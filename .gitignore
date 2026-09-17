@@ -1,0 +1,34 @@
+# Build and test output
+[Bb]in/
+[Oo]bj/
+[Tt]est[Rr]esults/
+[Cc]overage/
+artifacts/
+publish/
+*.trx
+*.coverage
+*.coveragexml
+
+# IDE and OS files
+.vs/
+.idea/
+*.user
+*.suo
+*.swp
+*.swo
+.DS_Store
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+appsettings.*.Local.json
+secrets.json
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Runtime logs
+*.log
