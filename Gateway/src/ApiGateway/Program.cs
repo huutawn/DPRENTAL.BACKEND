@@ -11,6 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Đăng ký các dịch vụ hệ thống và bảo mật
 builder.Services.AddGatewayDistributedTracing(builder.Configuration);
+builder.Services.AddGatewayObservability(builder.Configuration);
 builder.Services.AddGatewayJwtAuthentication(builder.Configuration);
 builder.Services.AddGatewaySecurity(builder.Configuration);
 builder.Services.AddGatewayTrafficControl(builder.Configuration);
@@ -21,6 +22,7 @@ var app = builder.Build();
 
 // Cấu hình chuỗi Middleware Pipeline cho Gateway
 app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseGatewayRequestLogging();
 app.UseMiddleware<GatewayExceptionMiddleware>();
 app.UseGatewaySecurity();
 app.UseGatewayProxyErrorResponses();
