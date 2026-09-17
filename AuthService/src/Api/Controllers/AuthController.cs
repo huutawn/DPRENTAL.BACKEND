@@ -1,3 +1,4 @@
+using AuthService.Application.Authentication.Sessions;
 using Dprental.AuthService.Api.Contracts.Auth;
 using Microsoft.AspNetCore.Mvc;
 
@@ -6,7 +7,7 @@ namespace Dprental.AuthService.Api.Controllers;
 [ApiController]
 [Route("api/v1/auth")]
 [Produces("application/json")]
-public sealed class AuthController : ControllerBase
+public sealed class AuthController(IAuthenticationSessionService authenticationSessionService) : ControllerBase
 {
     [HttpPost("register")]
     [ProducesResponseType<AccountCreatedResponse>(StatusCodes.Status201Created)]
@@ -23,11 +24,27 @@ public sealed class AuthController : ControllerBase
     [HttpPost("refresh")]
     [ProducesResponseType<AuthTokenResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    public ActionResult<AuthTokenResponse> Refresh(RefreshTokenRequest request) => NotImplementedYet();
+    public async Task<ActionResult<AuthTokenResponse>> Refresh(RefreshTokenRequest request, CancellationToken cancellationToken)
+    {
+        AuthenticationTokenPair? tokens = await authenticationSessionService.RefreshAsync(request.RefreshToken, cancellationToken);
+        if (tokens is null)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Auth.InvalidRefreshToken",
+                detail: "Refresh token không hợp lệ hoặc đã hết hạn.");
+        }
+
+        return Ok(new AuthTokenResponse(tokens.AccessToken, tokens.RefreshToken));
+    }
 
     [HttpPost("logout")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    public ActionResult Logout(RefreshTokenRequest request) => NotImplementedYet();
+    public async Task<IActionResult> Logout(RefreshTokenRequest request, CancellationToken cancellationToken)
+    {
+        await authenticationSessionService.RevokeByRefreshTokenAsync(request.RefreshToken, cancellationToken);
+        return NoContent();
+    }
 
     private ObjectResult NotImplementedYet() => Problem(
         statusCode: StatusCodes.Status501NotImplemented,

@@ -122,6 +122,18 @@ Auth__Jwt__Keys__0__PrivateKeyPem
 
 JWT được kiểm tra ngay khi service khởi động: issuer, audience, lifetime 1–60 phút, active key, `kid` duy nhất, PEM hợp lệ, RSA ít nhất 2048-bit và private/public key của active entry phải khớp. Access token mặc định hết hạn sau 15 phút.
 
+## Refresh token và session
+
+Refresh token là chuỗi ngẫu nhiên chỉ dùng một lần; database chỉ lưu SHA-256 hash, không lưu giá trị token thô. Session có hạn tuyệt đối 30 ngày. Mỗi lần `POST /api/v1/auth/refresh` thành công sẽ thu hồi token vừa dùng và trả một cặp token mới. Gửi lại token cũ sẽ thu hồi toàn bộ session và nhận `401` chung.
+
+`POST /api/v1/auth/logout` nhận `RefreshTokenRequest` và thu hồi toàn bộ session, luôn trả `204` để client có thể gọi lặp lại an toàn. Login chưa nằm trong phạm vi hiện tại; use case login sau này phải gọi `IAuthenticationSessionService.CreateSessionAsync` sau khi xác thực User.
+
+Sau khi pull thay đổi, áp dụng migration local (migration này xóa refresh token cũ, không xóa User):
+
+```bash
+dotnet ef database update --project AuthService/src/Infrastructure/AuthService.Infrastructure.csproj --startup-project AuthService/src/Api/AuthService.Api.csproj
+```
+
 JWKS được cache công khai tối đa 5 phút. Để rotate key an toàn: thêm key pair mới nhưng chưa active, deploy để JWKS công bố cả hai public key, chờ cache hết hạn, đổi `ActiveKeyId`, sau đó giữ public key cũ ít nhất bằng access-token lifetime cộng clock skew trước khi gỡ nó.
 
 ## Theo dõi trace phân tán
