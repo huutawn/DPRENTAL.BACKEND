@@ -47,7 +47,9 @@ internal static class DistributedTracingServiceCollectionExtensions
                     .AddAspNetCoreInstrumentation(instrumentation =>
                     {
                         // Health probe có tần suất cao, không mang giá trị chẩn đoán request nghiệp vụ nên không tạo span.
-                        instrumentation.Filter = context => !context.Request.Path.StartsWithSegments("/_health", StringComparison.Ordinal);
+                        instrumentation.Filter = context =>
+                            !context.Request.Path.StartsWithSegments("/_health", StringComparison.Ordinal) &&
+                            !context.Request.Path.StartsWithSegments("/health", StringComparison.Ordinal);
                     })
                     .AddHttpClientInstrumentation()
                     .AddSource(YarpActivitySourceName);

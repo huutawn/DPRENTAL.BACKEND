@@ -12,6 +12,10 @@ internal static class HealthServiceCollectionExtensions
             .AddCheck<JwksReadinessHealthCheck>(
                 "auth-jwks",
                 failureStatus: HealthStatus.Unhealthy,
+                tags: [GatewayHealthCheckTags.Readiness])
+            .AddCheck<GatewayConfigurationHealthCheck>(
+                "proxy-config",
+                failureStatus: HealthStatus.Unhealthy,
                 tags: [GatewayHealthCheckTags.Readiness]);
 
         return services;

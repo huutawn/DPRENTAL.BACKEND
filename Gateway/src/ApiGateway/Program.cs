@@ -31,18 +31,21 @@ app.UseAuthentication();
 app.UseGatewayTrafficControl();
 app.UseAuthorization();
 
-app.MapHealthChecks("/_health/live", new HealthCheckOptions
+HealthCheckOptions livenessOptions = new()
 {
     Predicate = _ => false,
     AllowCachingResponses = false
-})
-    .AllowAnonymous();
-app.MapHealthChecks("/_health/ready", new HealthCheckOptions
+};
+app.MapHealthChecks("/health/live", livenessOptions).AllowAnonymous();
+app.MapHealthChecks("/_health/live", livenessOptions).AllowAnonymous();
+
+HealthCheckOptions readinessOptions = new()
 {
     Predicate = check => check.Tags.Contains(GatewayHealthCheckTags.Readiness, StringComparer.Ordinal),
     AllowCachingResponses = false
-})
-    .AllowAnonymous();
+};
+app.MapHealthChecks("/health/ready", readinessOptions).AllowAnonymous();
+app.MapHealthChecks("/_health/ready", readinessOptions).AllowAnonymous();
 app.MapReverseProxy();
 
 app.Run();
