@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Common/AuthService.Common.csproj" />
+    <ProjectReference Include="../Domain/AuthService.Domain.csproj" />
+  </ItemGroup>
+</Project>
