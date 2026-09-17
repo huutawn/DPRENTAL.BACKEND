@@ -4,15 +4,14 @@
 
 | Lớp | Trách nhiệm | Không được chứa |
 | --- | --- | --- |
-| `Common` | Kiểu dữ liệu và concern thật sự dùng chung | Nghiệp vụ xác thực |
-| `Domain` | Entity, value object, repository contract, invariant | HTTP, controller, Redis |
-| `Application` | Use case và điều phối domain | Controller, persistence implementation |
-| `Infrastructure` | DbContext, EF Core, migration, database integration | HTTP contract, business flow |
-| `Api` | HTTP contract, middleware, DI/composition root | Business logic |
+| `Common` | Kiểu dữ liệu và concern thật sự dùng chung, gồm `IRepo<TEntity, TKey>` CRUD | Nghiệp vụ xác thực |
+| `Domain` | DTOs, Entities, Models, Utils, Validators, `IRepositories`, repository implementation, DbContext, EF Core và migration | HTTP pipeline, controller |
+| `Application` | Services, IServices, Security, Mapping, third-party integration và điều phối domain | Controller, HTTP pipeline |
+| `Api` | Controllers, Filters, middleware, DI/composition root | Business logic |
 
 Chi tiết về `Result` và `Error` trong `Common`: xem [common-result-error.md](common-result-error.md).
 
-Không để Domain gọi database hoặc SDK hạ tầng. Entity hiện dùng data annotation để khai báo mapping; DbContext, migration và truy cập PostgreSQL vẫn thuộc Infrastructure.
+Domain là nơi sở hữu DTO, entity/model, utility/validator và persistence của Auth. `Domain/IRepositories` giữ contract theo nghiệp vụ; các contract đó kế thừa `Common/IRepo<TEntity, TKey>` khi cần CRUD chuẩn. Application chỉ gọi repository contract và giữ mapper giữa model/DTO; API chỉ đăng ký dependency tại composition root, controller và filter support.
 
 ## Cấu hình môi trường
 
@@ -126,12 +125,12 @@ JWT được kiểm tra ngay khi service khởi động: issuer, audience, lifet
 
 Refresh token là chuỗi ngẫu nhiên chỉ dùng một lần; database chỉ lưu SHA-256 hash, không lưu giá trị token thô. Session có hạn tuyệt đối 30 ngày. Mỗi lần `POST /api/v1/auth/refresh` thành công sẽ thu hồi token vừa dùng và trả một cặp token mới. Gửi lại token cũ sẽ thu hồi toàn bộ session và nhận `401` chung.
 
-`POST /api/v1/auth/logout` nhận `RefreshTokenRequest` và thu hồi toàn bộ session, luôn trả `204` để client có thể gọi lặp lại an toàn. Login chưa nằm trong phạm vi hiện tại; use case login sau này phải gọi `IAuthenticationSessionService.CreateSessionAsync` sau khi xác thực User.
+`POST /api/v1/auth/logout` nhận `RefreshTokenRequest` và thu hồi toàn bộ session, luôn trả `204` để client có thể gọi lặp lại an toàn. Login chưa nằm trong phạm vi hiện tại; service login sau này phải gọi `IAuthSessionService.CreateSessionAsync` sau khi xác thực User.
 
 Sau khi pull thay đổi, áp dụng migration local (migration này xóa refresh token cũ, không xóa User):
 
 ```bash
-dotnet ef database update --project AuthService/src/Infrastructure/AuthService.Infrastructure.csproj --startup-project AuthService/src/Api/AuthService.Api.csproj
+dotnet ef database update --project AuthService/src/Domain/AuthService.Domain.csproj --startup-project AuthService/src/Api/AuthService.Api.csproj
 ```
 
 JWKS được cache công khai tối đa 5 phút. Để rotate key an toàn: thêm key pair mới nhưng chưa active, deploy để JWKS công bố cả hai public key, chờ cache hết hạn, đổi `ActiveKeyId`, sau đó giữ public key cũ ít nhất bằng access-token lifetime cộng clock skew trước khi gỡ nó.

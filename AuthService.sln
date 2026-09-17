@@ -10,8 +10,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthService.Application", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthService.Api", "AuthService\src\Api\AuthService.Api.csproj", "{F8FB5581-7C43-46B6-85A9-2A6A2E65E004}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthService.Infrastructure", "AuthService\src\Infrastructure\AuthService.Infrastructure.csproj", "{60CB950D-3B42-2E3C-0D3B-9C23D4C8C3F6}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthService.Api.Tests", "AuthService/tests/Api.Tests/AuthService.Api.Tests.csproj", "{F8FB5581-7C43-46B6-85A9-2A6A2E65E005}"
 EndProject
 Global

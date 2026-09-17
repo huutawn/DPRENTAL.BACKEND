@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
-namespace DpRent.Domain.Entities;
+namespace Dprental.AuthService.Domain.Entities;
 
 /// <summary>Phiên đăng nhập bền, là phạm vi thu hồi của một refresh token family.</summary>
 [Table("Sessions", Schema = "auth")]

@@ -1,5 +1,7 @@
-using AuthService.Application.Authentication.Sessions;
-using Dprental.AuthService.Api.Contracts.Auth;
+using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Application.Mapping;
+using Dprental.AuthService.Domain.DTOs.Auth;
+using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Dprental.AuthService.Api.Controllers;
@@ -7,7 +9,7 @@ namespace Dprental.AuthService.Api.Controllers;
 [ApiController]
 [Route("api/v1/auth")]
 [Produces("application/json")]
-public sealed class AuthController(IAuthenticationSessionService authenticationSessionService) : ControllerBase
+public sealed class AuthController(IAuthSessionService authSessionService) : ControllerBase
 {
     [HttpPost("register")]
     [ProducesResponseType<AccountCreatedResponse>(StatusCodes.Status201Created)]
@@ -26,7 +28,7 @@ public sealed class AuthController(IAuthenticationSessionService authenticationS
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AuthTokenResponse>> Refresh(RefreshTokenRequest request, CancellationToken cancellationToken)
     {
-        AuthenticationTokenPair? tokens = await authenticationSessionService.RefreshAsync(request.RefreshToken, cancellationToken);
+        AuthTokenPair? tokens = await authSessionService.RefreshAsync(request.RefreshToken, cancellationToken);
         if (tokens is null)
         {
             return Problem(
@@ -35,14 +37,14 @@ public sealed class AuthController(IAuthenticationSessionService authenticationS
                 detail: "Refresh token không hợp lệ hoặc đã hết hạn.");
         }
 
-        return Ok(new AuthTokenResponse(tokens.AccessToken, tokens.RefreshToken));
+        return Ok(tokens.ToDto());
     }
 
     [HttpPost("logout")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> Logout(RefreshTokenRequest request, CancellationToken cancellationToken)
     {
-        await authenticationSessionService.RevokeByRefreshTokenAsync(request.RefreshToken, cancellationToken);
+        await authSessionService.RevokeByRefreshTokenAsync(request.RefreshToken, cancellationToken);
         return NoContent();
     }
 

@@ -2,7 +2,7 @@
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
-namespace DpRent.Domain.Entities;
+namespace Dprental.AuthService.Domain.Entities;
 
 /// <summary>Refresh token chỉ lưu hash, thuộc về một session cụ thể.</summary>
 [Table("RefreshTokens", Schema = "auth")]

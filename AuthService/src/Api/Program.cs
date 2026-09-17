@@ -1,17 +1,15 @@
-using AuthService.Infrastructure;
-using AuthService.Infrastructure.Authentication;
-using Dprental.AuthService.Api.Authentication;
-using Dprental.AuthService.Api.Authentication.Transport;
+using Dprental.AuthService.Api.Endpoints;
 using Dprental.AuthService.Api.Observability;
-using Microsoft.EntityFrameworkCore;
+using Dprental.AuthService.Api.Security;
+using Dprental.AuthService.Application.DependencyInjection;
+using Dprental.AuthService.Domain.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAuthServiceDistributedTracing(builder.Configuration);
-builder.Services.AddJwtAuthentication(builder.Configuration);
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")));
-builder.Services.AddAuthenticationSessions();
+builder.Services.AddAuthApplication(builder.Configuration);
+builder.Services.AddAuthDomainPersistence(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddJwtBearerSecurity();
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();

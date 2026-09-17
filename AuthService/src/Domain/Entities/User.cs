@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
-namespace DpRent.Domain.Entities;
+namespace Dprental.AuthService.Domain.Entities;
 
 [Table("Users", Schema = "auth")]
 [Index(nameof(Email), IsUnique = true)]
