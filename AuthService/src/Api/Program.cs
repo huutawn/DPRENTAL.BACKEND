@@ -9,6 +9,24 @@ using Dprental.AuthService.Api.Authentication;
 using Dprental.AuthService.Api.Authentication.Transport;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddControllers();
+builder.Services.AddProblemDetails();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseExceptionHandler();
+app.UseStatusCodePages();
+
+app.MapControllers();
 // Đăng ký và validate JWT trước khi API bắt đầu nhận request.
 builder.Services.AddJwtAuthentication(builder.Configuration);
 
