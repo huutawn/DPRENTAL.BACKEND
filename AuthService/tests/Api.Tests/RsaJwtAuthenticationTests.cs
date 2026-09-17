@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using OpenTelemetry;
@@ -199,6 +200,31 @@ public sealed class RsaJwtAuthenticationTests
         Assert.True(key.TryGetProperty("e", out _));
         Assert.False(key.TryGetProperty("d", out _));
         Assert.DoesNotContain(ActivePair.PrivateKeyPem, payload, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SwaggerDocumentPublishesBearerCredentialScheme()
+    {
+        JwtOptions options = CreateValidOptions();
+        using WebApplicationFactory<Program> factory = new();
+        using WebApplicationFactory<Program> configuredFactory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
+            builder.ConfigureAppConfiguration((_, configurationBuilder) => configurationBuilder.AddConfiguration(CreateConfiguration(options)));
+        });
+        using HttpClient client = configuredFactory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/swagger/v1/swagger.json");
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement scheme = document.RootElement
+            .GetProperty("components")
+            .GetProperty("securitySchemes")
+            .GetProperty("Bearer");
+
+        Assert.True(response.IsSuccessStatusCode);
+        Assert.Equal("http", scheme.GetProperty("type").GetString());
+        Assert.Equal("bearer", scheme.GetProperty("scheme").GetString());
+        Assert.Equal("Json Web Token", scheme.GetProperty("bearerFormat").GetString());
     }
 
     [Fact]
