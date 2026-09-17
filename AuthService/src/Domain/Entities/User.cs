@@ -25,7 +25,9 @@ public class User
     public DateTime CreatedAt { get; set; }
     public bool IsActive { get; set; }
 
-    // Navigation properties
+    /// <summary>Các vai trò hiện có của người dùng.</summary>
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
-    public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
+
+    /// <summary>Các phiên đăng nhập được lưu bền của người dùng.</summary>
+    public ICollection<Session> Sessions { get; set; } = new List<Session>();
 }

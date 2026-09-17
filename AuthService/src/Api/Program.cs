@@ -1,4 +1,5 @@
 using AuthService.Infrastructure;
+using AuthService.Infrastructure.Authentication;
 using Dprental.AuthService.Api.Authentication;
 using Dprental.AuthService.Api.Authentication.Transport;
 using Dprental.AuthService.Api.Observability;
@@ -10,6 +11,7 @@ builder.Services.AddAuthServiceDistributedTracing(builder.Configuration);
 builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")));
+builder.Services.AddAuthenticationSessions();
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
