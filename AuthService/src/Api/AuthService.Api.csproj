@@ -3,6 +3,9 @@
     <UserSecretsId>dprental-authservice-local-39cb7dba-0214-4c1a-bb5c-1e5fdddb44fb</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.11" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../Application/AuthService.Application.csproj" />
     <ProjectReference Include="..\Infrastructure\AuthService.Infrastructure.csproj" />
   </ItemGroup>
