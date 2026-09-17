@@ -1,11 +1,11 @@
 namespace Dprental.Gateway.Observability;
 
-/// <summary>Supplies a safe request correlation identifier to callers, logs, and downstream services.</summary>
+/// <summary>Cung cấp mã định danh tương quan (Correlation ID) an toàn cho caller, logs và các downstream services.</summary>
 internal sealed class CorrelationIdMiddleware(RequestDelegate next, ILogger<CorrelationIdMiddleware> logger)
 {
     private const string HeaderName = "X-Correlation-ID";
 
-    /// <summary>Uses a caller-provided GUID or creates a fresh identifier for the request.</summary>
+    /// <summary>Sử dụng GUID do caller cung cấp nếu hợp lệ, hoặc tạo GUID mới cho request.</summary>
     public async Task InvokeAsync(HttpContext context)
     {
         string correlationId = Guid.TryParse(context.Request.Headers[HeaderName].FirstOrDefault(), out Guid parsed)
@@ -14,6 +14,8 @@ internal sealed class CorrelationIdMiddleware(RequestDelegate next, ILogger<Corr
 
         context.TraceIdentifier = correlationId;
         context.Response.Headers[HeaderName] = correlationId;
+        // Đồng bộ tiêu đề trên request để đảm bảo giá trị luôn là một GUID hợp lệ
+        context.Request.Headers[HeaderName] = correlationId;
         using (logger.BeginScope(new Dictionary<string, object?> { ["CorrelationId"] = correlationId }))
         {
             await next(context);
