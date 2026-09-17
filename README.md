@@ -10,14 +10,20 @@ Gateway được tổ chức theo kiến trúc Clean Architecture rõ ràng:
 Gateway/src/ApiGateway/
   Domain/
     Security/        # Hằng số header (GatewayHeaderConstants), IdentityContext, IIdentityContextAccessor
+    Traffic/         # Hằng số và tên chính sách điều phối (TrafficPolicyNames, ResilienceConstants)
   Application/
     Security/        # Cấu hình GatewaySecurityOptions, Validator, IHeaderSanitizer, IIdentityExtractor
+    Traffic/         # Cấu hình GatewayTrafficOptions, Validator
   Infrastructure/
     Security/
       Middlewares/   # HeaderSanitization, GatewayCors, RequestSizeProtection, SecurityHeaders
       Transforms/    # TrustedIdentityTransformProvider cho YARP
       ForwardedHeaders/ # Cấu hình mạng tin cậy CIDR và KnownProxies
-  Security/          # Extension methods đăng ký DI và Middleware Pipeline
+    Traffic/
+      RateLimiting/  # GatewayRateLimitingConfiguration phân vùng Anonymous, Authenticated, Sensitive
+      Resilience/    # UpstreamTimeoutMiddleware, NoUnsafeRetryPolicy
+  Security/          # Extension methods đăng ký DI và Middleware Pipeline Bảo mật
+  Traffic/           # Extension methods đăng ký DI và Middleware Pipeline Điều phối lưu lượng
   Authentication/    # JWT RS256 và JWKS của AuthService
   Health/            # liveness/readiness
   Observability/     # correlation ID và distributed tracing
@@ -102,10 +108,40 @@ Gateway đóng vai trò là ranh giới bảo mật vững chắc trước khi r
      - `Content-Security-Policy: default-src 'self'; frame-ancestors 'none';`
      - `Strict-Transport-Security` (khi request là HTTPS).
 
-Trong production, cấu hình bảo mật bằng biến môi trường:
+## Gateway Resilience & Traffic Control
+
+Gateway cung cấp cơ chế điều phối lưu lượng và phục hồi mạng tin cậy:
+
+1. **Upstream Timeout (504 Gateway Timeout)**:
+   - Ngân sách thời gian chờ mặc định được cấu hình qua `Gateway:Traffic:Resilience:DefaultTimeoutSeconds` (mặc định: 10 giây).
+   - Khi downstream service không phản hồi trong ngân sách, Gateway chủ động ngắt kết nối và trả về HTTP `504 Gateway Timeout` (`Gateway.Upstream.Timeout`).
+
+2. **Service Unavailable / Connection Failure (502 / 503)**:
+   - Khi downstream service bị sập, từ chối kết nối hoặc lỗi DNS, Gateway trả về mã lỗi canonical `502 Bad Gateway` (`Gateway.Upstream.Unavailable`) mà không gây crash tiến trình.
+
+3. **Rate Limiting (429 Too Many Requests)**:
+   - Hỗ trợ 3 phân tầng kiểm soát tần suất truy cập:
+     - **Anonymous**: Phân vùng theo Client IP (mặc định: 20 req/phút).
+     - **Authenticated**: Phân vùng theo `UserId` từ token JWT (mặc định: 100 req/phút).
+     - **Sensitive**: Áp dụng cho các endpoint nhạy cảm như login, auth sessions (mặc định: 5 req/phút).
+   - Khi vượt ngưỡng, Gateway trả về HTTP `429 Too Many Requests` (`Gateway.Traffic.RateLimitExceeded`) kèm tiêu đề `Retry-After`.
+   - Gateway chỉ bảo vệ hạ tầng và tài nguyên mạng, **không chứa business quota** (các quy tắc nghiệp vụ như "Supplier chỉ được đăng 20 máy/ngày" thuộc về Domain Service).
+
+4. **Client Cancellation**:
+   - Khi client chủ động ngắt kết nối (`RequestAborted`), tín hiệu hủy được chuyển tiếp xuống downstream service để giải phóng tài nguyên.
+
+5. **Cấm tự ý Retry các lệnh nghiệp vụ không an toàn (No Unsafe Retries)**:
+   - Gateway tuyệt đối **không tự động retry** các lệnh nghiệp vụ không an toàn (`POST`, `PATCH`, `CONNECT`).
+   - Ví dụ: `POST /rentals` gặp timeout sẽ lập tức trả về 504 thay vì tự gửi lại 3 lần, tránh nguy cơ tạo trùng lặp giao dịch (Duplicate Business Effects).
+
+Cấu hình mẫu trong production qua biến môi trường:
 
 ```text
 Gateway__Security__Cors__AllowedOrigins__0=https://app.dprental.vn
 Gateway__Security__ForwardedHeaders__KnownNetworks__0=10.0.0.0/8
 Gateway__Security__RequestSize__MaxRequestBodySizeBytes=10485760
+Gateway__Traffic__Resilience__DefaultTimeoutSeconds=10
+Gateway__Traffic__RateLimiting__Anonymous__PermitLimit=20
+Gateway__Traffic__RateLimiting__Authenticated__PermitLimit=100
+Gateway__Traffic__RateLimiting__Sensitive__PermitLimit=5
 ```

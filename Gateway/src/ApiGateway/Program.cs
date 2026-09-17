@@ -4,6 +4,7 @@ using Dprental.Gateway.Health;
 using Dprental.Gateway.Observability;
 using Dprental.Gateway.Proxy;
 using Dprental.Gateway.Security;
+using Dprental.Gateway.Traffic;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -12,6 +13,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddGatewayDistributedTracing(builder.Configuration);
 builder.Services.AddGatewayJwtAuthentication(builder.Configuration);
 builder.Services.AddGatewaySecurity(builder.Configuration);
+builder.Services.AddGatewayTrafficControl(builder.Configuration);
 builder.Services.AddGatewayReverseProxy(builder.Configuration);
 builder.Services.AddGatewayHealthChecks();
 
@@ -23,6 +25,7 @@ app.UseMiddleware<GatewayExceptionMiddleware>();
 app.UseGatewaySecurity();
 app.UseGatewayProxyErrorResponses();
 app.UseAuthentication();
+app.UseGatewayTrafficControl();
 app.UseAuthorization();
 
 app.MapHealthChecks("/_health/live", new HealthCheckOptions
