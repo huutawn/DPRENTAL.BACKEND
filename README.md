@@ -43,6 +43,18 @@ Chỉ lỗi do Gateway tạo ra (JWT, authorization, upstream không sẵn sàng
 
 `code` và `message` theo cùng contract ổn định của `AuthService.Common.Error`; `traceId` khớp `X-Correlation-ID` để tra log. Response hợp lệ hoặc lỗi nghiệp vụ từ service đích được Gateway chuyển tiếp nguyên trạng, không bị bọc lại.
 
+## Theo dõi trace phân tán
+
+Gateway dùng W3C `traceparent` và OpenTelemetry để giữ cùng một trace khi YARP chuyển request tới service đích. Root trace được sample 100% ở Development và 10% ở các môi trường khác; quyết định sample từ caller luôn được giữ nguyên.
+
+Để export trace qua OTLP HTTP/protobuf, cấu hình đầy đủ signal endpoint trong environment (không ghi token collector vào source control):
+
+```text
+Telemetry__Otlp__TracesEndpoint=https://otel-collector.internal/v1/traces
+```
+
+Gateway không thêm JWT, authorization header, request/response body, claim, hay correlation ID vào trace attributes. Endpoint `/_health/*` không tạo trace.
+
 Trong production, cấu hình bằng environment variables, ví dụ:
 
 ```text

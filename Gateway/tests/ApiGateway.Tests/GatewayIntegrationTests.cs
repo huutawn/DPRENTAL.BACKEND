@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
@@ -42,6 +43,28 @@ public sealed class GatewayIntegrationTests
         Assert.Equal("?source=test", upstream.LastRequest.Query);
         Assert.Equal(correlationId.ToString("D"), upstream.LastRequest.CorrelationId);
         Assert.Equal(correlationId.ToString("D"), response.Headers.GetValues("X-Correlation-ID").Single());
+    }
+
+    [Fact]
+    public async Task AuthRoutePropagatesW3CTraceContextToUpstream()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackAuthService upstream = new(CreateJwks(signingKey, "key-1"));
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+        const string inboundTraceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        using HttpRequestMessage request = new(HttpMethod.Get, "/api/v1/auth/sessions");
+        request.Headers.TryAddWithoutValidation("traceparent", inboundTraceParent);
+
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(ActivityContext.TryParse(inboundTraceParent, null, out ActivityContext inboundContext));
+        Assert.True(ActivityContext.TryParse(upstream.LastRequest.TraceParent, null, out ActivityContext upstreamContext));
+        // YARP phải tạo span con mới nhưng vẫn giữ TraceId gốc để collector ghép Gateway và downstream vào một trace.
+        Assert.Equal(inboundContext.TraceId, upstreamContext.TraceId);
+        Assert.NotEqual(inboundContext.SpanId, upstreamContext.SpanId);
+        Assert.True(upstreamContext.TraceFlags.HasFlag(ActivityTraceFlags.Recorded));
     }
 
     [Fact]
@@ -201,7 +224,7 @@ public sealed class GatewayIntegrationTests
 
         internal int JwksRequestCount { get; private set; }
 
-        internal ReceivedRequest LastRequest { get; private set; } = new(string.Empty, string.Empty, string.Empty, string.Empty);
+        internal ReceivedRequest LastRequest { get; private set; } = new(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
 
         public async ValueTask DisposeAsync()
         {
@@ -251,7 +274,8 @@ public sealed class GatewayIntegrationTests
                 request.Url?.AbsolutePath ?? string.Empty,
                 request.Url?.Query ?? string.Empty,
                 request.Headers["Authorization"] ?? string.Empty,
-                request.Headers["X-Correlation-ID"] ?? string.Empty);
+                request.Headers["X-Correlation-ID"] ?? string.Empty,
+                request.Headers["traceparent"] ?? string.Empty);
             await WriteResponseAsync(context.Response, "{\"proxied\":true}", "application/json");
         }
 
@@ -273,5 +297,5 @@ public sealed class GatewayIntegrationTests
         }
     }
 
-    private sealed record ReceivedRequest(string Path, string Query, string Authorization, string CorrelationId);
+    private sealed record ReceivedRequest(string Path, string Query, string Authorization, string CorrelationId, string TraceParent);
 }
