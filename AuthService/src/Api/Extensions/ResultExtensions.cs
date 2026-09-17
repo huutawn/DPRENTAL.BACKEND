@@ -3,8 +3,10 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Dprental.AuthService.Api.Extensions;
 
+/// <summary>Chuyển expected error của Application/Domain thành HTTP problem details tại API boundary.</summary>
 public static class ResultExtensions
 {
+    /// <summary>Trả về HTTP status phù hợp với loại lỗi mà không đưa business logic vào controller.</summary>
     public static ObjectResult ToProblem(this ControllerBase controller, Error error)
     {
         ArgumentNullException.ThrowIfNull(controller);
