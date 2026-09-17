@@ -1,13 +1,16 @@
+using Dprental.Gateway.Infrastructure.Security.Transforms;
+
 namespace Dprental.Gateway.Proxy;
 
-/// <summary>Registers the Gateway's single YARP configuration source.</summary>
+/// <summary>Đăng ký và cấu hình Reverse Proxy YARP cho API Gateway.</summary>
 internal static class ReverseProxyServiceCollectionExtensions
 {
-    /// <summary>Loads routes and clusters from standard ASP.NET Core configuration providers.</summary>
+    /// <summary>Nạp cấu hình các tuyến đường (routes), cụm máy chủ (clusters) và đăng ký bộ chuyển đổi danh tính đáng tin cậy.</summary>
     internal static IServiceCollection AddGatewayReverseProxy(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddReverseProxy()
-            .LoadFromConfig(configuration.GetRequiredSection("ReverseProxy"));
+            .LoadFromConfig(configuration.GetRequiredSection("ReverseProxy"))
+            .AddTransforms<TrustedIdentityTransformProvider>();
 
         return services;
     }

@@ -3,19 +3,24 @@ using Dprental.Gateway.Errors;
 using Dprental.Gateway.Health;
 using Dprental.Gateway.Observability;
 using Dprental.Gateway.Proxy;
+using Dprental.Gateway.Security;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Đăng ký các dịch vụ hệ thống và bảo mật
 builder.Services.AddGatewayDistributedTracing(builder.Configuration);
 builder.Services.AddGatewayJwtAuthentication(builder.Configuration);
+builder.Services.AddGatewaySecurity(builder.Configuration);
 builder.Services.AddGatewayReverseProxy(builder.Configuration);
 builder.Services.AddGatewayHealthChecks();
 
 var app = builder.Build();
 
+// Cấu hình chuỗi Middleware Pipeline cho Gateway
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<GatewayExceptionMiddleware>();
+app.UseGatewaySecurity();
 app.UseGatewayProxyErrorResponses();
 app.UseAuthentication();
 app.UseAuthorization();
