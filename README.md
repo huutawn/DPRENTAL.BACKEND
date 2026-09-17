@@ -32,20 +32,29 @@ Gateway/tests/ApiGateway.Tests/
 ```
 Gateway nhận JWT được AuthService ký và chỉ tải public key từ JWKS. Không đặt private key, token, hoặc password vào `appsettings*.json`.
 
-## Chạy local
+## Chạy local & Kiểm thử
 
-Khởi động AuthService tại `http://localhost:5000`, cấu hình issuer/audience của nó như trong `src/ApiGateway/appsettings.Development.json`, rồi chạy:
+### Chạy automated test suite
+
+Chạy toàn bộ bộ kiểm thử tự động (unit tests và integration tests bao gồm JWT, CORS, Rate Limit, Timeout):
 
 ```bash
-dotnet run --project Gateway/src/ApiGateway
+dotnet test Gateway/Gateway.sln
 ```
 
-Các endpoint public:
+### Khởi động Gateway chạy local
 
-- `/_health/live` kiểm tra tiến trình Gateway.
-- `/_health/ready` yêu cầu Gateway đã tải được JWKS hợp lệ.
-- `/api/v1/auth/{**catch-all}` chuyển tiếp tới AuthService và bỏ prefix `/api/v1/auth`.
+Khởi động AuthService tại `http://localhost:5000` (hoặc cấu hình endpoint tương ứng), sau đó chạy Gateway với môi trường `Development`:
 
+```bash
+ASPNETCORE_ENVIRONMENT=Development dotnet run --project Gateway/src/ApiGateway --urls "http://127.0.0.1:5050"
+```
+
+Các endpoint public và health checks:
+
+- `/_health/live`: kiểm tra tiến trình Gateway đang hoạt động (kèm đầy đủ security headers).
+- `/_health/ready`: yêu cầu Gateway đã tải được JWKS hợp lệ từ AuthService.
+- `/api/v1/auth/{**catch-all}`: chuyển tiếp tới AuthService và bỏ prefix `/api/v1/auth`.
 ## Gateway error response
 
 Chỉ lỗi do Gateway tạo ra (JWT, authorization, upstream không sẵn sàng hoặc exception) có payload JSON cố định:
@@ -58,8 +67,21 @@ Chỉ lỗi do Gateway tạo ra (JWT, authorization, upstream không sẵn sàng
 }
 ```
 
-`code` và `message` theo cùng contract ổn định của `AuthService.Common.Error`; `traceId` khớp `X-Correlation-ID` để tra log. Response hợp lệ hoặc lỗi nghiệp vụ từ service đích được Gateway chuyển tiếp nguyên trạng, không bị bọc lại.
+Danh mục mã lỗi canonical chuẩn hóa của Gateway:
 
+| HTTP Status | Mã lỗi (`code`) | Ý nghĩa |
+| :--- | :--- | :--- |
+| `401 Unauthorized` | `Gateway.Authentication.Required` | Thiếu Bearer token trên tài nguyên yêu cầu xác thực. |
+| `401 Unauthorized` | `Gateway.Authentication.InvalidToken` | Token không hợp lệ, sai chữ ký hoặc đã hết hạn. |
+| `403 Forbidden` | `Gateway.Authorization.Forbidden` | Người dùng không đủ quyền truy cập tài nguyên. |
+| `403 Forbidden` | `Gateway.Security.CorsOriginDenied` | Nguồn gốc (Origin) của request không nằm trong whitelist CORS. |
+| `413 Payload Too Large` | `Gateway.Request.PayloadTooLarge` | Kích thước request body vượt quá ngưỡng cho phép (MaxRequestBodySize). |
+| `429 Too Many Requests` | `Gateway.Traffic.RateLimitExceeded` | Vượt quá số lượng request cho phép trong khung thời gian (Rate Limit). |
+| `502 Bad Gateway` | `Gateway.Upstream.Unavailable` | Downstream service không thể kết nối, từ chối socket hoặc lỗi mạng. |
+| `504 Gateway Timeout` | `Gateway.Upstream.Timeout` | Downstream service không phản hồi trong ngân sách thời gian chờ (Timeout Budget). |
+| `500 Internal Error` | `Gateway.UnexpectedFailure` | Lỗi không mong đợi phát sinh trong nội bộ Gateway. |
+
+`code` và `message` theo cùng contract ổn định của `AuthService.Common.Error`; `traceId` khớp `X-Correlation-ID` để tra log. Response hợp lệ hoặc lỗi nghiệp vụ từ service đích được Gateway chuyển tiếp nguyên trạng, không bị bọc lại.
 ## Theo dõi trace phân tán
 
 Gateway dùng W3C `traceparent` và OpenTelemetry để giữ cùng một trace khi YARP chuyển request tới service đích. Root trace được sample 100% ở Development và 10% ở các môi trường khác; quyết định sample từ caller luôn được giữ nguyên.
