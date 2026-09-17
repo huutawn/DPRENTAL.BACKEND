@@ -19,12 +19,15 @@ internal static class ProxyErrorResponseApplicationBuilderExtensions
                 return;
             }
 
-            if (failure.Error == ForwarderError.RequestCanceled && context.RequestAborted.IsCancellationRequested)
+            bool isTimeout = failure.Error is ForwarderError.RequestTimedOut or ForwarderError.UpgradeActivityTimeout
+                || context.Items.ContainsKey("Gateway.TimeoutExceeded");
+
+            if (failure.Error == ForwarderError.RequestCanceled && !isTimeout && context.RequestAborted.IsCancellationRequested)
             {
                 return;
             }
 
-            (int statusCode, GatewayError error) = failure.Error is ForwarderError.RequestTimedOut or ForwarderError.UpgradeActivityTimeout
+            (int statusCode, GatewayError error) = isTimeout
                 ? (StatusCodes.Status504GatewayTimeout, GatewayError.UpstreamTimeout)
                 : (StatusCodes.Status502BadGateway, GatewayError.UpstreamUnavailable);
             await GatewayErrorResponseWriter.WriteAsync(context, statusCode, error, context.RequestAborted);

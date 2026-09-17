@@ -3,6 +3,8 @@ using Microsoft.Extensions.Options;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using OpenTelemetry.Metrics;
+using Dprental.Gateway.Domain.Observability;
 
 namespace Dprental.Gateway.Observability;
 
@@ -45,7 +47,9 @@ internal static class DistributedTracingServiceCollectionExtensions
                     .AddAspNetCoreInstrumentation(instrumentation =>
                     {
                         // Health probe có tần suất cao, không mang giá trị chẩn đoán request nghiệp vụ nên không tạo span.
-                        instrumentation.Filter = context => !context.Request.Path.StartsWithSegments("/_health", StringComparison.Ordinal);
+                        instrumentation.Filter = context =>
+                            !context.Request.Path.StartsWithSegments("/_health", StringComparison.Ordinal) &&
+                            !context.Request.Path.StartsWithSegments("/health", StringComparison.Ordinal);
                     })
                     .AddHttpClientInstrumentation()
                     .AddSource(YarpActivitySourceName);
@@ -58,8 +62,14 @@ internal static class DistributedTracingServiceCollectionExtensions
                         exporter.Endpoint = new Uri(options.Otlp.TracesEndpoint, UriKind.Absolute);
                     });
                 }
+            })
+            .WithMetrics(metrics =>
+            {
+                metrics
+                    .AddMeter(GatewayMetricNames.MeterName)
+                    .AddAspNetCoreInstrumentation()
+                    .AddHttpClientInstrumentation();
             });
-
         return services;
     }
 }
