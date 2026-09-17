@@ -11,9 +11,11 @@ Gateway/src/ApiGateway/
   Domain/
     Security/        # Hằng số header (GatewayHeaderConstants), IdentityContext, IIdentityContextAccessor
     Traffic/         # Hằng số và tên chính sách điều phối (TrafficPolicyNames, ResilienceConstants)
+    Observability/   # Tên metric chuẩn hóa (GatewayMetricNames), IGatewayMetrics
   Application/
     Security/        # Cấu hình GatewaySecurityOptions, Validator, IHeaderSanitizer, IIdentityExtractor
     Traffic/         # Cấu hình GatewayTrafficOptions, Validator
+    Observability/   # Cấu hình GatewayObservabilityOptions, Validator
   Infrastructure/
     Security/
       Middlewares/   # HeaderSanitization, GatewayCors, RequestSizeProtection, SecurityHeaders
@@ -22,11 +24,12 @@ Gateway/src/ApiGateway/
     Traffic/
       RateLimiting/  # GatewayRateLimitingConfiguration phân vùng Anonymous, Authenticated, Sensitive
       Resilience/    # UpstreamTimeoutMiddleware, NoUnsafeRetryPolicy
+    Observability/   # GatewayRequestLoggingMiddleware, GatewayMetrics, GatewayMetricsMiddleware
   Security/          # Extension methods đăng ký DI và Middleware Pipeline Bảo mật
   Traffic/           # Extension methods đăng ký DI và Middleware Pipeline Điều phối lưu lượng
+  Observability/     # DistributedTracing, RequestLogging, Metrics DI & Middleware
   Authentication/    # JWT RS256 và JWKS của AuthService
-  Health/            # liveness/readiness
-  Observability/     # correlation ID và distributed tracing
+  Health/            # Health checks (JwksReadinessHealthCheck, GatewayConfigurationHealthCheck)
   Proxy/             # YARP composition và error mapping
 Gateway/tests/ApiGateway.Tests/
 ```
@@ -157,7 +160,6 @@ Gateway cung cấp cơ chế điều phối lưu lượng và phục hồi mạn
    - Ví dụ: `POST /rentals` gặp timeout sẽ lập tức trả về 504 thay vì tự gửi lại 3 lần, tránh nguy cơ tạo trùng lặp giao dịch (Duplicate Business Effects).
 
 Cấu hình mẫu trong production qua biến môi trường:
-
 ```text
 Gateway__Security__Cors__AllowedOrigins__0=https://app.dprental.vn
 Gateway__Security__ForwardedHeaders__KnownNetworks__0=10.0.0.0/8
@@ -167,3 +169,50 @@ Gateway__Traffic__RateLimiting__Anonymous__PermitLimit=20
 Gateway__Traffic__RateLimiting__Authenticated__PermitLimit=100
 Gateway__Traffic__RateLimiting__Sensitive__PermitLimit=5
 ```
+
+## Observability & Operational Readiness
+
+### 1. Ghi log có cấu trúc (Structured Logging)
+
+Mỗi request đi qua Gateway đều xuất một bản ghi structured log chứa đầy đủ ngữ cảnh để tra cứu (tracing/correlation) mà **tuyệt đối không làm lộ dữ liệu nhạy cảm**:
+
+* **Thuộc tính bắt buộc được ghi nhận**:
+  - `Timestamp`: Thời gian UTC chuẩn ISO 8601.
+  - `CorrelationId`: Mã tương quan từ `X-Correlation-ID` (đồng bộ giữa Gateway và downstream).
+  - `TraceId`: W3C TraceId tương thích chuẩn OpenTelemetry.
+  - `Route`: Mã định danh route hoặc pattern đường dẫn YARP.
+  - `Method`: Phương thức HTTP (GET, POST, PUT, DELETE,...).
+  - `StatusCode`: Mã trạng thái phản hồi HTTP.
+  - `DurationMs`: Thời gian xử lý request tính bằng mili-giây.
+  - `Upstream`: Tên cụm dịch vụ downstream đích (ClusterId) hoặc `gateway`.
+* **Ranh giới bảo mật (Zero Leakage)**:
+  - Tuyệt đối **không ghi log** `Authorization` header, Bearer token, JWT, refresh token, mật khẩu, API key hay nội dung nhạy cảm của request body.
+
+### 2. Thu thập chỉ số đo lường (Metrics)
+
+Hệ thống sử dụng `System.Diagnostics.Metrics.Meter` với tên chuẩn `Dprental.Gateway`, tích hợp trực tiếp với OpenTelemetry:
+
+| Tên Metric | Kiểu Instrument | Mô tả |
+| :--- | :--- | :--- |
+| `gateway_request_total` | Counter (`long`) | Tổng số lượng request đi qua Gateway. |
+| `gateway_request_duration_seconds` | Histogram (`double`) | Phân phối thời gian xử lý request qua Gateway. |
+| `gateway_4xx_total` | Counter (`long`) | Tổng số lượng phản hồi lỗi client 4xx. |
+| `gateway_5xx_total` | Counter (`long`) | Tổng số lượng phản hồi lỗi server 5xx. |
+| `gateway_upstream_timeout_total` | Counter (`long`) | Tổng số request bị upstream timeout (504). |
+| `gateway_rate_limit_total` | Counter (`long`) | Tổng số request bị từ chối do vượt rate limit (429). |
+
+* **Quy tắc gán nhãn (Labels/Dimensions)**:
+  - Nhãn cho phép (Low-cardinality): `route`, `method`, `status`, `upstream`.
+  - **Tuyệt đối cấm sử dụng**: `userId`, `email`, `orderId` hoặc bất kỳ dữ liệu định danh người dùng (PII) làm label để tránh bùng nổ cardinality và rò rỉ dữ liệu riêng tư.
+
+### 3. Kiểm tra sức khỏe & Tính sẵn sàng (Health Checks)
+
+Gateway cung cấp các probe giám sát riêng biệt theo chuẩn Kubernetes / Container:
+
+* **Liveness Probe (`/health/live` và `/_health/live`)**:
+  - Trả về `200 OK` khi tiến trình Gateway đang chạy bình thường.
+* **Readiness Probe (`/health/ready` và `/_health/ready`)**:
+  - Trả về `200 OK` chỉ khi Gateway đã sẵn sàng nhận traffic thực tế:
+    1. Đã tải và nạp thành công khóa công khai JWKS từ AuthService (`auth-jwks`).
+    2. Cấu hình các tuyến đường (routes) và cụm dịch vụ (clusters) của Reverse Proxy đã sẵn sàng (`proxy-config`).
+  - Trả về `503 Service Unavailable` nếu các phụ thuộc cốt lõi chưa khả dụng.
