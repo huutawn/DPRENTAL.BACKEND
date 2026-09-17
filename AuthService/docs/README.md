@@ -9,6 +9,8 @@
 | `Application` | Use case và điều phối domain | Controller, persistence implementation |
 | `Api` | HTTP contract, middleware, DI/composition root | Business logic |
 
+Chi tiết về `Result` và `Error` trong `Common`: xem [common-result-error.md](common-result-error.md).
+
 Không được để `Domain` phụ thuộc vào hạ tầng. Khi bắt đầu persistence, repository implementation thuộc module hạ tầng cụ thể và interface vẫn nằm trong `Domain` (hoặc application consumer nếu đó là contract do application sở hữu).
 
 ## Cấu hình môi trường
