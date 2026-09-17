@@ -55,9 +55,10 @@ ASPNETCORE_ENVIRONMENT=Development dotnet run --project Gateway/src/ApiGateway -
 
 Các endpoint public và health checks:
 
-- `/_health/live`: kiểm tra tiến trình Gateway đang hoạt động (kèm đầy đủ security headers).
-- `/_health/ready`: yêu cầu Gateway đã tải được JWKS hợp lệ từ AuthService.
+- `/health/live` (hoặc `/_health/live`): kiểm tra tiến trình Gateway đang hoạt động (kèm đầy đủ security headers).
+- `/health/ready` (hoặc `/_health/ready`): yêu cầu Gateway đã tải được JWKS hợp lệ từ AuthService và cấu hình proxy sẵn sàng.
 - `/api/v1/auth/{**catch-all}`: chuyển tiếp tới AuthService và bỏ prefix `/api/v1/auth`.
+- `/swagger` & `/swagger/{**catch-all}`: chuyển tiếp trực tiếp tới Swagger UI và OpenAPI JSON (`/swagger/v1/swagger.json`) của AuthService.
 ## Gateway error response
 
 Chỉ lỗi do Gateway tạo ra (JWT, authorization, upstream không sẵn sàng hoặc exception) có payload JSON cố định:

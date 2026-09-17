@@ -46,6 +46,27 @@ public sealed class GatewayIntegrationTests
     }
 
     [Fact]
+    public async Task SwaggerRoutesForwardDirectlyToAuthService()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackAuthService upstream = new(CreateJwks(signingKey, "key-1"));
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage responseJson = await client.GetAsync("/swagger/v1/swagger.json");
+        Assert.Equal(HttpStatusCode.OK, responseJson.StatusCode);
+        Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
+
+        using HttpResponseMessage responseUi = await client.GetAsync("/swagger/index.html");
+        Assert.Equal(HttpStatusCode.OK, responseUi.StatusCode);
+        Assert.Equal("/swagger/index.html", upstream.LastRequest.Path);
+
+        using HttpResponseMessage responseRoot = await client.GetAsync("/swagger");
+        Assert.Equal(HttpStatusCode.OK, responseRoot.StatusCode);
+        Assert.Equal("/swagger", upstream.LastRequest.Path);
+    }
+
+    [Fact]
     public async Task AuthRoutePropagatesW3CTraceContextToUpstream()
     {
         using RSA signingKey = RSA.Create(2048);
