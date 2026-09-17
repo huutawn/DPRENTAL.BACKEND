@@ -1,5 +1,6 @@
 using Dprental.Gateway.Application.Observability;
 using Dprental.Gateway.Infrastructure.Observability;
+using Dprental.Gateway.Domain.Observability;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Options;
 
@@ -27,6 +28,8 @@ public static class ObservabilityServiceCollectionExtensions
             .Bind(configuration.GetSection(GatewayObservabilityOptions.SectionName))
             .ValidateOnStart();
 
+        services.AddSingleton<IGatewayMetrics, GatewayMetrics>();
+
         return services;
     }
 
@@ -40,6 +43,20 @@ public static class ObservabilityServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(app);
 
         app.UseMiddleware<GatewayRequestLoggingMiddleware>();
+
+        return app;
+    }
+
+    /// <summary>
+    /// Kích hoạt middleware thu thập chỉ số đo lường (Metrics Instrumentation) cho Gateway.
+    /// </summary>
+    /// <param name="app">Đối tượng IApplicationBuilder xây dựng HTTP pipeline.</param>
+    /// <returns>Đối tượng IApplicationBuilder để xâu chuỗi.</returns>
+    public static IApplicationBuilder UseGatewayMetrics(this IApplicationBuilder app)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+
+        app.UseMiddleware<GatewayMetricsMiddleware>();
 
         return app;
     }

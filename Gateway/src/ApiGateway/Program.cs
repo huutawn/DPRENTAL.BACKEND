@@ -23,6 +23,7 @@ var app = builder.Build();
 // Cấu hình chuỗi Middleware Pipeline cho Gateway
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseGatewayRequestLogging();
+app.UseGatewayMetrics();
 app.UseMiddleware<GatewayExceptionMiddleware>();
 app.UseGatewaySecurity();
 app.UseGatewayProxyErrorResponses();

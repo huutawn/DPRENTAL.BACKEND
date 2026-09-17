@@ -3,6 +3,8 @@ using Microsoft.Extensions.Options;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using OpenTelemetry.Metrics;
+using Dprental.Gateway.Domain.Observability;
 
 namespace Dprental.Gateway.Observability;
 
@@ -58,8 +60,14 @@ internal static class DistributedTracingServiceCollectionExtensions
                         exporter.Endpoint = new Uri(options.Otlp.TracesEndpoint, UriKind.Absolute);
                     });
                 }
+            })
+            .WithMetrics(metrics =>
+            {
+                metrics
+                    .AddMeter(GatewayMetricNames.MeterName)
+                    .AddAspNetCoreInstrumentation()
+                    .AddHttpClientInstrumentation();
             });
-
         return services;
     }
 }
