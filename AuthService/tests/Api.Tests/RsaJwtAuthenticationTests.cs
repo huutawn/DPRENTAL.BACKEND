@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -15,6 +17,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using OpenTelemetry;
+using OpenTelemetry.Trace;
 using Xunit;
 
 namespace Dprental.AuthService.Api.Tests;
@@ -197,6 +201,38 @@ public sealed class RsaJwtAuthenticationTests
         Assert.DoesNotContain(ActivePair.PrivateKeyPem, payload, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task JwksEndpointContinuesInboundW3CTrace()
+    {
+        JwtOptions options = CreateValidOptions();
+        ConcurrentQueue<ActivitySnapshot> serverActivities = new();
+        ActivityCaptureExporter exporter = new(serverActivities);
+        const string inboundTraceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        using WebApplicationFactory<Program> factory = new();
+        using WebApplicationFactory<Program> configuredFactory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, configurationBuilder) => configurationBuilder.AddConfiguration(CreateConfiguration(options)));
+            builder.ConfigureServices(services => services
+                .AddOpenTelemetry()
+                .WithTracing(tracing => tracing.AddProcessor(new SimpleActivityExportProcessor(exporter))));
+        });
+        // TestServer không phát server Activity; Kestrel mới phản ánh đúng pipeline HTTP của service khi chạy thực tế.
+        configuredFactory.UseKestrel(0);
+        using HttpClient client = configuredFactory.CreateClient();
+        using HttpRequestMessage request = new(HttpMethod.Get, "/.well-known/jwks.json");
+        request.Headers.TryAddWithoutValidation("traceparent", inboundTraceParent);
+
+        using HttpResponseMessage response = await SendWithoutClientInstrumentationAsync(client, request);
+
+        Assert.True(response.IsSuccessStatusCode);
+        Assert.True(ActivityContext.TryParse(inboundTraceParent, null, out ActivityContext inboundContext));
+        // AuthService phải tạo server span con của span Gateway để hai service xuất hiện trong cùng trace.
+        Assert.Contains(serverActivities, activity =>
+            activity.IdFormat == ActivityIdFormat.W3C
+            && activity.TraceId == inboundContext.TraceId
+            && activity.ParentSpanId == inboundContext.SpanId);
+    }
+
     private static ClaimsPrincipal ValidateToken(string token, JwtOptions options, RsaJwtKeyRing keyRing)
     {
         return new JwtSecurityTokenHandler { MapInboundClaims = false }.ValidateToken(token, new TokenValidationParameters
@@ -212,6 +248,13 @@ public sealed class RsaJwtAuthenticationTests
             NameClaimType = JwtRegisteredClaimNames.Sub,
             RoleClaimType = "role"
         }, out _);
+    }
+
+    private static async Task<HttpResponseMessage> SendWithoutClientInstrumentationAsync(HttpClient client, HttpRequestMessage request)
+    {
+        // Client của test không thuộc luồng Gateway; tắt instrumentation tại đây để nó không ghi đè traceparent cần kiểm tra.
+        using IDisposable scope = SuppressInstrumentationScope.Begin();
+        return await client.SendAsync(request);
     }
 
     private static string CreateTokenSignedBy(RsaPemPair pair, string keyId, JwtOptions options)
@@ -298,4 +341,22 @@ public sealed class RsaJwtAuthenticationTests
     }
 
     private sealed record RsaPemPair(string PrivateKeyPem, string PublicKeyPem);
+
+    private sealed record ActivitySnapshot(ActivityTraceId TraceId, ActivitySpanId ParentSpanId, ActivityIdFormat IdFormat);
+
+    private sealed class ActivityCaptureExporter(ConcurrentQueue<ActivitySnapshot> activities) : BaseExporter<Activity>
+    {
+        public override ExportResult Export(in Batch<Activity> batch)
+        {
+            foreach (Activity activity in batch)
+            {
+                if (activity.Kind == ActivityKind.Server)
+                {
+                    activities.Enqueue(new ActivitySnapshot(activity.TraceId, activity.ParentSpanId, activity.IdFormat));
+                }
+            }
+
+            return ExportResult.Success;
+        }
+    }
 }

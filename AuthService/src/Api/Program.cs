@@ -7,8 +7,10 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 using Dprental.AuthService.Api.Authentication;
 using Dprental.AuthService.Api.Authentication.Transport;
+using Dprental.AuthService.Api.Observability;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddAuthServiceDistributedTracing(builder.Configuration);
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();

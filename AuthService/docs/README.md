@@ -61,3 +61,20 @@ Auth__Jwt__Keys__0__PrivateKeyPem
 JWT được kiểm tra ngay khi service khởi động: issuer, audience, lifetime 1–60 phút, active key, `kid` duy nhất, PEM hợp lệ, RSA ít nhất 2048-bit và private/public key của active entry phải khớp. Access token mặc định hết hạn sau 15 phút.
 
 JWKS được cache công khai tối đa 5 phút. Để rotate key an toàn: thêm key pair mới nhưng chưa active, deploy để JWKS công bố cả hai public key, chờ cache hết hạn, đổi `ActiveKeyId`, sau đó giữ public key cũ ít nhất bằng access-token lifetime cộng clock skew trước khi gỡ nó.
+
+## Theo dõi trace phân tán
+
+API dùng W3C `traceparent` và OpenTelemetry ASP.NET Core instrumentation. Khi request đến từ Gateway, AuthService tạo server span có cùng `TraceId` và dùng span Gateway gửi sang làm parent; vì vậy collector hiển thị hai service trong một trace liên tục.
+
+```text
+Telemetry:Tracing:SamplingRatio       # 0.0 đến 1.0; development = 1.0, môi trường khác = 0.1
+Telemetry:Otlp:TracesEndpoint         # URL HTTP/protobuf tuyệt đối, kết thúc bằng /v1/traces
+```
+
+`TracesEndpoint` để trống thì không export trace, phù hợp khi local chưa chạy collector. Production cấu hình bằng:
+
+```text
+Telemetry__Otlp__TracesEndpoint=https://otel-collector.internal/v1/traces
+```
+
+Sampler là `ParentBased(TraceIdRatioBased)`: trace đã lấy mẫu từ Gateway luôn tiếp tục được lấy mẫu tại AuthService, còn request không có parent dùng tỷ lệ của service. Chỉ metadata HTTP tiêu chuẩn được instrumentation ghi nhận; không thêm token, authorization header, body, claim hoặc PEM key vào trace attributes.
