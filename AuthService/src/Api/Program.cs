@@ -1,23 +1,38 @@
+﻿using AuthService.Application.Interfaces;
 using AuthService.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using AuthService.Application.Services;
+using Dprental.AuthService.Api.Authentication;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Đăng ký Database
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-using Dprental.AuthService.Api.Authentication;
-using Dprental.AuthService.Api.Authentication.Transport;
 
-var builder = WebApplication.CreateBuilder(args);
-// Đăng ký và validate JWT trước khi API bắt đầu nhận request.
+// Đăng ký DI
+builder.Services.AddScoped<IApplicationDbContext>(provider =>
+    provider.GetRequiredService<ApplicationDbContext>());
+builder.Services.AddScoped<IAuthService, AuthService.Application.Services.AuthService>();
+
+// Đăng ký JWT
 builder.Services.AddJwtAuthentication(builder.Configuration);
+
+// Đăng ký Swagger & Controller
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-app.UseAuthentication();
-app.UseAuthorization();
-// Công bố public key cho gateway và các service cần tự xác thực JWT.
-app.MapJwksEndpoint();
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseRouting();
+app.MapControllers();
 
 app.Run();
 

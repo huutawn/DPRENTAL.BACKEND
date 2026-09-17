@@ -1,9 +1,9 @@
+using AuthService.Application.Interfaces; // Thêm dòng này
 using DpRent.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace AuthService.Infrastructure;
-
-public class ApplicationDbContext : DbContext
+public class ApplicationDbContext : DbContext, IApplicationDbContext
 {
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
     {
