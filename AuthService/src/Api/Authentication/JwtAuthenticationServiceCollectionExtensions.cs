@@ -8,15 +8,19 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace Dprental.AuthService.Api.Authentication;
 
+/// <summary>Các extension đăng ký JWT authentication vào dependency injection container.</summary>
 internal static class JwtAuthenticationServiceCollectionExtensions
 {
+    /// <summary>Đăng ký key ring, token issuer và JWT Bearer authentication cho API.</summary>
     internal static IServiceCollection AddJwtAuthentication(this IServiceCollection services, IConfiguration configuration)
     {
+        // ValidateOnStart bảo đảm API không chạy với issuer, audience hoặc RSA key chưa hợp lệ.
         services.AddSingleton<IValidateOptions<JwtOptions>, JwtOptionsValidator>();
         services.AddOptions<JwtOptions>()
             .Bind(configuration.GetRequiredSection(JwtOptions.SectionName))
             .ValidateOnStart();
 
+        // TimeProvider được inject để issuer không phụ thuộc trực tiếp vào đồng hồ hệ thống khi kiểm thử.
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<RsaJwtKeyRing>();
         services.AddSingleton<IAccessTokenIssuer, RsaAccessTokenIssuer>();
@@ -31,6 +35,7 @@ internal static class JwtAuthenticationServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>Thiết lập chính sách xác thực để chỉ nhận access token RS256 của key ring này.</summary>
     private static void ConfigureJwtBearer(
         JwtBearerOptions bearerOptions,
         RsaJwtKeyRing keyRing,
@@ -38,6 +43,7 @@ internal static class JwtAuthenticationServiceCollectionExtensions
     {
         JwtOptions jwtOptions = options.Value;
 
+        // Giữ tên claim nguyên bản (sub, role) để contract JWT không bị .NET tự ánh xạ.
         bearerOptions.MapInboundClaims = false;
         bearerOptions.TokenValidationParameters = new TokenValidationParameters
         {
@@ -46,6 +52,7 @@ internal static class JwtAuthenticationServiceCollectionExtensions
             ValidateAudience = true,
             ValidAudience = jwtOptions.Audience,
             ValidateIssuerSigningKey = true,
+            // Chỉ xác thực bằng public key có kid trùng JWT header; không thử tuần tự các key khác.
             IssuerSigningKeyResolver = (_, _, keyId, _) => keyRing.ResolveVerificationKeys(keyId),
             ValidateLifetime = true,
             RequireExpirationTime = true,

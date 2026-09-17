@@ -3,10 +3,13 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.AuthService.Api.Authentication.Configuration;
 
+/// <summary>Kiểm tra cấu hình JWT và key ring trước khi ứng dụng khởi động.</summary>
 internal sealed class JwtOptionsValidator : IValidateOptions<JwtOptions>
 {
+    /// <summary>Giới hạn thời hạn token để giảm rủi ro khi access token bị lộ.</summary>
     private const int MaximumAccessTokenLifetimeMinutes = 60;
 
+    /// <summary>Kiểm tra đầy đủ cấu hình JWT trước khi ứng dụng nhận traffic.</summary>
     public ValidateOptionsResult Validate(string? name, JwtOptions options)
     {
         List<string> failures = [];
@@ -43,6 +46,7 @@ internal sealed class JwtOptionsValidator : IValidateOptions<JwtOptions>
 
         try
         {
+            // Khởi tạo thử key ring để kiểm tra PEM, độ dài RSA và private/public key có khớp nhau.
             using RsaJwtKeyRing _ = new(options);
         }
         catch (ArgumentException exception)

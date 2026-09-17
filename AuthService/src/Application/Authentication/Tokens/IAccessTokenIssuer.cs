@@ -1,8 +1,8 @@
 namespace Dprental.AuthService.Application.Authentication.Tokens;
 
 /// <summary>
-/// Issues short-lived access tokens for an already authenticated subject.
-/// Authentication of the subject remains the responsibility of a use case.
+/// Phát hành access token có thời hạn ngắn cho một chủ thể đã được xác thực.
+/// Việc xác thực chủ thể thuộc trách nhiệm của use case gọi interface này.
 /// </summary>
 public interface IAccessTokenIssuer
 {
@@ -10,11 +10,19 @@ public interface IAccessTokenIssuer
 }
 
 /// <summary>
-/// Claims which do not require the domain User entity to issue an access token.
+/// Dữ liệu claim tối thiểu để phát access token mà không phụ thuộc vào entity User.
 /// </summary>
-public sealed record AccessTokenRequest(Guid SubjectId, IReadOnlyCollection<string>? Roles = null);
+public sealed record AccessTokenRequest(
+    /// <summary>Mã định danh duy nhất của chủ thể sẽ xuất hiện trong claim <c>sub</c>.</summary>
+    Guid SubjectId,
+    /// <summary>Các vai trò sẽ xuất hiện trong các claim <c>role</c>; có thể để trống.</summary>
+    IReadOnlyCollection<string>? Roles = null);
 
 /// <summary>
-/// A signed access token and its UTC expiry, for returning to a client after authentication.
+/// Access token đã ký và thời điểm hết hạn UTC để trả cho client sau khi xác thực.
 /// </summary>
-public sealed record IssuedAccessToken(string Value, DateTimeOffset ExpiresAtUtc);
+public sealed record IssuedAccessToken(
+    /// <summary>Chuỗi JWT đã được ký.</summary>
+    string Value,
+    /// <summary>Thời điểm JWT hết hạn theo UTC.</summary>
+    DateTimeOffset ExpiresAtUtc);

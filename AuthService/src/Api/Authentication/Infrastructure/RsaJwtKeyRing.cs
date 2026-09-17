@@ -5,25 +5,33 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace Dprental.AuthService.Api.Authentication.Infrastructure;
 
-/// <summary>
-/// Holds the active private key for signing and all public keys accepted for verification.
-/// </summary>
+/// <summary>Quản lý private key active để ký và các public key được chấp nhận để xác thực.</summary>
 internal sealed class RsaJwtKeyRing : IDisposable
 {
+    /// <summary>Độ dài RSA tối thiểu được chấp nhận để bảo vệ chữ ký JWT.</summary>
     private const int MinimumRsaKeySizeInBits = 2048;
+
+    /// <summary>Các đối tượng RSA cần được giải phóng cùng vòng đời của container DI.</summary>
     private readonly List<RSA> rsaInstances = [];
+
+    /// <summary>Public key được lập chỉ mục theo <c>kid</c> để xác thực token nhanh và chính xác.</summary>
     private readonly Dictionary<string, SecurityKey> verificationKeys = new(StringComparer.Ordinal);
+
+    /// <summary>Bản JWKS chỉ chứa public key, được tái sử dụng cho các HTTP response.</summary>
     private readonly IReadOnlyList<JwkDocument> jwks;
 
+    /// <summary>Khởi tạo key ring từ options đã được bind bởi dependency injection.</summary>
     public RsaJwtKeyRing(IOptions<JwtOptions> options)
         : this(options.Value)
     {
     }
 
+    /// <summary>Khởi tạo key ring từ cấu hình cụ thể; dùng cả khi validate lúc startup.</summary>
     public RsaJwtKeyRing(JwtOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
+        // Giữ RSA parameters public để kiểm tra active private key thực sự thuộc cùng key pair.
         Dictionary<string, RSAParameters> publicKeyParameters = new(StringComparer.Ordinal);
         foreach (JwtKeyOptions keyOptions in options.Keys)
         {
@@ -42,6 +50,7 @@ internal sealed class RsaJwtKeyRing : IDisposable
                 throw new ArgumentException($"Auth:Jwt:Keys contains duplicate KeyId '{keyOptions.KeyId}'.");
             }
 
+            // Chỉ public key được đưa vào danh sách xác thực và JWKS.
             RSA publicRsa = RSA.Create();
             rsaInstances.Add(publicRsa);
             publicRsa.ImportFromPem(keyOptions.PublicKeyPem);
@@ -64,6 +73,7 @@ internal sealed class RsaJwtKeyRing : IDisposable
             throw new ArgumentException($"Active signing key '{options.ActiveKeyId}' must have a PrivateKeyPem.");
         }
 
+        // Private key chỉ được nạp cho key active và chỉ được dùng để ký token mới.
         RSA privateRsa = RSA.Create();
         rsaInstances.Add(privateRsa);
         privateRsa.ImportFromPem(activeKeyOptions.PrivateKeyPem);
@@ -85,8 +95,10 @@ internal sealed class RsaJwtKeyRing : IDisposable
             .ToArray();
     }
 
+    /// <summary>Private RSA key của entry active, chỉ dùng để tạo chữ ký RS256.</summary>
     public RsaSecurityKey ActiveSigningKey { get; }
 
+    /// <summary>Trả về public key tương ứng với <c>kid</c> trong JWT header; không fallback key khác.</summary>
     public IEnumerable<SecurityKey> ResolveVerificationKeys(string? keyId)
     {
         return !string.IsNullOrWhiteSpace(keyId) && verificationKeys.TryGetValue(keyId, out SecurityKey? key)
@@ -94,8 +106,10 @@ internal sealed class RsaJwtKeyRing : IDisposable
             : [];
     }
 
+    /// <summary>Tạo payload JWKS công khai từ các public verification key hiện có.</summary>
     public JwksDocument CreateJwks() => new(jwks);
 
+    /// <summary>Giải phóng toàn bộ handle RSA đã được nạp từ PEM.</summary>
     public void Dispose()
     {
         foreach (RSA rsa in rsaInstances)
@@ -104,6 +118,7 @@ internal sealed class RsaJwtKeyRing : IDisposable
         }
     }
 
+    /// <summary>Chuyển public RSA parameters sang một JWK chuẩn, không bao gồm private exponent.</summary>
     private static JwkDocument CreateJwk(string keyId, RSAParameters parameters)
     {
         return new JwkDocument(
@@ -115,6 +130,7 @@ internal sealed class RsaJwtKeyRing : IDisposable
             Base64UrlEncoder.Encode(parameters.Exponent));
     }
 
+    /// <summary>Tạo SecurityKey có <c>kid</c> và không cache provider để không giữ RSA đã dispose.</summary>
     private static RsaSecurityKey CreateSecurityKey(RSA rsa, string keyId)
     {
         return new RsaSecurityKey(rsa)
@@ -124,6 +140,7 @@ internal sealed class RsaJwtKeyRing : IDisposable
         };
     }
 
+    /// <summary>Từ chối RSA key yếu trước khi key được dùng để ký hoặc xác thực token.</summary>
     private static void EnsureSafeRsaKeySize(string keyId, RSAParameters parameters)
     {
         int keySizeInBits = (parameters.Modulus?.Length ?? 0) * 8;
@@ -133,6 +150,7 @@ internal sealed class RsaJwtKeyRing : IDisposable
         }
     }
 
+    /// <summary>So sánh modulus và exponent để xác nhận private/public PEM thuộc cùng một key pair.</summary>
     private static bool HasSamePublicKey(RSAParameters first, RSAParameters second)
     {
         return first.Modulus is not null
@@ -144,6 +162,22 @@ internal sealed class RsaJwtKeyRing : IDisposable
     }
 }
 
-internal sealed record JwksDocument(IReadOnlyList<JwkDocument> Keys);
+/// <summary>Payload JWKS được endpoint công khai trả về theo RFC 7517.</summary>
+internal sealed record JwksDocument(
+    /// <summary>Danh sách public JWK có thể xác thực access token còn hiệu lực.</summary>
+    IReadOnlyList<JwkDocument> Keys);
 
-internal sealed record JwkDocument(string Kty, string Kid, string Use, string Alg, string N, string E);
+/// <summary>Một JSON Web Key RSA công khai, không bao giờ chứa thành phần private.</summary>
+internal sealed record JwkDocument(
+    /// <summary>Loại khóa chuẩn JWK, luôn là <c>RSA</c>.</summary>
+    string Kty,
+    /// <summary>Định danh khóa khớp với trường <c>kid</c> của JWT.</summary>
+    string Kid,
+    /// <summary>Mục đích dùng khóa, luôn là ký/xác thực chữ ký (<c>sig</c>).</summary>
+    string Use,
+    /// <summary>Thuật toán chữ ký chuẩn JWK, luôn là <c>RS256</c>.</summary>
+    string Alg,
+    /// <summary>RSA modulus được Base64Url encode.</summary>
+    string N,
+    /// <summary>RSA public exponent được Base64Url encode.</summary>
+    string E);
