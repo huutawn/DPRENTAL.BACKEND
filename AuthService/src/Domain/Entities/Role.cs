@@ -1,9 +1,20 @@
-﻿namespace DpRent.Domain.Entities;
+﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using Microsoft.EntityFrameworkCore;
 
+namespace DpRent.Domain.Entities;
+
+[Table("Roles", Schema = "auth")]
+[Index(nameof(Name), IsUnique = true)]
 public class Role
 {
+    [Key]
     public Guid Id { get; set; }
+
+    [Required]
+    [MaxLength(50)]
     public string Name { get; set; } = string.Empty;
+
     public string Description { get; set; } = string.Empty;
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
