@@ -28,3 +28,15 @@ docker compose up -d
 PostgreSQL lắng nghe ở `localhost:5432`; Valkey (Redis-compatible) ở `localhost:6379`. `.env` không được commit.
 
 Khi bắt đầu dùng database/cache, cấp connection strings cho API bằng .NET User Secrets theo hướng dẫn trong [docs](AuthService/docs/README.md). Không đặt password hoặc signing key vào `appsettings*.json`.
+
+## Theo dõi trace phân tán
+
+AuthService tiếp tục W3C `traceparent` do Gateway gửi tới và dùng OpenTelemetry để server span của AuthService thuộc cùng trace. Root trace được lấy mẫu 100% ở Development và 10% ở môi trường khác; quyết định lấy mẫu từ caller luôn được giữ nguyên.
+
+Để export trace qua OTLP HTTP/protobuf, cấu hình endpoint đầy đủ trong environment. Không đưa token hay credential của collector vào source control:
+
+```text
+Telemetry__Otlp__TracesEndpoint=https://otel-collector.internal/v1/traces
+```
+
+Trace không được bổ sung JWT, authorization header, request/response body, claim hoặc private key làm attribute.
