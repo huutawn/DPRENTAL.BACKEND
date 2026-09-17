@@ -1,3 +1,10 @@
+using AuthService.Infrastructure;
+using Microsoft.EntityFrameworkCore;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 using Dprental.AuthService.Api.Authentication;
 using Dprental.AuthService.Api.Authentication.Transport;
 
@@ -14,4 +21,4 @@ app.MapJwksEndpoint();
 
 app.Run();
 
-public partial class Program;
+public partial class Program { }

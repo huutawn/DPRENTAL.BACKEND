@@ -1,14 +1,16 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.0.31903.59
+# Visual Studio Version 18
+VisualStudioVersion = 18.9.12120.119 stable
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthService.Common", "AuthService/src/Common/AuthService.Common.csproj", "{F8FB5581-7C43-46B6-85A9-2A6A2E65E001}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthService.Common", "AuthService\src\Common\AuthService.Common.csproj", "{F8FB5581-7C43-46B6-85A9-2A6A2E65E001}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthService.Domain", "AuthService/src/Domain/AuthService.Domain.csproj", "{F8FB5581-7C43-46B6-85A9-2A6A2E65E002}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthService.Domain", "AuthService\src\Domain\AuthService.Domain.csproj", "{F8FB5581-7C43-46B6-85A9-2A6A2E65E002}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthService.Application", "AuthService/src/Application/AuthService.Application.csproj", "{F8FB5581-7C43-46B6-85A9-2A6A2E65E003}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthService.Application", "AuthService\src\Application\AuthService.Application.csproj", "{F8FB5581-7C43-46B6-85A9-2A6A2E65E003}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthService.Api", "AuthService/src/Api/AuthService.Api.csproj", "{F8FB5581-7C43-46B6-85A9-2A6A2E65E004}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthService.Api", "AuthService\src\Api\AuthService.Api.csproj", "{F8FB5581-7C43-46B6-85A9-2A6A2E65E004}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthService.Infrastructure", "AuthService\src\Infrastructure\AuthService.Infrastructure.csproj", "{60CB950D-3B42-2E3C-0D3B-9C23D4C8C3F6}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AuthService.Api.Tests", "AuthService/tests/Api.Tests/AuthService.Api.Tests.csproj", "{F8FB5581-7C43-46B6-85A9-2A6A2E65E005}"
 EndProject
