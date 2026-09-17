@@ -1,31 +1,22 @@
 using DpRent.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
-namespace AuthService.Infrastructure.Data
+namespace AuthService.Infrastructure.Data;
+
+public class ApplicationDbContext : DbContext
 {
-    public class ApplicationDbContext : DbContext
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
     {
-        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options) { }
+    }
 
-        public DbSet<User> Users { get; set; }
+    public DbSet<User> Users { get; set; }
+    public DbSet<Role> Roles { get; set; }
+    public DbSet<UserRole> UserRoles { get; set; }
+    public DbSet<RefreshToken> RefreshTokens { get; set; }
 
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
-        {
-            modelBuilder.HasDefaultSchema("auth");
-
-            base.OnModelCreating(modelBuilder);
-            modelBuilder.Entity<User>(entity =>
-            {
-                entity.HasKey(e => e.Id);
-
-                entity.HasIndex(e => e.Email).IsUnique();
-
-                entity.Property(e => e.FullName).IsRequired().HasMaxLength(100);
-                entity.Property(e => e.PasswordHash).IsRequired();
-                entity.Property(e => e.Role).IsRequired().HasMaxLength(50);
-                entity.Property(e => e.CreatedAt).IsRequired();
-                entity.Property(e => e.IsActive).IsRequired();
-            });
-        }
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+        modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
     }
 }
