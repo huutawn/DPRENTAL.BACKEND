@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddGatewayDistributedTracing(builder.Configuration);
 builder.Services.AddGatewayJwtAuthentication(builder.Configuration);
 builder.Services.AddGatewayReverseProxy(builder.Configuration);
 builder.Services.AddGatewayHealthChecks();
@@ -20,16 +21,16 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapHealthChecks("/_health/live", new HealthCheckOptions
-    {
-        Predicate = _ => false,
-        AllowCachingResponses = false
-    })
+{
+    Predicate = _ => false,
+    AllowCachingResponses = false
+})
     .AllowAnonymous();
 app.MapHealthChecks("/_health/ready", new HealthCheckOptions
-    {
-        Predicate = check => check.Tags.Contains(GatewayHealthCheckTags.Readiness, StringComparer.Ordinal),
-        AllowCachingResponses = false
-    })
+{
+    Predicate = check => check.Tags.Contains(GatewayHealthCheckTags.Readiness, StringComparer.Ordinal),
+    AllowCachingResponses = false
+})
     .AllowAnonymous();
 app.MapReverseProxy();
 
