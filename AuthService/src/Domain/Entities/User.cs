@@ -38,4 +38,5 @@ public class User
     public string? PasswordResetToken { get; set; }
     public DateTimeOffset? ResetTokenExpiry { get; set; }
 
+    public ICollection<OrganizationMembership> OrganizationMemberships { get; set; } = new List<OrganizationMembership>();
 }
