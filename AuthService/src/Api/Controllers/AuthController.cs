@@ -34,7 +34,28 @@ public sealed class AuthController(
     [ProducesResponseType<AuthTokenResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    public ActionResult<AuthTokenResponse> Login(LoginRequest request) => NotImplementedYet();
+    public async Task<ActionResult<AuthTokenResponse>> Login(LoginRequest request, CancellationToken cancellationToken)
+    {
+        Guid? userId = await userService.AuthenticateAsync(request, cancellationToken);
+        if (userId is null)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Auth.InvalidCredentials",
+                detail: "Email hoặc mật khẩu không chính xác.");
+        }
+
+        AuthTokenPair? tokens = await authSessionService.CreateSessionAsync(userId.Value, cancellationToken);
+        if (tokens is null)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Auth.InactiveAccount",
+                detail: "Tài khoản không tồn tại hoặc đã bị khóa.");
+        }
+
+        return Ok(tokens.ToDto());
+    }
 
     [HttpPost("refresh")]
     [ProducesResponseType<AuthTokenResponse>(StatusCodes.Status200OK)]

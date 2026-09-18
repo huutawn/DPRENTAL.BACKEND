@@ -10,4 +10,5 @@ namespace Dprental.AuthService.Domain.IRepositories;
 public interface IUserRepository : IRepo<User, Guid>
 {
     Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default);
+    Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken cancellationToken = default);
 }

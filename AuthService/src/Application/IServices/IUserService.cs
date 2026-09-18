@@ -6,4 +6,5 @@ namespace Dprental.AuthService.Application.IServices;
 public interface IUserService
 {
     Task<Result<AccountCreatedResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default);
+    Task<Guid?> AuthenticateAsync(LoginRequest request, CancellationToken cancellationToken = default);
 }
