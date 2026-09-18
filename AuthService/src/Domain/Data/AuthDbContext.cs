@@ -14,4 +14,5 @@ public sealed class AuthDbContext : DbContext
     public DbSet<UserRole> UserRoles { get; set; }
     public DbSet<Session> Sessions { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
+    //public DbSet<AuditLog> AuditLogs { get; set; }
 }
