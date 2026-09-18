@@ -3,9 +3,11 @@ using Dprental.AuthService.Domain.Entities;
 
 namespace Dprental.AuthService.Domain.IRepositories;
 
+/// <summary>
+/// Repository của User. <see cref="IRepo{TEntity, TKey}.CreateAsync"/> ném
+/// <see cref="Exceptions.DuplicateEmailException"/> khi email đã tồn tại.
+/// </summary>
 public interface IUserRepository : IRepo<User, Guid>
 {
     Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default);
-
-    Task<bool> TryCreateAsync(User user, CancellationToken cancellationToken = default);
 }

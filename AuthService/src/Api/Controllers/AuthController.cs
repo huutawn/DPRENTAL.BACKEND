@@ -13,7 +13,7 @@ namespace Dprental.AuthService.Api.Controllers;
 [Produces("application/json")]
 public sealed class AuthController(
     IAuthSessionService authSessionService,
-    IUserRegistrationService userRegistrationService) : ControllerBase
+    IUserService userService) : ControllerBase
 {
     [HttpPost("register")]
     [ProducesResponseType<AccountCreatedResponse>(StatusCodes.Status201Created)]
@@ -21,7 +21,7 @@ public sealed class AuthController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<AccountCreatedResponse>> Register(RegisterRequest request, CancellationToken cancellationToken)
     {
-        Result<AccountCreatedResponse> result = await userRegistrationService.RegisterAsync(request, cancellationToken);
+        Result<AccountCreatedResponse> result = await userService.RegisterAsync(request, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);

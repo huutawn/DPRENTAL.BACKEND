@@ -4,15 +4,16 @@ using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Errors;
+using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.AspNetCore.Identity;
 
 namespace Dprental.AuthService.Application.Services;
 
-public sealed class UserRegistrationService(
+public sealed class UserService(
     IUserRepository userRepository,
     IPasswordHasher<User> passwordHasher,
-    TimeProvider timeProvider) : IUserRegistrationService
+    TimeProvider timeProvider) : IUserService
 {
     public async Task<Result<AccountCreatedResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {
@@ -34,8 +35,13 @@ public sealed class UserRegistrationService(
         };
         user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
 
-        if (!await userRepository.TryCreateAsync(user, cancellationToken))
+        try
         {
+            await userRepository.CreateAsync(user, cancellationToken);
+        }
+        catch (DuplicateEmailException)
+        {
+            // Request khác đã đăng ký cùng email ngay sau bước kiểm tra ở trên.
             return UserErrors.EmailAlreadyExists;
         }
 

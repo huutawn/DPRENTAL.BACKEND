@@ -27,8 +27,8 @@ public static class ApplicationServiceCollectionExtensions
         services.AddSingleton<RsaJwtKeyRing>();
         services.AddSingleton<IAccessTokenIssuer, RsaAccessTokenIssuer>();
         services.AddScoped<IAuthSessionService, AuthSessionService>();
-        services.AddSingleton<IPasswordHasher<User>, PasswordHasher<User>>();
-        services.AddScoped<IUserRegistrationService, UserRegistrationService>();
+        services.AddTransient<IPasswordHasher<User>, PasswordHasher<User>>();
+        services.AddScoped<IUserService, UserService>();
 
         return services;
     }

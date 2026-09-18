@@ -9,7 +9,7 @@ namespace Dprental.AuthService.Api.Tests;
 public sealed class EfUserRepositoryTests
 {
     [Fact]
-    public async Task TryCreateAsyncPersistsUserAndEmailExistsFindsIt()
+    public async Task CreateAsyncPersistsUserAndEmailExistsFindsIt()
     {
         DbContextOptions<AuthDbContext> options = new DbContextOptionsBuilder<AuthDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
@@ -27,7 +27,7 @@ public sealed class EfUserRepositoryTests
         };
 
         Assert.False(await repository.EmailExistsAsync(user.Email));
-        Assert.True(await repository.TryCreateAsync(user));
+        Assert.Same(user, await repository.CreateAsync(user));
 
         Assert.True(await repository.EmailExistsAsync(user.Email));
         Assert.False(await repository.EmailExistsAsync("other@example.com"));

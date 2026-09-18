@@ -1,5 +1,6 @@
 using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -23,8 +24,17 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
         ArgumentNullException.ThrowIfNull(entity);
 
         dbContext.Users.Add(entity);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return entity;
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return entity;
+        }
+        catch (DbUpdateException exception) when (exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            // Bỏ entity lỗi khỏi DbContext để lần SaveChanges sau không thử insert lại.
+            dbContext.Entry(entity).State = EntityState.Detached;
+            throw new DuplicateEmailException("Email đã được sử dụng.", exception);
+        }
     }
 
     public async Task<bool> UpdateAsync(User entity, CancellationToken cancellationToken = default)
@@ -61,21 +71,4 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
         dbContext.Users
             .AsNoTracking()
             .AnyAsync(user => user.Email == normalizedEmail, cancellationToken);
-
-    public async Task<bool> TryCreateAsync(User user, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(user);
-
-        dbContext.Users.Add(user);
-        try
-        {
-            await dbContext.SaveChangesAsync(cancellationToken);
-            return true;
-        }
-        catch (DbUpdateException exception) when (exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
-        {
-            dbContext.Entry(user).State = EntityState.Detached;
-            return false;
-        }
-    }
 }

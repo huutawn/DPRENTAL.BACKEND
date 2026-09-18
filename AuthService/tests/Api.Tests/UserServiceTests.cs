@@ -3,13 +3,14 @@ using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Errors;
+using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.AspNetCore.Identity;
 using Xunit;
 
 namespace Dprental.AuthService.Api.Tests;
 
-public sealed class UserRegistrationServiceTests
+public sealed class UserServiceTests
 {
     [Fact]
     public async Task RegisterAsyncCreatesActiveUserWithNormalizedEmailAndHashedPassword()
@@ -17,7 +18,7 @@ public sealed class UserRegistrationServiceTests
         DateTimeOffset now = new(2026, 9, 17, 9, 0, 0, TimeSpan.Zero);
         RecordingUserRepository repository = new();
         PasswordHasher<User> hasher = new();
-        UserRegistrationService service = new(repository, hasher, new FixedTimeProvider(now));
+        UserService service = new(repository, hasher, new FixedTimeProvider(now));
 
         Result<AccountCreatedResponse> result = await service.RegisterAsync(
             new RegisterRequest("  Tan.Len@Example.COM ", "Matkhau123!", "  Huynh Tan Len "));
@@ -37,7 +38,7 @@ public sealed class UserRegistrationServiceTests
     public async Task RegisterAsyncExistingEmailReturnsConflictWithoutSaving()
     {
         RecordingUserRepository repository = new() { ExistingEmail = "tan.len@example.com" };
-        UserRegistrationService service = new(repository, new PasswordHasher<User>(), TimeProvider.System);
+        UserService service = new(repository, new PasswordHasher<User>(), TimeProvider.System);
 
         Result<AccountCreatedResponse> result = await service.RegisterAsync(
             new RegisterRequest("TAN.LEN@example.com", "Matkhau123!", "Huynh Tan Len"));
@@ -52,7 +53,7 @@ public sealed class UserRegistrationServiceTests
     public async Task RegisterAsyncConcurrentDuplicateRejectedByDatabaseReturnsConflict()
     {
         RecordingUserRepository repository = new() { RejectCreate = true };
-        UserRegistrationService service = new(repository, new PasswordHasher<User>(), TimeProvider.System);
+        UserService service = new(repository, new PasswordHasher<User>(), TimeProvider.System);
 
         Result<AccountCreatedResponse> result = await service.RegisterAsync(
             new RegisterRequest("tan.len@example.com", "Matkhau123!", "Huynh Tan Len"));
@@ -70,31 +71,28 @@ public sealed class UserRegistrationServiceTests
         public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
             Task.FromResult(normalizedEmail == ExistingEmail);
 
-        public Task<bool> TryCreateAsync(User user, CancellationToken cancellationToken = default)
+        public Task<User> CreateAsync(User entity, CancellationToken cancellationToken = default)
         {
             if (RejectCreate)
             {
-                return Task.FromResult(false);
+                throw new DuplicateEmailException();
             }
 
-            CreatedUsers.Add(user);
-            return Task.FromResult(true);
+            CreatedUsers.Add(entity);
+            return Task.FromResult(entity);
         }
 
         public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("UserRegistrationService does not use generic CRUD reads.");
+            throw new NotSupportedException("UserService.RegisterAsync does not use generic CRUD reads.");
 
         public Task<IReadOnlyList<User>> GetAllAsync(CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("UserRegistrationService does not use generic CRUD reads.");
-
-        public Task<User> CreateAsync(User entity, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("UserRegistrationService creates users through TryCreateAsync.");
+            throw new NotSupportedException("UserService.RegisterAsync does not use generic CRUD reads.");
 
         public Task<bool> UpdateAsync(User entity, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("UserRegistrationService does not update users.");
+            throw new NotSupportedException("UserService.RegisterAsync does not update users.");
 
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("UserRegistrationService does not delete users.");
+            throw new NotSupportedException("UserService.RegisterAsync does not delete users.");
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
