@@ -53,6 +53,28 @@ Khởi động AuthService tại `http://localhost:5000` (hoặc cấu hình end
 ASPNETCORE_ENVIRONMENT=Development dotnet run --project Gateway/src/ApiGateway --urls "http://127.0.0.1:5050"
 ```
 
+### Build & Chạy thử bằng Docker
+
+Build Docker image multi-stage .NET 10:
+
+```bash
+docker build -t dprental-gateway:latest -f Dockerfile .
+```
+
+Chạy container Gateway kết nối tới AuthService:
+
+```bash
+docker run -d --name dprental-gateway \
+  -p 8080:8080 \
+  -e ASPNETCORE_ENVIRONMENT=Production \
+  -e Gateway__Authentication__Jwt__Issuer=dprental-authservice-dev \
+  -e Gateway__Authentication__Jwt__Audience=dprental-clients \
+  -e Gateway__Authentication__Jwt__JwksUri=http://auth-service:5000/.well-known/jwks.json \
+  -e ReverseProxy__Clusters__auth-service__Destinations__primary__Address=http://auth-service:5000/ \
+  -e Gateway__Security__Cors__AllowedOrigins__0=http://localhost:3000 \
+  dprental-gateway:latest
+```
+
 Các endpoint public và health checks:
 
 - `/health/live` (hoặc `/_health/live`): kiểm tra tiến trình Gateway đang hoạt động (kèm đầy đủ security headers).
