@@ -64,7 +64,11 @@ public sealed class AuthSessionService(
     /// <summary>Phát hành access token từ dữ liệu đã được persistence xác thực.</summary>
     private AuthTokenPair IssueTokenPair(AuthSessionPrincipal principal, string refreshToken)
     {
-        IssuedAccessToken accessToken = accessTokenIssuer.Issue(new AccessTokenRequest(principal.UserId, principal.Roles));
+        IssuedAccessToken accessToken = accessTokenIssuer.Issue(new AccessTokenRequest(
+            principal.UserId,
+            principal.Roles,
+            principal.Permissions,
+            principal.OrganizationIds));
         return new AuthTokenPair(accessToken.Value, refreshToken);
     }
 

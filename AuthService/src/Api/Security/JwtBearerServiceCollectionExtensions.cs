@@ -1,7 +1,9 @@
 using System.IdentityModel.Tokens.Jwt;
+using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Domain.Utils;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
@@ -10,12 +12,22 @@ namespace Dprental.AuthService.Api.Security;
 /// <summary>Các extension đăng ký JWT authentication vào dependency injection container.</summary>
 internal static class JwtBearerServiceCollectionExtensions
 {
+    /// <summary>Tên claim permission, phải khớp <c>RsaAccessTokenIssuer.PermissionClaimType</c>.</summary>
+    private const string PermissionClaimType = "perm";
+
     /// <summary>Đăng ký JWT Bearer authentication cho API bằng key ring của Application.</summary>
     internal static IServiceCollection AddJwtBearerSecurity(this IServiceCollection services)
     {
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer();
-        services.AddAuthorization();
+        services.AddAuthorization(options =>
+        {
+            // Một policy cho mỗi permission đã khai báo: yêu cầu claim "perm" chứa đúng mã đó.
+            foreach (string permission in Permissions.All)
+            {
+                options.AddPolicy(permission, policy => policy.RequireClaim(PermissionClaimType, permission));
+            }
+        });
 
         services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
             .Configure<RsaJwtKeyRing, IOptions<JwtOptions>>(ConfigureJwtBearer);

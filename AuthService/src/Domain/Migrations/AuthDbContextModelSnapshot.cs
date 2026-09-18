@@ -22,6 +22,95 @@ namespace Dprental.AuthService.Domain.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Organization", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Slug")
+                        .IsUnique();
+
+                    b.ToTable("Organizations", "auth");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.OrganizationMembership", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("JoinedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("RoleId");
+
+                    b.HasIndex("UserId", "OrganizationId")
+                        .IsUnique();
+
+                    b.ToTable("OrganizationMemberships", "auth");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Permission", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("Permissions", "auth");
+                });
+
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -104,6 +193,83 @@ namespace Dprental.AuthService.Domain.Migrations
                         .IsUnique();
 
                     b.ToTable("Roles", "auth");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.RolePermission", b =>
+                {
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PermissionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("RoleId", "PermissionId");
+
+                    b.HasIndex("PermissionId");
+
+                    b.ToTable("RolePermissions", "auth");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.ServicePrincipal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ClientId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("SecretHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId")
+                        .IsUnique();
+
+                    b.ToTable("ServicePrincipals", "auth");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.ServicePrincipalScope", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Audience")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("ServicePrincipalId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ServicePrincipalId", "Scope", "Audience")
+                        .IsUnique();
+
+                    b.ToTable("ServicePrincipalScopes", "auth");
                 });
 
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Session", b =>
@@ -191,6 +357,33 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.ToTable("UserRoles", "auth");
                 });
 
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.OrganizationMembership", b =>
+                {
+                    b.HasOne("Dprental.AuthService.Domain.Entities.Organization", "Organization")
+                        .WithMany("Memberships")
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Dprental.AuthService.Domain.Entities.Role", "Role")
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Dprental.AuthService.Domain.Entities.User", "User")
+                        .WithMany("OrganizationMemberships")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("Role");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.RefreshToken", b =>
                 {
                     b.HasOne("Dprental.AuthService.Domain.Entities.Session", "Session")
@@ -208,6 +401,36 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Navigation("Session");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.RolePermission", b =>
+                {
+                    b.HasOne("Dprental.AuthService.Domain.Entities.Permission", "Permission")
+                        .WithMany("RolePermissions")
+                        .HasForeignKey("PermissionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Dprental.AuthService.Domain.Entities.Role", "Role")
+                        .WithMany("RolePermissions")
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Permission");
+
+                    b.Navigation("Role");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.ServicePrincipalScope", b =>
+                {
+                    b.HasOne("Dprental.AuthService.Domain.Entities.ServicePrincipal", "ServicePrincipal")
+                        .WithMany("Scopes")
+                        .HasForeignKey("ServicePrincipalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ServicePrincipal");
                 });
 
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Session", b =>
@@ -240,9 +463,26 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Organization", b =>
+                {
+                    b.Navigation("Memberships");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Permission", b =>
+                {
+                    b.Navigation("RolePermissions");
+                });
+
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Role", b =>
                 {
+                    b.Navigation("RolePermissions");
+
                     b.Navigation("UserRoles");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.ServicePrincipal", b =>
+                {
+                    b.Navigation("Scopes");
                 });
 
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Session", b =>
@@ -252,6 +492,8 @@ namespace Dprental.AuthService.Domain.Migrations
 
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.User", b =>
                 {
+                    b.Navigation("OrganizationMemberships");
+
                     b.Navigation("Sessions");
 
                     b.Navigation("UserRoles");
