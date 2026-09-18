@@ -16,6 +16,12 @@ RUN dotnet publish AuthService/src/Api/AuthService.Api.csproj \
     --output /app/publish \
     --no-restore
 
+FROM build AS migrator
+RUN dotnet tool install --tool-path /tools dotnet-ef --version 10.0.12
+
+WORKDIR /src
+ENTRYPOINT ["/tools/dotnet-ef", "database", "update", "--project", "AuthService/src/Domain/AuthService.Domain.csproj", "--startup-project", "AuthService/src/Api/AuthService.Api.csproj", "--configuration", "Release", "--no-build"]
+
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
@@ -33,9 +39,3 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=6 \
     CMD wget --quiet --tries=1 --spider http://127.0.0.1:8080/health/ready || exit 1
 
 ENTRYPOINT ["dotnet", "AuthService.Api.dll"]
-
-FROM build AS migrator
-RUN dotnet tool install --tool-path /tools dotnet-ef --version 10.0.12
-
-WORKDIR /src
-ENTRYPOINT ["/tools/dotnet-ef", "database", "update", "--project", "AuthService/src/Domain/AuthService.Domain.csproj", "--startup-project", "AuthService/src/Api/AuthService.Api.csproj", "--no-build"]
