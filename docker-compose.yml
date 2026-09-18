@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-authservice}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - auth-pg:/var/lib/postgresql/data
     healthcheck:
