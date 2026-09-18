@@ -72,6 +72,41 @@ docker build --target migrator -t ghcr.io/<org>/dprental-auth-migrator:<git-sha>
 
 Runtime lắng nghe cổng `8080`, chạy non-root UID `1654` và cung cấp `/health/live` cùng `/health/ready`. Readiness kiểm tra kết nối PostgreSQL; migrator nhận cùng cấu hình connection string và JWT key file với runtime.
 
+## CI/CD AuthService cho dev
+
+Workflow [authservice-dev.yml](.github/workflows/authservice-dev.yml) chạy khi tạo pull request hoặc push vào `auth/develop-ci-cd`. Nó fetch `origin/auth/develop` và chỉ tiếp tục khi commit hiện tại đã chứa branch nền này. Sau đó workflow restore, build Release, test, build hai Docker target; pull request chỉ kiểm tra và không phát hành artifact.
+
+Mỗi push đạt kiểm tra sẽ publish hai image GHCR bất biến bằng full Git SHA:
+
+```text
+ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-auth:<git-sha>
+ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-auth-migrator:<git-sha>
+```
+
+Thiết lập GitHub Environment variable `GHCR_IMAGE_NAMESPACE` bằng namespace GHCR viết thường (ví dụ `huutawn`). GHCR package phải cấp workflow của repository quyền ghi package. Tạo GitHub Environment tên `dev` với các secrets sau; không đặt PostgreSQL password, JWT private key hoặc nội dung `.env` vào GitHub:
+
+```text
+DEV_VPS_HOST              # IP hoặc hostname VPS
+DEV_VPS_USER              # user deploy thuộc group docker
+DEV_VPS_SSH_PRIVATE_KEY   # private key riêng của user deploy
+DEV_VPS_KNOWN_HOSTS       # dòng host key theo định dạng known_hosts
+DEV_VPS_PORT              # tùy chọn, mặc định 22
+```
+
+Trên VPS, cài [deploy-authservice.sh](scripts/deploy-authservice.sh) tại `/opt/dprental/dev/scripts/deploy-authservice.sh`, cho user deploy quyền đọc `.env` và ghi `release.env`; `.env`, PEM JWT và Docker registry credential vẫn chỉ tồn tại trên VPS. `release.env` phải đã có hai image AuthService với tag để script thay bằng SHA mới. Script validate Compose, pull hai image, chạy migration một lần, chỉ recreate `auth-service`, chờ healthcheck, rồi gọi `/health/ready` và `/.well-known/jwks.json` qua `DEV_DOMAIN`. Nó không rollback database hoặc image nếu migration/healthcheck lỗi.
+
+Ví dụ cài script bằng user có quyền quản trị VPS (thay `deploy` bằng user của GitHub Actions):
+
+```bash
+sudo install -d -o deploy -g deploy -m 0750 /opt/dprental/dev/scripts
+sudo install -o deploy -g deploy -m 0750 scripts/deploy-authservice.sh \
+  /opt/dprental/dev/scripts/deploy-authservice.sh
+sudo chown deploy:deploy /opt/dprental/dev/release.env
+sudo chmod 600 /opt/dprental/dev/release.env
+```
+
+User `deploy` phải thuộc group `docker`; quyền Docker tương đương quyền quản trị VPS nên deploy key chỉ dùng cho automation này. Khóa host SSH có thể lấy từ máy tin cậy bằng `ssh-keyscan -H <vps-host>` rồi lưu nguyên kết quả vào `DEV_VPS_KNOWN_HOSTS`. Thêm branch protection cho `auth/develop-ci-cd` và đặt workflow validation làm required check.
+
 ## Theo dõi trace phân tán
 
 AuthService tiếp tục W3C `traceparent` do Gateway gửi tới và dùng OpenTelemetry để server span của AuthService thuộc cùng trace. Root trace được lấy mẫu 100% ở Development và 10% ở môi trường khác; quyết định lấy mẫu từ caller luôn được giữ nguyên.
