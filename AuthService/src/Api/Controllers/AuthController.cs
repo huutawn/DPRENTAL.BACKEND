@@ -5,6 +5,7 @@ using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace Dprental.AuthService.Api.Controllers;
 
@@ -13,7 +14,9 @@ namespace Dprental.AuthService.Api.Controllers;
 [Produces("application/json")]
 public sealed class AuthController(
     IAuthSessionService authSessionService,
-    IUserService userService) : ControllerBase
+    IUserService userService,
+    IOptions<JwtOptions> jwtOptions,
+    IWebHostEnvironment environment) : ControllerBase
 {
     [HttpPost("register")]
     [ProducesResponseType<AccountCreatedResponse>(StatusCodes.Status201Created)]
@@ -31,10 +34,10 @@ public sealed class AuthController(
     }
 
     [HttpPost("login")]
-    [ProducesResponseType<AuthTokenResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<AuthTokenResponse>> Login(LoginRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> Login(LoginRequest request, CancellationToken cancellationToken)
     {
         Guid? userId = await userService.AuthenticateAsync(request, cancellationToken);
         if (userId is null)
@@ -53,16 +56,25 @@ public sealed class AuthController(
                 title: "Auth.InactiveAccount",
                 detail: "Tài khoản không tồn tại hoặc đã bị khóa.");
         }
+        SetAuthCookies(tokens.AccessToken, tokens.RefreshToken);
 
-        return Ok(tokens.ToDto());
+        return Ok(new { Message = "Đăng nhập thành công.", UserId = userId});
     }
 
     [HttpPost("refresh")]
-    [ProducesResponseType<AuthTokenResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<AuthTokenResponse>> Refresh(RefreshTokenRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> Refresh(CancellationToken cancellationToken)
     {
-        AuthTokenPair? tokens = await authSessionService.RefreshAsync(request.RefreshToken, cancellationToken);
+        if (!Request.Cookies.TryGetValue("refreshToken", out var currentRefreshToken))
+        {
+            return Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Auth.MissingCookie",
+                detail: "Không tìm thấy refresh token trong cookie.");
+        }
+
+        AuthTokenPair? tokens = await authSessionService.RefreshAsync(currentRefreshToken, cancellationToken);
         if (tokens is null)
         {
             return Problem(
@@ -71,14 +83,26 @@ public sealed class AuthController(
                 detail: "Refresh token không hợp lệ hoặc đã hết hạn.");
         }
 
-        return Ok(tokens.ToDto());
+        // Cập nhật lại Cookie với cặp token mới
+        SetAuthCookies(tokens.AccessToken, tokens.RefreshToken);
+
+        return Ok(new { Message = "Làm mới token thành công" });
     }
 
     [HttpPost("logout")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    public async Task<IActionResult> Logout(RefreshTokenRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> Logout(CancellationToken cancellationToken)
     {
-        await authSessionService.RevokeByRefreshTokenAsync(request.RefreshToken, cancellationToken);
+        // Đọc token từ Cookie để thu hồi trong Database
+        if (Request.Cookies.TryGetValue("refreshToken", out var currentRefreshToken))
+        {
+            await authSessionService.RevokeByRefreshTokenAsync(currentRefreshToken, cancellationToken);
+        }
+
+        // Xóa Cookie ở phía client
+        Response.Cookies.Delete("accessToken", CreateCookieOptions(TimeSpan.Zero));
+        Response.Cookies.Delete("refreshToken", CreateCookieOptions(TimeSpan.Zero));
+
         return NoContent();
     }
 
@@ -86,4 +110,29 @@ public sealed class AuthController(
         statusCode: StatusCodes.Status501NotImplemented,
         title: "Auth.NotImplemented",
         detail: "Endpoint chưa nối logic.");
+
+    private void SetAuthCookies(string accessToken, string refreshToken)
+    {
+        Response.Cookies.Append(
+            "accessToken",
+            accessToken,
+            CreateCookieOptions(TimeSpan.FromMinutes(jwtOptions.Value.AccessTokenLifetimeMinutes)));
+        Response.Cookies.Append(
+            "refreshToken",
+            refreshToken,
+            CreateCookieOptions(TimeSpan.FromDays(30)));
+    }
+
+    private CookieOptions CreateCookieOptions(TimeSpan lifetime)
+    {
+        bool isHttps = Request.IsHttps;
+        return new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = environment.IsProduction() || isHttps,
+            SameSite = isHttps ? SameSiteMode.None : SameSiteMode.Lax,
+            Path = "/",
+            Expires = DateTimeOffset.UtcNow.Add(lifetime)
+        };
+    }
 }

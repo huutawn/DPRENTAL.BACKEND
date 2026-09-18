@@ -33,6 +33,19 @@ internal static class JwtBearerServiceCollectionExtensions
 
         // Giữ tên claim nguyên bản (sub, role) để contract JWT không bị .NET tự ánh xạ.
         bearerOptions.MapInboundClaims = false;
+        bearerOptions.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                if (string.IsNullOrWhiteSpace(context.Token) &&
+                    context.Request.Cookies.TryGetValue("accessToken", out string? accessToken))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
+        };
         bearerOptions.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,

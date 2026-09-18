@@ -10,6 +10,16 @@ builder.Services.AddAuthServiceDistributedTracing(builder.Configuration);
 builder.Services.AddAuthApplication(builder.Configuration);
 builder.Services.AddAuthDomainPersistence(builder.Configuration.GetConnectionString("Postgres"));
 builder.Services.AddJwtBearerSecurity();
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.WithOrigins("http://localhost:3000")
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -25,6 +35,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseExceptionHandler();
 app.UseStatusCodePages();
+app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

@@ -1,0 +1,7 @@
+# Use this workspace to collaborate
+workspace:
+  id: 432ebf37-3d5f-4fac-8331-870413c8cd0c
+
+localResources:
+  specs:
+    - ../AuthService/src/Api/obj/Debug/net10.0/EndpointInfo/AuthService.Api.json

@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 
 namespace Dprental.AuthService.Domain.Entities;
 
@@ -30,4 +31,11 @@ public class User
 
     /// <summary>Các phiên đăng nhập được lưu bền của người dùng.</summary>
     public ICollection<Session> Sessions { get; set; } = new List<Session>();
+
+    public int AccessFailedCount { get; set; }
+    public DateTimeOffset? LockoutEnd { get; set; }
+
+    public string? PasswordResetToken { get; set; }
+    public DateTimeOffset? ResetTokenExpiry { get; set; }
+
 }
