@@ -6,5 +6,6 @@ namespace AuthService.Application.Interfaces;
 public interface IAuthService
 {
     Task<LoginResponseDto> LoginAsync(LoginRequestDto request);
+    Task<LoginResponseDto> RefreshAsync(string refreshToken);
 }
 
