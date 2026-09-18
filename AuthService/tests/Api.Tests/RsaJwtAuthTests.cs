@@ -208,6 +208,20 @@ public sealed class RsaJwtAuthTests
     }
 
     [Fact]
+    public async Task LivenessEndpointReturnsSuccessWithoutDatabaseAccess()
+    {
+        JwtOptions options = CreateValidOptions();
+        using WebApplicationFactory<Program> factory = new();
+        using WebApplicationFactory<Program> configuredFactory = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, configurationBuilder) => configurationBuilder.AddConfiguration(CreateConfiguration(options))));
+        using HttpClient client = configuredFactory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/health/live");
+
+        Assert.True(response.IsSuccessStatusCode);
+    }
+
+    [Fact]
     public async Task SwaggerDocumentPublishesBearerCredentialScheme()
     {
         JwtOptions options = CreateValidOptions();
