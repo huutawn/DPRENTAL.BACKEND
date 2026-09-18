@@ -38,12 +38,16 @@ public static class ForwardedHeadersConfiguration
         {
             if (!string.IsNullOrWhiteSpace(networkCidr))
             {
-                // Hỗ trợ phân tích cú pháp CIDR chuẩn qua IPNetwork của .NET
+                // Hỗ trợ phân tích cú pháp CIDR chuẩn qua IPNetwork
                 string[] parts = networkCidr.Split('/');
                 if (parts.Length == 2 &&
                     IPAddress.TryParse(parts[0], out IPAddress? ip) &&
                     int.TryParse(parts[1], out int prefixLength))
-                    options.KnownIPNetworks.Add(new System.Net.IPNetwork(ip, prefixLength));
+                {
+#pragma warning disable ASPDEPR005
+                    options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(ip, prefixLength));
+#pragma warning restore ASPDEPR005
+                }
             }
         }
 
