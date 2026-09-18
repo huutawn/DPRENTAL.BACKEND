@@ -76,48 +76,27 @@ docker run -d --name dprental-gateway \
   dprental-gateway:latest
 ```
 
-### Chạy bằng Docker Compose & Tùy biến môi trường mạng
+### Quick start — Docker stack tổng
 
-File `.env.example` và `docker-compose.yml` hỗ trợ linh hoạt 3 chế độ kết nối:
-
-* **Chế độ 1: Chạy bình thường trên máy host (Local Development, không qua Docker)**
-  - Cấu hình trong `.env`:
-    ```env
-    AUTH_SERVICE_HOST=localhost
-    AUTH_SERVICE_PORT=64837
-    ```
-  - Gateway chạy trực tiếp bằng `dotnet run` sẽ tự động chuyển tiếp tới `http://localhost:64837`.
-
-* **Chế độ 2: Chạy Docker chung 1 mạng (Shared Docker Network: `dprental-network`)**
-  - Cấu hình trong `.env`:
-    ```env
-    AUTH_SERVICE_HOST=auth-service
-    AUTH_SERVICE_PORT=5000
-    ```
-  - Gateway trong Docker network sẽ tự động phân giải và gọi AuthService qua tên service `http://auth-service:5000`.
-
-* **Chế độ 3: Chạy Gateway trong Docker nhưng AuthService chạy trực tiếp trên máy host**
-  - Cấu hình trong `.env`:
-    ```env
-    AUTH_SERVICE_HOST=host.docker.internal
-    AUTH_SERVICE_PORT=64837
-    ```
-  - Gateway gọi ngược về AuthService trên máy host qua `http://host.docker.internal:64837`.
-
-Khởi động Gateway bằng Docker Compose:
+Từ thư mục gốc `DPRENTAL/` (nơi có `compose.yaml`), chạy:
 
 ```bash
 cp .env.example .env
-docker compose up -d
-docker compose logs -f gateway
-docker compose down
+# Đổi POSTGRES_PASSWORD sang giá trị local riêng.
+docker compose up --build -d
+docker compose ps
 ```
-Các endpoint public và health checks:
 
-- `/health/live` (hoặc `/_health/live`): kiểm tra tiến trình Gateway đang hoạt động (kèm đầy đủ security headers).
-- `/health/ready` (hoặc `/_health/ready`): yêu cầu Gateway đã tải được JWKS hợp lệ từ AuthService và cấu hình proxy sẵn sàng.
-- `/api/v1/auth/{**catch-all}`: chuyển tiếp tới AuthService và bỏ prefix `/api/v1/auth`.
-- `/swagger` & `/swagger/{**catch-all}`: chuyển tiếp trực tiếp tới Swagger UI và OpenAPI JSON (`/swagger/v1/swagger.json`) của AuthService.
+Stack tự build Gateway và AuthService, khởi động PostgreSQL, Valkey và Kafka, tạo RSA key pair chỉ dành cho local development, rồi chạy migration trước khi AuthService nhận traffic. Không cần cấp PEM hoặc chạy `dotnet ef` thủ công cho quick start.
+
+Gateway là điểm vào công khai tại `http://localhost:5050`:
+
+- [Swagger UI](http://localhost:5050/swagger)
+- `GET /health/live` (hoặc `/_health/live`): kiểm tra tiến trình Gateway.
+- `GET /health/ready` (hoặc `/_health/ready`): yêu cầu JWKS và cấu hình proxy sẵn sàng.
+- `POST /api/v1/auth/register`: được proxy nguyên đường dẫn tới AuthService.
+
+AuthService chỉ mở trong Docker network tại `auth-service:8080`. Các port local của hạ tầng là PostgreSQL `55432`, Valkey `56379` và Kafka `29092`; chúng chỉ bind vào loopback. Dừng stack bằng `docker compose down`; named volumes được giữ lại.
 ## Gateway error response
 
 Chỉ lỗi do Gateway tạo ra (JWT, authorization, upstream không sẵn sàng hoặc exception) có payload JSON cố định:

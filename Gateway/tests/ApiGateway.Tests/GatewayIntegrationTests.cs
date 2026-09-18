@@ -23,7 +23,7 @@ public sealed class GatewayIntegrationTests
     private const string Audience = "dprental-clients";
 
     [Fact]
-    public async Task AuthRouteRemovesPrefixAndKeepsCorrelationId()
+    public async Task AuthRoutePreservesPathAndKeepsCorrelationId()
     {
         using RSA signingKey = RSA.Create(2048);
         await using LoopbackAuthService upstream = new(CreateJwks(signingKey, "key-1"));
@@ -39,7 +39,7 @@ public sealed class GatewayIntegrationTests
         using HttpResponseMessage response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("/sessions", upstream.LastRequest.Path);
+        Assert.Equal("/api/v1/auth/sessions", upstream.LastRequest.Path);
         Assert.Equal("?source=test", upstream.LastRequest.Query);
         Assert.Equal(correlationId.ToString("D"), upstream.LastRequest.CorrelationId);
         Assert.Equal(correlationId.ToString("D"), response.Headers.GetValues("X-Correlation-ID").Single());
