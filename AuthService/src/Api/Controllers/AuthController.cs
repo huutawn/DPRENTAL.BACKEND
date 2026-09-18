@@ -15,6 +15,7 @@ namespace Dprental.AuthService.Api.Controllers;
 public sealed class AuthController(
     IAuthSessionService authSessionService,
     IUserService userService,
+    IServiceIdentityService serviceIdentityService,
     IOptions<JwtOptions> jwtOptions,
     IWebHostEnvironment environment) : ControllerBase
 {
@@ -104,6 +105,18 @@ public sealed class AuthController(
         Response.Cookies.Delete("refreshToken", CreateCookieOptions(TimeSpan.Zero));
 
         return NoContent();
+    }
+
+    /// <summary>OAuth2 client_credentials — service khác tự xin token bằng client_id/client_secret, không có user.</summary>
+    [HttpPost("service-token")]
+    [ProducesResponseType<ServiceTokenResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<ServiceTokenResponse>> ServiceToken(ServiceTokenRequest request, CancellationToken cancellationToken)
+    {
+        Result<ServiceTokenResponse> result = await serviceIdentityService.IssueTokenAsync(request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
     private ObjectResult NotImplementedYet() => Problem(
