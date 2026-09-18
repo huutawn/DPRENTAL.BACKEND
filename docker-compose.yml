@@ -1,6 +1,10 @@
 # ==============================================================================
 # DPRENTAL API Gateway - Docker Compose Service Definition
 # ==============================================================================
+# Hỗ trợ tùy biến linh hoạt giữa 2 chế độ:
+# 1. Chế độ Docker Network: Tự động phân giải qua tên service "auth-service" trong mạng dprental-network.
+# 2. Chế độ kết nối Host: Tự động gọi về AuthService trên máy host qua "host.docker.internal:64837".
+# ==============================================================================
 services:
   gateway:
     build:
@@ -17,13 +21,13 @@ services:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Development}
       - ASPNETCORE_URLS=http://+:8080
 
-      # Cấu hình AuthService JWT & JWKS
+      # Cấu hình AuthService JWT & JWKS (Tự động dùng AUTH_SERVICE_HOST/PORT nếu không override)
       - Gateway__Authentication__Jwt__Issuer=${GATEWAY_JWT_ISSUER:-dprental-authservice-dev}
       - Gateway__Authentication__Jwt__Audience=${GATEWAY_JWT_AUDIENCE:-dprental-clients}
-      - Gateway__Authentication__Jwt__JwksUri=${GATEWAY_JWKS_URI:-http://host.docker.internal:5000/.well-known/jwks.json}
+      - Gateway__Authentication__Jwt__JwksUri=${GATEWAY_JWKS_URI:-http://${AUTH_SERVICE_HOST:-auth-service}:${AUTH_SERVICE_PORT:-5000}/.well-known/jwks.json}
 
       # Cấu hình Upstream URL cho YARP Reverse Proxy
-      - ReverseProxy__Clusters__auth-service__Destinations__primary__Address=${AUTH_SERVICE_UPSTREAM_URL:-http://host.docker.internal:5000/}
+      - ReverseProxy__Clusters__auth-service__Destinations__primary__Address=${AUTH_SERVICE_UPSTREAM_URL:-http://${AUTH_SERVICE_HOST:-auth-service}:${AUTH_SERVICE_PORT:-5000}/}
 
       # Cấu hình Bảo mật CORS & Kích thước Payload
       - Gateway__Security__Cors__AllowedOrigins__0=${CORS_ALLOWED_ORIGIN_0:-http://localhost:3000}
@@ -40,14 +44,14 @@ services:
       - Telemetry__Tracing__SamplingRatio=${TRACING_SAMPLING_RATIO:-1.0}
       - Telemetry__Otlp__TracesEndpoint=${OTLP_TRACES_ENDPOINT:-}
 
-    # Cho phép container gọi ngược về host machine (ví dụ AuthService đang chạy ở http://localhost:5000)
+    # Cho phép container gọi ngược về máy host (khi AuthService chạy trực tiếp trên host tại http://localhost:64837)
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
     networks:
       - dprental-network
 
-# Mạng Docker dùng chung giữa Gateway và các microservices khác
+# Mạng Docker dùng chung giữa Gateway và các microservices khác trong hệ thống DPRENTAL
 networks:
   dprental-network:
     name: dprental-network

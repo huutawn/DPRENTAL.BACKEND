@@ -45,14 +45,15 @@ Chạy toàn bộ bộ kiểm thử tự động (unit tests và integration tes
 dotnet test Gateway/Gateway.sln
 ```
 
-### Khởi động Gateway chạy local
+### Khởi động Gateway chạy local (kết nối AuthService trên máy host)
 
-Khởi động AuthService tại `http://localhost:5000` (hoặc cấu hình endpoint tương ứng), sau đó chạy Gateway với môi trường `Development`:
+Khởi động AuthService tại `http://localhost:64837` (cổng HTTP chuẩn theo `launchSettings.json` của AuthService), sau đó khởi động Gateway với môi trường `Development`:
 
 ```bash
 ASPNETCORE_ENVIRONMENT=Development dotnet run --project Gateway/src/ApiGateway --urls "http://127.0.0.1:5050"
 ```
 
+Hoặc dùng Visual Studio / Rider / VS Code với profile `ApiGateway` đã cấu hình sẵn cổng `http://localhost:5050`.
 ### Build & Chạy thử bằng Docker
 
 Build Docker image multi-stage .NET 10:
@@ -75,32 +76,42 @@ docker run -d --name dprental-gateway \
   dprental-gateway:latest
 ```
 
-### Chạy bằng Docker Compose
+### Chạy bằng Docker Compose & Tùy biến môi trường mạng
 
-Tạo file `.env` từ `.env.example`:
+File `.env.example` và `docker-compose.yml` hỗ trợ linh hoạt 3 chế độ kết nối:
+
+* **Chế độ 1: Chạy bình thường trên máy host (Local Development, không qua Docker)**
+  - Cấu hình trong `.env`:
+    ```env
+    AUTH_SERVICE_HOST=localhost
+    AUTH_SERVICE_PORT=64837
+    ```
+  - Gateway chạy trực tiếp bằng `dotnet run` sẽ tự động chuyển tiếp tới `http://localhost:64837`.
+
+* **Chế độ 2: Chạy Docker chung 1 mạng (Shared Docker Network: `dprental-network`)**
+  - Cấu hình trong `.env`:
+    ```env
+    AUTH_SERVICE_HOST=auth-service
+    AUTH_SERVICE_PORT=5000
+    ```
+  - Gateway trong Docker network sẽ tự động phân giải và gọi AuthService qua tên service `http://auth-service:5000`.
+
+* **Chế độ 3: Chạy Gateway trong Docker nhưng AuthService chạy trực tiếp trên máy host**
+  - Cấu hình trong `.env`:
+    ```env
+    AUTH_SERVICE_HOST=host.docker.internal
+    AUTH_SERVICE_PORT=64837
+    ```
+  - Gateway gọi ngược về AuthService trên máy host qua `http://host.docker.internal:64837`.
+
+Khởi động Gateway bằng Docker Compose:
 
 ```bash
 cp .env.example .env
-```
-
-Khởi động Gateway bằng Docker Compose (tự động đọc cấu hình từ file `.env`):
-
-```bash
 docker compose up -d
-```
-
-Xem log Gateway:
-
-```bash
 docker compose logs -f gateway
-```
-
-Dừng container:
-
-```bash
 docker compose down
 ```
-
 Các endpoint public và health checks:
 
 - `/health/live` (hoặc `/_health/live`): kiểm tra tiến trình Gateway đang hoạt động (kèm đầy đủ security headers).
