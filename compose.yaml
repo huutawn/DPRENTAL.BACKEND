@@ -1,0 +1,238 @@
+# Local DPRENTAL stack. This file deliberately replaces neither service-owned
+# Compose file; run it from this directory with `docker compose up --build`.
+name: dprental
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+        WORKDIR /src
+        COPY Gateway/Gateway/Gateway.sln Gateway/Gateway/Directory.Build.props Gateway/Gateway/
+        COPY Gateway/Gateway/src/ApiGateway/ApiGateway.csproj Gateway/Gateway/src/ApiGateway/
+        COPY Gateway/Gateway/tests/ApiGateway.Tests/ApiGateway.Tests.csproj Gateway/Gateway/tests/ApiGateway.Tests/
+        RUN dotnet restore Gateway/Gateway/Gateway.sln
+        COPY Gateway/Gateway/ Gateway/Gateway/
+        RUN dotnet publish Gateway/Gateway/src/ApiGateway/ApiGateway.csproj --configuration Release --output /app/publish --no-restore
+
+        FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+        WORKDIR /app
+        COPY --from=build /app/publish .
+        ENV ASPNETCORE_URLS=http://+:8080
+        EXPOSE 8080
+        USER 1654
+        ENTRYPOINT ["dotnet", "ApiGateway.dll"]
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-5050}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      Gateway__Authentication__Jwt__Issuer: ${AUTH_JWT_ISSUER:-dprental-authservice-dev}
+      Gateway__Authentication__Jwt__Audience: ${AUTH_JWT_AUDIENCE:-dprental-clients}
+      Gateway__Authentication__Jwt__JwksUri: http://auth-service:8080/.well-known/jwks.json
+      ReverseProxy__Clusters__auth-service__Destinations__primary__Address: http://auth-service:8080/
+      Gateway__Security__Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:-http://localhost:3000}
+      Gateway__Security__Cors__AllowedOrigins__1: ${CORS_ALLOWED_ORIGIN_1:-http://localhost:5173}
+      Gateway__Security__Cors__AllowedOrigins__2: http://localhost:${GATEWAY_PORT:-5050}
+      Gateway__Security__Cors__AllowedOrigins__3: http://127.0.0.1:${GATEWAY_PORT:-5050}
+      Gateway__Security__RequestSize__MaxRequestBodySizeBytes: ${MAX_REQUEST_BODY_SIZE_BYTES:-10485760}
+      Gateway__Traffic__Resilience__DefaultTimeoutSeconds: ${DEFAULT_TIMEOUT_SECONDS:-10}
+      Gateway__Traffic__RateLimiting__Anonymous__PermitLimit: ${RATE_LIMIT_ANONYMOUS_PERMIT:-20}
+      Gateway__Traffic__RateLimiting__Authenticated__PermitLimit: ${RATE_LIMIT_AUTHENTICATED_PERMIT:-100}
+      Gateway__Traffic__RateLimiting__Sensitive__PermitLimit: ${RATE_LIMIT_SENSITIVE_PERMIT:-5}
+      Telemetry__Tracing__SamplingRatio: ${TRACING_SAMPLING_RATIO:-1.0}
+      Telemetry__Otlp__TracesEndpoint: ${OTLP_TRACES_ENDPOINT:-}
+    depends_on:
+      auth-service:
+        condition: service_started
+    networks:
+      - dprental
+
+  auth-service:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+        WORKDIR /src
+        COPY AuthService/AuthService.sln AuthService/Directory.Build.props ./
+        COPY AuthService/AuthService/src/Common/AuthService.Common.csproj AuthService/src/Common/
+        COPY AuthService/AuthService/src/Domain/AuthService.Domain.csproj AuthService/src/Domain/
+        COPY AuthService/AuthService/src/Application/AuthService.Application.csproj AuthService/src/Application/
+        COPY AuthService/AuthService/src/Api/AuthService.Api.csproj AuthService/src/Api/
+        COPY AuthService/AuthService/tests/Api.Tests/AuthService.Api.Tests.csproj AuthService/tests/Api.Tests/
+        RUN dotnet restore AuthService.sln
+        COPY AuthService/AuthService/ AuthService/
+        RUN dotnet publish AuthService/src/Api/AuthService.Api.csproj --configuration Release --output /app/publish --no-restore
+
+        FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+        WORKDIR /app
+        COPY --from=build /app/publish .
+        ENV ASPNETCORE_URLS=http://+:8080
+        EXPOSE 8080
+        USER 1654
+        ENTRYPOINT ["dotnet", "AuthService.Api.dll"]
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        export Auth__Jwt__Keys__0__PublicKeyPem="$$(cat /run/dprental-jwt/public.pem)"
+        export Auth__Jwt__Keys__0__PrivateKeyPem="$$(cat /run/dprental-jwt/private.pem)"
+        exec dotnet AuthService.Api.dll
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:-authservice};Username=${POSTGRES_USER:-authservice};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      ConnectionStrings__Redis: valkey:6379
+      Auth__Jwt__Issuer: ${AUTH_JWT_ISSUER:-dprental-authservice-dev}
+      Auth__Jwt__Audience: ${AUTH_JWT_AUDIENCE:-dprental-clients}
+      Auth__Jwt__AccessTokenLifetimeMinutes: ${AUTH_JWT_ACCESS_TOKEN_LIFETIME_MINUTES:-15}
+      Auth__Jwt__ActiveKeyId: ${AUTH_JWT_ACTIVE_KEY_ID:?Set AUTH_JWT_ACTIVE_KEY_ID in .env}
+      Auth__Jwt__Keys__0__KeyId: ${AUTH_JWT_ACTIVE_KEY_ID:?Set AUTH_JWT_ACTIVE_KEY_ID in .env}
+      Telemetry__Tracing__SamplingRatio: ${TRACING_SAMPLING_RATIO:-1.0}
+      Telemetry__Otlp__TracesEndpoint: ${OTLP_TRACES_ENDPOINT:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      jwt-keys:
+        condition: service_completed_successfully
+      auth-migrate:
+        condition: service_completed_successfully
+    volumes:
+      - jwt-keys:/run/dprental-jwt:ro
+    networks:
+      - dprental
+
+  jwt-keys:
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    restart: "no"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ ! -s /keys/private.pem ] || [ ! -s /keys/public.pem ]; then
+          umask 077
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out /keys/private.pem
+          openssl pkey -in /keys/private.pem -pubout -out /keys/public.pem
+          chown 1654:1654 /keys/private.pem /keys/public.pem
+        fi
+    volumes:
+      - jwt-keys:/keys
+    networks:
+      - dprental
+
+  auth-migrate:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM mcr.microsoft.com/dotnet/sdk:10.0
+        WORKDIR /src
+        COPY AuthService/AuthService.sln AuthService/Directory.Build.props ./
+        COPY AuthService/AuthService/ AuthService/
+        RUN dotnet restore AuthService.sln \
+          && dotnet tool install --tool-path /tools dotnet-ef --version 10.0.12
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        export Auth__Jwt__Keys__0__PublicKeyPem="$$(cat /run/dprental-jwt/public.pem)"
+        export Auth__Jwt__Keys__0__PrivateKeyPem="$$(cat /run/dprental-jwt/private.pem)"
+        exec /tools/dotnet-ef database update \
+          --project AuthService/src/Domain/AuthService.Domain.csproj \
+          --startup-project AuthService/src/Api/AuthService.Api.csproj
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:-authservice};Username=${POSTGRES_USER:-authservice};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      Auth__Jwt__Issuer: ${AUTH_JWT_ISSUER:-dprental-authservice-dev}
+      Auth__Jwt__Audience: ${AUTH_JWT_AUDIENCE:-dprental-clients}
+      Auth__Jwt__AccessTokenLifetimeMinutes: ${AUTH_JWT_ACCESS_TOKEN_LIFETIME_MINUTES:-15}
+      Auth__Jwt__ActiveKeyId: ${AUTH_JWT_ACTIVE_KEY_ID:?Set AUTH_JWT_ACTIVE_KEY_ID in .env}
+      Auth__Jwt__Keys__0__KeyId: ${AUTH_JWT_ACTIVE_KEY_ID:?Set AUTH_JWT_ACTIVE_KEY_ID in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      jwt-keys:
+        condition: service_completed_successfully
+    volumes:
+      - jwt-keys:/run/dprental-jwt:ro
+    networks:
+      - dprental
+
+  postgres:
+    image: postgres:17.11-alpine3.24
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-authservice}
+      POSTGRES_USER: ${POSTGRES_USER:-authservice}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${DPRENTAL_POSTGRES_HOST_PORT:-55432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=$$POSTGRES_USER --dbname=$$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    networks:
+      - dprental
+
+  valkey:
+    image: valkey/valkey:8.1.10-alpine3.24
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${DPRENTAL_VALKEY_HOST_PORT:-56379}:6379"
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - dprental
+
+  kafka:
+    image: apache/kafka:4.3.1
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:${DPRENTAL_KAFKA_HOST_PORT:-29092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: ${KAFKA_NUM_PARTITIONS:-3}
+    ports:
+      - "127.0.0.1:${DPRENTAL_KAFKA_HOST_PORT:-29092}:29092"
+    volumes:
+      - kafka-data:/tmp/kraft-combined-logs
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    networks:
+      - dprental
+
+volumes:
+  postgres-data:
+  valkey-data:
+  kafka-data:
+  jwt-keys:
+
+networks:
+  dprental:
+    driver: bridge

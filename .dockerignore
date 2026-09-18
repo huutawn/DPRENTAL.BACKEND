@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+**/TestResults/
+**/.vs/
+**/.idea/
+**/.env
+**/.env.*
+**/.local-secrets/
+.git/
+Gateway/.git/
+AuthService/.git/
