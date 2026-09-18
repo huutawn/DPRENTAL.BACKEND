@@ -75,6 +75,32 @@ docker run -d --name dprental-gateway \
   dprental-gateway:latest
 ```
 
+### Chạy bằng Docker Compose
+
+Tạo file `.env` từ `.env.example`:
+
+```bash
+cp .env.example .env
+```
+
+Khởi động Gateway bằng Docker Compose (tự động đọc cấu hình từ file `.env`):
+
+```bash
+docker compose up -d
+```
+
+Xem log Gateway:
+
+```bash
+docker compose logs -f gateway
+```
+
+Dừng container:
+
+```bash
+docker compose down
+```
+
 Các endpoint public và health checks:
 
 - `/health/live` (hoặc `/_health/live`): kiểm tra tiến trình Gateway đang hoạt động (kèm đầy đủ security headers).
