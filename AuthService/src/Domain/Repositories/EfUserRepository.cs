@@ -71,4 +71,9 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
         dbContext.Users
             .AsNoTracking()
             .AnyAsync(user => user.Email == normalizedEmail, cancellationToken);
+
+    public Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
+        dbContext.Users
+            .AsNoTracking()
+            .SingleOrDefaultAsync(user => user.Email == normalizedEmail, cancellationToken);
 }

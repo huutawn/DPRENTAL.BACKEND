@@ -48,6 +48,27 @@ public sealed class UserService(
         return new AccountCreatedResponse(user.Id);
     }
 
+    public async Task<Guid?> AuthenticateAsync(LoginRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        string email = NormalizeEmail(request.Email);
+        User? user = await userRepository.FindByEmailAsync(email, cancellationToken);
+        if (user is null || !user.IsActive)
+        {
+            return null;
+        }
+
+        PasswordVerificationResult verification = passwordHasher.VerifyHashedPassword(
+            user,
+            user.PasswordHash,
+            request.Password);
+
+        return verification is PasswordVerificationResult.Success or PasswordVerificationResult.SuccessRehashNeeded
+            ? user.Id
+            : null;
+    }
+
     [SuppressMessage("Globalization", "CA1308:Normalize strings to uppercase", Justification = "Email được lưu và so sánh ở dạng chữ thường theo quy ước phổ biến.")]
     private static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
 }

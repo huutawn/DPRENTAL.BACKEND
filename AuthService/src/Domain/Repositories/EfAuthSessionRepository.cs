@@ -88,9 +88,13 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext) : IAuthSess
         {
             Id = Guid.NewGuid(),
             TokenHash = refreshTokenHash,
+            CreatedAt = utcNow,
+            UserId = userId,
             SessionId = session.Id,
+            ExpiryDate = expiresAtUtc,
             CreatedAtUtc = utcNow,
-            ExpiresAtUtc = expiresAtUtc
+            ExpiresAtUtc = expiresAtUtc,
+            IsRevoked = false
         };
 
         dbContext.Sessions.Add(session);
@@ -121,9 +125,9 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext) : IAuthSess
             return null;
         }
 
-        if (currentToken.UsedAtUtc is not null || currentToken.RevokedAtUtc is not null)
+        if (currentToken.IsRevoked || currentToken.UsedAtUtc is not null || currentToken.RevokedAtUtc is not null)
         {
-            await RevokeSessionAsync(currentToken.SessionId, utcNow, cancellationToken);
+            await RevokeCompromisedSessionAsync(currentToken.SessionId, utcNow, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return null;
         }
@@ -139,17 +143,33 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext) : IAuthSess
 
         if (usedTokenCount != 1)
         {
-            // Một request song song đã dùng token trước; không thu hồi session hợp lệ của request thắng cuộc.
+            // A second use of the rotated token is treated as reuse and invalidates the session.
+            await RevokeCompromisedSessionAsync(currentToken.SessionId, utcNow, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
             return null;
         }
+
+        await dbContext.RefreshTokens
+            .Where(token => token.Id == currentToken.Id)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(token => token.UsedAtUtc, utcNow)
+                .SetProperty(token => token.IsRevoked, true)
+                .SetProperty(token => token.RevokedAt, utcNow)
+                .SetProperty(token => token.RevokedAtUtc, utcNow)
+                .SetProperty(token => token.RevokedReason, "Rotated")
+                .SetProperty(token => token.ReplacedByTokenHash, replacementRefreshTokenHash), cancellationToken);
 
         dbContext.RefreshTokens.Add(new RefreshToken
         {
             Id = Guid.NewGuid(),
             TokenHash = replacementRefreshTokenHash,
+            CreatedAt = utcNow,
+            UserId = currentToken.Session.UserId,
             SessionId = currentToken.SessionId,
+            ExpiryDate = currentToken.Session.ExpiresAtUtc,
             CreatedAtUtc = utcNow,
-            ExpiresAtUtc = currentToken.Session.ExpiresAtUtc
+            ExpiresAtUtc = currentToken.Session.ExpiresAtUtc,
+            IsRevoked = false
         });
         await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -194,6 +214,19 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext) : IAuthSess
         session.User.IsActive;
 
     /// <summary>Thu hồi session một lần duy nhất; gọi lặp lại vẫn an toàn.</summary>
+    private async Task RevokeCompromisedSessionAsync(Guid sessionId, DateTime utcNow, CancellationToken cancellationToken)
+    {
+        await dbContext.RefreshTokens
+            .Where(token => token.SessionId == sessionId && !token.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(token => token.IsRevoked, true)
+                .SetProperty(token => token.RevokedAt, utcNow)
+                .SetProperty(token => token.RevokedAtUtc, utcNow)
+                .SetProperty(token => token.RevokedReason, "ReuseDetected"), cancellationToken);
+
+        await RevokeSessionAsync(sessionId, utcNow, cancellationToken);
+    }
+
     private Task<int> RevokeSessionAsync(Guid sessionId, DateTime utcNow, CancellationToken cancellationToken) =>
         dbContext.Sessions
             .Where(session => session.Id == sessionId && session.RevokedAtUtc == null)

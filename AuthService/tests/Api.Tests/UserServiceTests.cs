@@ -71,6 +71,9 @@ public sealed class UserServiceTests
         public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
             Task.FromResult(normalizedEmail == ExistingEmail);
 
+        public Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("UserService.RegisterAsync does not authenticate users.");
+
         public Task<User> CreateAsync(User entity, CancellationToken cancellationToken = default)
         {
             if (RejectCreate)

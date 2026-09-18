@@ -11,4 +11,8 @@
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.12" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.19.2" />
   </ItemGroup>
+  <ItemGroup>
+    <Folder Include="DTOs\Auth\" />
+    <Folder Include="Interfaces\" />
+  </ItemGroup>
 </Project>
