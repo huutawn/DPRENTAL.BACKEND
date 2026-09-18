@@ -1,5 +1,7 @@
+using Dprental.AuthService.Api.Filters;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Mapping;
+using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -9,13 +11,24 @@ namespace Dprental.AuthService.Api.Controllers;
 [ApiController]
 [Route("api/v1/auth")]
 [Produces("application/json")]
-public sealed class AuthController(IAuthSessionService authSessionService) : ControllerBase
+public sealed class AuthController(
+    IAuthSessionService authSessionService,
+    IUserService userService) : ControllerBase
 {
     [HttpPost("register")]
     [ProducesResponseType<AccountCreatedResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public ActionResult<AccountCreatedResponse> Register(RegisterRequest request) => NotImplementedYet();
+    public async Task<ActionResult<AccountCreatedResponse>> Register(RegisterRequest request, CancellationToken cancellationToken)
+    {
+        Result<AccountCreatedResponse> result = await userService.RegisterAsync(request, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return StatusCode(StatusCodes.Status201Created, result.Value);
+    }
 
     [HttpPost("login")]
     [ProducesResponseType<AuthTokenResponse>(StatusCodes.Status200OK)]

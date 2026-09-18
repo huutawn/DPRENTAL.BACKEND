@@ -3,5 +3,6 @@ using System.ComponentModel.DataAnnotations;
 namespace Dprental.AuthService.Domain.DTOs.Auth;
 
 public sealed record RegisterRequest(
-    [Required, StringLength(254)] string EmailOrUsername,
-    [Required, StringLength(128, MinimumLength = 8)] string Password);
+    [Required, EmailAddress, StringLength(254)] string Email,
+    [Required, StringLength(128, MinimumLength = 8)] string Password,
+    [Required, StringLength(100)] string FullName);

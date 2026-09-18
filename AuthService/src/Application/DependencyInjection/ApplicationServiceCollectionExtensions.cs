@@ -1,9 +1,11 @@
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security.Jwt;
 using Dprental.AuthService.Application.Services;
+using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Domain.Utils;
 using Dprental.AuthService.Domain.Validators;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -25,6 +27,8 @@ public static class ApplicationServiceCollectionExtensions
         services.AddSingleton<RsaJwtKeyRing>();
         services.AddSingleton<IAccessTokenIssuer, RsaAccessTokenIssuer>();
         services.AddScoped<IAuthSessionService, AuthSessionService>();
+        services.AddTransient<IPasswordHasher<User>, PasswordHasher<User>>();
+        services.AddScoped<IUserService, UserService>();
 
         return services;
     }
