@@ -28,11 +28,15 @@ Domain là nơi sở hữu DTO, entity/model, utility/validator và persistence 
    docker compose up -d
    ```
 
-2. Cấp `ConnectionStrings:Postgres` từ User Secrets hoặc secret manager. Giá trị phải dùng password đã đặt trong `.env`, ví dụ định dạng:
+2. Cấp `ConnectionStrings:Postgres` từ .NET User Secrets. Giá trị phải dùng password đã đặt trong `.env`:
 
-   ```text
-   Host=localhost;Port=5432;Database=authservice;Username=authservice;Password=<password-trong-.env>
+   ```bash
+   dotnet user-secrets set "ConnectionStrings:Postgres" \
+     "Host=localhost;Port=5432;Database=authservice;Username=authservice;Password=<password-trong-.env>" \
+     --project AuthService/src/Api/AuthService.Api.csproj
    ```
+
+   `.env` chỉ cấp credential cho Docker Compose; `dotnet run` không tự đọc file này. User Secrets được ASP.NET Core nạp tự động khi chạy môi trường `Development` và không được lưu trong repository.
 
 3. Tạo và cấp RSA key ring theo phần JWT bên dưới.
 
