@@ -71,6 +71,38 @@ public sealed class RsaJwtAuthTests
     }
 
     [Fact]
+    public void KeyRingLoadsPemFromFilePaths()
+    {
+        string temporaryDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+        string publicKeyPath = Path.Combine(temporaryDirectory, "public.pem");
+        string privateKeyPath = Path.Combine(temporaryDirectory, "private.pem");
+        File.WriteAllText(publicKeyPath, ActivePair.PublicKeyPem);
+        File.WriteAllText(privateKeyPath, ActivePair.PrivateKeyPem);
+
+        try
+        {
+            JwtOptions options = CreateValidOptions(
+            [
+                new JwtKeyOptions
+                {
+                    KeyId = "current",
+                    PublicKeyPem = publicKeyPath,
+                    PrivateKeyPem = privateKeyPath
+                }
+            ]);
+
+            using RsaJwtKeyRing keyRing = new(options);
+
+            Assert.Single(keyRing.ResolveVerificationKeys("current"));
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ValidationRejectsSymmetricTokenAndUnknownKeyId()
     {
         JwtOptions options = CreateValidOptions();

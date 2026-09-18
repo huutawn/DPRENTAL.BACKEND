@@ -53,7 +53,7 @@ public sealed class RsaJwtKeyRing : IDisposable
             // Chỉ public key được đưa vào danh sách xác thực và JWKS.
             RSA publicRsa = RSA.Create();
             rsaInstances.Add(publicRsa);
-            publicRsa.ImportFromPem(keyOptions.PublicKeyPem);
+            publicRsa.ImportFromPem(ReadPem(keyOptions.PublicKeyPem));
 
             RSAParameters parameters = publicRsa.ExportParameters(false);
             EnsureSafeRsaKeySize(keyOptions.KeyId, parameters);
@@ -76,7 +76,7 @@ public sealed class RsaJwtKeyRing : IDisposable
         // Private key chỉ được nạp cho key active và chỉ được dùng để ký token mới.
         RSA privateRsa = RSA.Create();
         rsaInstances.Add(privateRsa);
-        privateRsa.ImportFromPem(activeKeyOptions.PrivateKeyPem);
+        privateRsa.ImportFromPem(ReadPem(activeKeyOptions.PrivateKeyPem));
         RSAParameters privateKeyParameters = privateRsa.ExportParameters(true);
         if (privateKeyParameters.D is null)
         {
@@ -138,6 +138,14 @@ public sealed class RsaJwtKeyRing : IDisposable
             KeyId = keyId,
             CryptoProviderFactory = new CryptoProviderFactory { CacheSignatureProviders = false }
         };
+    }
+
+    private static string ReadPem(string pemOrPath)
+    {
+        string candidate = pemOrPath.Trim();
+        return candidate.StartsWith("-----BEGIN ", StringComparison.Ordinal)
+            ? candidate
+            : File.ReadAllText(pemOrPath);
     }
 
     /// <summary>Từ chối RSA key yếu trước khi key được dùng để ký hoặc xác thực token.</summary>
