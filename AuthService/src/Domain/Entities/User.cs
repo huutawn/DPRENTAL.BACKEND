@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
-namespace DpRent.Domain.Entities;
+namespace Dprental.AuthService.Domain.Entities;
 
 [Table("Users", Schema = "auth")]
 [Index(nameof(Email), IsUnique = true)]
@@ -25,7 +25,9 @@ public class User
     public DateTime CreatedAt { get; set; }
     public bool IsActive { get; set; }
 
-    // Navigation properties
+    /// <summary>Các vai trò hiện có của người dùng.</summary>
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
-    public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
+
+    /// <summary>Các phiên đăng nhập được lưu bền của người dùng.</summary>
+    public ICollection<Session> Sessions { get; set; } = new List<Session>();
 }

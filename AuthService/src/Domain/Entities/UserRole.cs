@@ -1,7 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
-namespace DpRent.Domain.Entities;
+namespace Dprental.AuthService.Domain.Entities;
 
 [Table("UserRoles", Schema = "auth")]
 [PrimaryKey(nameof(UserId), nameof(RoleId))] // Khóa chính kép

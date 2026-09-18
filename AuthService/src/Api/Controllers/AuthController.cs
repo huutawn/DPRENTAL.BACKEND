@@ -1,54 +1,89 @@
-﻿using AuthService.Application.DTOs.Auth;
-using AuthService.Application.Interfaces;
+using Dprental.AuthService.Api.Filters;
+using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Application.Mapping;
+using Dprental.AuthService.Common;
+using Dprental.AuthService.Domain.DTOs.Auth;
+using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Mvc;
 
-namespace AuthService.Api.Controllers;
+namespace Dprental.AuthService.Api.Controllers;
 
 [ApiController]
 [Route("api/v1/auth")]
-public class AuthController : ControllerBase
+[Produces("application/json")]
+public sealed class AuthController(
+    IAuthSessionService authSessionService,
+    IUserService userService) : ControllerBase
 {
-    private readonly IAuthService _authService;
-
-    public AuthController(IAuthService authService)
+    [HttpPost("register")]
+    [ProducesResponseType<AccountCreatedResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<AccountCreatedResponse>> Register(RegisterRequest request, CancellationToken cancellationToken)
     {
-        _authService = authService;
-    }
+        Result<AccountCreatedResponse> result = await userService.RegisterAsync(request, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
 
-    [HttpPost("refresh")]
-    public async Task<IActionResult> Refresh([FromBody] RefreshRequestDto request)
-    {
-        try
-        {
-            var response = await _authService.RefreshAsync(request.RefreshToken);
-            return Ok(response);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Unauthorized(new { message = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { message = "Lỗi hệ thống", details = ex.Message });
-        }
+        return StatusCode(StatusCodes.Status201Created, result.Value);
     }
 
     [HttpPost("login")]
-    public async Task<IActionResult> Login([FromBody] LoginRequestDto request)
+    [ProducesResponseType<AuthTokenResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<AuthTokenResponse>> Login(LoginRequest request, CancellationToken cancellationToken)
     {
-        try
+        Guid? userId = await userService.AuthenticateAsync(request, cancellationToken);
+        if (userId is null)
         {
-            var response = await _authService.LoginAsync(request);
-            return Ok(response);
+            return Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Auth.InvalidCredentials",
+                detail: "Email hoặc mật khẩu không chính xác.");
         }
-        catch (UnauthorizedAccessException ex)
+
+        AuthTokenPair? tokens = await authSessionService.CreateSessionAsync(userId.Value, cancellationToken);
+        if (tokens is null)
         {
-            return Unauthorized(new { message = ex.Message });
+            return Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Auth.InactiveAccount",
+                detail: "Tài khoản không tồn tại hoặc đã bị khóa.");
         }
-        catch (Exception ex)
-        {
-            // Tạm thời in ra lỗi chi tiết để dễ debug
-            return StatusCode(500, new { message = "Lỗi hệ thống", details = ex.Message });
-        }
+
+        return Ok(tokens.ToDto());
     }
+
+    [HttpPost("refresh")]
+    [ProducesResponseType<AuthTokenResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<AuthTokenResponse>> Refresh(RefreshTokenRequest request, CancellationToken cancellationToken)
+    {
+        AuthTokenPair? tokens = await authSessionService.RefreshAsync(request.RefreshToken, cancellationToken);
+        if (tokens is null)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Auth.InvalidRefreshToken",
+                detail: "Refresh token không hợp lệ hoặc đã hết hạn.");
+        }
+
+        return Ok(tokens.ToDto());
+    }
+
+    [HttpPost("logout")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> Logout(RefreshTokenRequest request, CancellationToken cancellationToken)
+    {
+        await authSessionService.RevokeByRefreshTokenAsync(request.RefreshToken, cancellationToken);
+        return NoContent();
+    }
+
+    private ObjectResult NotImplementedYet() => Problem(
+        statusCode: StatusCodes.Status501NotImplemented,
+        title: "Auth.NotImplemented",
+        detail: "Endpoint chưa nối logic.");
 }

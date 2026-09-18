@@ -1,27 +1,19 @@
-﻿using AuthService.Application.Interfaces;
-using AuthService.Infrastructure;
-using Microsoft.EntityFrameworkCore;
-using AuthService.Application.Services;
-using Dprental.AuthService.Api.Authentication;
+using Dprental.AuthService.Api.Endpoints;
+using Dprental.AuthService.Api.Observability;
+using Dprental.AuthService.Api.Security;
+using Dprental.AuthService.Application.DependencyInjection;
+using Dprental.AuthService.Domain.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Đăng ký Database
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-
-// Đăng ký DI
-builder.Services.AddScoped<IApplicationDbContext>(provider =>
-    provider.GetRequiredService<ApplicationDbContext>());
-builder.Services.AddScoped<IAuthService, AuthService.Application.Services.AuthService>();
-
-// Đăng ký JWT
-builder.Services.AddJwtAuthentication(builder.Configuration);
-
-// Đăng ký Swagger & Controller
+builder.Services.AddAuthServiceDistributedTracing(builder.Configuration);
+builder.Services.AddAuthApplication(builder.Configuration);
+builder.Services.AddAuthDomainPersistence(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddJwtBearerSecurity();
 builder.Services.AddControllers();
+builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options => options.InferSecuritySchemes());
 
 var app = builder.Build();
 
@@ -31,8 +23,12 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseRouting();
+app.UseExceptionHandler();
+app.UseStatusCodePages();
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapControllers();
+app.MapJwksEndpoint();
 
 app.Run();
 
