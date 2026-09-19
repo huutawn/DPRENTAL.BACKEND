@@ -9,7 +9,7 @@ namespace Dprental.AuthService.Api.Controllers;
 
 /// <summary>Thông tin của chính người dùng đang đăng nhập.</summary>
 [ApiController]
-[Route("api/v1/users")]
+[Route("users")]
 [Produces("application/json")]
 [Authorize]
 public sealed class UsersController(IUserService userService) : ControllerBase

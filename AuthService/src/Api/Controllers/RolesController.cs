@@ -10,7 +10,7 @@ namespace Dprental.AuthService.Api.Controllers;
 
 /// <summary>Gán/thu hồi role trên user — yêu cầu actor đã đăng nhập và mang đủ permission RBAC.</summary>
 [ApiController]
-[Route("api/v1/roles")]
+[Route("roles")]
 [Produces("application/json")]
 [Authorize]
 public sealed class RolesController(IRoleAssignmentService roleAssignmentService) : ControllerBase

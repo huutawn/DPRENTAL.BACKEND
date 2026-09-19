@@ -31,6 +31,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IRoleAssignmentService, RoleAssignmentService>();
         services.AddScoped<IServiceIdentityService, ServiceIdentityService>();
+        services.AddScoped<IExternalLoginService, ExternalLoginService>();
 
         return services;
     }

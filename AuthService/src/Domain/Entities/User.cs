@@ -39,4 +39,7 @@ public class User
     public DateTimeOffset? ResetTokenExpiry { get; set; }
 
     public ICollection<OrganizationMembership> OrganizationMemberships { get; set; } = new List<OrganizationMembership>();
+
+    /// <summary>Các tài khoản bên ngoài (ví dụ Google) đã liên kết với user này.</summary>
+    public ICollection<ExternalLogin> ExternalLogins { get; set; } = new List<ExternalLogin>();
 }

@@ -99,5 +99,5 @@ public sealed class UserService(
     }
 
     [SuppressMessage("Globalization", "CA1308:Normalize strings to uppercase", Justification = "Email được lưu và so sánh ở dạng chữ thường theo quy ước phổ biến.")]
-    private static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
+    internal static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
 }

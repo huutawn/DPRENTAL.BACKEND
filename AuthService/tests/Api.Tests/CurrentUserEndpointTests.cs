@@ -29,7 +29,7 @@ public sealed class CurrentUserEndpointTests
         await SeedAsync(factory);
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync("/api/v1/users/me");
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/users/me");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -44,7 +44,7 @@ public sealed class CurrentUserEndpointTests
         IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(UserId, ["Admin"]));
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Value);
 
-        using HttpResponseMessage response = await client.GetAsync("/api/v1/users/me");
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/users/me");
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         JsonElement root = document.RootElement;
 
@@ -71,7 +71,7 @@ public sealed class CurrentUserEndpointTests
         IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(Guid.NewGuid()));
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Value);
 
-        using HttpResponseMessage response = await client.GetAsync("/api/v1/users/me");
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/users/me");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }

@@ -21,4 +21,5 @@ public sealed class AuthDbContext : DbContext
     public DbSet<ServicePrincipalScope> ServicePrincipalScopes { get; set; }
     public DbSet<Organization> Organizations { get; set; }
     public DbSet<OrganizationMembership> OrganizationMemberships { get; set; }
+    public DbSet<ExternalLogin> ExternalLogins { get; set; }
 }

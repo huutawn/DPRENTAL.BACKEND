@@ -17,6 +17,7 @@ public static class DomainServiceCollectionExtensions
         services.AddScoped<IUserRepository, EfUserRepository>();
         services.AddScoped<IRoleRepository, EfRoleRepository>();
         services.AddScoped<IServicePrincipalRepository, EfServicePrincipalRepository>();
+        services.AddScoped<IExternalLoginRepository, EfExternalLoginRepository>();
         return services;
     }
 }
