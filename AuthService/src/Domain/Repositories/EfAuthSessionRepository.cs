@@ -2,6 +2,7 @@ using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Domain.Utils;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.AuthService.Domain.Repositories;
@@ -221,15 +222,9 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext) : IAuthSess
     private static AuthSessionPrincipal BuildPrincipal(User user) =>
         new(
             user.Id,
-            user.UserRoles.Select(userRole => userRole.Role.Name).ToArray(),
-            user.UserRoles.SelectMany(userRole => userRole.Role.RolePermissions.Select(rolePermission => rolePermission.Permission.Code))
-                .Concat(user.OrganizationMemberships
-                    .Where(membership => membership.Status == MembershipStatus.Active)
-                    .SelectMany(membership => membership.Role.RolePermissions.Select(rolePermission => rolePermission.Permission.Code)))
-                .Distinct()
-                .ToArray(),
-            user.OrganizationMemberships
-                .Where(membership => membership.Status == MembershipStatus.Active)
+            UserAccessResolver.Roles(user),
+            UserAccessResolver.Permissions(user),
+            UserAccessResolver.ActiveMemberships(user)
                 .Select(membership => membership.OrganizationId)
                 .ToArray());
 

@@ -76,4 +76,20 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
         dbContext.Users
             .AsNoTracking()
             .SingleOrDefaultAsync(user => user.Email == normalizedEmail, cancellationToken);
+
+    public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default) =>
+        dbContext.Users
+            .AsNoTracking()
+            .AsSplitQuery()
+            .Include(user => user.UserRoles)
+                .ThenInclude(userRole => userRole.Role)
+                    .ThenInclude(role => role.RolePermissions)
+                        .ThenInclude(rolePermission => rolePermission.Permission)
+            .Include(user => user.OrganizationMemberships)
+                .ThenInclude(membership => membership.Organization)
+            .Include(user => user.OrganizationMemberships)
+                .ThenInclude(membership => membership.Role)
+                    .ThenInclude(role => role.RolePermissions)
+                        .ThenInclude(rolePermission => rolePermission.Permission)
+            .SingleOrDefaultAsync(user => user.Id == id && user.IsActive, cancellationToken);
 }
