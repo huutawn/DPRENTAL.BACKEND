@@ -1,5 +1,6 @@
 using Dprental.AuthService.Api.Endpoints;
 using Dprental.AuthService.Api.Observability;
+using Dprental.AuthService.Api.Routing;
 using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.DependencyInjection;
 using Dprental.AuthService.Domain.Data;
@@ -13,6 +14,7 @@ builder.Services.AddAuthServiceDistributedTracing(builder.Configuration);
 builder.Services.AddAuthApplication(builder.Configuration);
 builder.Services.AddAuthDomainPersistence(builder.Configuration.GetConnectionString("Postgres"));
 builder.Services.AddJwtBearerSecurity();
+builder.Services.AddGoogleLogin(builder.Configuration);
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
@@ -23,7 +25,7 @@ builder.Services.AddCors(options =>
             .AllowCredentials();
     });
 });
-builder.Services.AddControllers();
+builder.Services.AddControllers(options => options.Conventions.Add(new ApiRoutePrefixConvention(ApiRoutes.Prefix)));
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options => options.InferSecuritySchemes());

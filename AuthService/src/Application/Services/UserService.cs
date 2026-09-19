@@ -2,10 +2,12 @@ using System.Diagnostics.CodeAnalysis;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
+using Dprental.AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Errors;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Domain.Utils;
 using Microsoft.AspNetCore.Identity;
 
 namespace Dprental.AuthService.Application.Services;
@@ -69,6 +71,33 @@ public sealed class UserService(
             : null;
     }
 
+    public async Task<Result<CurrentUserResponse>> GetCurrentUserProfileAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        User? user = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return UserErrors.UserNotFound;
+        }
+
+        UserOrganizationResponse[] organizations = UserAccessResolver.ActiveMemberships(user)
+            .Select(membership => new UserOrganizationResponse(
+                membership.OrganizationId,
+                membership.Organization.Name,
+                membership.Organization.Slug,
+                membership.Organization.Type,
+                membership.Role.Name))
+            .ToArray();
+
+        return new CurrentUserResponse(
+            user.Id,
+            user.Email,
+            user.FullName,
+            UserAccessResolver.Roles(user),
+            UserAccessResolver.Permissions(user),
+            organizations,
+            user.CreatedAt);
+    }
+
     [SuppressMessage("Globalization", "CA1308:Normalize strings to uppercase", Justification = "Email được lưu và so sánh ở dạng chữ thường theo quy ước phổ biến.")]
-    private static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
+    internal static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
 }

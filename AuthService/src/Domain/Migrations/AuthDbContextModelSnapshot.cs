@@ -22,6 +22,43 @@ namespace Dprental.AuthService.Domain.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.ExternalLogin", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ProviderSubject")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Provider", "ProviderSubject")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "Provider")
+                        .IsUnique();
+
+                    b.ToTable("ExternalLogins", "auth");
+                });
+
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Organization", b =>
                 {
                     b.Property<Guid>("Id")
@@ -357,6 +394,17 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.ToTable("UserRoles", "auth");
                 });
 
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.ExternalLogin", b =>
+                {
+                    b.HasOne("Dprental.AuthService.Domain.Entities.User", "User")
+                        .WithMany("ExternalLogins")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.OrganizationMembership", b =>
                 {
                     b.HasOne("Dprental.AuthService.Domain.Entities.Organization", "Organization")
@@ -492,6 +540,8 @@ namespace Dprental.AuthService.Domain.Migrations
 
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.User", b =>
                 {
+                    b.Navigation("ExternalLogins");
+
                     b.Navigation("OrganizationMemberships");
 
                     b.Navigation("Sessions");

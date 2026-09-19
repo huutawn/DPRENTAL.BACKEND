@@ -155,3 +155,41 @@ Telemetry__Otlp__TracesEndpoint=https://otel-collector.internal/v1/traces
 ```
 
 Sampler là `ParentBased(TraceIdRatioBased)`: trace đã lấy mẫu từ Gateway luôn tiếp tục được lấy mẫu tại AuthService, còn request không có parent dùng tỷ lệ của service. Chỉ metadata HTTP tiêu chuẩn được instrumentation ghi nhận; không thêm token, authorization header, body, claim hoặc PEM key vào trace attributes.
+
+## Đăng nhập bằng Google
+
+Đăng nhập Google dùng OAuth 2.0 authorization code kèm PKCE, do backend xử lý. Sau khi Google xác nhận danh tính, AuthService vẫn phát JWT và cookie `accessToken`/`refreshToken` như `POST /api/v1/auth/login`.
+
+```text
+GET /api/v1/auth/google/login?returnUrl=<url>     # chuyển trình duyệt sang Google
+GET /signin-google                                 # Google gọi về, do thư viện xử lý
+GET /api/v1/auth/google/callback?returnUrl=<url>   # tạo phiên, set cookie, chuyển về returnUrl
+```
+
+Lỗi được trả bằng cách chuyển về `returnUrl?error=<mã lỗi>` (ví dụ `ExternalLogin.EmailNotVerified`) vì lúc này user đang ở trên trình duyệt. `returnUrl` phải thuộc `Auth:Google:AllowedReturnUrls` (so sánh theo origin), nếu không endpoint trả `400`.
+
+Cấu hình (chưa có `ClientId` và `ClientSecret` thì tính năng tắt và cả hai endpoint trả `404`):
+
+```text
+Auth:Google:ClientId                  # có thể để trong appsettings, không phải bí mật
+Auth:Google:ClientSecret              # chỉ cấp qua User Secrets hoặc biến môi trường
+Auth:Google:AllowedReturnUrls:0       # mặc định http://localhost:3000
+```
+
+Trên Google Cloud Console tạo OAuth client loại Web application và thêm redirect URI `http://localhost:64837/signin-google` (thêm bản `https://localhost:64836/signin-google` nếu dùng HTTPS). Cấp secret:
+
+```bash
+dotnet user-secrets set "Auth:Google:ClientId" "<client-id>" --project AuthService/src/Api/AuthService.Api.csproj
+dotnet user-secrets set "Auth:Google:ClientSecret" "<client-secret>" --project AuthService/src/Api/AuthService.Api.csproj
+```
+
+Production: `Auth__Google__ClientId`, `Auth__Google__ClientSecret`, `Auth__Google__AllowedReturnUrls__0`.
+
+Quy tắc liên kết tài khoản, theo thứ tự:
+
+1. Đã có liên kết `(Google, sub)` thì dùng user đó; user bị khóa thì từ chối.
+2. Chưa liên kết mà email chưa được Google xác minh thì từ chối, không liên kết.
+3. Chưa liên kết, email đã xác minh và trùng user có sẵn thì thêm liên kết vào user đó.
+4. Không có user nào dùng email đó thì tạo user mới với mật khẩu ngẫu nhiên (chỉ đăng nhập được qua Google) và không có role nào.
+
+Bảng `auth.ExternalLogins` được tạo bởi migration `AddExternalLogins`; áp dụng bằng `dotnet ef database update` như phần Refresh token và session.
