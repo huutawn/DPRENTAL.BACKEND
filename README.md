@@ -93,14 +93,12 @@ DEV_VPS_KNOWN_HOSTS       # dòng host key theo định dạng known_hosts
 DEV_VPS_PORT              # tùy chọn, mặc định 22
 ```
 
-Trên VPS, cài [deploy-authservice.sh](scripts/deploy-authservice.sh) tại `/opt/dprental/dev/scripts/deploy-authservice.sh`, cho user deploy quyền đọc `.env` và ghi `release.env`; `.env`, PEM JWT và Docker registry credential vẫn chỉ tồn tại trên VPS. `release.env` phải đã có hai image AuthService với tag để script thay bằng SHA mới. Script validate Compose, pull hai image, chạy migration một lần, chỉ recreate `auth-service`, chờ healthcheck, rồi gọi `/health/ready` và `/.well-known/jwks.json` qua `DEV_DOMAIN`. Nó không rollback database hoặc image nếu migration/healthcheck lỗi.
+Workflow tự đồng bộ [deploy-authservice.sh](scripts/deploy-authservice.sh) lên `/opt/dprental/dev/scripts/deploy-authservice.sh` trước mỗi release. User SSH của workflow cần quyền tạo/ghi thư mục `scripts`, đọc `.env` và ghi `release.env`; `.env`, PEM JWT và Docker registry credential vẫn chỉ tồn tại trên VPS. `release.env` phải đã có hai image AuthService với tag để script thay bằng SHA mới. Script validate Compose, pull hai image, chạy migration một lần, chỉ recreate `auth-service`, chờ healthcheck, rồi gọi `/health/ready` qua `DEV_DOMAIN` và kiểm tra JWKS trực tiếp trong AuthService container. Gateway không public JWKS; Gateway tự tải JWKS qua Docker network nội bộ. Nó không rollback database hoặc image nếu migration/healthcheck lỗi.
 
 Ví dụ cài script bằng user có quyền quản trị VPS (thay `deploy` bằng user của GitHub Actions):
 
 ```bash
 sudo install -d -o deploy -g deploy -m 0750 /opt/dprental/dev/scripts
-sudo install -o deploy -g deploy -m 0750 scripts/deploy-authservice.sh \
-  /opt/dprental/dev/scripts/deploy-authservice.sh
 sudo chown deploy:deploy /opt/dprental/dev/release.env
 sudo chmod 600 /opt/dprental/dev/release.env
 ```

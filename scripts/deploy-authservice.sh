@@ -111,15 +111,18 @@ wait_for_auth_health() {
   fail 'AuthService không đạt trạng thái healthy; không tự rollback schema hoặc image.'
 }
 
-smoke_test_gateway() {
+smoke_test_gateway_health() {
   local domain="$1"
 
   curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
     "https://${domain}/health/ready" >/dev/null || \
     fail 'health endpoint công khai qua Gateway thất bại; không tự rollback schema hoặc image.'
-  curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
-    "https://${domain}/.well-known/jwks.json" >/dev/null || \
-    fail 'JWKS công khai qua Gateway thất bại; không tự rollback schema hoặc image.'
+}
+
+smoke_test_auth_jwks() {
+  "${compose_command[@]}" exec -T auth-service \
+    wget --quiet --tries=1 --spider http://127.0.0.1:8080/.well-known/jwks.json || \
+    fail 'JWKS nội bộ của AuthService thất bại; không tự rollback schema hoặc image.'
 }
 
 [ "$#" -eq 1 ] || usage
@@ -149,6 +152,7 @@ update_release_images "$runtime_image" "$migrator_image"
 "${compose_command[@]}" up -d --no-deps --force-recreate auth-service
 
 wait_for_auth_health
-smoke_test_gateway "$dev_domain"
+smoke_test_gateway_health "$dev_domain"
+smoke_test_auth_jwks
 
-printf 'AuthService revision %s đã healthy và smoke test qua Gateway thành công.\n' "$release_sha"
+printf 'AuthService revision %s đã healthy; Gateway health và JWKS nội bộ đã pass.\n' "$release_sha"
