@@ -2,6 +2,7 @@ using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Domain.Utils;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.AuthService.Domain.Repositories;
@@ -118,6 +119,12 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext) : IAuthSess
                 .ThenInclude(session => session.User)
                     .ThenInclude(user => user.UserRoles)
                         .ThenInclude(userRole => userRole.Role)
+                            .ThenInclude(role => role.RolePermissions)
+                                .ThenInclude(rolePermission => rolePermission.Permission)
+            .Include(token => token.Session.User.OrganizationMemberships)
+                .ThenInclude(membership => membership.Role)
+                    .ThenInclude(role => role.RolePermissions)
+                        .ThenInclude(rolePermission => rolePermission.Permission)
             .SingleOrDefaultAsync(token => token.TokenHash == currentRefreshTokenHash, cancellationToken);
 
         if (currentToken is null)
@@ -174,9 +181,7 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext) : IAuthSess
         await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        return new AuthSessionPrincipal(
-            currentToken.Session.UserId,
-            currentToken.Session.User.UserRoles.Select(userRole => userRole.Role.Name).ToArray());
+        return BuildPrincipal(currentToken.Session.User);
     }
 
     /// <inheritdoc />
@@ -194,17 +199,34 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext) : IAuthSess
         }
     }
 
-    /// <summary>Đọc user active và roles để phát hành access token.</summary>
+    /// <summary>Đọc user active cùng roles, permissions (global + theo organization) và organization đang active để phát hành access token.</summary>
     private async Task<AuthSessionPrincipal?> GetActiveUserPrincipalAsync(Guid userId, CancellationToken cancellationToken)
     {
-        return await dbContext.Users
+        User? user = await dbContext.Users
             .AsNoTracking()
             .Where(user => user.Id == userId && user.IsActive)
-            .Select(user => new AuthSessionPrincipal(
-                user.Id,
-                user.UserRoles.Select(userRole => userRole.Role.Name).ToArray()))
+            .Include(user => user.UserRoles)
+                .ThenInclude(userRole => userRole.Role)
+                    .ThenInclude(role => role.RolePermissions)
+                        .ThenInclude(rolePermission => rolePermission.Permission)
+            .Include(user => user.OrganizationMemberships)
+                .ThenInclude(membership => membership.Role)
+                    .ThenInclude(role => role.RolePermissions)
+                        .ThenInclude(rolePermission => rolePermission.Permission)
             .SingleOrDefaultAsync(cancellationToken);
+
+        return user is null ? null : BuildPrincipal(user);
     }
+
+    /// <summary>Gộp role, permission (global + theo organization active) và organization đang active thành principal.</summary>
+    private static AuthSessionPrincipal BuildPrincipal(User user) =>
+        new(
+            user.Id,
+            UserAccessResolver.Roles(user),
+            UserAccessResolver.Permissions(user),
+            UserAccessResolver.ActiveMemberships(user)
+                .Select(membership => membership.OrganizationId)
+                .ToArray());
 
     /// <summary>Kiểm tra session, token và user còn có thể dùng để refresh hay không.</summary>
     private static bool IsUsable(Session session, RefreshToken refreshToken, DateTime utcNow) =>

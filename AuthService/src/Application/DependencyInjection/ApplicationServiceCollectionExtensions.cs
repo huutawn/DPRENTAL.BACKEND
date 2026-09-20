@@ -29,6 +29,9 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IAuthSessionService, AuthSessionService>();
         services.AddTransient<IPasswordHasher<User>, PasswordHasher<User>>();
         services.AddScoped<IUserService, UserService>();
+        services.AddScoped<IRoleAssignmentService, RoleAssignmentService>();
+        services.AddScoped<IServiceIdentityService, ServiceIdentityService>();
+        services.AddScoped<IExternalLoginService, ExternalLoginService>();
 
         return services;
     }

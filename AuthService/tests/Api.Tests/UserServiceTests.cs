@@ -1,6 +1,7 @@
 using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
+using Dprental.AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Errors;
 using Dprental.AuthService.Domain.Exceptions;
@@ -62,11 +63,91 @@ public sealed class UserServiceTests
         Assert.Equal(UserErrors.EmailAlreadyExists, result.Error);
     }
 
+    [Fact]
+    public async Task GetCurrentUserProfileAsyncCombinesGlobalAndActiveOrganizationAccess()
+    {
+        Guid userId = Guid.NewGuid();
+        DateTime createdAt = new(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
+        User user = new()
+        {
+            Id = userId,
+            Email = "tan.len@example.com",
+            FullName = "Huynh Tan Len",
+            CreatedAt = createdAt,
+            IsActive = true,
+        };
+        user.UserRoles.Add(new UserRole { UserId = userId, Role = CreateRole("Admin", "roles.assign") });
+
+        Organization activeOrg = new() { Id = Guid.NewGuid(), Name = "Acme", Slug = "acme", Type = OrganizationType.Supplier, IsActive = true };
+        Organization suspendedOrg = new() { Id = Guid.NewGuid(), Name = "Beta", Slug = "beta", Type = OrganizationType.Renter, IsActive = true };
+        user.OrganizationMemberships.Add(new OrganizationMembership
+        {
+            UserId = userId,
+            OrganizationId = activeOrg.Id,
+            Organization = activeOrg,
+            Role = CreateRole("Owner", "roles.revoke"),
+            Status = MembershipStatus.Active,
+        });
+        user.OrganizationMemberships.Add(new OrganizationMembership
+        {
+            UserId = userId,
+            OrganizationId = suspendedOrg.Id,
+            Organization = suspendedOrg,
+            Role = CreateRole("Viewer", "orders.view"),
+            Status = MembershipStatus.Suspended,
+        });
+        UserService service = new(new RecordingUserRepository { ProfileUser = user }, new PasswordHasher<User>(), TimeProvider.System);
+
+        Result<CurrentUserResponse> result = await service.GetCurrentUserProfileAsync(userId);
+
+        Assert.True(result.IsSuccess);
+        CurrentUserResponse profile = result.Value;
+        Assert.Equal(userId, profile.Id);
+        Assert.Equal("tan.len@example.com", profile.Email);
+        Assert.Equal("Huynh Tan Len", profile.FullName);
+        Assert.Equal(createdAt, profile.CreatedAt);
+        Assert.Equal(["Admin"], profile.Roles);
+        Assert.Equal(["roles.assign", "roles.revoke"], profile.Permissions.Order(StringComparer.Ordinal));
+        UserOrganizationResponse organization = Assert.Single(profile.Organizations);
+        Assert.Equal(activeOrg.Id, organization.OrganizationId);
+        Assert.Equal("Acme", organization.Name);
+        Assert.Equal("acme", organization.Slug);
+        Assert.Equal(OrganizationType.Supplier, organization.Type);
+        Assert.Equal("Owner", organization.RoleName);
+    }
+
+    [Fact]
+    public async Task GetCurrentUserProfileAsyncMissingOrInactiveUserReturnsNotFound()
+    {
+        UserService service = new(new RecordingUserRepository(), new PasswordHasher<User>(), TimeProvider.System);
+
+        Result<CurrentUserResponse> result = await service.GetCurrentUserProfileAsync(Guid.NewGuid());
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(UserErrors.UserNotFound, result.Error);
+        Assert.Equal(ErrorType.NotFound, result.Error.Type);
+    }
+
+    private static Role CreateRole(string name, params string[] permissionCodes)
+    {
+        Role role = new() { Id = Guid.NewGuid(), Name = name };
+        foreach (string code in permissionCodes)
+        {
+            role.RolePermissions.Add(new RolePermission { Role = role, Permission = new Permission { Id = Guid.NewGuid(), Code = code } });
+        }
+
+        return role;
+    }
+
     private sealed class RecordingUserRepository : IUserRepository
     {
         public string? ExistingEmail { get; init; }
         public bool RejectCreate { get; init; }
+        public User? ProfileUser { get; init; }
         public List<User> CreatedUsers { get; } = [];
+
+        public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult(ProfileUser is not null && ProfileUser.Id == id ? ProfileUser : null);
 
         public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
             Task.FromResult(normalizedEmail == ExistingEmail);
