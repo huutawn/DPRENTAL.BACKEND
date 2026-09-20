@@ -83,7 +83,7 @@ ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-auth:<git-sha>
 ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-auth-migrator:<git-sha>
 ```
 
-Thiết lập GitHub Environment variable `GHCR_IMAGE_NAMESPACE` bằng namespace GHCR viết thường (ví dụ `huutawn`). GHCR package phải cấp workflow của repository quyền ghi package. Tạo GitHub Environment tên `dev` với các secrets sau; không đặt PostgreSQL password, JWT private key hoặc nội dung `.env` vào GitHub:
+Thiết lập GitHub Environment variable `GHCR_IMAGE_NAMESPACE` bằng namespace GHCR viết thường (ví dụ `huutawn`). Workflow gắn OCI source metadata để package mới tự liên kết repository. Với package đã từng được push thủ công, vào từng package GHCR và cấp repository workflow quyền **Write** trong phần Actions access trước lần CI đầu tiên. Tạo GitHub Environment tên `dev` với các secrets sau; không đặt PostgreSQL password, JWT private key hoặc nội dung `.env` vào GitHub:
 
 ```text
 DEV_VPS_HOST              # IP hoặc hostname VPS

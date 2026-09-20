@@ -95,6 +95,9 @@ jobs:
           target: runtime
           push: true
           tags: ghcr.io/${{ steps.image-name.outputs.namespace }}/dprental-auth:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Publish AuthService migrator image
         uses: docker/build-push-action@v6
@@ -103,6 +106,9 @@ jobs:
           target: migrator
           push: true
           tags: ghcr.io/${{ steps.image-name.outputs.namespace }}/dprental-auth-migrator:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
   deploy-dev:
     name: Deploy AuthService to dev VPS
