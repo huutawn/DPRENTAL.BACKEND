@@ -90,6 +90,29 @@ public sealed class GoogleLoginEndpointTests
     }
 
     [Fact]
+    public async Task GoogleRemoteFailureRedirectsToBffWithError()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory(googleConfigured: true);
+        using HttpClient client = CreateClient(factory);
+        using HttpResponseMessage login = await client.GetAsync(
+            $"/api/v1/auth/google/login?returnUrl={Uri.EscapeDataString(FrontendOrigin)}");
+        Uri authorizationRequest = login.Headers.Location ?? throw new InvalidOperationException("Missing Google authorization URL.");
+        string state = QueryHelpers.ParseQuery(authorizationRequest.Query)["state"].ToString();
+
+        using HttpResponseMessage callback = await client.GetAsync(
+            $"/signin-google?error=access_denied&state={Uri.EscapeDataString(state)}");
+
+        Assert.Equal(HttpStatusCode.Redirect, callback.StatusCode);
+        Uri location = callback.Headers.Location ?? throw new InvalidOperationException("Missing BFF callback URL.");
+        Dictionary<string, StringValues> query = QueryHelpers.ParseQuery(location.Query);
+        Assert.Equal($"{FrontendOrigin}/api/auth/google/callback", location.GetLeftPart(UriPartial.Path));
+        Assert.Equal("Auth.ExternalFailed", query["error"].ToString());
+        Assert.Equal(FrontendOrigin, query["returnUrl"].ToString());
+        Assert.Equal("no-store", callback.Headers.CacheControl?.ToString());
+        Assert.Equal("no-referrer", callback.Headers.GetValues("Referrer-Policy").Single());
+    }
+
+    [Fact]
     public async Task GoogleLoginWithoutReturnUrlFallsBackToFirstAllowedOrigin()
     {
         using WebApplicationFactory<Program> factory = CreateFactory(googleConfigured: true);

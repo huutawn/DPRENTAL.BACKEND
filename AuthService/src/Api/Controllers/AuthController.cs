@@ -67,7 +67,7 @@ public sealed class AuthController(
         }
         SetAuthCookies(tokens.AccessToken, tokens.RefreshToken);
 
-        return Ok(new { Message = "Đăng nhập thành công.", UserId = userId});
+        return Ok(new { Message = "Đăng nhập thành công.", UserId = userId });
     }
 
     [HttpPost("refresh")]
