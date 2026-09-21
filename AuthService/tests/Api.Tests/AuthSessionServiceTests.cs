@@ -15,7 +15,7 @@ public sealed class AuthSessionServiceTests
     {
         DateTimeOffset now = new(2026, 9, 17, 7, 30, 0, TimeSpan.Zero);
         RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), ["member"]));
-        AuthSessionService service = new(repository, new FakeAccessTokenIssuer(), new FixedTimeProvider(now));
+        AuthSessionService service = CreateService(repository, now);
 
         AuthTokenPair? result = await service.CreateSessionAsync(repository.Principal!.UserId);
 
@@ -31,7 +31,7 @@ public sealed class AuthSessionServiceTests
     public async Task RefreshAsyncRotatesTokenAndIssuesNewAccessToken()
     {
         RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), ["admin"]));
-        AuthSessionService service = new(repository, new FakeAccessTokenIssuer(), new FixedTimeProvider(DateTimeOffset.UnixEpoch));
+        AuthSessionService service = CreateService(repository, DateTimeOffset.UnixEpoch);
 
         AuthTokenPair? result = await service.RefreshAsync("refresh-token-cu");
 
@@ -47,7 +47,7 @@ public sealed class AuthSessionServiceTests
     public async Task RefreshAsyncEmptyTokenDoesNotAccessPersistence()
     {
         RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), []));
-        AuthSessionService service = new(repository, new FakeAccessTokenIssuer(), TimeProvider.System);
+        AuthSessionService service = CreateService(repository, DateTimeOffset.UtcNow);
 
         AuthTokenPair? result = await service.RefreshAsync(" ");
 
@@ -59,7 +59,7 @@ public sealed class AuthSessionServiceTests
     public async Task RevokeByRefreshTokenAsyncEmptyTokenIsIdempotent()
     {
         RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), []));
-        AuthSessionService service = new(repository, new FakeAccessTokenIssuer(), TimeProvider.System);
+        AuthSessionService service = CreateService(repository, DateTimeOffset.UtcNow);
 
         await service.RevokeByRefreshTokenAsync(string.Empty);
 
@@ -114,6 +114,21 @@ public sealed class AuthSessionServiceTests
             RevokeCalled = true;
             return Task.CompletedTask;
         }
+
+        public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private static AuthSessionService CreateService(RecordingAuthSessionRepository repository, DateTimeOffset now) =>
+        new(repository, new FakeAccessTokenIssuer(), new FixedTimeProvider(now), new TestCorrelationIdProvider(), new TestAuditLogRepository());
+
+    private sealed class TestCorrelationIdProvider : ICorrelationIdProvider
+    {
+        public string GetCorrelationId() => "test-correlation-id";
+    }
+
+    private sealed class TestAuditLogRepository : IAuditLogRepository
+    {
+        public Task AddAsync(AuditLog auditLog, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     /// <summary>Issuer cố định giúp assertion không phụ thuộc JWT cryptography.</summary>

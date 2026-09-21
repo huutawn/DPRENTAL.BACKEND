@@ -31,4 +31,6 @@ public class Session
 
     /// <summary>Các refresh token đã được phát hành trong session này.</summary>
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
+
+    public string? ReplacedByToken { get; set; }
 }

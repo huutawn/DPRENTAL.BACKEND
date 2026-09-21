@@ -1,10 +1,12 @@
 using Dprental.AuthService.Application.Services;
+using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Errors;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Identity;
 using Xunit;
 
@@ -18,7 +20,7 @@ public sealed class UserServiceTests
         DateTimeOffset now = new(2026, 9, 17, 9, 0, 0, TimeSpan.Zero);
         RecordingUserRepository repository = new();
         PasswordHasher<User> hasher = new();
-        UserService service = new(repository, hasher, new FixedTimeProvider(now));
+        UserService service = CreateService(repository, hasher, new FixedTimeProvider(now));
 
         Result<AccountCreatedResponse> result = await service.RegisterAsync(
             new RegisterRequest("  Tan.Len@Example.COM ", "Matkhau123!", "  Huynh Tan Len "));
@@ -38,7 +40,7 @@ public sealed class UserServiceTests
     public async Task RegisterAsyncExistingEmailReturnsConflictWithoutSaving()
     {
         RecordingUserRepository repository = new() { ExistingEmail = "tan.len@example.com" };
-        UserService service = new(repository, new PasswordHasher<User>(), TimeProvider.System);
+        UserService service = CreateService(repository, new PasswordHasher<User>(), TimeProvider.System);
 
         Result<AccountCreatedResponse> result = await service.RegisterAsync(
             new RegisterRequest("TAN.LEN@example.com", "Matkhau123!", "Huynh Tan Len"));
@@ -53,13 +55,39 @@ public sealed class UserServiceTests
     public async Task RegisterAsyncConcurrentDuplicateRejectedByDatabaseReturnsConflict()
     {
         RecordingUserRepository repository = new() { RejectCreate = true };
-        UserService service = new(repository, new PasswordHasher<User>(), TimeProvider.System);
+        UserService service = CreateService(repository, new PasswordHasher<User>(), TimeProvider.System);
 
         Result<AccountCreatedResponse> result = await service.RegisterAsync(
             new RegisterRequest("tan.len@example.com", "Matkhau123!", "Huynh Tan Len"));
 
         Assert.True(result.IsFailure);
         Assert.Equal(UserErrors.EmailAlreadyExists, result.Error);
+    }
+
+    private static UserService CreateService(IUserRepository repository, IPasswordHasher<User> passwordHasher, TimeProvider timeProvider) =>
+        new(repository, passwordHasher, timeProvider, new TestCorrelationIdProvider(), new TestAuditLogRepository(), new TestAuthSessionRepository());
+
+    private sealed class TestCorrelationIdProvider : ICorrelationIdProvider
+    {
+        public string GetCorrelationId() => "test-correlation-id";
+    }
+
+    private sealed class TestAuditLogRepository : IAuditLogRepository
+    {
+        public Task AddAsync(AuditLog auditLog, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class TestAuthSessionRepository : IAuthSessionRepository
+    {
+        public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<AuthSessionPrincipal?> CreateAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<AuthSessionPrincipal?> RotateAsync(string currentRefreshTokenHash, string replacementRefreshTokenHash, DateTime utcNow, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<Session?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<Session>> GetAllAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Session> CreateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> UpdateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private sealed class RecordingUserRepository : IUserRepository

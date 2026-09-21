@@ -4,8 +4,10 @@ using Dprental.AuthService.Application.Mapping;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Options; 
+using System.Security.Claims;
 
 namespace Dprental.AuthService.Api.Controllers;
 
@@ -103,6 +105,27 @@ public sealed class AuthController(
         Response.Cookies.Delete("accessToken", CreateCookieOptions(TimeSpan.Zero));
         Response.Cookies.Delete("refreshToken", CreateCookieOptions(TimeSpan.Zero));
 
+        return NoContent();
+    }
+
+    [HttpPost("reset-password")]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request, CancellationToken cancellationToken)
+    {
+        var result = await userService.ResetPasswordAsync(request, cancellationToken);
+        if (result.IsFailure) return this.ToProblem(result.Error);
+        return Ok(new { Message = "Đã đặt lại mật khẩu và hủy toàn bộ phiên cũ." });
+    }
+
+    [Authorize]
+    [HttpPost("revoke-all")]
+    public async Task<IActionResult> RevokeAllSessions(CancellationToken cancellationToken)
+    {
+        // Lấy UserId từ Claims của Token hiện tại
+        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (Guid.TryParse(userIdString, out Guid userId))
+        {
+            await authSessionService.RevokeAllSessionsForUserAsync(userId, cancellationToken);
+        }
         return NoContent();
     }
 

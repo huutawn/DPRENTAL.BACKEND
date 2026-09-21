@@ -15,6 +15,7 @@ public static class DomainServiceCollectionExtensions
         services.AddDbContext<AuthDbContext>(options => options.UseNpgsql(connectionString));
         services.AddScoped<IAuthSessionRepository, EfAuthSessionRepository>();
         services.AddScoped<IUserRepository, EfUserRepository>();
+        services.AddScoped<IAuditLogRepository, EfAuditLogRepository>();
         return services;
     }
 }

@@ -31,6 +31,11 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext) : IAuthSess
         return entity;
     }
 
+    public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        dbContext.Sessions
+            .Where(session => session.UserId == userId && session.RevokedAtUtc == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(session => session.RevokedAtUtc, DateTime.UtcNow), cancellationToken);
+
     /// <inheritdoc />
     public async Task<bool> UpdateAsync(Session entity, CancellationToken cancellationToken = default)
     {

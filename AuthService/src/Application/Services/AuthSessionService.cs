@@ -1,4 +1,5 @@
 using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Domain.Utils;
@@ -9,7 +10,9 @@ namespace Dprental.AuthService.Application.Services;
 public sealed class AuthSessionService(
     IAuthSessionRepository sessionRepository,
     IAccessTokenIssuer accessTokenIssuer,
-    TimeProvider timeProvider) : IAuthSessionService
+    TimeProvider timeProvider,
+    ICorrelationIdProvider correlationIdProvider,
+    IAuditLogRepository auditLogRepository) : IAuthSessionService
 {
     /// <summary>Thời hạn tuyệt đối của một session và mọi refresh token thuộc session đó.</summary>
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(30);
@@ -26,7 +29,14 @@ public sealed class AuthSessionService(
             utcNow.Add(SessionLifetime),
             cancellationToken);
 
-        return principal is null ? null : IssueTokenPair(principal, refreshToken);
+        if (principal is null)
+        {
+            return null;
+        }
+
+        AuthTokenPair tokens = IssueTokenPair(principal, refreshToken);
+        await LogAuditAsync(userId, userId.ToString(), "Login", "Success", cancellationToken);
+        return tokens;
     }
 
     /// <inheritdoc />
@@ -44,22 +54,49 @@ public sealed class AuthSessionService(
             timeProvider.GetUtcNow().UtcDateTime,
             cancellationToken);
 
-        return principal is null ? null : IssueTokenPair(principal, replacementRefreshToken);
+        if (principal is null)
+        {
+            await LogAuditAsync(null, "unknown", "Refresh", "Failed_InvalidOrReusedToken", cancellationToken);
+            return null;
+        }
+
+        AuthTokenPair tokens = IssueTokenPair(principal, replacementRefreshToken);
+        await LogAuditAsync(principal.UserId, principal.UserId.ToString(), "Refresh", "Success", cancellationToken);
+        return tokens;
     }
 
     /// <inheritdoc />
-    public Task RevokeByRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
+    public async Task RevokeByRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(refreshToken))
         {
-            return Task.CompletedTask;
+            return;
         }
 
-        return sessionRepository.RevokeByRefreshTokenHashAsync(
+        await sessionRepository.RevokeByRefreshTokenHashAsync(
             RefreshTokenUtility.ComputeHash(refreshToken),
             timeProvider.GetUtcNow().UtcDateTime,
             cancellationToken);
+        await LogAuditAsync(null, "unknown", "Logout", "Success", cancellationToken);
     }
+
+    public async Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        await sessionRepository.RevokeAllSessionsForUserAsync(userId, cancellationToken);
+        await LogAuditAsync(userId, userId.ToString(), "Session_RevokeAll", "Success", cancellationToken);
+    }
+
+    private Task LogAuditAsync(Guid? actorId, string target, string action, string result, CancellationToken cancellationToken) =>
+        auditLogRepository.AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorId = actorId,
+            Target = target,
+            Action = action,
+            Result = result,
+            CorrelationId = correlationIdProvider.GetCorrelationId(),
+            Timestamp = timeProvider.GetUtcNow()
+        }, cancellationToken);
 
     /// <summary>Phát hành access token từ dữ liệu đã được persistence xác thực.</summary>
     private AuthTokenPair IssueTokenPair(AuthSessionPrincipal principal, string refreshToken)

@@ -1,7 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 
 namespace Dprental.AuthService.Domain.Entities;
 
@@ -24,18 +23,15 @@ public class User
     public string FullName { get; set; } = string.Empty;
 
     public DateTime CreatedAt { get; set; }
-    public bool IsActive { get; set; }
+    public bool IsActive { get; set; } = true;
+    public int AccessFailedCount { get; set; }
+    public DateTimeOffset? LockoutEnd { get; set; }
+    public string? PasswordResetToken { get; set; }
+    public DateTimeOffset? ResetTokenExpiry { get; set; }
 
     /// <summary>Các vai trò hiện có của người dùng.</summary>
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
 
     /// <summary>Các phiên đăng nhập được lưu bền của người dùng.</summary>
     public ICollection<Session> Sessions { get; set; } = new List<Session>();
-
-    public int AccessFailedCount { get; set; }
-    public DateTimeOffset? LockoutEnd { get; set; }
-
-    public string? PasswordResetToken { get; set; }
-    public DateTimeOffset? ResetTokenExpiry { get; set; }
-
 }

@@ -2,7 +2,10 @@ using Dprental.AuthService.Api.Endpoints;
 using Dprental.AuthService.Api.Observability;
 using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.DependencyInjection;
+using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Domain.DependencyInjection;
+using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Domain.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,6 +23,10 @@ builder.Services.AddCors(options =>
             .AllowCredentials();
     });
 });
+
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICorrelationIdProvider, CorrelationIdProvider>();
+
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
