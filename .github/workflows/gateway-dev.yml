@@ -1,0 +1,179 @@
+name: Gateway CI/CD (dev)
+
+on:
+  pull_request:
+    branches:
+      - gateway/develop-ci-cd
+  push:
+    branches:
+      - gateway/develop-ci-cd
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate source, tests, and Docker artifacts
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify synchronization with gateway/develop
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "+refs/heads/gateway/develop:refs/remotes/origin/gateway/develop"
+          git merge-base --is-ancestor origin/gateway/develop HEAD
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore Gateway/Gateway.sln --nologo
+
+      - name: Build
+        run: dotnet build Gateway/Gateway.sln --configuration Release --no-restore --nologo
+
+      - name: Test
+        run: dotnet test Gateway/Gateway.sln --configuration Release --no-build --nologo
+
+      - name: Build runtime image
+        run: docker build --target runtime --tag gateway-ci-runtime:${{ github.sha }} .
+
+  publish:
+    name: Publish immutable images to GHCR
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/gateway/develop-ci-cd'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate GHCR namespace
+        id: image-name
+        env:
+          IMAGE_NAMESPACE: ${{ vars.GHCR_IMAGE_NAMESPACE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE_NAMESPACE"
+          case "$IMAGE_NAMESPACE" in
+            *[!a-z0-9._-]* | *[A-Z]*)
+              echo 'GHCR_IMAGE_NAMESPACE must be lowercase and contain only a-z, 0-9, dot, underscore, or hyphen.' >&2
+              exit 1
+              ;;
+          esac
+          printf 'namespace=%s\n' "$IMAGE_NAMESPACE" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish Gateway runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          push: true
+          tags: ghcr.io/${{ steps.image-name.outputs.namespace }}/dprental-gateway:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+  deploy-dev:
+    name: Deploy Gateway to dev VPS
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/gateway/develop-ci-cd'
+    runs-on: ubuntu-24.04
+    environment: dev
+    concurrency:
+      group: dprental-dev
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout deployment script
+        uses: actions/checkout@v4
+
+      - name: Configure SSH trust
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEV_VPS_SSH_PRIVATE_KEY }}
+          DEPLOY_VPS_KNOWN_HOSTS: ${{ secrets.DEV_VPS_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_SSH_PRIVATE_KEY"
+          test -n "$DEPLOY_VPS_KNOWN_HOSTS"
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$DEPLOY_VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/id_ed25519"
+          chmod 0644 "$HOME/.ssh/known_hosts"
+
+      - name: Synchronize deployment script
+        env:
+          DEPLOY_VPS_HOST: ${{ secrets.DEV_VPS_HOST }}
+          DEPLOY_VPS_USER: ${{ secrets.DEV_VPS_USER }}
+          DEPLOY_VPS_PORT: ${{ secrets.DEV_VPS_PORT || '22' }}
+          RELEASE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_VPS_HOST"
+          test -n "$DEPLOY_VPS_USER"
+          remote_temporary_script="/tmp/deploy-gateway-${RELEASE_SHA}.sh"
+          ssh \
+            -i "$HOME/.ssh/id_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -p "$DEPLOY_VPS_PORT" \
+            "$DEPLOY_VPS_USER@$DEPLOY_VPS_HOST" \
+            'install -d -m 0750 /opt/dprental/dev/scripts'
+          scp \
+            -i "$HOME/.ssh/id_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -P "$DEPLOY_VPS_PORT" \
+            scripts/deploy-gateway.sh \
+            "$DEPLOY_VPS_USER@$DEPLOY_VPS_HOST:$remote_temporary_script"
+          ssh \
+            -i "$HOME/.ssh/id_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -p "$DEPLOY_VPS_PORT" \
+            "$DEPLOY_VPS_USER@$DEPLOY_VPS_HOST" \
+            "install -m 0750 '$remote_temporary_script' /opt/dprental/dev/scripts/deploy-gateway.sh && rm -f '$remote_temporary_script'"
+
+      - name: Deploy the published revision
+        env:
+          DEPLOY_VPS_HOST: ${{ secrets.DEV_VPS_HOST }}
+          DEPLOY_VPS_USER: ${{ secrets.DEV_VPS_USER }}
+          DEPLOY_VPS_PORT: ${{ secrets.DEV_VPS_PORT || '22' }}
+          RELEASE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_VPS_HOST"
+          test -n "$DEPLOY_VPS_USER"
+          ssh \
+            -i "$HOME/.ssh/id_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -p "$DEPLOY_VPS_PORT" \
+            "$DEPLOY_VPS_USER@$DEPLOY_VPS_HOST" \
+            /opt/dprental/dev/scripts/deploy-gateway.sh "$RELEASE_SHA"

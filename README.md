@@ -255,3 +255,61 @@ Gateway cung cấp các probe giám sát riêng biệt theo chuẩn Kubernetes /
     1. Đã tải và nạp thành công khóa công khai JWKS từ AuthService (`auth-jwks`).
     2. Cấu hình các tuyến đường (routes) và cụm dịch vụ (clusters) của Reverse Proxy đã sẵn sàng (`proxy-config`).
   - Trả về `503 Service Unavailable` nếu các phụ thuộc cốt lõi chưa khả dụng.
+
+## Kiểm tra trước khi push
+
+Để tránh push commit chưa đồng bộ với nhánh nền `gateway/develop` hoặc làm gãy build/test, bật Git hook cho local clone:
+
+```bash
+# Linux / macOS
+./scripts/setup-git-hooks.sh
+
+# Windows PowerShell
+.\scripts\setup-git-hooks.ps1
+```
+
+Hook sẽ tự động chạy [pre-push-check.sh](scripts/pre-push-check.sh):
+1. Fetch `origin/gateway/develop` và kiểm tra commit hiện tại đã chứa nhánh nền này (`git merge-base --is-ancestor`).
+2. Build `Gateway/Gateway.sln` ở cấu hình `Release`.
+3. Chạy test `Gateway/Gateway.sln`.
+
+## Docker artifact
+
+Dockerfile ở repository root xây dựng runtime image tối giản cho Gateway:
+
+```bash
+docker build --target runtime -t ghcr.io/<org>/dprental-gateway:<git-sha> .
+```
+
+Runtime lắng nghe cổng `8080`, chạy non-root user `$APP_UID` và tích hợp sẵn `HEALTHCHECK` tự động thăm dò endpoint `/health/ready`.
+
+## CI/CD Gateway cho dev
+
+Workflow [gateway-dev.yml](.github/workflows/gateway-dev.yml) chạy khi tạo pull request hoặc push vào nhánh `gateway/develop-ci-cd`:
+
+1. **Validate**:
+   - Kiểm tra commit hiện tại đã chứa `origin/gateway/develop` mới nhất.
+   - Khôi phục, biên dịch và chạy kiểm thử tự động `Gateway/Gateway.sln`.
+   - Xây dựng thử nghiệm Docker runtime image.
+
+2. **Publish**:
+   - Khi push vào `gateway/develop-ci-cd`, workflow đăng nhập GHCR và xuất bản image bất biến:
+     ```text
+     ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-gateway:<git-sha>
+     ```
+
+3. **Deploy Dev**:
+   - Đồng bộ [deploy-gateway.sh](scripts/deploy-gateway.sh) lên máy chủ phát hành (`/opt/dprental/dev/scripts/deploy-gateway.sh`).
+   - Cập nhật **chỉ duy nhất biến `GATEWAY_IMAGE`** trong `/opt/dprental/dev/release.env`, bảo toàn nguyên vẹn mọi image khác (`AUTH_SERVICE_IMAGE`, `AUTH_MIGRATOR_IMAGE`...).
+   - Chỉ pull image `gateway` và khởi động lại duy nhất container này với `--no-deps --force-recreate gateway`.
+   - Chờ Gateway đạt trạng thái healthy và thực hiện kiểm thử khói (smoke tests) cả nội bộ lẫn qua domain công khai.
+
+Cấu hình GitHub Environment `dev` cần các secrets sau:
+
+```text
+DEV_VPS_HOST              # IP hoặc hostname VPS
+DEV_VPS_USER              # User deploy thuộc group docker
+DEV_VPS_SSH_PRIVATE_KEY   # Private key SSH riêng của user deploy
+DEV_VPS_KNOWN_HOSTS       # Dòng host key theo định dạng known_hosts
+DEV_VPS_PORT              # Tùy chọn, mặc định 22
+```
