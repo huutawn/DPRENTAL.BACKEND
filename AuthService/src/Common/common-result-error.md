@@ -203,7 +203,7 @@ Với `Result<TValue>`, có thể viết gọn hơn nữa (xem mục 4.5):
 
 ```csharp
 return user.Id;              // tự hiểu là Success
-return UserErrors.EmailTaken; // tự hiểu là Failure
+return AuthErrors.User.EmailAlreadyExists; // tự hiểu là Failure
 ```
 
 ### 4.2. Các thuộc tính
@@ -272,7 +272,7 @@ Nhờ hai dòng này, C# **tự bọc** giá trị hoặc lỗi thành `Result<T
 | Không có implicit | Có implicit |
 | --- | --- |
 | `return Result.Success(user.Id);` | `return user.Id;` |
-| `return Result.Failure<Guid>(UserErrors.EmailTaken);` | `return UserErrors.EmailTaken;` |
+| `return Result.Failure<Guid>(AuthErrors.User.EmailAlreadyExists);` | `return AuthErrors.User.EmailAlreadyExists;` |
 
 Code use case chỉ còn lại logic nghiệp vụ, dễ đọc hơn.
 
@@ -296,7 +296,7 @@ Tình huống: đăng ký tài khoản với email đã tồn tại.
 **① Domain: khai báo lỗi nghiệp vụ**
 
 ```csharp
-public static class UserErrors
+public static class AuthErrors.User
 {
     public static readonly Error EmailTaken =
         Error.Conflict("User.EmailTaken", "Email đã được sử dụng.");
@@ -312,7 +312,7 @@ public static class UserErrors
 public async Task<Result<Guid>> Handle(RegisterCommand cmd)
 {
     if (await _users.EmailExistsAsync(cmd.Email))
-        return UserErrors.EmailTaken;
+        return AuthErrors.User.EmailAlreadyExists;
 
     var user = User.Create(cmd.Email, _hasher.Hash(cmd.Password));
     await _users.AddAsync(user);
@@ -373,7 +373,7 @@ Những gì **không** đặt ở `Common`:
 
 | Thứ | Đặt ở |
 | --- | --- |
-| Lỗi cụ thể (`UserErrors.EmailTaken`) | Domain |
+| Lỗi cụ thể (`AuthErrors.User.EmailAlreadyExists`) | Domain |
 | Entity base, domain event | Domain |
 | `IPasswordHasher`, `ITokenService` | Application (interface) |
 | Đổi `ErrorType` sang HTTP | Api |

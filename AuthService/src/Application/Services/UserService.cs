@@ -1,20 +1,26 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Security.Cryptography;
+using System.Text;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Errors;
+using Dprental.AuthService.Domain.Enums;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Domain.Utils;
 using Microsoft.AspNetCore.Identity;
-using System.Diagnostics.CodeAnalysis;
+using Microsoft.Extensions.Options;
 
 namespace Dprental.AuthService.Application.Services;
 
 public sealed class UserService(
     IUserRepository userRepository,
+    IRoleRepository roleRepository,
     IPasswordHasher<User> passwordHasher,
+    IOptions<AdminBootstrapOptions> adminBootstrapOptions,
     TimeProvider timeProvider,
     ICorrelationIdProvider correlationIdProvider,
     IAuditLogRepository auditLogRepository,
@@ -28,9 +34,82 @@ public sealed class UserService(
         string email = NormalizeEmail(request.Email);
         if (await userRepository.EmailExistsAsync(email, cancellationToken))
         {
-            return UserErrors.EmailAlreadyExists;
+            return AuthErrors.User.EmailAlreadyExists;
         }
 
+        User user = CreateUserEntity(request, email);
+
+        try
+        {
+            await userRepository.CreateAsync(user, cancellationToken);
+        }
+        catch (DuplicateEmailException)
+        {
+            // Request khác đã đăng ký cùng email ngay sau bước kiểm tra ở trên.
+            return AuthErrors.User.EmailAlreadyExists;
+        }
+
+        return new AccountCreatedResponse(user.Id);
+    }
+
+    public async Task<Result<AccountCreatedResponse>> RegisterAdminAsync(
+        RegisterRequest request,
+        string? creationKey,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (!IsAdminCreationKeyValid(creationKey))
+        {
+            return AuthErrors.AdminBootstrap.InvalidKey;
+        }
+
+        string email = NormalizeEmail(request.Email);
+        if (await userRepository.EmailExistsAsync(email, cancellationToken))
+        {
+            return AuthErrors.User.EmailAlreadyExists;
+        }
+
+        Role? adminRole = await roleRepository.GetByNameAsync(SystemRoleCode.Admin, cancellationToken);
+        if (adminRole is null)
+        {
+            return AuthErrors.Role.RoleNotFound;
+        }
+
+        User user = CreateUserEntity(request, email);
+
+        try
+        {
+            await userRepository.CreateWithRoleAsync(user, adminRole.Id, cancellationToken);
+        }
+        catch (DuplicateEmailException)
+        {
+            return AuthErrors.User.EmailAlreadyExists;
+        }
+        catch (KeyNotFoundException)
+        {
+            return AuthErrors.Role.RoleNotFound;
+        }
+
+        return new AccountCreatedResponse(user.Id);
+    }
+
+    private bool IsAdminCreationKeyValid(string? providedKey)
+    {
+        string configuredKey = adminBootstrapOptions.Value.CreationKey;
+        if (string.IsNullOrWhiteSpace(configuredKey) || string.IsNullOrWhiteSpace(providedKey))
+        {
+            return false;
+        }
+
+        byte[] providedBytes = Encoding.UTF8.GetBytes(providedKey);
+        byte[] configuredBytes = Encoding.UTF8.GetBytes(configuredKey);
+
+        return CryptographicOperations.FixedTimeEquals(providedBytes, configuredBytes);
+    }
+
+    private User CreateUserEntity(RegisterRequest request, string email)
+    {
         User user = new()
         {
             Id = Guid.NewGuid(),
@@ -40,21 +119,10 @@ public sealed class UserService(
             IsActive = true,
         };
         user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
-
-        try
-        {
-            await userRepository.CreateAsync(user, cancellationToken);
-        }
-        catch (DuplicateEmailException)
-        {
-            // Request khác đã đăng ký cùng email ngay sau bước kiểm tra ở trên.
-            return UserErrors.EmailAlreadyExists;
-        }
-
-        return new AccountCreatedResponse(user.Id);
+        return user;
     }
 
-    public async Task<Guid?> AuthenticateAsync(LoginRequest request, CancellationToken cancellationToken)
+    public async Task<Guid?> AuthenticateAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -160,7 +228,7 @@ public sealed class UserService(
         return Result.Success();
     }
 
-    public async Task<Result> ResetPasswordAsync(ResetPasswordRequest request, CancellationToken cancellationToken)
+    public async Task<Result> ResetPasswordAsync(ResetPasswordRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         string corrId = correlationIdProvider.GetCorrelationId();
@@ -269,7 +337,7 @@ public sealed class UserService(
         User? user = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
         if (user is null)
         {
-            return UserErrors.UserNotFound;
+            return AuthErrors.User.NotFound;
         }
 
         UserOrganizationResponse[] organizations = UserAccessResolver.ActiveMemberships(user)

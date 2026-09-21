@@ -88,7 +88,8 @@ public sealed class CurrentUserEndpointTests
             ["Auth:Jwt:ActiveKeyId"] = "current",
             ["Auth:Jwt:Keys:0:KeyId"] = "current",
             ["Auth:Jwt:Keys:0:PublicKeyPem"] = rsa.ExportRSAPublicKeyPem(),
-            ["Auth:Jwt:Keys:0:PrivateKeyPem"] = rsa.ExportRSAPrivateKeyPem()
+            ["Auth:Jwt:Keys:0:PrivateKeyPem"] = rsa.ExportRSAPrivateKeyPem(),
+            ["Auth:AdminBootstrap:CreationKey"] = "test-bootstrap-creation-key"
         };
 
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>

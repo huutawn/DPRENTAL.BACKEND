@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Domain.Enums;
 using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Domain.Utils;
 using Microsoft.Extensions.Options;
@@ -9,28 +10,28 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace Dprental.AuthService.Application.Security.Jwt;
 
-/// <summary>Hiện thực phát hành access token bằng private RSA key của key ring.</summary>
+/// <summary>Hiện thực phát hành access token bằng private RSA key của key ring với claims rút gọn chuẩn.</summary>
 public sealed class RsaAccessTokenIssuer(
     IOptions<JwtOptions> options,
     RsaJwtKeyRing keyRing,
     TimeProvider timeProvider) : IAccessTokenIssuer
 {
-    /// <summary>Tên claim role ổn định, tương thích trực tiếp với JWT Bearer authorization.</summary>
-    private const string RoleClaimType = "role";
+    /// <summary>Tên claim role rút gọn thành "r".</summary>
+    private const string RoleClaimType = JwtClaimCatalog.Claims.Role;
 
-    /// <summary>Tên claim permission dùng trong <c>RequireClaim("perm", code)</c>.</summary>
-    private const string PermissionClaimType = "perm";
+    /// <summary>Tên claim permission rút gọn thành "p".</summary>
+    private const string PermissionClaimType = JwtClaimCatalog.Claims.Permission;
 
-    /// <summary>Tên claim organization context — một giá trị cho mỗi organization user đang active.</summary>
-    private const string OrganizationClaimType = "org";
+    /// <summary>Tên claim organization context rút gọn thành "o".</summary>
+    private const string OrganizationClaimType = JwtClaimCatalog.Claims.Organization;
 
-    /// <summary>Phân biệt token của user thật (không có claim này) và token của service (client_credentials).</summary>
-    private const string TokenUseClaimType = "token_use";
+    /// <summary>Tên claim token use rút gọn thành "u".</summary>
+    private const string TokenUseClaimType = JwtClaimCatalog.Claims.TokenUse;
 
-    /// <summary>Tên claim scope, dùng cho service token.</summary>
-    private const string ScopeClaimType = "scope";
+    /// <summary>Tên claim scope rút gọn thành "s".</summary>
+    private const string ScopeClaimType = JwtClaimCatalog.Claims.Scope;
 
-    /// <summary>Tạo access token RS256 với các standard claim và roles đã chuẩn hóa.</summary>
+    /// <summary>Tạo access token RS256 với các standard claim và alias đã chuẩn hóa.</summary>
     public IssuedAccessToken Issue(AccessTokenRequest request)
     {
         if (request.SubjectId == Guid.Empty)
@@ -38,7 +39,6 @@ public sealed class RsaAccessTokenIssuer(
             throw new ArgumentException("The token subject is required.", nameof(request));
         }
 
-        // Dùng TimeProvider để thời gian phát hành có thể kiểm thử được và nhất quán.
         DateTimeOffset issuedAtUtc = timeProvider.GetUtcNow();
         DateTimeOffset expiresAtUtc = issuedAtUtc.AddMinutes(options.Value.AccessTokenLifetimeMinutes);
         List<Claim> claims =
@@ -48,8 +48,18 @@ public sealed class RsaAccessTokenIssuer(
             new Claim(JwtRegisteredClaimNames.Iat, EpochTime.GetIntDate(issuedAtUtc.UtcDateTime).ToString(CultureInfo.InvariantCulture), ClaimValueTypes.Integer64)
         ];
 
-        AddDistinctClaims(claims, RoleClaimType, request.Roles);
-        AddDistinctClaims(claims, PermissionClaimType, request.Permissions);
+        // Ánh xạ role và permission sang alias ngắn từ catalog duy nhất sau khi đã trim
+        IReadOnlyList<string>? roleAliases = request.Roles?
+            .Where(r => !string.IsNullOrWhiteSpace(r))
+            .Select(r => JwtClaimCatalog.RoleAliases.ToAlias(r.Trim()))
+            .ToArray();
+        IReadOnlyList<string>? permissionAliases = request.Permissions?
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => JwtClaimCatalog.PermissionAliases.ToAlias(p.Trim()))
+            .ToArray();
+
+        AddDistinctClaims(claims, RoleClaimType, roleAliases);
+        AddDistinctClaims(claims, PermissionClaimType, permissionAliases);
         AddDistinctClaims(claims, ScopeClaimType, request.Scopes);
 
         if (request.OrganizationIds is not null)
@@ -62,10 +72,12 @@ public sealed class RsaAccessTokenIssuer(
 
         if (!string.IsNullOrWhiteSpace(request.TokenUse))
         {
-            claims.Add(new Claim(TokenUseClaimType, request.TokenUse));
+            string tokenUseValue = string.Equals(request.TokenUse, "service", StringComparison.OrdinalIgnoreCase)
+                ? JwtClaimCatalog.TokenUses.Service
+                : request.TokenUse.Trim();
+            claims.Add(new Claim(TokenUseClaimType, tokenUseValue));
         }
 
-        // SecurityKey mang ActiveKeyId nên JwtSecurityTokenHandler sẽ đưa kid vào JWT header.
         SigningCredentials signingCredentials = new(keyRing.ActiveSigningKey, SecurityAlgorithms.RsaSha256);
         JwtSecurityToken token = new(
             options.Value.Issuer,

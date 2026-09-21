@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Domain.Enums;
 
 [Table("Roles", Schema = "auth")]
 [Index(nameof(Name), IsUnique = true)]
@@ -16,6 +17,8 @@ public class Role
     public string Name { get; set; } = string.Empty;
 
     public string Description { get; set; } = string.Empty;
+    public RoleScope Scope { get; set; } = RoleScope.Global;
+
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
 

@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Dprental.AuthService.Api.Filters;
 using Dprental.AuthService.Api.Security;
@@ -41,6 +42,26 @@ public sealed class AuthController(
 
         return StatusCode(StatusCodes.Status201Created, result.Value);
     }
+    [HttpPost("admins")]
+    [ProducesResponseType<AccountCreatedResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<AccountCreatedResponse>> RegisterAdmin(
+        RegisterRequest request,
+        [FromHeader(Name = "X-Admin-Creation-Key")] string? adminCreationKey,
+        CancellationToken cancellationToken)
+    {
+        Result<AccountCreatedResponse> result = await userService.RegisterAdminAsync(request, adminCreationKey, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return StatusCode(StatusCodes.Status201Created, result.Value);
+    }
+
 
     [HttpPost("login")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -51,23 +72,17 @@ public sealed class AuthController(
         Guid? userId = await userService.AuthenticateAsync(request, cancellationToken);
         if (userId is null)
         {
-            return Problem(
-                statusCode: StatusCodes.Status401Unauthorized,
-                title: "Auth.InvalidCredentials",
-                detail: "Email hoặc mật khẩu không chính xác.");
+            return this.ToProblem(AuthErrors.Auth.InvalidCredentials);
         }
 
         AuthTokenPair? tokens = await authSessionService.CreateSessionAsync(userId.Value, cancellationToken);
         if (tokens is null)
         {
-            return Problem(
-                statusCode: StatusCodes.Status401Unauthorized,
-                title: "Auth.InactiveAccount",
-                detail: "Tài khoản không tồn tại hoặc đã bị khóa.");
+            return this.ToProblem(AuthErrors.Auth.InactiveAccount);
         }
         SetAuthCookies(tokens.AccessToken, tokens.RefreshToken);
 
-        return Ok(new { Message = "Đăng nhập thành công.", UserId = userId});
+        return Ok(new { Message = "Đăng nhập thành công.", UserId = userId });
     }
 
     [HttpPost("refresh")]
@@ -77,19 +92,13 @@ public sealed class AuthController(
     {
         if (!Request.Cookies.TryGetValue("refreshToken", out var currentRefreshToken))
         {
-            return Problem(
-                statusCode: StatusCodes.Status401Unauthorized,
-                title: "Auth.MissingCookie",
-                detail: "Không tìm thấy refresh token trong cookie.");
+            return this.ToProblem(AuthErrors.Auth.MissingCookie);
         }
 
         AuthTokenPair? tokens = await authSessionService.RefreshAsync(currentRefreshToken, cancellationToken);
         if (tokens is null)
         {
-            return Problem(
-                statusCode: StatusCodes.Status401Unauthorized,
-                title: "Auth.InvalidRefreshToken",
-                detail: "Refresh token không hợp lệ hoặc đã hết hạn.");
+            return this.ToProblem(AuthErrors.Auth.InvalidRefreshToken);
         }
 
         // Cập nhật lại Cookie với cặp token mới
@@ -303,8 +312,7 @@ public sealed class AuthController(
     [HttpPost("revoke-all")]
     public async Task<IActionResult> RevokeAllSessions(CancellationToken cancellationToken)
     {
-        // Lấy UserId từ Claims của Token hiện tại
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        string? userIdString = User.Identity?.Name ?? User.FindFirstValue(JwtRegisteredClaimNames.Sub);
         if (Guid.TryParse(userIdString, out Guid userId))
         {
             await authSessionService.RevokeAllSessionsForUserAsync(userId, cancellationToken);

@@ -10,6 +10,12 @@ public sealed class EfRoleRepository(AuthDbContext dbContext) : IRoleRepository
     public Task<bool> RoleExistsAsync(Guid roleId, CancellationToken cancellationToken = default) =>
         dbContext.Roles.AsNoTracking().AnyAsync(role => role.Id == roleId, cancellationToken);
 
+    public Task<Role?> GetByIdAsync(Guid roleId, CancellationToken cancellationToken = default) =>
+        dbContext.Roles.AsNoTracking().SingleOrDefaultAsync(role => role.Id == roleId, cancellationToken);
+
+    public Task<Role?> GetByNameAsync(string name, CancellationToken cancellationToken = default) =>
+        dbContext.Roles.AsNoTracking().SingleOrDefaultAsync(role => role.Name == name, cancellationToken);
+
     public async Task<IReadOnlyList<string>> GetPermissionCodesAsync(Guid roleId, CancellationToken cancellationToken = default) =>
         await dbContext.RolePermissions
             .AsNoTracking()
