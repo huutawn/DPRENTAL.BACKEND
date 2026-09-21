@@ -15,8 +15,8 @@ public sealed class ServiceIdentityService(
     IServicePrincipalRepository servicePrincipalRepository,
     IAccessTokenIssuer accessTokenIssuer) : IServiceIdentityService
 {
-    /// <summary>Giá trị claim <c>token_use</c> đánh dấu đây là service token, không phải user token.</summary>
-    private const string ServiceTokenUse = "service";
+    /// <summary>Giá trị claim <c>token_use</c> (rút gọn thành "u") đánh dấu đây là service token.</summary>
+    private const string ServiceTokenUse = JwtClaimCatalog.TokenUses.Service;
 
     public async Task<Result<ServiceTokenResponse>> IssueTokenAsync(ServiceTokenRequest request, CancellationToken cancellationToken = default)
     {

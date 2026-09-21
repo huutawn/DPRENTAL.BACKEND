@@ -48,7 +48,7 @@ public sealed class RsaJwtAuthTests
         Assert.Equal(SecurityAlgorithms.RsaSha256, rawToken.Header.Alg);
         Assert.Equal(options.ActiveKeyId, rawToken.Header.Kid);
         Assert.Equal(subjectId.ToString("D"), principal.FindFirstValue(JwtRegisteredClaimNames.Sub));
-        Assert.Equal(["admin", "staff"], principal.FindAll("role").Select(claim => claim.Value));
+        Assert.Equal(["adm", "staff"], principal.FindAll(JwtClaimCatalog.Claims.Role).Select(claim => claim.Value));
         Assert.NotNull(principal.FindFirst(JwtRegisteredClaimNames.Jti));
         Assert.NotNull(principal.FindFirst(JwtRegisteredClaimNames.Iat));
         Assert.Equal(now.AddMinutes(options.AccessTokenLifetimeMinutes), result.ExpiresAtUtc);
@@ -323,7 +323,7 @@ public sealed class RsaJwtAuthTests
             ValidateLifetime = false,
             ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
             NameClaimType = JwtRegisteredClaimNames.Sub,
-            RoleClaimType = "role"
+            RoleClaimType = JwtClaimCatalog.Claims.Role
         }, out _);
     }
 
