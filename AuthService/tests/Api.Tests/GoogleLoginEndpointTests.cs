@@ -71,6 +71,25 @@ public sealed class GoogleLoginEndpointTests
     }
 
     [Fact]
+    public async Task GoogleLoginUsesTrustedForwardedOriginForGoogleRedirectUri()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory(googleConfigured: true);
+        using HttpClient client = CreateClient(factory);
+        using HttpRequestMessage request = new(
+            HttpMethod.Get,
+            $"/api/v1/auth/google/login?returnUrl={Uri.EscapeDataString(FrontendOrigin)}");
+        request.Headers.TryAddWithoutValidation("X-Forwarded-Proto", "https");
+        request.Headers.TryAddWithoutValidation("X-Forwarded-Host", "dev-api.lazyops.cloud");
+
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Uri location = response.Headers.Location ?? throw new InvalidOperationException("Missing Location header.");
+        Dictionary<string, StringValues> query = QueryHelpers.ParseQuery(location.Query);
+        Assert.Equal("https://dev-api.lazyops.cloud/signin-google", query["redirect_uri"].ToString());
+    }
+
+    [Fact]
     public async Task GoogleLoginWithoutReturnUrlFallsBackToFirstAllowedOrigin()
     {
         using WebApplicationFactory<Program> factory = CreateFactory(googleConfigured: true);
@@ -272,6 +291,9 @@ public sealed class GoogleLoginEndpointTests
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(settings));
+            // Forwarded-header registration reads host configuration during Program startup.
+            builder.UseSetting("Auth:ForwardedHeaders:Enabled", "true");
+            builder.UseSetting("Auth:ForwardedHeaders:KnownNetworks:0", "127.0.0.0/8");
             if (googleConfigured)
             {
                 // Đọc lúc đăng ký service trong Program.cs nên phải là host setting, không phải cấu hình nạp trễ.
