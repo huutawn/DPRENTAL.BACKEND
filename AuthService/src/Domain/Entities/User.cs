@@ -42,4 +42,7 @@ public class User
 
     /// <summary>Các tài khoản bên ngoài (ví dụ Google) đã liên kết với user này.</summary>
     public ICollection<ExternalLogin> ExternalLogins { get; set; } = new List<ExternalLogin>();
+
+    /// <summary>Các ticket ngắn hạn đã cấp sau khi đăng nhập Google.</summary>
+    public ICollection<GoogleLoginTicket> GoogleLoginTickets { get; set; } = new List<GoogleLoginTicket>();
 }

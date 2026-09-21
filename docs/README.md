@@ -32,7 +32,7 @@ Domain là nơi sở hữu DTO, entity/model, utility/validator và persistence 
 
    ```bash
    dotnet user-secrets set "ConnectionStrings:Postgres" \
-     "Host=localhost;Port=5432;Database=authservice;Username=authservice;Password=<password-trong-.env>" \
+     "Host=localhost;Port=5433;Database=authservice;Username=authservice;Password=<password-trong-.env>" \
      --project AuthService/src/Api/AuthService.Api.csproj
    ```
 
@@ -158,23 +158,27 @@ Sampler là `ParentBased(TraceIdRatioBased)`: trace đã lấy mẫu từ Gatewa
 
 ## Đăng nhập bằng Google
 
-Đăng nhập Google dùng OAuth 2.0 authorization code kèm PKCE, do backend xử lý. Sau khi Google xác nhận danh tính, AuthService vẫn phát JWT và cookie `accessToken`/`refreshToken` như `POST /api/v1/auth/login`.
+Đăng nhập Google dùng OAuth 2.0 authorization code kèm PKCE, do backend xử lý. Sau khi Google xác nhận danh tính, AuthService tạo ticket opaque dùng một lần trong 90 giây rồi chuyển browser về Next BFF. Next BFF gọi exchange ở server, nhận JWT/refresh token và tự set cookie `HttpOnly` trên domain frontend để SSR đọc được.
 
 ```text
 GET /api/v1/auth/google/login?returnUrl=<url>     # chuyển trình duyệt sang Google
 GET /signin-google                                 # Google gọi về, do thư viện xử lý
-GET /api/v1/auth/google/callback?returnUrl=<url>   # tạo phiên, set cookie, chuyển về returnUrl
+GET /api/v1/auth/google/callback?returnUrl=<url>   # tạo ticket, chuyển về callback BFF cùng origin
+POST /api/v1/auth/google/exchange                  # Next BFF đổi { ticket } lấy token pair
 ```
 
-Lỗi được trả bằng cách chuyển về `returnUrl?error=<mã lỗi>` (ví dụ `ExternalLogin.EmailNotVerified`) vì lúc này user đang ở trên trình duyệt. `returnUrl` phải thuộc `Auth:Google:AllowedReturnUrls` (so sánh theo origin), nếu không endpoint trả `400`.
+Redirect thành công dùng callback đã chọn trong `BffCallbackUrls` với `?ticket=<opaque>&returnUrl=<url>`; token không có mặt trong URL. Lỗi chuyển về cùng callback với `error=<mã lỗi>` (ví dụ `ExternalLogin.EmailNotVerified`). `returnUrl` phải thuộc `Auth:Google:AllowedReturnUrls` và AuthService chọn callback có cùng origin; nếu không endpoint trả `400`. Exchange thiếu ticket trả `400`; ticket sai, hết hạn hoặc đã dùng trả `401` cùng một lỗi chung.
 
 Cấu hình (chưa có `ClientId` và `ClientSecret` thì tính năng tắt và cả hai endpoint trả `404`):
 
 ```text
 Auth:Google:ClientId                  # có thể để trong appsettings, không phải bí mật
 Auth:Google:ClientSecret              # chỉ cấp qua User Secrets hoặc biến môi trường
-Auth:Google:AllowedReturnUrls:0       # mặc định http://localhost:3000
+Auth:Google:AllowedReturnUrls:0       # frontend origin, ví dụ http://localhost:3000
+Auth:Google:BffCallbackUrls:0         # callback BFF của origin trên, ví dụ http://localhost:3000/api/auth/google/callback
 ```
+
+Khi Google được bật, mỗi origin trong `AllowedReturnUrls` phải có đúng một callback HTTP(S) cùng origin trong `BffCallbackUrls`; cấu hình sai làm service fail ngay khi khởi động.
 
 Trên Google Cloud Console tạo OAuth client loại **Web application**. `Authorized redirect URIs` phải là callback của Google middleware, không phải endpoint controller `google/callback`:
 
@@ -205,9 +209,13 @@ Production truyền các biến môi trường sau vào AuthService; không đư
 Auth__Google__ClientId=<google-oauth-client-id>
 Auth__Google__ClientSecret=<google-oauth-client-secret>
 Auth__Google__AllowedReturnUrls__0=https://dev-app.lazyops.cloud
-# Chỉ thêm khi môi trường này cần hỗ trợ frontend local:
+# Chỉ thêm khi môi trường này cần hỗ trợ frontend local đồng thời:
 Auth__Google__AllowedReturnUrls__1=http://localhost:3000
+Auth__Google__BffCallbackUrls__0=https://dev-app.lazyops.cloud/api/auth/google/callback
+Auth__Google__BffCallbackUrls__1=http://localhost:3000/api/auth/google/callback
 ```
+
+`WebApplication.CreateBuilder` tự nạp environment variables sau `appsettings*.json`, nên các biến trên vẫn inject được vào artifact đã build/publish. `.env` hiện chỉ là input cho Docker Compose tạo Postgres/Valkey, không tự đi vào `dotnet run` hay image AuthService; không thêm cấu hình Google vào `.env` trừ khi Docker Compose được mở rộng để truyền chúng vào service AuthService. Local development nên cấp `ClientId`/`ClientSecret` bằng User Secrets; `appsettings.json` đã có cặp localhost không nhạy cảm.
 
 Không có biến cấu hình redirect URI: Google handler tạo URI từ request host và callback path `/signin-google`. Khi TLS kết thúc ở reverse proxy, proxy phải chuyển `X-Forwarded-Proto: https` và application phải xử lý forwarded headers trước authentication; nếu không handler có thể gửi `http://dev-api.lazyops.cloud/signin-google` cho Google và bị từ chối do không khớp redirect URI.
 

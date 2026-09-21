@@ -24,7 +24,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-PostgreSQL lắng nghe ở `localhost:5432`; Valkey (Redis-compatible) ở `localhost:6379`. `.env` không được commit.
+PostgreSQL lắng nghe ở `localhost:5433`; Valkey (Redis-compatible) ở `localhost:6379`. `.env` không được commit.
 
 Trước khi chạy API, cấp connection string, RSA JWT key ring bằng User Secrets hoặc secret manager theo [hướng dẫn local](docs/README.md#chạy-api-cục-bộ). Không đặt password hoặc signing key vào `appsettings*.json`.
 
