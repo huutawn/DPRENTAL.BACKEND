@@ -1,3 +1,5 @@
+using Dprental.AuthService.Domain.Entities;
+
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
@@ -52,9 +54,15 @@ public sealed class RoleAssignmentService(IRoleRepository roleRepository) : IRol
             return Result.Failure(RoleErrors.CannotSelfAssign);
         }
 
-        if (!await roleRepository.RoleExistsAsync(request.RoleId, cancellationToken))
+        Role? role = await roleRepository.GetByIdAsync(request.RoleId, cancellationToken);
+        if (role is null)
         {
             return Result.Failure(RoleErrors.RoleNotFound);
+        }
+
+        if (role.Scope != RoleScope.Global)
+        {
+            return Result.Failure(RoleErrors.InvalidScope);
         }
 
         IReadOnlyList<string> rolePermissions = await roleRepository.GetPermissionCodesAsync(request.RoleId, cancellationToken);

@@ -21,4 +21,7 @@ public static class RoleErrors
 
     public static readonly Error AssignmentFailed =
         Error.Failure("Role.AssignmentFailed", "Không thể gán role — user hoặc role không tồn tại.");
+
+    public static readonly Error InvalidScope =
+        Error.Validation("Role.InvalidScope", "Chỉ có thể gán role toàn cục qua endpoint này.");
 }
