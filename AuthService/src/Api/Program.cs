@@ -4,9 +4,12 @@ using Dprental.AuthService.Api.Routing;
 using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.DependencyInjection;
 using Dprental.AuthService.Domain.Data;
+using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Domain.DependencyInjection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Domain.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,9 +30,15 @@ builder.Services.AddCors(options =>
     });
 });
 builder.Services.AddControllers(options => options.Conventions.Add(new ApiRoutePrefixConvention(ApiRoutes.Prefix)));
+
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICorrelationIdProvider, CorrelationIdProvider>();
+builder.Services.AddScoped<IAuditLogRepository, EfAuditLogRepository>();
+builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options => options.InferSecuritySchemes());
+builder.Services.AddScoped<IRecoveryTokenRepository, EfRecoveryTokenRepository>();
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AuthDbContext>(
         "postgres",

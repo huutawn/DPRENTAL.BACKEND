@@ -1,4 +1,5 @@
 using Dprental.AuthService.Application.Services;
+using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.DTOs.User;
@@ -6,6 +7,7 @@ using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Errors;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Identity;
 using Xunit;
 
@@ -19,7 +21,7 @@ public sealed class UserServiceTests
         DateTimeOffset now = new(2026, 9, 17, 9, 0, 0, TimeSpan.Zero);
         RecordingUserRepository repository = new();
         PasswordHasher<User> hasher = new();
-        UserService service = new(repository, hasher, new FixedTimeProvider(now));
+        UserService service = CreateService(repository, hasher, new FixedTimeProvider(now));
 
         Result<AccountCreatedResponse> result = await service.RegisterAsync(
             new RegisterRequest("  Tan.Len@Example.COM ", "Matkhau123!", "  Huynh Tan Len "));
@@ -39,7 +41,7 @@ public sealed class UserServiceTests
     public async Task RegisterAsyncExistingEmailReturnsConflictWithoutSaving()
     {
         RecordingUserRepository repository = new() { ExistingEmail = "tan.len@example.com" };
-        UserService service = new(repository, new PasswordHasher<User>(), TimeProvider.System);
+        UserService service = CreateService(repository, new PasswordHasher<User>(), TimeProvider.System);
 
         Result<AccountCreatedResponse> result = await service.RegisterAsync(
             new RegisterRequest("TAN.LEN@example.com", "Matkhau123!", "Huynh Tan Len"));
@@ -54,7 +56,7 @@ public sealed class UserServiceTests
     public async Task RegisterAsyncConcurrentDuplicateRejectedByDatabaseReturnsConflict()
     {
         RecordingUserRepository repository = new() { RejectCreate = true };
-        UserService service = new(repository, new PasswordHasher<User>(), TimeProvider.System);
+        UserService service = CreateService(repository, new PasswordHasher<User>(), TimeProvider.System);
 
         Result<AccountCreatedResponse> result = await service.RegisterAsync(
             new RegisterRequest("tan.len@example.com", "Matkhau123!", "Huynh Tan Len"));
@@ -96,7 +98,9 @@ public sealed class UserServiceTests
             Role = CreateRole("Viewer", "orders.view"),
             Status = MembershipStatus.Suspended,
         });
-        UserService service = new(new RecordingUserRepository { ProfileUser = user }, new PasswordHasher<User>(), TimeProvider.System);
+
+        // Đã sửa lại để gọi CreateService thay vì new UserService(...)
+        UserService service = CreateService(new RecordingUserRepository { ProfileUser = user }, new PasswordHasher<User>(), TimeProvider.System);
 
         Result<CurrentUserResponse> result = await service.GetCurrentUserProfileAsync(userId);
 
@@ -119,13 +123,35 @@ public sealed class UserServiceTests
     [Fact]
     public async Task GetCurrentUserProfileAsyncMissingOrInactiveUserReturnsNotFound()
     {
-        UserService service = new(new RecordingUserRepository(), new PasswordHasher<User>(), TimeProvider.System);
+        // Đã sửa lại để gọi CreateService thay vì new UserService(...)
+        UserService service = CreateService(new RecordingUserRepository(), new PasswordHasher<User>(), TimeProvider.System);
 
         Result<CurrentUserResponse> result = await service.GetCurrentUserProfileAsync(Guid.NewGuid());
 
         Assert.True(result.IsFailure);
         Assert.Equal(UserErrors.UserNotFound, result.Error);
         Assert.Equal(ErrorType.NotFound, result.Error.Type);
+    }
+
+    // ========================================================================
+    // HÀM TIỆN ÍCH TẠO SERVICE ĐỂ DÙNG CHUNG TRONG CÁC TEST CASE
+    // ========================================================================
+    private static UserService CreateService(
+        IUserRepository userRepository,
+        IPasswordHasher<User> passwordHasher,
+        TimeProvider timeProvider)
+    {
+        // Vì RegisterAsync và GetCurrentUserProfileAsync KHÔNG gọi đến 3 dependency này,
+        // nên ta có thể truyền null! để test pass. (Nếu các hàm khác cần, ta sẽ phải dùng Mock/Fake).
+        return new UserService(
+            userRepository,
+            passwordHasher,
+            timeProvider,
+            correlationIdProvider: null!,
+            auditLogRepository: null!,
+            authSessionRepository: null!,
+            recoveryTokenRepository: null!
+        );
     }
 
     private static Role CreateRole(string name, params string[] permissionCodes)

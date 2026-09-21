@@ -8,6 +8,7 @@ using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
@@ -274,6 +275,47 @@ public sealed class AuthController(
         Response.Headers["Referrer-Policy"] = "no-referrer";
         return Redirect(destination);
     }
+    [HttpPost("forgot-password")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ForgotPassword([FromBody] RequestPasswordResetRequest request, CancellationToken cancellationToken)
+    {
+        var result = await userService.RequestPasswordResetAsync(request, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        // Luôn trả về thông báo thành công chung chung để chống dò quét email (Email Enumeration)
+        return Ok(new { Message = "Yêu cầu khôi phục mật khẩu đã được xử lý." });
+    }
+
+    [HttpPost("reset-password")]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request, CancellationToken cancellationToken)
+    {
+        var result = await userService.ResetPasswordAsync(request, cancellationToken);
+        if (result.IsFailure) return this.ToProblem(result.Error);
+        return Ok(new { Message = "Đã đặt lại mật khẩu và hủy toàn bộ phiên cũ." });
+    }
+
+    [Authorize]
+    [HttpPost("revoke-all")]
+    public async Task<IActionResult> RevokeAllSessions(CancellationToken cancellationToken)
+    {
+        // Lấy UserId từ Claims của Token hiện tại
+        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (Guid.TryParse(userIdString, out Guid userId))
+        {
+            await authSessionService.RevokeAllSessionsForUserAsync(userId, cancellationToken);
+        }
+        return NoContent();
+    }
+
+    private ObjectResult NotImplementedYet() => Problem(
+        statusCode: StatusCodes.Status501NotImplemented,
+        title: "Auth.NotImplemented",
+        detail: "Endpoint chưa nối logic.");
 
     private void SetAuthCookies(string accessToken, string refreshToken)
     {

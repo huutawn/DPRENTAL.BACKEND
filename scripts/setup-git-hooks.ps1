@@ -14,6 +14,7 @@ git config --local core.hooksPath .githooks
 if ($LASTEXITCODE -ne 0) {
     throw 'Thiết lập Git hook: không thể cấu hình core.hooksPath.'
 }
+"@
 
 $hooksPath = (git config --local --get core.hooksPath).Trim()
 if ($hooksPath -ne '.githooks') {
