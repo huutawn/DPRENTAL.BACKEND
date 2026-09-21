@@ -20,4 +20,6 @@ public interface IAuthSessionRepository : IRepo<Session, Guid>
     Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken);
 
     Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default);
 }

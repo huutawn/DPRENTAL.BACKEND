@@ -1,23 +1,30 @@
+using System.Security.Claims;
 using Dprental.AuthService.Api.Filters;
+using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Mapping;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.Models;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options; 
-using System.Security.Claims;
+using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Options;
 
 namespace Dprental.AuthService.Api.Controllers;
 
 [ApiController]
-[Route("api/v1/auth")]
+[Route("")]
 [Produces("application/json")]
 public sealed class AuthController(
     IAuthSessionService authSessionService,
     IUserService userService,
+    IServiceIdentityService serviceIdentityService,
+    IExternalLoginService externalLoginService,
     IOptions<JwtOptions> jwtOptions,
+    IOptions<GoogleAuthOptions> googleOptions,
     IWebHostEnvironment environment) : ControllerBase
 {
     [HttpPost("register")]
@@ -106,6 +113,123 @@ public sealed class AuthController(
         Response.Cookies.Delete("refreshToken", CreateCookieOptions(TimeSpan.Zero));
 
         return NoContent();
+    }
+
+    /// <summary>OAuth2 client_credentials — service khác tự xin token bằng client_id/client_secret, không có user.</summary>
+    [HttpPost("service-token")]
+    [ProducesResponseType<ServiceTokenResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<ServiceTokenResponse>> ServiceToken(ServiceTokenRequest request, CancellationToken cancellationToken)
+    {
+        Result<ServiceTokenResponse> result = await serviceIdentityService.IssueTokenAsync(request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Bắt đầu đăng nhập Google: kiểm tra returnUrl rồi chuyển trình duyệt sang trang đăng nhập của Google.</summary>
+    [HttpGet("google/login")]
+    [ProducesResponseType(StatusCodes.Status302Found)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public IActionResult GoogleLogin([FromQuery] string? returnUrl)
+    {
+        GoogleAuthOptions google = googleOptions.Value;
+        if (!google.IsConfigured)
+        {
+            return NotFound();
+        }
+
+        string target = returnUrl ?? (google.AllowedReturnUrls.Count > 0 ? google.AllowedReturnUrls[0] : "/");
+        if (!ReturnUrlValidator.IsAllowed(target, google.AllowedReturnUrls))
+        {
+            return InvalidReturnUrl();
+        }
+
+        // Sau khi handler Google xử lý xong /signin-google, trình duyệt được chuyển tiếp tới GoogleCallback.
+        AuthenticationProperties properties = new()
+        {
+            RedirectUri = Url.Action(nameof(GoogleCallback), new { returnUrl = target })
+        };
+
+        return Challenge(properties, GoogleDefaults.AuthenticationScheme);
+    }
+
+    /// <summary>Nhận danh tính Google, tìm/liên kết/tạo user, tạo phiên đăng nhập rồi chuyển về frontend.</summary>
+    [HttpGet("google/callback")]
+    [ProducesResponseType(StatusCodes.Status302Found)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GoogleCallback([FromQuery] string? returnUrl, CancellationToken cancellationToken)
+    {
+        GoogleAuthOptions google = googleOptions.Value;
+        if (!google.IsConfigured)
+        {
+            return NotFound();
+        }
+
+        if (!ReturnUrlValidator.IsAllowed(returnUrl, google.AllowedReturnUrls))
+        {
+            return InvalidReturnUrl();
+        }
+
+        // Cookie tạm chỉ dùng một lần: đọc xong là xóa ngay dù kết quả thế nào.
+        AuthenticateResult external = await HttpContext.AuthenticateAsync(GoogleAuthenticationExtensions.ExternalScheme);
+        await HttpContext.SignOutAsync(GoogleAuthenticationExtensions.ExternalScheme);
+
+        ClaimsPrincipal? principal = external.Principal;
+        string? subject = principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!external.Succeeded || principal is null || string.IsNullOrWhiteSpace(subject))
+        {
+            return Redirect(WithError(returnUrl, "Auth.ExternalFailed"));
+        }
+
+        ExternalIdentity identity = new(
+            GoogleDefaults.AuthenticationScheme,
+            subject,
+            principal.FindFirstValue(ClaimTypes.Email),
+            string.Equals(principal.FindFirstValue(GoogleClaims.EmailVerified), bool.TrueString, StringComparison.OrdinalIgnoreCase),
+            principal.FindFirstValue(ClaimTypes.Name));
+
+        Result<Guid> result = await externalLoginService.SignInAsync(identity, cancellationToken);
+        if (result.IsFailure)
+        {
+            return Redirect(WithError(returnUrl, result.Error.Code));
+        }
+
+        AuthTokenPair? tokens = await authSessionService.CreateSessionAsync(result.Value, cancellationToken);
+        if (tokens is null)
+        {
+            return Redirect(WithError(returnUrl, "Auth.InactiveAccount"));
+        }
+
+        SetAuthCookies(tokens.AccessToken, tokens.RefreshToken);
+        return Redirect(returnUrl);
+    }
+
+    private ObjectResult InvalidReturnUrl() => Problem(
+        statusCode: StatusCodes.Status400BadRequest,
+        title: "Auth.InvalidReturnUrl",
+        detail: "returnUrl không nằm trong danh sách được phép.");
+
+    /// <summary>Gắn mã lỗi vào query của returnUrl; lúc này user đang ở trên trình duyệt nên chuyển hướng thay vì trả JSON.</summary>
+    private static string WithError(string returnUrl, string errorCode) =>
+        QueryHelpers.AddQueryString(returnUrl, "error", errorCode);
+
+    [HttpPost("forgot-password")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ForgotPassword([FromBody] RequestPasswordResetRequest request, CancellationToken cancellationToken)
+    {
+        var result = await userService.RequestPasswordResetAsync(request, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        // Luôn trả về thông báo thành công chung chung để chống dò quét email (Email Enumeration)
+        return Ok(new { Message = "Yêu cầu khôi phục mật khẩu đã được xử lý." });
     }
 
     [HttpPost("reset-password")]

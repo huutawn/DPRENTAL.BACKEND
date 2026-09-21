@@ -1,6 +1,7 @@
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
+using Dprental.AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Errors;
 using Dprental.AuthService.Domain.Exceptions;
@@ -17,7 +18,8 @@ public sealed class UserService(
     TimeProvider timeProvider,
     ICorrelationIdProvider correlationIdProvider,
     IAuditLogRepository auditLogRepository,
-    IAuthSessionRepository authSessionRepository) : IUserService
+    IAuthSessionRepository authSessionRepository,
+    IRecoveryTokenRepository recoveryTokenRepository) : IUserService    
 {
     public async Task<Result<AccountCreatedResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {
@@ -60,28 +62,34 @@ public sealed class UserService(
         User? user = await userRepository.FindByEmailAsync(email, cancellationToken);
         string corrId = correlationIdProvider.GetCorrelationId();
 
+        // 1. Kiểm tra tài khoản tồn tại
         if (user is null)
         {
             await LogAuditAsync(null, email, "Login", "Failed_UserNotFound", corrId, cancellationToken);
             return null;
         }
 
+        // 2. Kiểm tra trạng thái kích hoạt
         if (!user.IsActive)
         {
             await LogAuditAsync(user.Id, user.Id.ToString(), "Login", "Failed_AccountDisabled", corrId, cancellationToken);
             return null;
         }
 
+        // 3. Kiểm tra trạng thái khóa tài khoản (Lockout)
         if (user.LockoutEnd is not null && user.LockoutEnd > timeProvider.GetUtcNow())
         {
             await LogAuditAsync(user.Id, user.Id.ToString(), "Login", "Failed_LockedOut", corrId, cancellationToken);
             return null;
         }
 
+        // 4. Xác thực mật khẩu
         PasswordVerificationResult verification = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
         if (verification is not PasswordVerificationResult.Success and not PasswordVerificationResult.SuccessRehashNeeded)
         {
             user.AccessFailedCount++;
+
+            // Khóa 15 phút nếu sai 5 lần
             if (user.AccessFailedCount >= 5)
             {
                 user.LockoutEnd = timeProvider.GetUtcNow().AddMinutes(15);
@@ -92,8 +100,16 @@ public sealed class UserService(
             return null;
         }
 
+        // 5. Cập nhật lại Hash nếu thuật toán mã hóa thay đổi (SuccessRehashNeeded)
+        if (verification == PasswordVerificationResult.SuccessRehashNeeded)
+        {
+            user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
+        }
+
+        // 6. Đăng nhập thành công -> Reset bộ đếm lỗi và thời gian khóa
         user.AccessFailedCount = 0;
         user.LockoutEnd = null;
+
         await userRepository.UpdateAsync(user, cancellationToken);
         await LogAuditAsync(user.Id, user.Id.ToString(), "Login", "Success", corrId, cancellationToken);
 
@@ -121,44 +137,82 @@ public sealed class UserService(
             return Result.Success();
         }
 
-        // Tạo token mới, lưu hash
+        // Tạo mã token raw (để gửi qua email cho user)
         string rawToken = RefreshTokenUtility.Create();
-        user.PasswordResetToken = RefreshTokenUtility.ComputeHash(rawToken);
-        user.ResetTokenExpiry = timeProvider.GetUtcNow().AddMinutes(30);
-        await userRepository.UpdateAsync(user, cancellationToken);
+
+        // Tạo entity RecoveryToken lưu vào database (chỉ lưu mã băm Hash)
+        RecoveryToken recoveryToken = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            TokenHash = RefreshTokenUtility.ComputeHash(rawToken),
+            Purpose = "ResetPassword",
+            CreatedAtUtc = timeProvider.GetUtcNow().UtcDateTime,
+            ExpiresAtUtc = timeProvider.GetUtcNow().UtcDateTime.AddMinutes(30) // TTL 30 phút
+        };
+
+        await recoveryTokenRepository.AddAsync(recoveryToken, cancellationToken);
 
         await LogAuditAsync(user.Id, user.Id.ToString(), "Password_ResetRequest", "Success", corrId, cancellationToken);
+
+        // Lưu ý: Ở ứng dụng thực tế, bạn sẽ gọi một EmailService ở đây để gửi biến `rawToken` cho người dùng.
+
         return Result.Success();
     }
 
     public async Task<Result> ResetPasswordAsync(ResetPasswordRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-
-        User? user = await userRepository.FindByEmailAsync(NormalizeEmail(request.Email), cancellationToken);
         string corrId = correlationIdProvider.GetCorrelationId();
 
-        if (user is null || string.IsNullOrWhiteSpace(user.PasswordResetToken) || user.PasswordResetToken != request.Token)
+        // 1. Tìm User
+        User? user = await userRepository.FindByEmailAsync(NormalizeEmail(request.Email), cancellationToken);
+        if (user is null)
         {
-            await LogAuditAsync(user?.Id, user?.Id.ToString() ?? request.Email, "Password_Reset", "Failed_InvalidToken", corrId, cancellationToken);
-            return Result.Failure(Error.Unauthorized("Auth.ResetFailed", "Mã không hợp lệ."));
+            // Ghi log chung chung để chống dò quét email (Email Enumeration)
+            await LogAuditAsync(null, request.Email, "Password_Reset", "Failed_UserNotFound", corrId, cancellationToken);
+            return Result.Failure(Error.Unauthorized("Auth.ResetFailed", "Mã không hợp lệ hoặc tài khoản không tồn tại."));
         }
 
-        if (user.ResetTokenExpiry is null || user.ResetTokenExpiry <= timeProvider.GetUtcNow())
+        // 2. Băm token từ request để tìm kiếm trong DB (Tuyệt đối không tìm bằng token raw)
+        string incomingTokenHash = RefreshTokenUtility.ComputeHash(request.Token); // Gọi hàm băm SHA256 tương tự như RefreshToken
+
+        // 3. Tìm token trong bảng RecoveryTokens
+        RecoveryToken? recoveryToken = await recoveryTokenRepository.FindByHashAsync(incomingTokenHash, cancellationToken);
+
+        // 4. Validate Token (Có tồn tại? Của đúng User? Đúng mục đích? Đã bị dùng chưa?)
+        if (recoveryToken is null ||
+            recoveryToken.UserId != user.Id ||
+            recoveryToken.Purpose != "ResetPassword" ||
+            recoveryToken.UsedAtUtc is not null)
+        {
+            await LogAuditAsync(user.Id, user.Id.ToString(), "Password_Reset", "Failed_InvalidOrReusedToken", corrId, cancellationToken);
+            return Result.Failure(Error.Unauthorized("Auth.ResetFailed", "Mã khôi phục không hợp lệ hoặc đã được sử dụng."));
+        }
+
+        // 5. Kiểm tra thời hạn (TTL)
+        if (recoveryToken.ExpiresAtUtc <= timeProvider.GetUtcNow().UtcDateTime)
         {
             await LogAuditAsync(user.Id, user.Id.ToString(), "Password_Reset", "Failed_TokenExpired", corrId, cancellationToken);
-            return Result.Failure(Error.Unauthorized("Auth.TokenExpired", "Mã đã hết hạn."));
+            return Result.Failure(Error.Unauthorized("Auth.TokenExpired", "Mã khôi phục đã hết hạn."));
         }
 
+        // 6. Đổi mật khẩu & Reset Abuse Protection (Mở khóa tài khoản)
         user.PasswordHash = passwordHasher.HashPassword(user, request.NewPassword);
-        user.PasswordResetToken = null;
-        user.ResetTokenExpiry = null;
         user.AccessFailedCount = 0;
         user.LockoutEnd = null;
         await userRepository.UpdateAsync(user, cancellationToken);
 
+        // 7. Đánh dấu Token đã sử dụng (One-time use)
+        recoveryToken.UsedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
+        await recoveryTokenRepository.UpdateAsync(recoveryToken, cancellationToken);
+
+        // 8. Kích hoạt Kill Switch: Đăng xuất tất cả các thiết bị sau khi đổi mật khẩu
         await authSessionRepository.RevokeAllSessionsForUserAsync(user.Id, cancellationToken);
+
+        // 9. Ghi Audit Log thành công
         await LogAuditAsync(user.Id, user.Id.ToString(), "Password_Reset", "Success", corrId, cancellationToken);
+
         return Result.Success();
     }
 
@@ -210,6 +264,33 @@ public sealed class UserService(
         }, cancellationToken);
     }
 
+    public async Task<Result<CurrentUserResponse>> GetCurrentUserProfileAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        User? user = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return UserErrors.UserNotFound;
+        }
+
+        UserOrganizationResponse[] organizations = UserAccessResolver.ActiveMemberships(user)
+            .Select(membership => new UserOrganizationResponse(
+                membership.OrganizationId,
+                membership.Organization.Name,
+                membership.Organization.Slug,
+                membership.Organization.Type,
+                membership.Role.Name))
+            .ToArray();
+
+        return new CurrentUserResponse(
+            user.Id,
+            user.Email,
+            user.FullName,
+            UserAccessResolver.Roles(user),
+            UserAccessResolver.Permissions(user),
+            organizations,
+            user.CreatedAt);
+    }
+
     [SuppressMessage("Globalization", "CA1308:Normalize strings to uppercase", Justification = "Email được lưu và so sánh ở dạng chữ thường theo quy ước phổ biến.")]
-    private static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
+    internal static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
 }

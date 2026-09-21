@@ -1,36 +1,24 @@
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 
-$repoRoot = git rev-parse --show-toplevel
-if (-not $repoRoot) {
-	throw "This is not a Git repository. Run it inside the repo root."
+$repositoryRoot = (git rev-parse --show-toplevel).Trim()
+if (-not $repositoryRoot) {
+    throw 'Thiết lập Git hook: phải chạy bên trong Git worktree.'
 }
 
-$hooksDir = Join-Path $repoRoot ".git/hooks"
-if (-not (Test-Path $hooksDir)) {
-	throw "The .git/hooks directory does not exist."
+Set-Location $repositoryRoot
+if (-not (Test-Path '.githooks/pre-push')) {
+    throw 'Thiết lập Git hook: thiếu .githooks/pre-push.'
 }
 
-$solutionPath = Join-Path $repoRoot "AuthService\AuthService.sln"
-$preCommitPath = Join-Path $hooksDir "pre-commit"
-
-$hookScript = @"
-#!/usr/bin/env pwsh
-Set-StrictMode -Version Latest
-`$ErrorActionPreference = 'Stop'
-
-Write-Host "Running pre-commit build..."
-& dotnet build "$solutionPath"
-if (`$LASTEXITCODE -ne 0) {
-	Write-Error "Build failed. Commit aborted."
-	exit 1
+git config --local core.hooksPath .githooks
+if ($LASTEXITCODE -ne 0) {
+    throw 'Thiết lập Git hook: không thể cấu hình core.hooksPath.'
 }
 "@
 
-Set-Content -Path $preCommitPath -Value $hookScript -Encoding UTF8
-
-if ($PSVersionTable.PSVersion.Major -ge 6) {
-	& chmod +x $preCommitPath
+$hooksPath = (git config --local --get core.hooksPath).Trim()
+if ($hooksPath -ne '.githooks') {
+    throw "Thiết lập Git hook: cần .githooks, nhưng nhận được $hooksPath."
 }
 
-Write-Host "Git hook pre-commit created at: $preCommitPath"
-Write-Host "Build check: dotnet build \"$solutionPath\""
+Write-Host "Đã bật Git hook cho clone này: $hooksPath"

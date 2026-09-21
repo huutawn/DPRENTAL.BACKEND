@@ -1,9 +1,13 @@
 using Dprental.AuthService.Api.Endpoints;
 using Dprental.AuthService.Api.Observability;
+using Dprental.AuthService.Api.Routing;
 using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.DependencyInjection;
+using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Domain.DependencyInjection;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Repositories;
 
@@ -13,6 +17,7 @@ builder.Services.AddAuthServiceDistributedTracing(builder.Configuration);
 builder.Services.AddAuthApplication(builder.Configuration);
 builder.Services.AddAuthDomainPersistence(builder.Configuration.GetConnectionString("Postgres"));
 builder.Services.AddJwtBearerSecurity();
+builder.Services.AddGoogleLogin(builder.Configuration);
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
@@ -23,14 +28,21 @@ builder.Services.AddCors(options =>
             .AllowCredentials();
     });
 });
+builder.Services.AddControllers(options => options.Conventions.Add(new ApiRoutePrefixConvention(ApiRoutes.Prefix)));
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICorrelationIdProvider, CorrelationIdProvider>();
-
+builder.Services.AddScoped<IAuditLogRepository, EfAuditLogRepository>();
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options => options.InferSecuritySchemes());
+builder.Services.AddScoped<IRecoveryTokenRepository, EfRecoveryTokenRepository>();
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<AuthDbContext>(
+        "postgres",
+        failureStatus: HealthStatus.Unhealthy,
+        tags: ["ready"]);
 
 var app = builder.Build();
 
@@ -47,6 +59,20 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.MapJwksEndpoint();
+
+HealthCheckOptions livenessOptions = new()
+{
+    Predicate = _ => false,
+    AllowCachingResponses = false
+};
+app.MapHealthChecks("/health/live", livenessOptions).AllowAnonymous();
+
+HealthCheckOptions readinessOptions = new()
+{
+    Predicate = check => check.Tags.Contains("ready", StringComparer.Ordinal),
+    AllowCachingResponses = false
+};
+app.MapHealthChecks("/health/ready", readinessOptions).AllowAnonymous();
 
 app.Run();
 

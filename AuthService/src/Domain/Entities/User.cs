@@ -23,15 +23,17 @@ public class User
     public string FullName { get; set; } = string.Empty;
 
     public DateTime CreatedAt { get; set; }
+
     public bool IsActive { get; set; } = true;
+
+    // Dùng cho Abuse Protection (Chống brute-force)
     public int AccessFailedCount { get; set; }
     public DateTimeOffset? LockoutEnd { get; set; }
-    public string? PasswordResetToken { get; set; }
-    public DateTimeOffset? ResetTokenExpiry { get; set; }
 
-    /// <summary>Các vai trò hiện có của người dùng.</summary>
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
-
-    /// <summary>Các phiên đăng nhập được lưu bền của người dùng.</summary>
     public ICollection<Session> Sessions { get; set; } = new List<Session>();
+    public ICollection<OrganizationMembership> OrganizationMemberships { get; set; } = new List<OrganizationMembership>();
+    public ICollection<ExternalLogin> ExternalLogins { get; set; } = new List<ExternalLogin>();
+
+    public ICollection<RecoveryToken> RecoveryTokens { get; set; } = new List<RecoveryToken>();
 }

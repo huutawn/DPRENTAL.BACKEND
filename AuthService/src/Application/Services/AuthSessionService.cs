@@ -1,5 +1,6 @@
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Domain.Utils;
@@ -14,10 +15,8 @@ public sealed class AuthSessionService(
     ICorrelationIdProvider correlationIdProvider,
     IAuditLogRepository auditLogRepository) : IAuthSessionService
 {
-    /// <summary>Thời hạn tuyệt đối của một session và mọi refresh token thuộc session đó.</summary>
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(30);
 
-    /// <inheritdoc />
     public async Task<AuthTokenPair?> CreateSessionAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
@@ -29,55 +28,66 @@ public sealed class AuthSessionService(
             utcNow.Add(SessionLifetime),
             cancellationToken);
 
-        if (principal is null)
-        {
-            return null;
-        }
+        if (principal is null) return null;
 
         AuthTokenPair tokens = IssueTokenPair(principal, refreshToken);
-        await LogAuditAsync(userId, userId.ToString(), "Login", "Success", cancellationToken);
+        // Lưu ý: Đăng nhập thành công đã được log bên UserService.AuthenticateAsync, 
+        // có thể bỏ log ở đây để tránh trùng lặp 2 dòng log cho 1 lần login.
         return tokens;
     }
 
-    /// <inheritdoc />
     public async Task<AuthTokenPair?> RefreshAsync(string refreshToken, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(refreshToken))
-        {
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(refreshToken)) return null;
 
         string replacementRefreshToken = RefreshTokenUtility.Create();
-        AuthSessionPrincipal? principal = await sessionRepository.RotateAsync(
-            RefreshTokenUtility.ComputeHash(refreshToken),
-            RefreshTokenUtility.ComputeHash(replacementRefreshToken),
-            timeProvider.GetUtcNow().UtcDateTime,
-            cancellationToken);
 
-        if (principal is null)
+        try
         {
-            await LogAuditAsync(null, "unknown", "Refresh", "Failed_InvalidOrReusedToken", cancellationToken);
+            AuthSessionPrincipal? principal = await sessionRepository.RotateAsync(
+                RefreshTokenUtility.ComputeHash(refreshToken),
+                RefreshTokenUtility.ComputeHash(replacementRefreshToken),
+                timeProvider.GetUtcNow().UtcDateTime,
+                cancellationToken);
+
+            if (principal is null)
+            {
+                await LogAuditAsync(null, "unknown", "Refresh", "Failed_InvalidToken", cancellationToken);
+                return null;
+            }
+
+            AuthTokenPair tokens = IssueTokenPair(principal, replacementRefreshToken);
+            await LogAuditAsync(principal.UserId, principal.UserId.ToString(), "Refresh", "Success", cancellationToken);
+            return tokens;
+        }
+        catch (SessionCompromisedException ex)
+        {
+            // BẮT BỘC PHẢI CÓ CHO MVP: Xử lý Refresh-token reuse (Session Compromise)
+            // Kẻ gian đang cố dùng lại token cũ -> Kích hoạt Kill Switch thu hồi toàn bộ session của user này
+            await sessionRepository.RevokeAllSessionsForUserAsync(ex.UserId, cancellationToken);
+            await LogAuditAsync(ex.UserId, ex.UserId.ToString(), "Session_Compromised", "RevokedAll_ReuseDetected", cancellationToken);
             return null;
         }
-
-        AuthTokenPair tokens = IssueTokenPair(principal, replacementRefreshToken);
-        await LogAuditAsync(principal.UserId, principal.UserId.ToString(), "Refresh", "Success", cancellationToken);
-        return tokens;
     }
 
-    /// <inheritdoc />
     public async Task RevokeByRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(refreshToken))
-        {
-            return;
-        }
+        if (string.IsNullOrWhiteSpace(refreshToken)) return;
 
-        await sessionRepository.RevokeByRefreshTokenHashAsync(
-            RefreshTokenUtility.ComputeHash(refreshToken),
-            timeProvider.GetUtcNow().UtcDateTime,
-            cancellationToken);
-        await LogAuditAsync(null, "unknown", "Logout", "Success", cancellationToken);
+        string tokenHash = RefreshTokenUtility.ComputeHash(refreshToken);
+
+        // MVP: Để có ActorId cho Audit Log, bạn cần lấy UserId từ session trước khi revoke
+        Guid? userId = await sessionRepository.GetUserIdByTokenHashAsync(tokenHash, cancellationToken);
+
+        if (userId.HasValue)
+        {
+            await sessionRepository.RevokeByRefreshTokenHashAsync(tokenHash, timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
+            await LogAuditAsync(userId.Value, userId.Value.ToString(), "Logout", "Success", cancellationToken);
+        }
+        else
+        {
+            await LogAuditAsync(null, "unknown", "Logout", "Failed_TokenNotFound", cancellationToken);
+        }
     }
 
     public async Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -98,11 +108,13 @@ public sealed class AuthSessionService(
             Timestamp = timeProvider.GetUtcNow()
         }, cancellationToken);
 
-    /// <summary>Phát hành access token từ dữ liệu đã được persistence xác thực.</summary>
     private AuthTokenPair IssueTokenPair(AuthSessionPrincipal principal, string refreshToken)
     {
-        IssuedAccessToken accessToken = accessTokenIssuer.Issue(new AccessTokenRequest(principal.UserId, principal.Roles));
+        IssuedAccessToken accessToken = accessTokenIssuer.Issue(new AccessTokenRequest(
+            principal.UserId,
+            principal.Roles,
+            principal.Permissions,
+            principal.OrganizationIds));
         return new AuthTokenPair(accessToken.Value, refreshToken);
     }
-
 }

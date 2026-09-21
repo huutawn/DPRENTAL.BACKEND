@@ -1,0 +1,134 @@
+using System.Security.Cryptography;
+using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Common;
+using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Domain.Errors;
+using Dprental.AuthService.Domain.Exceptions;
+using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Domain.Models;
+using Microsoft.AspNetCore.Identity;
+
+namespace Dprental.AuthService.Application.Services;
+
+/// <summary>
+/// Đăng nhập bằng nhà cung cấp bên ngoài: tra theo subject trước, chỉ liên kết theo email khi nhà cung cấp
+/// đã xác minh email đó, và chỉ tạo user mới khi chưa có ai dùng email này.
+/// </summary>
+public sealed class ExternalLoginService(
+    IExternalLoginRepository externalLoginRepository,
+    IUserRepository userRepository,
+    IPasswordHasher<User> passwordHasher,
+    TimeProvider timeProvider) : IExternalLoginService
+{
+    private const int FullNameMaxLength = 100;
+
+    public async Task<Result<Guid>> SignInAsync(ExternalIdentity identity, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrWhiteSpace(identity.Provider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(identity.Subject);
+
+        // Đã liên kết trước đó: tra theo subject, không theo email, nên vẫn đúng khi user đổi email ở nhà cung cấp.
+        ExternalLogin? existing = await externalLoginRepository.FindAsync(identity.Provider, identity.Subject, cancellationToken);
+        if (existing is not null)
+        {
+            return existing.User.IsActive ? existing.UserId : ExternalLoginErrors.AccountDisabled;
+        }
+
+        if (string.IsNullOrWhiteSpace(identity.Email))
+        {
+            return ExternalLoginErrors.MissingEmail;
+        }
+
+        // Email chưa xác minh không đủ tin cậy để gắn vào tài khoản có sẵn: kẻ xấu có thể đăng ký email của người khác.
+        if (!identity.EmailVerified)
+        {
+            return ExternalLoginErrors.EmailNotVerified;
+        }
+
+        string email = UserService.NormalizeEmail(identity.Email);
+        DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
+
+        User? user = await userRepository.FindByEmailAsync(email, cancellationToken);
+        if (user is not null)
+        {
+            return await LinkToExistingUserAsync(user, identity, email, utcNow, cancellationToken);
+        }
+
+        return await CreateUserAsync(identity, email, utcNow, cancellationToken);
+    }
+
+    private async Task<Result<Guid>> LinkToExistingUserAsync(
+        User user,
+        ExternalIdentity identity,
+        string email,
+        DateTime utcNow,
+        CancellationToken cancellationToken)
+    {
+        if (!user.IsActive)
+        {
+            return ExternalLoginErrors.AccountDisabled;
+        }
+
+        try
+        {
+            await externalLoginRepository.AddAsync(NewLogin(user.Id, identity, email, utcNow), cancellationToken);
+            return user.Id;
+        }
+        catch (DuplicateExternalLoginException)
+        {
+            // Hoặc request khác vừa liên kết cùng tài khoản (thì dùng lại), hoặc user này đã gắn một tài khoản khác.
+            ExternalLogin? raced = await externalLoginRepository.FindAsync(identity.Provider, identity.Subject, cancellationToken);
+            return raced is not null && raced.UserId == user.Id ? user.Id : ExternalLoginErrors.AlreadyLinked;
+        }
+    }
+
+    private async Task<Result<Guid>> CreateUserAsync(
+        ExternalIdentity identity,
+        string email,
+        DateTime utcNow,
+        CancellationToken cancellationToken)
+    {
+        User user = new()
+        {
+            Id = Guid.NewGuid(),
+            Email = email,
+            FullName = BuildFullName(identity.FullName, email),
+            CreatedAt = utcNow,
+            IsActive = true,
+        };
+
+        // Mật khẩu ngẫu nhiên không ai biết: tài khoản chỉ đăng nhập được qua nhà cung cấp bên ngoài.
+        user.PasswordHash = passwordHasher.HashPassword(user, RandomNumberGenerator.GetHexString(64));
+        user.ExternalLogins.Add(NewLogin(user.Id, identity, email, utcNow));
+
+        try
+        {
+            await userRepository.CreateAsync(user, cancellationToken);
+            return user.Id;
+        }
+        catch (DuplicateEmailException)
+        {
+            // Request khác vừa tạo xong cùng tài khoản: đọc lại thay vì báo lỗi cho người dùng.
+            ExternalLogin? raced = await externalLoginRepository.FindAsync(identity.Provider, identity.Subject, cancellationToken);
+            return raced is not null ? raced.UserId : UserErrors.EmailAlreadyExists;
+        }
+    }
+
+    private static ExternalLogin NewLogin(Guid userId, ExternalIdentity identity, string email, DateTime utcNow) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Provider = identity.Provider,
+            ProviderSubject = identity.Subject,
+            Email = email,
+            CreatedAtUtc = utcNow,
+        };
+
+    private static string BuildFullName(string? fullName, string email)
+    {
+        string name = string.IsNullOrWhiteSpace(fullName) ? email : fullName.Trim();
+        return name.Length <= FullNameMaxLength ? name : name[..FullNameMaxLength];
+    }
+}

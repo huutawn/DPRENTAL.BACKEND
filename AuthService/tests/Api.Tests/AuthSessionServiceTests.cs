@@ -116,6 +116,10 @@ public sealed class AuthSessionServiceTests
         }
 
         public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Principal?.UserId);
+        }
     }
 
     private static AuthSessionService CreateService(RecordingAuthSessionRepository repository, DateTimeOffset now) =>

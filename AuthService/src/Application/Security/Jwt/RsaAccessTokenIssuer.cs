@@ -18,6 +18,18 @@ public sealed class RsaAccessTokenIssuer(
     /// <summary>Tên claim role ổn định, tương thích trực tiếp với JWT Bearer authorization.</summary>
     private const string RoleClaimType = "role";
 
+    /// <summary>Tên claim permission dùng trong <c>RequireClaim("perm", code)</c>.</summary>
+    private const string PermissionClaimType = "perm";
+
+    /// <summary>Tên claim organization context — một giá trị cho mỗi organization user đang active.</summary>
+    private const string OrganizationClaimType = "org";
+
+    /// <summary>Phân biệt token của user thật (không có claim này) và token của service (client_credentials).</summary>
+    private const string TokenUseClaimType = "token_use";
+
+    /// <summary>Tên claim scope, dùng cho service token.</summary>
+    private const string ScopeClaimType = "scope";
+
     /// <summary>Tạo access token RS256 với các standard claim và roles đã chuẩn hóa.</summary>
     public IssuedAccessToken Issue(AccessTokenRequest request)
     {
@@ -36,28 +48,50 @@ public sealed class RsaAccessTokenIssuer(
             new Claim(JwtRegisteredClaimNames.Iat, EpochTime.GetIntDate(issuedAtUtc.UtcDateTime).ToString(CultureInfo.InvariantCulture), ClaimValueTypes.Integer64)
         ];
 
-        if (request.Roles is not null)
+        AddDistinctClaims(claims, RoleClaimType, request.Roles);
+        AddDistinctClaims(claims, PermissionClaimType, request.Permissions);
+        AddDistinctClaims(claims, ScopeClaimType, request.Scopes);
+
+        if (request.OrganizationIds is not null)
         {
-            // Không phát role rỗng, loại khoảng trắng thừa và tránh lặp claim role.
-            foreach (string role in request.Roles
-                         .Where(role => !string.IsNullOrWhiteSpace(role))
-                         .Select(role => role.Trim())
-                         .Distinct(StringComparer.Ordinal))
+            foreach (Guid organizationId in request.OrganizationIds.Distinct())
             {
-                claims.Add(new Claim(RoleClaimType, role));
+                claims.Add(new Claim(OrganizationClaimType, organizationId.ToString("D")));
             }
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.TokenUse))
+        {
+            claims.Add(new Claim(TokenUseClaimType, request.TokenUse));
         }
 
         // SecurityKey mang ActiveKeyId nên JwtSecurityTokenHandler sẽ đưa kid vào JWT header.
         SigningCredentials signingCredentials = new(keyRing.ActiveSigningKey, SecurityAlgorithms.RsaSha256);
         JwtSecurityToken token = new(
             options.Value.Issuer,
-            options.Value.Audience,
+            request.Audience ?? options.Value.Audience,
             claims,
             issuedAtUtc.UtcDateTime,
             expiresAtUtc.UtcDateTime,
             signingCredentials);
 
         return new IssuedAccessToken(new JwtSecurityTokenHandler().WriteToken(token), expiresAtUtc);
+    }
+
+    /// <summary>Thêm một claim theo mỗi giá trị không rỗng, đã trim và loại trùng.</summary>
+    private static void AddDistinctClaims(List<Claim> claims, string claimType, IReadOnlyCollection<string>? values)
+    {
+        if (values is null)
+        {
+            return;
+        }
+
+        foreach (string value in values
+                     .Where(value => !string.IsNullOrWhiteSpace(value))
+                     .Select(value => value.Trim())
+                     .Distinct(StringComparer.Ordinal))
+        {
+            claims.Add(new Claim(claimType, value));
+        }
     }
 }

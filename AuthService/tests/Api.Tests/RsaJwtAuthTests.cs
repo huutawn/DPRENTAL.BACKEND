@@ -71,6 +71,38 @@ public sealed class RsaJwtAuthTests
     }
 
     [Fact]
+    public void KeyRingLoadsPemFromFilePaths()
+    {
+        string temporaryDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+        string publicKeyPath = Path.Combine(temporaryDirectory, "public.pem");
+        string privateKeyPath = Path.Combine(temporaryDirectory, "private.pem");
+        File.WriteAllText(publicKeyPath, ActivePair.PublicKeyPem);
+        File.WriteAllText(privateKeyPath, ActivePair.PrivateKeyPem);
+
+        try
+        {
+            JwtOptions options = CreateValidOptions(
+            [
+                new JwtKeyOptions
+                {
+                    KeyId = "current",
+                    PublicKeyPem = publicKeyPath,
+                    PrivateKeyPem = privateKeyPath
+                }
+            ]);
+
+            using RsaJwtKeyRing keyRing = new(options);
+
+            Assert.Single(keyRing.ResolveVerificationKeys("current"));
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ValidationRejectsSymmetricTokenAndUnknownKeyId()
     {
         JwtOptions options = CreateValidOptions();
@@ -205,6 +237,20 @@ public sealed class RsaJwtAuthTests
         Assert.True(key.TryGetProperty("e", out _));
         Assert.False(key.TryGetProperty("d", out _));
         Assert.DoesNotContain(ActivePair.PrivateKeyPem, payload, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LivenessEndpointReturnsSuccessWithoutDatabaseAccess()
+    {
+        JwtOptions options = CreateValidOptions();
+        using WebApplicationFactory<Program> factory = new();
+        using WebApplicationFactory<Program> configuredFactory = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, configurationBuilder) => configurationBuilder.AddConfiguration(CreateConfiguration(options))));
+        using HttpClient client = configuredFactory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/health/live");
+
+        Assert.True(response.IsSuccessStatusCode);
     }
 
     [Fact]
