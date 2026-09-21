@@ -219,6 +219,17 @@ Auth__Google__BffCallbackUrls__1=http://localhost:3000/api/auth/google/callback
 
 Không có biến cấu hình redirect URI: Google handler tạo URI từ request host và callback path `/signin-google`. Khi TLS kết thúc ở reverse proxy, proxy phải chuyển `X-Forwarded-Proto: https` và application phải xử lý forwarded headers trước authentication; nếu không handler có thể gửi `http://dev-api.lazyops.cloud/signin-google` cho Google và bị từ chối do không khớp redirect URI.
 
+Với topology `Caddy -> Gateway -> AuthService`, Gateway ghi đè `X-Forwarded-Proto` và `X-Forwarded-Host` bằng public origin mà Caddy đã xác thực. AuthService chỉ được tin hai header này từ Docker network nội bộ chứa Gateway, vì vậy môi trường deploy cần thêm:
+
+```text
+Auth__ForwardedHeaders__Enabled=true
+Auth__ForwardedHeaders__KnownNetworks__0=<CIDR của Docker services network, ví dụ 172.31.0.0/16>
+# Tùy chọn, mặc định đã là 1:
+Auth__ForwardedHeaders__ForwardLimit=1
+```
+
+Không dùng `EDGE_NETWORK_CIDR` cho AuthService: AuthService không nằm trong network `edge`; peer trực tiếp của nó là Gateway trong `services`. Lấy CIDR thật trên host bằng `docker network inspect dprental-dev_services --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'`, đặt vào biến Compose (ví dụ `SERVICES_NETWORK_CIDR`), rồi truyền thành `Auth__ForwardedHeaders__KnownNetworks__0`. Các giá trị này không phải secret.
+
 Quy tắc liên kết tài khoản, theo thứ tự:
 
 1. Đã có liên kết `(Google, sub)` thì dùng user đó; user bị khóa thì từ chối.
