@@ -34,7 +34,6 @@ builder.Services.AddControllers(options => options.Conventions.Add(new ApiRouteP
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICorrelationIdProvider, CorrelationIdProvider>();
 builder.Services.AddScoped<IAuditLogRepository, EfAuditLogRepository>();
-builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options => options.InferSecuritySchemes());

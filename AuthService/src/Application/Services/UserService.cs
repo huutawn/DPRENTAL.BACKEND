@@ -122,7 +122,7 @@ public sealed class UserService(
         return user;
     }
 
-    public async Task<Guid?> AuthenticateAsync(LoginRequest request, CancellationToken cancellationToken)
+    public async Task<Guid?> AuthenticateAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -228,7 +228,7 @@ public sealed class UserService(
         return Result.Success();
     }
 
-    public async Task<Result> ResetPasswordAsync(ResetPasswordRequest request, CancellationToken cancellationToken)
+    public async Task<Result> ResetPasswordAsync(ResetPasswordRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         string corrId = correlationIdProvider.GetCorrelationId();

@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Dprental.AuthService.Api.Filters;
 using Dprental.AuthService.Api.Security;
@@ -311,8 +312,7 @@ public sealed class AuthController(
     [HttpPost("revoke-all")]
     public async Task<IActionResult> RevokeAllSessions(CancellationToken cancellationToken)
     {
-        // Lấy UserId từ Claims của Token hiện tại
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        string? userIdString = User.Identity?.Name ?? User.FindFirstValue(JwtRegisteredClaimNames.Sub);
         if (Guid.TryParse(userIdString, out Guid userId))
         {
             await authSessionService.RevokeAllSessionsForUserAsync(userId, cancellationToken);
