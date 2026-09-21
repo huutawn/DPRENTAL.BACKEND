@@ -4,7 +4,6 @@ using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Organization;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Errors;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 
@@ -30,30 +29,30 @@ public sealed partial class OrganizationService(
 
         if (actorUserId == Guid.Empty)
         {
-            return Result.Failure<OrganizationResponse>(OrganizationErrors.UserNotFound);
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.UserNotFound);
         }
 
         string trimmedName = request.Name?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(trimmedName) || trimmedName.Length > 150)
         {
-            return Result.Failure<OrganizationResponse>(OrganizationErrors.InvalidName);
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.InvalidName);
         }
 
         string trimmedSlug = request.Slug?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(trimmedSlug) || trimmedSlug.Length > 100 || !CanonicalSlugRegex().IsMatch(trimmedSlug))
         {
-            return Result.Failure<OrganizationResponse>(OrganizationErrors.InvalidSlugFormat);
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.InvalidSlugFormat);
         }
 
         if (!Enum.IsDefined(request.Type))
         {
-            return Result.Failure<OrganizationResponse>(OrganizationErrors.InvalidStateTransition);
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.InvalidStateTransition);
         }
 
         User? actor = await userRepository.GetByIdAsync(actorUserId, cancellationToken);
         if (actor is null || !actor.IsActive)
         {
-            return Result.Failure<OrganizationResponse>(OrganizationErrors.UserNotFound);
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.UserNotFound);
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
@@ -63,20 +62,20 @@ public sealed partial class OrganizationService(
         {
             if (!isPlatformAdmin)
             {
-                return Result.Failure<OrganizationResponse>(OrganizationErrors.PlatformAdminRequired);
+                return Result.Failure<OrganizationResponse>(AuthErrors.Organization.PlatformAdminRequired);
             }
         }
         else
         {
             if (!isPlatformAdmin && !globalPerms.Contains(Permissions.Organizations.Create))
             {
-                return Result.Failure<OrganizationResponse>(OrganizationErrors.CreationNotAllowed);
+                return Result.Failure<OrganizationResponse>(AuthErrors.Organization.CreationNotAllowed);
             }
         }
 
         if (await organizationRepository.SlugExistsAsync(trimmedSlug, cancellationToken))
         {
-            return Result.Failure<OrganizationResponse>(OrganizationErrors.SlugAlreadyExists);
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.SlugAlreadyExists);
         }
 
         Role? ownerRole = await roleRepository.GetByNameAsync("Owner", cancellationToken)
@@ -84,7 +83,7 @@ public sealed partial class OrganizationService(
 
         if (ownerRole is null)
         {
-            return Result.Failure<OrganizationResponse>(OrganizationErrors.RoleNotFound);
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.RoleNotFound);
         }
 
         DateTime now = DateTime.UtcNow;
@@ -121,7 +120,7 @@ public sealed partial class OrganizationService(
         }
         catch (DuplicateSlugException)
         {
-            return Result.Failure<OrganizationResponse>(OrganizationErrors.SlugAlreadyExists);
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.SlugAlreadyExists);
         }
     }
 
@@ -132,13 +131,13 @@ public sealed partial class OrganizationService(
     {
         if (actorUserId == Guid.Empty || organizationId == Guid.Empty)
         {
-            return Result.Failure<OrganizationResponse>(OrganizationErrors.OrganizationNotFound);
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.OrganizationNotFound);
         }
 
         Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
         if (org is null)
         {
-            return Result.Failure<OrganizationResponse>(OrganizationErrors.OrganizationNotFound);
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.OrganizationNotFound);
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
@@ -146,7 +145,7 @@ public sealed partial class OrganizationService(
 
         if (!org.IsActive && !isPlatformAdmin)
         {
-            return Result.Failure<OrganizationResponse>(OrganizationErrors.InactiveOrganization);
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.InactiveOrganization);
         }
 
         if (!isPlatformAdmin && !globalPerms.Contains(Permissions.Organizations.Read))
@@ -154,13 +153,13 @@ public sealed partial class OrganizationService(
             OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
             if (membership is null || membership.Status != MembershipStatus.Active)
             {
-                return Result.Failure<OrganizationResponse>(OrganizationErrors.CrossOrganizationAccessDenied);
+                return Result.Failure<OrganizationResponse>(AuthErrors.Organization.CrossOrganizationAccessDenied);
             }
 
             IReadOnlyList<string> effectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
             if (!effectivePerms.Contains(Permissions.Organizations.Read))
             {
-                return Result.Failure<OrganizationResponse>(OrganizationErrors.Forbidden);
+                return Result.Failure<OrganizationResponse>(AuthErrors.Organization.Forbidden);
             }
         }
 
@@ -179,7 +178,7 @@ public sealed partial class OrganizationService(
     {
         if (actorUserId == Guid.Empty)
         {
-            return Result.Failure<IReadOnlyList<OrganizationResponse>>(OrganizationErrors.Forbidden);
+            return Result.Failure<IReadOnlyList<OrganizationResponse>>(AuthErrors.Organization.Forbidden);
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
@@ -206,12 +205,12 @@ public sealed partial class OrganizationService(
 
         if (actorUserId == Guid.Empty || organizationId == Guid.Empty)
         {
-            return Result.Failure(OrganizationErrors.OrganizationNotFound);
+            return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
         }
 
         if (request.Name is null && request.IsActive is null)
         {
-            return Result.Failure(OrganizationErrors.EmptyPatch);
+            return Result.Failure(AuthErrors.Organization.EmptyPatch);
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
@@ -219,18 +218,18 @@ public sealed partial class OrganizationService(
 
         if (request.IsActive.HasValue && !isPlatformAdmin)
         {
-            return Result.Failure(OrganizationErrors.PlatformAdminRequired);
+            return Result.Failure(AuthErrors.Organization.PlatformAdminRequired);
         }
 
         Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
         if (org is null)
         {
-            return Result.Failure(OrganizationErrors.OrganizationNotFound);
+            return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
         }
 
         if (!org.IsActive && !isPlatformAdmin)
         {
-            return Result.Failure(OrganizationErrors.InactiveOrganization);
+            return Result.Failure(AuthErrors.Organization.InactiveOrganization);
         }
 
         if (!isPlatformAdmin && !globalPerms.Contains(Permissions.Organizations.Update))
@@ -238,20 +237,20 @@ public sealed partial class OrganizationService(
             OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
             if (membership is null || membership.Status != MembershipStatus.Active)
             {
-                return Result.Failure(OrganizationErrors.CrossOrganizationAccessDenied);
+                return Result.Failure(AuthErrors.Organization.CrossOrganizationAccessDenied);
             }
 
             IReadOnlyList<string> effectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
             if (!effectivePerms.Contains(Permissions.Organizations.Update))
             {
-                return Result.Failure(OrganizationErrors.Forbidden);
+                return Result.Failure(AuthErrors.Organization.Forbidden);
             }
         }
 
         string? trimmedName = request.Name?.Trim();
         if (request.Name is not null && (string.IsNullOrWhiteSpace(trimmedName) || trimmedName.Length > 150))
         {
-            return Result.Failure(OrganizationErrors.InvalidName);
+            return Result.Failure(AuthErrors.Organization.InvalidName);
         }
 
         bool nameChanged = trimmedName is not null && !string.Equals(trimmedName, org.Name, StringComparison.Ordinal);
@@ -259,7 +258,7 @@ public sealed partial class OrganizationService(
 
         if (!nameChanged && !activeChanged)
         {
-            return Result.Failure(OrganizationErrors.NoOpPatch);
+            return Result.Failure(AuthErrors.Organization.NoOpPatch);
         }
 
         if (nameChanged)
@@ -283,13 +282,13 @@ public sealed partial class OrganizationService(
     {
         if (actorUserId == Guid.Empty || organizationId == Guid.Empty)
         {
-            return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(OrganizationErrors.OrganizationNotFound);
+            return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(AuthErrors.Organization.OrganizationNotFound);
         }
 
         Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
         if (org is null)
         {
-            return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(OrganizationErrors.OrganizationNotFound);
+            return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(AuthErrors.Organization.OrganizationNotFound);
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
@@ -297,7 +296,7 @@ public sealed partial class OrganizationService(
 
         if (!org.IsActive && !isPlatformAdmin)
         {
-            return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(OrganizationErrors.InactiveOrganization);
+            return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(AuthErrors.Organization.InactiveOrganization);
         }
 
         if (!isPlatformAdmin && !globalPerms.Contains(Permissions.Organizations.Members.Read))
@@ -305,13 +304,13 @@ public sealed partial class OrganizationService(
             OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
             if (membership is null || membership.Status != MembershipStatus.Active)
             {
-                return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(OrganizationErrors.CrossOrganizationAccessDenied);
+                return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(AuthErrors.Organization.CrossOrganizationAccessDenied);
             }
 
             IReadOnlyList<string> effectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
             if (!effectivePerms.Contains(Permissions.Organizations.Members.Read))
             {
-                return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(OrganizationErrors.Forbidden);
+                return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(AuthErrors.Organization.Forbidden);
             }
         }
 
@@ -341,18 +340,18 @@ public sealed partial class OrganizationService(
 
         if (actorUserId == Guid.Empty || organizationId == Guid.Empty)
         {
-            return Result.Failure<OrganizationMemberResponse>(OrganizationErrors.OrganizationNotFound);
+            return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.OrganizationNotFound);
         }
 
         if (request.UserId == Guid.Empty || request.RoleId == Guid.Empty)
         {
-            return Result.Failure<OrganizationMemberResponse>(OrganizationErrors.UserNotFound);
+            return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.UserNotFound);
         }
 
         Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
         if (org is null)
         {
-            return Result.Failure<OrganizationMemberResponse>(OrganizationErrors.OrganizationNotFound);
+            return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.OrganizationNotFound);
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
@@ -360,7 +359,7 @@ public sealed partial class OrganizationService(
 
         if (!org.IsActive && !isPlatformAdmin)
         {
-            return Result.Failure<OrganizationMemberResponse>(OrganizationErrors.InactiveOrganization);
+            return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.InactiveOrganization);
         }
 
         if (!isPlatformAdmin && !globalPerms.Contains(Permissions.Organizations.Members.Manage))
@@ -368,36 +367,36 @@ public sealed partial class OrganizationService(
             OrganizationMembership? actorMembership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
             if (actorMembership is null || actorMembership.Status != MembershipStatus.Active)
             {
-                return Result.Failure<OrganizationMemberResponse>(OrganizationErrors.CrossOrganizationAccessDenied);
+                return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.CrossOrganizationAccessDenied);
             }
 
             IReadOnlyList<string> actorEffectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
             if (!actorEffectivePerms.Contains(Permissions.Organizations.Members.Manage))
             {
-                return Result.Failure<OrganizationMemberResponse>(OrganizationErrors.Forbidden);
+                return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.Forbidden);
             }
         }
 
         User? targetUser = await userRepository.GetByIdAsync(request.UserId, cancellationToken);
         if (targetUser is null)
         {
-            return Result.Failure<OrganizationMemberResponse>(OrganizationErrors.UserNotFound);
+            return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.UserNotFound);
         }
 
         if (!targetUser.IsActive)
         {
-            return Result.Failure<OrganizationMemberResponse>(OrganizationErrors.UserInactive);
+            return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.UserInactive);
         }
 
         Role? targetRole = await roleRepository.GetByIdAsync(request.RoleId, cancellationToken);
         if (targetRole is null)
         {
-            return Result.Failure<OrganizationMemberResponse>(OrganizationErrors.RoleNotFound);
+            return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.RoleNotFound);
         }
 
         if (targetRole.Scope != RoleScope.Organization)
         {
-            return Result.Failure<OrganizationMemberResponse>(OrganizationErrors.InvalidRoleScope);
+            return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.InvalidRoleScope);
         }
 
         if (!isPlatformAdmin)
@@ -406,13 +405,13 @@ public sealed partial class OrganizationService(
             IReadOnlyList<string> targetRolePerms = await roleRepository.GetPermissionCodesAsync(request.RoleId, cancellationToken);
             if (targetRolePerms.Except(actorEffectivePerms).Any())
             {
-                return Result.Failure<OrganizationMemberResponse>(OrganizationErrors.PrivilegeEscalation);
+                return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.PrivilegeEscalation);
             }
         }
 
         if (await membershipRepository.MembershipExistsAsync(organizationId, request.UserId, cancellationToken))
         {
-            return Result.Failure<OrganizationMemberResponse>(OrganizationErrors.MembershipAlreadyExists);
+            return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.MembershipAlreadyExists);
         }
 
         OrganizationMembership membership = new()
@@ -440,7 +439,7 @@ public sealed partial class OrganizationService(
         }
         catch (DuplicateMembershipException)
         {
-            return Result.Failure<OrganizationMemberResponse>(OrganizationErrors.MembershipAlreadyExists);
+            return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.MembershipAlreadyExists);
         }
     }
 
@@ -455,28 +454,28 @@ public sealed partial class OrganizationService(
 
         if (actorUserId == Guid.Empty || organizationId == Guid.Empty || memberId == Guid.Empty)
         {
-            return Result.Failure(OrganizationErrors.OrganizationNotFound);
+            return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
         }
 
         if (request.RoleId is null && request.Status is null)
         {
-            return Result.Failure(OrganizationErrors.EmptyPatch);
+            return Result.Failure(AuthErrors.Organization.EmptyPatch);
         }
 
         if (request.RoleId.HasValue && request.RoleId.Value == Guid.Empty)
         {
-            return Result.Failure(OrganizationErrors.RoleNotFound);
+            return Result.Failure(AuthErrors.Organization.RoleNotFound);
         }
 
         if (request.Status.HasValue && !Enum.IsDefined(request.Status.Value))
         {
-            return Result.Failure(OrganizationErrors.InvalidStateTransition);
+            return Result.Failure(AuthErrors.Organization.InvalidStateTransition);
         }
 
         Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
         if (org is null)
         {
-            return Result.Failure(OrganizationErrors.OrganizationNotFound);
+            return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
@@ -484,7 +483,7 @@ public sealed partial class OrganizationService(
 
         if (!org.IsActive && !isPlatformAdmin)
         {
-            return Result.Failure(OrganizationErrors.InactiveOrganization);
+            return Result.Failure(AuthErrors.Organization.InactiveOrganization);
         }
 
         if (!isPlatformAdmin && !globalPerms.Contains(Permissions.Organizations.Members.Manage))
@@ -492,20 +491,20 @@ public sealed partial class OrganizationService(
             OrganizationMembership? actorMembership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
             if (actorMembership is null || actorMembership.Status != MembershipStatus.Active)
             {
-                return Result.Failure(OrganizationErrors.CrossOrganizationAccessDenied);
+                return Result.Failure(AuthErrors.Organization.CrossOrganizationAccessDenied);
             }
 
             IReadOnlyList<string> actorEffectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
             if (!actorEffectivePerms.Contains(Permissions.Organizations.Members.Manage))
             {
-                return Result.Failure(OrganizationErrors.Forbidden);
+                return Result.Failure(AuthErrors.Organization.Forbidden);
             }
         }
 
         OrganizationMembership? member = await membershipRepository.FindMemberAsync(organizationId, memberId, cancellationToken);
         if (member is null)
         {
-            return Result.Failure(OrganizationErrors.MembershipNotFound);
+            return Result.Failure(AuthErrors.Organization.MembershipNotFound);
         }
 
         Role? currentRole = member.Role ?? await roleRepository.GetByIdAsync(member.RoleId, cancellationToken);
@@ -519,14 +518,14 @@ public sealed partial class OrganizationService(
             {
                 if (member.Status == MembershipStatus.Invited)
                 {
-                    return Result.Failure(OrganizationErrors.CannotActivateInvitation);
+                    return Result.Failure(AuthErrors.Organization.CannotActivateInvitation);
                 }
             }
             else if (newStatus == MembershipStatus.Suspended)
             {
                 if (member.Status == MembershipStatus.Invited)
                 {
-                    return Result.Failure(OrganizationErrors.InvalidStateTransition);
+                    return Result.Failure(AuthErrors.Organization.InvalidStateTransition);
                 }
 
                 if (member.Status == MembershipStatus.Active && isCurrentlyOwner)
@@ -534,7 +533,7 @@ public sealed partial class OrganizationService(
                     int activeOwners = await membershipRepository.CountActiveOwnersAsync(organizationId, cancellationToken);
                     if (activeOwners <= 1)
                     {
-                        return Result.Failure(OrganizationErrors.LastOwner);
+                        return Result.Failure(AuthErrors.Organization.LastOwner);
                     }
                 }
             }
@@ -542,7 +541,7 @@ public sealed partial class OrganizationService(
             {
                 if (member.Status != MembershipStatus.Invited)
                 {
-                    return Result.Failure(OrganizationErrors.InvalidStateTransition);
+                    return Result.Failure(AuthErrors.Organization.InvalidStateTransition);
                 }
             }
         }
@@ -553,12 +552,12 @@ public sealed partial class OrganizationService(
             newRole = await roleRepository.GetByIdAsync(request.RoleId.Value, cancellationToken);
             if (newRole is null)
             {
-                return Result.Failure(OrganizationErrors.RoleNotFound);
+                return Result.Failure(AuthErrors.Organization.RoleNotFound);
             }
 
             if (newRole.Scope != RoleScope.Organization)
             {
-                return Result.Failure(OrganizationErrors.InvalidRoleScope);
+                return Result.Failure(AuthErrors.Organization.InvalidRoleScope);
             }
 
             if (!isPlatformAdmin)
@@ -567,7 +566,7 @@ public sealed partial class OrganizationService(
                 IReadOnlyList<string> targetRolePerms = await roleRepository.GetPermissionCodesAsync(request.RoleId.Value, cancellationToken);
                 if (targetRolePerms.Except(actorEffectivePerms).Any())
                 {
-                    return Result.Failure(OrganizationErrors.PrivilegeEscalation);
+                    return Result.Failure(AuthErrors.Organization.PrivilegeEscalation);
                 }
             }
 
@@ -576,7 +575,7 @@ public sealed partial class OrganizationService(
                 int totalOwners = await membershipRepository.CountOwnersAsync(organizationId, cancellationToken);
                 if (totalOwners <= 1)
                 {
-                    return Result.Failure(OrganizationErrors.LastOwner);
+                    return Result.Failure(AuthErrors.Organization.LastOwner);
                 }
 
                 if (member.Status == MembershipStatus.Active)
@@ -584,7 +583,7 @@ public sealed partial class OrganizationService(
                     int activeOwners = await membershipRepository.CountActiveOwnersAsync(organizationId, cancellationToken);
                     if (activeOwners <= 1)
                     {
-                        return Result.Failure(OrganizationErrors.LastOwner);
+                        return Result.Failure(AuthErrors.Organization.LastOwner);
                     }
                 }
             }
@@ -595,7 +594,7 @@ public sealed partial class OrganizationService(
 
         if (!roleChanged && !statusChanged)
         {
-            return Result.Failure(OrganizationErrors.NoOpPatch);
+            return Result.Failure(AuthErrors.Organization.NoOpPatch);
         }
 
         if (roleChanged)
@@ -623,13 +622,13 @@ public sealed partial class OrganizationService(
     {
         if (actorUserId == Guid.Empty || organizationId == Guid.Empty || memberId == Guid.Empty)
         {
-            return Result.Failure(OrganizationErrors.OrganizationNotFound);
+            return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
         }
 
         Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
         if (org is null)
         {
-            return Result.Failure(OrganizationErrors.OrganizationNotFound);
+            return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
@@ -637,7 +636,7 @@ public sealed partial class OrganizationService(
 
         if (!org.IsActive && !isPlatformAdmin)
         {
-            return Result.Failure(OrganizationErrors.InactiveOrganization);
+            return Result.Failure(AuthErrors.Organization.InactiveOrganization);
         }
 
         if (!isPlatformAdmin && !globalPerms.Contains(Permissions.Organizations.Members.Manage))
@@ -645,20 +644,20 @@ public sealed partial class OrganizationService(
             OrganizationMembership? actorMembership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
             if (actorMembership is null || actorMembership.Status != MembershipStatus.Active)
             {
-                return Result.Failure(OrganizationErrors.CrossOrganizationAccessDenied);
+                return Result.Failure(AuthErrors.Organization.CrossOrganizationAccessDenied);
             }
 
             IReadOnlyList<string> actorEffectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
             if (!actorEffectivePerms.Contains(Permissions.Organizations.Members.Manage))
             {
-                return Result.Failure(OrganizationErrors.Forbidden);
+                return Result.Failure(AuthErrors.Organization.Forbidden);
             }
         }
 
         OrganizationMembership? member = await membershipRepository.FindMemberAsync(organizationId, memberId, cancellationToken);
         if (member is null)
         {
-            return Result.Failure(OrganizationErrors.MembershipNotFound);
+            return Result.Failure(AuthErrors.Organization.MembershipNotFound);
         }
 
         Role? currentRole = member.Role ?? await roleRepository.GetByIdAsync(member.RoleId, cancellationToken);
@@ -667,7 +666,7 @@ public sealed partial class OrganizationService(
             int totalOwners = await membershipRepository.CountOwnersAsync(organizationId, cancellationToken);
             if (totalOwners <= 1)
             {
-                return Result.Failure(OrganizationErrors.LastOwner);
+                return Result.Failure(AuthErrors.Organization.LastOwner);
             }
 
             if (member.Status == MembershipStatus.Active)
@@ -675,7 +674,7 @@ public sealed partial class OrganizationService(
                 int activeOwners = await membershipRepository.CountActiveOwnersAsync(organizationId, cancellationToken);
                 if (activeOwners <= 1)
                 {
-                    return Result.Failure(OrganizationErrors.LastOwner);
+                    return Result.Failure(AuthErrors.Organization.LastOwner);
                 }
             }
         }
@@ -691,19 +690,19 @@ public sealed partial class OrganizationService(
     {
         if (actorUserId == Guid.Empty || organizationId == Guid.Empty)
         {
-            return Result.Failure(OrganizationErrors.OrganizationNotFound);
+            return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
         }
 
         User? actor = await userRepository.GetByIdAsync(actorUserId, cancellationToken);
         if (actor is null || !actor.IsActive)
         {
-            return Result.Failure(OrganizationErrors.UserNotFound);
+            return Result.Failure(AuthErrors.Organization.UserNotFound);
         }
 
         Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
         if (org is null)
         {
-            return Result.Failure(OrganizationErrors.OrganizationNotFound);
+            return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
@@ -711,18 +710,18 @@ public sealed partial class OrganizationService(
 
         if (!org.IsActive && !isPlatformAdmin)
         {
-            return Result.Failure(OrganizationErrors.InactiveOrganization);
+            return Result.Failure(AuthErrors.Organization.InactiveOrganization);
         }
 
         OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
         if (membership is null)
         {
-            return Result.Failure(OrganizationErrors.MembershipNotFound);
+            return Result.Failure(AuthErrors.Organization.MembershipNotFound);
         }
 
         if (membership.Status != MembershipStatus.Invited)
         {
-            return Result.Failure(OrganizationErrors.InvalidStateTransition);
+            return Result.Failure(AuthErrors.Organization.InvalidStateTransition);
         }
 
         membership.Status = MembershipStatus.Active;

@@ -4,7 +4,6 @@ using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Errors;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Domain.Utils;
@@ -27,12 +26,12 @@ public sealed class ServiceIdentityService(
         if (principal is null || !principal.IsActive || !SecretMatches(request.ClientSecret, principal.SecretHash))
         {
             // Sai client_id, sai secret hay principal bị khóa đều trả cùng một lỗi để không lộ lý do cụ thể.
-            return ServicePrincipalErrors.InvalidClient;
+            return AuthErrors.ServicePrincipal.InvalidClient;
         }
 
         if (!await servicePrincipalRepository.HasScopeAsync(principal.Id, request.Scope, request.Audience, cancellationToken))
         {
-            return ServicePrincipalErrors.InvalidScope;
+            return AuthErrors.ServicePrincipal.InvalidScope;
         }
 
         IssuedAccessToken token = accessTokenIssuer.Issue(new AccessTokenRequest(

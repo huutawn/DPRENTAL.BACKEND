@@ -1,7 +1,6 @@
 using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Errors;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
@@ -43,7 +42,7 @@ public sealed class ExternalLoginServiceTests
         Result<Guid> result = await service.SignInAsync(CreateIdentity("google-sub-1"));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(ExternalLoginErrors.AccountDisabled, result.Error);
+        Assert.Equal(AuthErrors.ExternalLogin.AccountDisabled, result.Error);
     }
 
     [Fact]
@@ -69,7 +68,7 @@ public sealed class ExternalLoginServiceTests
         Result<Guid> result = await service.SignInAsync(CreateIdentity("google-sub-1", email: "  "));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(ExternalLoginErrors.MissingEmail, result.Error);
+        Assert.Equal(AuthErrors.ExternalLogin.MissingEmail, result.Error);
         Assert.Empty(users.Created);
     }
 
@@ -84,7 +83,7 @@ public sealed class ExternalLoginServiceTests
         Result<Guid> result = await service.SignInAsync(CreateIdentity("attacker-sub", email: "len@example.com", emailVerified: false));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(ExternalLoginErrors.EmailNotVerified, result.Error);
+        Assert.Equal(AuthErrors.ExternalLogin.EmailNotVerified, result.Error);
         Assert.Equal(ErrorType.Forbidden, result.Error.Type);
         Assert.Empty(logins.Added);
         Assert.Empty(users.Created);
@@ -123,7 +122,7 @@ public sealed class ExternalLoginServiceTests
         Result<Guid> result = await service.SignInAsync(CreateIdentity("google-sub-1", email: "len@example.com"));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(ExternalLoginErrors.AccountDisabled, result.Error);
+        Assert.Equal(AuthErrors.ExternalLogin.AccountDisabled, result.Error);
         Assert.Empty(logins.Added);
     }
 
@@ -150,7 +149,7 @@ public sealed class ExternalLoginServiceTests
         Result<Guid> result = await service.SignInAsync(CreateIdentity("second-google-sub", email: "len@example.com"));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(ExternalLoginErrors.AlreadyLinked, result.Error);
+        Assert.Equal(AuthErrors.ExternalLogin.AlreadyLinked, result.Error);
         Assert.Equal(ErrorType.Conflict, result.Error.Type);
     }
 
@@ -215,7 +214,7 @@ public sealed class ExternalLoginServiceTests
         Result<Guid> result = await service.SignInAsync(CreateIdentity("google-sub-9", email: "an@example.com"));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(UserErrors.EmailAlreadyExists, result.Error);
+        Assert.Equal(AuthErrors.User.EmailAlreadyExists, result.Error);
     }
 
     private static ExternalLoginService CreateService(FakeExternalLogins logins, FakeUsers users) =>

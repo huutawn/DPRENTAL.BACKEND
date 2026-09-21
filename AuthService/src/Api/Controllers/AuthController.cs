@@ -51,19 +51,13 @@ public sealed class AuthController(
         Guid? userId = await userService.AuthenticateAsync(request, cancellationToken);
         if (userId is null)
         {
-            return Problem(
-                statusCode: StatusCodes.Status401Unauthorized,
-                title: "Auth.InvalidCredentials",
-                detail: "Email hoặc mật khẩu không chính xác.");
+            return this.ToProblem(AuthErrors.Auth.InvalidCredentials);
         }
 
         AuthTokenPair? tokens = await authSessionService.CreateSessionAsync(userId.Value, cancellationToken);
         if (tokens is null)
         {
-            return Problem(
-                statusCode: StatusCodes.Status401Unauthorized,
-                title: "Auth.InactiveAccount",
-                detail: "Tài khoản không tồn tại hoặc đã bị khóa.");
+            return this.ToProblem(AuthErrors.Auth.InactiveAccount);
         }
         SetAuthCookies(tokens.AccessToken, tokens.RefreshToken);
 
@@ -77,19 +71,13 @@ public sealed class AuthController(
     {
         if (!Request.Cookies.TryGetValue("refreshToken", out var currentRefreshToken))
         {
-            return Problem(
-                statusCode: StatusCodes.Status401Unauthorized,
-                title: "Auth.MissingCookie",
-                detail: "Không tìm thấy refresh token trong cookie.");
+            return this.ToProblem(AuthErrors.Auth.MissingCookie);
         }
 
         AuthTokenPair? tokens = await authSessionService.RefreshAsync(currentRefreshToken, cancellationToken);
         if (tokens is null)
         {
-            return Problem(
-                statusCode: StatusCodes.Status401Unauthorized,
-                title: "Auth.InvalidRefreshToken",
-                detail: "Refresh token không hợp lệ hoặc đã hết hạn.");
+            return this.ToProblem(AuthErrors.Auth.InvalidRefreshToken);
         }
 
         // Cập nhật lại Cookie với cặp token mới

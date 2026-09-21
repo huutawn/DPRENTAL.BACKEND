@@ -3,7 +3,6 @@ using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Errors;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Utils;
@@ -28,7 +27,7 @@ public sealed class UserService(
         string email = NormalizeEmail(request.Email);
         if (await userRepository.EmailExistsAsync(email, cancellationToken))
         {
-            return UserErrors.EmailAlreadyExists;
+            return AuthErrors.User.EmailAlreadyExists;
         }
 
         User user = new()
@@ -48,7 +47,7 @@ public sealed class UserService(
         catch (DuplicateEmailException)
         {
             // Request khác đã đăng ký cùng email ngay sau bước kiểm tra ở trên.
-            return UserErrors.EmailAlreadyExists;
+            return AuthErrors.User.EmailAlreadyExists;
         }
 
         return new AccountCreatedResponse(user.Id);
@@ -269,7 +268,7 @@ public sealed class UserService(
         User? user = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
         if (user is null)
         {
-            return UserErrors.UserNotFound;
+            return AuthErrors.User.NotFound;
         }
 
         UserOrganizationResponse[] organizations = UserAccessResolver.ActiveMemberships(user)

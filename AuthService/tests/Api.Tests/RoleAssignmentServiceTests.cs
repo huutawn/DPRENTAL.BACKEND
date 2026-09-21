@@ -2,7 +2,6 @@ using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Errors;
 using Dprental.AuthService.Domain.IRepositories;
 using Xunit;
 
@@ -27,7 +26,7 @@ public sealed class RoleAssignmentServiceTests
         Result result = await service.AssignAsync(actorUserId, new AssignRoleRequest(targetUserId, orgRoleId));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(RoleErrors.InvalidScope, result.Error);
+        Assert.Equal(AuthErrors.Role.InvalidScope, result.Error);
         Assert.Equal(ErrorType.Validation, result.Error.Type);
     }
 
@@ -48,7 +47,7 @@ public sealed class RoleAssignmentServiceTests
         Result result = await service.RevokeAsync(actorUserId, new AssignRoleRequest(targetUserId, orgRoleId));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(RoleErrors.InvalidScope, result.Error);
+        Assert.Equal(AuthErrors.Role.InvalidScope, result.Error);
         Assert.Equal(ErrorType.Validation, result.Error.Type);
     }
 

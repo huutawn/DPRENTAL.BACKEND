@@ -3,7 +3,6 @@ using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Organization;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Errors;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Xunit;
@@ -37,7 +36,7 @@ public sealed class OrganizationServiceTests
             new CreateOrganizationRequest("Acme Corp", invalidSlug, OrganizationType.Supplier));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.InvalidSlugFormat, result.Error);
+        Assert.Equal(AuthErrors.Organization.InvalidSlugFormat, result.Error);
         Assert.Equal(ErrorType.Validation, result.Error.Type);
     }
 
@@ -57,7 +56,7 @@ public sealed class OrganizationServiceTests
             new CreateOrganizationRequest(invalidName, "valid-slug", OrganizationType.Supplier));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.InvalidName, result.Error);
+        Assert.Equal(AuthErrors.Organization.InvalidName, result.Error);
     }
 
     [Fact]
@@ -77,7 +76,7 @@ public sealed class OrganizationServiceTests
             new CreateOrganizationRequest("Platform Org", "platform-org", OrganizationType.Platform));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.PlatformAdminRequired, result.Error);
+        Assert.Equal(AuthErrors.Organization.PlatformAdminRequired, result.Error);
         Assert.Equal(ErrorType.Forbidden, result.Error.Type);
     }
 
@@ -98,7 +97,7 @@ public sealed class OrganizationServiceTests
             new CreateOrganizationRequest("Supplier Org", "supplier-org", OrganizationType.Supplier));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.CreationNotAllowed, result.Error);
+        Assert.Equal(AuthErrors.Organization.CreationNotAllowed, result.Error);
     }
 
     [Fact]
@@ -119,7 +118,7 @@ public sealed class OrganizationServiceTests
             new CreateOrganizationRequest("Acme", "existing-slug", OrganizationType.Supplier));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.SlugAlreadyExists, result.Error);
+        Assert.Equal(AuthErrors.Organization.SlugAlreadyExists, result.Error);
         Assert.Equal(ErrorType.Conflict, result.Error.Type);
     }
 
@@ -167,7 +166,7 @@ public sealed class OrganizationServiceTests
         Result<OrganizationResponse> result = await service.GetByIdAsync(ActorUserId, orgId);
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.InactiveOrganization, result.Error);
+        Assert.Equal(AuthErrors.Organization.InactiveOrganization, result.Error);
         Assert.Equal(ErrorType.Forbidden, result.Error.Type);
     }
 
@@ -188,7 +187,7 @@ public sealed class OrganizationServiceTests
         Result<OrganizationResponse> result = await service.GetByIdAsync(ActorUserId, orgId);
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.CrossOrganizationAccessDenied, result.Error);
+        Assert.Equal(AuthErrors.Organization.CrossOrganizationAccessDenied, result.Error);
     }
 
     [Fact]
@@ -245,7 +244,7 @@ public sealed class OrganizationServiceTests
             new AddOrganizationMemberRequest(targetUserId, globalRoleId));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.InvalidRoleScope, result.Error);
+        Assert.Equal(AuthErrors.Organization.InvalidRoleScope, result.Error);
     }
 
     [Fact]
@@ -272,7 +271,7 @@ public sealed class OrganizationServiceTests
             new AddOrganizationMemberRequest(targetUserId, MemberRoleId));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.UserInactive, result.Error);
+        Assert.Equal(AuthErrors.Organization.UserInactive, result.Error);
     }
 
     [Fact]
@@ -308,7 +307,7 @@ public sealed class OrganizationServiceTests
             new AddOrganizationMemberRequest(targetUserId, MemberRoleId));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.MembershipAlreadyExists, result.Error);
+        Assert.Equal(AuthErrors.Organization.MembershipAlreadyExists, result.Error);
         Assert.Equal(ErrorType.Conflict, result.Error.Type);
     }
 
@@ -350,7 +349,7 @@ public sealed class OrganizationServiceTests
             new AddOrganizationMemberRequest(targetUserId, customRoleId));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.PrivilegeEscalation, result.Error);
+        Assert.Equal(AuthErrors.Organization.PrivilegeEscalation, result.Error);
         Assert.Equal(ErrorType.Forbidden, result.Error.Type);
     }
 
@@ -385,7 +384,7 @@ public sealed class OrganizationServiceTests
             new PatchOrganizationMemberRequest(Status: MembershipStatus.Active));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.CannotActivateInvitation, result.Error);
+        Assert.Equal(AuthErrors.Organization.CannotActivateInvitation, result.Error);
     }
 
     [Fact]
@@ -453,7 +452,7 @@ public sealed class OrganizationServiceTests
             new PatchOrganizationMemberRequest(Status: MembershipStatus.Suspended));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.LastOwner, result.Error);
+        Assert.Equal(AuthErrors.Organization.LastOwner, result.Error);
     }
 
     [Fact]
@@ -493,7 +492,7 @@ public sealed class OrganizationServiceTests
             new PatchOrganizationMemberRequest(RoleId: MemberRoleId));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.LastOwner, result.Error);
+        Assert.Equal(AuthErrors.Organization.LastOwner, result.Error);
     }
 
     [Fact]
@@ -527,7 +526,7 @@ public sealed class OrganizationServiceTests
         Result result = await service.DeleteMemberAsync(ActorAdminId, orgId, ownerMemberId);
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.LastOwner, result.Error);
+        Assert.Equal(AuthErrors.Organization.LastOwner, result.Error);
     }
 
     [Fact]
@@ -550,7 +549,7 @@ public sealed class OrganizationServiceTests
             new UpdateOrganizationRequest(IsActive: false));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(OrganizationErrors.PlatformAdminRequired, result.Error);
+        Assert.Equal(AuthErrors.Organization.PlatformAdminRequired, result.Error);
     }
 
     private sealed class FakeOrganizationRepository : IOrganizationRepository

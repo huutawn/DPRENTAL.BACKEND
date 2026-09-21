@@ -4,7 +4,6 @@ using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Errors;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
@@ -47,7 +46,7 @@ public sealed class UserServiceTests
             new RegisterRequest("TAN.LEN@example.com", "Matkhau123!", "Huynh Tan Len"));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(UserErrors.EmailAlreadyExists, result.Error);
+        Assert.Equal(AuthErrors.User.EmailAlreadyExists, result.Error);
         Assert.Equal(ErrorType.Conflict, result.Error.Type);
         Assert.Empty(repository.CreatedUsers);
     }
@@ -62,7 +61,7 @@ public sealed class UserServiceTests
             new RegisterRequest("tan.len@example.com", "Matkhau123!", "Huynh Tan Len"));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(UserErrors.EmailAlreadyExists, result.Error);
+        Assert.Equal(AuthErrors.User.EmailAlreadyExists, result.Error);
     }
 
     [Fact]
@@ -129,7 +128,7 @@ public sealed class UserServiceTests
         Result<CurrentUserResponse> result = await service.GetCurrentUserProfileAsync(Guid.NewGuid());
 
         Assert.True(result.IsFailure);
-        Assert.Equal(UserErrors.UserNotFound, result.Error);
+        Assert.Equal(AuthErrors.User.UserNotFound, result.Error);
         Assert.Equal(ErrorType.NotFound, result.Error.Type);
     }
 

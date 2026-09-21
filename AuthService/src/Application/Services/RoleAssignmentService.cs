@@ -3,7 +3,6 @@ using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
-using Dprental.AuthService.Domain.Errors;
 using Dprental.AuthService.Domain.IRepositories;
 
 namespace Dprental.AuthService.Application.Services;
@@ -26,11 +25,11 @@ public sealed class RoleAssignmentService(IRoleRepository roleRepository) : IRol
 
         if (await roleRepository.IsAssignedAsync(request.TargetUserId, request.RoleId, cancellationToken))
         {
-            return Result.Failure(RoleErrors.AlreadyAssigned);
+            return Result.Failure(AuthErrors.Role.AlreadyAssigned);
         }
 
         bool assigned = await roleRepository.AssignAsync(request.TargetUserId, request.RoleId, cancellationToken);
-        return assigned ? Result.Success() : Result.Failure(RoleErrors.AssignmentFailed);
+        return assigned ? Result.Success() : Result.Failure(AuthErrors.Role.AssignmentFailed);
     }
 
     public async Task<Result> RevokeAsync(Guid actorUserId, AssignRoleRequest request, CancellationToken cancellationToken = default)
@@ -44,32 +43,32 @@ public sealed class RoleAssignmentService(IRoleRepository roleRepository) : IRol
         }
 
         bool revoked = await roleRepository.RevokeAsync(request.TargetUserId, request.RoleId, cancellationToken);
-        return revoked ? Result.Success() : Result.Failure(RoleErrors.NotAssigned);
+        return revoked ? Result.Success() : Result.Failure(AuthErrors.Role.NotAssigned);
     }
 
     private async Task<Result> GuardAsync(Guid actorUserId, AssignRoleRequest request, CancellationToken cancellationToken)
     {
         if (actorUserId == request.TargetUserId)
         {
-            return Result.Failure(RoleErrors.CannotSelfAssign);
+            return Result.Failure(AuthErrors.Role.CannotSelfAssign);
         }
 
         Role? role = await roleRepository.GetByIdAsync(request.RoleId, cancellationToken);
         if (role is null)
         {
-            return Result.Failure(RoleErrors.RoleNotFound);
+            return Result.Failure(AuthErrors.Role.RoleNotFound);
         }
 
         if (role.Scope != RoleScope.Global)
         {
-            return Result.Failure(RoleErrors.InvalidScope);
+            return Result.Failure(AuthErrors.Role.InvalidScope);
         }
 
         IReadOnlyList<string> rolePermissions = await roleRepository.GetPermissionCodesAsync(request.RoleId, cancellationToken);
         IReadOnlyList<string> actorPermissions = await roleRepository.GetUserPermissionCodesAsync(actorUserId, cancellationToken);
         if (rolePermissions.Except(actorPermissions).Any())
         {
-            return Result.Failure(RoleErrors.InsufficientPermission);
+            return Result.Failure(AuthErrors.Role.InsufficientPermission);
         }
 
         return Result.Success();

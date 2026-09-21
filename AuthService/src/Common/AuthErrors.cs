@@ -7,9 +7,11 @@ public static class AuthErrors
     {
         public static readonly Error NotFound =
             Error.NotFound(AuthErrorCode.Organization.NotFound, "Organization không tồn tại.");
+        public static readonly Error OrganizationNotFound = NotFound;
 
         public static readonly Error Inactive =
             Error.Forbidden(AuthErrorCode.Organization.Inactive, "Organization đã bị vô hiệu hóa.");
+        public static readonly Error InactiveOrganization = Inactive;
 
         public static readonly Error CrossOrganizationAccessDenied =
             Error.Forbidden(AuthErrorCode.Organization.CrossOrganizationAccessDenied, "Bạn không có quyền truy cập organization này.");
@@ -73,6 +75,7 @@ public static class AuthErrors
     {
         public static readonly Error NotFound =
             Error.NotFound(AuthErrorCode.Role.NotFound, "Role không tồn tại.");
+        public static readonly Error RoleNotFound = NotFound;
 
         public static readonly Error CannotSelfAssign =
             Error.Forbidden(AuthErrorCode.Role.CannotSelfAssign, "Không thể tự gán hoặc tự thu hồi role của chính mình.");
@@ -100,6 +103,7 @@ public static class AuthErrors
 
         public static readonly Error NotFound =
             Error.NotFound(AuthErrorCode.User.NotFound, "Người dùng không tồn tại hoặc tài khoản đã bị khóa.");
+        public static readonly Error UserNotFound = NotFound;
     }
 
     public static class ServicePrincipal
