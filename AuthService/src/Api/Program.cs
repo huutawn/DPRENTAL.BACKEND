@@ -17,6 +17,7 @@ builder.Services.AddAuthServiceDistributedTracing(builder.Configuration);
 builder.Services.AddAuthApplication(builder.Configuration);
 builder.Services.AddAuthDomainPersistence(builder.Configuration.GetConnectionString("Postgres"));
 builder.Services.AddJwtBearerSecurity();
+builder.Services.AddAuthForwardedHeaders(builder.Configuration);
 builder.Services.AddGoogleLogin(builder.Configuration);
 builder.Services.AddCors(options =>
 {
@@ -45,6 +46,8 @@ builder.Services.AddHealthChecks()
         tags: ["ready"]);
 
 var app = builder.Build();
+
+app.UseForwardedHeaders();
 
 if (app.Environment.IsDevelopment())
 {

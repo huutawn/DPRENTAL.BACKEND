@@ -111,6 +111,117 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext) : IAuthSess
     }
 
     /// <inheritdoc />
+    public async Task<bool> CreateGoogleLoginTicketAsync(
+        Guid userId,
+        string ticketHash,
+        DateTime utcNow,
+        DateTime expiresAtUtc,
+        CancellationToken cancellationToken)
+    {
+        bool activeUserExists = await dbContext.Users
+            .AnyAsync(user => user.Id == userId && user.IsActive, cancellationToken);
+        if (!activeUserExists)
+        {
+            return false;
+        }
+
+        dbContext.GoogleLoginTickets.Add(new GoogleLoginTicket
+        {
+            Id = Guid.NewGuid(),
+            TicketHash = ticketHash,
+            UserId = userId,
+            CreatedAtUtc = utcNow,
+            ExpiresAtUtc = expiresAtUtc
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<AuthSessionPrincipal?> ConsumeGoogleLoginTicketAndCreateSessionAsync(
+        string ticketHash,
+        string refreshTokenHash,
+        DateTime utcNow,
+        DateTime sessionExpiresAtUtc,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+
+        GoogleLoginTicket? ticket = await dbContext.GoogleLoginTickets
+            .AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.TicketHash == ticketHash, cancellationToken);
+        if (ticket is null || ticket.ExpiresAtUtc <= utcNow || ticket.UsedAtUtc is not null)
+        {
+            return null;
+        }
+
+        AuthSessionPrincipal? principal = await GetActiveUserPrincipalAsync(ticket.UserId, cancellationToken);
+        if (principal is null)
+        {
+            return null;
+        }
+
+        int consumed;
+        if (dbContext.Database.IsRelational())
+        {
+            consumed = await dbContext.GoogleLoginTickets
+                .Where(candidate => candidate.Id == ticket.Id
+                    && candidate.UsedAtUtc == null
+                    && candidate.ExpiresAtUtc > utcNow)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(candidate => candidate.UsedAtUtc, utcNow), cancellationToken);
+        }
+        else
+        {
+            GoogleLoginTicket? trackedTicket = await dbContext.GoogleLoginTickets
+                .SingleOrDefaultAsync(candidate => candidate.Id == ticket.Id
+                    && candidate.UsedAtUtc == null
+                    && candidate.ExpiresAtUtc > utcNow, cancellationToken);
+            if (trackedTicket is null)
+            {
+                return null;
+            }
+
+            trackedTicket.UsedAtUtc = utcNow;
+            consumed = 1;
+        }
+        if (consumed != 1)
+        {
+            return null;
+        }
+
+        Session session = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = ticket.UserId,
+            CreatedAtUtc = utcNow,
+            ExpiresAtUtc = sessionExpiresAtUtc
+        };
+        dbContext.Sessions.Add(session);
+        dbContext.RefreshTokens.Add(new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            TokenHash = refreshTokenHash,
+            CreatedAt = utcNow,
+            UserId = ticket.UserId,
+            SessionId = session.Id,
+            ExpiryDate = sessionExpiresAtUtc,
+            CreatedAtUtc = utcNow,
+            ExpiresAtUtc = sessionExpiresAtUtc,
+            IsRevoked = false
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        return principal;
+    }
+
+    /// <inheritdoc />
     public async Task<AuthSessionPrincipal?> RotateAsync(
         string currentRefreshTokenHash,
         string replacementRefreshTokenHash,

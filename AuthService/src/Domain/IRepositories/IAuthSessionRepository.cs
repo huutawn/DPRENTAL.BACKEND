@@ -10,6 +10,19 @@ public interface IAuthSessionRepository : IRepo<Session, Guid>
     /// <summary>Tạo session mới cùng refresh token đầu tiên nếu user đang hoạt động.</summary>
     Task<AuthSessionPrincipal?> CreateAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken);
 
+    /// <summary>Tạo ticket Google ngắn hạn cho user đang active.</summary>
+    Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Consume ticket Google một lần và tạo session/refresh token trong cùng transaction.
+    /// </summary>
+    Task<AuthSessionPrincipal?> ConsumeGoogleLoginTicketAndCreateSessionAsync(
+        string ticketHash,
+        string refreshTokenHash,
+        DateTime utcNow,
+        DateTime sessionExpiresAtUtc,
+        CancellationToken cancellationToken);
+
     /// <summary>
     /// Xoay refresh token một cách nguyên tử. Nếu phát hiện token đã dùng lại,
     /// Repository sẽ thu hồi session trước khi trả kết quả.

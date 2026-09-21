@@ -127,6 +127,41 @@ public sealed class AuthController(
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
+    /// <summary>Next BFF đổi ticket Google ngắn hạn, một lần dùng lấy cặp token để tự set cookie FE-domain.</summary>
+    [HttpPost("google/exchange")]
+    [ProducesResponseType<AuthTokenResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AuthTokenResponse>> ExchangeGoogleLoginTicket(
+        [FromBody] GoogleLoginTicketExchangeRequest? request,
+        CancellationToken cancellationToken)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (!googleOptions.Value.IsConfigured)
+        {
+            return NotFound();
+        }
+        if (string.IsNullOrWhiteSpace(request?.Ticket))
+        {
+            return Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Auth.MissingGoogleLoginTicket",
+                detail: "Ticket là bắt buộc.");
+        }
+
+        AuthTokenPair? tokens = await authSessionService.ExchangeGoogleLoginTicketAsync(request.Ticket, cancellationToken);
+        if (tokens is null)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Auth.InvalidGoogleLoginTicket",
+                detail: "Ticket không hợp lệ, đã hết hạn hoặc đã được sử dụng.");
+        }
+
+        return Ok(new AuthTokenResponse(tokens.AccessToken, tokens.RefreshToken));
+    }
+
     /// <summary>Bắt đầu đăng nhập Google: kiểm tra returnUrl rồi chuyển trình duyệt sang trang đăng nhập của Google.</summary>
     [HttpGet("google/login")]
     [ProducesResponseType(StatusCodes.Status302Found)]
@@ -142,6 +177,10 @@ public sealed class AuthController(
 
         string target = returnUrl ?? (google.AllowedReturnUrls.Count > 0 ? google.AllowedReturnUrls[0] : "/");
         if (!ReturnUrlValidator.IsAllowed(target, google.AllowedReturnUrls))
+        {
+            return InvalidReturnUrl();
+        }
+        if (!GoogleBffCallbackResolver.TryResolve(target, google, out _))
         {
             return InvalidReturnUrl();
         }
@@ -172,6 +211,10 @@ public sealed class AuthController(
         {
             return InvalidReturnUrl();
         }
+        if (!GoogleBffCallbackResolver.TryResolve(returnUrl, google, out string bffCallbackUrl))
+        {
+            return InvalidReturnUrl();
+        }
 
         // Cookie tạm chỉ dùng một lần: đọc xong là xóa ngay dù kết quả thế nào.
         AuthenticateResult external = await HttpContext.AuthenticateAsync(GoogleAuthenticationExtensions.ExternalScheme);
@@ -181,7 +224,7 @@ public sealed class AuthController(
         string? subject = principal?.FindFirstValue(ClaimTypes.NameIdentifier);
         if (!external.Succeeded || principal is null || string.IsNullOrWhiteSpace(subject))
         {
-            return Redirect(WithError(returnUrl, "Auth.ExternalFailed"));
+            return RedirectToBff(WithError(bffCallbackUrl, returnUrl, "Auth.ExternalFailed"));
         }
 
         ExternalIdentity identity = new(
@@ -194,17 +237,16 @@ public sealed class AuthController(
         Result<Guid> result = await externalLoginService.SignInAsync(identity, cancellationToken);
         if (result.IsFailure)
         {
-            return Redirect(WithError(returnUrl, result.Error.Code));
+            return RedirectToBff(WithError(bffCallbackUrl, returnUrl, result.Error.Code));
         }
 
-        AuthTokenPair? tokens = await authSessionService.CreateSessionAsync(result.Value, cancellationToken);
-        if (tokens is null)
+        string? ticket = await authSessionService.CreateGoogleLoginTicketAsync(result.Value, cancellationToken);
+        if (ticket is null)
         {
-            return Redirect(WithError(returnUrl, "Auth.InactiveAccount"));
+            return RedirectToBff(WithError(bffCallbackUrl, returnUrl, "Auth.InactiveAccount"));
         }
 
-        SetAuthCookies(tokens.AccessToken, tokens.RefreshToken);
-        return Redirect(returnUrl);
+        return RedirectToBff(WithTicket(bffCallbackUrl, returnUrl, ticket));
     }
 
     private ObjectResult InvalidReturnUrl() => Problem(
@@ -213,9 +255,26 @@ public sealed class AuthController(
         detail: "returnUrl không nằm trong danh sách được phép.");
 
     /// <summary>Gắn mã lỗi vào query của returnUrl; lúc này user đang ở trên trình duyệt nên chuyển hướng thay vì trả JSON.</summary>
-    private static string WithError(string returnUrl, string errorCode) =>
-        QueryHelpers.AddQueryString(returnUrl, "error", errorCode);
+    private static string WithError(string callbackUrl, string returnUrl, string errorCode) =>
+        QueryHelpers.AddQueryString(callbackUrl, new Dictionary<string, string?>
+        {
+            ["error"] = errorCode,
+            ["returnUrl"] = returnUrl
+        });
 
+    private static string WithTicket(string callbackUrl, string returnUrl, string ticket) =>
+        QueryHelpers.AddQueryString(callbackUrl, new Dictionary<string, string?>
+        {
+            ["ticket"] = ticket,
+            ["returnUrl"] = returnUrl
+        });
+
+    private RedirectResult RedirectToBff(string destination)
+    {
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers["Referrer-Policy"] = "no-referrer";
+        return Redirect(destination);
+    }
     [HttpPost("forgot-password")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
