@@ -71,7 +71,7 @@ public sealed class AuthSessionServiceTests
     {
         DateTimeOffset now = new(2026, 9, 21, 7, 30, 0, TimeSpan.Zero);
         RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), []));
-        AuthSessionService service = new(repository, new FakeAccessTokenIssuer(), new FixedTimeProvider(now));
+        AuthSessionService service = CreateService(repository, now);
 
         string? ticket = await service.CreateGoogleLoginTicketAsync(repository.Principal!.UserId);
 
@@ -87,7 +87,7 @@ public sealed class AuthSessionServiceTests
     {
         DateTimeOffset now = new(2026, 9, 21, 7, 30, 0, TimeSpan.Zero);
         RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), ["member"]));
-        AuthSessionService service = new(repository, new FakeAccessTokenIssuer(), new FixedTimeProvider(now));
+        AuthSessionService service = CreateService(repository, now);
 
         AuthTokenPair? result = await service.ExchangeGoogleLoginTicketAsync("google-ticket");
 
