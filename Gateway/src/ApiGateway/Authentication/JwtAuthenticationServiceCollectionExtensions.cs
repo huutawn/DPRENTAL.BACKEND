@@ -50,6 +50,20 @@ internal static class JwtAuthenticationServiceCollectionExtensions
         bearerOptions.MapInboundClaims = false;
         bearerOptions.ConfigurationManager = configurationManager;
         bearerOptions.RefreshOnIssuerKeyNotFound = true;
+        bearerOptions.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                if (string.IsNullOrWhiteSpace(context.Token) &&
+                    context.Request.Cookies.TryGetValue("accessToken", out string? accessToken) &&
+                    !string.IsNullOrWhiteSpace(accessToken))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
+        };
         bearerOptions.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,

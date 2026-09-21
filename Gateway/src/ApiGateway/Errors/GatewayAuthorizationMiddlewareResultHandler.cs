@@ -21,7 +21,8 @@ internal sealed class GatewayAuthorizationMiddlewareResultHandler : IAuthorizati
 
         if (authorizeResult.Challenged)
         {
-            bool suppliedCredentials = context.Request.Headers.ContainsKey(HeaderNames.Authorization);
+            bool suppliedCredentials = context.Request.Headers.ContainsKey(HeaderNames.Authorization) ||
+                                       context.Request.Cookies.ContainsKey("accessToken");
             context.Response.Headers[HeaderNames.WWWAuthenticate] = suppliedCredentials
                 ? "Bearer error=\"invalid_token\""
                 : "Bearer";

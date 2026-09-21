@@ -313,7 +313,7 @@ public sealed class GatewaySecurityIntegrationTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
-        Assert.Equal("/sessions", upstream.LastRequest.Path);
+        Assert.Equal("/api/v1/auth/sessions", upstream.LastRequest.Path);
     }
 
     [Fact]
@@ -347,6 +347,104 @@ public sealed class GatewaySecurityIntegrationTests
         Assert.Equal(expectedUserId, upstream.LastRequest.Headers[GatewayHeaderConstants.UserId]);
         Assert.False(upstream.LastRequest.Headers.ContainsKey(GatewayHeaderConstants.PartyId));
         Assert.False(upstream.LastRequest.Headers.ContainsKey(GatewayHeaderConstants.Role));
+    }
+
+    [Fact]
+    public async Task ValidTokenInCookieForwardsCompleteIdentityContextAndBearerDownstream()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress, includeProtectedRoute: true);
+        using HttpClient client = factory.CreateClient();
+
+        string expectedUserId = Guid.NewGuid().ToString("D");
+        string expectedPartyId = "party-dprental-org-cookie";
+        string[] expectedRoles = ["customer"];
+
+        string token = CreateToken(
+            signingKey,
+            keyId: "key-1",
+            issuer: Issuer,
+            audience: Audience,
+            userId: expectedUserId,
+            partyId: expectedPartyId,
+            roles: expectedRoles);
+
+        using HttpRequestMessage request = new(HttpMethod.Get, "/protected/orders");
+        request.Headers.Add("Cookie", $"accessToken={token}");
+
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(expectedUserId, upstream.LastRequest.Headers[GatewayHeaderConstants.UserId]);
+        Assert.Equal(expectedPartyId, upstream.LastRequest.Headers[GatewayHeaderConstants.PartyId]);
+        Assert.Equal("ApiGateway", upstream.LastRequest.Headers[GatewayHeaderConstants.ServiceName]);
+        Assert.Equal("customer", upstream.LastRequest.Headers[GatewayHeaderConstants.Role]);
+        Assert.Equal($"Bearer {token}", upstream.LastRequest.Headers["Authorization"]);
+    }
+
+    [Fact]
+    public async Task InvalidTokenInCookieReturns401InvalidToken()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress, includeProtectedRoute: true);
+        using HttpClient client = factory.CreateClient();
+
+        using RSA untrustedKey = RSA.Create(2048);
+        string invalidToken = CreateToken(untrustedKey, "untrusted-key", Issuer, Audience, "fake-user");
+
+        using HttpRequestMessage request = new(HttpMethod.Get, "/protected/orders");
+        request.Headers.Add("Cookie", $"accessToken={invalidToken}");
+
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        GatewayErrorResponse? error = await response.Content.ReadFromJsonAsync<GatewayErrorResponse>();
+        Assert.NotNull(error);
+        Assert.Equal(GatewayError.InvalidAccessToken.Code, error.Code);
+    }
+
+    [Fact]
+    public async Task MissingTokenInHeaderAndCookieReturns401AuthenticationRequired()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress, includeProtectedRoute: true);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Get, "/protected/orders");
+
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        GatewayErrorResponse? error = await response.Content.ReadFromJsonAsync<GatewayErrorResponse>();
+        Assert.NotNull(error);
+        Assert.Equal(GatewayError.AuthenticationRequired.Code, error.Code);
+    }
+
+    [Fact]
+    public async Task SetCookieFromDownstreamIsPreservedAndForwardedToClient()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"))
+        {
+            CookieToSet = "accessToken=cookie-token-val; Path=/; HttpOnly; SameSite=Lax"
+        };
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Post, "/api/v1/auth/sessions")
+        {
+            Content = new StringContent("{\"email\":\"user@example.test\"}", Encoding.UTF8, "application/json")
+        };
+
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.Contains("Set-Cookie"));
+        string setCookie = string.Join(";", response.Headers.GetValues("Set-Cookie"));
+        Assert.Contains("accessToken=cookie-token-val", setCookie, StringComparison.Ordinal);
     }
 
     private static WebApplicationFactory<Program> CreateFactory(
@@ -466,6 +564,8 @@ public sealed class GatewaySecurityIntegrationTests
 
         internal string Jwks { get; set; }
 
+        internal string? CookieToSet { get; set; }
+
         internal CapturedRequest LastRequest { get; private set; } = new();
 
         public async ValueTask DisposeAsync()
@@ -526,6 +626,11 @@ public sealed class GatewaySecurityIntegrationTests
                 Path = request.Url?.AbsolutePath,
                 Headers = capturedHeaders
             };
+
+            if (!string.IsNullOrWhiteSpace(CookieToSet))
+            {
+                context.Response.Headers.Add("Set-Cookie", CookieToSet);
+            }
 
             await WriteResponseAsync(context.Response, "{\"success\":true}", "application/json");
         }

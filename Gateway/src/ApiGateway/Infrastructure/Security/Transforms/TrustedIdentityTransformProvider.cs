@@ -110,6 +110,14 @@ public sealed class TrustedIdentityTransformProvider : ITransformProvider
                     // Cập nhật vào accessor để có thể truy xuất trong nội bộ Gateway nếu cần
                     identityContextAccessor.SetCurrent(identity);
                 }
+
+                // Chuyển đổi Cookie token sang Authorization Bearer cho downstream nếu client chỉ gửi Cookie
+                if (proxyHeaders.Authorization is null &&
+                    httpContext.Request.Cookies.TryGetValue("accessToken", out string? cookieToken) &&
+                    !string.IsNullOrWhiteSpace(cookieToken))
+                {
+                    proxyHeaders.TryAddWithoutValidation("Authorization", $"Bearer {cookieToken}");
+                }
             }
 
             return ValueTask.CompletedTask;
