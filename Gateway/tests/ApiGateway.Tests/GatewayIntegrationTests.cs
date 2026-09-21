@@ -64,6 +64,21 @@ public sealed class GatewayIntegrationTests
     }
 
     [Fact]
+    public async Task GoogleProviderCallbackRouteIsAnonymousAndForwardsToAuthService()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackAuthService upstream = new(CreateJwks(signingKey, "key-1"));
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/signin-google?state=google-state&code=authorization-code");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("/signin-google", upstream.LastRequest.Path);
+        Assert.Equal("?state=google-state&code=authorization-code", upstream.LastRequest.Query);
+    }
+
+    [Fact]
     public async Task SwaggerRoutesForwardDirectlyToAuthService()
     {
         using RSA signingKey = RSA.Create(2048);
