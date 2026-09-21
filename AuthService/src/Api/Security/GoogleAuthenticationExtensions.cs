@@ -2,6 +2,7 @@ using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.Extensions.Options;
 
 namespace Dprental.AuthService.Api.Security;
 
@@ -15,7 +16,12 @@ internal static class GoogleAuthenticationExtensions
     internal static IServiceCollection AddGoogleLogin(this IServiceCollection services, IConfiguration configuration)
     {
         IConfigurationSection section = configuration.GetSection(GoogleAuthOptions.SectionName);
-        services.Configure<GoogleAuthOptions>(section);
+        services.AddOptions<GoogleAuthOptions>()
+            .Bind(section)
+            .Validate(
+                GoogleBffCallbackResolver.IsValidConfiguration,
+                "Auth:Google:BffCallbackUrls phải có đúng một callback HTTP(S) cho mỗi allowed frontend origin.")
+            .ValidateOnStart();
 
         GoogleAuthOptions google = section.Get<GoogleAuthOptions>() ?? new GoogleAuthOptions();
         if (!google.IsConfigured)
