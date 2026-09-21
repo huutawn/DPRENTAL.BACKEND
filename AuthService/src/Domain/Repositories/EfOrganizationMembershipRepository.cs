@@ -1,3 +1,4 @@
+using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Exceptions;
@@ -35,15 +36,27 @@ public sealed class EfOrganizationMembershipRepository(AuthDbContext dbContext) 
                     .ThenInclude(rp => rp.Permission)
             .SingleOrDefaultAsync(m => m.OrganizationId == organizationId && (m.Id == memberOrUserId || m.UserId == memberOrUserId), cancellationToken);
 
-    public async Task<IReadOnlyList<OrganizationMembership>> GetMembersAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
-        await dbContext.OrganizationMemberships
+    public async Task<PagedResult<OrganizationMembership>> GetMembersAsync(Guid organizationId, PageRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        IQueryable<OrganizationMembership> query = dbContext.OrganizationMemberships
             .AsNoTracking()
             .Include(m => m.User)
             .Include(m => m.Role)
-            .Where(m => m.OrganizationId == organizationId)
+            .Where(m => m.OrganizationId == organizationId);
+
+        int totalCount = await query.CountAsync(cancellationToken);
+
+        List<OrganizationMembership> items = await query
             .OrderBy(m => m.JoinedAtUtc)
+            .ThenBy(m => m.Id)
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
             .ToListAsync(cancellationToken);
 
+        return PagedResult.Create(items, request.Page, request.PageSize, totalCount);
+    }
     public Task<bool> MembershipExistsAsync(Guid organizationId, Guid userId, CancellationToken cancellationToken = default) =>
         dbContext.OrganizationMemberships
             .AsNoTracking()

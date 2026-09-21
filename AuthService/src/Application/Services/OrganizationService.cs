@@ -172,27 +172,36 @@ public sealed partial class OrganizationService(
             org.CreatedAtUtc);
     }
 
-    public async Task<Result<IReadOnlyList<OrganizationResponse>>> ListAsync(
+    public async Task<Result<PagedResult<OrganizationResponse>>> ListAsync(
         Guid actorUserId,
+        PageRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         if (actorUserId == Guid.Empty)
         {
-            return Result.Failure<IReadOnlyList<OrganizationResponse>>(AuthErrors.Organization.Forbidden);
+            return Result.Failure<PagedResult<OrganizationResponse>>(AuthErrors.Organization.Forbidden);
+        }
+
+        Result validation = request.Validate();
+        if (validation.IsFailure)
+        {
+            return Result.Failure<PagedResult<OrganizationResponse>>(validation.Error);
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
         bool hasGlobalRead = globalPerms.Contains(PermissionCode.IdentityOrganizationsRead, StringComparer.Ordinal);
 
-        IReadOnlyList<Organization> orgs = hasGlobalRead
-            ? await organizationRepository.GetAllAsync(cancellationToken)
-            : await organizationRepository.GetUserOrganizationsAsync(actorUserId, cancellationToken);
+        PagedResult<Organization> pagedOrgs = hasGlobalRead
+            ? await organizationRepository.GetAllAsync(request, cancellationToken)
+            : await organizationRepository.GetUserOrganizationsAsync(actorUserId, request, cancellationToken);
 
-        OrganizationResponse[] mapped = orgs
+        OrganizationResponse[] mapped = pagedOrgs.Items
             .Select(org => new OrganizationResponse(org.Id, org.Name, org.Slug, org.Type, org.IsActive, org.CreatedAtUtc))
             .ToArray();
 
-        return mapped;
+        return new PagedResult<OrganizationResponse>(mapped, pagedOrgs.Page, pagedOrgs.PageSize, pagedOrgs.TotalCount, pagedOrgs.TotalPages);
     }
 
     public async Task<Result> UpdateAsync(
@@ -275,20 +284,29 @@ public sealed partial class OrganizationService(
         return Result.Success();
     }
 
-    public async Task<Result<IReadOnlyList<OrganizationMemberResponse>>> GetMembersAsync(
+    public async Task<Result<PagedResult<OrganizationMemberResponse>>> GetMembersAsync(
         Guid actorUserId,
         Guid organizationId,
+        PageRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         if (actorUserId == Guid.Empty || organizationId == Guid.Empty)
         {
-            return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(AuthErrors.Organization.OrganizationNotFound);
+            return Result.Failure<PagedResult<OrganizationMemberResponse>>(AuthErrors.Organization.OrganizationNotFound);
+        }
+
+        Result validation = request.Validate();
+        if (validation.IsFailure)
+        {
+            return Result.Failure<PagedResult<OrganizationMemberResponse>>(validation.Error);
         }
 
         Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
         if (org is null)
         {
-            return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(AuthErrors.Organization.OrganizationNotFound);
+            return Result.Failure<PagedResult<OrganizationMemberResponse>>(AuthErrors.Organization.OrganizationNotFound);
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
@@ -296,7 +314,7 @@ public sealed partial class OrganizationService(
 
         if (!org.IsActive && !canManageSuspended)
         {
-            return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(AuthErrors.Organization.InactiveOrganization);
+            return Result.Failure<PagedResult<OrganizationMemberResponse>>(AuthErrors.Organization.InactiveOrganization);
         }
 
         if (!globalPerms.Contains(PermissionCode.IdentityMembersRead, StringComparer.Ordinal))
@@ -304,18 +322,18 @@ public sealed partial class OrganizationService(
             OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
             if (membership is null || membership.Status != MembershipStatus.Active)
             {
-                return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(AuthErrors.Organization.CrossOrganizationAccessDenied);
+                return Result.Failure<PagedResult<OrganizationMemberResponse>>(AuthErrors.Organization.CrossOrganizationAccessDenied);
             }
 
             IReadOnlyList<string> effectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
             if (!effectivePerms.Contains(PermissionCode.IdentityMembersRead, StringComparer.Ordinal))
             {
-                return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(AuthErrors.Organization.Forbidden);
+                return Result.Failure<PagedResult<OrganizationMemberResponse>>(AuthErrors.Organization.Forbidden);
             }
         }
 
-        IReadOnlyList<OrganizationMembership> members = await membershipRepository.GetMembersAsync(organizationId, cancellationToken);
-        OrganizationMemberResponse[] mapped = members
+        PagedResult<OrganizationMembership> pagedMembers = await membershipRepository.GetMembersAsync(organizationId, request, cancellationToken);
+        OrganizationMemberResponse[] mapped = pagedMembers.Items
             .Select(m => new OrganizationMemberResponse(
                 m.Id,
                 m.UserId,
@@ -327,7 +345,7 @@ public sealed partial class OrganizationService(
                 m.JoinedAtUtc))
             .ToArray();
 
-        return mapped;
+        return new PagedResult<OrganizationMemberResponse>(mapped, pagedMembers.Page, pagedMembers.PageSize, pagedMembers.TotalCount, pagedMembers.TotalPages);
     }
 
     public async Task<Result<OrganizationMemberResponse>> AddMemberAsync(

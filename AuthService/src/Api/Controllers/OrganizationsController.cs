@@ -52,17 +52,18 @@ public sealed class OrganizationsController(IOrganizationService organizationSer
     }
 
     [HttpGet]
-    [ProducesResponseType<IReadOnlyList<OrganizationResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<PagedResult<OrganizationResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-    public async Task<IActionResult> List(CancellationToken cancellationToken)
+    public async Task<IActionResult> List([FromQuery] PageRequest request, CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(out Guid userId))
         {
             return Unauthorized();
         }
 
-        Result<IReadOnlyList<OrganizationResponse>> result = await organizationService.ListAsync(userId, cancellationToken);
+        Result<PagedResult<OrganizationResponse>> result = await organizationService.ListAsync(userId, request, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
@@ -84,18 +85,19 @@ public sealed class OrganizationsController(IOrganizationService organizationSer
     }
 
     [HttpGet("{id:guid}/members")]
-    [ProducesResponseType<IReadOnlyList<OrganizationMemberResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<PagedResult<OrganizationMemberResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetMembers(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> GetMembers(Guid id, [FromQuery] PageRequest request, CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(out Guid userId))
         {
             return Unauthorized();
         }
 
-        Result<IReadOnlyList<OrganizationMemberResponse>> result = await organizationService.GetMembersAsync(userId, id, cancellationToken);
+        Result<PagedResult<OrganizationMemberResponse>> result = await organizationService.GetMembersAsync(userId, id, request, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 

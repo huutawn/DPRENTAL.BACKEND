@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Dprental.AuthService.Common;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Domain.Data;
@@ -130,9 +131,9 @@ public sealed class OrganizationIntegrationTests
         using HttpResponseMessage listRes = await client.GetAsync($"/api/v1/auth/organizations/{org.Id}/members");
         Assert.Equal(HttpStatusCode.OK, listRes.StatusCode);
 
-        IReadOnlyList<OrganizationMemberResponse>? members = await listRes.Content.ReadFromJsonAsync<IReadOnlyList<OrganizationMemberResponse>>();
-        Assert.NotNull(members);
-        OrganizationMemberResponse creator = Assert.Single(members);
+        PagedResult<OrganizationMemberResponse>? paged = await listRes.Content.ReadFromJsonAsync<PagedResult<OrganizationMemberResponse>>();
+        Assert.NotNull(paged);
+        OrganizationMemberResponse creator = Assert.Single(paged.Items);
 
         Assert.Equal(adminId, creator.UserId);
         Assert.Equal("admin@example.com", creator.Email);

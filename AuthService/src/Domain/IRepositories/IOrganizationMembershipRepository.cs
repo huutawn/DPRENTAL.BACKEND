@@ -1,3 +1,4 @@
+using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.Entities;
 
 namespace Dprental.AuthService.Domain.IRepositories;
@@ -10,7 +11,7 @@ public interface IOrganizationMembershipRepository
 
     Task<OrganizationMembership?> FindMemberAsync(Guid organizationId, Guid memberOrUserId, CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<OrganizationMembership>> GetMembersAsync(Guid organizationId, CancellationToken cancellationToken = default);
+    Task<PagedResult<OrganizationMembership>> GetMembersAsync(Guid organizationId, PageRequest request, CancellationToken cancellationToken = default);
 
     Task<bool> MembershipExistsAsync(Guid organizationId, Guid userId, CancellationToken cancellationToken = default);
 

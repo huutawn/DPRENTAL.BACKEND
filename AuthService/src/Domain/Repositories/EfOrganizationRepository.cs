@@ -1,3 +1,4 @@
+using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Exceptions;
@@ -23,20 +24,44 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
             .AsNoTracking()
             .AnyAsync(org => org.Slug == slug, cancellationToken);
 
-    public async Task<IReadOnlyList<Organization>> GetAllAsync(CancellationToken cancellationToken = default) =>
-        await dbContext.Organizations
-            .AsNoTracking()
+    public async Task<PagedResult<Organization>> GetAllAsync(PageRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        IQueryable<Organization> query = dbContext.Organizations.AsNoTracking();
+        int totalCount = await query.CountAsync(cancellationToken);
+
+        List<Organization> items = await query
             .OrderBy(org => org.CreatedAtUtc)
+            .ThenBy(org => org.Id)
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
             .ToListAsync(cancellationToken);
 
-    public async Task<IReadOnlyList<Organization>> GetUserOrganizationsAsync(Guid userId, CancellationToken cancellationToken = default) =>
-        await dbContext.OrganizationMemberships
+        return PagedResult.Create(items, request.Page, request.PageSize, totalCount);
+    }
+
+    public async Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        IQueryable<Organization> query = dbContext.OrganizationMemberships
             .AsNoTracking()
             .Where(m => m.UserId == userId && m.Status == MembershipStatus.Active && m.Organization.IsActive)
             .Select(m => m.Organization)
-            .Distinct()
+            .Distinct();
+
+        int totalCount = await query.CountAsync(cancellationToken);
+
+        List<Organization> items = await query
             .OrderBy(org => org.CreatedAtUtc)
+            .ThenBy(org => org.Id)
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
             .ToListAsync(cancellationToken);
+
+        return PagedResult.Create(items, request.Page, request.PageSize, totalCount);
+    }
 
     public async Task<Organization> CreateAsync(
         Organization organization,

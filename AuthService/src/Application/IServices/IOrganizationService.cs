@@ -9,11 +9,11 @@ public interface IOrganizationService
 
     Task<Result<OrganizationResponse>> GetByIdAsync(Guid actorUserId, Guid organizationId, CancellationToken cancellationToken = default);
 
-    Task<Result<IReadOnlyList<OrganizationResponse>>> ListAsync(Guid actorUserId, CancellationToken cancellationToken = default);
+    Task<Result<PagedResult<OrganizationResponse>>> ListAsync(Guid actorUserId, PageRequest request, CancellationToken cancellationToken = default);
 
     Task<Result> UpdateAsync(Guid actorUserId, Guid organizationId, UpdateOrganizationRequest request, CancellationToken cancellationToken = default);
 
-    Task<Result<IReadOnlyList<OrganizationMemberResponse>>> GetMembersAsync(Guid actorUserId, Guid organizationId, CancellationToken cancellationToken = default);
+    Task<Result<PagedResult<OrganizationMemberResponse>>> GetMembersAsync(Guid actorUserId, Guid organizationId, PageRequest request, CancellationToken cancellationToken = default);
 
     Task<Result<OrganizationMemberResponse>> AddMemberAsync(Guid actorUserId, Guid organizationId, AddOrganizationMemberRequest request, CancellationToken cancellationToken = default);
 

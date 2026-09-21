@@ -579,11 +579,19 @@ public sealed class OrganizationServiceTests
         public Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default) =>
             Task.FromResult(ExistingSlugs.Contains(slug) || Organizations.Values.Any(o => o.Slug == slug));
 
-        public Task<IReadOnlyList<Organization>> GetAllAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<Organization>>(Organizations.Values.ToList());
+        public Task<PagedResult<Organization>> GetAllAsync(PageRequest request, CancellationToken cancellationToken = default)
+        {
+            List<Organization> list = Organizations.Values.OrderBy(o => o.CreatedAtUtc).ThenBy(o => o.Id).ToList();
+            List<Organization> paged = list.Skip((request.Page - 1) * request.PageSize).Take(request.PageSize).ToList();
+            return Task.FromResult(PagedResult.Create(paged, request.Page, request.PageSize, list.Count));
+        }
 
-        public Task<IReadOnlyList<Organization>> GetUserOrganizationsAsync(Guid userId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<Organization>>(Organizations.Values.ToList());
+        public Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default)
+        {
+            List<Organization> list = Organizations.Values.OrderBy(o => o.CreatedAtUtc).ThenBy(o => o.Id).ToList();
+            List<Organization> paged = list.Skip((request.Page - 1) * request.PageSize).Take(request.PageSize).ToList();
+            return Task.FromResult(PagedResult.Create(paged, request.Page, request.PageSize, list.Count));
+        }
 
         public Task<Organization> CreateAsync(Organization organization, OrganizationMembership initialMembership, CancellationToken cancellationToken = default)
         {
@@ -619,8 +627,12 @@ public sealed class OrganizationServiceTests
         public Task<OrganizationMembership?> FindMemberAsync(Guid organizationId, Guid memberOrUserId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Memberships.FirstOrDefault(m => m.OrganizationId == organizationId && (m.Id == memberOrUserId || m.UserId == memberOrUserId)));
 
-        public Task<IReadOnlyList<OrganizationMembership>> GetMembersAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<OrganizationMembership>>(Memberships.Where(m => m.OrganizationId == organizationId).ToList());
+        public Task<PagedResult<OrganizationMembership>> GetMembersAsync(Guid organizationId, PageRequest request, CancellationToken cancellationToken = default)
+        {
+            List<OrganizationMembership> list = Memberships.Where(m => m.OrganizationId == organizationId).OrderBy(m => m.JoinedAtUtc).ThenBy(m => m.Id).ToList();
+            List<OrganizationMembership> paged = list.Skip((request.Page - 1) * request.PageSize).Take(request.PageSize).ToList();
+            return Task.FromResult(PagedResult.Create(paged, request.Page, request.PageSize, list.Count));
+        }
 
         public Task<bool> MembershipExistsAsync(Guid organizationId, Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Memberships.Any(m => m.OrganizationId == organizationId && m.UserId == userId));

@@ -1,3 +1,4 @@
+using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.Entities;
 
 namespace Dprental.AuthService.Domain.IRepositories;
@@ -10,9 +11,9 @@ public interface IOrganizationRepository
 
     Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<Organization>> GetAllAsync(CancellationToken cancellationToken = default);
+    Task<PagedResult<Organization>> GetAllAsync(PageRequest request, CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<Organization>> GetUserOrganizationsAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default);
 
     Task<Organization> CreateAsync(Organization organization, OrganizationMembership initialMembership, CancellationToken cancellationToken = default);
 
