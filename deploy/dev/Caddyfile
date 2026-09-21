@@ -1,0 +1,8 @@
+{
+    email {$CADDY_ACME_EMAIL}
+}
+
+{$DEV_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy gateway:8080
+}
