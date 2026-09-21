@@ -22,6 +22,38 @@ namespace Dprental.AuthService.Domain.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.AuditLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CorrelationId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Result")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("Timestamp")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AuditLogs");
+                });
+
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.ExternalLogin", b =>
                 {
                     b.Property<Guid>("Id")
@@ -183,6 +215,44 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.ToTable("Permissions", "auth");
                 });
 
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.RecoveryToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("UsedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("RecoveryTokens", "auth");
+                });
+
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -203,6 +273,9 @@ namespace Dprental.AuthService.Domain.Migrations
 
                     b.Property<bool>("IsRevoked")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("ReplaceByToken")
+                        .HasColumnType("text");
 
                     b.Property<string>("ReplacedByTokenHash")
                         .HasMaxLength(200)
@@ -258,6 +331,9 @@ namespace Dprental.AuthService.Domain.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
+
+                    b.Property<int>("Scope")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
@@ -356,6 +432,9 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Property<DateTime>("ExpiresAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("ReplacedByToken")
+                        .HasColumnType("text");
+
                     b.Property<DateTime?>("RevokedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -399,12 +478,6 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("text");
-
-                    b.Property<string>("PasswordResetToken")
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset?>("ResetTokenExpiry")
-                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
@@ -474,6 +547,17 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Navigation("Organization");
 
                     b.Navigation("Role");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.RecoveryToken", b =>
+                {
+                    b.HasOne("Dprental.AuthService.Domain.Entities.User", "User")
+                        .WithMany("RecoveryTokens")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("User");
                 });
@@ -591,6 +675,8 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Navigation("GoogleLoginTickets");
 
                     b.Navigation("OrganizationMemberships");
+
+                    b.Navigation("RecoveryTokens");
 
                     b.Navigation("Sessions");
 

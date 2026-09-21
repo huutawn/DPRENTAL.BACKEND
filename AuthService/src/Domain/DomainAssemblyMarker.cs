@@ -1,3 +1,5 @@
+global using Dprental.AuthService.Domain.Enums;
+
 namespace Dprental.AuthService.Domain;
 
 /// <summary>Assembly marker for authentication domain code.</summary>

@@ -16,13 +16,14 @@ public static class UserAccessResolver
             .ToArray();
     }
 
-    /// <summary>Membership đang Active — chỉ những membership này đóng góp permission và organization.</summary>
+    /// <summary>Membership đang Active — chỉ những membership này đóng góp permission và organization khi cả membership và organization đều Active.</summary>
     public static OrganizationMembership[] ActiveMemberships(User user)
     {
         ArgumentNullException.ThrowIfNull(user);
 
         return user.OrganizationMemberships
-            .Where(membership => membership.Status == MembershipStatus.Active)
+            .Where(membership => membership.Status == MembershipStatus.Active
+                && membership.Organization is { IsActive: true })
             .ToArray();
     }
 

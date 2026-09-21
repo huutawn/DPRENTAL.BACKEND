@@ -32,6 +32,11 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext) : IAuthSess
         return entity;
     }
 
+    public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        dbContext.Sessions
+            .Where(session => session.UserId == userId && session.RevokedAtUtc == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(session => session.RevokedAtUtc, DateTime.UtcNow), cancellationToken);
+
     /// <inheritdoc />
     public async Task<bool> UpdateAsync(Session entity, CancellationToken cancellationToken = default)
     {
@@ -233,6 +238,8 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext) : IAuthSess
                             .ThenInclude(role => role.RolePermissions)
                                 .ThenInclude(rolePermission => rolePermission.Permission)
             .Include(token => token.Session.User.OrganizationMemberships)
+                .ThenInclude(membership => membership.Organization)
+            .Include(token => token.Session.User.OrganizationMemberships)
                 .ThenInclude(membership => membership.Role)
                     .ThenInclude(role => role.RolePermissions)
                         .ThenInclude(rolePermission => rolePermission.Permission)
@@ -321,6 +328,8 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext) : IAuthSess
                     .ThenInclude(role => role.RolePermissions)
                         .ThenInclude(rolePermission => rolePermission.Permission)
             .Include(user => user.OrganizationMemberships)
+                .ThenInclude(membership => membership.Organization)
+            .Include(user => user.OrganizationMemberships)
                 .ThenInclude(membership => membership.Role)
                     .ThenInclude(role => role.RolePermissions)
                         .ThenInclude(rolePermission => rolePermission.Permission)
@@ -358,6 +367,20 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext) : IAuthSess
                 .SetProperty(token => token.RevokedReason, "ReuseDetected"), cancellationToken);
 
         await RevokeSessionAsync(sessionId, utcNow, cancellationToken);
+    }
+
+    public async Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default)
+    {
+        // Dựa vào context cấu hình DbContext của bạn, project có bảng RefreshTokens.
+        // Nếu entity RefreshToken của bạn có cấu trúc chứa TokenHash và UserId, bạn dùng cách này:
+        var tokenRecord = await dbContext.RefreshTokens
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.TokenHash == tokenHash, cancellationToken);
+
+        return tokenRecord?.UserId;
+
+        // (Ghi chú: Nếu TokenHash của bạn được lưu trực tiếp trong bảng Sessions thay vì bảng RefreshTokens, 
+        // bạn chỉ cần đổi dbContext.RefreshTokens thành dbContext.Sessions và truy vấn đúng tên cột).
     }
 
     private Task<int> RevokeSessionAsync(Guid sessionId, DateTime utcNow, CancellationToken cancellationToken) =>

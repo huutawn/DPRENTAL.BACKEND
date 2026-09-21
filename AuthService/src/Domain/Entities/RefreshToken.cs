@@ -33,6 +33,7 @@ public class RefreshToken
 
     /// <summary>Token đã bị thu hồi (bởi rotation hoặc thủ công).</summary>
     public bool IsRevoked { get; set; }
+    public string? ReplaceByToken { get; set; }
 
     /// <summary>Thời điểm token đã được sử dụng để xoay vòng.</summary>
     public DateTime? UsedAtUtc { get; set; }

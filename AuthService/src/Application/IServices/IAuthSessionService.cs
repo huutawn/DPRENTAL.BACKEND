@@ -16,4 +16,5 @@ public interface IAuthSessionService
     Task<AuthTokenPair?> RefreshAsync(string refreshToken, CancellationToken cancellationToken = default);
 
     Task RevokeByRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default);
+    Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
 }

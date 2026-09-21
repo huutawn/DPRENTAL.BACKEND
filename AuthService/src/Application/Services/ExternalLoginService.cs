@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Errors;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
@@ -32,18 +31,18 @@ public sealed class ExternalLoginService(
         ExternalLogin? existing = await externalLoginRepository.FindAsync(identity.Provider, identity.Subject, cancellationToken);
         if (existing is not null)
         {
-            return existing.User.IsActive ? existing.UserId : ExternalLoginErrors.AccountDisabled;
+            return existing.User.IsActive ? existing.UserId : AuthErrors.ExternalLogin.AccountDisabled;
         }
 
         if (string.IsNullOrWhiteSpace(identity.Email))
         {
-            return ExternalLoginErrors.MissingEmail;
+            return AuthErrors.ExternalLogin.MissingEmail;
         }
 
         // Email chưa xác minh không đủ tin cậy để gắn vào tài khoản có sẵn: kẻ xấu có thể đăng ký email của người khác.
         if (!identity.EmailVerified)
         {
-            return ExternalLoginErrors.EmailNotVerified;
+            return AuthErrors.ExternalLogin.EmailNotVerified;
         }
 
         string email = UserService.NormalizeEmail(identity.Email);
@@ -67,7 +66,7 @@ public sealed class ExternalLoginService(
     {
         if (!user.IsActive)
         {
-            return ExternalLoginErrors.AccountDisabled;
+            return AuthErrors.ExternalLogin.AccountDisabled;
         }
 
         try
@@ -79,7 +78,7 @@ public sealed class ExternalLoginService(
         {
             // Hoặc request khác vừa liên kết cùng tài khoản (thì dùng lại), hoặc user này đã gắn một tài khoản khác.
             ExternalLogin? raced = await externalLoginRepository.FindAsync(identity.Provider, identity.Subject, cancellationToken);
-            return raced is not null && raced.UserId == user.Id ? user.Id : ExternalLoginErrors.AlreadyLinked;
+            return raced is not null && raced.UserId == user.Id ? user.Id : AuthErrors.ExternalLogin.AlreadyLinked;
         }
     }
 
@@ -111,7 +110,7 @@ public sealed class ExternalLoginService(
         {
             // Request khác vừa tạo xong cùng tài khoản: đọc lại thay vì báo lỗi cho người dùng.
             ExternalLogin? raced = await externalLoginRepository.FindAsync(identity.Provider, identity.Subject, cancellationToken);
-            return raced is not null ? raced.UserId : UserErrors.EmailAlreadyExists;
+            return raced is not null ? raced.UserId : AuthErrors.User.EmailAlreadyExists;
         }
     }
 

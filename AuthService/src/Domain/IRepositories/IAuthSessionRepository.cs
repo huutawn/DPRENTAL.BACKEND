@@ -31,4 +31,8 @@ public interface IAuthSessionRepository : IRepo<Session, Guid>
 
     /// <summary>Thu hồi session được xác định bởi hash refresh token.</summary>
     Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken);
+
+    Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default);
 }

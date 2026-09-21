@@ -37,6 +37,73 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
         }
     }
 
+    public async Task<User> CreateWithRoleAsync(User user, Guid roleId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+
+        if (dbContext.Database.IsRelational())
+        {
+            var executionStrategy = dbContext.Database.CreateExecutionStrategy();
+            return await executionStrategy.ExecuteAsync(async () =>
+            {
+                await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    bool roleExists = await dbContext.Roles.AnyAsync(r => r.Id == roleId, cancellationToken);
+                    if (!roleExists)
+                    {
+                        throw new KeyNotFoundException($"Role {roleId} does not exist.");
+                    }
+
+                    dbContext.Users.Add(user);
+                    dbContext.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = roleId });
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                    return user;
+                }
+                catch (DbUpdateException exception)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.Entry(user).State = EntityState.Detached;
+                    if (exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } ||
+                        exception.Message.Contains("Unique", StringComparison.OrdinalIgnoreCase) ||
+                        exception.InnerException?.Message.Contains("Unique", StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        throw new DuplicateEmailException("Email đã được sử dụng.", exception);
+                    }
+                    throw;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.Entry(user).State = EntityState.Detached;
+                    throw;
+                }
+            });
+        }
+        else
+        {
+            bool roleExists = await dbContext.Roles.AnyAsync(r => r.Id == roleId, cancellationToken);
+            if (!roleExists)
+            {
+                throw new KeyNotFoundException($"Role {roleId} does not exist.");
+            }
+
+            dbContext.Users.Add(user);
+            dbContext.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = roleId });
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return user;
+            }
+            catch (DbUpdateException exception)
+            {
+                dbContext.Entry(user).State = EntityState.Detached;
+                throw new DuplicateEmailException("Email đã được sử dụng.", exception);
+            }
+        }
+    }
+
     public async Task<bool> UpdateAsync(User entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);

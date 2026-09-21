@@ -1,25 +1,31 @@
 using Dprental.AuthService.Application.Services;
+using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Errors;
+using Dprental.AuthService.Domain.Enums;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Domain.Validators;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Dprental.AuthService.Api.Tests;
 
 public sealed class UserServiceTests
 {
+    private const string ValidBootstrapKey = "super-secret-bootstrap-key";
+
     [Fact]
     public async Task RegisterAsyncCreatesActiveUserWithNormalizedEmailAndHashedPassword()
     {
         DateTimeOffset now = new(2026, 9, 17, 9, 0, 0, TimeSpan.Zero);
         RecordingUserRepository repository = new();
         PasswordHasher<User> hasher = new();
-        UserService service = new(repository, hasher, new FixedTimeProvider(now));
+        UserService service = CreateService(repository, passwordHasher: hasher, timeProvider: new FixedTimeProvider(now));
 
         Result<AccountCreatedResponse> result = await service.RegisterAsync(
             new RegisterRequest("  Tan.Len@Example.COM ", "Matkhau123!", "  Huynh Tan Len "));
@@ -39,13 +45,13 @@ public sealed class UserServiceTests
     public async Task RegisterAsyncExistingEmailReturnsConflictWithoutSaving()
     {
         RecordingUserRepository repository = new() { ExistingEmail = "tan.len@example.com" };
-        UserService service = new(repository, new PasswordHasher<User>(), TimeProvider.System);
+        UserService service = CreateService(repository);
 
         Result<AccountCreatedResponse> result = await service.RegisterAsync(
             new RegisterRequest("TAN.LEN@example.com", "Matkhau123!", "Huynh Tan Len"));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(UserErrors.EmailAlreadyExists, result.Error);
+        Assert.Equal(AuthErrors.User.EmailAlreadyExists, result.Error);
         Assert.Equal(ErrorType.Conflict, result.Error.Type);
         Assert.Empty(repository.CreatedUsers);
     }
@@ -54,13 +60,114 @@ public sealed class UserServiceTests
     public async Task RegisterAsyncConcurrentDuplicateRejectedByDatabaseReturnsConflict()
     {
         RecordingUserRepository repository = new() { RejectCreate = true };
-        UserService service = new(repository, new PasswordHasher<User>(), TimeProvider.System);
+        UserService service = CreateService(repository);
 
         Result<AccountCreatedResponse> result = await service.RegisterAsync(
             new RegisterRequest("tan.len@example.com", "Matkhau123!", "Huynh Tan Len"));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(UserErrors.EmailAlreadyExists, result.Error);
+        Assert.Equal(AuthErrors.User.EmailAlreadyExists, result.Error);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("wrong-key")]
+    public async Task RegisterAdminAsyncWithMissingOrInvalidKeyReturnsUnauthorized401(string? invalidKey)
+    {
+        RecordingUserRepository repository = new();
+        UserService service = CreateService(repository);
+
+        Result<AccountCreatedResponse> result = await service.RegisterAdminAsync(
+            new RegisterRequest("admin@example.com", "Password123!", "Admin User"),
+            invalidKey);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.AdminBootstrap.InvalidKey, result.Error);
+        Assert.Equal(ErrorType.Unauthorized, result.Error.Type);
+        Assert.Empty(repository.CreatedUsers);
+        Assert.Empty(repository.CreatedWithRole);
+    }
+
+    [Fact]
+    public async Task RegisterAdminAsyncWithValidKeyCreatesAdminUserAndAssignsRole()
+    {
+        RecordingUserRepository repository = new();
+        FakeRoleRepository roleRepo = new();
+        Guid adminRoleId = Guid.NewGuid();
+        roleRepo.Roles[SystemRoleCode.Admin] = new Role { Id = adminRoleId, Name = SystemRoleCode.Admin, Scope = RoleScope.Global };
+
+        UserService service = CreateService(repository, roleRepository: roleRepo);
+
+        Result<AccountCreatedResponse> result = await service.RegisterAdminAsync(
+            new RegisterRequest("  Admin@Example.com ", "AdminPassword123!", "  Super Admin  "),
+            ValidBootstrapKey);
+
+        Assert.True(result.IsSuccess);
+        User created = Assert.Single(repository.CreatedUsers);
+        Assert.Equal("admin@example.com", created.Email);
+        Assert.Equal("Super Admin", created.FullName);
+        Assert.True(created.IsActive);
+
+        var (assignedUser, assignedRoleId) = Assert.Single(repository.CreatedWithRole);
+        Assert.Equal(created.Id, assignedUser.Id);
+        Assert.Equal(adminRoleId, assignedRoleId);
+    }
+
+    [Fact]
+    public async Task RegisterAdminAsyncExistingEmailReturnsConflictWithoutCreating()
+    {
+        RecordingUserRepository repository = new() { ExistingEmail = "admin@example.com" };
+        FakeRoleRepository roleRepo = new();
+        roleRepo.Roles[SystemRoleCode.Admin] = new Role { Id = Guid.NewGuid(), Name = SystemRoleCode.Admin, Scope = RoleScope.Global };
+
+        UserService service = CreateService(repository, roleRepository: roleRepo);
+
+        Result<AccountCreatedResponse> result = await service.RegisterAdminAsync(
+            new RegisterRequest("admin@example.com", "Password123!", "Admin"),
+            ValidBootstrapKey);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.User.EmailAlreadyExists, result.Error);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.Empty(repository.CreatedUsers);
+        Assert.Empty(repository.CreatedWithRole);
+    }
+
+    [Fact]
+    public async Task RegisterAdminAsyncWhenAdminRoleNotFoundReturnsNotFoundAndRollback()
+    {
+        RecordingUserRepository repository = new();
+        FakeRoleRepository roleRepo = new(); // no admin role in database
+
+        UserService service = CreateService(repository, roleRepository: roleRepo);
+
+        Result<AccountCreatedResponse> result = await service.RegisterAdminAsync(
+            new RegisterRequest("admin@example.com", "Password123!", "Admin"),
+            ValidBootstrapKey);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Role.RoleNotFound, result.Error);
+        Assert.Equal(ErrorType.NotFound, result.Error.Type);
+        Assert.Empty(repository.CreatedUsers);
+        Assert.Empty(repository.CreatedWithRole);
+    }
+
+    [Fact]
+    public void AdminBootstrapOptionsValidatorRejectsMissingOrEmptyKey()
+    {
+        AdminBootstrapOptionsValidator validator = new();
+
+        ValidateOptionsResult resultEmpty = validator.Validate(null, new AdminBootstrapOptions { CreationKey = "" });
+        Assert.True(resultEmpty.Failed);
+        Assert.Contains("Auth:AdminBootstrap:CreationKey must be configured.", resultEmpty.FailureMessage);
+
+        ValidateOptionsResult resultWhitespace = validator.Validate(null, new AdminBootstrapOptions { CreationKey = "   " });
+        Assert.True(resultWhitespace.Failed);
+
+        ValidateOptionsResult resultValid = validator.Validate(null, new AdminBootstrapOptions { CreationKey = "secret-key" });
+        Assert.True(resultValid.Succeeded);
     }
 
     [Fact]
@@ -96,7 +203,8 @@ public sealed class UserServiceTests
             Role = CreateRole("Viewer", "orders.view"),
             Status = MembershipStatus.Suspended,
         });
-        UserService service = new(new RecordingUserRepository { ProfileUser = user }, new PasswordHasher<User>(), TimeProvider.System);
+
+        UserService service = CreateService(new RecordingUserRepository { ProfileUser = user });
 
         Result<CurrentUserResponse> result = await service.GetCurrentUserProfileAsync(userId);
 
@@ -119,13 +227,36 @@ public sealed class UserServiceTests
     [Fact]
     public async Task GetCurrentUserProfileAsyncMissingOrInactiveUserReturnsNotFound()
     {
-        UserService service = new(new RecordingUserRepository(), new PasswordHasher<User>(), TimeProvider.System);
+        UserService service = CreateService(new RecordingUserRepository());
 
         Result<CurrentUserResponse> result = await service.GetCurrentUserProfileAsync(Guid.NewGuid());
 
         Assert.True(result.IsFailure);
-        Assert.Equal(UserErrors.UserNotFound, result.Error);
+        Assert.Equal(AuthErrors.User.UserNotFound, result.Error);
         Assert.Equal(ErrorType.NotFound, result.Error.Type);
+    }
+
+    // ========================================================================
+    // HÀM TIỆN ÍCH TẠO SERVICE ĐỂ DÙNG CHUNG TRONG CÁC TEST CASE
+    // ========================================================================
+    private static UserService CreateService(
+        IUserRepository userRepository,
+        IRoleRepository? roleRepository = null,
+        IPasswordHasher<User>? passwordHasher = null,
+        TimeProvider? timeProvider = null,
+        string creationKey = ValidBootstrapKey)
+    {
+        return new UserService(
+            userRepository,
+            roleRepository ?? new FakeRoleRepository(),
+            passwordHasher ?? new PasswordHasher<User>(),
+            Options.Create(new AdminBootstrapOptions { CreationKey = creationKey }),
+            timeProvider ?? TimeProvider.System,
+            correlationIdProvider: null!,
+            auditLogRepository: null!,
+            authSessionRepository: null!,
+            recoveryTokenRepository: null!
+        );
     }
 
     private static Role CreateRole(string name, params string[] permissionCodes)
@@ -139,12 +270,42 @@ public sealed class UserServiceTests
         return role;
     }
 
+    private sealed class FakeRoleRepository : IRoleRepository
+    {
+        public Dictionary<string, Role> Roles { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Task<bool> RoleExistsAsync(Guid roleId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Roles.Values.Any(r => r.Id == roleId));
+
+        public Task<Role?> GetByIdAsync(Guid roleId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Roles.Values.FirstOrDefault(r => r.Id == roleId));
+
+        public Task<Role?> GetByNameAsync(string name, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Roles.GetValueOrDefault(name));
+
+        public Task<IReadOnlyList<string>> GetPermissionCodesAsync(Guid roleId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
+
+        public Task<IReadOnlyList<string>> GetUserPermissionCodesAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
+
+        public Task<bool> IsAssignedAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
+        public Task<bool> AssignAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(true);
+
+        public Task<bool> RevokeAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(true);
+    }
+
     private sealed class RecordingUserRepository : IUserRepository
     {
         public string? ExistingEmail { get; init; }
         public bool RejectCreate { get; init; }
         public User? ProfileUser { get; init; }
         public List<User> CreatedUsers { get; } = [];
+        public List<(User User, Guid RoleId)> CreatedWithRole { get; } = [];
 
         public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(ProfileUser is not null && ProfileUser.Id == id ? ProfileUser : null);
@@ -164,6 +325,18 @@ public sealed class UserServiceTests
 
             CreatedUsers.Add(entity);
             return Task.FromResult(entity);
+        }
+
+        public Task<User> CreateWithRoleAsync(User user, Guid roleId, CancellationToken cancellationToken = default)
+        {
+            if (RejectCreate)
+            {
+                throw new DuplicateEmailException();
+            }
+
+            CreatedUsers.Add(user);
+            CreatedWithRole.Add((user, roleId));
+            return Task.FromResult(user);
         }
 
         public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
