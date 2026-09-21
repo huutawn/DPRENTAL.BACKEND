@@ -308,7 +308,8 @@ public sealed class GoogleLoginEndpointTests
             ["Auth:Google:AllowedReturnUrls:0"] = FrontendOrigin,
             ["Auth:Google:AllowedReturnUrls:1"] = DevelopmentFrontendOrigin,
             ["Auth:Google:BffCallbackUrls:0"] = $"{FrontendOrigin}/api/auth/google/callback",
-            ["Auth:Google:BffCallbackUrls:1"] = $"{DevelopmentFrontendOrigin}/api/auth/google/callback"
+            ["Auth:Google:BffCallbackUrls:1"] = $"{DevelopmentFrontendOrigin}/api/auth/google/callback",
+            ["Auth:AdminBootstrap:CreationKey"] = "test-bootstrap-creation-key"
         };
 
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>

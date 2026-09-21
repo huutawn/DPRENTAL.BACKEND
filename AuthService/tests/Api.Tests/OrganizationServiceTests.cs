@@ -689,6 +689,7 @@ public sealed class OrganizationServiceTests
             Task.FromResult<IReadOnlyList<User>>(Users.Values.ToList());
 
         public Task<User> CreateAsync(User entity, CancellationToken cancellationToken = default) => Task.FromResult(entity);
+        public Task<User> CreateWithRoleAsync(User user, Guid roleId, CancellationToken cancellationToken = default) => Task.FromResult(user);
         public Task<bool> UpdateAsync(User entity, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default) => Task.FromResult(false);

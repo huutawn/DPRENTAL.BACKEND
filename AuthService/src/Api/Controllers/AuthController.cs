@@ -41,6 +41,26 @@ public sealed class AuthController(
 
         return StatusCode(StatusCodes.Status201Created, result.Value);
     }
+    [HttpPost("admins")]
+    [ProducesResponseType<AccountCreatedResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<AccountCreatedResponse>> RegisterAdmin(
+        RegisterRequest request,
+        [FromHeader(Name = "X-Admin-Creation-Key")] string? adminCreationKey,
+        CancellationToken cancellationToken)
+    {
+        Result<AccountCreatedResponse> result = await userService.RegisterAdminAsync(request, adminCreationKey, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return StatusCode(StatusCodes.Status201Created, result.Value);
+    }
+
 
     [HttpPost("login")]
     [ProducesResponseType(StatusCodes.Status200OK)]

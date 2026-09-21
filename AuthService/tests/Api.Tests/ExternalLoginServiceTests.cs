@@ -305,6 +305,9 @@ public sealed class ExternalLoginServiceTests
             return Task.FromResult(entity);
         }
 
+        public Task<User> CreateWithRoleAsync(User user, Guid roleId, CancellationToken cancellationToken = default) =>
+            CreateAsync(user, cancellationToken);
+
         public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("ExternalLoginService does not check email existence separately.");
 

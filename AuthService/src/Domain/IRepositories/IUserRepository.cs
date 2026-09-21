@@ -14,4 +14,7 @@ public interface IUserRepository : IRepo<User, Guid>
 
     /// <summary>Đọc user active kèm role, permission và membership (organization) để dựng hồ sơ.</summary>
     Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Tạo user và gán role trong cùng một transaction.</summary>
+    Task<User> CreateWithRoleAsync(User user, Guid roleId, CancellationToken cancellationToken = default);
 }
