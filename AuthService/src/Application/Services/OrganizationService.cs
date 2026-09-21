@@ -1,3 +1,4 @@
+using Dprental.AuthService.Domain.Enums;
 using System.Text.RegularExpressions;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security;
@@ -56,18 +57,17 @@ public sealed partial class OrganizationService(
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
-        bool isPlatformAdmin = IsPlatformAdmin(globalPerms);
 
         if (request.Type == OrganizationType.Platform)
         {
-            if (!isPlatformAdmin)
+            if (!globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal))
             {
                 return Result.Failure<OrganizationResponse>(AuthErrors.Organization.PlatformAdminRequired);
             }
         }
         else
         {
-            if (!isPlatformAdmin && !globalPerms.Contains(Permissions.Organizations.Create))
+            if (!globalPerms.Contains(PermissionCode.IdentityOrganizationsCreate, StringComparer.Ordinal))
             {
                 return Result.Failure<OrganizationResponse>(AuthErrors.Organization.CreationNotAllowed);
             }
@@ -141,14 +141,14 @@ public sealed partial class OrganizationService(
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
-        bool isPlatformAdmin = IsPlatformAdmin(globalPerms);
+        bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
 
-        if (!org.IsActive && !isPlatformAdmin)
+        if (!org.IsActive && !canManageSuspended)
         {
             return Result.Failure<OrganizationResponse>(AuthErrors.Organization.InactiveOrganization);
         }
 
-        if (!isPlatformAdmin && !globalPerms.Contains(Permissions.Organizations.Read))
+        if (!globalPerms.Contains(PermissionCode.IdentityOrganizationsRead, StringComparer.Ordinal))
         {
             OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
             if (membership is null || membership.Status != MembershipStatus.Active)
@@ -157,7 +157,7 @@ public sealed partial class OrganizationService(
             }
 
             IReadOnlyList<string> effectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
-            if (!effectivePerms.Contains(Permissions.Organizations.Read))
+            if (!effectivePerms.Contains(PermissionCode.IdentityOrganizationsRead, StringComparer.Ordinal))
             {
                 return Result.Failure<OrganizationResponse>(AuthErrors.Organization.Forbidden);
             }
@@ -182,9 +182,9 @@ public sealed partial class OrganizationService(
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
-        bool isPlatformAdmin = IsPlatformAdmin(globalPerms);
+        bool hasGlobalRead = globalPerms.Contains(PermissionCode.IdentityOrganizationsRead, StringComparer.Ordinal);
 
-        IReadOnlyList<Organization> orgs = isPlatformAdmin
+        IReadOnlyList<Organization> orgs = hasGlobalRead
             ? await organizationRepository.GetAllAsync(cancellationToken)
             : await organizationRepository.GetUserOrganizationsAsync(actorUserId, cancellationToken);
 
@@ -214,9 +214,9 @@ public sealed partial class OrganizationService(
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
-        bool isPlatformAdmin = IsPlatformAdmin(globalPerms);
+        bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
 
-        if (request.IsActive.HasValue && !isPlatformAdmin)
+        if (request.IsActive.HasValue && !canManageSuspended)
         {
             return Result.Failure(AuthErrors.Organization.PlatformAdminRequired);
         }
@@ -227,12 +227,12 @@ public sealed partial class OrganizationService(
             return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
         }
 
-        if (!org.IsActive && !isPlatformAdmin)
+        if (!org.IsActive && !canManageSuspended)
         {
             return Result.Failure(AuthErrors.Organization.InactiveOrganization);
         }
 
-        if (!isPlatformAdmin && !globalPerms.Contains(Permissions.Organizations.Update))
+        if (!globalPerms.Contains(PermissionCode.IdentityOrganizationsUpdate, StringComparer.Ordinal))
         {
             OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
             if (membership is null || membership.Status != MembershipStatus.Active)
@@ -241,7 +241,7 @@ public sealed partial class OrganizationService(
             }
 
             IReadOnlyList<string> effectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
-            if (!effectivePerms.Contains(Permissions.Organizations.Update))
+            if (!effectivePerms.Contains(PermissionCode.IdentityOrganizationsUpdate, StringComparer.Ordinal))
             {
                 return Result.Failure(AuthErrors.Organization.Forbidden);
             }
@@ -292,14 +292,14 @@ public sealed partial class OrganizationService(
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
-        bool isPlatformAdmin = IsPlatformAdmin(globalPerms);
+        bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
 
-        if (!org.IsActive && !isPlatformAdmin)
+        if (!org.IsActive && !canManageSuspended)
         {
             return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(AuthErrors.Organization.InactiveOrganization);
         }
 
-        if (!isPlatformAdmin && !globalPerms.Contains(Permissions.Organizations.Members.Read))
+        if (!globalPerms.Contains(PermissionCode.IdentityMembersRead, StringComparer.Ordinal))
         {
             OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
             if (membership is null || membership.Status != MembershipStatus.Active)
@@ -308,7 +308,7 @@ public sealed partial class OrganizationService(
             }
 
             IReadOnlyList<string> effectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
-            if (!effectivePerms.Contains(Permissions.Organizations.Members.Read))
+            if (!effectivePerms.Contains(PermissionCode.IdentityMembersRead, StringComparer.Ordinal))
             {
                 return Result.Failure<IReadOnlyList<OrganizationMemberResponse>>(AuthErrors.Organization.Forbidden);
             }
@@ -355,14 +355,14 @@ public sealed partial class OrganizationService(
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
-        bool isPlatformAdmin = IsPlatformAdmin(globalPerms);
+        bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
 
-        if (!org.IsActive && !isPlatformAdmin)
+        if (!org.IsActive && !canManageSuspended)
         {
             return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.InactiveOrganization);
         }
 
-        if (!isPlatformAdmin && !globalPerms.Contains(Permissions.Organizations.Members.Manage))
+        if (!globalPerms.Contains(PermissionCode.IdentityMembersManage, StringComparer.Ordinal))
         {
             OrganizationMembership? actorMembership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
             if (actorMembership is null || actorMembership.Status != MembershipStatus.Active)
@@ -371,7 +371,7 @@ public sealed partial class OrganizationService(
             }
 
             IReadOnlyList<string> actorEffectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
-            if (!actorEffectivePerms.Contains(Permissions.Organizations.Members.Manage))
+            if (!actorEffectivePerms.Contains(PermissionCode.IdentityMembersManage, StringComparer.Ordinal))
             {
                 return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.Forbidden);
             }
@@ -399,11 +399,12 @@ public sealed partial class OrganizationService(
             return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.InvalidRoleScope);
         }
 
-        if (!isPlatformAdmin)
+        if (!globalPerms.Contains(PermissionCode.IdentityRolesAssignOrganization, StringComparer.Ordinal)
+            && !globalPerms.Contains(PermissionCode.IdentityRolesAssignGlobal, StringComparer.Ordinal))
         {
             IReadOnlyList<string> actorEffectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
             IReadOnlyList<string> targetRolePerms = await roleRepository.GetPermissionCodesAsync(request.RoleId, cancellationToken);
-            if (targetRolePerms.Except(actorEffectivePerms).Any())
+            if (targetRolePerms.Except(actorEffectivePerms, StringComparer.Ordinal).Any())
             {
                 return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.PrivilegeEscalation);
             }
@@ -479,14 +480,14 @@ public sealed partial class OrganizationService(
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
-        bool isPlatformAdmin = IsPlatformAdmin(globalPerms);
+        bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
 
-        if (!org.IsActive && !isPlatformAdmin)
+        if (!org.IsActive && !canManageSuspended)
         {
             return Result.Failure(AuthErrors.Organization.InactiveOrganization);
         }
 
-        if (!isPlatformAdmin && !globalPerms.Contains(Permissions.Organizations.Members.Manage))
+        if (!globalPerms.Contains(PermissionCode.IdentityMembersManage, StringComparer.Ordinal))
         {
             OrganizationMembership? actorMembership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
             if (actorMembership is null || actorMembership.Status != MembershipStatus.Active)
@@ -495,7 +496,7 @@ public sealed partial class OrganizationService(
             }
 
             IReadOnlyList<string> actorEffectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
-            if (!actorEffectivePerms.Contains(Permissions.Organizations.Members.Manage))
+            if (!actorEffectivePerms.Contains(PermissionCode.IdentityMembersManage, StringComparer.Ordinal))
             {
                 return Result.Failure(AuthErrors.Organization.Forbidden);
             }
@@ -560,11 +561,12 @@ public sealed partial class OrganizationService(
                 return Result.Failure(AuthErrors.Organization.InvalidRoleScope);
             }
 
-            if (!isPlatformAdmin)
+            if (!globalPerms.Contains(PermissionCode.IdentityRolesAssignOrganization, StringComparer.Ordinal)
+                && !globalPerms.Contains(PermissionCode.IdentityRolesAssignGlobal, StringComparer.Ordinal))
             {
                 IReadOnlyList<string> actorEffectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
                 IReadOnlyList<string> targetRolePerms = await roleRepository.GetPermissionCodesAsync(request.RoleId.Value, cancellationToken);
-                if (targetRolePerms.Except(actorEffectivePerms).Any())
+                if (targetRolePerms.Except(actorEffectivePerms, StringComparer.Ordinal).Any())
                 {
                     return Result.Failure(AuthErrors.Organization.PrivilegeEscalation);
                 }
@@ -632,14 +634,14 @@ public sealed partial class OrganizationService(
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
-        bool isPlatformAdmin = IsPlatformAdmin(globalPerms);
+        bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
 
-        if (!org.IsActive && !isPlatformAdmin)
+        if (!org.IsActive && !canManageSuspended)
         {
             return Result.Failure(AuthErrors.Organization.InactiveOrganization);
         }
 
-        if (!isPlatformAdmin && !globalPerms.Contains(Permissions.Organizations.Members.Manage))
+        if (!globalPerms.Contains(PermissionCode.IdentityMembersManage, StringComparer.Ordinal))
         {
             OrganizationMembership? actorMembership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
             if (actorMembership is null || actorMembership.Status != MembershipStatus.Active)
@@ -648,7 +650,7 @@ public sealed partial class OrganizationService(
             }
 
             IReadOnlyList<string> actorEffectivePerms = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
-            if (!actorEffectivePerms.Contains(Permissions.Organizations.Members.Manage))
+            if (!actorEffectivePerms.Contains(PermissionCode.IdentityMembersManage, StringComparer.Ordinal))
             {
                 return Result.Failure(AuthErrors.Organization.Forbidden);
             }
@@ -706,9 +708,9 @@ public sealed partial class OrganizationService(
         }
 
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
-        bool isPlatformAdmin = IsPlatformAdmin(globalPerms);
+        bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
 
-        if (!org.IsActive && !isPlatformAdmin)
+        if (!org.IsActive && !canManageSuspended)
         {
             return Result.Failure(AuthErrors.Organization.InactiveOrganization);
         }
@@ -730,11 +732,6 @@ public sealed partial class OrganizationService(
         await membershipRepository.UpdateAsync(membership, cancellationToken);
         return Result.Success();
     }
-
-    private static bool IsPlatformAdmin(IReadOnlyList<string> globalPermissions) =>
-        globalPermissions.Contains(Permissions.Platform.Manage) ||
-        globalPermissions.Contains("platform-management") ||
-        globalPermissions.Contains("platform.management");
 
     private static bool IsOwner(Role? role) =>
         role is not null && string.Equals(role.Name, "Owner", StringComparison.OrdinalIgnoreCase);

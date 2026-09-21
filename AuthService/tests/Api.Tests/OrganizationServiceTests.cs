@@ -110,7 +110,7 @@ public sealed class OrganizationServiceTests
         OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
 
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true, Email = "admin@example.com" };
-        memRepo.GlobalPermissions[ActorAdminId] = [Permissions.Platform.Manage];
+        memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
         orgRepo.ExistingSlugs.Add("existing-slug");
 
         Result<OrganizationResponse> result = await service.CreateAsync(
@@ -132,7 +132,7 @@ public sealed class OrganizationServiceTests
         OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
 
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true, Email = "admin@example.com" };
-        memRepo.GlobalPermissions[ActorAdminId] = [Permissions.Platform.Manage];
+        memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
         roleRepo.Roles[OwnerRoleId] = new Role { Id = OwnerRoleId, Name = "Owner", Scope = RoleScope.Organization };
 
         Result<OrganizationResponse> result = await service.CreateAsync(
@@ -203,7 +203,7 @@ public sealed class OrganizationServiceTests
         Guid targetUserId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
-        memRepo.GlobalPermissions[ActorAdminId] = [Permissions.Platform.Manage];
+        memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
         userRepo.Users[targetUserId] = new User { Id = targetUserId, IsActive = true, Email = "target@example.com", FullName = "Target User" };
         roleRepo.Roles[MemberRoleId] = new Role { Id = MemberRoleId, Name = "Member", Scope = RoleScope.Organization };
@@ -233,7 +233,7 @@ public sealed class OrganizationServiceTests
         Guid globalRoleId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
-        memRepo.GlobalPermissions[ActorAdminId] = [Permissions.Platform.Manage];
+        memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
         userRepo.Users[targetUserId] = new User { Id = targetUserId, IsActive = true };
         roleRepo.Roles[globalRoleId] = new Role { Id = globalRoleId, Name = "GlobalRole", Scope = RoleScope.Global };
@@ -260,7 +260,7 @@ public sealed class OrganizationServiceTests
         Guid targetUserId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
-        memRepo.GlobalPermissions[ActorAdminId] = [Permissions.Platform.Manage];
+        memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
         userRepo.Users[targetUserId] = new User { Id = targetUserId, IsActive = false }; // inactive!
         roleRepo.Roles[MemberRoleId] = new Role { Id = MemberRoleId, Name = "Member", Scope = RoleScope.Organization };
@@ -287,7 +287,7 @@ public sealed class OrganizationServiceTests
         Guid targetUserId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
-        memRepo.GlobalPermissions[ActorAdminId] = [Permissions.Platform.Manage];
+        memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
         userRepo.Users[targetUserId] = new User { Id = targetUserId, IsActive = true };
         roleRepo.Roles[MemberRoleId] = new Role { Id = MemberRoleId, Name = "Member", Scope = RoleScope.Organization };
@@ -366,7 +366,7 @@ public sealed class OrganizationServiceTests
         Guid memberId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
-        memRepo.GlobalPermissions[ActorAdminId] = [Permissions.Platform.Manage];
+        memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
         memRepo.Memberships.Add(new OrganizationMembership
         {
@@ -430,7 +430,7 @@ public sealed class OrganizationServiceTests
         Guid ownerMemberId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
-        memRepo.GlobalPermissions[ActorAdminId] = [Permissions.Platform.Manage];
+        memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
         Role ownerRole = new() { Id = OwnerRoleId, Name = "Owner", Scope = RoleScope.Organization };
         roleRepo.Roles[OwnerRoleId] = ownerRole;
@@ -468,7 +468,7 @@ public sealed class OrganizationServiceTests
         Guid ownerMemberId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
-        memRepo.GlobalPermissions[ActorAdminId] = [Permissions.Platform.Manage];
+        memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
         Role ownerRole = new() { Id = OwnerRoleId, Name = "Owner", Scope = RoleScope.Organization };
         Role memberRole = new() { Id = MemberRoleId, Name = "Member", Scope = RoleScope.Organization };
@@ -508,7 +508,7 @@ public sealed class OrganizationServiceTests
         Guid ownerMemberId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
-        memRepo.GlobalPermissions[ActorAdminId] = [Permissions.Platform.Manage];
+        memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
         Role ownerRole = new() { Id = OwnerRoleId, Name = "Owner", Scope = RoleScope.Organization };
         roleRepo.Roles[OwnerRoleId] = ownerRole;
@@ -551,6 +551,18 @@ public sealed class OrganizationServiceTests
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.Organization.PlatformAdminRequired, result.Error);
     }
+
+        private static readonly string[] AdminPermissions =
+    [
+        PermissionCode.IdentityOrganizationsSuspend,
+        PermissionCode.IdentityOrganizationsCreate,
+        PermissionCode.IdentityOrganizationsRead,
+        PermissionCode.IdentityOrganizationsUpdate,
+        PermissionCode.IdentityMembersRead,
+        PermissionCode.IdentityMembersManage,
+        PermissionCode.IdentityRolesAssignOrganization,
+        PermissionCode.IdentityRolesRead
+    ];
 
     private sealed class FakeOrganizationRepository : IOrganizationRepository
     {

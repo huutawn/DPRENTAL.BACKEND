@@ -1,4 +1,4 @@
-namespace Dprental.AuthService.Common;
+namespace Dprental.AuthService.Domain.Enums;
 
 /// <summary>Mã permission chuẩn mang namespace identity.*.</summary>
 public static class PermissionCode

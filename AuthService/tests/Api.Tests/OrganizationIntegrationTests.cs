@@ -375,7 +375,7 @@ public sealed class OrganizationIntegrationTests
         Permission pUpdate = new() { Id = Guid.NewGuid(), Code = Permissions.Organizations.Update };
         Permission pMemRead = new() { Id = Guid.NewGuid(), Code = Permissions.Organizations.Members.Read };
         Permission pMemManage = new() { Id = Guid.NewGuid(), Code = Permissions.Organizations.Members.Manage };
-        Permission pPlatform = new() { Id = Guid.NewGuid(), Code = Permissions.Platform.Manage };
+        Permission pPlatform = new() { Id = Guid.NewGuid(), Code = Permissions.Organizations.Suspend };
         Permission pAssign = new() { Id = Guid.NewGuid(), Code = Permissions.Roles.Assign };
         Permission pRevoke = new() { Id = Guid.NewGuid(), Code = Permissions.Roles.Revoke };
 

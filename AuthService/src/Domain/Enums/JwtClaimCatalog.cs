@@ -1,4 +1,4 @@
-namespace Dprental.AuthService.Common;
+namespace Dprental.AuthService.Domain.Enums;
 
 /// <summary>Catalog duy nhất ánh xạ claim ngắn gọn và alias cho role/permission trong JWT.</summary>
 public static class JwtClaimCatalog

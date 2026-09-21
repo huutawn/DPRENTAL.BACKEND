@@ -3,12 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.AuthService.Domain.Entities;
-
-public enum RoleScope
-{
-    Global,
-    Organization
-}
+using Dprental.AuthService.Domain.Enums;
 
 [Table("Roles", Schema = "auth")]
 [Index(nameof(Name), IsUnique = true)]

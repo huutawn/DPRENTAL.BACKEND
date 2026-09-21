@@ -1,42 +1,50 @@
+using Dprental.AuthService.Common;
+using Dprental.AuthService.Domain.Enums;
+
 namespace Dprental.AuthService.Application.Security;
 
-/// <summary>Mã quyền ổn định dùng trong policy — đổi tên hiển thị của permission không ảnh hưởng các hằng số này.</summary>
+/// <summary>Mã quyền ổn định dùng trong policy — ánh xạ chuẩn theo catalog PermissionCode.</summary>
 public static class Permissions
 {
     public static class Roles
     {
-        public const string Assign = "roles.assign";
-        public const string Revoke = "roles.revoke";
+        public const string Assign = PermissionCode.IdentityRolesAssignGlobal;
+        public const string Revoke = PermissionCode.IdentityRolesRevokeGlobal;
+        public const string AssignGlobal = PermissionCode.IdentityRolesAssignGlobal;
+        public const string RevokeGlobal = PermissionCode.IdentityRolesRevokeGlobal;
+        public const string AssignOrganization = PermissionCode.IdentityRolesAssignOrganization;
+        public const string RevokeOrganization = PermissionCode.IdentityRolesRevokeOrganization;
+        public const string Read = PermissionCode.IdentityRolesRead;
     }
+
     public static class Organizations
     {
-        public const string Create = "organizations.create";
-        public const string Read = "organizations.read";
-        public const string Update = "organizations.update";
+        public const string Create = PermissionCode.IdentityOrganizationsCreate;
+        public const string Read = PermissionCode.IdentityOrganizationsRead;
+        public const string Update = PermissionCode.IdentityOrganizationsUpdate;
+        public const string Suspend = PermissionCode.IdentityOrganizationsSuspend;
 
         public static class Members
         {
-            public const string Read = "organizations.members.read";
-            public const string Manage = "organizations.members.manage";
+            public const string Read = PermissionCode.IdentityMembersRead;
+            public const string Manage = PermissionCode.IdentityMembersManage;
         }
     }
 
-    public static class Platform
+    public static class Users
     {
-        public const string Manage = "platform.manage";
+        public const string Read = PermissionCode.IdentityUsersRead;
+        public const string Manage = PermissionCode.IdentityUsersManage;
     }
 
+    public static class ServicePrincipals
+    {
+        public const string Read = PermissionCode.IdentityServicePrincipalsRead;
+        public const string Manage = PermissionCode.IdentityServicePrincipalsManage;
+        public const string RotateSecret = PermissionCode.IdentityServicePrincipalsRotateSecret;
+        public const string ManageScopes = PermissionCode.IdentityServicePrincipalsManageScopes;
+    }
 
-    /// <summary>Toàn bộ mã quyền đã khai báo — dùng để đăng ký policy hàng loạt, tránh quên khi thêm quyền mới.</summary>
-    public static IReadOnlyCollection<string> All { get; } =
-    [
-        Roles.Assign,
-        Roles.Revoke,
-        Organizations.Create,
-        Organizations.Read,
-        Organizations.Update,
-        Organizations.Members.Read,
-        Organizations.Members.Manage,
-        Platform.Manage
-    ];
+    /// <summary>Toàn bộ mã quyền đã khai báo — dùng để đăng ký policy hàng loạt.</summary>
+    public static IReadOnlyCollection<string> All => PermissionCode.All;
 }

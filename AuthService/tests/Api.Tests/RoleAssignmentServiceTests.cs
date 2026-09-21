@@ -61,7 +61,7 @@ public sealed class RoleAssignmentServiceTests
         FakeRoleRepository roleRepo = new();
         roleRepo.Roles[globalRoleId] = new Role { Id = globalRoleId, Name = "GlobalAdmin", Scope = RoleScope.Global };
         roleRepo.RolePermissions[globalRoleId] = ["perm.one"];
-        roleRepo.UserPermissions[actorUserId] = ["perm.one"];
+        roleRepo.UserPermissions[actorUserId] = ["perm.one", PermissionCode.IdentityRolesAssignGlobal];
 
         RoleAssignmentService service = new(roleRepo);
 

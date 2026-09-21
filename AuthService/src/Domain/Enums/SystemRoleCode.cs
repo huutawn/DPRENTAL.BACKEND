@@ -1,4 +1,4 @@
-namespace Dprental.AuthService.Common;
+namespace Dprental.AuthService.Domain.Enums;
 
 /// <summary>Mã role hệ thống chuẩn được hỗ trợ.</summary>
 public static class SystemRoleCode
