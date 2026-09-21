@@ -60,6 +60,14 @@ public sealed class TrustedIdentityTransformProvider : ITransformProvider
                 proxyHeaders.Remove(untrustedHeader);
             }
 
+            // Gateway has already accepted forwarded metadata only from a configured trusted proxy.
+            // Replace any downstream values so AuthService receives the public origin, never an
+            // internal Docker destination such as auth-service:8080.
+            proxyHeaders.Remove(GatewayHeaderConstants.ForwardedProto);
+            proxyHeaders.TryAddWithoutValidation(GatewayHeaderConstants.ForwardedProto, httpContext.Request.Scheme);
+            proxyHeaders.Remove(GatewayHeaderConstants.ForwardedHost);
+            proxyHeaders.TryAddWithoutValidation(GatewayHeaderConstants.ForwardedHost, httpContext.Request.Host.Value);
+
             // 2. CorrelationId Forwarding: Đảm bảo downstream luôn nhận CorrelationId an toàn
             string correlationId = httpContext.TraceIdentifier;
             if (string.IsNullOrWhiteSpace(correlationId) &&

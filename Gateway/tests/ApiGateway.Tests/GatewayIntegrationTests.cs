@@ -46,6 +46,24 @@ public sealed class GatewayIntegrationTests
     }
 
     [Fact]
+    public async Task AuthRouteForwardsTrustedPublicOriginToDownstream()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackAuthService upstream = new(CreateJwks(signingKey, "key-1"));
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+        using HttpRequestMessage request = new(HttpMethod.Get, "/api/v1/auth/google/login");
+        request.Headers.TryAddWithoutValidation("X-Forwarded-Proto", "https");
+        request.Headers.TryAddWithoutValidation("X-Forwarded-Host", "dev-api.lazyops.cloud");
+
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("https", upstream.LastRequest.ForwardedProto);
+        Assert.Equal("dev-api.lazyops.cloud", upstream.LastRequest.ForwardedHost);
+    }
+
+    [Fact]
     public async Task SwaggerRoutesForwardDirectlyToAuthService()
     {
         using RSA signingKey = RSA.Create(2048);
@@ -245,7 +263,7 @@ public sealed class GatewayIntegrationTests
 
         internal int JwksRequestCount { get; private set; }
 
-        internal ReceivedRequest LastRequest { get; private set; } = new(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+        internal ReceivedRequest LastRequest { get; private set; } = new(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
 
         public async ValueTask DisposeAsync()
         {
@@ -296,7 +314,9 @@ public sealed class GatewayIntegrationTests
                 request.Url?.Query ?? string.Empty,
                 request.Headers["Authorization"] ?? string.Empty,
                 request.Headers["X-Correlation-ID"] ?? string.Empty,
-                request.Headers["traceparent"] ?? string.Empty);
+                request.Headers["traceparent"] ?? string.Empty,
+                request.Headers["X-Forwarded-Proto"] ?? string.Empty,
+                request.Headers["X-Forwarded-Host"] ?? string.Empty);
             await WriteResponseAsync(context.Response, "{\"proxied\":true}", "application/json");
         }
 
@@ -318,5 +338,12 @@ public sealed class GatewayIntegrationTests
         }
     }
 
-    private sealed record ReceivedRequest(string Path, string Query, string Authorization, string CorrelationId, string TraceParent);
+    private sealed record ReceivedRequest(
+        string Path,
+        string Query,
+        string Authorization,
+        string CorrelationId,
+        string TraceParent,
+        string ForwardedProto,
+        string ForwardedHost);
 }
