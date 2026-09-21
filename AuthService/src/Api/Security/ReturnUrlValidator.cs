@@ -32,7 +32,7 @@ internal static class ReturnUrlValidator
     }
 
     /// <summary>So origin (scheme, host, port) thay vì so chuỗi để <c>http://localhost:3000.evil.com</c> không lọt qua.</summary>
-    private static bool TryGetOrigin(string url, out string? origin)
+    internal static bool TryGetOrigin(string url, out string? origin)
     {
         origin = null;
         if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)
