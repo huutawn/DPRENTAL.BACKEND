@@ -176,14 +176,40 @@ Auth:Google:ClientSecret              # chỉ cấp qua User Secrets hoặc bi�
 Auth:Google:AllowedReturnUrls:0       # mặc định http://localhost:3000
 ```
 
-Trên Google Cloud Console tạo OAuth client loại Web application và thêm redirect URI `http://localhost:64837/signin-google` (thêm bản `https://localhost:64836/signin-google` nếu dùng HTTPS). Cấp secret:
+Trên Google Cloud Console tạo OAuth client loại **Web application**. `Authorized redirect URIs` phải là callback của Google middleware, không phải endpoint controller `google/callback`:
+
+```text
+https://dev-api.lazyops.cloud/signin-google
+http://localhost:64837/signin-google
+```
+
+`Authorized JavaScript origins` không cần thiết cho luồng này vì browser chỉ được chuyển hướng tới endpoint backend; frontend không gọi Google Identity Services trực tiếp.
+
+`returnUrl` là URL frontend nhận browser sau khi đăng nhập. Giá trị cấu hình chỉ so sánh theo origin, do đó không thêm path:
+
+```text
+https://dev-app.lazyops.cloud
+http://localhost:3000
+```
+
+Cấp secret local:
 
 ```bash
 dotnet user-secrets set "Auth:Google:ClientId" "<client-id>" --project AuthService/src/Api/AuthService.Api.csproj
 dotnet user-secrets set "Auth:Google:ClientSecret" "<client-secret>" --project AuthService/src/Api/AuthService.Api.csproj
 ```
 
-Production: `Auth__Google__ClientId`, `Auth__Google__ClientSecret`, `Auth__Google__AllowedReturnUrls__0`.
+Production truyền các biến môi trường sau vào AuthService; không đưa `ClientSecret` vào source control:
+
+```text
+Auth__Google__ClientId=<google-oauth-client-id>
+Auth__Google__ClientSecret=<google-oauth-client-secret>
+Auth__Google__AllowedReturnUrls__0=https://dev-app.lazyops.cloud
+# Chỉ thêm khi môi trường này cần hỗ trợ frontend local:
+Auth__Google__AllowedReturnUrls__1=http://localhost:3000
+```
+
+Không có biến cấu hình redirect URI: Google handler tạo URI từ request host và callback path `/signin-google`. Khi TLS kết thúc ở reverse proxy, proxy phải chuyển `X-Forwarded-Proto: https` và application phải xử lý forwarded headers trước authentication; nếu không handler có thể gửi `http://dev-api.lazyops.cloud/signin-google` cho Google và bị từ chối do không khớp redirect URI.
 
 Quy tắc liên kết tài khoản, theo thứ tự:
 
