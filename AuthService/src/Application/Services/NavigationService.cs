@@ -11,7 +11,8 @@ namespace Dprental.AuthService.Application.Services;
 public sealed class NavigationService(
     IUserRepository userRepository,
     IOrganizationRepository organizationRepository,
-    IOrganizationMembershipRepository membershipRepository) : INavigationService
+    IOrganizationMembershipRepository membershipRepository,
+    INavigationCatalogRepository navigationCatalogRepository) : INavigationService
 {
     public async Task<Result<NavigationResponse>> GetNavigationAsync(
         Guid userId,
@@ -23,7 +24,7 @@ public sealed class NavigationService(
             return Result.Failure<NavigationResponse>(AuthErrors.User.NotFound);
         }
 
-        if (organizationId == Guid.Empty)
+        if (organizationId is not Guid selectedOrganizationId || selectedOrganizationId == Guid.Empty)
         {
             return Result.Failure<NavigationResponse>(AuthErrors.Navigation.InvalidOrganizationContext);
         }
@@ -34,33 +35,31 @@ public sealed class NavigationService(
             return Result.Failure<NavigationResponse>(AuthErrors.User.NotFound);
         }
 
-        IReadOnlyList<string> effectivePermissions;
-        if (organizationId is Guid selectedOrganizationId)
+        var membership = await membershipRepository.GetByOrganizationAndUserAsync(
+            selectedOrganizationId,
+            userId,
+            cancellationToken);
+        if (membership is null || membership.Status != MembershipStatus.Active)
         {
-            var membership = await membershipRepository.GetByOrganizationAndUserAsync(
-                selectedOrganizationId,
-                userId,
-                cancellationToken);
-            if (membership is null || membership.Status != MembershipStatus.Active)
-            {
-                return Result.Failure<NavigationResponse>(AuthErrors.Organization.CrossOrganizationAccessDenied);
-            }
-
-            var organization = await organizationRepository.GetByIdAsync(selectedOrganizationId, cancellationToken);
-            if (organization is null || !organization.IsActive)
-            {
-                return Result.Failure<NavigationResponse>(AuthErrors.Organization.CrossOrganizationAccessDenied);
-            }
-
-            effectivePermissions = await membershipRepository.GetEffectivePermissionsAsync(
-                userId,
-                selectedOrganizationId,
-                cancellationToken);
+            return Result.Failure<NavigationResponse>(AuthErrors.Organization.CrossOrganizationAccessDenied);
         }
-        else
+
+        var organization = await organizationRepository.GetByIdAsync(selectedOrganizationId, cancellationToken);
+        if (organization is null || !organization.IsActive)
         {
-            effectivePermissions = await membershipRepository.GetGlobalPermissionsAsync(userId, cancellationToken);
+            return Result.Failure<NavigationResponse>(AuthErrors.Organization.CrossOrganizationAccessDenied);
         }
+
+        var catalog = await navigationCatalogRepository.GetOrganizationCatalogAsync(selectedOrganizationId, cancellationToken);
+        if (catalog is null || catalog.DashboardType != organization.Type)
+        {
+            return Result.Failure<NavigationResponse>(AuthErrors.Navigation.CatalogNotFound);
+        }
+
+        IReadOnlyList<string> effectivePermissions = await membershipRepository.GetEffectivePermissionsAsync(
+            userId,
+            selectedOrganizationId,
+            cancellationToken);
 
         string[] identityPermissions = effectivePermissions
             .Where(PermissionCode.All.Contains)
@@ -69,8 +68,43 @@ public sealed class NavigationService(
             .ToArray();
 
         return new NavigationResponse(
-            organizationId,
+            selectedOrganizationId,
+            organization.Type.ToString(),
             identityPermissions,
-            NavigationCatalog.Resolve(identityPermissions.ToHashSet(StringComparer.Ordinal)));
+            ResolveItems(catalog.Items, identityPermissions.ToHashSet(StringComparer.Ordinal)));
+    }
+
+    private static NavigationItemResponse[] ResolveItems(
+        IEnumerable<Domain.Entities.NavigationItem> allItems,
+        IReadOnlySet<string> effectivePermissions)
+    {
+        Domain.Entities.NavigationItem[] items = allItems.Where(item => item.IsActive).ToArray();
+        return ResolveChildren(null, items, effectivePermissions, new HashSet<Guid>()).ToArray();
+    }
+
+    private static IEnumerable<NavigationItemResponse> ResolveChildren(
+        Guid? parentId,
+        IReadOnlyCollection<Domain.Entities.NavigationItem> allItems,
+        IReadOnlySet<string> effectivePermissions,
+        HashSet<Guid> ancestors)
+    {
+        foreach (var item in allItems.Where(candidate => candidate.ParentId == parentId)
+                     .OrderBy(candidate => candidate.Order).ThenBy(candidate => candidate.Key, StringComparer.Ordinal))
+        {
+            if (ancestors.Contains(item.Id))
+            {
+                continue;
+            }
+
+            HashSet<Guid> nextAncestors = new(ancestors) { item.Id };
+            NavigationItemResponse[] children = ResolveChildren(item.Id, allItems, effectivePermissions, nextAncestors).ToArray();
+            bool hasPermission = item.Permissions.Any(binding => effectivePermissions.Contains(binding.Permission.Code));
+            if (children.Length == 0 && !hasPermission)
+            {
+                continue;
+            }
+
+            yield return new NavigationItemResponse(item.Key, item.Label, item.Href, item.Icon, item.Order, children);
+        }
     }
 }

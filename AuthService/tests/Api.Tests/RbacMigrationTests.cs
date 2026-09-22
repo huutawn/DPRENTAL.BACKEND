@@ -106,23 +106,24 @@ public sealed class RbacMigrationTests
             [new Guid("c3030000-0000-0000-0000-000000000007")] = PermissionCode.IdentityServicePrincipalsRead,
             [new Guid("c3030000-0000-0000-0000-000000000008")] = PermissionCode.IdentityServicePrincipalsManage,
             [new Guid("c3030000-0000-0000-0000-000000000009")] = PermissionCode.IdentityServicePrincipalsRotateSecret,
-            [new Guid("c3030000-0000-0000-0000-000000000010")] = PermissionCode.IdentityServicePrincipalsManageScopes
+            [new Guid("c3030000-0000-0000-0000-000000000010")] = PermissionCode.IdentityServicePrincipalsManageScopes,
+            [new Guid("f7200000-0000-0000-0000-000000000001")] = PermissionCode.IdentityNavigationManage
         };
 
-        // All 17 canonical permissions present, and zero legacy permissions
-        Assert.Equal(17, permissions.Count);
+        // All canonical permissions present, and zero legacy permissions
+        Assert.Equal(18, permissions.Count);
         Assert.All(permissions.Values, code => Assert.StartsWith("identity.", code, StringComparison.Ordinal));
         Assert.Equal(PermissionCode.All.OrderBy(x => x), permissions.Values.OrderBy(x => x));
 
-        // Admin: all 17
+        // Admin: all permissions, including navigation management
         HashSet<string> adminPerms = [.. permissions.Values];
-        Assert.Equal(17, adminPerms.Count);
+        Assert.Equal(18, adminPerms.Count);
 
-        // Platform Admin: all 15 except global role assign/revoke
+        // Platform Admin: all except global role assign/revoke
         HashSet<string> platformAdminPerms = [.. permissions.Values];
         platformAdminPerms.Remove(PermissionCode.IdentityRolesAssignGlobal);
         platformAdminPerms.Remove(PermissionCode.IdentityRolesRevokeGlobal);
-        Assert.Equal(15, platformAdminPerms.Count);
+        Assert.Equal(16, platformAdminPerms.Count);
         Assert.DoesNotContain(PermissionCode.IdentityRolesAssignGlobal, platformAdminPerms);
         Assert.DoesNotContain(PermissionCode.IdentityRolesRevokeGlobal, platformAdminPerms);
 

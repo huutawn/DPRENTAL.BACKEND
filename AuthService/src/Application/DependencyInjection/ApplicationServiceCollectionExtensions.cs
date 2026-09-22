@@ -39,6 +39,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IExternalLoginService, ExternalLoginService>();
         services.AddScoped<IOrganizationService, OrganizationService>();
         services.AddScoped<INavigationService, NavigationService>();
+        services.AddScoped<INavigationAdminService, NavigationAdminService>();
 
         return services;
     }
