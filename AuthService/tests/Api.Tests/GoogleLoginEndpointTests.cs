@@ -309,6 +309,8 @@ public sealed class GoogleLoginEndpointTests
             ["Auth:Google:AllowedReturnUrls:1"] = DevelopmentFrontendOrigin,
             ["Auth:Google:BffCallbackUrls:0"] = $"{FrontendOrigin}/api/auth/google/callback",
             ["Auth:Google:BffCallbackUrls:1"] = $"{DevelopmentFrontendOrigin}/api/auth/google/callback",
+            ["Auth:Google:ClientId"] = googleConfigured ? "test-client-id" : string.Empty,
+            ["Auth:Google:ClientSecret"] = googleConfigured ? "test-client-secret" : string.Empty,
             ["Auth:AdminBootstrap:CreationKey"] = "test-bootstrap-creation-key"
         };
 
@@ -318,12 +320,8 @@ public sealed class GoogleLoginEndpointTests
             // Forwarded-header registration reads host configuration during Program startup.
             builder.UseSetting("Auth:ForwardedHeaders:Enabled", "true");
             builder.UseSetting("Auth:ForwardedHeaders:KnownNetworks:0", "127.0.0.0/8");
-            if (googleConfigured)
-            {
-                // Đọc lúc đăng ký service trong Program.cs nên phải là host setting, không phải cấu hình nạp trễ.
-                builder.UseSetting("Auth:Google:ClientId", "test-client-id");
-                builder.UseSetting("Auth:Google:ClientSecret", "test-client-secret");
-            }
+            builder.UseSetting("Auth:Google:ClientId", googleConfigured ? "test-client-id" : string.Empty);
+            builder.UseSetting("Auth:Google:ClientSecret", googleConfigured ? "test-client-secret" : string.Empty);
 
             builder.ConfigureServices(services =>
             {
