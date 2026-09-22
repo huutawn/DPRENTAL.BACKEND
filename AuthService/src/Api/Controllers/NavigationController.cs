@@ -16,8 +16,7 @@ namespace Dprental.AuthService.Api.Controllers;
 public sealed class NavigationController(INavigationService navigationService) : ControllerBase
 {
     /// <summary>
-    /// Lấy navigation. Không có organizationId chỉ dùng permission global; có organizationId yêu cầu
-    /// user là active member của organization active đó. Endpoint chỉ yêu cầu authenticated user.
+    /// Lấy navigation của một dashboard organization. OrganizationId là bắt buộc; endpoint chỉ yêu cầu authenticated user.
     /// </summary>
     [HttpGet]
     [ProducesResponseType<NavigationResponse>(StatusCodes.Status200OK)]

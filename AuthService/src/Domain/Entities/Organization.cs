@@ -92,4 +92,6 @@ public class Organization
     public DateTime? ReviewedAtUtc { get; set; }
 
     public ICollection<OrganizationMembership> Memberships { get; set; } = new List<OrganizationMembership>();
+
+    public ICollection<NavigationCatalog> NavigationCatalogs { get; set; } = new List<NavigationCatalog>();
 }

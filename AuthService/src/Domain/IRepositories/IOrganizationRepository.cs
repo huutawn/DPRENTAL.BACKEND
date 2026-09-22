@@ -21,6 +21,13 @@ public interface IOrganizationRepository
     /// </summary>
     Task<Organization> CreateAsync(Organization organization, OrganizationMembership initialMembership, CancellationToken cancellationToken = default);
 
+    /// <summary>Tạo organization, owner membership và catalog dashboard đã clone trong cùng một SaveChanges.</summary>
+    Task<Organization> CreateAsync(
+        Organization organization,
+        OrganizationMembership initialMembership,
+        NavigationCatalog navigationCatalog,
+        CancellationToken cancellationToken = default);
+
     Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default);
 
     Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default);

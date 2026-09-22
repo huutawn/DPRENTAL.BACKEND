@@ -40,6 +40,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IOrganizationService, OrganizationService>();
         services.AddScoped<IOrganizationRegistrationService, OrganizationRegistrationService>();
         services.AddScoped<INavigationService, NavigationService>();
+        services.AddScoped<INavigationAdminService, NavigationAdminService>();
 
         return services;
     }

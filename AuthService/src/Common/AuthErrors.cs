@@ -131,6 +131,23 @@ public static class AuthErrors
     {
         public static readonly Error InvalidOrganizationContext =
             Error.Validation(AuthErrorCode.Navigation.InvalidOrganizationContext, "Organization context không hợp lệ.");
+
+        public static readonly Error CatalogNotFound =
+            Error.NotFound(AuthErrorCode.Navigation.CatalogNotFound, "Navigation catalog không tồn tại.");
+        public static readonly Error InvalidDashboardType =
+            Error.Validation(AuthErrorCode.Navigation.InvalidDashboardType, "Dashboard type không hợp lệ hoặc không khớp organization.");
+        public static readonly Error InvalidItem =
+            Error.Validation(AuthErrorCode.Navigation.InvalidItem, "Navigation item không hợp lệ.");
+        public static readonly Error DuplicateKey =
+            Error.Conflict(AuthErrorCode.Navigation.DuplicateKey, "Navigation key đã tồn tại trong catalog.");
+        public static readonly Error ParentHasChildren =
+            Error.Conflict(AuthErrorCode.Navigation.ParentHasChildren, "Không thể xóa menu cha khi vẫn còn menu con.");
+        public static readonly Error InvalidPermissionBinding =
+            Error.Validation(AuthErrorCode.Navigation.InvalidPermissionBinding, "Permission không thể gắn vào navigation item này.");
+        public static readonly Error LastPermission =
+            Error.Conflict(AuthErrorCode.Navigation.LastPermission, "Không thể gỡ permission cuối cùng của menu item.");
+        public static readonly Error ManageDenied =
+            Error.Forbidden(AuthErrorCode.Navigation.ManageDenied, "Bạn không có quyền quản lý navigation catalog.");
     }
 
     public static class ServicePrincipal

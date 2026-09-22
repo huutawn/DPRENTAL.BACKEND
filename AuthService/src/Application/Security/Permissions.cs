@@ -54,6 +54,11 @@ public static class Permissions
         public const string ManageScopes = PermissionCode.IdentityServicePrincipalsManageScopes;
     }
 
+    public static class Navigation
+    {
+        public const string Manage = PermissionCode.IdentityNavigationManage;
+    }
+
     /// <summary>Toàn bộ mã quyền đã khai báo — dùng để đăng ký policy hàng loạt.</summary>
     public static IReadOnlyCollection<string> All => PermissionCode.All;
 }
