@@ -36,7 +36,13 @@ builder.Services.AddScoped<ICorrelationIdProvider, CorrelationIdProvider>();
 builder.Services.AddScoped<IAuditLogRepository, EfAuditLogRepository>();
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options => options.InferSecuritySchemes());
+builder.Services.AddSwaggerGen(options =>
+{
+    options.InferSecuritySchemes();
+    options.IncludeXmlComments(
+        Path.Combine(AppContext.BaseDirectory, $"{typeof(Program).Assembly.GetName().Name}.xml"),
+        includeControllerXmlComments: true);
+});
 builder.Services.AddScoped<IRecoveryTokenRepository, EfRecoveryTokenRepository>();
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AuthDbContext>(
@@ -78,4 +84,5 @@ app.MapHealthChecks("/health/ready", readinessOptions).AllowAnonymous();
 
 app.Run();
 
+/// <summary>Điểm vào ứng dụng AuthService, được công khai để chạy kiểm thử tích hợp.</summary>
 public partial class Program { }
