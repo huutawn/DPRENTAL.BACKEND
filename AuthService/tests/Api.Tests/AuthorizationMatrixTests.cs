@@ -119,7 +119,7 @@ public sealed class AuthorizationMatrixTests
     public async Task SuperAdminHasFullAuthorizationAcrossPlatformAndGlobalRoles()
     {
         OrganizationService orgService = new(_orgRepo, _memRepo, _userRepo, _roleRepo);
-        RoleAssignmentService roleService = new(_roleRepo);
+        RoleAssignmentService roleService = new(_roleRepo, _memRepo);
 
         // 1. Can suspend/activate org
         Result suspendRes = await orgService.UpdateAsync(SuperAdminUserId, OrganizationId, new UpdateOrganizationRequest(IsActive: false));
@@ -139,7 +139,7 @@ public sealed class AuthorizationMatrixTests
     public async Task PlatformAdminCanManageOrganizationsButCannotAssignOrRevokeGlobalRoles()
     {
         OrganizationService orgService = new(_orgRepo, _memRepo, _userRepo, _roleRepo);
-        RoleAssignmentService roleService = new(_roleRepo);
+        RoleAssignmentService roleService = new(_roleRepo, _memRepo);
 
         // 1. Can suspend/activate org (has identity.organizations.suspend)
         Result suspendRes = await orgService.UpdateAsync(PlatformAdminUserId, OrganizationId, new UpdateOrganizationRequest(IsActive: false));
@@ -161,7 +161,7 @@ public sealed class AuthorizationMatrixTests
     public async Task OwnerCanUpdateOrgAndManageMembersButCannotSuspendOrgOrAssignGlobalRoles()
     {
         OrganizationService orgService = new(_orgRepo, _memRepo, _userRepo, _roleRepo);
-        RoleAssignmentService roleService = new(_roleRepo);
+        RoleAssignmentService roleService = new(_roleRepo, _memRepo);
 
         // 1. Can update org name
         Result nameRes = await orgService.UpdateAsync(OwnerUserId, OrganizationId, new UpdateOrganizationRequest(Name: "Renamed Org"));
@@ -177,6 +177,51 @@ public sealed class AuthorizationMatrixTests
         Result assignRes = await roleService.AssignAsync(OwnerUserId, new AssignRoleRequest(target, GlobalRoleId));
         Assert.True(assignRes.IsFailure);
         Assert.Equal(AuthErrors.Role.InsufficientPermission, assignRes.Error);
+    }
+
+    [Fact]
+    public async Task OwnerCanAssignOrganizationScopedRoleWithinOwnOrganization()
+    {
+        RoleAssignmentService roleService = new(_roleRepo, _memRepo);
+
+        Guid newMemberTarget = Guid.NewGuid();
+        _memRepo.Memberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = OrganizationId,
+            UserId = newMemberTarget,
+            RoleId = OrgMemberRoleId,
+            Status = MembershipStatus.Active
+        });
+
+        Result result = await roleService.AssignAsync(OwnerUserId, new AssignRoleRequest(newMemberTarget, OrgOwnerRoleId, OrganizationId));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(OrgOwnerRoleId, _memRepo.Memberships.Single(m => m.UserId == newMemberTarget).RoleId);
+    }
+
+    [Fact]
+    public async Task OwnerCannotAssignOrganizationScopedRoleInADifferentOrganization()
+    {
+        // Acceptance criterion DPR-107: user ở Supplier A không thể dùng role của mình quản lý Supplier B.
+        RoleAssignmentService roleService = new(_roleRepo, _memRepo);
+
+        Guid supplierBOrganizationId = Guid.NewGuid();
+        Guid supplierBTarget = Guid.NewGuid();
+        _memRepo.Memberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = supplierBOrganizationId,
+            UserId = supplierBTarget,
+            RoleId = OrgMemberRoleId,
+            Status = MembershipStatus.Active
+        });
+
+        // OwnerUserId chỉ là Owner của OrganizationId (Supplier A) — không có membership ở supplierBOrganizationId.
+        Result result = await roleService.AssignAsync(OwnerUserId, new AssignRoleRequest(supplierBTarget, OrgOwnerRoleId, supplierBOrganizationId));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Organization.CrossOrganizationAccessDenied, result.Error);
     }
 
     [Fact]
