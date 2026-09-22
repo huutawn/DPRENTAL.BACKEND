@@ -1,0 +1,200 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text.Json;
+using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Domain.Data;
+using Dprental.AuthService.Domain.DTOs.Auth;
+using Dprental.AuthService.Domain.DTOs.Organization;
+using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Domain.Enums;
+using Dprental.AuthService.Domain.Models;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Xunit;
+
+namespace Dprental.AuthService.Api.Tests;
+
+public sealed class RegistrationEndpointTests
+{
+    private static readonly Guid OwnerRoleId = new("a1010000-0000-0000-0000-000000000001");
+
+    [Fact]
+    public async Task PostRegisterWithoutCitizenIdReturnsCreated()
+    {
+        // Đăng ký customer không còn thu thập CCCD — request tối thiểu vẫn phải thành công.
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/v1/auth/register",
+            new RegisterRequest("customer@example.com", "Matkhau123!", "Customer"));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostRegisterWithOptionalProfileFieldsReturnsCreated()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/v1/auth/register",
+            new RegisterRequest("customer2@example.com", "Matkhau123!", "Customer", "https://cdn.example.com/a.png", "0901234567", new DateOnly(2000, 1, 1)));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("not-a-url")]
+    [InlineData("ftp:/broken")]
+    public async Task PostRegisterWithInvalidAvatarUrlReturnsBadRequest(string avatarUrl)
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/v1/auth/register",
+            new RegisterRequest("customer@example.com", "Matkhau123!", "Customer", avatarUrl));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostRegisterWithEmptyAvatarUrlReturnsCreated()
+    {
+        // AvatarUrl không bắt buộc — gửi "" phải được coi như bỏ trống, không phải lỗi format.
+        // [Url] gốc của .NET không tự bỏ qua chuỗi rỗng (khác RegularExpressionAttribute), nên dùng
+        // OptionalUrlAttribute để đồng nhất hành vi giữa các field optional.
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/v1/auth/register",
+            new StringContent(
+                """{"email":"customer3@example.com","password":"Matkhau123!","fullName":"Customer","avatarUrl":""}""",
+                System.Text.Encoding.UTF8,
+                "application/json"));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostOrganizationsRegisterRequiresAuthentication()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/organizations/register", CreateProfile());
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PostOrganizationsRegisterCreatesPendingOrganizationForLoggedInUser()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedOwnerRoleAsync(factory);
+        Guid userId = await SeedUserAsync(factory, "owner@example.com");
+        using HttpClient client = CreateAuthenticatedClient(factory, userId);
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/organizations/register", CreateProfile());
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Guid organizationId = body.RootElement.GetProperty("organizationId").GetGuid();
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AuthDbContext dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        Organization org = await dbContext.Organizations.SingleAsync(o => o.Id == organizationId);
+        Assert.Equal(OrganizationStatus.Pending, org.Status);
+    }
+
+    [Fact]
+    public async Task PostOrganizationsRegisterWithInvalidTaxCodeReturnsBadRequest()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedOwnerRoleAsync(factory);
+        Guid userId = await SeedUserAsync(factory, "owner@example.com");
+        using HttpClient client = CreateAuthenticatedClient(factory, userId);
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/v1/auth/organizations/register", CreateProfile() with { TaxCode = "123" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    private static OrganizationProfileRequest CreateProfile() =>
+        new(
+            Name: "Dong A Rental",
+            Type: OrganizationType.Supplier,
+            TaxCode: "0312345678",
+            LegalRepresentativeName: "Nguyen Van A",
+            ContactEmail: "contact@donga.vn",
+            ContactPhone: "0281234567",
+            Address: "12 Nguyen Hue",
+            Province: "TP. Ho Chi Minh",
+            Ward: "Phuong Sai Gon",
+            BusinessLicenseDocumentUrl: "https://files.example.com/license.pdf");
+
+    private static async Task SeedOwnerRoleAsync(WebApplicationFactory<Program> factory)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        AuthDbContext dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        dbContext.Roles.Add(new Role { Id = OwnerRoleId, Name = SystemRoleCode.Owner, Scope = RoleScope.Organization });
+        await dbContext.SaveChangesAsync();
+    }
+
+    private static async Task<Guid> SeedUserAsync(WebApplicationFactory<Program> factory, string email)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        AuthDbContext dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        User user = new() { Id = Guid.NewGuid(), Email = email, FullName = "Owner", PasswordHash = "hash", IsActive = true };
+        dbContext.Users.Add(user);
+        await dbContext.SaveChangesAsync();
+        return user.Id;
+    }
+
+    private static HttpClient CreateAuthenticatedClient(WebApplicationFactory<Program> factory, Guid userId)
+    {
+        HttpClient client = factory.CreateClient();
+        IAccessTokenIssuer issuer = factory.Services.GetRequiredService<IAccessTokenIssuer>();
+        IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(userId));
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Value);
+        return client;
+    }
+
+    private static WebApplicationFactory<Program> CreateFactory()
+    {
+        string inMemoryDatabaseName = Guid.NewGuid().ToString("N");
+        using RSA rsa = RSA.Create(2048);
+        Dictionary<string, string?> settings = new()
+        {
+            ["Auth:Jwt:Issuer"] = "https://auth.example.test",
+            ["Auth:Jwt:Audience"] = "dprental-clients",
+            ["Auth:Jwt:AccessTokenLifetimeMinutes"] = "15",
+            ["Auth:Jwt:ActiveKeyId"] = "current",
+            ["Auth:Jwt:Keys:0:KeyId"] = "current",
+            ["Auth:Jwt:Keys:0:PublicKeyPem"] = rsa.ExportRSAPublicKeyPem(),
+            ["Auth:Jwt:Keys:0:PrivateKeyPem"] = rsa.ExportRSAPrivateKeyPem(),
+            ["Auth:AdminBootstrap:CreationKey"] = "test-admin-bootstrap-secret-key-12345"
+        };
+
+        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(settings));
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<DbContextOptions<AuthDbContext>>();
+                services.RemoveAll<IDbContextOptionsConfiguration<AuthDbContext>>();
+                services.AddDbContext<AuthDbContext>(options => options.UseInMemoryDatabase(inMemoryDatabaseName));
+            });
+        });
+    }
+}

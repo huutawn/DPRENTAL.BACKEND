@@ -52,7 +52,7 @@ public sealed class AuthController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<AccountCreatedResponse>> RegisterAdmin(
-        RegisterRequest request,
+        RegisterAdminRequest request,
         [FromHeader(Name = "X-Admin-Creation-Key")] string? adminCreationKey,
         CancellationToken cancellationToken)
     {

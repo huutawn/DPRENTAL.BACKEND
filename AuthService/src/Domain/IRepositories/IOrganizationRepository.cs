@@ -15,7 +15,13 @@ public interface IOrganizationRepository
 
     Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Tạo organization và membership ban đầu trong một transaction. Ném <see cref="Exceptions.DuplicateSlugException"/>
+    /// hoặc <see cref="Exceptions.DuplicateTaxCodeException"/> khi vi phạm unique.
+    /// </summary>
     Task<Organization> CreateAsync(Organization organization, OrganizationMembership initialMembership, CancellationToken cancellationToken = default);
 
     Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default);
+
+    Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default);
 }

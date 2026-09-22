@@ -32,12 +32,13 @@ public sealed class UserService(
         ArgumentNullException.ThrowIfNull(request);
 
         string email = NormalizeEmail(request.Email);
-        if (await userRepository.EmailExistsAsync(email, cancellationToken))
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        if (await CustomerAccountRules.ValidateAsync(request, email, userRepository, now, cancellationToken) is Error error)
         {
-            return AuthErrors.User.EmailAlreadyExists;
+            return error;
         }
 
-        User user = CreateUserEntity(request, email);
+        User user = CustomerAccountRules.Create(request, email, passwordHasher, now.UtcDateTime);
         Role? customerRole = await roleRepository.GetByNameAsync(SystemRoleCode.Customer, cancellationToken);
 
         try
@@ -63,7 +64,7 @@ public sealed class UserService(
     }
 
     public async Task<Result<AccountCreatedResponse>> RegisterAdminAsync(
-        RegisterRequest request,
+        RegisterAdminRequest request,
         string? creationKey,
         CancellationToken cancellationToken = default)
     {
@@ -118,7 +119,7 @@ public sealed class UserService(
         return CryptographicOperations.FixedTimeEquals(providedBytes, configuredBytes);
     }
 
-    private User CreateUserEntity(RegisterRequest request, string email)
+    private User CreateUserEntity(RegisterAdminRequest request, string email)
     {
         User user = new()
         {
@@ -366,7 +367,11 @@ public sealed class UserService(
             UserAccessResolver.Roles(user),
             UserAccessResolver.Permissions(user),
             organizations,
-            user.CreatedAt);
+            user.CreatedAt,
+            user.AvatarUrl,
+            user.PhoneNumber,
+            user.DateOfBirth,
+            CustomerAccountRules.MaskCitizenId(user.CitizenId));
     }
 
     [SuppressMessage("Globalization", "CA1308:Normalize strings to uppercase", Justification = "Email được lưu và so sánh ở dạng chữ thường theo quy ước phổ biến.")]

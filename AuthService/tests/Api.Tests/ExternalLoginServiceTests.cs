@@ -281,6 +281,9 @@ public sealed class ExternalLoginServiceTests
 
     private sealed class FakeUsers : IUserRepository
     {
+        public Task<bool> CitizenIdExistsAsync(string citizenId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
         public User? Existing { get; init; }
         public bool RejectCreate { get; init; }
         public Action? OnCreateRejected { get; init; }

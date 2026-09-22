@@ -69,6 +69,15 @@ public static class AuthErrors
 
         public static readonly Error CreationNotAllowed =
             Error.Forbidden(AuthErrorCode.Organization.CreationNotAllowed, "Bạn không có quyền tạo organization.");
+
+        public static readonly Error PendingApproval =
+            Error.Forbidden(AuthErrorCode.Organization.PendingApproval, "Organization chưa được Platform duyệt.");
+
+        public static readonly Error TaxCodeAlreadyExists =
+            Error.Conflict(AuthErrorCode.Organization.TaxCodeAlreadyExists, "Mã số thuế đã được đăng ký cho organization khác.");
+
+        public static readonly Error SelfRegistrationTypeNotAllowed =
+            Error.Validation(AuthErrorCode.Organization.SelfRegistrationTypeNotAllowed, "Chỉ được tự đăng ký organization loại Supplier hoặc Renter.");
     }
 
     public static class Role
@@ -110,6 +119,12 @@ public static class AuthErrors
         public static readonly Error NotFound =
             Error.NotFound(AuthErrorCode.User.NotFound, "Người dùng không tồn tại hoặc tài khoản đã bị khóa.");
         public static readonly Error UserNotFound = NotFound;
+
+        public static readonly Error CitizenIdAlreadyExists =
+            Error.Conflict(AuthErrorCode.User.CitizenIdAlreadyExists, "Số CCCD đã được sử dụng.");
+
+        public static readonly Error Underage =
+            Error.Validation(AuthErrorCode.User.Underage, "Người dùng phải đủ 18 tuổi.");
     }
 
     public static class ServicePrincipal

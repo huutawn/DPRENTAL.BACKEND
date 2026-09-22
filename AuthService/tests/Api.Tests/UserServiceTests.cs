@@ -43,6 +43,55 @@ public sealed class UserServiceTests
     }
 
     [Fact]
+    public async Task RegisterAsyncStoresProfileFieldsAndLeavesCitizenIdEmpty()
+    {
+        RecordingUserRepository repository = new();
+        UserService service = CreateService(repository);
+
+        Result<AccountCreatedResponse> result = await service.RegisterAsync(
+            new RegisterRequest("a@example.com", "Matkhau123!", "A", "https://cdn.example.com/a.png", "0901234567", new DateOnly(2000, 1, 1)));
+
+        Assert.True(result.IsSuccess);
+        User created = Assert.Single(repository.CreatedUsers);
+        // Đăng ký không thu thập CCCD — chỉ được set sau, qua đăng ký tổ chức hoặc hoàn thiện hồ sơ để thuê cá nhân.
+        Assert.Null(created.CitizenId);
+        Assert.Equal("https://cdn.example.com/a.png", created.AvatarUrl);
+        Assert.Equal("0901234567", created.PhoneNumber);
+        Assert.Equal(new DateOnly(2000, 1, 1), created.DateOfBirth);
+    }
+
+    [Fact]
+    public async Task RegisterAsyncRejectsUnderageUser()
+    {
+        DateTimeOffset now = new(2026, 9, 22, 0, 0, 0, TimeSpan.Zero);
+        RecordingUserRepository repository = new();
+        UserService service = CreateService(repository, timeProvider: new FixedTimeProvider(now));
+
+        Result<AccountCreatedResponse> result = await service.RegisterAsync(
+            new RegisterRequest("a@example.com", "Matkhau123!", "A", DateOfBirth: new DateOnly(2008, 9, 23)));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.User.Underage, result.Error);
+        Assert.Empty(repository.CreatedUsers);
+    }
+
+    [Fact]
+    public async Task GetCurrentUserProfileAsyncMasksCitizenId()
+    {
+        // CitizenId được set trực tiếp trên entity — mô phỏng trạng thái sau khi user đã hoàn thiện hồ sơ
+        // hoặc đăng ký tổ chức (đăng ký customer không thu thập CCCD).
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "a@example.com", FullName = "A", CitizenId = "079203001234", AvatarUrl = "https://cdn.example.com/a.png", IsActive = true };
+        UserService service = CreateService(new RecordingUserRepository { ProfileUser = user });
+
+        Result<CurrentUserResponse> result = await service.GetCurrentUserProfileAsync(userId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("********1234", result.Value.MaskedCitizenId);
+        Assert.Equal("https://cdn.example.com/a.png", result.Value.AvatarUrl);
+    }
+
+    [Fact]
     public async Task RegisterAsyncAssignsCustomerRoleWhenSeeded()
     {
         RecordingUserRepository repository = new();
@@ -100,7 +149,7 @@ public sealed class UserServiceTests
         UserService service = CreateService(repository);
 
         Result<AccountCreatedResponse> result = await service.RegisterAdminAsync(
-            new RegisterRequest("admin@example.com", "Password123!", "Admin User"),
+            new RegisterAdminRequest("admin@example.com", "Password123!", "Admin User"),
             invalidKey);
 
         Assert.True(result.IsFailure);
@@ -121,7 +170,7 @@ public sealed class UserServiceTests
         UserService service = CreateService(repository, roleRepository: roleRepo);
 
         Result<AccountCreatedResponse> result = await service.RegisterAdminAsync(
-            new RegisterRequest("  Admin@Example.com ", "AdminPassword123!", "  Super Admin  "),
+            new RegisterAdminRequest("  Admin@Example.com ", "AdminPassword123!", "  Super Admin  "),
             ValidBootstrapKey);
 
         Assert.True(result.IsSuccess);
@@ -145,7 +194,7 @@ public sealed class UserServiceTests
         UserService service = CreateService(repository, roleRepository: roleRepo);
 
         Result<AccountCreatedResponse> result = await service.RegisterAdminAsync(
-            new RegisterRequest("admin@example.com", "Password123!", "Admin"),
+            new RegisterAdminRequest("admin@example.com", "Password123!", "Admin"),
             ValidBootstrapKey);
 
         Assert.True(result.IsFailure);
@@ -164,7 +213,7 @@ public sealed class UserServiceTests
         UserService service = CreateService(repository, roleRepository: roleRepo);
 
         Result<AccountCreatedResponse> result = await service.RegisterAdminAsync(
-            new RegisterRequest("admin@example.com", "Password123!", "Admin"),
+            new RegisterAdminRequest("admin@example.com", "Password123!", "Admin"),
             ValidBootstrapKey);
 
         Assert.True(result.IsFailure);
@@ -205,8 +254,8 @@ public sealed class UserServiceTests
         };
         user.UserRoles.Add(new UserRole { UserId = userId, Role = CreateRole("Admin", "roles.assign") });
 
-        Organization activeOrg = new() { Id = Guid.NewGuid(), Name = "Acme", Slug = "acme", Type = OrganizationType.Supplier, IsActive = true };
-        Organization suspendedOrg = new() { Id = Guid.NewGuid(), Name = "Beta", Slug = "beta", Type = OrganizationType.Renter, IsActive = true };
+        Organization activeOrg = new() { Id = Guid.NewGuid(), Name = "Acme", Slug = "acme", Type = OrganizationType.Supplier, Status = OrganizationStatus.Active };
+        Organization suspendedOrg = new() { Id = Guid.NewGuid(), Name = "Beta", Slug = "beta", Type = OrganizationType.Renter, Status = OrganizationStatus.Active };
         user.OrganizationMemberships.Add(new OrganizationMembership
         {
             UserId = userId,
@@ -321,6 +370,11 @@ public sealed class UserServiceTests
 
     private sealed class RecordingUserRepository : IUserRepository
     {
+        public string? ExistingCitizenId { get; init; }
+
+        public Task<bool> CitizenIdExistsAsync(string citizenId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(citizenId == ExistingCitizenId);
+
         public string? ExistingEmail { get; init; }
         public bool RejectCreate { get; init; }
         public User? ProfileUser { get; init; }

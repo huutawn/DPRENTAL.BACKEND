@@ -159,7 +159,7 @@ public sealed class OrganizationServiceTests
         OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
 
         Guid orgId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Inactive", Slug = "inactive", IsActive = false };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Inactive", Slug = "inactive", Status = OrganizationStatus.Suspended };
         userRepo.Users[ActorUserId] = new User { Id = ActorUserId, IsActive = true };
         memRepo.GlobalPermissions[ActorUserId] = [];
 
@@ -180,7 +180,7 @@ public sealed class OrganizationServiceTests
         OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
 
         Guid orgId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorUserId] = new User { Id = ActorUserId, IsActive = true };
         memRepo.GlobalPermissions[ActorUserId] = []; // Not platform admin, no membership
 
@@ -201,7 +201,7 @@ public sealed class OrganizationServiceTests
 
         Guid orgId = Guid.NewGuid();
         Guid targetUserId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -231,7 +231,7 @@ public sealed class OrganizationServiceTests
         Guid orgId = Guid.NewGuid();
         Guid targetUserId = Guid.NewGuid();
         Guid globalRoleId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -258,7 +258,7 @@ public sealed class OrganizationServiceTests
 
         Guid orgId = Guid.NewGuid();
         Guid targetUserId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -285,7 +285,7 @@ public sealed class OrganizationServiceTests
 
         Guid orgId = Guid.NewGuid();
         Guid targetUserId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -323,7 +323,7 @@ public sealed class OrganizationServiceTests
         Guid orgId = Guid.NewGuid();
         Guid targetUserId = Guid.NewGuid();
         Guid customRoleId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
 
         userRepo.Users[ActorUserId] = new User { Id = ActorUserId, IsActive = true };
         memRepo.GlobalPermissions[ActorUserId] = []; // Not platform admin
@@ -364,7 +364,7 @@ public sealed class OrganizationServiceTests
 
         Guid orgId = Guid.NewGuid();
         Guid memberId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -397,7 +397,7 @@ public sealed class OrganizationServiceTests
         OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
 
         Guid orgId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorUserId] = new User { Id = ActorUserId, IsActive = true };
         memRepo.GlobalPermissions[ActorUserId] = [];
 
@@ -428,7 +428,7 @@ public sealed class OrganizationServiceTests
 
         Guid orgId = Guid.NewGuid();
         Guid ownerMemberId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -466,7 +466,7 @@ public sealed class OrganizationServiceTests
 
         Guid orgId = Guid.NewGuid();
         Guid ownerMemberId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -506,7 +506,7 @@ public sealed class OrganizationServiceTests
 
         Guid orgId = Guid.NewGuid();
         Guid ownerMemberId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -539,7 +539,7 @@ public sealed class OrganizationServiceTests
         OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
 
         Guid orgId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorUserId] = new User { Id = ActorUserId, IsActive = true };
         memRepo.GlobalPermissions[ActorUserId] = [Permissions.Organizations.Update]; // NOT platform admin
 
@@ -566,6 +566,10 @@ public sealed class OrganizationServiceTests
 
     private sealed class FakeOrganizationRepository : IOrganizationRepository
     {
+        public Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
+
         public Dictionary<Guid, Organization> Organizations { get; } = [];
         public HashSet<string> ExistingSlugs { get; } = [];
         public OrganizationMembership? LastCreatedInitialMembership { get; private set; }
@@ -680,6 +684,9 @@ public sealed class OrganizationServiceTests
 
     private sealed class FakeUserRepository : IUserRepository
     {
+        public Task<bool> CitizenIdExistsAsync(string citizenId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
         public Dictionary<Guid, User> Users { get; } = [];
 
         public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>

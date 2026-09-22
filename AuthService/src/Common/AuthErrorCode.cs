@@ -26,6 +26,9 @@ public static class AuthErrorCode
         public const string InvalidName = "Organization.InvalidName";
         public const string PlatformAdminRequired = "Organization.PlatformAdminRequired";
         public const string CreationNotAllowed = "Organization.CreationNotAllowed";
+        public const string PendingApproval = "Organization.PendingApproval";
+        public const string TaxCodeAlreadyExists = "Organization.TaxCodeAlreadyExists";
+        public const string SelfRegistrationTypeNotAllowed = "Organization.SelfRegistrationTypeNotAllowed";
     }
 
     public static class Role
@@ -45,6 +48,8 @@ public static class AuthErrorCode
     {
         public const string EmailAlreadyExists = "User.EmailAlreadyExists";
         public const string NotFound = "User.NotFound";
+        public const string CitizenIdAlreadyExists = "User.CitizenIdAlreadyExists";
+        public const string Underage = "User.Underage";
     }
 
     public static class ServicePrincipal

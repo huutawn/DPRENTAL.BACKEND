@@ -86,9 +86,9 @@ public sealed class PagingTests
 
         // Add with same CreatedAtUtc to verify Id tie-breaker
         db.Organizations.AddRange(
-            new Organization { Id = id1, Name = "B", Slug = "b", Type = OrganizationType.Supplier, CreatedAtUtc = fixedTime, IsActive = true },
-            new Organization { Id = id2, Name = "A", Slug = "a", Type = OrganizationType.Supplier, CreatedAtUtc = fixedTime, IsActive = true },
-            new Organization { Id = id3, Name = "C", Slug = "c", Type = OrganizationType.Supplier, CreatedAtUtc = fixedTime, IsActive = true }
+            new Organization { Id = id1, Name = "B", Slug = "b", Type = OrganizationType.Supplier, CreatedAtUtc = fixedTime, Status = OrganizationStatus.Active },
+            new Organization { Id = id2, Name = "A", Slug = "a", Type = OrganizationType.Supplier, CreatedAtUtc = fixedTime, Status = OrganizationStatus.Active },
+            new Organization { Id = id3, Name = "C", Slug = "c", Type = OrganizationType.Supplier, CreatedAtUtc = fixedTime, Status = OrganizationStatus.Active }
         );
         await db.SaveChangesAsync();
 
@@ -134,6 +134,10 @@ public sealed class PagingTests
 
     private sealed class FakeOrgRepository : IOrganizationRepository
     {
+        public Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
+
         public Task<Organization?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<Organization?>(null);
         public Task<Organization?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult<Organization?>(null);
         public Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult(false);
@@ -165,6 +169,9 @@ public sealed class PagingTests
 
     private sealed class FakeUserRepo : IUserRepository
     {
+        public Task<bool> CitizenIdExistsAsync(string citizenId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
         public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<User?>(null);
         public Task<User?> FindByEmailAsync(string email, CancellationToken cancellationToken = default) => Task.FromResult<User?>(null);
         public Task<bool> EmailExistsAsync(string email, CancellationToken cancellationToken = default) => Task.FromResult(false);

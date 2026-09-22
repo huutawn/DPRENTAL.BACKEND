@@ -6,6 +6,7 @@ namespace Dprental.AuthService.Domain.Entities;
 
 [Table("Users", Schema = "auth")]
 [Index(nameof(Email), IsUnique = true)]
+[Index(nameof(CitizenId), IsUnique = true)]
 public class User
 {
     [Key]
@@ -21,6 +22,19 @@ public class User
     [Required]
     [MaxLength(100)]
     public string FullName { get; set; } = string.Empty;
+
+    /// <summary>Số CCCD 12 chữ số — dữ liệu cá nhân nhạy cảm, không ghi log và chỉ trả ra ở dạng che.
+    /// Null với user tạo qua Google chưa bổ sung hồ sơ.</summary>
+    [MaxLength(12)]
+    public string? CitizenId { get; set; }
+
+    [MaxLength(500)]
+    public string? AvatarUrl { get; set; }
+
+    [MaxLength(15)]
+    public string? PhoneNumber { get; set; }
+
+    public DateOnly? DateOfBirth { get; set; }
 
     public DateTime CreatedAt { get; set; }
 

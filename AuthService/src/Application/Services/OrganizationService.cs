@@ -1,6 +1,6 @@
 using Dprental.AuthService.Domain.Enums;
-using System.Text.RegularExpressions;
 using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Application.Mapping;
 using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Organization;
@@ -10,16 +10,13 @@ using Dprental.AuthService.Domain.IRepositories;
 
 namespace Dprental.AuthService.Application.Services;
 
-public sealed partial class OrganizationService(
+public sealed class OrganizationService(
     IOrganizationRepository organizationRepository,
     IOrganizationMembershipRepository membershipRepository,
     IUserRepository userRepository,
     IRoleRepository roleRepository) : IOrganizationService
 {
     private static readonly Guid SeededOwnerRoleId = new("a1010000-0000-0000-0000-000000000001");
-
-    [GeneratedRegex(@"^[a-z0-9]+(-[a-z0-9]+)*$", RegexOptions.CultureInvariant)]
-    private static partial Regex CanonicalSlugRegex();
 
     public async Task<Result<OrganizationResponse>> CreateAsync(
         Guid actorUserId,
@@ -40,7 +37,7 @@ public sealed partial class OrganizationService(
         }
 
         string trimmedSlug = request.Slug?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(trimmedSlug) || trimmedSlug.Length > 100 || !CanonicalSlugRegex().IsMatch(trimmedSlug))
+        if (string.IsNullOrWhiteSpace(trimmedSlug) || !OrganizationSlug.IsCanonical(trimmedSlug))
         {
             return Result.Failure<OrganizationResponse>(AuthErrors.Organization.InvalidSlugFormat);
         }
@@ -93,7 +90,8 @@ public sealed partial class OrganizationService(
             Name = trimmedName,
             Slug = trimmedSlug,
             Type = request.Type,
-            IsActive = true,
+            // Organization do Platform tạo trực tiếp không cần qua bước duyệt.
+            Status = OrganizationStatus.Active,
             CreatedAtUtc = now
         };
 
@@ -110,13 +108,7 @@ public sealed partial class OrganizationService(
         try
         {
             Organization created = await organizationRepository.CreateAsync(organization, initialMembership, cancellationToken);
-            return new OrganizationResponse(
-                created.Id,
-                created.Name,
-                created.Slug,
-                created.Type,
-                created.IsActive,
-                created.CreatedAtUtc);
+            return created.ToResponse();
         }
         catch (DuplicateSlugException)
         {
@@ -143,7 +135,8 @@ public sealed partial class OrganizationService(
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
         bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
 
-        if (!org.IsActive && !canManageSuspended)
+        // Organization Pending/Rejected vẫn cho thành viên xem để theo dõi kết quả duyệt; chỉ Suspended mới bị chặn.
+        if (org.Status == OrganizationStatus.Suspended && !canManageSuspended)
         {
             return Result.Failure<OrganizationResponse>(AuthErrors.Organization.InactiveOrganization);
         }
@@ -163,13 +156,7 @@ public sealed partial class OrganizationService(
             }
         }
 
-        return new OrganizationResponse(
-            org.Id,
-            org.Name,
-            org.Slug,
-            org.Type,
-            org.IsActive,
-            org.CreatedAtUtc);
+        return org.ToResponse();
     }
 
     public async Task<Result<PagedResult<OrganizationResponse>>> ListAsync(
@@ -198,7 +185,7 @@ public sealed partial class OrganizationService(
             : await organizationRepository.GetUserOrganizationsAsync(actorUserId, request, cancellationToken);
 
         OrganizationResponse[] mapped = pagedOrgs.Items
-            .Select(org => new OrganizationResponse(org.Id, org.Name, org.Slug, org.Type, org.IsActive, org.CreatedAtUtc))
+            .Select(org => org.ToResponse())
             .ToArray();
 
         return new PagedResult<OrganizationResponse>(mapped, pagedOrgs.Page, pagedOrgs.PageSize, pagedOrgs.TotalCount, pagedOrgs.TotalPages);
@@ -236,9 +223,9 @@ public sealed partial class OrganizationService(
             return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
         }
 
-        if (!org.IsActive && !canManageSuspended)
+        if (org.Status != OrganizationStatus.Active && !canManageSuspended)
         {
-            return Result.Failure(AuthErrors.Organization.InactiveOrganization);
+            return Result.Failure(InactiveError(org));
         }
 
         if (!globalPerms.Contains(PermissionCode.IdentityOrganizationsUpdate, StringComparer.Ordinal))
@@ -263,11 +250,29 @@ public sealed partial class OrganizationService(
         }
 
         bool nameChanged = trimmedName is not null && !string.Equals(trimmedName, org.Name, StringComparison.Ordinal);
-        bool activeChanged = request.IsActive.HasValue && request.IsActive.Value != org.IsActive;
+        bool activeChanged = request.IsActive.HasValue && request.IsActive.Value != (org.Status == OrganizationStatus.Active);
 
         if (!nameChanged && !activeChanged)
         {
             return Result.Failure(AuthErrors.Organization.NoOpPatch);
+        }
+
+        // IsActive=true: kích hoạt lại org bị đình chỉ, hoặc duyệt org đang Pending.
+        // IsActive=false: chỉ đình chỉ được org đang Active (từ chối org Pending thuộc luồng duyệt riêng).
+        OrganizationStatus? newStatus = null;
+        if (activeChanged)
+        {
+            newStatus = (request.IsActive!.Value, org.Status) switch
+            {
+                (true, OrganizationStatus.Pending or OrganizationStatus.Suspended) => OrganizationStatus.Active,
+                (false, OrganizationStatus.Active) => OrganizationStatus.Suspended,
+                _ => null
+            };
+
+            if (newStatus is null)
+            {
+                return Result.Failure(AuthErrors.Organization.InvalidStateTransition);
+            }
         }
 
         if (nameChanged)
@@ -275,9 +280,15 @@ public sealed partial class OrganizationService(
             org.Name = trimmedName!;
         }
 
-        if (activeChanged)
+        if (newStatus is not null)
         {
-            org.IsActive = request.IsActive!.Value;
+            if (org.Status == OrganizationStatus.Pending)
+            {
+                org.ReviewedByUserId = actorUserId;
+                org.ReviewedAtUtc = DateTime.UtcNow;
+            }
+
+            org.Status = newStatus.Value;
         }
 
         await organizationRepository.UpdateAsync(org, cancellationToken);
@@ -312,9 +323,9 @@ public sealed partial class OrganizationService(
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
         bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
 
-        if (!org.IsActive && !canManageSuspended)
+        if (org.Status != OrganizationStatus.Active && !canManageSuspended)
         {
-            return Result.Failure<PagedResult<OrganizationMemberResponse>>(AuthErrors.Organization.InactiveOrganization);
+            return Result.Failure<PagedResult<OrganizationMemberResponse>>(InactiveError(org));
         }
 
         if (!globalPerms.Contains(PermissionCode.IdentityMembersRead, StringComparer.Ordinal))
@@ -375,9 +386,9 @@ public sealed partial class OrganizationService(
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
         bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
 
-        if (!org.IsActive && !canManageSuspended)
+        if (org.Status != OrganizationStatus.Active && !canManageSuspended)
         {
-            return Result.Failure<OrganizationMemberResponse>(AuthErrors.Organization.InactiveOrganization);
+            return Result.Failure<OrganizationMemberResponse>(InactiveError(org));
         }
 
         if (!globalPerms.Contains(PermissionCode.IdentityMembersManage, StringComparer.Ordinal))
@@ -500,9 +511,9 @@ public sealed partial class OrganizationService(
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
         bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
 
-        if (!org.IsActive && !canManageSuspended)
+        if (org.Status != OrganizationStatus.Active && !canManageSuspended)
         {
-            return Result.Failure(AuthErrors.Organization.InactiveOrganization);
+            return Result.Failure(InactiveError(org));
         }
 
         if (!globalPerms.Contains(PermissionCode.IdentityMembersManage, StringComparer.Ordinal))
@@ -654,9 +665,9 @@ public sealed partial class OrganizationService(
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
         bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
 
-        if (!org.IsActive && !canManageSuspended)
+        if (org.Status != OrganizationStatus.Active && !canManageSuspended)
         {
-            return Result.Failure(AuthErrors.Organization.InactiveOrganization);
+            return Result.Failure(InactiveError(org));
         }
 
         if (!globalPerms.Contains(PermissionCode.IdentityMembersManage, StringComparer.Ordinal))
@@ -728,9 +739,9 @@ public sealed partial class OrganizationService(
         IReadOnlyList<string> globalPerms = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
         bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
 
-        if (!org.IsActive && !canManageSuspended)
+        if (org.Status != OrganizationStatus.Active && !canManageSuspended)
         {
-            return Result.Failure(AuthErrors.Organization.InactiveOrganization);
+            return Result.Failure(InactiveError(org));
         }
 
         OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
@@ -750,6 +761,12 @@ public sealed partial class OrganizationService(
         await membershipRepository.UpdateAsync(membership, cancellationToken);
         return Result.Success();
     }
+
+    /// <summary>Organization chưa được duyệt trả lỗi riêng để client phân biệt với organization bị đình chỉ.</summary>
+    private static Error InactiveError(Organization org) =>
+        org.Status is OrganizationStatus.Pending or OrganizationStatus.Rejected
+            ? AuthErrors.Organization.PendingApproval
+            : AuthErrors.Organization.InactiveOrganization;
 
     private static bool IsOwner(Role? role) =>
         role is not null && string.Equals(role.Name, "Owner", StringComparison.OrdinalIgnoreCase);

@@ -38,6 +38,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IServiceIdentityService, ServiceIdentityService>();
         services.AddScoped<IExternalLoginService, ExternalLoginService>();
         services.AddScoped<IOrganizationService, OrganizationService>();
+        services.AddScoped<IOrganizationRegistrationService, OrganizationRegistrationService>();
 
         return services;
     }

@@ -13,8 +13,33 @@ namespace Dprental.AuthService.Api.Controllers;
 [Route("organizations")]
 [Produces("application/json")]
 [Authorize]
-public sealed class OrganizationsController(IOrganizationService organizationService) : ControllerBase
+public sealed class OrganizationsController(
+    IOrganizationService organizationService,
+    IOrganizationRegistrationService organizationRegistrationService) : ControllerBase
 {
+    /// <summary>Người dùng đang đăng nhập tự đăng ký tổ chức Supplier/Renter và trở thành Owner; tổ chức chờ Platform duyệt.</summary>
+    [HttpPost("register")]
+    [ProducesResponseType<OrganizationRegisteredResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Register(OrganizationProfileRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        Result<OrganizationRegisteredResponse> result = await organizationRegistrationService.RegisterForExistingUserAsync(userId, request, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return StatusCode(StatusCodes.Status201Created, result.Value);
+    }
+
     /// <summary>Tạo organization mới và thêm người gọi làm thành viên ban đầu.</summary>
     [HttpPost]
     [ProducesResponseType<OrganizationResponse>(StatusCodes.Status201Created)]
