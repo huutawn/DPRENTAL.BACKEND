@@ -60,7 +60,7 @@ public sealed class NavigationServiceTests
             [PermissionCode.IdentityOrganizationsSuspend],
             [],
             []);
-        dbContext.Organizations.Add(new Organization { Id = organizationId, Name = "Other", Slug = "other", IsActive = true });
+        dbContext.Organizations.Add(new Organization { Id = organizationId, Name = "Other", Slug = "other", Status = OrganizationStatus.Active });
         await dbContext.SaveChangesAsync();
 
         NavigationService service = CreateService(dbContext);
@@ -113,7 +113,7 @@ public sealed class NavigationServiceTests
             .SingleAsync(item => item.UserId == userId && item.OrganizationId == organizationAId);
         membership.Status = MembershipStatus.Suspended;
         Organization organization = await dbContext.Organizations.SingleAsync(item => item.Id == organizationBId);
-        organization.IsActive = false;
+        organization.Status = OrganizationStatus.Suspended;
         await dbContext.SaveChangesAsync();
 
         NavigationService service = CreateService(dbContext);
@@ -151,8 +151,8 @@ public sealed class NavigationServiceTests
         IReadOnlyCollection<string> organizationBPermissions)
     {
         User user = new() { Id = userId, Email = $"{userId:N}@example.com", FullName = "Navigation User", IsActive = true };
-        Organization organizationA = new() { Id = organizationAId, Name = "Organization A", Slug = $"org-a-{organizationAId:N}", IsActive = true };
-        Organization organizationB = new() { Id = organizationBId, Name = "Organization B", Slug = $"org-b-{organizationBId:N}", IsActive = true };
+        Organization organizationA = new() { Id = organizationAId, Name = "Organization A", Slug = $"org-a-{organizationAId:N}", Status = OrganizationStatus.Active };
+        Organization organizationB = new() { Id = organizationBId, Name = "Organization B", Slug = $"org-b-{organizationBId:N}", Status = OrganizationStatus.Active };
         Role globalRole = CreateRole("global", RoleScope.Global, globalPermissions);
         Role orgARole = CreateRole("org-a", RoleScope.Organization, organizationAPermissions);
         Role orgBRole = CreateRole("org-b", RoleScope.Organization, organizationBPermissions);

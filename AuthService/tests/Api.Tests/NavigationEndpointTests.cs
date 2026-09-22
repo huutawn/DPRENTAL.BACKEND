@@ -142,9 +142,9 @@ public sealed class NavigationEndpointTests
 
         dbContext.Users.Add(new User { Id = fixture.UserId, Email = "navigation@example.com", FullName = "Navigation User", IsActive = true });
         dbContext.Organizations.AddRange(
-            new Organization { Id = fixture.OrganizationAId, Name = "Organization A", Slug = "navigation-org-a", IsActive = true },
-            new Organization { Id = fixture.OrganizationBId, Name = "Organization B", Slug = "navigation-org-b", IsActive = true },
-            new Organization { Id = fixture.UnrelatedOrganizationId, Name = "Other Organization", Slug = "navigation-org-other", IsActive = true });
+            new Organization { Id = fixture.OrganizationAId, Name = "Organization A", Slug = "navigation-org-a", Status = OrganizationStatus.Active },
+            new Organization { Id = fixture.OrganizationBId, Name = "Organization B", Slug = "navigation-org-b", Status = OrganizationStatus.Active },
+            new Organization { Id = fixture.UnrelatedOrganizationId, Name = "Other Organization", Slug = "navigation-org-other", Status = OrganizationStatus.Active });
         dbContext.Roles.AddRange(globalRole, organizationARole, organizationBRole);
         dbContext.UserRoles.Add(new UserRole { UserId = fixture.UserId, RoleId = globalRole.Id });
         dbContext.OrganizationMemberships.AddRange(
