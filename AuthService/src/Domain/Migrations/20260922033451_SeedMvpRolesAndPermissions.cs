@@ -40,7 +40,6 @@ namespace AuthService.Domain.Migrations
                     { RenterMemberRoleId, "renter_member", "Thành viên thông thường của một Organization loại Renter — tương đương Member.", 1 }
                 }); 
 
-            //hi
             migrationBuilder.InsertData(
                 schema: "auth",
                 table: "Permissions",
