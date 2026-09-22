@@ -1,9 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.AuthService.Domain.Entities;
 
+/// <summary>Nhật ký hành vi bảo mật/RBAC — tra theo actor (ai làm) và theo thời gian (gần đây/dọn log cũ) là 2 truy vấn chính.</summary>
+[Index(nameof(ActorId))]
+[Index(nameof(Timestamp))]
 public sealed class AuditLog
 {
     public Guid Id { get; set; }

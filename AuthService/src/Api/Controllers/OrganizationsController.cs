@@ -1,4 +1,5 @@
 using Dprental.AuthService.Api.Filters;
+using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Organization;
@@ -175,6 +176,10 @@ public sealed class OrganizationsController(IOrganizationService organizationSer
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
 
-    private bool TryGetCurrentUserId(out Guid userId) =>
-        Guid.TryParse(User.Identity?.Name, out userId);
+    private bool TryGetCurrentUserId(out Guid userId)
+    {
+        Guid? actorUserId = User.GetJwtSub();
+        userId = actorUserId ?? Guid.Empty;
+        return actorUserId is not null;
+    }
 }
