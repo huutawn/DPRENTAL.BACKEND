@@ -38,10 +38,20 @@ public sealed class UserService(
         }
 
         User user = CreateUserEntity(request, email);
+        Role? customerRole = await roleRepository.GetByNameAsync(SystemRoleCode.Customer, cancellationToken);
 
         try
         {
-            await userRepository.CreateAsync(user, cancellationToken);
+            if (customerRole is not null)
+            {
+                await userRepository.CreateWithRoleAsync(user, customerRole.Id, cancellationToken);
+            }
+            else
+            {
+                // Role customer chưa được seed (vd DB chưa chạy migration mới nhất) — vẫn cho đăng ký,
+                // không chặn user chỉ vì thiếu 1 role không mang permission gì.
+                await userRepository.CreateAsync(user, cancellationToken);
+            }
         }
         catch (DuplicateEmailException)
         {

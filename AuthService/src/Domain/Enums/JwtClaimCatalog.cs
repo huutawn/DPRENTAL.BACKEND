@@ -32,13 +32,15 @@ public static class JwtClaimCatalog
         public const string AdminPlatform = "adp";
         public const string Owner = "own";
         public const string Member = "mem";
+        public const string Customer = "cus";
 
         private static readonly Dictionary<string, string> CanonicalToAlias = new(StringComparer.Ordinal)
         {
             [SystemRoleCode.Admin] = Admin,
             [SystemRoleCode.AdminPlatform] = AdminPlatform,
             [SystemRoleCode.Owner] = Owner,
-            [SystemRoleCode.Member] = Member
+            [SystemRoleCode.Member] = Member,
+            [SystemRoleCode.Customer] = Customer
         };
 
         private static readonly Dictionary<string, string> AliasToCanonical = new(StringComparer.Ordinal)
@@ -46,7 +48,8 @@ public static class JwtClaimCatalog
             [Admin] = SystemRoleCode.Admin,
             [AdminPlatform] = SystemRoleCode.AdminPlatform,
             [Owner] = SystemRoleCode.Owner,
-            [Member] = SystemRoleCode.Member
+            [Member] = SystemRoleCode.Member,
+            [Customer] = SystemRoleCode.Customer
         };
 
         public static string ToAlias(string canonicalRole) =>
