@@ -143,6 +143,13 @@ public sealed class PagingTests
             Task.FromResult(PagedResult.Create<Organization>([], request.Page, request.PageSize, 0));
         public Task<Organization> CreateAsync(Organization organization, OrganizationMembership initialMembership, CancellationToken cancellationToken = default) =>
             Task.FromResult(organization);
+
+        public Task<Organization> CreateAsync(
+            Organization organization,
+            OrganizationMembership initialMembership,
+            NavigationCatalog navigationCatalog,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(organization);
         public Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default) => Task.FromResult(true);
     }
 

@@ -30,4 +30,6 @@ public class Organization
     public DateTime CreatedAtUtc { get; set; }
 
     public ICollection<OrganizationMembership> Memberships { get; set; } = new List<OrganizationMembership>();
+
+    public ICollection<NavigationCatalog> NavigationCatalogs { get; set; } = new List<NavigationCatalog>();
 }

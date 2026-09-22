@@ -49,6 +49,16 @@ public sealed class OrganizationIntegrationTests
         OrganizationResponse? org = await createRes.Content.ReadFromJsonAsync<OrganizationResponse>();
         Assert.NotNull(org);
         Guid orgId = org.Id;
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            NavigationCatalog catalog = await db.NavigationCatalogs
+                .Include(item => item.Items)
+                .SingleAsync(item => item.OrganizationId == orgId);
+            NavigationItem clonedRoot = Assert.Single(catalog.Items);
+            Assert.Equal(OrganizationType.Supplier, catalog.DashboardType);
+            Assert.NotNull(clonedRoot.SourceTemplateItemId);
+        }
 
         // 2. User A invites User B
         AddOrganizationMemberRequest addReq = new(userBId, MemberRoleId);
@@ -400,6 +410,19 @@ public sealed class OrganizationIntegrationTests
 
         db.Permissions.AddRange(pCreate, pRead, pUpdate, pMemRead, pMemManage, pPlatform, pAssign, pRevoke);
         db.Roles.AddRange(adminRole, customerRole, ownerRole, memberRole);
+        NavigationCatalog platformTemplate = new() { Id = Guid.NewGuid(), DashboardType = OrganizationType.Platform, CreatedAtUtc = DateTime.UtcNow };
+        NavigationCatalog supplierTemplate = new() { Id = Guid.NewGuid(), DashboardType = OrganizationType.Supplier, CreatedAtUtc = DateTime.UtcNow };
+        supplierTemplate.Items.Add(new NavigationItem
+        {
+            Id = Guid.NewGuid(),
+            CatalogId = supplierTemplate.Id,
+            Key = "dashboard",
+            Label = "Dashboard",
+            Icon = "layout-dashboard",
+            Order = 10
+        });
+        NavigationCatalog renterTemplate = new() { Id = Guid.NewGuid(), DashboardType = OrganizationType.Renter, CreatedAtUtc = DateTime.UtcNow };
+        db.NavigationCatalogs.AddRange(platformTemplate, supplierTemplate, renterTemplate);
         await db.SaveChangesAsync();
     }
 

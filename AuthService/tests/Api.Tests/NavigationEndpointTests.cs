@@ -51,12 +51,8 @@ public sealed class NavigationEndpointTests
         Assert.Equal(["identity.users", "identity.roles"], ChildKeysInOrder(orgBDocument.RootElement));
         Assert.DoesNotContain(PermissionCode.IdentityMembersManage, Permissions(orgBDocument.RootElement));
 
-        using HttpResponseMessage globalResponse = await client.GetAsync("/api/v1/auth/navigation");
-        using JsonDocument globalDocument = JsonDocument.Parse(await globalResponse.Content.ReadAsStringAsync());
-
-        Assert.Equal(HttpStatusCode.OK, globalResponse.StatusCode);
-        Assert.Equal([PermissionCode.IdentityUsersRead], Permissions(globalDocument.RootElement));
-        Assert.Equal(["identity.users"], ChildKeysInOrder(globalDocument.RootElement));
+        using HttpResponseMessage missingOrganization = await client.GetAsync("/api/v1/auth/navigation");
+        Assert.Equal(HttpStatusCode.BadRequest, missingOrganization.StatusCode);
     }
 
     [Fact]
@@ -77,6 +73,24 @@ public sealed class NavigationEndpointTests
         Assert.Equal(HttpStatusCode.BadRequest, emptyOrganization.StatusCode);
     }
 
+    [Fact]
+    public async Task NavigationCatalogAdministrationRequiresNavigationManagePermission()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        NavigationFixture fixture = await SeedAsync(factory);
+        using HttpClient userClient = CreateAuthenticatedClient(factory, fixture.UserId);
+        using HttpClient managerClient = CreateAuthenticatedClient(factory, fixture.ManagerUserId, [PermissionCode.IdentityNavigationManage]);
+
+        using HttpResponseMessage denied = await userClient.GetAsync("/api/v1/auth/navigation/permissions");
+        using HttpResponseMessage allowed = await managerClient.GetAsync("/api/v1/auth/navigation/permissions");
+        using JsonDocument document = JsonDocument.Parse(await allowed.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+        Assert.Contains(document.RootElement.EnumerateArray(), permission =>
+            permission.GetProperty("code").GetString() == PermissionCode.IdentityUsersRead);
+    }
+
     private static string[] Permissions(JsonElement root) => root.GetProperty("permissions")
         .EnumerateArray()
         .Select(item => item.GetString())
@@ -90,11 +104,14 @@ public sealed class NavigationEndpointTests
         .OfType<string>()
         .ToArray();
 
-    private static HttpClient CreateAuthenticatedClient(WebApplicationFactory<Program> factory, Guid userId)
+    private static HttpClient CreateAuthenticatedClient(
+        WebApplicationFactory<Program> factory,
+        Guid userId,
+        IReadOnlyCollection<string>? permissions = null)
     {
         HttpClient client = factory.CreateClient();
         IAccessTokenIssuer issuer = factory.Services.GetRequiredService<IAccessTokenIssuer>();
-        IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(userId));
+        IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(userId, Permissions: permissions));
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Value);
         return client;
     }
@@ -129,27 +146,37 @@ public sealed class NavigationEndpointTests
 
     private static async Task<NavigationFixture> SeedAsync(WebApplicationFactory<Program> factory)
     {
-        NavigationFixture fixture = new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        NavigationFixture fixture = new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         using IServiceScope scope = factory.Services.CreateScope();
         AuthDbContext dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
 
         Permission usersRead = new() { Id = Guid.NewGuid(), Code = PermissionCode.IdentityUsersRead };
         Permission membersManage = new() { Id = Guid.NewGuid(), Code = PermissionCode.IdentityMembersManage };
         Permission rolesRead = new() { Id = Guid.NewGuid(), Code = PermissionCode.IdentityRolesRead };
+        Permission navigationManage = new() { Id = Guid.NewGuid(), Code = PermissionCode.IdentityNavigationManage };
         Role globalRole = RoleWithPermissions("global", RoleScope.Global, usersRead);
         Role organizationARole = RoleWithPermissions("org-a", RoleScope.Organization, membersManage);
         Role organizationBRole = RoleWithPermissions("org-b", RoleScope.Organization, rolesRead);
+        Role managerRole = RoleWithPermissions("navigation-manager", RoleScope.Global, navigationManage);
 
-        dbContext.Users.Add(new User { Id = fixture.UserId, Email = "navigation@example.com", FullName = "Navigation User", IsActive = true });
+        dbContext.Users.AddRange(
+            new User { Id = fixture.UserId, Email = "navigation@example.com", FullName = "Navigation User", IsActive = true },
+            new User { Id = fixture.ManagerUserId, Email = "navigation-manager@example.com", FullName = "Navigation Manager", IsActive = true });
         dbContext.Organizations.AddRange(
             new Organization { Id = fixture.OrganizationAId, Name = "Organization A", Slug = "navigation-org-a", IsActive = true },
             new Organization { Id = fixture.OrganizationBId, Name = "Organization B", Slug = "navigation-org-b", IsActive = true },
             new Organization { Id = fixture.UnrelatedOrganizationId, Name = "Other Organization", Slug = "navigation-org-other", IsActive = true });
-        dbContext.Roles.AddRange(globalRole, organizationARole, organizationBRole);
-        dbContext.UserRoles.Add(new UserRole { UserId = fixture.UserId, RoleId = globalRole.Id });
+        dbContext.Roles.AddRange(globalRole, organizationARole, organizationBRole, managerRole);
+        dbContext.UserRoles.AddRange(
+            new UserRole { UserId = fixture.UserId, RoleId = globalRole.Id },
+            new UserRole { UserId = fixture.ManagerUserId, RoleId = managerRole.Id });
         dbContext.OrganizationMemberships.AddRange(
             new OrganizationMembership { Id = Guid.NewGuid(), UserId = fixture.UserId, OrganizationId = fixture.OrganizationAId, RoleId = organizationARole.Id, Status = MembershipStatus.Active, JoinedAtUtc = DateTime.UtcNow },
             new OrganizationMembership { Id = Guid.NewGuid(), UserId = fixture.UserId, OrganizationId = fixture.OrganizationBId, RoleId = organizationBRole.Id, Status = MembershipStatus.Active, JoinedAtUtc = DateTime.UtcNow });
+
+        dbContext.NavigationCatalogs.AddRange(
+            CreateCatalog(fixture.OrganizationAId, usersRead, membersManage, "identity.members", "/organizations/{organizationId}/members"),
+            CreateCatalog(fixture.OrganizationBId, usersRead, rolesRead, "identity.roles", "/roles"));
 
         await dbContext.SaveChangesAsync();
         return fixture;
@@ -166,5 +193,58 @@ public sealed class NavigationEndpointTests
         return role;
     }
 
-    private sealed record NavigationFixture(Guid UserId, Guid OrganizationAId, Guid OrganizationBId, Guid UnrelatedOrganizationId);
+    private static NavigationCatalog CreateCatalog(
+        Guid organizationId,
+        Permission usersRead,
+        Permission scopedPermission,
+        string scopedKey,
+        string scopedHref)
+    {
+        NavigationCatalog catalog = new()
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organizationId,
+            DashboardType = OrganizationType.Platform,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+        NavigationItem identity = new()
+        {
+            Id = Guid.NewGuid(),
+            CatalogId = catalog.Id,
+            Key = "identity",
+            Label = "Identity",
+            Icon = "shield",
+            Order = 10
+        };
+        NavigationItem users = new()
+        {
+            Id = Guid.NewGuid(),
+            CatalogId = catalog.Id,
+            ParentId = identity.Id,
+            Key = "identity.users",
+            Label = "Users",
+            Href = "/users",
+            Icon = "users",
+            Order = 10
+        };
+        users.Permissions.Add(new NavigationItemPermission { NavigationItemId = users.Id, PermissionId = usersRead.Id, Permission = usersRead });
+        NavigationItem scoped = new()
+        {
+            Id = Guid.NewGuid(),
+            CatalogId = catalog.Id,
+            ParentId = identity.Id,
+            Key = scopedKey,
+            Label = scopedKey,
+            Href = scopedHref,
+            Icon = "users-round",
+            Order = 20
+        };
+        scoped.Permissions.Add(new NavigationItemPermission { NavigationItemId = scoped.Id, PermissionId = scopedPermission.Id, Permission = scopedPermission });
+        catalog.Items.Add(identity);
+        catalog.Items.Add(users);
+        catalog.Items.Add(scoped);
+        return catalog;
+    }
+
+    private sealed record NavigationFixture(Guid UserId, Guid OrganizationAId, Guid OrganizationBId, Guid UnrelatedOrganizationId, Guid ManagerUserId);
 }

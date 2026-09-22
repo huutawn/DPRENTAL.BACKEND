@@ -14,7 +14,8 @@ public sealed partial class OrganizationService(
     IOrganizationRepository organizationRepository,
     IOrganizationMembershipRepository membershipRepository,
     IUserRepository userRepository,
-    IRoleRepository roleRepository) : IOrganizationService
+    IRoleRepository roleRepository,
+    INavigationCatalogRepository? navigationCatalogRepository = null) : IOrganizationService
 {
     private static readonly Guid SeededOwnerRoleId = new("a1010000-0000-0000-0000-000000000001");
 
@@ -109,7 +110,14 @@ public sealed partial class OrganizationService(
 
         try
         {
-            Organization created = await organizationRepository.CreateAsync(organization, initialMembership, cancellationToken);
+            Result<NavigationCatalog> navigationCatalogResult = await CreateCatalogFromTemplateAsync(organization, cancellationToken);
+            if (navigationCatalogResult.IsFailure)
+            {
+                return Result.Failure<OrganizationResponse>(navigationCatalogResult.Error);
+            }
+
+            NavigationCatalog navigationCatalog = navigationCatalogResult.Value;
+            Organization created = await organizationRepository.CreateAsync(organization, initialMembership, navigationCatalog, cancellationToken);
             return new OrganizationResponse(
                 created.Id,
                 created.Name,
@@ -122,6 +130,55 @@ public sealed partial class OrganizationService(
         {
             return Result.Failure<OrganizationResponse>(AuthErrors.Organization.SlugAlreadyExists);
         }
+    }
+
+    private async Task<Result<NavigationCatalog>> CreateCatalogFromTemplateAsync(Organization organization, CancellationToken cancellationToken)
+    {
+        if (navigationCatalogRepository is null)
+        {
+            return Result.Failure<NavigationCatalog>(AuthErrors.Navigation.CatalogNotFound);
+        }
+
+        NavigationCatalog? template = await navigationCatalogRepository.GetTemplateAsync(organization.Type, cancellationToken);
+        if (template is null)
+        {
+            return Result.Failure<NavigationCatalog>(AuthErrors.Navigation.CatalogNotFound);
+        }
+
+        NavigationCatalog catalog = new()
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organization.Id,
+            DashboardType = organization.Type,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+        Dictionary<Guid, NavigationItem> copies = [];
+        foreach (NavigationItem source in template.Items)
+        {
+            NavigationItem copy = new()
+            {
+                Id = Guid.NewGuid(),
+                CatalogId = catalog.Id,
+                SourceTemplateItemId = source.Id,
+                Key = source.Key,
+                Label = source.Label,
+                Href = source.Href,
+                Icon = source.Icon,
+                Order = source.Order,
+                IsActive = source.IsActive
+            };
+            foreach (NavigationItemPermission permission in source.Permissions)
+            {
+                copy.Permissions.Add(new NavigationItemPermission { NavigationItemId = copy.Id, PermissionId = permission.PermissionId });
+            }
+            copies[source.Id] = copy;
+            catalog.Items.Add(copy);
+        }
+        foreach (NavigationItem source in template.Items.Where(item => item.ParentId is not null))
+        {
+            copies[source.Id].ParentId = copies[source.ParentId!.Value].Id;
+        }
+        return catalog;
     }
 
     public async Task<Result<OrganizationResponse>> GetByIdAsync(

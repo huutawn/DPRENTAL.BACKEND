@@ -32,13 +32,13 @@ public sealed class NavigationServiceTests
         Result<Domain.DTOs.Navigation.NavigationResponse> orgA = await service.GetNavigationAsync(userId, organizationAId);
         Result<Domain.DTOs.Navigation.NavigationResponse> orgB = await service.GetNavigationAsync(userId, organizationBId);
 
-        Assert.True(orgA.IsSuccess);
+        Assert.True(orgA.IsSuccess, orgA.Error.Code);
         Assert.Equal(
             [PermissionCode.IdentityMembersManage, PermissionCode.IdentityUsersRead],
             orgA.Value.Permissions);
         Assert.Equal(["identity.members", "identity.users"], ChildKeys(orgA.Value));
 
-        Assert.True(orgB.IsSuccess);
+        Assert.True(orgB.IsSuccess, orgB.Error.Code);
         Assert.Equal(
             [PermissionCode.IdentityRolesRead, PermissionCode.IdentityUsersRead],
             orgB.Value.Permissions);
@@ -71,7 +71,7 @@ public sealed class NavigationServiceTests
     }
 
     [Fact]
-    public async Task GlobalNavigationDoesNotIncludeScopedPermissions()
+    public async Task NavigationWithoutOrganizationIsRejected()
     {
         await using AuthDbContext dbContext = CreateDbContext();
         Guid userId = Guid.NewGuid();
@@ -87,10 +87,8 @@ public sealed class NavigationServiceTests
         NavigationService service = CreateService(dbContext);
         Result<Domain.DTOs.Navigation.NavigationResponse> result = await service.GetNavigationAsync(userId, null);
 
-        Assert.True(result.IsSuccess);
-        Assert.Null(result.Value.OrganizationId);
-        Assert.Equal([PermissionCode.IdentityUsersRead], result.Value.Permissions);
-        Assert.Equal(["identity.users"], ChildKeys(result.Value));
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Navigation.InvalidOrganizationContext, result.Error);
     }
 
     [Fact]
@@ -139,7 +137,8 @@ public sealed class NavigationServiceTests
     private static NavigationService CreateService(AuthDbContext dbContext) => new(
         new EfUserRepository(dbContext),
         new EfOrganizationRepository(dbContext),
-        new EfOrganizationMembershipRepository(dbContext));
+        new EfOrganizationMembershipRepository(dbContext),
+        new EfNavigationCatalogRepository(dbContext));
 
     private static async Task SeedUserWithPermissionsAsync(
         AuthDbContext dbContext,
@@ -166,6 +165,14 @@ public sealed class NavigationServiceTests
             new OrganizationMembership { Id = Guid.NewGuid(), UserId = userId, OrganizationId = organizationBId, RoleId = orgBRole.Id, Status = MembershipStatus.Active, JoinedAtUtc = DateTime.UtcNow });
 
         await dbContext.SaveChangesAsync();
+
+        Permission usersRead = await GetOrCreatePermissionAsync(dbContext, PermissionCode.IdentityUsersRead);
+        Permission membersManage = await GetOrCreatePermissionAsync(dbContext, PermissionCode.IdentityMembersManage);
+        Permission rolesRead = await GetOrCreatePermissionAsync(dbContext, PermissionCode.IdentityRolesRead);
+        dbContext.NavigationCatalogs.AddRange(
+            CreateCatalog(organizationAId, usersRead, membersManage, "identity.members", "/organizations/{organizationId}/members"),
+            CreateCatalog(organizationBId, usersRead, rolesRead, "identity.roles", "/roles"));
+        await dbContext.SaveChangesAsync();
     }
 
     private static Role CreateRole(string name, RoleScope scope, IReadOnlyCollection<string> permissions)
@@ -178,5 +185,71 @@ public sealed class NavigationServiceTests
         }
 
         return role;
+    }
+
+    private static async Task<Permission> GetOrCreatePermissionAsync(AuthDbContext dbContext, string code)
+    {
+        Permission? permission = await dbContext.Permissions.SingleOrDefaultAsync(item => item.Code == code);
+        if (permission is not null)
+        {
+            return permission;
+        }
+
+        permission = new Permission { Id = Guid.NewGuid(), Code = code };
+        dbContext.Permissions.Add(permission);
+        return permission;
+    }
+
+    private static NavigationCatalog CreateCatalog(
+        Guid organizationId,
+        Permission usersRead,
+        Permission scopedPermission,
+        string scopedKey,
+        string scopedHref)
+    {
+        NavigationCatalog catalog = new()
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organizationId,
+            DashboardType = OrganizationType.Platform,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+        NavigationItem identity = new()
+        {
+            Id = Guid.NewGuid(),
+            CatalogId = catalog.Id,
+            Key = "identity",
+            Label = "Identity",
+            Icon = "shield",
+            Order = 10
+        };
+        NavigationItem users = new()
+        {
+            Id = Guid.NewGuid(),
+            CatalogId = catalog.Id,
+            ParentId = identity.Id,
+            Key = "identity.users",
+            Label = "Users",
+            Href = "/users",
+            Icon = "users",
+            Order = 10
+        };
+        users.Permissions.Add(new NavigationItemPermission { NavigationItemId = users.Id, PermissionId = usersRead.Id, Permission = usersRead });
+        NavigationItem scoped = new()
+        {
+            Id = Guid.NewGuid(),
+            CatalogId = catalog.Id,
+            ParentId = identity.Id,
+            Key = scopedKey,
+            Label = scopedKey,
+            Href = scopedHref,
+            Icon = "shield-check",
+            Order = 20
+        };
+        scoped.Permissions.Add(new NavigationItemPermission { NavigationItemId = scoped.Id, PermissionId = scopedPermission.Id, Permission = scopedPermission });
+        catalog.Items.Add(identity);
+        catalog.Items.Add(users);
+        catalog.Items.Add(scoped);
+        return catalog;
     }
 }

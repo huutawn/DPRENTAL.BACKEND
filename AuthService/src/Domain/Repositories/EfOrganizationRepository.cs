@@ -67,6 +67,13 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
         Organization organization,
         OrganizationMembership initialMembership,
         CancellationToken cancellationToken = default)
+        => await CreateAsync(organization, initialMembership, null, cancellationToken);
+
+    public async Task<Organization> CreateAsync(
+        Organization organization,
+        OrganizationMembership initialMembership,
+        NavigationCatalog? navigationCatalog,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(organization);
         ArgumentNullException.ThrowIfNull(initialMembership);
@@ -78,6 +85,10 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
 
         dbContext.Organizations.Add(organization);
         dbContext.OrganizationMemberships.Add(initialMembership);
+        if (navigationCatalog is not null)
+        {
+            dbContext.NavigationCatalogs.Add(navigationCatalog);
+        }
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -87,6 +98,10 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
         {
             dbContext.Entry(organization).State = EntityState.Detached;
             dbContext.Entry(initialMembership).State = EntityState.Detached;
+            if (navigationCatalog is not null)
+            {
+                dbContext.Entry(navigationCatalog).State = EntityState.Detached;
+            }
             throw new DuplicateSlugException("Slug của organization đã tồn tại.", exception);
         }
     }

@@ -25,6 +25,8 @@ public static class PermissionCode
     public const string IdentityServicePrincipalsRotateSecret = "identity.service-principals.rotate-secret";
     public const string IdentityServicePrincipalsManageScopes = "identity.service-principals.manage-scopes";
 
+    public const string IdentityNavigationManage = "identity.navigation.manage";
+
     public static readonly IReadOnlyCollection<string> All =
     [
         IdentityUsersRead,
@@ -43,6 +45,7 @@ public static class PermissionCode
         IdentityServicePrincipalsRead,
         IdentityServicePrincipalsManage,
         IdentityServicePrincipalsRotateSecret,
-        IdentityServicePrincipalsManageScopes
+        IdentityServicePrincipalsManageScopes,
+        IdentityNavigationManage
     ];
 }
