@@ -50,6 +50,14 @@ public static class AuthErrorCode
     public static class Navigation
     {
         public const string InvalidOrganizationContext = "Navigation.InvalidOrganizationContext";
+        public const string CatalogNotFound = "Navigation.CatalogNotFound";
+        public const string InvalidDashboardType = "Navigation.InvalidDashboardType";
+        public const string InvalidItem = "Navigation.InvalidItem";
+        public const string DuplicateKey = "Navigation.DuplicateKey";
+        public const string ParentHasChildren = "Navigation.ParentHasChildren";
+        public const string InvalidPermissionBinding = "Navigation.InvalidPermissionBinding";
+        public const string LastPermission = "Navigation.LastPermission";
+        public const string ManageDenied = "Navigation.ManageDenied";
     }
 
     public static class ServicePrincipal
