@@ -39,6 +39,26 @@ public sealed class UserServiceTests
         Assert.Equal(now.UtcDateTime, created.CreatedAt);
         Assert.NotEqual("Matkhau123!", created.PasswordHash);
         Assert.Equal(PasswordVerificationResult.Success, hasher.VerifyHashedPassword(created, created.PasswordHash, "Matkhau123!"));
+        Assert.Empty(repository.CreatedWithRole);
+    }
+
+    [Fact]
+    public async Task RegisterAsyncAssignsCustomerRoleWhenSeeded()
+    {
+        RecordingUserRepository repository = new();
+        FakeRoleRepository roleRepo = new();
+        Guid customerRoleId = Guid.NewGuid();
+        roleRepo.Roles[SystemRoleCode.Customer] = new Role { Id = customerRoleId, Name = SystemRoleCode.Customer, Scope = RoleScope.Global };
+        UserService service = CreateService(repository, roleRepository: roleRepo);
+
+        Result<AccountCreatedResponse> result = await service.RegisterAsync(
+            new RegisterRequest("new.user@example.com", "Matkhau123!", "New User"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(repository.CreatedUsers);
+        var (assignedUser, assignedRoleId) = Assert.Single(repository.CreatedWithRole);
+        Assert.Equal(result.Value.AccountId, assignedUser.Id);
+        Assert.Equal(customerRoleId, assignedRoleId);
     }
 
     [Fact]
