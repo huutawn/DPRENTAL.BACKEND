@@ -17,7 +17,7 @@ namespace Dprental.AuthService.Api.Controllers;
 public sealed class RolesController(IRoleAssignmentService roleAssignmentService) : ControllerBase
 {
     [HttpPost("assign")]
-    [Authorize(Policy = Permissions.Roles.Assign)]
+    [Authorize(Policy = Permissions.Roles.AssignAny)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
