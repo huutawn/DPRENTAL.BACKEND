@@ -15,7 +15,8 @@ internal static class JwksEndpointRouteBuilderExtensions
                 return Results.Json(keyRing.CreateJwks());
             })
             .AllowAnonymous()
-            .WithName("GetJwtJsonWebKeySet");
+            .WithName("GetJwtJsonWebKeySet")
+            .WithSummary("Công bố JSON Web Key Set để consumer xác thực access token RS256.");
 
         return endpoints;
     }
