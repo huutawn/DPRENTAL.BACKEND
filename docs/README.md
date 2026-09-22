@@ -165,6 +165,45 @@ Auth__AdminBootstrap__CreationKey
 
 JWT được kiểm tra ngay khi service khởi động: issuer, audience, lifetime 1–60 phút, active key, `kid` duy nhất, PEM hợp lệ, RSA ít nhất 2048-bit và private/public key của active entry phải khớp. Access token mặc định hết hạn sau 15 phút.
 
+## Navigation theo RBAC
+
+`GET /api/v1/auth/navigation` yêu cầu access token của user đã xác thực, nhưng không yêu cầu permission riêng như `identity.navigation.read`. Response luôn có `permissions` là các mã canonical `identity.*` hiệu lực và `items` là navigation tree đã lọc; permission ngoài namespace `identity.*` không được trả về. Response mang `Cache-Control: no-store`.
+
+Không truyền `organizationId` thì endpoint chỉ resolve permission global. Khi truyền `organizationId`, user phải là thành viên `Active` của organization `Active`; endpoint cộng permission global với role scoped của **đúng** organization đó. User không phải active member, membership bị đình chỉ/chưa chấp nhận, hoặc organization inactive nhận `403`, kể cả khi có global permission. Điều này chặn quyền của Organization A xuất hiện khi client chọn Organization B.
+
+```http
+GET /api/v1/auth/navigation?organizationId=<organization-guid>
+Authorization: Bearer <access-token>
+```
+
+```json
+{
+  "organizationId": "<organization-guid>",
+  "permissions": ["identity.organizations.read"],
+  "items": [
+    {
+      "key": "identity",
+      "label": "Identity",
+      "href": null,
+      "icon": "shield",
+      "order": 10,
+      "children": [
+        {
+          "key": "identity.organizations",
+          "label": "Organizations",
+          "href": "/organizations",
+          "icon": "building-2",
+          "order": 20,
+          "children": []
+        }
+      ]
+    }
+  ]
+}
+```
+
+Catalog v1 có parent `identity` và các child `identity.users`, `identity.organizations`, `identity.members`, `identity.roles`, `identity.service-principals`. Parent chỉ xuất hiện khi còn ít nhất một child visible. `href` là frontend route template; `identity.members` dùng `/organizations/{organizationId}/members`, client thay placeholder theo context hiện tại.
+
 ## Refresh token và session
 
 Refresh token là chuỗi ngẫu nhiên chỉ dùng một lần; database chỉ lưu SHA-256 hash, không lưu giá trị token thô. Session có hạn tuyệt đối 30 ngày. Mỗi lần `POST /api/v1/auth/refresh` thành công sẽ thu hồi token vừa dùng và trả một cặp token mới. Gửi lại token cũ sẽ thu hồi toàn bộ session và nhận `401` chung.

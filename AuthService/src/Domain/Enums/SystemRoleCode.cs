@@ -8,11 +8,15 @@ public static class SystemRoleCode
     public const string Owner = "Owner";
     public const string Member = "Member";
 
+    /// <summary>Role toàn cục gán mặc định cho mọi user đăng ký qua /register — không mang permission nào.</summary>
+    public const string Customer = "customer";
+
     public static readonly IReadOnlyCollection<string> All =
     [
         Admin,
         AdminPlatform,
         Owner,
-        Member
+        Member,
+        Customer
     ];
 }
