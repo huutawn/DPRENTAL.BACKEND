@@ -279,6 +279,36 @@ public sealed class RsaJwtAuthTests
     }
 
     [Fact]
+    public async Task SwaggerDocumentIncludesSummariesForEveryApiOperationAndController()
+    {
+        JwtOptions options = CreateValidOptions();
+        using WebApplicationFactory<Program> factory = new();
+        using WebApplicationFactory<Program> configuredFactory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
+            builder.ConfigureAppConfiguration((_, configurationBuilder) => configurationBuilder.AddConfiguration(CreateConfiguration(options)));
+        });
+        using HttpClient client = configuredFactory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/swagger/v1/swagger.json");
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement paths = document.RootElement.GetProperty("paths");
+        JsonElement tags = document.RootElement.GetProperty("tags");
+
+        Assert.True(response.IsSuccessStatusCode);
+        Assert.All(
+            paths.EnumerateObject()
+                .SelectMany(path => path.Value.EnumerateObject())
+                .Where(operation => operation.Name is "get" or "post" or "patch" or "delete"),
+            operation => Assert.False(string.IsNullOrWhiteSpace(operation.Value.GetProperty("summary").GetString())));
+        foreach (string controllerTag in new[] { "Auth", "Organizations", "Roles", "Users" })
+        {
+            JsonElement tag = tags.EnumerateArray().Single(tag => tag.GetProperty("name").GetString() == controllerTag);
+            Assert.False(string.IsNullOrWhiteSpace(tag.GetProperty("description").GetString()));
+        }
+    }
+
+    [Fact]
     public async Task JwksEndpointContinuesInboundW3CTrace()
     {
         JwtOptions options = CreateValidOptions();

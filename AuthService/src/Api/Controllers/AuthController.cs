@@ -15,6 +15,7 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.AuthService.Api.Controllers;
 
+/// <summary>Đăng ký, xác thực và quản lý phiên đăng nhập của người dùng hoặc service.</summary>
 [ApiController]
 [Route("")]
 [Produces("application/json")]
@@ -27,6 +28,7 @@ public sealed class AuthController(
     IOptions<GoogleAuthOptions> googleOptions,
     IWebHostEnvironment environment) : ControllerBase
 {
+    /// <summary>Tạo tài khoản người dùng mới.</summary>
     [HttpPost("register")]
     [ProducesResponseType<AccountCreatedResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -41,6 +43,8 @@ public sealed class AuthController(
 
         return StatusCode(StatusCodes.Status201Created, result.Value);
     }
+
+    /// <summary>Tạo tài khoản quản trị bằng khóa khởi tạo bảo mật.</summary>
     [HttpPost("admins")]
     [ProducesResponseType<AccountCreatedResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -62,6 +66,7 @@ public sealed class AuthController(
     }
 
 
+    /// <summary>Đăng nhập bằng email và mật khẩu, rồi thiết lập cookie phiên.</summary>
     [HttpPost("login")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -84,6 +89,7 @@ public sealed class AuthController(
         return Ok(new { Message = "Đăng nhập thành công.", UserId = userId });
     }
 
+    /// <summary>Làm mới phiên đăng nhập bằng refresh token trong cookie.</summary>
     [HttpPost("refresh")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -106,6 +112,7 @@ public sealed class AuthController(
         return Ok(new { Message = "Làm mới token thành công" });
     }
 
+    /// <summary>Đăng xuất, thu hồi refresh token hiện tại và xóa cookie phiên.</summary>
     [HttpPost("logout")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> Logout(CancellationToken cancellationToken)
@@ -123,7 +130,7 @@ public sealed class AuthController(
         return NoContent();
     }
 
-    /// <summary>OAuth2 client_credentials — service khác tự xin token bằng client_id/client_secret, không có user.</summary>
+    /// <summary>Cấp access token OAuth2 client_credentials cho service, không đại diện người dùng.</summary>
     [HttpPost("service-token")]
     [ProducesResponseType<ServiceTokenResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -135,7 +142,7 @@ public sealed class AuthController(
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
-    /// <summary>Next BFF đổi ticket Google ngắn hạn, một lần dùng lấy cặp token để tự set cookie FE-domain.</summary>
+    /// <summary>Đổi ticket Google dùng một lần thành cặp access và refresh token cho Next BFF.</summary>
     [HttpPost("google/exchange")]
     [ProducesResponseType<AuthTokenResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -170,7 +177,7 @@ public sealed class AuthController(
         return Ok(new AuthTokenResponse(tokens.AccessToken, tokens.RefreshToken));
     }
 
-    /// <summary>Bắt đầu đăng nhập Google: kiểm tra returnUrl rồi chuyển trình duyệt sang trang đăng nhập của Google.</summary>
+    /// <summary>Bắt đầu đăng nhập Google sau khi kiểm tra return URL an toàn.</summary>
     [HttpGet("google/login")]
     [ProducesResponseType(StatusCodes.Status302Found)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -202,7 +209,7 @@ public sealed class AuthController(
         return Challenge(properties, GoogleDefaults.AuthenticationScheme);
     }
 
-    /// <summary>Nhận danh tính Google, tìm/liên kết/tạo user, tạo phiên đăng nhập rồi chuyển về frontend.</summary>
+    /// <summary>Xử lý callback Google, liên kết danh tính và chuyển ticket đăng nhập về frontend.</summary>
     [HttpGet("google/callback")]
     [ProducesResponseType(StatusCodes.Status302Found)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -283,6 +290,7 @@ public sealed class AuthController(
         Response.Headers["Referrer-Policy"] = "no-referrer";
         return Redirect(destination);
     }
+    /// <summary>Yêu cầu đặt lại mật khẩu mà không tiết lộ email có tồn tại hay không.</summary>
     [HttpPost("forgot-password")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -299,6 +307,7 @@ public sealed class AuthController(
         return Ok(new { Message = "Yêu cầu khôi phục mật khẩu đã được xử lý." });
     }
 
+    /// <summary>Đặt lại mật khẩu bằng token hợp lệ và thu hồi toàn bộ phiên cũ.</summary>
     [HttpPost("reset-password")]
     public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request, CancellationToken cancellationToken)
     {
@@ -307,6 +316,7 @@ public sealed class AuthController(
         return Ok(new { Message = "Đã đặt lại mật khẩu và hủy toàn bộ phiên cũ." });
     }
 
+    /// <summary>Thu hồi toàn bộ phiên đăng nhập của người dùng hiện tại.</summary>
     [Authorize]
     [HttpPost("revoke-all")]
     public async Task<IActionResult> RevokeAllSessions(CancellationToken cancellationToken)

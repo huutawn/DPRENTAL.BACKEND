@@ -8,13 +8,14 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Dprental.AuthService.Api.Controllers;
 
-/// <summary>Thông tin của chính người dùng đang đăng nhập.</summary>
+/// <summary>Cung cấp hồ sơ, quyền và organization của người dùng đang đăng nhập.</summary>
 [ApiController]
 [Route("users")]
 [Produces("application/json")]
 [Authorize]
 public sealed class UsersController(IUserService userService) : ControllerBase
 {
+    /// <summary>Lấy hồ sơ, role, permission và organization đang hoạt động của người dùng hiện tại.</summary>
     [HttpGet("me")]
     [ProducesResponseType<CurrentUserResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
