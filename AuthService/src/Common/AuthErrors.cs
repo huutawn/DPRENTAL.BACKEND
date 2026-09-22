@@ -112,6 +112,12 @@ public static class AuthErrors
         public static readonly Error UserNotFound = NotFound;
     }
 
+    public static class Navigation
+    {
+        public static readonly Error InvalidOrganizationContext =
+            Error.Validation(AuthErrorCode.Navigation.InvalidOrganizationContext, "Organization context không hợp lệ.");
+    }
+
     public static class ServicePrincipal
     {
         public static readonly Error InvalidClient =
