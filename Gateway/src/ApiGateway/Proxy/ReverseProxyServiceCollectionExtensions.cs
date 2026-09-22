@@ -10,7 +10,8 @@ internal static class ReverseProxyServiceCollectionExtensions
     {
         services.AddReverseProxy()
             .LoadFromConfig(configuration.GetRequiredSection("ReverseProxy"))
-            .AddTransforms<TrustedIdentityTransformProvider>();
+            .AddTransforms<TrustedIdentityTransformProvider>()
+            .AddTransforms<GatewayCorsResponseTransformProvider>();
 
         return services;
     }

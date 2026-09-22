@@ -82,8 +82,13 @@ public sealed class GatewayCorsMiddleware
             return;
         }
 
-        // 4. Áp dụng các header CORS cho request thực tế
-        ApplyActualRequestHeaders(context.Response, requestOrigin, corsOptions);
+        // 4. YARP sẽ sao chép response headers từ downstream. Chờ đến lúc response bắt đầu
+        // để Gateway có thể thay thế mọi header CORS downstream bằng policy authoritative này.
+        context.Response.OnStarting(() =>
+        {
+            ApplyActualRequestHeaders(context.Response, requestOrigin, corsOptions);
+            return Task.CompletedTask;
+        });
 
         await next(context);
     }
@@ -116,8 +121,8 @@ public sealed class GatewayCorsMiddleware
     private static void ApplyPreflightHeaders(HttpResponse response, string origin, GatewayCorsOptions corsOptions)
     {
         response.Headers[HeaderNames.AccessControlAllowOrigin] = origin;
-        response.Headers[HeaderNames.AccessControlAllowMethods] = string.Join(", ", corsOptions.AllowedMethods);
-        response.Headers[HeaderNames.AccessControlAllowHeaders] = string.Join(", ", corsOptions.AllowedHeaders);
+        response.Headers[HeaderNames.AccessControlAllowMethods] = JoinHeaderValues(corsOptions.AllowedMethods);
+        response.Headers[HeaderNames.AccessControlAllowHeaders] = JoinHeaderValues(corsOptions.AllowedHeaders);
 
         if (corsOptions.AllowCredentials && !string.Equals(origin, "*", StringComparison.Ordinal))
         {
@@ -129,11 +134,13 @@ public sealed class GatewayCorsMiddleware
             response.Headers[HeaderNames.AccessControlMaxAge] = corsOptions.PreflightMaxAgeSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        response.Headers[HeaderNames.Vary] = HeaderNames.Origin;
+        EnsureVaryIncludesOrigin(response);
     }
 
     private static void ApplyActualRequestHeaders(HttpResponse response, string origin, GatewayCorsOptions corsOptions)
     {
+        GatewayCorsResponseHeaders.Remove(response.Headers);
+
         response.Headers[HeaderNames.AccessControlAllowOrigin] = origin;
 
         if (corsOptions.AllowCredentials && !string.Equals(origin, "*", StringComparison.Ordinal))
@@ -143,9 +150,55 @@ public sealed class GatewayCorsMiddleware
 
         if (corsOptions.ExposedHeaders.Length > 0)
         {
-            response.Headers[HeaderNames.AccessControlExposeHeaders] = string.Join(", ", corsOptions.ExposedHeaders);
+            response.Headers[HeaderNames.AccessControlExposeHeaders] = JoinHeaderValues(corsOptions.ExposedHeaders);
         }
 
-        response.Headers[HeaderNames.Vary] = HeaderNames.Origin;
+        EnsureVaryIncludesOrigin(response);
+    }
+
+    private static void EnsureVaryIncludesOrigin(HttpResponse response)
+    {
+        if (!response.Headers.TryGetValue(HeaderNames.Vary, out var values))
+        {
+            response.Headers[HeaderNames.Vary] = HeaderNames.Origin;
+            return;
+        }
+
+        string[] varyValues = values
+            .SelectMany(value => value?.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries) ?? [])
+            .ToArray();
+
+        if (varyValues.Any(value => string.Equals(value, "*", StringComparison.Ordinal) || string.Equals(value, HeaderNames.Origin, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        response.Headers[HeaderNames.Vary] = string.Join(", ", varyValues.Append(HeaderNames.Origin));
+    }
+
+    private static string JoinHeaderValues(IEnumerable<string> values) => string.Join(", ", values
+        .Where(value => !string.IsNullOrWhiteSpace(value))
+        .Distinct(StringComparer.OrdinalIgnoreCase));
+}
+
+/// <summary>Loại bỏ các CORS response headers do downstream phát để Gateway là nơi duy nhất xác lập policy CORS.</summary>
+internal static class GatewayCorsResponseHeaders
+{
+    private static readonly string[] Names =
+    [
+        HeaderNames.AccessControlAllowOrigin,
+        HeaderNames.AccessControlAllowCredentials,
+        HeaderNames.AccessControlAllowHeaders,
+        HeaderNames.AccessControlAllowMethods,
+        HeaderNames.AccessControlExposeHeaders,
+        HeaderNames.AccessControlMaxAge
+    ];
+
+    internal static void Remove(IHeaderDictionary headers)
+    {
+        foreach (string header in Names)
+        {
+            headers.Remove(header);
+        }
     }
 }

@@ -114,6 +114,40 @@ public sealed class GatewaySecurityIntegrationTests
     }
 
     [Fact]
+    public async Task GatewayCorsPolicyReplacesCorsHeadersFromUpstream()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
+        upstream.ResponseHeaders["Access-Control-Allow-Origin"] = "http://localhost:3000";
+        upstream.ResponseHeaders["Access-Control-Allow-Credentials"] = "false";
+        upstream.ResponseHeaders["Access-Control-Allow-Methods"] = "GET";
+        upstream.ResponseHeaders["Access-Control-Expose-Headers"] = "X-Upstream-Only";
+        upstream.ResponseHeaders["Vary"] = "Accept-Encoding";
+
+        using WebApplicationFactory<Program> factory = CreateFactory(
+            upstream.BaseAddress,
+            allowedOrigins: [WhitelistedOrigin]);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Post, "/api/v1/auth/sessions")
+        {
+            Content = new StringContent("{\"email\":\"user@example.test\"}", Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("Origin", WhitelistedOrigin);
+
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(WhitelistedOrigin, response.Headers.GetValues("Access-Control-Allow-Origin").Single());
+        Assert.Equal("true", response.Headers.GetValues("Access-Control-Allow-Credentials").Single());
+        Assert.False(response.Headers.Contains("Access-Control-Allow-Methods"));
+        Assert.Equal("X-Correlation-ID", response.Headers.GetValues("Access-Control-Expose-Headers").Single());
+        string vary = string.Join(",", response.Headers.GetValues("Vary"));
+        Assert.Contains("Accept-Encoding", vary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Origin", vary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task PreflightOptionsAllowedOriginReturns204WithPreflightHeaders()
     {
         // Kịch bản Preflight CORS: OPTIONS request với Origin hợp lệ trả về 204 No Content cùng các header quy định.
@@ -566,6 +600,8 @@ public sealed class GatewaySecurityIntegrationTests
 
         internal string? CookieToSet { get; set; }
 
+        internal Dictionary<string, string> ResponseHeaders { get; } = new(StringComparer.OrdinalIgnoreCase);
+
         internal CapturedRequest LastRequest { get; private set; } = new();
 
         public async ValueTask DisposeAsync()
@@ -630,6 +666,11 @@ public sealed class GatewaySecurityIntegrationTests
             if (!string.IsNullOrWhiteSpace(CookieToSet))
             {
                 context.Response.Headers.Add("Set-Cookie", CookieToSet);
+            }
+
+            foreach ((string name, string value) in ResponseHeaders)
+            {
+                context.Response.Headers.Add(name, value);
             }
 
             await WriteResponseAsync(context.Response, "{\"success\":true}", "application/json");
