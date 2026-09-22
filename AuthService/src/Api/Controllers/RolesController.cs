@@ -1,4 +1,5 @@
 using Dprental.AuthService.Api.Filters;
+using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Common;
@@ -16,7 +17,7 @@ namespace Dprental.AuthService.Api.Controllers;
 public sealed class RolesController(IRoleAssignmentService roleAssignmentService) : ControllerBase
 {
     [HttpPost("assign")]
-    [Authorize(Policy = Permissions.Roles.Assign)]
+    [Authorize(Policy = Permissions.Roles.AssignAny)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
@@ -24,7 +25,12 @@ public sealed class RolesController(IRoleAssignmentService roleAssignmentService
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Assign(AssignRoleRequest request, CancellationToken cancellationToken)
     {
-        Result result = await roleAssignmentService.AssignAsync(CurrentUserId(), request, cancellationToken);
+        if (User.GetJwtSub() is not Guid actorUserId)
+        {
+            return Unauthorized();
+        }
+
+        Result result = await roleAssignmentService.AssignAsync(actorUserId, request, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
 
@@ -36,13 +42,12 @@ public sealed class RolesController(IRoleAssignmentService roleAssignmentService
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Revoke(AssignRoleRequest request, CancellationToken cancellationToken)
     {
-        Result result = await roleAssignmentService.RevokeAsync(CurrentUserId(), request, cancellationToken);
+        if (User.GetJwtSub() is not Guid actorUserId)
+        {
+            return Unauthorized();
+        }
+
+        Result result = await roleAssignmentService.RevokeAsync(actorUserId, request, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
-
-    /// <summary>
-    /// Id của user đang gọi endpoint. <c>NameClaimType</c> được cấu hình là claim <c>sub</c>
-    /// (xem <c>JwtBearerServiceCollectionExtensions</c>), nên <see cref="ControllerBase.User"/>.Identity.Name chính là nó.
-    /// </summary>
-    private Guid CurrentUserId() => Guid.Parse(User.Identity!.Name!);
 }

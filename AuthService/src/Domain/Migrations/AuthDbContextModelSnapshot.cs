@@ -51,6 +51,10 @@ namespace Dprental.AuthService.Domain.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ActorId");
+
+                    b.HasIndex("Timestamp");
+
                     b.ToTable("AuditLogs");
                 });
 
@@ -554,7 +558,7 @@ namespace Dprental.AuthService.Domain.Migrations
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.RecoveryToken", b =>
                 {
                     b.HasOne("Dprental.AuthService.Domain.Entities.User", "User")
-                        .WithMany("RecoveryTokens")
+                        .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -675,8 +679,6 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Navigation("GoogleLoginTickets");
 
                     b.Navigation("OrganizationMemberships");
-
-                    b.Navigation("RecoveryTokens");
 
                     b.Navigation("Sessions");
 

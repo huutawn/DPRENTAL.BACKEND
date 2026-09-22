@@ -1,4 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
+using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Domain.Enums;
 using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Domain.Utils;
@@ -28,6 +29,14 @@ internal static class JwtBearerServiceCollectionExtensions
                 string alias = JwtClaimCatalog.PermissionAliases.ToAlias(permission);
                 options.AddPolicy(permission, policy => policy.RequireClaim(PermissionClaimType, alias));
             }
+
+            // Policy gộp cho RolesController.Assign: chấp nhận claim "p" mang alias assign.global
+            // HOẶC assign.organization — quyền chính xác theo từng organization được service tự
+            // truy vấn DB, policy này chỉ chặn sớm token không mang permission assign nào cả.
+            options.AddPolicy(Permissions.Roles.AssignAny, policy => policy.RequireClaim(
+                PermissionClaimType,
+                JwtClaimCatalog.PermissionAliases.ToAlias(PermissionCode.IdentityRolesAssignGlobal),
+                JwtClaimCatalog.PermissionAliases.ToAlias(PermissionCode.IdentityRolesAssignOrganization)));
         });
 
         services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
