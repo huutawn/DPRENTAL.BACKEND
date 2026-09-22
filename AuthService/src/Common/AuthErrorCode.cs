@@ -37,6 +37,8 @@ public static class AuthErrorCode
         public const string NotAssigned = "Role.NotAssigned";
         public const string AssignmentFailed = "Role.AssignmentFailed";
         public const string InvalidScope = "Role.InvalidScope";
+        public const string OrganizationRequired = "Role.OrganizationRequired";
+        public const string OrganizationRevokeNotSupported = "Role.OrganizationRevokeNotSupported";
     }
 
     public static class User

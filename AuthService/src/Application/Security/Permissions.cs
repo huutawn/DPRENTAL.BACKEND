@@ -15,6 +15,15 @@ public static class Permissions
         public const string AssignOrganization = PermissionCode.IdentityRolesAssignOrganization;
         public const string RevokeOrganization = PermissionCode.IdentityRolesRevokeOrganization;
         public const string Read = PermissionCode.IdentityRolesRead;
+
+        /// <summary>
+        /// Policy gộp cho endpoint Assign dùng chung cho cả global lẫn organization: chấp nhận JWT
+        /// mang alias của MỘT trong hai permission. Đây chỉ là lớp lọc thô ở tầng claim (chặn token
+        /// legacy/không hợp lệ) — quyền thật theo đúng organization vẫn do RoleAssignmentService
+        /// tự truy vấn DB, vì JWT gộp permission của mọi organization user thuộc về, không phân biệt
+        /// đang thao tác trên organization nào.
+        /// </summary>
+        public const string AssignAny = "Roles.AssignAny";
     }
 
     public static class Organizations

@@ -94,6 +94,12 @@ public static class AuthErrors
 
         public static readonly Error InvalidScope =
             Error.Validation(AuthErrorCode.Role.InvalidScope, "Chỉ có thể gán role toàn cục qua endpoint này.");
+
+        public static readonly Error OrganizationRequired =
+            Error.Validation(AuthErrorCode.Role.OrganizationRequired, "Role thuộc phạm vi Organization — cần cung cấp OrganizationId.");
+
+        public static readonly Error OrganizationRevokeNotSupported =
+            Error.Validation(AuthErrorCode.Role.OrganizationRevokeNotSupported, "Không thể thu hồi role theo Organization qua endpoint này — dùng DELETE /organizations/{id}/members/{memberId}.");
     }
 
     public static class User
