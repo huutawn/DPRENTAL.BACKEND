@@ -40,7 +40,9 @@ Domain là nơi sở hữu DTO, entity/model, utility/validator và persistence 
 
 3. Tạo và cấp RSA key ring theo phần JWT bên dưới.
 
-4. Chạy API:
+4. Tạo và cấp khóa bootstrap quản trị viên theo phần **Bootstrap tài khoản quản trị viên** bên dưới.
+
+5. Chạy API:
 
    ```bash
    dotnet run --project AuthService/src/Api/AuthService.Api.csproj
@@ -53,6 +55,43 @@ Domain là nơi sở hữu DTO, entity/model, utility/validator và persistence 
    ```
 
 Nếu startup báo `Auth:Jwt:ActiveKeyId must be configured` hoặc `Auth:Jwt:Keys must contain at least one verification key`, key ring chưa được cấp đầy đủ.
+
+## Bootstrap tài khoản quản trị viên
+
+`POST /api/v1/auth/admins` tạo tài khoản với role `Admin`. Endpoint yêu cầu khóa bí mật trong header `X-Admin-Creation-Key`; không có khóa hoặc khóa không khớp sẽ nhận `401`. API không khởi động nếu chưa cấu hình `Auth:AdminBootstrap:CreationKey`.
+
+Tạo một khóa ngẫu nhiên 256-bit cho local development. Lệnh không in khóa ra terminal; thư mục `.local-secrets/` đã bị Git bỏ qua:
+
+```bash
+mkdir -p .local-secrets
+openssl rand -hex 32 | tr -d '\n' > .local-secrets/admin-bootstrap.key
+chmod 600 .local-secrets/admin-bootstrap.key
+```
+
+Không truyền khóa qua command-line. Cấp khóa vào .NET User Secrets bằng JSON đọc từ file:
+
+```bash
+jq -n \
+  --rawfile creationKey .local-secrets/admin-bootstrap.key \
+  '{"Auth:AdminBootstrap:CreationKey": $creationKey}' \
+  | dotnet user-secrets set --project AuthService/src/Api/AuthService.Api.csproj
+```
+
+Sau khi API chạy, gửi request tạo admin từ một HTTP client được cấu hình để giữ secret an toàn. Request có body sau và header `X-Admin-Creation-Key` bằng đúng giá trị đã cấp:
+
+```http
+POST /api/v1/auth/admins
+Content-Type: application/json
+X-Admin-Creation-Key: <admin-bootstrap-key>
+
+{
+  "email": "admin@example.com",
+  "password": "Password123!",
+  "fullName": "Administrator"
+}
+```
+
+Request thành công trả `201 Created` cùng `accountId`; email đã tồn tại trả `409`. Bất kỳ ai có khóa đều có thể tạo tài khoản role `Admin`, vì vậy chỉ dùng qua kênh tin cậy, không đưa header vào log/trace, và rotate khóa trong secret manager sau khi bootstrap xong.
 
 ## JWT access token
 
@@ -121,6 +160,7 @@ Auth__Jwt__ActiveKeyId
 Auth__Jwt__Keys__0__KeyId
 Auth__Jwt__Keys__0__PublicKeyPem
 Auth__Jwt__Keys__0__PrivateKeyPem
+Auth__AdminBootstrap__CreationKey
 ```
 
 JWT được kiểm tra ngay khi service khởi động: issuer, audience, lifetime 1–60 phút, active key, `kid` duy nhất, PEM hợp lệ, RSA ít nhất 2048-bit và private/public key của active entry phải khớp. Access token mặc định hết hạn sau 15 phút.
