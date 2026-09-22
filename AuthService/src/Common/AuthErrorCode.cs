@@ -52,6 +52,11 @@ public static class AuthErrorCode
         public const string Underage = "User.Underage";
     }
 
+    public static class Navigation
+    {
+        public const string InvalidOrganizationContext = "Navigation.InvalidOrganizationContext";
+    }
+
     public static class ServicePrincipal
     {
         public const string InvalidClient = "ServicePrincipal.InvalidClient";
