@@ -29,4 +29,23 @@ public sealed class UsersController(IUserService userService) : ControllerBase
         Result<CurrentUserResponse> result = await userService.GetCurrentUserProfileAsync(userId, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
+
+    [HttpPut("me")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> UpdateCurrentUser([FromBody] UpdateUserProfileRequest request, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(User.Identity?.Name, out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        Result result = await userService.UpdateUserProfileAsync(userId, request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
+    }
+
+
+
 }

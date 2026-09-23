@@ -1,11 +1,12 @@
-using System.IdentityModel.Tokens.Jwt;
 using Dprental.AuthService.Application.Security;
+using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Domain.Utils;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace Dprental.AuthService.Api.Security;
 
@@ -37,9 +38,9 @@ internal static class JwtBearerServiceCollectionExtensions
 
     /// <summary>Thiết lập chính sách xác thực để chỉ nhận access token RS256 của key ring này.</summary>
     private static void ConfigureJwtBearer(
-        JwtBearerOptions bearerOptions,
-        RsaJwtKeyRing keyRing,
-        IOptions<JwtOptions> options)
+    JwtBearerOptions bearerOptions,
+    RsaJwtKeyRing keyRing,
+    IOptions<JwtOptions> options)
     {
         JwtOptions jwtOptions = options.Value;
 
@@ -56,8 +57,58 @@ internal static class JwtBearerServiceCollectionExtensions
                 }
 
                 return Task.CompletedTask;
+            },
+
+            // Chặn ngay sau khi chữ ký/thời hạn token hợp lệ, nhưng trước khi vào Controller:
+            // kiểm tra user còn tồn tại và đang active (áp dụng Kill Switch cho mọi request).
+            OnTokenValidated = async context =>
+{
+    string? userIdClaim = context.Principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+
+    if (string.IsNullOrWhiteSpace(userIdClaim) || !Guid.TryParse(userIdClaim, out Guid userId))
+    {
+        context.Fail("Token thiếu hoặc chứa thông tin định danh người dùng không hợp lệ.");
+        return;
+    }
+
+    var userRepository = context.HttpContext.RequestServices
+        .GetRequiredService<IUserRepository>();
+
+    var user = await userRepository.GetByIdAsync(userId);
+
+    if (user is null || !user.IsActive)
+    {
+        context.Fail("Tài khoản không tồn tại hoặc đã bị khóa.");
+    }
+},
+
+            // Tùy chỉnh response body cho đúng format ProblemDetails hiện tại của hệ thống.
+            OnChallenge = async context =>
+            {
+                // Nếu đã có response khác được set (VD lỗi khác), không ghi đè.
+                if (context.Handled)
+                {
+                    return;
+                }
+
+                context.HandleResponse();
+
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                context.Response.ContentType = "application/problem+json";
+
+                var problem = new
+                {
+                    type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+                    title = "Unauthorized",
+                    status = 401,
+                    detail = context.AuthenticateFailure?.Message ?? "Không có quyền truy cập.",
+                    traceId = context.HttpContext.TraceIdentifier
+                };
+
+                await context.Response.WriteAsJsonAsync(problem);
             }
         };
+
         bearerOptions.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -65,7 +116,6 @@ internal static class JwtBearerServiceCollectionExtensions
             ValidateAudience = true,
             ValidAudience = jwtOptions.Audience,
             ValidateIssuerSigningKey = true,
-            // Chỉ xác thực bằng public key có kid trùng JWT header; không thử tuần tự các key khác.
             IssuerSigningKeyResolver = (_, _, keyId, _) => keyRing.ResolveVerificationKeys(keyId),
             ValidateLifetime = true,
             RequireExpirationTime = true,

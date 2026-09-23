@@ -454,6 +454,10 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Property<int>("AccessFailedCount")
                         .HasColumnType("integer");
 
+                    b.Property<string>("AvatarUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -475,6 +479,10 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<string>("PhoneNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.HasKey("Id");
 
@@ -551,7 +559,7 @@ namespace Dprental.AuthService.Domain.Migrations
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.RecoveryToken", b =>
                 {
                     b.HasOne("Dprental.AuthService.Domain.Entities.User", "User")
-                        .WithMany("RecoveryTokens")
+                        .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -672,8 +680,6 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Navigation("GoogleLoginTickets");
 
                     b.Navigation("OrganizationMemberships");
-
-                    b.Navigation("RecoveryTokens");
 
                     b.Navigation("Sessions");
 

@@ -22,6 +22,11 @@ public class User
     [MaxLength(100)]
     public string FullName { get; set; } = string.Empty;
 
+    [MaxLength(20)]
+    public string? PhoneNumber { get; set; }
+
+    [MaxLength(500)]
+    public string? AvatarUrl { get; set; }
     public DateTime CreatedAt { get; set; }
 
     public bool IsActive { get; set; } = true;

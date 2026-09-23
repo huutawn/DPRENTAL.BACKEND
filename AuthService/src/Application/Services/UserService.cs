@@ -9,6 +9,7 @@ using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Utils;
 using Microsoft.AspNetCore.Identity;
 using System.Diagnostics.CodeAnalysis;
+using Dprental.AuthService.Common.Pagination;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -289,6 +290,103 @@ public sealed class UserService(
             UserAccessResolver.Permissions(user),
             organizations,
             user.CreatedAt);
+    }
+
+    public async Task<Result> UpdateUserProfileAsync(Guid userId, UpdateUserProfileRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+        if (user is null) return Result.Failure(UserErrors.UserNotFound);
+
+        user.FullName = request.FullName.Trim();
+        user.PhoneNumber = request.PhoneNumber?.Trim();
+        user.AvatarUrl = request.AvatarUrl?.Trim();
+
+        await userRepository.UpdateAsync(user, cancellationToken);
+        return Result.Success();
+    }
+
+    public async Task<Result<AdminUserDetailDto>> GetUserByIdAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        User? user = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
+        if (user is null) return Result.Failure<AdminUserDetailDto>(UserErrors.UserNotFound);
+
+        var detailDto = new AdminUserDetailDto(
+            user.Id,
+            user.Email,
+            user.FullName,
+            user.PhoneNumber,
+            user.AvatarUrl,
+            user.IsActive,
+            user.CreatedAt,
+            UserAccessResolver.Roles(user)
+        );
+
+        return detailDto;
+    }
+
+    public async Task<PagedResult<AdminUserListItemDto>> GetUsersPagedAsync(PageRequest pageRequest, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pageRequest);
+
+        int skip = (pageRequest.Page - 1) * pageRequest.PageSize;
+
+        var (users, totalCount) = await userRepository.GetUsersPagedAsync(skip, pageRequest.PageSize, cancellationToken);
+
+        int totalPages = (int)Math.Ceiling(totalCount / (double)pageRequest.PageSize);
+
+        var items = users.Select(u => new AdminUserListItemDto(
+            u.Id,
+            u.Email,
+            u.FullName,
+            u.IsActive,
+            u.CreatedAt)).ToList();
+
+        return new PagedResult<AdminUserListItemDto>(items, pageRequest.Page, pageRequest.PageSize, totalCount, totalPages);
+    }
+
+    public async Task<Result> SuspendUserAsync(Guid targetUserId, Guid adminId, CancellationToken cancellationToken = default)
+    {
+        User? user = await userRepository.GetByIdAsync(targetUserId, cancellationToken);
+        string corrId = correlationIdProvider.GetCorrelationId();
+
+        if (user is null)
+        {
+            await LogAuditAsync(adminId, targetUserId.ToString(), "Account_Suspend", "Failed_UserNotFound", corrId, cancellationToken);
+            return Result.Failure(UserErrors.UserNotFound);
+        }
+
+        if (!user.IsActive) return Result.Success();
+
+        user.IsActive = false;
+        await userRepository.UpdateAsync(user, cancellationToken);
+        await authSessionRepository.RevokeAllSessionsForUserAsync(targetUserId, cancellationToken);
+        await LogAuditAsync(adminId, targetUserId.ToString(), "Account_Suspend", "Success", corrId, cancellationToken);
+
+        return Result.Success();
+    }
+
+    public async Task<Result> ActivateUserAsync(Guid targetUserId, Guid adminId, CancellationToken cancellationToken = default)
+    {
+        User? user = await userRepository.GetByIdAsync(targetUserId, cancellationToken);
+        string corrId = correlationIdProvider.GetCorrelationId();
+
+        if (user is null)
+        {
+            await LogAuditAsync(adminId, targetUserId.ToString(), "Account_Activate", "Failed_UserNotFound", corrId, cancellationToken);
+            return Result.Failure(UserErrors.UserNotFound); 
+        }
+
+        if (user.IsActive) return Result.Success();
+
+        user.IsActive = true;
+        user.LockoutEnd = null;
+        user.AccessFailedCount = 0;
+        await userRepository.UpdateAsync(user, cancellationToken);
+        await LogAuditAsync(adminId, targetUserId.ToString(), "Account_Activate", "Success", corrId, cancellationToken);
+
+        return Result.Success();
     }
 
     [SuppressMessage("Globalization", "CA1308:Normalize strings to uppercase", Justification = "Email được lưu và so sánh ở dạng chữ thường theo quy ước phổ biến.")]
