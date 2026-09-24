@@ -100,11 +100,6 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
 
-      - name: Require VPS host fingerprint
-        env:
-          DEPLOY_VPS_SSH_FINGERPRINT: ${{ secrets.DEV_VPS_SSH_FINGERPRINT }}
-        run: test -n "$DEPLOY_VPS_SSH_FINGERPRINT"
-
       - name: Run deployment over SSH
         uses: appleboy/ssh-action@v1
         with:
@@ -112,6 +107,5 @@ jobs:
           username: ${{ secrets.DEV_VPS_USER }}
           port: ${{ secrets.DEV_VPS_PORT || '22' }}
           key: ${{ secrets.DEV_VPS_SSH_PRIVATE_KEY }}
-          fingerprint: ${{ secrets.DEV_VPS_SSH_FINGERPRINT }}
           envs: GITHUB_SHA
           script_path: scripts/deploy-gateway.sh

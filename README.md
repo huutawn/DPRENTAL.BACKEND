@@ -297,7 +297,7 @@ Workflow [gateway-dev.yml](.github/workflows/gateway-dev.yml) chạy khi tạo p
      ```text
      ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-gateway:<git-sha>
      ```
-   - Thực thi [deploy-gateway.sh](scripts/deploy-gateway.sh) trên máy chủ qua SSH; action đối chiếu fingerprint máy chủ trước khi chạy.
+   - Thực thi [deploy-gateway.sh](scripts/deploy-gateway.sh) trên máy chủ qua SSH.
    - Cập nhật **chỉ duy nhất biến `GATEWAY_IMAGE`** trong `/opt/dprental/dev/release.env`, bảo toàn nguyên vẹn mọi image khác (`AUTH_SERVICE_IMAGE`, `AUTH_MIGRATOR_IMAGE`...).
    - Chỉ pull image `gateway` và khởi động lại duy nhất container này với `--no-deps --force-recreate gateway`.
    - Chờ Gateway đạt trạng thái healthy và thực hiện kiểm thử khói (smoke tests) cả nội bộ lẫn qua domain công khai.
@@ -308,8 +308,5 @@ Cấu hình GitHub Environment `dev` cần các secrets sau:
 DEV_VPS_HOST              # IP hoặc hostname VPS
 DEV_VPS_USER              # User deploy thuộc group docker
 DEV_VPS_SSH_PRIVATE_KEY   # Private key SSH riêng của user deploy
-DEV_VPS_SSH_FINGERPRINT   # Fingerprint SHA256 của SSH host key máy chủ (bắt buộc)
 DEV_VPS_PORT              # Tùy chọn, mặc định 22
 ```
-
-Lấy fingerprint từ bản host key đã xác thực trước đó bằng `ssh-keygen -lf <known_hosts-file> -E sha256`, rồi lưu giá trị `SHA256:...` vào `DEV_VPS_SSH_FINGERPRINT`. Secret `DEV_VPS_KNOWN_HOSTS` cũ không còn được workflow sử dụng.
