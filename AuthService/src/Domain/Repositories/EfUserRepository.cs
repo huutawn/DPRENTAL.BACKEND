@@ -1,9 +1,7 @@
 using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace Dprental.AuthService.Domain.Repositories;
 
@@ -29,11 +27,16 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
             await dbContext.SaveChangesAsync(cancellationToken);
             return entity;
         }
-        catch (DbUpdateException exception) when (exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        catch (DbUpdateException exception)
         {
             // Bỏ entity lỗi khỏi DbContext để lần SaveChanges sau không thử insert lại.
             dbContext.Entry(entity).State = EntityState.Detached;
-            throw UniqueConstraintViolations.ToUserException(exception);
+            if (UniqueConstraintViolations.ToUserException(exception) is { } duplicate)
+            {
+                throw duplicate;
+            }
+
+            throw;
         }
     }
 
@@ -41,6 +44,7 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
     {
         ArgumentNullException.ThrowIfNull(user);
 
+        UserRole userRole = new() { UserId = user.Id, RoleId = roleId };
         if (dbContext.Database.IsRelational())
         {
             var executionStrategy = dbContext.Database.CreateExecutionStrategy();
@@ -56,7 +60,7 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
                     }
 
                     dbContext.Users.Add(user);
-                    dbContext.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = roleId });
+                    dbContext.UserRoles.Add(userRole);
                     await dbContext.SaveChangesAsync(cancellationToken);
                     await transaction.CommitAsync(cancellationToken);
                     return user;
@@ -64,23 +68,18 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
                 catch (DbUpdateException exception)
                 {
                     await transaction.RollbackAsync(cancellationToken);
-                    dbContext.Entry(user).State = EntityState.Detached;
-                    if (UniqueConstraintViolations.IsUniqueViolation(exception))
+                    Detach(user, userRole);
+                    if (UniqueConstraintViolations.ToUserException(exception) is { } duplicate)
                     {
-                        throw UniqueConstraintViolations.ToUserException(exception);
+                        throw duplicate;
                     }
 
-                    if (exception.Message.Contains("Unique", StringComparison.OrdinalIgnoreCase) ||
-                        exception.InnerException?.Message.Contains("Unique", StringComparison.OrdinalIgnoreCase) == true)
-                    {
-                        throw new DuplicateEmailException("Email đã được sử dụng.", exception);
-                    }
                     throw;
                 }
                 catch
                 {
                     await transaction.RollbackAsync(cancellationToken);
-                    dbContext.Entry(user).State = EntityState.Detached;
+                    Detach(user, userRole);
                     throw;
                 }
             });
@@ -94,18 +93,26 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
             }
 
             dbContext.Users.Add(user);
-            dbContext.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = roleId });
+            dbContext.UserRoles.Add(userRole);
             try
             {
                 await dbContext.SaveChangesAsync(cancellationToken);
                 return user;
             }
-            catch (DbUpdateException exception)
+            catch
             {
-                dbContext.Entry(user).State = EntityState.Detached;
-                throw new DuplicateEmailException("Email đã được sử dụng.", exception);
+                // Provider không quan hệ (InMemory) không kiểm tra unique index nên không có lỗi trùng để dịch.
+                Detach(user, userRole);
+                throw;
             }
         }
+    }
+
+    // Bỏ cả User lẫn UserRole khỏi DbContext; nếu chỉ bỏ User, UserRole mồ côi sẽ bị insert ở lần SaveChanges sau.
+    private void Detach(User user, UserRole userRole)
+    {
+        dbContext.Entry(user).State = EntityState.Detached;
+        dbContext.Entry(userRole).State = EntityState.Detached;
     }
 
     public async Task<bool> UpdateAsync(User entity, CancellationToken cancellationToken = default)
@@ -126,10 +133,15 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
             await dbContext.SaveChangesAsync(cancellationToken);
             return true;
         }
-        catch (DbUpdateException exception) when (UniqueConstraintViolations.IsUniqueViolation(exception))
+        catch (DbUpdateException exception)
         {
             dbContext.Entry(entity).State = EntityState.Detached;
-            throw UniqueConstraintViolations.ToUserException(exception);
+            if (UniqueConstraintViolations.ToUserException(exception) is { } duplicate)
+            {
+                throw duplicate;
+            }
+
+            throw;
         }
     }
 

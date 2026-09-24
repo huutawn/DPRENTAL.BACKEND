@@ -80,7 +80,12 @@ public sealed class EfOrganizationMembershipRepository(AuthDbContext dbContext) 
         catch (DbUpdateException exception)
         {
             dbContext.Entry(membership).State = EntityState.Detached;
-            throw new DuplicateMembershipException("User đã là thành viên của organization này.", exception);
+            if (UniqueConstraintViolations.ToMembershipException(exception) is { } duplicate)
+            {
+                throw duplicate;
+            }
+
+            throw;
         }
     }
 

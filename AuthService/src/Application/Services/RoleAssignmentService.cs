@@ -42,7 +42,9 @@ public sealed class RoleAssignmentService(
                 return Result.Failure(AuthErrors.Role.AlreadyAssigned);
             }
 
-            membership.RoleId = request.RoleId;
+            if (orga)
+
+                membership.RoleId = request.RoleId;
             bool orgUpdated = await membershipRepository.UpdateAsync(membership, cancellationToken);
             return orgUpdated ? Result.Success() : Result.Failure(AuthErrors.Role.AssignmentFailed);
         }
@@ -153,4 +155,5 @@ public sealed class RoleAssignmentService(
             ? Result.Failure(AuthErrors.Organization.PrivilegeEscalation)
             : Result.Success();
     }
+
 }

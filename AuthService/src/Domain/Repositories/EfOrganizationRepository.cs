@@ -107,12 +107,12 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
                 dbContext.Entry(navigationCatalog).State = EntityState.Detached;
             }
 
-            if (UniqueConstraintViolations.IsUniqueViolation(exception))
+            if (UniqueConstraintViolations.ToOrganizationException(exception) is { } duplicate)
             {
-                throw UniqueConstraintViolations.ToOrganizationException(exception);
+                throw duplicate;
             }
 
-            throw new DuplicateSlugException("Slug của organization đã tồn tại.", exception);
+            throw;
         }
     }
 
