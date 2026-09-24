@@ -10,9 +10,19 @@ permissions:
 
 jobs:
   publish:
-    name: Publish immutable images to GHCR
+    name: Publish ${{ matrix.name }} image to GHCR
     runs-on: ubuntu-24.04
     environment: dev
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: runtime
+            target: runtime
+            image_name: dprental-auth
+          - name: migrator
+            target: migrator
+            image_name: dprental-auth-migrator
     permissions:
       contents: read
       packages: write
@@ -46,28 +56,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish AuthService runtime image
+      - name: Publish AuthService ${{ matrix.name }} image
         uses: docker/build-push-action@v6
         with:
           context: .
-          target: runtime
+          target: ${{ matrix.target }}
           push: true
-          tags: ghcr.io/${{ steps.image-name.outputs.namespace }}/dprental-auth:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+          tags: ghcr.io/${{ steps.image-name.outputs.namespace }}/${{ matrix.image_name }}:${{ github.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-
-      - name: Publish AuthService migrator image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: migrator
-          push: true
-          tags: ghcr.io/${{ steps.image-name.outputs.namespace }}/dprental-auth-migrator:${{ github.sha }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-
   deploy-dev:
     name: Deploy AuthService to dev VPS
     needs: publish
@@ -80,7 +80,10 @@ jobs:
     steps:
       - name: Checkout deployment script
         uses: actions/checkout@v4
-
+        with:
+          sparse-checkout: |
+            scripts/deploy-authservice.sh
+          sparse-checkout-cone-mode: false
       - name: Configure SSH trust
         env:
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEV_VPS_SSH_PRIVATE_KEY }}
