@@ -126,6 +126,14 @@ require_file "$ENVIRONMENT_FILE"
 require_file "$RELEASE_FILE"
 require_file "$COMPOSE_FILE"
 
+[ -n "${GHCR_USERNAME:-}" ] || fail 'thiếu GitHub username để pull image private.'
+[ -n "${GHCR_TOKEN:-}" ] || fail 'thiếu GitHub token để pull image private.'
+docker_config_dir="$(mktemp -d)" || fail 'không thể tạo Docker config tạm thời.'
+trap 'rm -rf "$docker_config_dir"' EXIT
+export DOCKER_CONFIG="$docker_config_dir"
+docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin <<< "$GHCR_TOKEN" >/dev/null
+unset GHCR_TOKEN
+
 readonly -a compose_command=(docker compose --project-directory "$DEPLOY_DIRECTORY" --file "$COMPOSE_FILE" --env-file "$ENVIRONMENT_FILE" --env-file "$RELEASE_FILE")
 
 current_gateway_image="$(read_release_value GATEWAY_IMAGE)"

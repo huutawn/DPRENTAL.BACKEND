@@ -297,7 +297,7 @@ Workflow [gateway-dev.yml](.github/workflows/gateway-dev.yml) chạy khi tạo p
      ```text
      ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-gateway:<git-sha>
      ```
-   - Thực thi [deploy-gateway.sh](scripts/deploy-gateway.sh) trên máy chủ qua SSH.
+   - Truyền `GITHUB_TOKEN` của run qua SSH, đăng nhập GHCR bằng Docker config tạm trên VPS, rồi thực thi [deploy-gateway.sh](scripts/deploy-gateway.sh). Docker config tạm được xóa sau deploy.
    - Cập nhật **chỉ duy nhất biến `GATEWAY_IMAGE`** trong `/opt/dprental/dev/release.env`, bảo toàn nguyên vẹn mọi image khác (`AUTH_SERVICE_IMAGE`, `AUTH_MIGRATOR_IMAGE`...).
    - Chỉ pull image `gateway` và khởi động lại duy nhất container này với `--no-deps --force-recreate gateway`.
    - Chờ Gateway đạt trạng thái healthy và thực hiện kiểm thử khói (smoke tests) cả nội bộ lẫn qua domain công khai.

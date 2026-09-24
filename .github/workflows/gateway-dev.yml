@@ -102,10 +102,13 @@ jobs:
 
       - name: Run deployment over SSH
         uses: appleboy/ssh-action@v1
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.DEV_VPS_HOST }}
           username: ${{ secrets.DEV_VPS_USER }}
           port: ${{ secrets.DEV_VPS_PORT || '22' }}
           key: ${{ secrets.DEV_VPS_SSH_PRIVATE_KEY }}
-          envs: GITHUB_SHA
+          envs: GITHUB_SHA,GHCR_USERNAME,GHCR_TOKEN
           script_path: scripts/deploy-gateway.sh
