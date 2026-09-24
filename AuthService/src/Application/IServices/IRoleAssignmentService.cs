@@ -1,5 +1,5 @@
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.DTOs.Auth;
+using Dprental.AuthService.Application.DTOs.Auth;
 
 namespace Dprental.AuthService.Application.IServices;
 

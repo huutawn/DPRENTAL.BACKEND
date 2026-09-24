@@ -3,7 +3,7 @@ using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.DTOs.Auth;
+using Dprental.AuthService.Application.DTOs.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

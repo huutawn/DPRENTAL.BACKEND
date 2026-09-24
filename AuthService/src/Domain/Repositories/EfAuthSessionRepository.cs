@@ -1,8 +1,8 @@
 using Dprental.AuthService.Domain.Data;
+using Dprental.AuthService.Domain.Access;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
-using Dprental.AuthService.Domain.Utils;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.AuthService.Domain.Repositories;

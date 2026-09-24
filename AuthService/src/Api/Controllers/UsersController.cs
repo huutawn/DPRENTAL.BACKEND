@@ -2,9 +2,9 @@ using Dprental.AuthService.Api.Filters;
 using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.DTOs.Auth;
-using Dprental.AuthService.Domain.DTOs.Organization;
-using Dprental.AuthService.Domain.DTOs.User;
+using Dprental.AuthService.Application.DTOs.Auth;
+using Dprental.AuthService.Application.DTOs.Organization;
+using Dprental.AuthService.Application.DTOs.User;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

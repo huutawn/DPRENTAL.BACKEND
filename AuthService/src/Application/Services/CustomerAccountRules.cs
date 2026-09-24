@@ -1,5 +1,5 @@
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.DTOs.Auth;
+using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.AspNetCore.Identity;

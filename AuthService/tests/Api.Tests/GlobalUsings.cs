@@ -1,1 +1,2 @@
-global using Dprental.AuthService.Domain.Enums;
+global using Dprental.AuthService.Common.Enums;
+global using Dprental.AuthService.Application.Options;

@@ -1,11 +1,11 @@
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.DTOs.User;
+using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
-using Dprental.AuthService.Domain.Utils;
+using Dprental.AuthService.Common.Utils;
 
 namespace Dprental.AuthService.Application.Services;
 
