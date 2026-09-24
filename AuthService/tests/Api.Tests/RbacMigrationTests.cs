@@ -1,7 +1,7 @@
 using System.Reflection;
 using AuthService.Domain.Migrations;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.Enums;
+using Dprental.AuthService.Common.Enums;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Xunit;

@@ -1,9 +1,10 @@
-using Dprental.AuthService.Domain.Enums;
+using Dprental.AuthService.Common.Enums;
+using System.Text.RegularExpressions;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Mapping;
 using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.DTOs.Organization;
+using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;

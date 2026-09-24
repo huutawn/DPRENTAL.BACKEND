@@ -1,6 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using Dprental.AuthService.Domain.Enums;
+using Dprental.AuthService.Common.Enums;
 
 namespace Dprental.AuthService.Api.Security;
 

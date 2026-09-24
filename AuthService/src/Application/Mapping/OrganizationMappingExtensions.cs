@@ -1,4 +1,4 @@
-using Dprental.AuthService.Domain.DTOs.Organization;
+using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Domain.Entities;
 
 namespace Dprental.AuthService.Application.Mapping;

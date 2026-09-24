@@ -1,8 +1,8 @@
 using System.IdentityModel.Tokens.Jwt;
 using Dprental.AuthService.Application.Security;
-using Dprental.AuthService.Domain.Enums;
-using Dprental.AuthService.Domain.Models;
-using Dprental.AuthService.Domain.Utils;
+using Dprental.AuthService.Common.Enums;
+using Dprental.AuthService.Application.Options;
+using Dprental.AuthService.Application.Security.Jwt;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
