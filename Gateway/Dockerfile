@@ -4,15 +4,14 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Sao chép solution và các file định nghĩa project để cache layer restore dependencies
-COPY Gateway/Gateway.sln Gateway/Directory.Build.props Gateway/
+# Sao chép cấu hình build và project ApiGateway để cache layer restore dependencies
+COPY Gateway/Directory.Build.props Gateway/
 COPY Gateway/src/ApiGateway/ApiGateway.csproj Gateway/src/ApiGateway/
-COPY Gateway/tests/ApiGateway.Tests/ApiGateway.Tests.csproj Gateway/tests/ApiGateway.Tests/
 
-RUN dotnet restore Gateway/Gateway.sln
+RUN dotnet restore Gateway/src/ApiGateway/ApiGateway.csproj
 
-# Sao chép toàn bộ mã nguồn và thực hiện build release
-COPY Gateway/ Gateway/
+# Sao chép mã nguồn ApiGateway và thực hiện publish release
+COPY Gateway/src/ApiGateway/ Gateway/src/ApiGateway/
 WORKDIR /src/Gateway/src/ApiGateway
 RUN dotnet publish -c Release -o /app/publish --no-restore
 
