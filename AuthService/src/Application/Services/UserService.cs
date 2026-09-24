@@ -194,6 +194,8 @@ public sealed class UserService(
         return user.Id;
     }
 
+
+
     public async Task<Result> RequestPasswordResetAsync(RequestPasswordResetRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -403,9 +405,15 @@ public sealed class UserService(
         return detailDto;
     }
 
-    public async Task<PagedResult<AdminUserListItemDto>> GetUsersPagedAsync(PageRequest pageRequest, CancellationToken cancellationToken = default)
+    public async Task<Result<PagedResult<AdminUserListItemDto>>> GetUsersPagedAsync(PageRequest pageRequest, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(pageRequest);
+
+        Result validation = pageRequest.Validate();
+        if (validation.IsFailure)
+        {
+            return Result.Failure<PagedResult<AdminUserListItemDto>>(validation.Error);
+        }
 
         int skip = (pageRequest.Page - 1) * pageRequest.PageSize;
 

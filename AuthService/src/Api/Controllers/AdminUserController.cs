@@ -25,13 +25,13 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
     [ProducesResponseType<PagedResult<AdminUserListItemDto>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<AdminUserListItemDto>>> GetUsersPaged(
-         [FromQuery] GetUsersRequest request,
-         CancellationToken cancellationToken = default)
+     [FromQuery] GetUsersRequest request,
+     CancellationToken cancellationToken = default)
     {
         var pageRequest = new PageRequest(request.Page, request.PageSize);
 
         var result = await userService.GetUsersPagedAsync(pageRequest, cancellationToken);
-        return Ok(result);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
     /// <summary>Lấy chi tiết một người dùng theo id.</summary>
