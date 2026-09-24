@@ -62,8 +62,6 @@ jobs:
           context: .
           target: ${{ matrix.target }}
           push: true
-          cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
           tags: ghcr.io/${{ steps.image-name.outputs.namespace }}/${{ matrix.image_name }}:${{ github.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -105,15 +103,19 @@ jobs:
           DEPLOY_VPS_USER: ${{ secrets.DEV_VPS_USER }}
           DEPLOY_VPS_PORT: ${{ secrets.DEV_VPS_PORT || '22' }}
           RELEASE_SHA: ${{ github.sha }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           test -n "$DEPLOY_VPS_HOST"
           test -n "$DEPLOY_VPS_USER"
+          test -n "$GHCR_USERNAME"
+          test -n "$GHCR_TOKEN"
           ssh \
             -i "$HOME/.ssh/id_ed25519" \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -p "$DEPLOY_VPS_PORT" \
             "$DEPLOY_VPS_USER@$DEPLOY_VPS_HOST" \
-            bash -s -- "$RELEASE_SHA" < scripts/deploy-authservice.sh
+            "GHCR_USERNAME=$(printf '%q' "$GHCR_USERNAME") GHCR_TOKEN=$(printf '%q' "$GHCR_TOKEN") bash -s -- $RELEASE_SHA" < scripts/deploy-authservice.sh
