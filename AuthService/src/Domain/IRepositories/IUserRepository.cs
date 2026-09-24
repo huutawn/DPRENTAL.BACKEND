@@ -18,4 +18,7 @@ public interface IUserRepository : IRepo<User, Guid>
 
     /// <summary>Tạo user và gán role trong cùng một transaction.</summary>
     Task<User> CreateWithRoleAsync(User user, Guid roleId, CancellationToken cancellationToken = default);
+
+    /// <summary>Lấy danh sách user có phân trang và tổng số lượng.</summary>
+    Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, CancellationToken cancellationToken = default);
 }

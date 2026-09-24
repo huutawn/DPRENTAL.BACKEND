@@ -151,6 +151,22 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
             .AsNoTracking()
             .AnyAsync(user => user.CitizenId == citizenId, cancellationToken);
 
+    public async Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, CancellationToken cancellationToken = default)
+    {
+        var query = dbContext.Users.AsNoTracking();
+
+        int totalCount = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .OrderByDescending(u => u.CreatedAt)
+            .ThenBy(u => u.Id)
+            .Skip(skip)
+            .Take(take)
+            .ToListAsync(cancellationToken);
+
+        return (items, totalCount);
+    }
+
     public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
         dbContext.Users
             .AsNoTracking()
