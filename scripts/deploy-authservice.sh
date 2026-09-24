@@ -121,7 +121,7 @@ smoke_test_gateway_health() {
 
 smoke_test_auth_jwks() {
   "${compose_command[@]}" exec -T auth-service \
-    wget --quiet --tries=1 --output-document=/dev/null http://127.0.0.1:8080/.well-known/jwks.json || \
+    wget --quiet --tries=1 --output-document=/dev/null http://127.0.0.1:8080/.well-known/jwks.json </dev/null || \
     fail 'JWKS nội bộ của AuthService thất bại; không tự rollback schema hoặc image.'
 }
 
@@ -146,7 +146,7 @@ update_release_images "$runtime_image" "$migrator_image"
 
 "${compose_command[@]}" --profile migration pull auth-service auth-migrate
 "${compose_command[@]}" up -d postgres valkey
-"${compose_command[@]}" --profile migration run --rm auth-migrate
+"${compose_command[@]}" --profile migration run --rm auth-migrate </dev/null
 "${compose_command[@]}" up -d --no-deps --force-recreate auth-service
 
 wait_for_auth_health

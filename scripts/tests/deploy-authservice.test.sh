@@ -26,6 +26,7 @@ deploy_directory="$temporary_directory/deploy"
 fake_bin="$temporary_directory/bin"
 docker_log="$temporary_directory/docker.log"
 curl_log="$temporary_directory/curl.log"
+deploy_log="$temporary_directory/deploy.log"
 release_sha='0123456789abcdef0123456789abcdef01234567'
 
 mkdir -p "$deploy_directory" "$fake_bin"
@@ -48,6 +49,9 @@ if [ "${1:-}" = inspect ]; then
 fi
 
 case " $* " in
+  *' run --rm auth-migrate '* | *' exec -T auth-service '*)
+    cat >/dev/null
+    ;;
   *' ps -q auth-service '*)
     printf 'auth-service-container\n'
     ;;
@@ -67,7 +71,7 @@ PATH="$fake_bin:$PATH" \
   CURL_LOG="$curl_log" \
   DPR_DEPLOY_DIRECTORY="$deploy_directory" \
   AUTH_DEPLOY_HEALTH_INTERVAL_SECONDS=0 \
-  bash -s -- "$release_sha" < "$deployer" >/dev/null
+  bash -s -- "$release_sha" < "$deployer" > "$deploy_log"
 
 assert_contains "AUTH_SERVICE_IMAGE=ghcr.io/example/dprental-auth:$release_sha" "$deploy_directory/release.env"
 assert_contains "AUTH_MIGRATOR_IMAGE=ghcr.io/example/dprental-auth-migrator:$release_sha" "$deploy_directory/release.env"
@@ -76,6 +80,7 @@ assert_contains '--profile migration run --rm auth-migrate' "$docker_log"
 assert_contains 'up -d --no-deps --force-recreate auth-service' "$docker_log"
 assert_contains 'exec -T auth-service wget --quiet --tries=1 --output-document=/dev/null http://127.0.0.1:8080/.well-known/jwks.json' "$docker_log"
 assert_contains 'https://dev-api.example.test/health/ready' "$curl_log"
+assert_contains "AuthService revision $release_sha đã healthy" "$deploy_log"
 
 if PATH="$fake_bin:$PATH" DPR_DEPLOY_DIRECTORY="$deploy_directory" "$deployer" invalid >/dev/null 2>&1; then
   fail 'SHA không hợp lệ lại được chấp nhận.'
