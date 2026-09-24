@@ -67,11 +67,11 @@ public sealed class ClaimsPrincipalExtensionsTests
     }
 
     [Fact]
-    public void GetJwtSubThrowsForNullPrincipal()
+    public void GetJwtSubReturnsNullForNullPrincipal()
     {
         ClaimsPrincipal? principal = null;
 
-        Assert.Throws<ArgumentNullException>(() => principal!.GetJwtSub());
+        Assert.Null(principal!.GetJwtSub());
     }
 
     private static ClaimsPrincipal CreatePrincipal(IEnumerable<Claim> claims)

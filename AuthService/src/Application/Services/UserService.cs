@@ -16,6 +16,7 @@ using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
+using Dprental.AuthService.Domain.DTOs.User;
 
 namespace Dprental.AuthService.Application.Services;
 

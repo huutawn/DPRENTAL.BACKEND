@@ -7,6 +7,7 @@ using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Application.DTOs.User;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Dprental.AuthService.Domain.DTOs.User;
 
 namespace Dprental.AuthService.Api.Controllers;
 
@@ -235,7 +236,6 @@ public sealed class UsersController(
         Result<IReadOnlyList<OrganizationInvitationResponse>> result = await organizationService.GetMyInvitationsAsync(userId, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
-}
 
     /// <summary>Cập nhật hồ sơ (tên, số điện thoại, avatar) của người dùng hiện tại.</summary>
     /// <param name="request">Thông tin hồ sơ cần cập nhật.</param>

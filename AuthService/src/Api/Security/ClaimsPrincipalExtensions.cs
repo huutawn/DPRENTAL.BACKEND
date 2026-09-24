@@ -14,9 +14,8 @@ internal static class ClaimsPrincipalExtensions
     /// </summary>
     internal static Guid? GetJwtSub(this ClaimsPrincipal user)
     {
-        ArgumentNullException.ThrowIfNull(user);
 
-        if (user.Identity?.IsAuthenticated != true)
+        if (user == null || user.Identity?.IsAuthenticated != true)
         {
             return null;
         }

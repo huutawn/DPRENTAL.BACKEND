@@ -42,12 +42,6 @@ public class User
     /// <summary>Suy ra từ <see cref="ProfileCompletedAtUtc"/> — không lưu xuống DB.</summary>
     [NotMapped]
     public bool IsProfileCompleted => ProfileCompletedAtUtc is not null;
-
-    [MaxLength(20)]
-    public string? PhoneNumber { get; set; }
-
-    [MaxLength(500)]
-    public string? AvatarUrl { get; set; }
     public DateTime CreatedAt { get; set; }
 
     /// <summary>Cho biết tài khoản đã có mật khẩu tự đặt hay chưa (user tạo qua Google có HasPassword = false).</summary>
