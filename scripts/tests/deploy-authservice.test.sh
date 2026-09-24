@@ -102,7 +102,7 @@ assert_not_contains 'test-token' "$docker_log"
 assert_contains '--profile migration pull auth-service auth-migrate' "$docker_log"
 assert_contains '--profile migration run --rm auth-migrate' "$docker_log"
 assert_contains 'up -d --no-deps --force-recreate auth-service' "$docker_log"
-assert_contains 'exec -T auth-service wget --quiet --tries=1 --output-document=/dev/null http://127.0.0.1:8080/.well-known/jwks.json' "$docker_log"
+assert_contains 'exec -T auth-service perl -MIO::Socket::INET -e $s=IO::Socket::INET->new("127.0.0.1:8080") or exit 1; print $s "GET /.well-known/jwks.json HTTP/1.0\r\n\r\n"; my $r=<$s>; exit($r =~ /200/ ? 0 : 1)' "$docker_log"
 assert_contains 'https://dev-api.example.test/health/ready' "$curl_log"
 assert_contains "AuthService revision $release_sha đã healthy" "$deploy_log"
 

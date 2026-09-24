@@ -74,6 +74,9 @@ jobs:
     concurrency:
       group: dprental-dev
       cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - name: Checkout deployment script

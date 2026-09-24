@@ -121,7 +121,7 @@ smoke_test_gateway_health() {
 
 smoke_test_auth_jwks() {
   "${compose_command[@]}" exec -T auth-service \
-    wget --quiet --tries=1 --output-document=/dev/null http://127.0.0.1:8080/.well-known/jwks.json </dev/null || \
+    perl -MIO::Socket::INET -e '$s=IO::Socket::INET->new("127.0.0.1:8080") or exit 1; print $s "GET /.well-known/jwks.json HTTP/1.0\r\n\r\n"; my $r=<$s>; exit($r =~ /200/ ? 0 : 1)' </dev/null || \
     fail 'JWKS nội bộ của AuthService thất bại; không tự rollback schema hoặc image.'
 }
 
