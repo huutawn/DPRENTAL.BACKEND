@@ -34,4 +34,13 @@ public interface IAuthSessionRepository : IRepo<Session, Guid>
     Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
 
     Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default);
+
+    /// <summary>Lấy tối đa 50 session gần nhất của người dùng.</summary>
+    Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    /// <summary>Lấy SessionId tương ứng với tokenHash của refresh token.</summary>
+    Task<Guid?> GetSessionIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default);
+
+    /// <summary>Thu hồi một session cụ thể của user cùng các refresh token con chưa thu hồi.</summary>
+    Task<bool> RevokeSessionForUserAsync(Guid userId, Guid sessionId, DateTime utcNow, CancellationToken cancellationToken = default);
 }

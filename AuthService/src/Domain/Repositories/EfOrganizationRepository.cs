@@ -47,7 +47,7 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
 
         IQueryable<Organization> query = dbContext.OrganizationMemberships
             .AsNoTracking()
-            .Where(m => m.UserId == userId && m.Status == MembershipStatus.Active && m.Organization.IsActive)
+            .Where(m => m.UserId == userId && m.Status == MembershipStatus.Active && m.Organization.Status == OrganizationStatus.Active)
             .Select(m => m.Organization)
             .Distinct();
 
@@ -63,6 +63,10 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
         return PagedResult.Create(items, request.Page, request.PageSize, totalCount);
     }
 
+    /// <summary>
+    /// Tạo organization và membership ban đầu trong một transaction. Ném <see cref="Exceptions.DuplicateSlugException"/>
+    /// hoặc <see cref="Exceptions.DuplicateTaxCodeException"/> khi vi phạm unique.
+    /// </summary>
     public async Task<Organization> CreateAsync(
         Organization organization,
         OrganizationMembership initialMembership,
@@ -102,9 +106,20 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
             {
                 dbContext.Entry(navigationCatalog).State = EntityState.Detached;
             }
+
+            if (UniqueConstraintViolations.IsUniqueViolation(exception))
+            {
+                throw UniqueConstraintViolations.ToOrganizationException(exception);
+            }
+
             throw new DuplicateSlugException("Slug của organization đã tồn tại.", exception);
         }
     }
+
+    public Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default) =>
+        dbContext.Organizations
+            .AsNoTracking()
+            .AnyAsync(org => org.TaxCode == taxCode, cancellationToken);
 
     public async Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default)
     {

@@ -23,7 +23,7 @@ public static class UserAccessResolver
 
         return user.OrganizationMemberships
             .Where(membership => membership.Status == MembershipStatus.Active
-                && membership.Organization is { IsActive: true })
+                && membership.Organization is { Status: OrganizationStatus.Active })
             .ToArray();
     }
 

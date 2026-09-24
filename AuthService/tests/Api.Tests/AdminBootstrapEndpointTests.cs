@@ -30,7 +30,7 @@ public sealed class AdminBootstrapEndpointTests
         await SeedDatabaseAsync(factory);
         using HttpClient client = factory.CreateClient();
 
-        RegisterRequest request = new("admin1@example.com", "Password123!", "Admin One");
+        RegisterAdminRequest request = new("admin1@example.com", "Password123!", "Admin One");
         using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/admins", request);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -48,7 +48,7 @@ public sealed class AdminBootstrapEndpointTests
 
         HttpRequestMessage requestMessage = new(HttpMethod.Post, "/api/v1/auth/admins")
         {
-            Content = JsonContent.Create(new RegisterRequest("admin2@example.com", "Password123!", "Admin Two"))
+            Content = JsonContent.Create(new RegisterAdminRequest("admin2@example.com", "Password123!", "Admin Two"))
         };
         requestMessage.Headers.Add("X-Admin-Creation-Key", "wrong-secret-key");
 
@@ -69,7 +69,7 @@ public sealed class AdminBootstrapEndpointTests
 
         HttpRequestMessage requestMessage = new(HttpMethod.Post, "/api/v1/auth/admins")
         {
-            Content = JsonContent.Create(new RegisterRequest("superadmin@example.com", "Password123!", "Super Admin"))
+            Content = JsonContent.Create(new RegisterAdminRequest("superadmin@example.com", "Password123!", "Super Admin"))
         };
         requestMessage.Headers.Add("X-Admin-Creation-Key", ConfiguredBootstrapKey);
 
@@ -100,7 +100,7 @@ public sealed class AdminBootstrapEndpointTests
         // Create first admin
         HttpRequestMessage req1 = new(HttpMethod.Post, "/api/v1/auth/admins")
         {
-            Content = JsonContent.Create(new RegisterRequest("duplicate@example.com", "Password123!", "Admin 1"))
+            Content = JsonContent.Create(new RegisterAdminRequest("duplicate@example.com", "Password123!", "Admin 1"))
         };
         req1.Headers.Add("X-Admin-Creation-Key", ConfiguredBootstrapKey);
         using HttpResponseMessage res1 = await client.SendAsync(req1);
@@ -109,7 +109,7 @@ public sealed class AdminBootstrapEndpointTests
         // Attempt second admin with same email
         HttpRequestMessage req2 = new(HttpMethod.Post, "/api/v1/auth/admins")
         {
-            Content = JsonContent.Create(new RegisterRequest("duplicate@example.com", "Password123!", "Admin 2"))
+            Content = JsonContent.Create(new RegisterAdminRequest("duplicate@example.com", "Password123!", "Admin 2"))
         };
         req2.Headers.Add("X-Admin-Creation-Key", ConfiguredBootstrapKey);
         using HttpResponseMessage res2 = await client.SendAsync(req2);
@@ -129,7 +129,7 @@ public sealed class AdminBootstrapEndpointTests
 
         HttpRequestMessage req = new(HttpMethod.Post, "/api/v1/auth/admins")
         {
-            Content = JsonContent.Create(new RegisterRequest("orphan@example.com", "Password123!", "Orphan Admin"))
+            Content = JsonContent.Create(new RegisterAdminRequest("orphan@example.com", "Password123!", "Orphan Admin"))
         };
         req.Headers.Add("X-Admin-Creation-Key", ConfiguredBootstrapKey);
         using HttpResponseMessage res = await client.SendAsync(req);

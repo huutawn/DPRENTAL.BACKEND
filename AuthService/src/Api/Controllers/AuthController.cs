@@ -53,7 +53,7 @@ public sealed class AuthController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<AccountCreatedResponse>> RegisterAdmin(
-        RegisterRequest request,
+        RegisterAdminRequest request,
         [FromHeader(Name = "X-Admin-Creation-Key")] string? adminCreationKey,
         CancellationToken cancellationToken)
     {
@@ -125,8 +125,7 @@ public sealed class AuthController(
         }
 
         // Xóa Cookie ở phía client
-        Response.Cookies.Delete("accessToken", CreateCookieOptions(TimeSpan.Zero));
-        Response.Cookies.Delete("refreshToken", CreateCookieOptions(TimeSpan.Zero));
+        AuthCookies.Clear(Response, Request, environment);
 
         return NoContent();
     }
@@ -336,26 +335,12 @@ public sealed class AuthController(
 
     private void SetAuthCookies(string accessToken, string refreshToken)
     {
-        Response.Cookies.Append(
-            "accessToken",
+        AuthCookies.SetAuthCookies(
+            Response,
+            Request,
+            environment,
             accessToken,
-            CreateCookieOptions(TimeSpan.FromMinutes(jwtOptions.Value.AccessTokenLifetimeMinutes)));
-        Response.Cookies.Append(
-            "refreshToken",
             refreshToken,
-            CreateCookieOptions(TimeSpan.FromDays(30)));
-    }
-
-    private CookieOptions CreateCookieOptions(TimeSpan lifetime)
-    {
-        bool isHttps = Request.IsHttps;
-        return new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = environment.IsProduction() || isHttps,
-            SameSite = isHttps ? SameSiteMode.None : SameSiteMode.Lax,
-            Path = "/",
-            Expires = DateTimeOffset.UtcNow.Add(lifetime)
-        };
+            jwtOptions.Value.AccessTokenLifetimeMinutes);
     }
 }
