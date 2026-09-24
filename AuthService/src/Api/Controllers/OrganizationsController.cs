@@ -211,6 +211,40 @@ public sealed class OrganizationsController(
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
 
+    /// <summary>Từ chối lời mời tham gia organization của người dùng hiện tại.</summary>
+    [HttpPost("{id:guid}/members/decline")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeclineInvitation(Guid id, CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        Result result = await organizationService.DeclineInvitationAsync(userId, id, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
+    }
+
+    /// <summary>Người dùng hiện tại tự rời khỏi organization (chặn nếu là Owner duy nhất).</summary>
+    [HttpDelete("{id:guid}/members/me")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> LeaveOrganization(Guid id, CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        Result result = await organizationService.LeaveAsync(userId, id, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
+    }
+
     private bool TryGetCurrentUserId(out Guid userId)
     {
         Guid? actorUserId = User.GetJwtSub();

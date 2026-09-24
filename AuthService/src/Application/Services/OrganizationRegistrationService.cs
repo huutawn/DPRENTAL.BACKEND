@@ -29,6 +29,11 @@ public sealed class OrganizationRegistrationService(
             return AuthErrors.User.NotFound;
         }
 
+        if (ProfileCompletionGuard.Check(actor) is Error profileError)
+        {
+            return profileError;
+        }
+
         if (request.Type is not (OrganizationType.Supplier or OrganizationType.Renter))
         {
             return AuthErrors.Organization.SelfRegistrationTypeNotAllowed;

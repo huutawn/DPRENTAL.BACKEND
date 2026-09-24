@@ -50,6 +50,15 @@ public static class AuthErrorCode
         public const string NotFound = "User.NotFound";
         public const string CitizenIdAlreadyExists = "User.CitizenIdAlreadyExists";
         public const string Underage = "User.Underage";
+        public const string LastOwnerOrganization = "User.LastOwnerOrganization";
+    }
+
+    public static class Profile
+    {
+        public const string NotCompleted = "Profile.NotCompleted";
+        public const string AlreadyCompleted = "Profile.AlreadyCompleted";
+        public const string EmptyPatch = "Profile.EmptyPatch";
+        public const string InvalidFullName = "Profile.InvalidFullName";
     }
 
     public static class Navigation
@@ -77,6 +86,8 @@ public static class AuthErrorCode
         public const string EmailNotVerified = "ExternalLogin.EmailNotVerified";
         public const string AccountDisabled = "ExternalLogin.AccountDisabled";
         public const string AlreadyLinked = "ExternalLogin.AlreadyLinked";
+        public const string NotLinked = "ExternalLogin.NotLinked";
+        public const string CannotUnlinkLastCredential = "ExternalLogin.CannotUnlinkLastCredential";
     }
 
     public static class Auth
@@ -85,6 +96,7 @@ public static class AuthErrorCode
         public const string InactiveAccount = "Auth.InactiveAccount";
         public const string MissingCookie = "Auth.MissingCookie";
         public const string InvalidRefreshToken = "Auth.InvalidRefreshToken";
+        public const string SessionNotFound = "Auth.SessionNotFound";
     }
 
     public static class Paging

@@ -787,6 +787,11 @@ public sealed class OrganizationService(
             return Result.Failure(AuthErrors.Organization.UserNotFound);
         }
 
+        if (ProfileCompletionGuard.Check(actor) is Error profileError)
+        {
+            return Result.Failure(profileError);
+        }
+
         Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
         if (org is null)
         {
@@ -816,6 +821,131 @@ public sealed class OrganizationService(
         membership.JoinedAtUtc = DateTime.UtcNow;
 
         await membershipRepository.UpdateAsync(membership, cancellationToken);
+        return Result.Success();
+    }
+
+    public async Task<Result<IReadOnlyList<MyOrganizationResponse>>> GetMyOrganizationsAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty)
+        {
+            return Result.Failure<IReadOnlyList<MyOrganizationResponse>>(AuthErrors.User.NotFound);
+        }
+
+        IReadOnlyList<OrganizationMembership> memberships = await membershipRepository.GetMembershipsForUserAsync(userId, cancellationToken);
+
+        IReadOnlyList<MyOrganizationResponse> result = memberships
+            .Where(m => m.Status == MembershipStatus.Active)
+            .OrderBy(m => m.JoinedAtUtc)
+            .ThenBy(m => m.Id)
+            .Select(m => new MyOrganizationResponse(
+                m.Id,
+                m.OrganizationId,
+                m.Organization?.Name ?? string.Empty,
+                m.Organization?.Slug ?? string.Empty,
+                m.Organization?.Type ?? OrganizationType.Supplier,
+                m.Organization?.Status ?? OrganizationStatus.Active,
+                m.Role?.Name ?? string.Empty,
+                m.Status,
+                m.JoinedAtUtc))
+            .ToList();
+
+        return Result.Success(result);
+    }
+
+    public async Task<Result<IReadOnlyList<OrganizationInvitationResponse>>> GetMyInvitationsAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId == Guid.Empty)
+        {
+            return Result.Failure<IReadOnlyList<OrganizationInvitationResponse>>(AuthErrors.User.NotFound);
+        }
+
+        IReadOnlyList<OrganizationMembership> memberships = await membershipRepository.GetMembershipsForUserAsync(userId, cancellationToken);
+
+        IReadOnlyList<OrganizationInvitationResponse> result = memberships
+            .Where(m => m.Status == MembershipStatus.Invited)
+            .OrderByDescending(m => m.JoinedAtUtc)
+            .ThenBy(m => m.Id)
+            .Select(m => new OrganizationInvitationResponse(
+                m.Id,
+                m.OrganizationId,
+                m.Organization?.Name ?? string.Empty,
+                m.Organization?.Slug ?? string.Empty,
+                m.Organization?.Type ?? OrganizationType.Supplier,
+                m.Role?.Name ?? string.Empty,
+                m.JoinedAtUtc))
+            .ToList();
+
+        return Result.Success(result);
+    }
+
+    public async Task<Result> DeclineInvitationAsync(
+        Guid actorUserId,
+        Guid organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (actorUserId == Guid.Empty || organizationId == Guid.Empty)
+        {
+            return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
+        }
+
+        Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
+        if (org is null)
+        {
+            return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
+        }
+
+        OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
+        if (membership is null)
+        {
+            return Result.Failure(AuthErrors.Organization.MembershipNotFound);
+        }
+
+        if (membership.Status != MembershipStatus.Invited)
+        {
+            return Result.Failure(AuthErrors.Organization.InvalidStateTransition);
+        }
+
+        await membershipRepository.DeleteAsync(membership.Id, cancellationToken);
+        return Result.Success();
+    }
+
+    public async Task<Result> LeaveAsync(
+        Guid actorUserId,
+        Guid organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (actorUserId == Guid.Empty || organizationId == Guid.Empty)
+        {
+            return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
+        }
+
+        Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
+        if (org is null)
+        {
+            return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
+        }
+
+        OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
+        if (membership is null || membership.Status != MembershipStatus.Active)
+        {
+            return Result.Failure(AuthErrors.Organization.MembershipNotFound);
+        }
+
+        Role? currentRole = membership.Role ?? await roleRepository.GetByIdAsync(membership.RoleId, cancellationToken);
+        if (IsOwner(currentRole))
+        {
+            int activeOwners = await membershipRepository.CountActiveOwnersAsync(organizationId, cancellationToken);
+            if (activeOwners <= 1)
+            {
+                return Result.Failure(AuthErrors.Organization.LastOwner);
+            }
+        }
+
+        await membershipRepository.DeleteAsync(membership.Id, cancellationToken);
         return Result.Success();
     }
 

@@ -9,7 +9,10 @@ namespace Dprental.AuthService.Application.Services;
 /// <summary>Quy tắc dựng tài khoản customer, dùng chung cho đăng ký cá nhân và tài khoản Owner khi đăng ký tổ chức.</summary>
 internal static class CustomerAccountRules
 {
-    private const int MinimumAge = 18;
+    internal const int MinimumAge = 18;
+
+    internal static bool IsUnderage(DateOnly dateOfBirth, DateTimeOffset utcNow) =>
+        dateOfBirth.AddYears(MinimumAge) > DateOnly.FromDateTime(utcNow.UtcDateTime);
 
     /// <summary>
     /// Kiểm tra tuổi và trùng email trước khi ghi. Race condition vẫn được chặn bởi unique index.
@@ -23,7 +26,7 @@ internal static class CustomerAccountRules
         CancellationToken cancellationToken)
     {
         if (request.DateOfBirth is DateOnly dateOfBirth
-            && dateOfBirth.AddYears(MinimumAge) > DateOnly.FromDateTime(utcNow.UtcDateTime))
+            && IsUnderage(dateOfBirth, utcNow))
         {
             return AuthErrors.User.Underage;
         }
@@ -52,6 +55,7 @@ internal static class CustomerAccountRules
             PhoneNumber = NullIfBlank(request.PhoneNumber),
             DateOfBirth = request.DateOfBirth,
             CreatedAt = utcNow,
+            HasPassword = true,
             IsActive = true,
         };
         user.PasswordHash = passwordHasher.HashPassword(user, request.Password);

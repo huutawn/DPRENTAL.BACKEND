@@ -153,4 +153,12 @@ public sealed class EfOrganizationMembershipRepository(AuthDbContext dbContext) 
             .SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Code))
             .Distinct()
             .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<OrganizationMembership>> GetMembershipsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        await dbContext.OrganizationMemberships
+            .AsNoTracking()
+            .Include(m => m.Organization)
+            .Include(m => m.Role)
+            .Where(m => m.UserId == userId)
+            .ToListAsync(cancellationToken);
 }

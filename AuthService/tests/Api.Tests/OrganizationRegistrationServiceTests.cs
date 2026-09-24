@@ -143,7 +143,7 @@ public sealed class OrganizationRegistrationServiceTests
 
     private static async Task<User> CreateUserAsync(AuthDbContext dbContext, string email)
     {
-        User user = new() { Id = Guid.NewGuid(), Email = email, FullName = "Owner", PasswordHash = "hash", IsActive = true };
+        User user = new() { Id = Guid.NewGuid(), Email = email, FullName = "Owner", PasswordHash = "hash", IsActive = true, ProfileCompletedAtUtc = DateTime.UtcNow };
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
         return user;

@@ -121,8 +121,16 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
         }
 
         dbContext.Users.Update(entity);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException exception) when (UniqueConstraintViolations.IsUniqueViolation(exception))
+        {
+            dbContext.Entry(entity).State = EntityState.Detached;
+            throw UniqueConstraintViolations.ToUserException(exception);
+        }
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)

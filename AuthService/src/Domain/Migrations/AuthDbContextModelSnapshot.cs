@@ -654,6 +654,9 @@ namespace Dprental.AuthService.Domain.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<bool>("HasPassword")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
@@ -667,6 +670,9 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Property<string>("PhoneNumber")
                         .HasMaxLength(15)
                         .HasColumnType("character varying(15)");
+
+                    b.Property<DateTime?>("ProfileCompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 

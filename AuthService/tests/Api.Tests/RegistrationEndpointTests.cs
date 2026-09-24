@@ -155,7 +155,7 @@ public sealed class RegistrationEndpointTests
     {
         using IServiceScope scope = factory.Services.CreateScope();
         AuthDbContext dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-        User user = new() { Id = Guid.NewGuid(), Email = email, FullName = "Owner", PasswordHash = "hash", IsActive = true };
+        User user = new() { Id = Guid.NewGuid(), Email = email, FullName = "Owner", PasswordHash = "hash", IsActive = true, ProfileCompletedAtUtc = DateTime.UtcNow };
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
         return user.Id;

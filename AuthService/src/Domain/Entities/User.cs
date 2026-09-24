@@ -36,7 +36,17 @@ public class User
 
     public DateOnly? DateOfBirth { get; set; }
 
+    /// <summary>Thời điểm user hoàn thiện hồ sơ bắt buộc (CCCD + SĐT + ngày sinh); null khi chưa hoàn thiện.</summary>
+    public DateTime? ProfileCompletedAtUtc { get; set; }
+
+    /// <summary>Suy ra từ <see cref="ProfileCompletedAtUtc"/> — không lưu xuống DB.</summary>
+    [NotMapped]
+    public bool IsProfileCompleted => ProfileCompletedAtUtc is not null;
+
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>Cho biết tài khoản đã có mật khẩu tự đặt hay chưa (user tạo qua Google có HasPassword = false).</summary>
+    public bool HasPassword { get; set; }
 
     public bool IsActive { get; set; } = true;
 

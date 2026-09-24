@@ -443,6 +443,7 @@ public sealed class OrganizationIntegrationTests
             FullName = fullName,
             PasswordHash = "hash",
             CreatedAt = DateTime.UtcNow,
+            ProfileCompletedAtUtc = DateTime.UtcNow,
             IsActive = true
         };
         user.UserRoles.Add(new UserRole { UserId = userId, RoleId = roleId });

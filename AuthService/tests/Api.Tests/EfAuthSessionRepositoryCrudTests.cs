@@ -15,7 +15,7 @@ public sealed class EfAuthSessionRepositoryCrudTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
             .Options;
         await using AuthDbContext dbContext = new(options);
-        EfAuthSessionRepository repository = new(dbContext);
+        EfAuthSessionRepository repository = new(dbContext, TimeProvider.System);
         Session session = new()
         {
             Id = Guid.NewGuid(),

@@ -22,4 +22,12 @@ public interface IOrganizationService
     Task<Result> DeleteMemberAsync(Guid actorUserId, Guid organizationId, Guid memberId, CancellationToken cancellationToken = default);
 
     Task<Result> AcceptInvitationAsync(Guid actorUserId, Guid organizationId, CancellationToken cancellationToken = default);
+
+    Task<Result<IReadOnlyList<MyOrganizationResponse>>> GetMyOrganizationsAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    Task<Result<IReadOnlyList<OrganizationInvitationResponse>>> GetMyInvitationsAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    Task<Result> DeclineInvitationAsync(Guid actorUserId, Guid organizationId, CancellationToken cancellationToken = default);
+
+    Task<Result> LeaveAsync(Guid actorUserId, Guid organizationId, CancellationToken cancellationToken = default);
 }
