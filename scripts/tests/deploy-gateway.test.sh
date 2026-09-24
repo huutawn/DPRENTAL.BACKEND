@@ -92,8 +92,20 @@ assert_not_contains 'recreate auth-service' "$docker_log"
 assert_contains 'exec -T gateway wget --quiet --tries=1 --spider http://127.0.0.1:8080/health/ready' "$docker_log"
 assert_contains 'https://dev-api.example.test/health/ready' "$curl_log"
 
+PATH="$fake_bin:$PATH" \
+  DOCKER_LOG="$docker_log" \
+  CURL_LOG="$curl_log" \
+  DPR_DEPLOY_DIRECTORY="$deploy_directory" \
+  GITHUB_SHA="$release_sha" \
+  GATEWAY_DEPLOY_HEALTH_INTERVAL_SECONDS=0 \
+  "$deployer" >/dev/null
+
 if PATH="$fake_bin:$PATH" DPR_DEPLOY_DIRECTORY="$deploy_directory" "$deployer" invalid >/dev/null 2>&1; then
   fail 'SHA không hợp lệ lại được chấp nhận.'
+fi
+
+if PATH="$fake_bin:$PATH" DPR_DEPLOY_DIRECTORY="$deploy_directory" GITHUB_SHA=invalid "$deployer" >/dev/null 2>&1; then
+  fail 'GITHUB_SHA không hợp lệ lại được chấp nhận.'
 fi
 
 printf 'Đã đạt regression test cho script triển khai Gateway.\n'

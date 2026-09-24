@@ -290,16 +290,14 @@ Workflow [gateway-dev.yml](.github/workflows/gateway-dev.yml) chạy khi tạo p
 1. **Validate**:
    - Kiểm tra commit hiện tại đã chứa `origin/gateway/develop` mới nhất.
    - Khôi phục, biên dịch và chạy kiểm thử tự động `Gateway/Gateway.sln`.
-   - Xây dựng thử nghiệm Docker runtime image.
+   - Với pull request, xây dựng thử nghiệm Docker runtime image.
 
-2. **Publish**:
-   - Khi push vào `gateway/develop-ci-cd`, workflow đăng nhập GHCR và xuất bản image bất biến:
+2. **Release** (chỉ khi push vào `gateway/develop-ci-cd`):
+   - Xây dựng Docker runtime image một lần, sử dụng cache build của GitHub Actions, rồi đăng nhập GHCR và xuất bản image bất biến:
      ```text
      ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-gateway:<git-sha>
      ```
-
-3. **Deploy Dev**:
-   - Đồng bộ [deploy-gateway.sh](scripts/deploy-gateway.sh) lên máy chủ phát hành (`/opt/dprental/dev/scripts/deploy-gateway.sh`).
+   - Thực thi [deploy-gateway.sh](scripts/deploy-gateway.sh) trên máy chủ qua SSH; action đối chiếu fingerprint máy chủ trước khi chạy.
    - Cập nhật **chỉ duy nhất biến `GATEWAY_IMAGE`** trong `/opt/dprental/dev/release.env`, bảo toàn nguyên vẹn mọi image khác (`AUTH_SERVICE_IMAGE`, `AUTH_MIGRATOR_IMAGE`...).
    - Chỉ pull image `gateway` và khởi động lại duy nhất container này với `--no-deps --force-recreate gateway`.
    - Chờ Gateway đạt trạng thái healthy và thực hiện kiểm thử khói (smoke tests) cả nội bộ lẫn qua domain công khai.
@@ -310,6 +308,8 @@ Cấu hình GitHub Environment `dev` cần các secrets sau:
 DEV_VPS_HOST              # IP hoặc hostname VPS
 DEV_VPS_USER              # User deploy thuộc group docker
 DEV_VPS_SSH_PRIVATE_KEY   # Private key SSH riêng của user deploy
-DEV_VPS_KNOWN_HOSTS       # Dòng host key theo định dạng known_hosts
+DEV_VPS_SSH_FINGERPRINT   # Fingerprint SHA256 của SSH host key máy chủ (bắt buộc)
 DEV_VPS_PORT              # Tùy chọn, mặc định 22
 ```
+
+Lấy fingerprint từ bản host key đã xác thực trước đó bằng `ssh-keygen -lf <known_hosts-file> -E sha256`, rồi lưu giá trị `SHA256:...` vào `DEV_VPS_SSH_FINGERPRINT`. Secret `DEV_VPS_KNOWN_HOSTS` cũ không còn được workflow sử dụng.

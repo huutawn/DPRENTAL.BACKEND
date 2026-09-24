@@ -118,8 +118,8 @@ smoke_test_gateway_internal_health() {
     fail 'health check nội bộ của Gateway thất bại; không tự rollback image.'
 }
 
-[ "$#" -eq 1 ] || usage
-release_sha="$1"
+[ "$#" -le 1 ] || usage
+release_sha="${1:-${GITHUB_SHA:-}}"
 [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || fail 'release SHA phải là commit SHA gồm đúng 40 ký tự hex thường.'
 
 require_file "$ENVIRONMENT_FILE"
