@@ -1,0 +1,546 @@
+using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Application.Services;
+using Dprental.AuthService.Common;
+using Dprental.AuthService.Domain.DTOs.User;
+using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Domain.Exceptions;
+using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Domain.Models;
+using Xunit;
+
+namespace Dprental.AuthService.Api.Tests;
+
+public sealed class UserAccountServiceTests
+{
+    private static readonly DateTimeOffset FixedNow = new(2026, 9, 23, 10, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public async Task CompleteProfileAsyncHappyPathSucceedsAndAudits()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            FullName = "Original Name",
+            IsActive = true
+        };
+
+        FakeUserRepository userRepo = new() { User = user };
+        TestAuditLogRepository auditRepo = new();
+        UserAccountService service = CreateService(userRepo, auditLogRepository: auditRepo);
+
+        CompleteProfileRequest request = new(
+            CitizenId: "079203001234",
+            PhoneNumber: "0901234567",
+            DateOfBirth: new DateOnly(2000, 1, 1),
+            FullName: "Updated Name",
+            AvatarUrl: "https://example.com/avatar.png");
+
+        Result<CurrentUserResponse> result = await service.CompleteProfileAsync(userId, request);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value.IsProfileCompleted);
+        Assert.Equal("********1234", result.Value.MaskedCitizenId);
+        Assert.Equal("0901234567", result.Value.PhoneNumber);
+        Assert.Equal("Updated Name", result.Value.FullName);
+        Assert.Equal("https://example.com/avatar.png", result.Value.AvatarUrl);
+        Assert.Equal(new DateOnly(2000, 1, 1), result.Value.DateOfBirth);
+        Assert.NotNull(user.ProfileCompletedAtUtc);
+
+        AuditLog log = Assert.Single(auditRepo.Logs);
+        Assert.Equal("Profile_Complete", log.Action);
+        Assert.Equal("Success", log.Result);
+        Assert.Equal(userId.ToString(), log.Target);
+        Assert.DoesNotContain("079203001234", log.Target, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CompleteProfileAsyncAlreadyCompletedReturnsConflict()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            FullName = "Name",
+            CitizenId = "079203001234",
+            ProfileCompletedAtUtc = DateTime.UtcNow,
+            IsActive = true
+        };
+
+        FakeUserRepository userRepo = new() { User = user };
+        UserAccountService service = CreateService(userRepo);
+
+        CompleteProfileRequest request = new(
+            CitizenId: "079203001234",
+            PhoneNumber: "0901234567",
+            DateOfBirth: new DateOnly(2000, 1, 1));
+
+        Result<CurrentUserResponse> result = await service.CompleteProfileAsync(userId, request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Profile.AlreadyCompleted, result.Error);
+    }
+
+    [Fact]
+    public async Task CompleteProfileAsyncUnderageReturnsBadRequest()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
+        FakeUserRepository userRepo = new() { User = user };
+        UserAccountService service = CreateService(userRepo);
+
+        // FixedNow is 2026-09-23, so DOB in 2010 is 16 years old
+        CompleteProfileRequest request = new(
+            CitizenId: "079203001234",
+            PhoneNumber: "0901234567",
+            DateOfBirth: new DateOnly(2010, 1, 1));
+
+        Result<CurrentUserResponse> result = await service.CompleteProfileAsync(userId, request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.User.Underage, result.Error);
+    }
+
+    [Fact]
+    public async Task CompleteProfileAsyncCitizenIdExistsReturnsConflict()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
+        FakeUserRepository userRepo = new() { User = user, ExistingCitizenId = "079203001234" };
+        UserAccountService service = CreateService(userRepo);
+
+        CompleteProfileRequest request = new(
+            CitizenId: "079203001234",
+            PhoneNumber: "0901234567",
+            DateOfBirth: new DateOnly(2000, 1, 1));
+
+        Result<CurrentUserResponse> result = await service.CompleteProfileAsync(userId, request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.User.CitizenIdAlreadyExists, result.Error);
+    }
+
+    [Fact]
+    public async Task CompleteProfileAsyncDuplicateCitizenIdExceptionOnSaveReturnsConflict()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
+        FakeUserRepository userRepo = new() { User = user, ThrowDuplicateCitizenIdOnUpdate = true };
+        UserAccountService service = CreateService(userRepo);
+
+        CompleteProfileRequest request = new(
+            CitizenId: "079203001234",
+            PhoneNumber: "0901234567",
+            DateOfBirth: new DateOnly(2000, 1, 1));
+
+        Result<CurrentUserResponse> result = await service.CompleteProfileAsync(userId, request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.User.CitizenIdAlreadyExists, result.Error);
+    }
+
+    [Fact]
+    public async Task UpdateProfileAsyncEmptyPatchReturnsBadRequest()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
+        FakeUserRepository userRepo = new() { User = user };
+        UserAccountService service = CreateService(userRepo);
+
+        UpdateProfileRequest request = new();
+
+        Result<CurrentUserResponse> result = await service.UpdateProfileAsync(userId, request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Profile.EmptyPatch, result.Error);
+    }
+
+    [Fact]
+    public async Task UpdateProfileAsyncBlankFullNameReturnsInvalidFullName()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
+        FakeUserRepository userRepo = new() { User = user };
+        UserAccountService service = CreateService(userRepo);
+
+        UpdateProfileRequest request = new(FullName: "   ");
+
+        Result<CurrentUserResponse> result = await service.UpdateProfileAsync(userId, request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Profile.InvalidFullName, result.Error);
+    }
+
+    [Fact]
+    public async Task UpdateProfileAsyncEmptyAvatarUrlClearsAvatar()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            AvatarUrl = "https://example.com/old-avatar.png",
+            IsActive = true
+        };
+        FakeUserRepository userRepo = new() { User = user };
+        UserAccountService service = CreateService(userRepo);
+
+        UpdateProfileRequest request = new(AvatarUrl: "");
+
+        Result<CurrentUserResponse> result = await service.UpdateProfileAsync(userId, request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.Value.AvatarUrl);
+        Assert.Null(user.AvatarUrl);
+    }
+
+    [Fact]
+    public async Task GetExternalLoginsAsyncReturnsLoginsForUser()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
+        FakeUserRepository userRepo = new() { User = user };
+        FakeExternalLoginRepository loginRepo = new();
+        loginRepo.Logins.Add(new ExternalLogin
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Provider = "Google",
+            Email = "user@example.com",
+            CreatedAtUtc = FixedNow.UtcDateTime
+        });
+
+        UserAccountService service = CreateService(userRepo, externalLoginRepository: loginRepo);
+
+        Result<IReadOnlyList<ExternalLoginResponse>> result = await service.GetExternalLoginsAsync(userId);
+
+        Assert.True(result.IsSuccess);
+        ExternalLoginResponse item = Assert.Single(result.Value);
+        Assert.Equal("Google", item.Provider);
+        Assert.Equal("user@example.com", item.Email);
+    }
+
+    [Fact]
+    public async Task UnlinkExternalLoginAsyncUnknownProviderReturnsNotLinked()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
+        FakeUserRepository userRepo = new() { User = user };
+        UserAccountService service = CreateService(userRepo);
+
+        Result result = await service.UnlinkExternalLoginAsync(userId, "Facebook");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.ExternalLogin.NotLinked, result.Error);
+    }
+
+    [Fact]
+    public async Task UnlinkExternalLoginAsyncWhenUserHasNoPasswordAndSingleLoginReturnsCannotUnlinkLastCredential()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "google@example.com", IsActive = true, HasPassword = false };
+        FakeUserRepository userRepo = new() { User = user };
+        FakeExternalLoginRepository loginRepo = new();
+        loginRepo.Logins.Add(new ExternalLogin
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Provider = "Google",
+            ProviderSubject = "sub-123",
+            Email = "google@example.com"
+        });
+
+        UserAccountService service = CreateService(userRepo, externalLoginRepository: loginRepo);
+
+        Result result = await service.UnlinkExternalLoginAsync(userId, "Google");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.ExternalLogin.CannotUnlinkLastCredential, result.Error);
+    }
+
+    [Fact]
+    public async Task UnlinkExternalLoginAsyncWhenUserHasPasswordSucceedsAndLogsAudit()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", IsActive = true, HasPassword = true };
+        FakeUserRepository userRepo = new() { User = user };
+        FakeExternalLoginRepository loginRepo = new();
+        loginRepo.Logins.Add(new ExternalLogin
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Provider = "Google",
+            ProviderSubject = "sub-123",
+            Email = "user@example.com"
+        });
+        TestAuditLogRepository auditRepo = new();
+
+        UserAccountService service = CreateService(userRepo, auditLogRepository: auditRepo, externalLoginRepository: loginRepo);
+
+        Result result = await service.UnlinkExternalLoginAsync(userId, "Google");
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(loginRepo.Logins);
+        AuditLog audit = Assert.Single(auditRepo.Logs);
+        Assert.Equal("ExternalLogin_Unlink", audit.Action);
+        Assert.Equal(userId.ToString(), audit.Target);
+    }
+
+    [Fact]
+    public async Task DeactivateAsyncWhenLastOwnerReturnsLastOwnerOrganization()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid orgId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "owner@example.com", IsActive = true };
+        FakeUserRepository userRepo = new() { User = user };
+        FakeOrganizationMembershipRepository memRepo = new()
+        {
+            ActiveOwnersCount = 1
+        };
+        memRepo.Memberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            OrganizationId = orgId,
+            Status = MembershipStatus.Active,
+            Role = new Role { Id = Guid.NewGuid(), Name = "Owner" }
+        });
+
+        UserAccountService service = CreateService(userRepo, organizationMembershipRepository: memRepo);
+
+        Result result = await service.DeactivateAsync(userId);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.User.LastOwnerOrganization, result.Error);
+        Assert.True(user.IsActive);
+    }
+
+    [Fact]
+    public async Task DeactivateAsyncHappyPathDeactivatesUserRevokesSessionsAndLogsAudit()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "member@example.com", IsActive = true };
+        FakeUserRepository userRepo = new() { User = user };
+        FakeAuthSessionRepository sessionRepo = new();
+        TestAuditLogRepository auditRepo = new();
+
+        UserAccountService service = CreateService(
+            userRepo,
+            auditLogRepository: auditRepo,
+            authSessionRepository: sessionRepo);
+
+        Result result = await service.DeactivateAsync(userId);
+
+        Assert.True(result.IsSuccess);
+        Assert.False(user.IsActive);
+        Assert.Contains(userId, sessionRepo.RevokedUsers);
+        AuditLog audit = Assert.Single(auditRepo.Logs);
+        Assert.Equal("Account_Deactivate", audit.Action);
+        Assert.Equal(userId.ToString(), audit.Target);
+    }
+
+    private static UserAccountService CreateService(
+        FakeUserRepository userRepo,
+        IAuditLogRepository? auditLogRepository = null,
+        FakeExternalLoginRepository? externalLoginRepository = null,
+        FakeAuthSessionRepository? authSessionRepository = null,
+        FakeOrganizationMembershipRepository? organizationMembershipRepository = null)
+    {
+        return new UserAccountService(
+            userRepo,
+            externalLoginRepository ?? new FakeExternalLoginRepository(),
+            authSessionRepository ?? new FakeAuthSessionRepository(),
+            organizationMembershipRepository ?? new FakeOrganizationMembershipRepository(),
+            auditLogRepository ?? new TestAuditLogRepository(),
+            new TestCorrelationIdProvider(),
+            new FixedTimeProvider(FixedNow));
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
+    }
+
+    private sealed class TestCorrelationIdProvider : ICorrelationIdProvider
+    {
+        public string GetCorrelationId() => "test-corr-id";
+    }
+
+    private sealed class TestAuditLogRepository : IAuditLogRepository
+    {
+        public List<AuditLog> Logs { get; } = [];
+
+        public Task AddAsync(AuditLog log, CancellationToken cancellationToken = default)
+        {
+            Logs.Add(log);
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<AuditLog>> GetRecentLogsAsync(int count, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class FakeUserRepository : IUserRepository
+    {
+        public User? User { get; set; }
+        public string? ExistingCitizenId { get; set; }
+        public bool ThrowDuplicateCitizenIdOnUpdate { get; set; }
+
+        public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult(User is not null && User.Id == id ? User : null);
+
+        public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult(User is not null && User.Id == id ? User : null);
+
+        public Task<bool> CitizenIdExistsAsync(string citizenId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(citizenId == ExistingCitizenId);
+
+        public Task<bool> UpdateAsync(User entity, CancellationToken cancellationToken = default)
+        {
+            if (ThrowDuplicateCitizenIdOnUpdate)
+            {
+                throw new DuplicateCitizenIdException();
+            }
+            User = entity;
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<User> CreateAsync(User entity, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<User> CreateWithRoleAsync(User user, Guid roleId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<User>> GetAllAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class FakeExternalLoginRepository : IExternalLoginRepository
+    {
+        public List<ExternalLogin> Logins { get; } = [];
+
+        public Task<ExternalLogin?> FindAsync(string provider, string providerSubject, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task AddAsync(ExternalLogin login, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<ExternalLogin>> GetByUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<ExternalLogin>>(Logins.Where(l => l.UserId == userId).ToList());
+
+        public Task<bool> DeleteAsync(Guid userId, string provider, CancellationToken cancellationToken = default)
+        {
+            int removed = Logins.RemoveAll(l => l.UserId == userId && l.Provider == provider);
+            return Task.FromResult(removed > 0);
+        }
+    }
+
+    private sealed class FakeAuthSessionRepository : IAuthSessionRepository
+    {
+        public List<Guid> RevokedUsers { get; } = [];
+
+        public Task<AuthSessionPrincipal?> CreateAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<AuthSessionPrincipal?> ConsumeGoogleLoginTicketAndCreateSessionAsync(string ticketHash, string refreshTokenHash, DateTime utcNow, DateTime sessionExpiresAtUtc, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<AuthSessionPrincipal?> RotateAsync(string currentRefreshTokenHash, string replacementRefreshTokenHash, DateTime utcNow, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default)
+        {
+            RevokedUsers.Add(userId);
+            return Task.CompletedTask;
+        }
+
+        public Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<Session?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<Session>> GetAllAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<Session> CreateAsync(Session entity, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<bool> UpdateAsync(Session entity, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<Guid?> GetSessionIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<bool> RevokeSessionForUserAsync(Guid userId, Guid sessionId, DateTime utcNow, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class FakeOrganizationMembershipRepository : IOrganizationMembershipRepository
+    {
+        public List<OrganizationMembership> Memberships { get; } = [];
+        public int ActiveOwnersCount { get; set; } = 1;
+
+        public Task<OrganizationMembership?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<OrganizationMembership?> GetByOrganizationAndUserAsync(Guid organizationId, Guid userId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<OrganizationMembership?> FindMemberAsync(Guid organizationId, Guid memberOrUserId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<PagedResult<OrganizationMembership>> GetMembersAsync(Guid organizationId, PageRequest request, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<bool> MembershipExistsAsync(Guid organizationId, Guid userId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<OrganizationMembership> AddMemberAsync(OrganizationMembership membership, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<bool> UpdateAsync(OrganizationMembership membership, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<bool> DeleteAsync(Guid membershipId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<int> CountOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<int> CountActiveOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(ActiveOwnersCount);
+
+        public Task<IReadOnlyList<string>> GetEffectivePermissionsAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<OrganizationMembership>> GetMembershipsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<OrganizationMembership>>(Memberships.Where(m => m.UserId == userId).ToList());
+    }
+}

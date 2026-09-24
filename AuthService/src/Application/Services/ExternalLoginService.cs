@@ -16,6 +16,7 @@ namespace Dprental.AuthService.Application.Services;
 public sealed class ExternalLoginService(
     IExternalLoginRepository externalLoginRepository,
     IUserRepository userRepository,
+    IRoleRepository roleRepository,
     IPasswordHasher<User> passwordHasher,
     TimeProvider timeProvider) : IExternalLoginService
 {
@@ -94,6 +95,7 @@ public sealed class ExternalLoginService(
             Email = email,
             FullName = BuildFullName(identity.FullName, email),
             CreatedAt = utcNow,
+            HasPassword = false,
             IsActive = true,
         };
 
@@ -101,9 +103,21 @@ public sealed class ExternalLoginService(
         user.PasswordHash = passwordHasher.HashPassword(user, RandomNumberGenerator.GetHexString(64));
         user.ExternalLogins.Add(NewLogin(user.Id, identity, email, utcNow));
 
+        Role? customerRole = await roleRepository.GetByNameAsync(SystemRoleCode.Customer, cancellationToken);
+
         try
         {
-            await userRepository.CreateAsync(user, cancellationToken);
+            if (customerRole is not null)
+            {
+                await userRepository.CreateWithRoleAsync(user, customerRole.Id, cancellationToken);
+            }
+            else
+            {
+                // Role customer chưa được seed (vd DB chưa chạy migration mới nhất) — vẫn cho tạo tài khoản,
+                // không chặn user chỉ vì thiếu 1 role không mang permission gì. Giống UserService.RegisterAsync.
+                await userRepository.CreateAsync(user, cancellationToken);
+            }
+
             return user.Id;
         }
         catch (DuplicateEmailException)

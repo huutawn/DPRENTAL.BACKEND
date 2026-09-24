@@ -179,6 +179,34 @@ public sealed class ExternalLoginServiceTests
     }
 
     [Fact]
+    public async Task SignInAsyncNewUserIsAssignedCustomerRoleWhenSeeded()
+    {
+        FakeUsers users = new();
+        ExternalLoginService service = CreateService(new FakeExternalLogins(), users);
+
+        Result<Guid> result = await service.SignInAsync(CreateIdentity("google-sub-10", email: "role-test@example.com"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(users.Created);
+        var (assignedUser, assignedRoleId) = Assert.Single(users.CreatedWithRole);
+        Assert.Equal(result.Value, assignedUser.Id);
+        Assert.Equal(CustomerRoleId, assignedRoleId);
+    }
+
+    [Fact]
+    public async Task SignInAsyncNewUserWithoutSeededCustomerRoleStillCreatesAccount()
+    {
+        FakeUsers users = new();
+        ExternalLoginService service = CreateService(new FakeExternalLogins(), users, new FakeRoles());
+
+        Result<Guid> result = await service.SignInAsync(CreateIdentity("google-sub-11", email: "no-role@example.com"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(users.Created);
+        Assert.Empty(users.CreatedWithRole);
+    }
+
+    [Fact]
     public async Task SignInAsyncNewUserWithoutNameUsesEmailAndTruncatesLongNames()
     {
         FakeUsers users = new();
@@ -217,8 +245,17 @@ public sealed class ExternalLoginServiceTests
         Assert.Equal(AuthErrors.User.EmailAlreadyExists, result.Error);
     }
 
-    private static ExternalLoginService CreateService(FakeExternalLogins logins, FakeUsers users) =>
-        new(logins, users, new PasswordHasher<User>(), new FixedTimeProvider(Now));
+    private static readonly Guid CustomerRoleId = Guid.NewGuid();
+
+    private static ExternalLoginService CreateService(FakeExternalLogins logins, FakeUsers users, FakeRoles? roles = null) =>
+        new(logins, users, roles ?? CreateRolesWithCustomerSeeded(), new PasswordHasher<User>(), new FixedTimeProvider(Now));
+
+    private static FakeRoles CreateRolesWithCustomerSeeded()
+    {
+        FakeRoles roles = new();
+        roles.Roles[SystemRoleCode.Customer] = new Role { Id = CustomerRoleId, Name = SystemRoleCode.Customer, Scope = RoleScope.Global };
+        return roles;
+    }
 
     private static ExternalIdentity CreateIdentity(
         string subject,
@@ -277,14 +314,27 @@ public sealed class ExternalLoginServiceTests
             Added.Add(login);
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<ExternalLogin>> GetByUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<ExternalLogin>>(Links.Where(l => l.UserId == userId).ToList());
+
+        public Task<bool> DeleteAsync(Guid userId, string provider, CancellationToken cancellationToken = default)
+        {
+            int removed = Links.RemoveAll(l => l.UserId == userId && l.Provider == provider);
+            return Task.FromResult(removed > 0);
+        }
     }
 
     private sealed class FakeUsers : IUserRepository
     {
+        public Task<bool> CitizenIdExistsAsync(string citizenId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
         public User? Existing { get; init; }
         public bool RejectCreate { get; init; }
         public Action? OnCreateRejected { get; init; }
         public List<User> Created { get; } = [];
+        public List<(User User, Guid RoleId)> CreatedWithRole { get; } = [];
         public string? LastLookupEmail { get; private set; }
 
         public Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken cancellationToken = default)
@@ -305,8 +355,18 @@ public sealed class ExternalLoginServiceTests
             return Task.FromResult(entity);
         }
 
-        public Task<User> CreateWithRoleAsync(User user, Guid roleId, CancellationToken cancellationToken = default) =>
-            CreateAsync(user, cancellationToken);
+        public Task<User> CreateWithRoleAsync(User user, Guid roleId, CancellationToken cancellationToken = default)
+        {
+            if (RejectCreate)
+            {
+                OnCreateRejected?.Invoke();
+                throw new DuplicateEmailException();
+            }
+
+            Created.Add(user);
+            CreatedWithRole.Add((user, roleId));
+            return Task.FromResult(user);
+        }
 
         public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("ExternalLoginService does not check email existence separately.");
@@ -330,5 +390,34 @@ public sealed class ExternalLoginServiceTests
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => utcNow;
+    }
+
+    private sealed class FakeRoles : IRoleRepository
+    {
+        public Dictionary<string, Role> Roles { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Task<Role?> GetByNameAsync(string name, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Roles.GetValueOrDefault(name));
+
+        public Task<Role?> GetByIdAsync(Guid roleId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("ExternalLoginService does not look up roles by id.");
+
+        public Task<bool> RoleExistsAsync(Guid roleId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("ExternalLoginService does not check role existence.");
+
+        public Task<IReadOnlyList<string>> GetPermissionCodesAsync(Guid roleId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("ExternalLoginService does not read role permissions.");
+
+        public Task<IReadOnlyList<string>> GetUserPermissionCodesAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("ExternalLoginService does not read user permissions.");
+
+        public Task<bool> IsAssignedAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("ExternalLoginService does not check role assignment.");
+
+        public Task<bool> AssignAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("ExternalLoginService does not assign roles directly.");
+
+        public Task<bool> RevokeAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("ExternalLoginService does not revoke roles.");
     }
 }

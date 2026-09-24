@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Application.Mapping;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.Auth;
 using Dprental.AuthService.Domain.DTOs.User;
@@ -32,12 +33,13 @@ public sealed class UserService(
         ArgumentNullException.ThrowIfNull(request);
 
         string email = NormalizeEmail(request.Email);
-        if (await userRepository.EmailExistsAsync(email, cancellationToken))
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        if (await CustomerAccountRules.ValidateAsync(request, email, userRepository, now, cancellationToken) is Error error)
         {
-            return AuthErrors.User.EmailAlreadyExists;
+            return error;
         }
 
-        User user = CreateUserEntity(request, email);
+        User user = CustomerAccountRules.Create(request, email, passwordHasher, now.UtcDateTime);
         Role? customerRole = await roleRepository.GetByNameAsync(SystemRoleCode.Customer, cancellationToken);
 
         try
@@ -63,7 +65,7 @@ public sealed class UserService(
     }
 
     public async Task<Result<AccountCreatedResponse>> RegisterAdminAsync(
-        RegisterRequest request,
+        RegisterAdminRequest request,
         string? creationKey,
         CancellationToken cancellationToken = default)
     {
@@ -118,7 +120,7 @@ public sealed class UserService(
         return CryptographicOperations.FixedTimeEquals(providedBytes, configuredBytes);
     }
 
-    private User CreateUserEntity(RegisterRequest request, string email)
+    private User CreateUserEntity(RegisterAdminRequest request, string email)
     {
         User user = new()
         {
@@ -126,6 +128,7 @@ public sealed class UserService(
             Email = email,
             FullName = request.FullName.Trim(),
             CreatedAt = timeProvider.GetUtcNow().UtcDateTime,
+            HasPassword = true,
             IsActive = true,
         };
         user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
@@ -277,6 +280,7 @@ public sealed class UserService(
 
         // 6. Đổi mật khẩu & Reset Abuse Protection (Mở khóa tài khoản)
         user.PasswordHash = passwordHasher.HashPassword(user, request.NewPassword);
+        user.HasPassword = true;
         user.AccessFailedCount = 0;
         user.LockoutEnd = null;
         await userRepository.UpdateAsync(user, cancellationToken);
@@ -321,6 +325,7 @@ public sealed class UserService(
         }
 
         user.PasswordHash = passwordHasher.HashPassword(user, request.NewPassword);
+        user.HasPassword = true;
         await userRepository.UpdateAsync(user, cancellationToken);
 
         await authSessionRepository.RevokeAllSessionsForUserAsync(user.Id, cancellationToken);
@@ -350,23 +355,7 @@ public sealed class UserService(
             return AuthErrors.User.NotFound;
         }
 
-        UserOrganizationResponse[] organizations = UserAccessResolver.ActiveMemberships(user)
-            .Select(membership => new UserOrganizationResponse(
-                membership.OrganizationId,
-                membership.Organization.Name,
-                membership.Organization.Slug,
-                membership.Organization.Type,
-                membership.Role.Name))
-            .ToArray();
-
-        return new CurrentUserResponse(
-            user.Id,
-            user.Email,
-            user.FullName,
-            UserAccessResolver.Roles(user),
-            UserAccessResolver.Permissions(user),
-            organizations,
-            user.CreatedAt);
+        return user.ToCurrentUserResponse();
     }
 
     [SuppressMessage("Globalization", "CA1308:Normalize strings to uppercase", Justification = "Email được lưu và so sánh ở dạng chữ thường theo quy ước phổ biến.")]

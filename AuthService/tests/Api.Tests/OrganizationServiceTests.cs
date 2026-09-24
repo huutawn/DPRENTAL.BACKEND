@@ -159,7 +159,7 @@ public sealed class OrganizationServiceTests
         OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
 
         Guid orgId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Inactive", Slug = "inactive", IsActive = false };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Inactive", Slug = "inactive", Status = OrganizationStatus.Suspended };
         userRepo.Users[ActorUserId] = new User { Id = ActorUserId, IsActive = true };
         memRepo.GlobalPermissions[ActorUserId] = [];
 
@@ -180,7 +180,7 @@ public sealed class OrganizationServiceTests
         OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
 
         Guid orgId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorUserId] = new User { Id = ActorUserId, IsActive = true };
         memRepo.GlobalPermissions[ActorUserId] = []; // Not platform admin, no membership
 
@@ -201,7 +201,7 @@ public sealed class OrganizationServiceTests
 
         Guid orgId = Guid.NewGuid();
         Guid targetUserId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -231,7 +231,7 @@ public sealed class OrganizationServiceTests
         Guid orgId = Guid.NewGuid();
         Guid targetUserId = Guid.NewGuid();
         Guid globalRoleId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -258,7 +258,7 @@ public sealed class OrganizationServiceTests
 
         Guid orgId = Guid.NewGuid();
         Guid targetUserId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -285,7 +285,7 @@ public sealed class OrganizationServiceTests
 
         Guid orgId = Guid.NewGuid();
         Guid targetUserId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -323,7 +323,7 @@ public sealed class OrganizationServiceTests
         Guid orgId = Guid.NewGuid();
         Guid targetUserId = Guid.NewGuid();
         Guid customRoleId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
 
         userRepo.Users[ActorUserId] = new User { Id = ActorUserId, IsActive = true };
         memRepo.GlobalPermissions[ActorUserId] = []; // Not platform admin
@@ -364,7 +364,7 @@ public sealed class OrganizationServiceTests
 
         Guid orgId = Guid.NewGuid();
         Guid memberId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -397,8 +397,8 @@ public sealed class OrganizationServiceTests
         OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
 
         Guid orgId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
-        userRepo.Users[ActorUserId] = new User { Id = ActorUserId, IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
+        userRepo.Users[ActorUserId] = new User { Id = ActorUserId, IsActive = true, ProfileCompletedAtUtc = DateTime.UtcNow };
         memRepo.GlobalPermissions[ActorUserId] = [];
 
         OrganizationMembership membership = new()
@@ -428,7 +428,7 @@ public sealed class OrganizationServiceTests
 
         Guid orgId = Guid.NewGuid();
         Guid ownerMemberId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -466,7 +466,7 @@ public sealed class OrganizationServiceTests
 
         Guid orgId = Guid.NewGuid();
         Guid ownerMemberId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -506,7 +506,7 @@ public sealed class OrganizationServiceTests
 
         Guid orgId = Guid.NewGuid();
         Guid ownerMemberId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
 
@@ -539,7 +539,7 @@ public sealed class OrganizationServiceTests
         OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
 
         Guid orgId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", IsActive = true };
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorUserId] = new User { Id = ActorUserId, IsActive = true };
         memRepo.GlobalPermissions[ActorUserId] = [Permissions.Organizations.Update]; // NOT platform admin
 
@@ -550,6 +550,203 @@ public sealed class OrganizationServiceTests
 
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.Organization.PlatformAdminRequired, result.Error);
+    }
+
+    [Fact]
+    public async Task GetMyOrganizationsAsyncReturnsActiveMembershipsOnly()
+    {
+        FakeOrganizationRepository orgRepo = new();
+        FakeMembershipRepository memRepo = new();
+        FakeUserRepository userRepo = new();
+        FakeRoleRepository roleRepo = new();
+        OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
+
+        Guid userId = Guid.NewGuid();
+        Guid activeOrgId = Guid.NewGuid();
+        Guid invitedOrgId = Guid.NewGuid();
+
+        Organization activeOrg = new() { Id = activeOrgId, Name = "Active Co", Slug = "active-co", Status = OrganizationStatus.Active };
+        Organization invitedOrg = new() { Id = invitedOrgId, Name = "Invited Co", Slug = "invited-co", Status = OrganizationStatus.Active };
+        Role memberRole = new() { Id = Guid.NewGuid(), Name = "Member" };
+
+        memRepo.Memberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            OrganizationId = activeOrgId,
+            Organization = activeOrg,
+            Role = memberRole,
+            Status = MembershipStatus.Active,
+            JoinedAtUtc = DateTime.UtcNow
+        });
+        memRepo.Memberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            OrganizationId = invitedOrgId,
+            Organization = invitedOrg,
+            Role = memberRole,
+            Status = MembershipStatus.Invited,
+            JoinedAtUtc = DateTime.UtcNow
+        });
+
+        Result<IReadOnlyList<MyOrganizationResponse>> result = await service.GetMyOrganizationsAsync(userId);
+
+        Assert.True(result.IsSuccess);
+        MyOrganizationResponse item = Assert.Single(result.Value);
+        Assert.Equal(activeOrgId, item.OrganizationId);
+        Assert.Equal("Active Co", item.Name);
+        Assert.Equal("Member", item.RoleName);
+    }
+
+    [Fact]
+    public async Task GetMyInvitationsAsyncReturnsInvitedMembershipsOnly()
+    {
+        FakeOrganizationRepository orgRepo = new();
+        FakeMembershipRepository memRepo = new();
+        FakeUserRepository userRepo = new();
+        FakeRoleRepository roleRepo = new();
+        OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
+
+        Guid userId = Guid.NewGuid();
+        Guid invitedOrgId = Guid.NewGuid();
+
+        Organization invitedOrg = new() { Id = invitedOrgId, Name = "Pending Org", Slug = "pending-org", Status = OrganizationStatus.Active };
+        Role driverRole = new() { Id = Guid.NewGuid(), Name = "Driver" };
+
+        memRepo.Memberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            OrganizationId = invitedOrgId,
+            Organization = invitedOrg,
+            Role = driverRole,
+            Status = MembershipStatus.Invited,
+            JoinedAtUtc = DateTime.UtcNow
+        });
+
+        Result<IReadOnlyList<OrganizationInvitationResponse>> result = await service.GetMyInvitationsAsync(userId);
+
+        Assert.True(result.IsSuccess);
+        OrganizationInvitationResponse item = Assert.Single(result.Value);
+        Assert.Equal(invitedOrgId, item.OrganizationId);
+        Assert.Equal("Pending Org", item.Name);
+        Assert.Equal("Driver", item.RoleName);
+    }
+
+    [Fact]
+    public async Task DeclineInvitationAsyncRemovesPendingInvitation()
+    {
+        FakeOrganizationRepository orgRepo = new();
+        FakeMembershipRepository memRepo = new();
+        FakeUserRepository userRepo = new();
+        FakeRoleRepository roleRepo = new();
+        OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
+
+        Guid userId = Guid.NewGuid();
+        Guid orgId = Guid.NewGuid();
+        Guid membershipId = Guid.NewGuid();
+
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Org", Slug = "org", Status = OrganizationStatus.Active };
+        memRepo.Memberships.Add(new OrganizationMembership
+        {
+            Id = membershipId,
+            UserId = userId,
+            OrganizationId = orgId,
+            Status = MembershipStatus.Invited
+        });
+
+        Result result = await service.DeclineInvitationAsync(userId, orgId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(memRepo.Memberships);
+    }
+
+    [Fact]
+    public async Task DeclineInvitationAsyncWhenActiveReturnsInvalidStateTransition()
+    {
+        FakeOrganizationRepository orgRepo = new();
+        FakeMembershipRepository memRepo = new();
+        FakeUserRepository userRepo = new();
+        FakeRoleRepository roleRepo = new();
+        OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
+
+        Guid userId = Guid.NewGuid();
+        Guid orgId = Guid.NewGuid();
+
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Org", Slug = "org", Status = OrganizationStatus.Active };
+        memRepo.Memberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            OrganizationId = orgId,
+            Status = MembershipStatus.Active
+        });
+
+        Result result = await service.DeclineInvitationAsync(userId, orgId);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Organization.InvalidStateTransition, result.Error);
+    }
+
+    [Fact]
+    public async Task LeaveAsyncWhenLastOwnerReturnsLastOwnerError()
+    {
+        FakeOrganizationRepository orgRepo = new();
+        FakeMembershipRepository memRepo = new();
+        FakeUserRepository userRepo = new();
+        FakeRoleRepository roleRepo = new();
+        OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
+
+        Guid userId = Guid.NewGuid();
+        Guid orgId = Guid.NewGuid();
+        Role ownerRole = new() { Id = OwnerRoleId, Name = "Owner" };
+
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Org", Slug = "org", Status = OrganizationStatus.Active };
+        memRepo.Memberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            OrganizationId = orgId,
+            RoleId = OwnerRoleId,
+            Role = ownerRole,
+            Status = MembershipStatus.Active
+        });
+
+        Result result = await service.LeaveAsync(userId, orgId);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Organization.LastOwner, result.Error);
+    }
+
+    [Fact]
+    public async Task LeaveAsyncWhenNormalMemberSucceeds()
+    {
+        FakeOrganizationRepository orgRepo = new();
+        FakeMembershipRepository memRepo = new();
+        FakeUserRepository userRepo = new();
+        FakeRoleRepository roleRepo = new();
+        OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
+
+        Guid userId = Guid.NewGuid();
+        Guid orgId = Guid.NewGuid();
+        Role memberRole = new() { Id = Guid.NewGuid(), Name = "Member" };
+
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Org", Slug = "org", Status = OrganizationStatus.Active };
+        memRepo.Memberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            OrganizationId = orgId,
+            RoleId = memberRole.Id,
+            Role = memberRole,
+            Status = MembershipStatus.Active
+        });
+
+        Result result = await service.LeaveAsync(userId, orgId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(memRepo.Memberships);
     }
 
     private static readonly string[] AdminPermissions =
@@ -566,6 +763,10 @@ public sealed class OrganizationServiceTests
 
     private sealed class FakeOrganizationRepository : IOrganizationRepository
     {
+        public Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
+
         public Dictionary<Guid, Organization> Organizations { get; } = [];
         public HashSet<string> ExistingSlugs { get; } = [];
         public OrganizationMembership? LastCreatedInitialMembership { get; private set; }
@@ -683,10 +884,16 @@ public sealed class OrganizationServiceTests
 
         public Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(GlobalPermissions.GetValueOrDefault(userId) ?? (IReadOnlyList<string>)[]);
+
+        public Task<IReadOnlyList<OrganizationMembership>> GetMembershipsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<OrganizationMembership>>(Memberships.Where(m => m.UserId == userId).ToList());
     }
 
     private sealed class FakeUserRepository : IUserRepository
     {
+        public Task<bool> CitizenIdExistsAsync(string citizenId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
         public Dictionary<Guid, User> Users { get; } = [];
 
         public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>

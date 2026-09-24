@@ -69,6 +69,15 @@ public static class AuthErrors
 
         public static readonly Error CreationNotAllowed =
             Error.Forbidden(AuthErrorCode.Organization.CreationNotAllowed, "Bạn không có quyền tạo organization.");
+
+        public static readonly Error PendingApproval =
+            Error.Forbidden(AuthErrorCode.Organization.PendingApproval, "Organization chưa được Platform duyệt.");
+
+        public static readonly Error TaxCodeAlreadyExists =
+            Error.Conflict(AuthErrorCode.Organization.TaxCodeAlreadyExists, "Mã số thuế đã được đăng ký cho organization khác.");
+
+        public static readonly Error SelfRegistrationTypeNotAllowed =
+            Error.Validation(AuthErrorCode.Organization.SelfRegistrationTypeNotAllowed, "Chỉ được tự đăng ký organization loại Supplier hoặc Renter.");
     }
 
     public static class Role
@@ -110,6 +119,30 @@ public static class AuthErrors
         public static readonly Error NotFound =
             Error.NotFound(AuthErrorCode.User.NotFound, "Người dùng không tồn tại hoặc tài khoản đã bị khóa.");
         public static readonly Error UserNotFound = NotFound;
+
+        public static readonly Error CitizenIdAlreadyExists =
+            Error.Conflict(AuthErrorCode.User.CitizenIdAlreadyExists, "Số CCCD đã được sử dụng.");
+
+        public static readonly Error Underage =
+            Error.Validation(AuthErrorCode.User.Underage, "Người dùng phải đủ 18 tuổi.");
+
+        public static readonly Error LastOwnerOrganization =
+            Error.Conflict(AuthErrorCode.User.LastOwnerOrganization, "Bạn đang là Owner duy nhất của một tổ chức — hãy chuyển quyền Owner trước khi vô hiệu hóa tài khoản.");
+    }
+
+    public static class Profile
+    {
+        public static readonly Error NotCompleted =
+            Error.Forbidden(AuthErrorCode.Profile.NotCompleted, "Bạn cần hoàn thiện hồ sơ cá nhân (CCCD, số điện thoại, ngày sinh) trước khi thực hiện thao tác này.");
+
+        public static readonly Error AlreadyCompleted =
+            Error.Conflict(AuthErrorCode.Profile.AlreadyCompleted, "Hồ sơ cá nhân đã được hoàn thiện trước đó. Vui lòng sử dụng chức năng cập nhật thông tin cá nhân.");
+
+        public static readonly Error EmptyPatch =
+            Error.Validation(AuthErrorCode.Profile.EmptyPatch, "Yêu cầu cập nhật không chứa trường thông tin nào để thay đổi.");
+
+        public static readonly Error InvalidFullName =
+            Error.Validation(AuthErrorCode.Profile.InvalidFullName, "Họ và tên không được để trống hoặc chỉ chứa khoảng trắng (tối đa 100 ký tự).");
     }
 
     public static class Navigation
@@ -157,6 +190,12 @@ public static class AuthErrors
 
         public static readonly Error AlreadyLinked =
             Error.Conflict(AuthErrorCode.ExternalLogin.AlreadyLinked, "Tài khoản này đã liên kết với một tài khoản bên ngoài khác.");
+
+        public static readonly Error NotLinked =
+            Error.NotFound(AuthErrorCode.ExternalLogin.NotLinked, "Tài khoản chưa liên kết với nhà cung cấp này.");
+
+        public static readonly Error CannotUnlinkLastCredential =
+            Error.Conflict(AuthErrorCode.ExternalLogin.CannotUnlinkLastCredential, "Tài khoản chưa có mật khẩu — hãy đặt mật khẩu trước khi gỡ liên kết.");
     }
 
     public static class Auth
@@ -172,6 +211,9 @@ public static class AuthErrors
 
         public static readonly Error InvalidRefreshToken =
             Error.Unauthorized(AuthErrorCode.Auth.InvalidRefreshToken, "Refresh token không hợp lệ hoặc đã hết hạn.");
+
+        public static readonly Error SessionNotFound =
+            Error.NotFound(AuthErrorCode.Auth.SessionNotFound, "Phiên đăng nhập không tồn tại.");
     }
 
     public static class Paging

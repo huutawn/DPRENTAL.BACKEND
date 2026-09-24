@@ -45,7 +45,7 @@ public sealed class NavigationService(
         }
 
         var organization = await organizationRepository.GetByIdAsync(selectedOrganizationId, cancellationToken);
-        if (organization is null || !organization.IsActive)
+        if (organization is null || organization.Status != OrganizationStatus.Active)
         {
             return Result.Failure<NavigationResponse>(AuthErrors.Organization.CrossOrganizationAccessDenied);
         }
