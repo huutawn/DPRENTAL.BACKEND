@@ -31,6 +31,7 @@ Thumbs.db
 !.env.example
 appsettings.Local.json
 appsettings.*.Local.json
+.local-secrets/
 secrets.json
 *.pem
 *.key
@@ -42,3 +43,7 @@ secrets.json
 *.db
 *.sqlite
 *.sqlite3
+
+# Postman config
+.postman/
+postman/
