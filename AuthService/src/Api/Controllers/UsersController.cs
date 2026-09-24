@@ -1,4 +1,5 @@
 using Dprental.AuthService.Api.Filters;
+using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.User;
@@ -7,21 +8,21 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Dprental.AuthService.Api.Controllers;
 
-/// <summary>Thông tin của chính người dùng đang đăng nhập.</summary>
+/// <summary>Cung cấp hồ sơ, quyền và organization của người dùng đang đăng nhập.</summary>
 [ApiController]
 [Route("users")]
 [Produces("application/json")]
 [Authorize]
 public sealed class UsersController(IUserService userService) : ControllerBase
 {
+    /// <summary>Lấy hồ sơ, role, permission và organization đang hoạt động của người dùng hiện tại.</summary>
     [HttpGet("me")]
     [ProducesResponseType<CurrentUserResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<CurrentUserResponse>> GetCurrentUser(CancellationToken cancellationToken)
     {
-        // NameClaimType được cấu hình là claim "sub" (xem JwtBearerServiceCollectionExtensions).
-        if (!Guid.TryParse(User.Identity?.Name, out Guid userId))
+        if (User.GetJwtSub() is not Guid userId)
         {
             return Unauthorized();
         }
@@ -30,6 +31,9 @@ public sealed class UsersController(IUserService userService) : ControllerBase
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
+    /// <summary>Cập nhật hồ sơ (tên, số điện thoại, avatar) của người dùng hiện tại.</summary>
+    /// <param name="request">Thông tin hồ sơ cần cập nhật.</param>
+    /// <param name="cancellationToken">Token hủy request.</param>
     [HttpPut("me")]
     [Authorize]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -45,7 +49,4 @@ public sealed class UsersController(IUserService userService) : ControllerBase
         Result result = await userService.UpdateUserProfileAsync(userId, request, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
-
-
-
 }

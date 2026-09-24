@@ -90,6 +90,29 @@ public sealed class GoogleLoginEndpointTests
     }
 
     [Fact]
+    public async Task GoogleRemoteFailureRedirectsToBffWithError()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory(googleConfigured: true);
+        using HttpClient client = CreateClient(factory);
+        using HttpResponseMessage login = await client.GetAsync(
+            $"/api/v1/auth/google/login?returnUrl={Uri.EscapeDataString(FrontendOrigin)}");
+        Uri authorizationRequest = login.Headers.Location ?? throw new InvalidOperationException("Missing Google authorization URL.");
+        string state = QueryHelpers.ParseQuery(authorizationRequest.Query)["state"].ToString();
+
+        using HttpResponseMessage callback = await client.GetAsync(
+            $"/signin-google?error=access_denied&state={Uri.EscapeDataString(state)}");
+
+        Assert.Equal(HttpStatusCode.Redirect, callback.StatusCode);
+        Uri location = callback.Headers.Location ?? throw new InvalidOperationException("Missing BFF callback URL.");
+        Dictionary<string, StringValues> query = QueryHelpers.ParseQuery(location.Query);
+        Assert.Equal($"{FrontendOrigin}/api/auth/google/callback", location.GetLeftPart(UriPartial.Path));
+        Assert.Equal("Auth.ExternalFailed", query["error"].ToString());
+        Assert.Equal(FrontendOrigin, query["returnUrl"].ToString());
+        Assert.Equal("no-store", callback.Headers.CacheControl?.ToString());
+        Assert.Equal("no-referrer", callback.Headers.GetValues("Referrer-Policy").Single());
+    }
+
+    [Fact]
     public async Task GoogleLoginWithoutReturnUrlFallsBackToFirstAllowedOrigin()
     {
         using WebApplicationFactory<Program> factory = CreateFactory(googleConfigured: true);
@@ -285,7 +308,10 @@ public sealed class GoogleLoginEndpointTests
             ["Auth:Google:AllowedReturnUrls:0"] = FrontendOrigin,
             ["Auth:Google:AllowedReturnUrls:1"] = DevelopmentFrontendOrigin,
             ["Auth:Google:BffCallbackUrls:0"] = $"{FrontendOrigin}/api/auth/google/callback",
-            ["Auth:Google:BffCallbackUrls:1"] = $"{DevelopmentFrontendOrigin}/api/auth/google/callback"
+            ["Auth:Google:BffCallbackUrls:1"] = $"{DevelopmentFrontendOrigin}/api/auth/google/callback",
+            ["Auth:Google:ClientId"] = googleConfigured ? "test-client-id" : string.Empty,
+            ["Auth:Google:ClientSecret"] = googleConfigured ? "test-client-secret" : string.Empty,
+            ["Auth:AdminBootstrap:CreationKey"] = "test-bootstrap-creation-key"
         };
 
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
@@ -294,12 +320,8 @@ public sealed class GoogleLoginEndpointTests
             // Forwarded-header registration reads host configuration during Program startup.
             builder.UseSetting("Auth:ForwardedHeaders:Enabled", "true");
             builder.UseSetting("Auth:ForwardedHeaders:KnownNetworks:0", "127.0.0.0/8");
-            if (googleConfigured)
-            {
-                // Đọc lúc đăng ký service trong Program.cs nên phải là host setting, không phải cấu hình nạp trễ.
-                builder.UseSetting("Auth:Google:ClientId", "test-client-id");
-                builder.UseSetting("Auth:Google:ClientSecret", "test-client-secret");
-            }
+            builder.UseSetting("Auth:Google:ClientId", googleConfigured ? "test-client-id" : string.Empty);
+            builder.UseSetting("Auth:Google:ClientSecret", googleConfigured ? "test-client-secret" : string.Empty);
 
             builder.ConfigureServices(services =>
             {

@@ -1,9 +1,14 @@
+using Dprental.AuthService.Domain.Entities;
+
 namespace Dprental.AuthService.Domain.IRepositories;
 
 /// <summary>Repository cho role, permission của role và việc gán/thu hồi role trên user.</summary>
 public interface IRoleRepository
 {
     Task<bool> RoleExistsAsync(Guid roleId, CancellationToken cancellationToken = default);
+    Task<Role?> GetByIdAsync(Guid roleId, CancellationToken cancellationToken = default);
+    Task<Role?> GetByNameAsync(string name, CancellationToken cancellationToken = default);
+
 
     /// <summary>Mã các permission mà role này mang — dùng để kiểm tra actor có đủ quyền trước khi gán/thu hồi.</summary>
     Task<IReadOnlyList<string>> GetPermissionCodesAsync(Guid roleId, CancellationToken cancellationToken = default);

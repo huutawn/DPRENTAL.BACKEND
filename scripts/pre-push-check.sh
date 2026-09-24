@@ -39,6 +39,6 @@ printf 'Đang build %s (Release)...\n' "$SOLUTION_FILE"
 dotnet build "$SOLUTION_FILE" --configuration Release --nologo || fail "build thất bại; push đã bị chặn."
 
 printf 'Đang chạy test %s (Release)...\n' "$SOLUTION_FILE"
-dotnet test "$SOLUTION_FILE" --configuration Release --no-build --nologo || fail "test thất bại; push đã bị chặn."
+DOTNET_USE_POLLING_FILE_WATCHER=1 dotnet test "$SOLUTION_FILE" --configuration Release --no-build --nologo || fail "test thất bại; push đã bị chặn."
 
 printf 'Đã đạt toàn bộ kiểm tra trước khi push.\n'

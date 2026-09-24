@@ -2,6 +2,7 @@ using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
 
 namespace Dprental.AuthService.Api.Security;
@@ -52,9 +53,51 @@ internal static class GoogleAuthenticationExtensions
                 // Google quay về bằng điều hướng cấp cao nhất (GET), nên Lax là đủ. Mặc định SameSite=None yêu cầu Secure
                 // và bị trình duyệt từ chối trên http://localhost khi phát triển.
                 options.CorrelationCookie.SameSite = SameSiteMode.Lax;
+                options.Events.OnRemoteFailure = context => HandleRemoteFailureAsync(context, google);
             });
 
         return services;
+    }
+
+    private static Task HandleRemoteFailureAsync(RemoteFailureContext context, GoogleAuthOptions google)
+    {
+        if (TryGetReturnUrl(context.Properties?.RedirectUri, out string? returnUrl)
+            && returnUrl is not null
+            && GoogleBffCallbackResolver.TryResolve(returnUrl, google, out string callbackUrl))
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers["Referrer-Policy"] = "no-referrer";
+            context.Response.Redirect(QueryHelpers.AddQueryString(callbackUrl, new Dictionary<string, string?>
+            {
+                ["error"] = "Auth.ExternalFailed",
+                ["returnUrl"] = returnUrl
+            }));
+        }
+        else
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        }
+
+        context.HandleResponse();
+        return Task.CompletedTask;
+    }
+
+    private static bool TryGetReturnUrl(string? redirectUri, out string? returnUrl)
+    {
+        returnUrl = null;
+        if (string.IsNullOrWhiteSpace(redirectUri))
+        {
+            return false;
+        }
+
+        int queryIndex = redirectUri.IndexOf('?', StringComparison.Ordinal);
+        if (queryIndex < 0)
+        {
+            return false;
+        }
+
+        returnUrl = QueryHelpers.ParseQuery(redirectUri[queryIndex..])["returnUrl"].ToString();
+        return !string.IsNullOrWhiteSpace(returnUrl);
     }
 }
 

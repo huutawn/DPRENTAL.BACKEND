@@ -1,4 +1,5 @@
 using Dprental.AuthService.Application.Security;
+using Dprental.AuthService.Domain.Enums;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Domain.Utils;
@@ -13,8 +14,8 @@ namespace Dprental.AuthService.Api.Security;
 /// <summary>Các extension đăng ký JWT authentication vào dependency injection container.</summary>
 internal static class JwtBearerServiceCollectionExtensions
 {
-    /// <summary>Tên claim permission, phải khớp <c>RsaAccessTokenIssuer.PermissionClaimType</c>.</summary>
-    private const string PermissionClaimType = "perm";
+    /// <summary>Tên claim permission rút gọn ("p"), phải khớp <c>RsaAccessTokenIssuer</c>.</summary>
+    private const string PermissionClaimType = JwtClaimCatalog.Claims.Permission;
 
     /// <summary>Đăng ký JWT Bearer authentication cho API bằng key ring của Application.</summary>
     internal static IServiceCollection AddJwtBearerSecurity(this IServiceCollection services)
@@ -23,11 +24,20 @@ internal static class JwtBearerServiceCollectionExtensions
             .AddJwtBearer();
         services.AddAuthorization(options =>
         {
-            // Một policy cho mỗi permission đã khai báo: yêu cầu claim "perm" chứa đúng mã đó.
-            foreach (string permission in Permissions.All)
+            // Một policy cho mỗi permission chuẩn: yêu cầu claim "p" chứa đúng alias ngắn.
+            foreach (string permission in PermissionCode.All)
             {
-                options.AddPolicy(permission, policy => policy.RequireClaim(PermissionClaimType, permission));
+                string alias = JwtClaimCatalog.PermissionAliases.ToAlias(permission);
+                options.AddPolicy(permission, policy => policy.RequireClaim(PermissionClaimType, alias));
             }
+
+            // Policy gộp cho RolesController.Assign: chấp nhận claim "p" mang alias assign.global
+            // HOẶC assign.organization — quyền chính xác theo từng organization được service tự
+            // truy vấn DB, policy này chỉ chặn sớm token không mang permission assign nào cả.
+            options.AddPolicy(Permissions.Roles.AssignAny, policy => policy.RequireClaim(
+                PermissionClaimType,
+                JwtClaimCatalog.PermissionAliases.ToAlias(PermissionCode.IdentityRolesAssignGlobal),
+                JwtClaimCatalog.PermissionAliases.ToAlias(PermissionCode.IdentityRolesAssignOrganization)));
         });
 
         services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
@@ -44,7 +54,7 @@ internal static class JwtBearerServiceCollectionExtensions
     {
         JwtOptions jwtOptions = options.Value;
 
-        // Giữ tên claim nguyên bản (sub, role) để contract JWT không bị .NET tự ánh xạ.
+        // Giữ tên claim nguyên bản (sub, r, p) để contract JWT không bị .NET tự ánh xạ.
         bearerOptions.MapInboundClaims = false;
         bearerOptions.Events = new JwtBearerEvents
         {
@@ -123,7 +133,7 @@ internal static class JwtBearerServiceCollectionExtensions
             ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
             ClockSkew = TimeSpan.FromSeconds(30),
             NameClaimType = JwtRegisteredClaimNames.Sub,
-            RoleClaimType = "role"
+            RoleClaimType = JwtClaimCatalog.Claims.Role
         };
     }
 }

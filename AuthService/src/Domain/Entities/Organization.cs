@@ -4,13 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.AuthService.Domain.Entities;
 
-/// <summary>Loại organization theo vai trò trong nền tảng.</summary>
-public enum OrganizationType
-{
-    Platform,
-    Supplier,
-    Renter
-}
+using Dprental.AuthService.Domain.Enums;
 
 /// <summary>Một tổ chức (Platform/Supplier/Renter) mà user có thể là thành viên.</summary>
 [Table("Organizations", Schema = "auth")]
@@ -36,4 +30,6 @@ public class Organization
     public DateTime CreatedAtUtc { get; set; }
 
     public ICollection<OrganizationMembership> Memberships { get; set; } = new List<OrganizationMembership>();
+
+    public ICollection<NavigationCatalog> NavigationCatalogs { get; set; } = new List<NavigationCatalog>();
 }

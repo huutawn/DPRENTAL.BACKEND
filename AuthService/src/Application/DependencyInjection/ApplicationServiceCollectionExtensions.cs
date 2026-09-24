@@ -23,6 +23,11 @@ public static class ApplicationServiceCollectionExtensions
             .Bind(configuration.GetRequiredSection(JwtOptions.SectionName))
             .ValidateOnStart();
 
+        services.AddSingleton<IValidateOptions<AdminBootstrapOptions>, AdminBootstrapOptionsValidator>();
+        services.AddOptions<AdminBootstrapOptions>()
+            .Bind(configuration.GetSection(AdminBootstrapOptions.SectionName))
+            .ValidateOnStart();
+
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<RsaJwtKeyRing>();
         services.AddSingleton<IAccessTokenIssuer, RsaAccessTokenIssuer>();
@@ -32,6 +37,9 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IRoleAssignmentService, RoleAssignmentService>();
         services.AddScoped<IServiceIdentityService, ServiceIdentityService>();
         services.AddScoped<IExternalLoginService, ExternalLoginService>();
+        services.AddScoped<IOrganizationService, OrganizationService>();
+        services.AddScoped<INavigationService, NavigationService>();
+        services.AddScoped<INavigationAdminService, NavigationAdminService>();
 
         return services;
     }

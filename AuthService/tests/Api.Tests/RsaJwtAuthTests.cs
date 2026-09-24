@@ -48,7 +48,7 @@ public sealed class RsaJwtAuthTests
         Assert.Equal(SecurityAlgorithms.RsaSha256, rawToken.Header.Alg);
         Assert.Equal(options.ActiveKeyId, rawToken.Header.Kid);
         Assert.Equal(subjectId.ToString("D"), principal.FindFirstValue(JwtRegisteredClaimNames.Sub));
-        Assert.Equal(["admin", "staff"], principal.FindAll("role").Select(claim => claim.Value));
+        Assert.Equal(["adm", "staff"], principal.FindAll(JwtClaimCatalog.Claims.Role).Select(claim => claim.Value));
         Assert.NotNull(principal.FindFirst(JwtRegisteredClaimNames.Jti));
         Assert.NotNull(principal.FindFirst(JwtRegisteredClaimNames.Iat));
         Assert.Equal(now.AddMinutes(options.AccessTokenLifetimeMinutes), result.ExpiresAtUtc);
@@ -279,6 +279,36 @@ public sealed class RsaJwtAuthTests
     }
 
     [Fact]
+    public async Task SwaggerDocumentIncludesSummariesForEveryApiOperationAndController()
+    {
+        JwtOptions options = CreateValidOptions();
+        using WebApplicationFactory<Program> factory = new();
+        using WebApplicationFactory<Program> configuredFactory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
+            builder.ConfigureAppConfiguration((_, configurationBuilder) => configurationBuilder.AddConfiguration(CreateConfiguration(options)));
+        });
+        using HttpClient client = configuredFactory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/swagger/v1/swagger.json");
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement paths = document.RootElement.GetProperty("paths");
+        JsonElement tags = document.RootElement.GetProperty("tags");
+
+        Assert.True(response.IsSuccessStatusCode);
+        Assert.All(
+            paths.EnumerateObject()
+                .SelectMany(path => path.Value.EnumerateObject())
+                .Where(operation => operation.Name is "get" or "post" or "patch" or "delete"),
+            operation => Assert.False(string.IsNullOrWhiteSpace(operation.Value.GetProperty("summary").GetString())));
+        foreach (string controllerTag in new[] { "Auth", "Organizations", "Roles", "Users" })
+        {
+            JsonElement tag = tags.EnumerateArray().Single(tag => tag.GetProperty("name").GetString() == controllerTag);
+            Assert.False(string.IsNullOrWhiteSpace(tag.GetProperty("description").GetString()));
+        }
+    }
+
+    [Fact]
     public async Task JwksEndpointContinuesInboundW3CTrace()
     {
         JwtOptions options = CreateValidOptions();
@@ -323,7 +353,7 @@ public sealed class RsaJwtAuthTests
             ValidateLifetime = false,
             ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
             NameClaimType = JwtRegisteredClaimNames.Sub,
-            RoleClaimType = "role"
+            RoleClaimType = JwtClaimCatalog.Claims.Role
         }, out _);
     }
 
@@ -392,7 +422,8 @@ public sealed class RsaJwtAuthTests
             ["Auth:Jwt:Issuer"] = options.Issuer,
             ["Auth:Jwt:Audience"] = options.Audience,
             ["Auth:Jwt:AccessTokenLifetimeMinutes"] = options.AccessTokenLifetimeMinutes.ToString(CultureInfo.InvariantCulture),
-            ["Auth:Jwt:ActiveKeyId"] = options.ActiveKeyId
+            ["Auth:Jwt:ActiveKeyId"] = options.ActiveKeyId,
+            ["Auth:AdminBootstrap:CreationKey"] = "test-bootstrap-creation-key"
         };
 
         for (int index = 0; index < options.Keys.Count; index++)

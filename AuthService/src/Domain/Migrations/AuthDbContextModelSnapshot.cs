@@ -51,6 +51,10 @@ namespace Dprental.AuthService.Domain.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ActorId");
+
+                    b.HasIndex("Timestamp");
+
                     b.ToTable("AuditLogs");
                 });
 
@@ -124,6 +128,99 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("GoogleLoginTickets", "auth");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.NavigationCatalog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DashboardType")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DashboardType")
+                        .IsUnique()
+                        .HasFilter("\"OrganizationId\" IS NULL");
+
+                    b.HasIndex("OrganizationId")
+                        .IsUnique()
+                        .HasFilter("\"OrganizationId\" IS NOT NULL");
+
+                    b.ToTable("NavigationCatalogs", "auth");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.NavigationItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CatalogId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Href")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Icon")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("SourceTemplateItemId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ParentId");
+
+                    b.HasIndex("CatalogId", "Key")
+                        .IsUnique();
+
+                    b.ToTable("NavigationItems", "auth");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.NavigationItemPermission", b =>
+                {
+                    b.Property<Guid>("NavigationItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PermissionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("NavigationItemId", "PermissionId");
+
+                    b.HasIndex("PermissionId");
+
+                    b.ToTable("NavigationItemPermissions", "auth");
                 });
 
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Organization", b =>
@@ -332,6 +429,9 @@ namespace Dprental.AuthService.Domain.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
+                    b.Property<int>("Scope")
+                        .HasColumnType("integer");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Name")
@@ -529,6 +629,53 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.NavigationCatalog", b =>
+                {
+                    b.HasOne("Dprental.AuthService.Domain.Entities.Organization", "Organization")
+                        .WithMany("NavigationCatalogs")
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("Organization");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.NavigationItem", b =>
+                {
+                    b.HasOne("Dprental.AuthService.Domain.Entities.NavigationCatalog", "Catalog")
+                        .WithMany("Items")
+                        .HasForeignKey("CatalogId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Dprental.AuthService.Domain.Entities.NavigationItem", "Parent")
+                        .WithMany("Children")
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Catalog");
+
+                    b.Navigation("Parent");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.NavigationItemPermission", b =>
+                {
+                    b.HasOne("Dprental.AuthService.Domain.Entities.NavigationItem", "NavigationItem")
+                        .WithMany("Permissions")
+                        .HasForeignKey("NavigationItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Dprental.AuthService.Domain.Entities.Permission", "Permission")
+                        .WithMany()
+                        .HasForeignKey("PermissionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("NavigationItem");
+
+                    b.Navigation("Permission");
+                });
+
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.OrganizationMembership", b =>
                 {
                     b.HasOne("Dprental.AuthService.Domain.Entities.Organization", "Organization")
@@ -646,9 +793,23 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.NavigationCatalog", b =>
+                {
+                    b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.NavigationItem", b =>
+                {
+                    b.Navigation("Children");
+
+                    b.Navigation("Permissions");
+                });
+
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Organization", b =>
                 {
                     b.Navigation("Memberships");
+
+                    b.Navigation("NavigationCatalogs");
                 });
 
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Permission", b =>

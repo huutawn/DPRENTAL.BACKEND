@@ -3,7 +3,6 @@ using Dprental.AuthService.Api.Filters;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Common.Pagination;
 using Dprental.AuthService.Domain.DTOs.User;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,18 +10,22 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Dprental.AuthService.Api.Controllers;
 
+/// <summary>Endpoint quản trị dành cho admin để tra cứu và quản lý trạng thái người dùng.</summary>
 [ApiController]
 [Route("admin/users")]
 [Produces("application/json")]
 [Authorize] // Tạm thời dùng Authorize chung, bạn sẽ bổ sung Policy [Authorize(Policy = "...")] sau khi hoàn thiện Catalog quyền mới
 public sealed class AdminUsersController(IUserService userService) : ControllerBase
 {
+    /// <summary>Lấy danh sách người dùng có phân trang.</summary>
+    /// <param name="request">Tham số phân trang (page, pageSize).</param>
+    /// <param name="cancellationToken">Token hủy request.</param>
     [HttpGet]
     [Authorize(Policy = Permissions.Users.Read)]
     [ProducesResponseType<PagedResult<AdminUserListItemDto>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<AdminUserListItemDto>>> GetUsersPaged(
-         [FromQuery] GetUsersRequest request, 
+         [FromQuery] GetUsersRequest request,
          CancellationToken cancellationToken = default)
     {
         var pageRequest = new PageRequest(request.Page, request.PageSize);
@@ -31,6 +34,9 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
         return Ok(result);
     }
 
+    /// <summary>Lấy chi tiết một người dùng theo id.</summary>
+    /// <param name="id">Id của người dùng.</param>
+    /// <param name="cancellationToken">Token hủy request.</param>
     [HttpGet("{id:guid}")]
     [Authorize(Policy = Permissions.Users.Read)]
     [ProducesResponseType<AdminUserDetailDto>(StatusCodes.Status200OK)]
@@ -41,6 +47,9 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
+    /// <summary>Tạm khóa (suspend) một người dùng.</summary>
+    /// <param name="id">Id của người dùng cần khóa.</param>
+    /// <param name="cancellationToken">Token hủy request.</param>
     [HttpPost("{id:guid}/suspend")]
     [Authorize(Policy = Permissions.Users.Manage)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -53,6 +62,9 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
 
+    /// <summary>Kích hoạt lại một người dùng đã bị khóa.</summary>
+    /// <param name="id">Id của người dùng cần kích hoạt.</param>
+    /// <param name="cancellationToken">Token hủy request.</param>
     [HttpPost("{id:guid}/activate")]
     [Authorize(Policy = Permissions.Users.Manage)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
