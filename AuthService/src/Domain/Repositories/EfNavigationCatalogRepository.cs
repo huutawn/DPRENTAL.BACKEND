@@ -1,6 +1,6 @@
 using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Enums;
+using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
 

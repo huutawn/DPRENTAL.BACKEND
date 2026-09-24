@@ -1,5 +1,5 @@
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.DTOs.Navigation;
+using Dprental.AuthService.Application.DTOs.Navigation;
 
 namespace Dprental.AuthService.Application.IServices;
 

@@ -33,7 +33,7 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
         {
             // Bỏ entity lỗi khỏi DbContext để lần SaveChanges sau không thử insert lại.
             dbContext.Entry(entity).State = EntityState.Detached;
-            throw new DuplicateEmailException("Email đã được sử dụng.", exception);
+            throw UniqueConstraintViolations.ToUserException(exception);
         }
     }
 
@@ -65,8 +65,12 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
                 {
                     await transaction.RollbackAsync(cancellationToken);
                     dbContext.Entry(user).State = EntityState.Detached;
-                    if (exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } ||
-                        exception.Message.Contains("Unique", StringComparison.OrdinalIgnoreCase) ||
+                    if (UniqueConstraintViolations.IsUniqueViolation(exception))
+                    {
+                        throw UniqueConstraintViolations.ToUserException(exception);
+                    }
+
+                    if (exception.Message.Contains("Unique", StringComparison.OrdinalIgnoreCase) ||
                         exception.InnerException?.Message.Contains("Unique", StringComparison.OrdinalIgnoreCase) == true)
                     {
                         throw new DuplicateEmailException("Email đã được sử dụng.", exception);
@@ -117,8 +121,16 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
         }
 
         dbContext.Users.Update(entity);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException exception) when (UniqueConstraintViolations.IsUniqueViolation(exception))
+        {
+            dbContext.Entry(entity).State = EntityState.Detached;
+            throw UniqueConstraintViolations.ToUserException(exception);
+        }
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -133,6 +145,11 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;
     }
+
+    public Task<bool> CitizenIdExistsAsync(string citizenId, CancellationToken cancellationToken = default) =>
+        dbContext.Users
+            .AsNoTracking()
+            .AnyAsync(user => user.CitizenId == citizenId, cancellationToken);
 
     public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
         dbContext.Users

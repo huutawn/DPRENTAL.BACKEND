@@ -33,4 +33,30 @@ public sealed class EfExternalLoginRepository(AuthDbContext dbContext) : IExtern
             throw new DuplicateExternalLoginException("Liên kết đăng nhập bên ngoài đã tồn tại.", exception);
         }
     }
+
+    public async Task<IReadOnlyList<ExternalLogin>> GetByUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        await dbContext.ExternalLogins
+            .AsNoTracking()
+            .Where(login => login.UserId == userId)
+            .OrderBy(login => login.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+
+    public async Task<bool> DeleteAsync(Guid userId, string provider, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(provider);
+
+        ExternalLogin? login = await dbContext.ExternalLogins
+            .SingleOrDefaultAsync(
+                l => l.UserId == userId && l.Provider == provider,
+                cancellationToken);
+
+        if (login is null)
+        {
+            return false;
+        }
+
+        dbContext.ExternalLogins.Remove(login);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
 }

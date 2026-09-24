@@ -1,8 +1,8 @@
 using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.DTOs.Auth;
+using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Enums;
+using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.IRepositories;
 using Xunit;
 
@@ -391,5 +391,8 @@ public sealed class RoleAssignmentServiceTests
 
         public Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(GlobalPermissions.GetValueOrDefault(userId) ?? (IReadOnlyList<string>)[]);
+
+        public Task<IReadOnlyList<OrganizationMembership>> GetMembershipsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<OrganizationMembership>>(Memberships.Values.Where(m => m.UserId == userId).ToList());
     }
 }

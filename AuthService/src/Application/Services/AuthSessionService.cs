@@ -1,9 +1,11 @@
 using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Common;
+using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
-using Dprental.AuthService.Domain.Utils;
+using Dprental.AuthService.Common.Utils;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -131,6 +133,53 @@ public sealed class AuthSessionService(
     {
         await sessionRepository.RevokeAllSessionsForUserAsync(userId, cancellationToken);
         await LogAuditAsync(userId, userId.ToString(), "Session_RevokeAll", "Success", cancellationToken);
+    }
+
+    public async Task<Guid?> GetCurrentSessionIdAsync(string? currentRefreshToken, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(currentRefreshToken))
+        {
+            return null;
+        }
+
+        string tokenHash = RefreshTokenUtility.ComputeHash(currentRefreshToken);
+        return await sessionRepository.GetSessionIdByTokenHashAsync(tokenHash, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SessionResponse>> GetSessionsAsync(
+        Guid userId,
+        string? currentRefreshToken,
+        CancellationToken cancellationToken = default)
+    {
+        Guid? currentSessionId = await GetCurrentSessionIdAsync(currentRefreshToken, cancellationToken);
+
+        DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
+        IReadOnlyList<Session> sessions = await sessionRepository.GetSessionsForUserAsync(userId, cancellationToken);
+
+        return sessions.Select(s => new SessionResponse(
+            s.Id,
+            s.CreatedAtUtc,
+            s.ExpiresAtUtc,
+            s.RevokedAtUtc,
+            s.RevokedAtUtc is null && s.ExpiresAtUtc > utcNow,
+            currentSessionId.HasValue && s.Id == currentSessionId.Value))
+            .ToArray();
+    }
+
+    public async Task<Result> RevokeSessionAsync(
+        Guid userId,
+        Guid sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
+        bool revoked = await sessionRepository.RevokeSessionForUserAsync(userId, sessionId, utcNow, cancellationToken);
+        if (!revoked)
+        {
+            return Result.Failure(AuthErrors.Auth.SessionNotFound);
+        }
+
+        await LogAuditAsync(userId, sessionId.ToString(), "Session_Revoke", "Success", cancellationToken);
+        return Result.Success();
     }
 
     private Task LogAuditAsync(Guid? actorId, string target, string action, string result, CancellationToken cancellationToken) =>
