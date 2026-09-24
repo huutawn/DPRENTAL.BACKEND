@@ -64,19 +64,19 @@ Dockerfile ở repository root có hai target cho deploy, đều dùng cùng sou
 
 ```bash
 # Image runtime của AuthService
-docker build --target runtime -t ghcr.io/<org>/dprental-authservice:<git-sha> .
+docker build --target runtime -t ghcr.io/<org>/dprental-auth:<git-sha> .
 
 # Image chạy EF Core migration một lần trước khi khởi động API
 docker build --target migrator -t ghcr.io/<org>/dprental-auth-migrator:<git-sha> .
 ```
 
-Runtime lắng nghe cổng `8080`, chạy non-root UID `1654` và cung cấp `/health/live` cùng `/health/ready`. Readiness kiểm tra kết nối PostgreSQL; migrator nhận cùng cấu hình connection string và JWT key file với runtime.
+Runtime lắng nghe cổng `8080`, chạy non-root UID `1654` và cung cấp `/health/live` cùng `/health/ready`. Readiness kiểm tra kết nối PostgreSQL. Image migrator chứa EF Core migration bundle và các file `appsettings*.json`, không chứa SDK, source code hay `dotnet-ef`. Bundle nhận cấu hình môi trường, connection string và JWT key file từ Compose như migrator trước đó; không đưa secret vào image.
 
 ## CI/CD AuthService cho dev
 
-Workflow [authservice-dev.yml](.github/workflows/authservice-dev.yml) chạy khi tạo pull request hoặc push vào `auth/develop-ci-cd`. Nó fetch `origin/auth/develop` và chỉ tiếp tục khi commit hiện tại đã chứa branch nền này. Sau đó workflow restore, build Release, test, build hai Docker target; pull request chỉ kiểm tra và không phát hành artifact.
+Workflow [authservice-dev.yml](.github/workflows/authservice-dev.yml) chỉ chạy khi có push vào `auth/develop-ci-cd`; nó không chạy cho pull request và không kiểm tra branch nền hoặc chạy test. Job publish build và đẩy hai Docker image lên GHCR một lần, sau đó job deploy chạy trên VPS. Kiểm tra build và test .NET vẫn có trong [pre-push hook](scripts/pre-push-check.sh) ở máy lập trình viên, nhưng hook này có thể bị bỏ qua và không thay thế CI.
 
-Mỗi push đạt kiểm tra sẽ publish hai image GHCR bất biến bằng full Git SHA:
+Mỗi push sẽ publish hai image GHCR bất biến bằng full Git SHA:
 
 ```text
 ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-auth:<git-sha>
@@ -93,17 +93,16 @@ DEV_VPS_KNOWN_HOSTS       # dòng host key theo định dạng known_hosts
 DEV_VPS_PORT              # tùy chọn, mặc định 22
 ```
 
-Workflow tự đồng bộ [deploy-authservice.sh](scripts/deploy-authservice.sh) lên `/opt/dprental/dev/scripts/deploy-authservice.sh` trước mỗi release. User SSH của workflow cần quyền tạo/ghi thư mục `scripts`, đọc `.env` và ghi `release.env`; `.env`, PEM JWT và Docker registry credential vẫn chỉ tồn tại trên VPS. `release.env` phải đã có hai image AuthService với tag để script thay bằng SHA mới. Script validate Compose, pull hai image, chạy migration một lần, chỉ recreate `auth-service`, chờ healthcheck, rồi gọi `/health/ready` qua `DEV_DOMAIN` và kiểm tra JWKS trực tiếp trong AuthService container. Gateway không public JWKS; Gateway tự tải JWKS qua Docker network nội bộ. Nó không rollback database hoặc image nếu migration/healthcheck lỗi.
+Workflow truyền [deploy-authservice.sh](scripts/deploy-authservice.sh) từ commit đang phát hành qua một kết nối SSH và chạy trực tiếp trên VPS; không cần cài bản script cố định. User SSH của workflow cần quyền đọc `.env` và ghi `release.env`; `.env`, PEM JWT và Docker registry credential vẫn chỉ tồn tại trên VPS. `release.env` phải đã có hai image AuthService với tag để script thay bằng SHA mới. Script pull hai image bằng một lệnh Compose, chạy migration một lần, chỉ recreate `auth-service`, chờ healthcheck, rồi gọi `/health/ready` qua `DEV_DOMAIN` và kiểm tra JWKS trực tiếp trong AuthService container. Gateway không public JWKS; Gateway tự tải JWKS qua Docker network nội bộ. Nó không rollback database hoặc image nếu migration/healthcheck lỗi.
 
-Ví dụ cài script bằng user có quyền quản trị VPS (thay `deploy` bằng user của GitHub Actions):
+Ví dụ cấp quyền ghi `release.env` cho user GitHub Actions trên VPS (thay `deploy` bằng user thực tế):
 
 ```bash
-sudo install -d -o deploy -g deploy -m 0750 /opt/dprental/dev/scripts
 sudo chown deploy:deploy /opt/dprental/dev/release.env
 sudo chmod 600 /opt/dprental/dev/release.env
 ```
 
-User `deploy` phải thuộc group `docker`; quyền Docker tương đương quyền quản trị VPS nên deploy key chỉ dùng cho automation này. Khóa host SSH có thể lấy từ máy tin cậy bằng `ssh-keyscan -H <vps-host>` rồi lưu nguyên kết quả vào `DEV_VPS_KNOWN_HOSTS`. Thêm branch protection cho `auth/develop-ci-cd` và đặt workflow validation làm required check.
+User `deploy` phải thuộc group `docker`; quyền Docker tương đương quyền quản trị VPS nên deploy key chỉ dùng cho automation này. Khóa host SSH có thể lấy từ máy tin cậy bằng `ssh-keyscan -H <vps-host>` rồi lưu nguyên kết quả vào `DEV_VPS_KNOWN_HOSTS`. Nếu chỉ muốn triển khai sau khi merge PR, cấu hình branch protection/ruleset cho `auth/develop-ci-cd` để yêu cầu PR và chặn push trực tiếp; event `push` tự nó không bảo đảm commit đến từ PR.
 
 ## Theo dõi trace phân tán
 

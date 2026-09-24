@@ -1,14 +1,16 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS ef-tools
+RUN dotnet tool install --tool-path /tools dotnet-ef --version 10.0.12
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-COPY AuthService.sln Directory.Build.props ./
+COPY Directory.Build.props ./
 COPY AuthService/src/Common/AuthService.Common.csproj AuthService/src/Common/
 COPY AuthService/src/Domain/AuthService.Domain.csproj AuthService/src/Domain/
 COPY AuthService/src/Application/AuthService.Application.csproj AuthService/src/Application/
 COPY AuthService/src/Api/AuthService.Api.csproj AuthService/src/Api/
-COPY AuthService/tests/Api.Tests/AuthService.Api.Tests.csproj AuthService/tests/Api.Tests/
 
-RUN dotnet restore AuthService.sln
+RUN dotnet restore AuthService/src/Api/AuthService.Api.csproj
 
 COPY AuthService/ AuthService/
 RUN dotnet publish AuthService/src/Api/AuthService.Api.csproj \
@@ -16,11 +18,23 @@ RUN dotnet publish AuthService/src/Api/AuthService.Api.csproj \
     --output /app/publish \
     --no-restore
 
-FROM build AS migrator
-RUN dotnet tool install --tool-path /tools dotnet-ef --version 10.0.12
+FROM build AS bundle-build
+COPY --from=ef-tools /tools /tools
+RUN /tools/dotnet-ef migrations bundle \
+    --project AuthService/src/Domain/AuthService.Domain.csproj \
+    --startup-project AuthService/src/Api/AuthService.Api.csproj \
+    --configuration Release \
+    --no-build \
+    --output /app/efbundle
 
-WORKDIR /src
-ENTRYPOINT ["/tools/dotnet-ef", "database", "update", "--project", "AuthService/src/Domain/AuthService.Domain.csproj", "--startup-project", "AuthService/src/Api/AuthService.Api.csproj", "--configuration", "Release", "--no-build"]
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS migrator
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends libgssapi-krb5-2 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=bundle-build /app/efbundle ./
+COPY --from=build /app/publish/appsettings*.json ./
+ENTRYPOINT ["/app/efbundle"]
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app

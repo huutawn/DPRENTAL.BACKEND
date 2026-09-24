@@ -67,10 +67,11 @@ PATH="$fake_bin:$PATH" \
   CURL_LOG="$curl_log" \
   DPR_DEPLOY_DIRECTORY="$deploy_directory" \
   AUTH_DEPLOY_HEALTH_INTERVAL_SECONDS=0 \
-  "$deployer" "$release_sha" >/dev/null
+  bash -s -- "$release_sha" < "$deployer" >/dev/null
 
 assert_contains "AUTH_SERVICE_IMAGE=ghcr.io/example/dprental-auth:$release_sha" "$deploy_directory/release.env"
 assert_contains "AUTH_MIGRATOR_IMAGE=ghcr.io/example/dprental-auth-migrator:$release_sha" "$deploy_directory/release.env"
+assert_contains '--profile migration pull auth-service auth-migrate' "$docker_log"
 assert_contains '--profile migration run --rm auth-migrate' "$docker_log"
 assert_contains 'up -d --no-deps --force-recreate auth-service' "$docker_log"
 assert_contains 'exec -T auth-service wget --quiet --tries=1 --output-document=/dev/null http://127.0.0.1:8080/.well-known/jwks.json' "$docker_log"

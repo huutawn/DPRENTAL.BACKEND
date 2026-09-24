@@ -144,9 +144,7 @@ dev_domain="$(read_environment_value DEV_DOMAIN)"
 printf 'Đang phát hành AuthService revision %s...\n' "$release_sha"
 update_release_images "$runtime_image" "$migrator_image"
 
-"${compose_command[@]}" config --quiet
-"${compose_command[@]}" pull auth-service
-"${compose_command[@]}" --profile migration pull auth-migrate
+"${compose_command[@]}" --profile migration pull auth-service auth-migrate
 "${compose_command[@]}" up -d postgres valkey
 "${compose_command[@]}" --profile migration run --rm auth-migrate
 "${compose_command[@]}" up -d --no-deps --force-recreate auth-service

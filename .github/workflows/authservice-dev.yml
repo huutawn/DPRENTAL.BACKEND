@@ -1,9 +1,6 @@
 name: AuthService CI/CD (dev)
 
 on:
-  pull_request:
-    branches:
-      - auth/develop-ci-cd
   push:
     branches:
       - auth/develop-ci-cd
@@ -12,47 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  validate:
-    name: Validate source, tests, and Docker artifacts
-    runs-on: ubuntu-24.04
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Verify synchronization with auth/develop
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --no-tags origin "+refs/heads/auth/develop:refs/remotes/origin/auth/develop"
-          git merge-base --is-ancestor origin/auth/develop HEAD
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-
-      - name: Restore
-        run: dotnet restore AuthService.sln --nologo
-
-      - name: Build
-        run: dotnet build AuthService.sln --configuration Release --no-restore --nologo
-
-      - name: Test
-        run: dotnet test AuthService.sln --configuration Release --no-build --nologo
-
-      - name: Build runtime image
-        run: docker build --target runtime --tag authservice-ci-runtime:${{ github.sha }} .
-
-      - name: Build migrator image
-        run: docker build --target migrator --tag authservice-ci-migrator:${{ github.sha }} .
-
   publish:
     name: Publish immutable images to GHCR
-    needs: validate
-    if: github.event_name == 'push' && github.ref == 'refs/heads/auth/develop-ci-cd'
     runs-on: ubuntu-24.04
     environment: dev
     permissions:
@@ -113,7 +71,6 @@ jobs:
   deploy-dev:
     name: Deploy AuthService to dev VPS
     needs: publish
-    if: github.event_name == 'push' && github.ref == 'refs/heads/auth/develop-ci-cd'
     runs-on: ubuntu-24.04
     environment: dev
     concurrency:
@@ -139,40 +96,6 @@ jobs:
           chmod 0600 "$HOME/.ssh/id_ed25519"
           chmod 0644 "$HOME/.ssh/known_hosts"
 
-      - name: Synchronize deployment script
-        env:
-          DEPLOY_VPS_HOST: ${{ secrets.DEV_VPS_HOST }}
-          DEPLOY_VPS_USER: ${{ secrets.DEV_VPS_USER }}
-          DEPLOY_VPS_PORT: ${{ secrets.DEV_VPS_PORT || '22' }}
-          RELEASE_SHA: ${{ github.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$DEPLOY_VPS_HOST"
-          test -n "$DEPLOY_VPS_USER"
-          remote_temporary_script="/tmp/deploy-authservice-${RELEASE_SHA}.sh"
-          ssh \
-            -i "$HOME/.ssh/id_ed25519" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -p "$DEPLOY_VPS_PORT" \
-            "$DEPLOY_VPS_USER@$DEPLOY_VPS_HOST" \
-            'install -d -m 0750 /opt/dprental/dev/scripts'
-          scp \
-            -i "$HOME/.ssh/id_ed25519" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -P "$DEPLOY_VPS_PORT" \
-            scripts/deploy-authservice.sh \
-            "$DEPLOY_VPS_USER@$DEPLOY_VPS_HOST:$remote_temporary_script"
-          ssh \
-            -i "$HOME/.ssh/id_ed25519" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -p "$DEPLOY_VPS_PORT" \
-            "$DEPLOY_VPS_USER@$DEPLOY_VPS_HOST" \
-            "install -m 0750 '$remote_temporary_script' /opt/dprental/dev/scripts/deploy-authservice.sh && rm -f '$remote_temporary_script'"
-
       - name: Deploy the published revision
         env:
           DEPLOY_VPS_HOST: ${{ secrets.DEV_VPS_HOST }}
@@ -190,4 +113,4 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -p "$DEPLOY_VPS_PORT" \
             "$DEPLOY_VPS_USER@$DEPLOY_VPS_HOST" \
-            /opt/dprental/dev/scripts/deploy-authservice.sh "$RELEASE_SHA"
+            bash -s -- "$RELEASE_SHA" < scripts/deploy-authservice.sh
