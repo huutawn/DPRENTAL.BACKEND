@@ -1,4 +1,4 @@
-namespace Dprental.AuthService.Domain.DTOs.Navigation;
+namespace Dprental.AuthService.Application.DTOs.Navigation;
 
 /// <summary>Item đầy đủ cho màn quản trị catalog, gồm permission bindings không bị filter theo user gọi.</summary>
 public sealed record NavigationAdminItemResponse(

@@ -1,6 +1,6 @@
 using Dprental.AuthService.Domain.Entities;
 
-namespace Dprental.AuthService.Domain.Utils;
+namespace Dprental.AuthService.Domain.Access;
 
 /// <summary>Quy tắc duy nhất để suy ra role, permission và organization của user, dùng chung cho access token và GET /me.</summary>
 public static class UserAccessResolver

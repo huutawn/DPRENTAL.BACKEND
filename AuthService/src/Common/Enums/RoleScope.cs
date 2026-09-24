@@ -1,4 +1,4 @@
-namespace Dprental.AuthService.Domain.Enums;
+namespace Dprental.AuthService.Common.Enums;
 
 public enum RoleScope
 {

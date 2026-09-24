@@ -1,4 +1,4 @@
-namespace Dprental.AuthService.Domain.Models;
+namespace Dprental.AuthService.Application.Options;
 
 /// <summary>Cấu hình bootstrap khóa tạo Super Admin ban đầu.</summary>
 public sealed class AdminBootstrapOptions

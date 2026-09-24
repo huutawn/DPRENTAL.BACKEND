@@ -7,15 +7,15 @@ Service xác thực cho hệ thống DPRENTAL, xây dựng bằng .NET theo ki�
 ```text
 AuthService/
   src/
-    Common/       # Primitive dùng chung, gồm IRepo<TEntity, TKey> CRUD
-    Domain/       # DTOs, Entities, IRepositories, Models, Repositories, Utils, Validators, persistence
-    Application/  # Services, IServices, Security, Mapping và application logic
+    Common/       # Kiểu dùng chung, enums và utility không phụ thuộc domain
+    Domain/       # Entities, access rules, IRepositories, Models, EF repositories và persistence
+    Application/  # DTOs, options, validators, services, security, mapping và application logic
     Api/          # Controllers, Filters, HTTP/security composition root
   docs/           # Tài liệu kỹ thuật
 docker-compose.yml
 ```
 
-Hướng phụ thuộc: `Api -> Application -> Domain`; các lớp có thể dùng `Common`. API tham chiếu trực tiếp Domain chỉ tại composition root để đăng ký persistence.
+Hướng phụ thuộc chính: `Api -> Application -> Domain -> Common`; Application và Domain cùng dùng các primitive của Common. API composition root đăng ký persistence Domain; các endpoint trao đổi DTO thuộc Application.
 
 ## Chạy hạ tầng cục bộ
 

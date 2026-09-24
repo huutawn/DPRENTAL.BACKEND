@@ -1,10 +1,10 @@
 using System;
 using System.IO;
 using Microsoft.Extensions.Options;
-using Dprental.AuthService.Domain.Models;
-using Dprental.AuthService.Domain.Utils;
+using Dprental.AuthService.Application.Options;
+using Dprental.AuthService.Application.Security.Jwt;
 
-namespace Dprental.AuthService.Domain.Validators;
+namespace Dprental.AuthService.Application.Validators;
 
 /// <summary>Kiểm tra cấu hình JWT và key ring trước khi ứng dụng khởi động.</summary>
 public sealed class JwtOptionsValidator : IValidateOptions<JwtOptions>

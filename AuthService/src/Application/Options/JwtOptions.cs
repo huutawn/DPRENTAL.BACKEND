@@ -1,4 +1,4 @@
-namespace Dprental.AuthService.Domain.Models;
+namespace Dprental.AuthService.Application.Options;
 
 /// <summary>Tập hợp cấu hình cần thiết để phát hành và xác thực JWT RS256.</summary>
 public sealed class JwtOptions

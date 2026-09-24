@@ -1,3 +1,3 @@
-namespace Dprental.AuthService.Domain.DTOs.Auth;
+namespace Dprental.AuthService.Application.DTOs.Auth;
 
 public sealed record AccountCreatedResponse(Guid AccountId);

@@ -1,7 +1,7 @@
-using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Application.Options;
 using Microsoft.Extensions.Options;
 
-namespace Dprental.AuthService.Domain.Validators;
+namespace Dprental.AuthService.Application.Validators;
 
 /// <summary>Kiểm tra bắt buộc cấu hình Auth:AdminBootstrap:CreationKey khi ứng dụng khởi động.</summary>
 public sealed class AdminBootstrapOptionsValidator : IValidateOptions<AdminBootstrapOptions>

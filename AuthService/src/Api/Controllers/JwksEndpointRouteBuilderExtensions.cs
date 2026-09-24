@@ -1,4 +1,4 @@
-using Dprental.AuthService.Domain.Utils;
+using Dprental.AuthService.Application.Security.Jwt;
 
 namespace Dprental.AuthService.Api.Endpoints;
 

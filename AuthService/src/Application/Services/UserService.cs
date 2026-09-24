@@ -3,14 +3,16 @@ using System.Security.Cryptography;
 using System.Text;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.DTOs.Auth;
-using Dprental.AuthService.Domain.DTOs.User;
+using Dprental.AuthService.Application.DTOs.Auth;
+using Dprental.AuthService.Application.DTOs.User;
+using Dprental.AuthService.Application.Options;
+using Dprental.AuthService.Common.Utils;
+using Dprental.AuthService.Domain.Access;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Enums;
+using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
-using Dprental.AuthService.Domain.Utils;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 
@@ -25,7 +27,7 @@ public sealed class UserService(
     ICorrelationIdProvider correlationIdProvider,
     IAuditLogRepository auditLogRepository,
     IAuthSessionRepository authSessionRepository,
-    IRecoveryTokenRepository recoveryTokenRepository) : IUserService    
+    IRecoveryTokenRepository recoveryTokenRepository) : IUserService
 {
     public async Task<Result<AccountCreatedResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {

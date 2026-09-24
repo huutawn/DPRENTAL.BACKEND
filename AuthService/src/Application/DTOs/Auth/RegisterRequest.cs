@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Dprental.AuthService.Domain.DTOs.Auth;
+namespace Dprental.AuthService.Application.DTOs.Auth;
 
 public sealed record RegisterRequest(
     [Required, EmailAddress, StringLength(254)] string Email,

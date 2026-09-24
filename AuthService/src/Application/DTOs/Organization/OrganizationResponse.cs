@@ -1,6 +1,6 @@
-using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Common.Enums;
 
-namespace Dprental.AuthService.Domain.DTOs.Organization;
+namespace Dprental.AuthService.Application.DTOs.Organization;
 
 public sealed record OrganizationResponse(
     Guid Id,

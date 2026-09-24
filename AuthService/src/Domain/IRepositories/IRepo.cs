@@ -1,4 +1,4 @@
-namespace Dprental.AuthService.Common.Repositories;
+namespace Dprental.AuthService.Domain.IRepositories;
 
 /// <summary>CRUD contract shared by domain-specific repositories.</summary>
 /// <typeparam name="TEntity">The persisted entity type.</typeparam>

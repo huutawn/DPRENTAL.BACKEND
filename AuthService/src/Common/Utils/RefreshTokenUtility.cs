@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Dprental.AuthService.Domain.Utils;
+namespace Dprental.AuthService.Common.Utils;
 
 /// <summary>Creates opaque refresh tokens and their persistent hashes.</summary>
 public static class RefreshTokenUtility

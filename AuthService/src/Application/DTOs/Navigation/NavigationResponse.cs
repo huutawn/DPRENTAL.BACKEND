@@ -1,4 +1,4 @@
-namespace Dprental.AuthService.Domain.DTOs.Navigation;
+namespace Dprental.AuthService.Application.DTOs.Navigation;
 
 /// <summary>Menu navigation được lọc theo quyền hiệu lực của user trong một organization context tùy chọn.</summary>
 public sealed record NavigationResponse(

@@ -1,6 +1,6 @@
-using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Common.Enums;
 
-namespace Dprental.AuthService.Domain.DTOs.User;
+namespace Dprental.AuthService.Application.DTOs.User;
 
 /// <summary>Thông tin hồ sơ, quyền/vai trò và các organization đang active của người dùng hiện tại.</summary>
 public sealed record CurrentUserResponse(

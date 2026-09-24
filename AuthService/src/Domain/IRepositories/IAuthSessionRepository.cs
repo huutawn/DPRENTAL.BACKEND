@@ -1,4 +1,3 @@
-using Dprental.AuthService.Common.Repositories;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Models;
 

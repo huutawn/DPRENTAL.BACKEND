@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.AuthService.Domain.Entities;
 
-using Dprental.AuthService.Domain.Enums;
+using Dprental.AuthService.Common.Enums;
 
 /// <summary>Một tổ chức (Platform/Supplier/Renter) mà user có thể là thành viên.</summary>
 [Table("Organizations", Schema = "auth")]

@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Dprental.AuthService.Domain.DTOs.Organization;
+namespace Dprental.AuthService.Application.DTOs.Organization;
 
 public sealed record UpdateOrganizationRequest(
     [MaxLength(150)]

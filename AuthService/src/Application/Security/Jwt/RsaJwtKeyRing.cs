@@ -1,9 +1,9 @@
 using System.Security.Cryptography;
-using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Application.Options;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
-namespace Dprental.AuthService.Domain.Utils;
+namespace Dprental.AuthService.Application.Security.Jwt;
 
 /// <summary>Quản lý private key active để ký và các public key được chấp nhận để xác thực.</summary>
 public sealed class RsaJwtKeyRing : IDisposable

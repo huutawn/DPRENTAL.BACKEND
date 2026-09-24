@@ -38,7 +38,7 @@ namespace AuthService.Domain.Migrations
                     { SupplierMemberRoleId, "supplier_member", "Thành viên thông thường của một Organization loại Supplier — tương đương Member.", 1 },
                     { RenterAdminRoleId, "renter_admin", "Quản trị viên của một Organization loại Renter — tương đương Owner.", 1 },
                     { RenterMemberRoleId, "renter_member", "Thành viên thông thường của một Organization loại Renter — tương đương Member.", 1 }
-                }); 
+                });
 
             migrationBuilder.InsertData(
                 schema: "auth",

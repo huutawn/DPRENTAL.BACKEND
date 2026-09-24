@@ -1,4 +1,4 @@
-namespace Dprental.AuthService.Domain.Enums;
+namespace Dprental.AuthService.Common.Enums;
 
 /// <summary>Loại organization theo vai trò trong nền tảng.</summary>
 public enum OrganizationType
