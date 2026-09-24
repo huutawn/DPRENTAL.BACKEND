@@ -85,23 +85,10 @@ jobs:
           sparse-checkout: |
             scripts/deploy-authservice.sh
           sparse-checkout-cone-mode: false
-      - name: Configure SSH trust
+      - name: Deploy the published revision
         env:
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEV_VPS_SSH_PRIVATE_KEY }}
           DEPLOY_VPS_KNOWN_HOSTS: ${{ secrets.DEV_VPS_KNOWN_HOSTS }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$DEPLOY_SSH_PRIVATE_KEY"
-          test -n "$DEPLOY_VPS_KNOWN_HOSTS"
-          install -d -m 0700 "$HOME/.ssh"
-          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
-          printf '%s\n' "$DEPLOY_VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          chmod 0600 "$HOME/.ssh/id_ed25519"
-          chmod 0644 "$HOME/.ssh/known_hosts"
-
-      - name: Deploy the published revision
-        env:
           DEPLOY_VPS_HOST: ${{ secrets.DEV_VPS_HOST }}
           DEPLOY_VPS_USER: ${{ secrets.DEV_VPS_USER }}
           DEPLOY_VPS_PORT: ${{ secrets.DEV_VPS_PORT || '22' }}
@@ -111,14 +98,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$DEPLOY_SSH_PRIVATE_KEY"
+          test -n "$DEPLOY_VPS_KNOWN_HOSTS"
           test -n "$DEPLOY_VPS_HOST"
           test -n "$DEPLOY_VPS_USER"
           test -n "$GHCR_USERNAME"
           test -n "$GHCR_TOKEN"
-          ssh \
-            -i "$HOME/.ssh/id_ed25519" \
-            -o IdentitiesOnly=yes \
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          eval "$(ssh-agent -s)" >/dev/null
+          trap 'ssh-agent -k >/dev/null' EXIT
+          ssh-add - <<< "$DEPLOY_SSH_PRIVATE_KEY" >/dev/null
+          { printf '%s\n' "$GHCR_USERNAME" "$GHCR_TOKEN"; cat scripts/deploy-authservice.sh; } | ssh \
+            -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             -p "$DEPLOY_VPS_PORT" \
             "$DEPLOY_VPS_USER@$DEPLOY_VPS_HOST" \
-            "GHCR_USERNAME=$(printf '%q' "$GHCR_USERNAME") GHCR_TOKEN=$(printf '%q' "$GHCR_TOKEN") bash -s -- $RELEASE_SHA" < scripts/deploy-authservice.sh
+            "bash -c 'IFS= read -r GHCR_USERNAME; IFS= read -r GHCR_TOKEN; export GHCR_USERNAME GHCR_TOKEN; exec bash -s -- \"\$1\"' -- $RELEASE_SHA"
