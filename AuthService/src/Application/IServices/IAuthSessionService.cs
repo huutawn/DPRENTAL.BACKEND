@@ -1,3 +1,5 @@
+using Dprental.AuthService.Common;
+using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Domain.Models;
 
 namespace Dprental.AuthService.Application.IServices;
@@ -17,4 +19,13 @@ public interface IAuthSessionService
 
     Task RevokeByRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default);
     Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    /// <summary>Lấy danh sách các phiên đăng nhập của người dùng, đánh dấu phiên hiện tại theo refreshToken.</summary>
+    Task<IReadOnlyList<SessionResponse>> GetSessionsAsync(Guid userId, string? currentRefreshToken, CancellationToken cancellationToken = default);
+
+    /// <summary>Thu hồi một phiên đăng nhập cụ thể của người dùng.</summary>
+    Task<Result> RevokeSessionAsync(Guid userId, Guid sessionId, CancellationToken cancellationToken = default);
+
+    /// <summary>Tra cứu SessionId từ chuỗi refresh token raw nếu hợp lệ.</summary>
+    Task<Guid?> GetCurrentSessionIdAsync(string? currentRefreshToken, CancellationToken cancellationToken = default);
 }

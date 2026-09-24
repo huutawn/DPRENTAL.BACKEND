@@ -1,9 +1,9 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using Dprental.AuthService.Common.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Enums;
 
 [Table("Roles", Schema = "auth")]
 [Index(nameof(Name), IsUnique = true)]

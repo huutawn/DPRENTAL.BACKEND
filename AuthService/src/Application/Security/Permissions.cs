@@ -1,5 +1,5 @@
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.Enums;
+using Dprental.AuthService.Common.Enums;
 
 namespace Dprental.AuthService.Application.Security;
 

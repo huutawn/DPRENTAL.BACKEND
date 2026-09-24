@@ -1,4 +1,7 @@
 using Dprental.AuthService.Application.Security;
+using Dprental.AuthService.Common.Enums;
+using Dprental.AuthService.Application.Options;
+using Dprental.AuthService.Application.Security.Jwt;
 using Dprental.AuthService.Domain.Enums;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;

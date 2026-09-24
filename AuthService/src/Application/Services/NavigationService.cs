@@ -1,8 +1,8 @@
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.DTOs.Navigation;
-using Dprental.AuthService.Domain.Enums;
+using Dprental.AuthService.Application.DTOs.Navigation;
+using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.IRepositories;
 
 namespace Dprental.AuthService.Application.Services;
@@ -45,7 +45,7 @@ public sealed class NavigationService(
         }
 
         var organization = await organizationRepository.GetByIdAsync(selectedOrganizationId, cancellationToken);
-        if (organization is null || !organization.IsActive)
+        if (organization is null || organization.Status != OrganizationStatus.Active)
         {
             return Result.Failure<NavigationResponse>(AuthErrors.Organization.CrossOrganizationAccessDenied);
         }

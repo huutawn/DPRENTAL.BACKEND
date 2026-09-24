@@ -183,6 +183,15 @@ public sealed class AuthSessionServiceTests
         {
             return Task.FromResult(Principal?.UserId);
         }
+
+        public Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Session>>([]);
+
+        public Task<Guid?> GetSessionIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) =>
+            Task.FromResult<Guid?>(null);
+
+        public Task<bool> RevokeSessionForUserAsync(Guid userId, Guid sessionId, DateTime utcNow, CancellationToken cancellationToken = default) =>
+            Task.FromResult(true);
     }
 
     private static AuthSessionService CreateService(RecordingAuthSessionRepository repository, DateTimeOffset now) =>

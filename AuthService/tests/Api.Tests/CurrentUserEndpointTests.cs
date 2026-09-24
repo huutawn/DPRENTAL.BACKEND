@@ -129,7 +129,7 @@ public sealed class CurrentUserEndpointTests
                 Name = "Acme",
                 Slug = "acme",
                 Type = OrganizationType.Supplier,
-                IsActive = true
+                Status = OrganizationStatus.Active
             },
             Role = CreateRole("Owner", "roles.revoke"),
             Status = MembershipStatus.Active

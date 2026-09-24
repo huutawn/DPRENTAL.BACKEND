@@ -28,7 +28,7 @@ public sealed class EfOrganizationRepositoryTests
             Name = "Acme Corp",
             Slug = "acme-corp",
             Type = OrganizationType.Supplier,
-            IsActive = true,
+            Status = OrganizationStatus.Active,
             CreatedAtUtc = DateTime.UtcNow
         };
 
@@ -72,7 +72,7 @@ public sealed class EfOrganizationRepositoryTests
             Name = "Acme",
             Slug = "acme",
             Type = OrganizationType.Supplier,
-            IsActive = true,
+            Status = OrganizationStatus.Active,
             CreatedAtUtc = DateTime.UtcNow
         };
         OrganizationMembership mem1 = new()
@@ -93,7 +93,7 @@ public sealed class EfOrganizationRepositoryTests
             Name = "Acme 2",
             Slug = "acme", // Duplicate slug
             Type = OrganizationType.Renter,
-            IsActive = true,
+            Status = OrganizationStatus.Active,
             CreatedAtUtc = DateTime.UtcNow
         };
         OrganizationMembership mem2 = new()

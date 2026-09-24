@@ -1,9 +1,9 @@
 using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.DTOs.Auth;
-using Dprental.AuthService.Domain.DTOs.Organization;
+using Dprental.AuthService.Application.DTOs.Auth;
+using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Enums;
+using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.IRepositories;
 using Xunit;
 
@@ -64,7 +64,7 @@ public sealed class AuthorizationMatrixTests
             Name = "Matrix Org",
             Slug = "matrix-org",
             Type = OrganizationType.Supplier,
-            IsActive = true
+            Status = OrganizationStatus.Active
         };
 
         // Super Admin permissions (all 17)
@@ -257,6 +257,10 @@ public sealed class AuthorizationMatrixTests
 
     private sealed class FakeOrgRepo : IOrganizationRepository
     {
+        public Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
+
         public Dictionary<Guid, Organization> Organizations { get; } = [];
         public Task<Organization?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Organizations.GetValueOrDefault(id));
         public Task<Organization?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult(Organizations.Values.FirstOrDefault(o => o.Slug == slug));
@@ -310,10 +314,15 @@ public sealed class AuthorizationMatrixTests
             Task.FromResult(EffectivePermissions.GetValueOrDefault((userId, organizationId)) ?? (IReadOnlyList<string>)[]);
         public Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(GlobalPermissions.GetValueOrDefault(userId) ?? (IReadOnlyList<string>)[]);
+        public Task<IReadOnlyList<OrganizationMembership>> GetMembershipsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<OrganizationMembership>>(Memberships.Where(m => m.UserId == userId).ToList());
     }
 
     private sealed class FakeUserRepo : IUserRepository
     {
+        public Task<bool> CitizenIdExistsAsync(string citizenId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
         public Dictionary<Guid, User> Users { get; } = [];
         public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Users.GetValueOrDefault(id));
         public Task<User?> FindByEmailAsync(string email, CancellationToken cancellationToken = default) => Task.FromResult<User?>(null);

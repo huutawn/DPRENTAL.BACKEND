@@ -1,10 +1,10 @@
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security.Jwt;
 using Dprental.AuthService.Application.Services;
+using Dprental.AuthService.Application.Options;
+using Dprental.AuthService.Application.Validators;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Models;
-using Dprental.AuthService.Domain.Utils;
-using Dprental.AuthService.Domain.Validators;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,8 +38,10 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IServiceIdentityService, ServiceIdentityService>();
         services.AddScoped<IExternalLoginService, ExternalLoginService>();
         services.AddScoped<IOrganizationService, OrganizationService>();
+        services.AddScoped<IOrganizationRegistrationService, OrganizationRegistrationService>();
         services.AddScoped<INavigationService, NavigationService>();
         services.AddScoped<INavigationAdminService, NavigationAdminService>();
+        services.AddScoped<IUserAccountService, UserAccountService>();
 
         return services;
     }

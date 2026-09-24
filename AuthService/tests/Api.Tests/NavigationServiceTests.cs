@@ -2,7 +2,7 @@ using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Enums;
+using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -29,8 +29,8 @@ public sealed class NavigationServiceTests
 
         NavigationService service = CreateService(dbContext);
 
-        Result<Domain.DTOs.Navigation.NavigationResponse> orgA = await service.GetNavigationAsync(userId, organizationAId);
-        Result<Domain.DTOs.Navigation.NavigationResponse> orgB = await service.GetNavigationAsync(userId, organizationBId);
+        Result<Application.DTOs.Navigation.NavigationResponse> orgA = await service.GetNavigationAsync(userId, organizationAId);
+        Result<Application.DTOs.Navigation.NavigationResponse> orgB = await service.GetNavigationAsync(userId, organizationBId);
 
         Assert.True(orgA.IsSuccess, orgA.Error.Code);
         Assert.Equal(
@@ -60,11 +60,11 @@ public sealed class NavigationServiceTests
             [PermissionCode.IdentityOrganizationsSuspend],
             [],
             []);
-        dbContext.Organizations.Add(new Organization { Id = organizationId, Name = "Other", Slug = "other", IsActive = true });
+        dbContext.Organizations.Add(new Organization { Id = organizationId, Name = "Other", Slug = "other", Status = OrganizationStatus.Active });
         await dbContext.SaveChangesAsync();
 
         NavigationService service = CreateService(dbContext);
-        Result<Domain.DTOs.Navigation.NavigationResponse> result = await service.GetNavigationAsync(userId, organizationId);
+        Result<Application.DTOs.Navigation.NavigationResponse> result = await service.GetNavigationAsync(userId, organizationId);
 
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.Organization.CrossOrganizationAccessDenied, result.Error);
@@ -85,7 +85,7 @@ public sealed class NavigationServiceTests
             [PermissionCode.IdentityRolesRead]);
 
         NavigationService service = CreateService(dbContext);
-        Result<Domain.DTOs.Navigation.NavigationResponse> result = await service.GetNavigationAsync(userId, null);
+        Result<Application.DTOs.Navigation.NavigationResponse> result = await service.GetNavigationAsync(userId, null);
 
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.Navigation.InvalidOrganizationContext, result.Error);
@@ -111,13 +111,13 @@ public sealed class NavigationServiceTests
             .SingleAsync(item => item.UserId == userId && item.OrganizationId == organizationAId);
         membership.Status = MembershipStatus.Suspended;
         Organization organization = await dbContext.Organizations.SingleAsync(item => item.Id == organizationBId);
-        organization.IsActive = false;
+        organization.Status = OrganizationStatus.Suspended;
         await dbContext.SaveChangesAsync();
 
         NavigationService service = CreateService(dbContext);
-        Result<Domain.DTOs.Navigation.NavigationResponse> suspended = await service.GetNavigationAsync(userId, organizationAId);
-        Result<Domain.DTOs.Navigation.NavigationResponse> inactiveOrganization = await service.GetNavigationAsync(userId, organizationBId);
-        Result<Domain.DTOs.Navigation.NavigationResponse> empty = await service.GetNavigationAsync(userId, Guid.Empty);
+        Result<Application.DTOs.Navigation.NavigationResponse> suspended = await service.GetNavigationAsync(userId, organizationAId);
+        Result<Application.DTOs.Navigation.NavigationResponse> inactiveOrganization = await service.GetNavigationAsync(userId, organizationBId);
+        Result<Application.DTOs.Navigation.NavigationResponse> empty = await service.GetNavigationAsync(userId, Guid.Empty);
 
         Assert.True(suspended.IsFailure);
         Assert.Equal(AuthErrors.Organization.CrossOrganizationAccessDenied, suspended.Error);
@@ -127,7 +127,7 @@ public sealed class NavigationServiceTests
         Assert.Equal(AuthErrors.Navigation.InvalidOrganizationContext, empty.Error);
     }
 
-    private static string[] ChildKeys(Domain.DTOs.Navigation.NavigationResponse response) =>
+    private static string[] ChildKeys(Application.DTOs.Navigation.NavigationResponse response) =>
         Assert.Single(response.Items).Children.Select(item => item.Key).Order(StringComparer.Ordinal).ToArray();
 
     private static AuthDbContext CreateDbContext() => new(new DbContextOptionsBuilder<AuthDbContext>()
@@ -150,8 +150,8 @@ public sealed class NavigationServiceTests
         IReadOnlyCollection<string> organizationBPermissions)
     {
         User user = new() { Id = userId, Email = $"{userId:N}@example.com", FullName = "Navigation User", IsActive = true };
-        Organization organizationA = new() { Id = organizationAId, Name = "Organization A", Slug = $"org-a-{organizationAId:N}", IsActive = true };
-        Organization organizationB = new() { Id = organizationBId, Name = "Organization B", Slug = $"org-b-{organizationBId:N}", IsActive = true };
+        Organization organizationA = new() { Id = organizationAId, Name = "Organization A", Slug = $"org-a-{organizationAId:N}", Status = OrganizationStatus.Active };
+        Organization organizationB = new() { Id = organizationBId, Name = "Organization B", Slug = $"org-b-{organizationBId:N}", Status = OrganizationStatus.Active };
         Role globalRole = CreateRole("global", RoleScope.Global, globalPermissions);
         Role orgARole = CreateRole("org-a", RoleScope.Organization, organizationAPermissions);
         Role orgBRole = CreateRole("org-b", RoleScope.Organization, organizationBPermissions);
