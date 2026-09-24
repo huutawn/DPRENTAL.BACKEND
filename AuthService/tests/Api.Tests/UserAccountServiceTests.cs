@@ -424,6 +424,8 @@ public sealed class UserAccountServiceTests
 
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, CancellationToken cancellationToken = default) =>
+    throw new NotSupportedException();
     }
 
     private sealed class FakeExternalLoginRepository : IExternalLoginRepository

@@ -342,7 +342,8 @@ public sealed class ExternalLoginServiceTests
             LastLookupEmail = normalizedEmail;
             return Task.FromResult(Existing is not null && Existing.Email == normalizedEmail ? Existing : null);
         }
-
+        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("ExternalLoginService does not use pagination.");
         public Task<User> CreateAsync(User entity, CancellationToken cancellationToken = default)
         {
             if (RejectCreate)

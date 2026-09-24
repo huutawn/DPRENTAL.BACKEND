@@ -59,6 +59,12 @@ public static class Permissions
         public const string Manage = PermissionCode.IdentityNavigationManage;
     }
 
-    /// <summary>Toàn bộ mã quyền đã khai báo — dùng để đăng ký policy hàng loạt.</summary>
-    public static IReadOnlyCollection<string> All => PermissionCode.All;
+    /// <summary>Toàn bộ mã quyền đã khai báo — dùng để đăng ký policy hàng loạt, tránh quên khi thêm quyền mới.</summary>
+    public static IReadOnlyCollection<string> All { get; } =
+    [
+        Roles.Assign,
+        Roles.Revoke,
+        Users.Read,
+        Users.Manage
+    ];
 }

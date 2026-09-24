@@ -7,6 +7,7 @@ using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Application.DTOs.User;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Dprental.AuthService.Domain.DTOs.User;
 
 namespace Dprental.AuthService.Api.Controllers;
 
@@ -234,5 +235,24 @@ public sealed class UsersController(
 
         Result<IReadOnlyList<OrganizationInvitationResponse>> result = await organizationService.GetMyInvitationsAsync(userId, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Cập nhật hồ sơ (tên, số điện thoại, avatar) của người dùng hiện tại.</summary>
+    /// <param name="request">Thông tin hồ sơ cần cập nhật.</param>
+    /// <param name="cancellationToken">Token hủy request.</param>
+    [HttpPut("me")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> UpdateCurrentUser([FromBody] UpdateUserProfileRequest request, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(User.Identity?.Name, out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        Result result = await userService.UpdateUserProfileAsync(userId, request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
 }
