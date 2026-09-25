@@ -12,7 +12,10 @@ AuthService/
     Application/     # DTOs, repository ports (interfaces), services, security, mapping
     Infrastructure/  # EF Core DbContext, Repositories, Migrations và data persistence
     Api/             # Controllers, Filters, HTTP/security composition root
-  docs/              # Tài liệu kỹ thuật
+  tests/              # Kiểm thử
+Directory.Build.props
+Directory.Packages.props
+docs/                 # Tài liệu kỹ thuật
 docker-compose.yml
 ```
 
@@ -28,6 +31,20 @@ docker compose up -d
 PostgreSQL lắng nghe ở `localhost:5433`; Valkey (Redis-compatible) ở `localhost:6379`. `.env` không được commit.
 
 Trước khi chạy API, cấp connection string, RSA JWT key ring bằng User Secrets hoặc secret manager theo [hướng dẫn local](docs/README.md#chạy-api-cục-bộ). Không đặt password hoặc signing key vào `appsettings*.json`.
+
+## Quản lý version NuGet tập trung
+
+AuthService sử dụng Central Package Management (CPM) để quản lý toàn bộ version thư viện tại file `Directory.Packages.props` ở thư mục gốc. Tùy chọn `CentralPackageVersionOverrideEnabled` được đặt thành `false` nhằm ngăn từng project tự ghi đè version chung.
+
+- **Đổi version package có sẵn**:
+  Cập nhật thuộc tính `Version` trong thẻ `<PackageVersion Include="<TênPackage>" Version="<VersionMới>" />` tại `Directory.Packages.props`. Mọi project tham chiếu package này sẽ tự nhận version mới.
+
+- **Thêm package mới vào solution**:
+  1. Thêm thẻ `<PackageVersion Include="<TênPackage>" Version="<Version>" />` vào `Directory.Packages.props`.
+  2. Thêm thẻ `<PackageReference Include="<TênPackage>" />` vào file `.csproj` của project cần dùng (không khai báo thuộc tính `Version`).
+
+- **Dùng package đã có cho project khác**:
+  Chỉ cần thêm `<PackageReference Include="<TênPackage>" />` vào file `.csproj` của project đó; version được tự động kế thừa từ file chung.
 
 ## Kiểm tra trước khi push
 
