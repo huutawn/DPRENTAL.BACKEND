@@ -7,7 +7,7 @@ using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Mapping;
 using Dprental.AuthService.Application.Options;
-using Dprental.AuthService.Application.Repositories;
+using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Common;

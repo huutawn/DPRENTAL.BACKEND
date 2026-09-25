@@ -1,9 +1,7 @@
 global using Dprental.AuthService.Common.Enums;
 global using Dprental.AuthService.Application.Options;
-global using Dprental.AuthService.Application.Repositories;
-global using Dprental.AuthService.Application.Exceptions;
-global using Dprental.AuthService.Infrastructure.Data;
-global using Dprental.AuthService.Infrastructure.Repositories;
+global using Dprental.AuthService.Domain.IRepositories;
+global using Dprental.AuthService.Domain.Repositories;
 
 namespace Dprental.AuthService.Api.Tests;
 

@@ -8,9 +8,8 @@ Service xác thực cho hệ thống DPRENTAL, xây dựng bằng .NET theo ki�
 AuthService/
   src/
     Common/          # Kiểu dùng chung, enums, Result/Error và utility
-    Domain/          # Entities và domain models
-    Application/     # DTOs, repository ports (interfaces), services, security, mapping
-    Infrastructure/  # EF Core DbContext, Repositories, Migrations và data persistence
+    Domain/          # Entities, domain models, repository contracts, EF Core DbContext, migrations và data persistence
+    Application/     # DTOs, services, security, mapping
     Api/             # Controllers, Filters, HTTP/security composition root
   tests/              # Kiểm thử
 Directory.Build.props
@@ -19,7 +18,7 @@ docs/                 # Tài liệu kỹ thuật
 docker-compose.yml
 ```
 
-Hướng phụ thuộc chính: `Api -> Application -> Domain -> Common`; `Infrastructure -> Application & Domain`; API composition root đăng ký persistence Infrastructure; các endpoint trao đổi DTO thuộc Application.
+Hướng phụ thuộc chính: `Api -> Application -> Domain -> Common`; API composition root đăng ký persistence Domain (`AddAuthDomainPersistence`); các endpoint trao đổi DTO thuộc Application.
 
 ## Chạy hạ tầng cục bộ
 

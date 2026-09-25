@@ -16,7 +16,6 @@
   <ItemGroup>
     <ProjectReference Include="../Application/AuthService.Application.csproj" />
     <ProjectReference Include="../Domain/AuthService.Domain.csproj" />
-    <ProjectReference Include="../Infrastructure/AuthService.Infrastructure.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
