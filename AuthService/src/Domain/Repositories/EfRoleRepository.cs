@@ -1,0 +1,73 @@
+using Dprental.AuthService.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
+
+using Dprental.AuthService.Domain.IRepositories;
+
+namespace Dprental.AuthService.Domain.Repositories;
+
+public sealed class EfRoleRepository(AuthDbContext dbContext) : IRoleRepository
+{
+    public Task<bool> RoleExistsAsync(Guid roleId, CancellationToken cancellationToken = default) =>
+        dbContext.Roles.AsNoTracking().AnyAsync(role => role.Id == roleId, cancellationToken);
+
+    public Task<Role?> GetByIdAsync(Guid roleId, CancellationToken cancellationToken = default) =>
+        dbContext.Roles.AsNoTracking().SingleOrDefaultAsync(role => role.Id == roleId, cancellationToken);
+
+    public Task<Role?> GetByNameAsync(string name, CancellationToken cancellationToken = default) =>
+        dbContext.Roles.AsNoTracking().SingleOrDefaultAsync(role => role.Name == name, cancellationToken);
+
+    public async Task<IReadOnlyList<string>> GetPermissionCodesAsync(Guid roleId, CancellationToken cancellationToken = default) =>
+        await dbContext.RolePermissions
+            .AsNoTracking()
+            .Where(rolePermission => rolePermission.RoleId == roleId)
+            .Select(rolePermission => rolePermission.Permission.Code)
+            .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<string>> GetUserPermissionCodesAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        await dbContext.UserRoles
+            .AsNoTracking()
+            .Where(userRole => userRole.UserId == userId)
+            .SelectMany(userRole => userRole.Role.RolePermissions.Select(rolePermission => rolePermission.Permission.Code))
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+    public Task<bool> IsAssignedAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) =>
+        dbContext.UserRoles
+            .AsNoTracking()
+            .AnyAsync(userRole => userRole.UserId == userId && userRole.RoleId == roleId, cancellationToken);
+
+    public async Task<bool> AssignAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default)
+    {
+        bool userExists = await dbContext.Users.AsNoTracking().AnyAsync(user => user.Id == userId, cancellationToken);
+        bool roleExists = await dbContext.Roles.AsNoTracking().AnyAsync(role => role.Id == roleId, cancellationToken);
+        if (!userExists || !roleExists)
+        {
+            return false;
+        }
+
+        UserRole userRole = new() { UserId = userId, RoleId = roleId };
+        dbContext.UserRoles.Add(userRole);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException exception)
+        {
+            dbContext.Entry(userRole).State = EntityState.Detached;
+            if (DbExceptionTranslator.TryTranslate(exception, out var constraintEx))
+            {
+                throw constraintEx;
+            }
+            throw;
+        }
+    }
+
+    public async Task<bool> RevokeAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default)
+    {
+        int deleted = await dbContext.UserRoles
+            .Where(userRole => userRole.UserId == userId && userRole.RoleId == roleId)
+            .ExecuteDeleteAsync(cancellationToken);
+        return deleted > 0;
+    }
+}
