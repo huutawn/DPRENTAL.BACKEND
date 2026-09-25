@@ -20,7 +20,6 @@ public static class DomainServiceCollectionExtensions
         services.AddScoped<IExternalLoginRepository, EfExternalLoginRepository>();
         services.AddScoped<IOrganizationRepository, EfOrganizationRepository>();
         services.AddScoped<IOrganizationMembershipRepository, EfOrganizationMembershipRepository>();
-        services.AddScoped<INavigationCatalogRepository, EfNavigationCatalogRepository>();
         return services;
     }
 }

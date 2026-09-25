@@ -165,62 +165,6 @@ Auth__AdminBootstrap__CreationKey
 
 JWT được kiểm tra ngay khi service khởi động: issuer, audience, lifetime 1–60 phút, active key, `kid` duy nhất, PEM hợp lệ, RSA ít nhất 2048-bit và private/public key của active entry phải khớp. Access token mặc định hết hạn sau 15 phút.
 
-## Navigation theo RBAC
-
-`GET /api/v1/auth/navigation?organizationId=<organization-guid>` yêu cầu access token của user đã xác thực, nhưng không yêu cầu permission riêng như `identity.navigation.read`. `organizationId` là bắt buộc: user phải là thành viên `Active` của organization `Active`. Endpoint cộng permission global với role scoped của **đúng** organization đó, rồi lọc catalog riêng của organization theo semantic **ANY** (một trong các permission được gắn vào item là đủ). User không phải active member, membership bị đình chỉ/chưa chấp nhận, hoặc organization inactive nhận `403`, kể cả khi có global permission. Điều này chặn quyền của Organization A xuất hiện khi client chọn Organization B.
-
-Response luôn có `permissions` là các mã canonical `identity.*` hiệu lực và `items` là tree đã lọc; item không còn child visible và không khớp permission nào sẽ không được trả về. Response mang `Cache-Control: no-store`.
-
-```http
-GET /api/v1/auth/navigation?organizationId=<organization-guid>
-Authorization: Bearer <access-token>
-```
-
-```json
-{
-  "organizationId": "<organization-guid>",
-  "dashboardType": "Platform",
-  "permissions": ["identity.organizations.read"],
-  "items": [
-    {
-      "key": "identity",
-      "label": "Identity",
-      "href": null,
-      "icon": "shield",
-      "order": 10,
-      "children": [
-        {
-          "key": "identity.organizations",
-          "label": "Organizations",
-          "href": "/organizations",
-          "icon": "building-2",
-          "order": 20,
-          "children": []
-        }
-      ]
-    }
-  ]
-}
-```
-
-`dashboardType` phản ánh `Organization.Type`: `Platform`, `Supplier`, hoặc `Renter`. Catalog là dữ liệu DB theo từng organization, vì vậy cùng một permission nhưng dashboard khác có thể có menu khác. Migration tạo template cho cả ba dashboard type, clone template khi tạo organization mới, và tạo catalog riêng cho organization đã tồn tại. Thay đổi template chỉ tác động organization tạo sau đó; catalog của organization hiện có được quản trị độc lập.
-
-`href` là URL route nội bộ của frontend, không phải backend endpoint. Backend chỉ nhận đường dẫn tương đối bắt đầu bằng `/`, có thể dùng `{organizationId}`; không nhận URL tuyệt đối hay external URL. Frontend dùng `key`, `label`, `icon`, `order` để render và điều hướng đúng theo `href` được trả về; frontend vẫn phải tự bảo vệ route vì menu không thay thế authorization ở các API đích.
-
-### Quản trị catalog navigation
-
-Permission global `identity.navigation.manage` bảo vệ toàn bộ CRUD. Migration chỉ cấp permission này cho các role platform `admin` và `admin_platform`; service kiểm tra lại permission từ DB, không dựa riêng vào claim trong access token.
-
-| Mục đích | Endpoint |
-| --- | --- |
-| Danh sách permission `identity.*` có thể gắn menu | `GET /api/v1/auth/navigation/permissions` |
-| CRUD template theo dashboard | `GET/POST /api/v1/auth/navigation/templates/{dashboardType}/items`, `PUT/DELETE /api/v1/auth/navigation/templates/{dashboardType}/items/{itemId}` |
-| Gắn/gỡ permission template item | `POST /api/v1/auth/navigation/templates/{dashboardType}/items/{itemId}/permissions`, `DELETE /api/v1/auth/navigation/templates/{dashboardType}/items/{itemId}/permissions/{permissionId}` |
-| CRUD catalog của organization | `GET/POST /api/v1/auth/organizations/{organizationId}/navigation/items`, `PUT/DELETE /api/v1/auth/organizations/{organizationId}/navigation/items/{itemId}` |
-| Gắn/gỡ permission organization item | `POST /api/v1/auth/organizations/{organizationId}/navigation/items/{itemId}/permissions`, `DELETE /api/v1/auth/organizations/{organizationId}/navigation/items/{itemId}/permissions/{permissionId}` |
-
-Menu container có `href: null` và không gắn permission; menu leaf phải có `href` và ít nhất một permission. Key là duy nhất trong một catalog. Không thể gắn permission ngoài `PermissionCode.All`, tạo vòng parent/child, xóa parent còn child, hoặc gỡ permission cuối cùng của leaf. `DELETE` binding đã không tồn tại trả lỗi validation thay vì âm thầm thành công.
-
 ## Refresh token và session
 
 Refresh token là chuỗi ngẫu nhiên chỉ dùng một lần; database chỉ lưu SHA-256 hash, không lưu giá trị token thô. Session có hạn tuyệt đối 30 ngày. Mỗi lần `POST /api/v1/auth/refresh` thành công sẽ thu hồi token vừa dùng và trả một cặp token mới. Gửi lại token cũ sẽ thu hồi toàn bộ session và nhận `401` chung.
