@@ -1,9 +1,10 @@
+using Dprental.AuthService.Common;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.IServices;
-using Dprental.AuthService.Domain.Data;
+
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Models;
@@ -190,8 +191,9 @@ public sealed class GoogleLoginEndpointTests
             await dbContext.SaveChangesAsync();
 
             IAuthSessionService sessions = scope.ServiceProvider.GetRequiredService<IAuthSessionService>();
-            string? ticket = await sessions.CreateGoogleLoginTicketAsync(userId);
-            Assert.NotNull(ticket);
+            Result<string> ticketResult = await sessions.CreateGoogleLoginTicketAsync(userId);
+            Assert.True(ticketResult.IsSuccess);
+            string ticket = ticketResult.Value;
 
             using HttpClient client = CreateClient(factory);
             using HttpResponseMessage first = await client.PostAsJsonAsync("/api/v1/auth/google/exchange", new { ticket });

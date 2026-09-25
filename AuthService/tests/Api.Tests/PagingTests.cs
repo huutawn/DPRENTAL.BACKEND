@@ -1,10 +1,10 @@
 using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.Data;
+
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.IRepositories;
-using Dprental.AuthService.Domain.Repositories;
+
+
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -119,7 +119,7 @@ public sealed class PagingTests
         FakeUserRepo userRepo = new();
         FakeRoleRepo roleRepo = new();
 
-        OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
+        OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
 
         Result<PagedResult<OrganizationResponse>> result = await service.ListAsync(actorId, new PageRequest(Page: 0, PageSize: 20));
         Assert.True(result.IsFailure);
@@ -149,6 +149,8 @@ public sealed class PagingTests
             Task.FromResult(organization);
 
         public Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task LockOrganizationsAsync(IReadOnlyList<Guid> sortedOrganizationIds, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) => Task.FromResult(IExecutionTransaction.None);
     }
 
     private sealed class FakeMemRepository : IOrganizationMembershipRepository
@@ -164,9 +166,9 @@ public sealed class PagingTests
         public Task<bool> DeleteAsync(Guid membershipId, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<int> CountOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult(0);
         public Task<int> CountActiveOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult(0);
-        public Task<IReadOnlyList<string>> GetEffectivePermissionsAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
-        public Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
         public Task<IReadOnlyList<OrganizationMembership>> GetMembershipsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<OrganizationMembership>>([]);
+        public Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<IReadOnlyList<string>> GetScopedPermissionCodesAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
     }
 
     private sealed class FakeUserRepo : IUserRepository
@@ -185,6 +187,9 @@ public sealed class PagingTests
         public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<User?>(null);
         public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, CancellationToken cancellationToken = default)
         => Task.FromResult<(IReadOnlyCollection<User> Items, int TotalCount)>((Array.Empty<User>(), 0));
+        public Task<bool> ChangePasswordAndRevokeSessionsAsync(Guid userId, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> ResetPasswordWithTokenAsync(Guid userId, string tokenHash, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(true);
 
     }
     private sealed class FakeRoleRepo : IRoleRepository

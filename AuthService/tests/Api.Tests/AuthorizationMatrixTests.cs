@@ -4,7 +4,7 @@ using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Common.Enums;
-using Dprental.AuthService.Domain.IRepositories;
+
 using Xunit;
 
 namespace Dprental.AuthService.Api.Tests;
@@ -118,8 +118,8 @@ public sealed class AuthorizationMatrixTests
     [Fact]
     public async Task SuperAdminHasFullAuthorizationAcrossPlatformAndGlobalRoles()
     {
-        OrganizationService orgService = new(_orgRepo, _memRepo, _userRepo, _roleRepo);
-        RoleAssignmentService roleService = new(_roleRepo, _memRepo);
+        OrganizationService orgService = new(_orgRepo, _memRepo, _userRepo, _roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        RoleAssignmentService roleService = new(_roleRepo, _memRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
 
         // 1. Can suspend/activate org
         Result suspendRes = await orgService.UpdateAsync(SuperAdminUserId, OrganizationId, new UpdateOrganizationRequest(IsActive: false));
@@ -138,8 +138,8 @@ public sealed class AuthorizationMatrixTests
     [Fact]
     public async Task PlatformAdminCanManageOrganizationsButCannotAssignOrRevokeGlobalRoles()
     {
-        OrganizationService orgService = new(_orgRepo, _memRepo, _userRepo, _roleRepo);
-        RoleAssignmentService roleService = new(_roleRepo, _memRepo);
+        OrganizationService orgService = new(_orgRepo, _memRepo, _userRepo, _roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        RoleAssignmentService roleService = new(_roleRepo, _memRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
 
         // 1. Can suspend/activate org (has identity.organizations.suspend)
         Result suspendRes = await orgService.UpdateAsync(PlatformAdminUserId, OrganizationId, new UpdateOrganizationRequest(IsActive: false));
@@ -160,8 +160,8 @@ public sealed class AuthorizationMatrixTests
     [Fact]
     public async Task OwnerCanUpdateOrgAndManageMembersButCannotSuspendOrgOrAssignGlobalRoles()
     {
-        OrganizationService orgService = new(_orgRepo, _memRepo, _userRepo, _roleRepo);
-        RoleAssignmentService roleService = new(_roleRepo, _memRepo);
+        OrganizationService orgService = new(_orgRepo, _memRepo, _userRepo, _roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        RoleAssignmentService roleService = new(_roleRepo, _memRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
 
         // 1. Can update org name
         Result nameRes = await orgService.UpdateAsync(OwnerUserId, OrganizationId, new UpdateOrganizationRequest(Name: "Renamed Org"));
@@ -182,7 +182,7 @@ public sealed class AuthorizationMatrixTests
     [Fact]
     public async Task OwnerCanAssignOrganizationScopedRoleWithinOwnOrganization()
     {
-        RoleAssignmentService roleService = new(_roleRepo, _memRepo);
+        RoleAssignmentService roleService = new(_roleRepo, _memRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
 
         Guid newMemberTarget = Guid.NewGuid();
         _memRepo.Memberships.Add(new OrganizationMembership
@@ -204,7 +204,7 @@ public sealed class AuthorizationMatrixTests
     public async Task OwnerCannotAssignOrganizationScopedRoleInADifferentOrganization()
     {
         // Acceptance criterion DPR-107: user ở Supplier A không thể dùng role của mình quản lý Supplier B.
-        RoleAssignmentService roleService = new(_roleRepo, _memRepo);
+        RoleAssignmentService roleService = new(_roleRepo, _memRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
 
         Guid supplierBOrganizationId = Guid.NewGuid();
         Guid supplierBTarget = Guid.NewGuid();
@@ -227,7 +227,7 @@ public sealed class AuthorizationMatrixTests
     [Fact]
     public async Task MemberCanReadOrgAndMembersButCannotUpdateOrgOrManageMembers()
     {
-        OrganizationService orgService = new(_orgRepo, _memRepo, _userRepo, _roleRepo);
+        OrganizationService orgService = new(_orgRepo, _memRepo, _userRepo, _roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
 
         // 1. Can read org
         Result<OrganizationResponse> getRes = await orgService.GetByIdAsync(MemberUserId, OrganizationId);
@@ -277,6 +277,8 @@ public sealed class AuthorizationMatrixTests
             Organizations[organization.Id] = organization;
             return Task.FromResult(true);
         }
+        public Task LockOrganizationsAsync(IReadOnlyList<Guid> sortedOrganizationIds, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) => Task.FromResult(IExecutionTransaction.None);
     }
 
     private sealed class FakeMemRepo : IOrganizationMembershipRepository
@@ -304,7 +306,7 @@ public sealed class AuthorizationMatrixTests
         public Task<bool> DeleteAsync(Guid membershipId, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<int> CountOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult(1);
         public Task<int> CountActiveOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult(1);
-        public Task<IReadOnlyList<string>> GetEffectivePermissionsAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<string>> GetScopedPermissionCodesAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default) =>
             Task.FromResult(EffectivePermissions.GetValueOrDefault((userId, organizationId)) ?? (IReadOnlyList<string>)[]);
         public Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(GlobalPermissions.GetValueOrDefault(userId) ?? (IReadOnlyList<string>)[]);
@@ -329,6 +331,9 @@ public sealed class AuthorizationMatrixTests
         public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<User?>(null);
         public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, CancellationToken cancellationToken = default)
         => Task.FromResult<(IReadOnlyCollection<User> Items, int TotalCount)>((Users.Values.Skip(skip).Take(take).ToList(), Users.Count));
+        public Task<bool> ChangePasswordAndRevokeSessionsAsync(Guid userId, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> ResetPasswordWithTokenAsync(Guid userId, string tokenHash, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(Users.TryGetValue(userId, out var u) && u.IsActive);
     }
 
     private sealed class FakeRoleRepo : IRoleRepository
