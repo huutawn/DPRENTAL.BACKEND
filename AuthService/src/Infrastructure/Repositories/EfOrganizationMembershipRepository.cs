@@ -78,18 +78,10 @@ public sealed class EfOrganizationMembershipRepository(AuthDbContext dbContext) 
         catch (DbUpdateException exception)
         {
             dbContext.Entry(membership).State = EntityState.Detached;
-<<<<<<< HEAD:AuthService/src/Domain/Repositories/EfOrganizationMembershipRepository.cs
-            if (UniqueConstraintViolations.ToMembershipException(exception) is { } duplicate)
-            {
-                throw duplicate;
-            }
-
-=======
             if (DbExceptionTranslator.TryTranslate(exception, out var constraintEx))
             {
                 throw constraintEx;
             }
->>>>>>> b8a22d3c2f59a49031461f3f63c44a44371afe2d:AuthService/src/Infrastructure/Repositories/EfOrganizationMembershipRepository.cs
             throw;
         }
     }

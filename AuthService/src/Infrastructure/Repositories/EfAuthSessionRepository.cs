@@ -332,62 +332,6 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         }
     }
 
-<<<<<<< HEAD:AuthService/src/Domain/Repositories/EfAuthSessionRepository.cs
-    /// <summary>Đọc user active cùng roles, permissions (global + theo organization) và organization đang active để phát hành access token.</summary>
-    private async Task<AuthSessionPrincipal?> GetActiveUserPrincipalAsync(Guid userId, CancellationToken cancellationToken)
-    {
-        User? user = await dbContext.Users
-            .AsNoTracking()
-            .Where(user => user.Id == userId && user.IsActive)
-            .Include(user => user.UserRoles)
-                .ThenInclude(userRole => userRole.Role)
-                    .ThenInclude(role => role.RolePermissions)
-                        .ThenInclude(rolePermission => rolePermission.Permission)
-            .Include(user => user.OrganizationMemberships)
-                .ThenInclude(membership => membership.Organization)
-            .Include(user => user.OrganizationMemberships)
-                .ThenInclude(membership => membership.Role)
-                    .ThenInclude(role => role.RolePermissions)
-                        .ThenInclude(rolePermission => rolePermission.Permission)
-            .SingleOrDefaultAsync(cancellationToken);
-
-        return user is null ? null : BuildPrincipal(user);
-    }
-
-    /// <summary>Gộp role, permission (global + theo organization active), organization đang active và trạng thái hoàn thiện hồ sơ thành principal.</summary>
-    private static AuthSessionPrincipal BuildPrincipal(User user) =>
-        new(
-            user.Id,
-            UserAccessResolver.Roles(user),
-            UserAccessResolver.Permissions(user),
-            UserAccessResolver.ActiveMemberships(user)
-                .Select(membership => membership.OrganizationId)
-                .ToArray(),
-            user.IsProfileCompleted);
-
-    /// <summary>Kiểm tra session, token và user còn có thể dùng để refresh hay không.</summary>
-    private static bool IsUsable(Session session, RefreshToken refreshToken, DateTime utcNow) =>
-        session.RevokedAtUtc is null &&
-        session.ExpiresAtUtc > utcNow &&
-        refreshToken.ExpiresAtUtc > utcNow &&
-        session.User.IsActive;
-
-    /// <summary>Thu hồi session một lần duy nhất; gọi lặp lại vẫn an toàn.</summary>
-    private async Task RevokeCompromisedSessionAsync(Guid sessionId, DateTime utcNow, CancellationToken cancellationToken)
-    {
-        await dbContext.RefreshTokens
-            .Where(token => token.SessionId == sessionId && !token.IsRevoked)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(token => token.IsRevoked, true)
-                .SetProperty(token => token.RevokedAt, utcNow)
-                .SetProperty(token => token.RevokedAtUtc, utcNow)
-                .SetProperty(token => token.RevokedReason, "ReuseDetected"), cancellationToken);
-
-        await RevokeSessionAsync(sessionId, utcNow, cancellationToken);
-    }
-
-=======
->>>>>>> b8a22d3c2f59a49031461f3f63c44a44371afe2d:AuthService/src/Infrastructure/Repositories/EfAuthSessionRepository.cs
     public async Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default)
     {
         var tokenRecord = await dbContext.RefreshTokens

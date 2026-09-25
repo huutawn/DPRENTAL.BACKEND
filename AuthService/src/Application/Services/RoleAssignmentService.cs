@@ -208,8 +208,6 @@ public sealed class RoleAssignmentService(
             : Result.Success();
     }
 
-<<<<<<< HEAD
-=======
     private async Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken)
     {
         IReadOnlyList<string> perms = await membershipRepository.GetGlobalPermissionsAsync(userId, cancellationToken);
@@ -226,5 +224,4 @@ public sealed class RoleAssignmentService(
         IReadOnlyList<string> scopedPerms = await membershipRepository.GetScopedPermissionCodesAsync(userId, organizationId, cancellationToken);
         return globalPerms.Concat(scopedPerms).Distinct(StringComparer.Ordinal).ToArray();
     }
->>>>>>> b8a22d3c2f59a49031461f3f63c44a44371afe2d
 }

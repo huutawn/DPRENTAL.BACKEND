@@ -45,28 +45,12 @@ public sealed class UserService(
             "Register",
             async () =>
             {
-<<<<<<< HEAD
-                await userRepository.CreateWithRoleAsync(user, customerRole.Id, cancellationToken);
-            }
-            else
-            {
-            
-                await userRepository.CreateAsync(user, cancellationToken);
-            }
-        }
-        catch (DuplicateEmailException)
-        {
-            // Request khác đã đăng ký cùng email ngay sau bước kiểm tra ở trên.
-            return AuthErrors.User.EmailAlreadyExists;
-        }
-=======
                 string email = NormalizeEmail(request.Email);
                 DateTimeOffset now = timeProvider.GetUtcNow();
                 if (await CustomerAccountRules.ValidateAsync(request, email, userRepository, now, cancellationToken) is Error error)
                 {
                     return Result.Failure<AccountCreatedResponse>(error);
                 }
->>>>>>> b8a22d3c2f59a49031461f3f63c44a44371afe2d
 
                 User user = CustomerAccountRules.Create(request, email, passwordHasher, now.UtcDateTime);
                 Role? customerRole = await roleRepository.GetByNameAsync(SystemRoleCode.Customer, cancellationToken);

@@ -12,6 +12,14 @@ namespace AuthService.Domain.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.AddColumn<string>(
+                name: "AvatarUrl",
+                schema: "auth",
+                table: "Users",
+                type: "character varying(500)",
+                maxLength: 500,
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
                 name: "CitizenId",
                 schema: "auth",
                 table: "Users",
@@ -24,6 +32,14 @@ namespace AuthService.Domain.Migrations
                 schema: "auth",
                 table: "Users",
                 type: "date",
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "PhoneNumber",
+                schema: "auth",
+                table: "Users",
+                type: "character varying(15)",
+                maxLength: 15,
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
