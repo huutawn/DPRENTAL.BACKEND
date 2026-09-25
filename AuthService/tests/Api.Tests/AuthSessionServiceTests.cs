@@ -3,6 +3,7 @@ using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Domain.Entities;
+using Microsoft.AspNetCore.Http; // Đã thêm
 using Xunit;
 
 namespace Dprental.AuthService.Api.Tests;
@@ -134,7 +135,15 @@ public sealed class AuthSessionServiceTests
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("AuthSessionService revokes sessions instead of deleting them.");
 
-        public Task<AuthSessionPrincipal?> CreateAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken)
+        // Đã bổ sung deviceName và ipAddress vào chữ ký hàm
+        public Task<AuthSessionPrincipal?> CreateAsync(
+            Guid userId,
+            string refreshTokenHash,
+            DateTime utcNow,
+            DateTime expiresAtUtc,
+            string? deviceName,
+            string? ipAddress,
+            CancellationToken cancellationToken)
         {
             CreatedRefreshTokenHash = refreshTokenHash;
             CreatedAtUtc = utcNow;
@@ -194,8 +203,15 @@ public sealed class AuthSessionServiceTests
             Task.FromResult(true);
     }
 
+    // Đã truyền FakeHttpContextAccessor vào constructor
     private static AuthSessionService CreateService(RecordingAuthSessionRepository repository, DateTimeOffset now) =>
-        new(repository, new FakeAccessTokenIssuer(), new FixedTimeProvider(now), new TestCorrelationIdProvider(), new TestAuditLogRepository());
+        new(repository, new FakeAccessTokenIssuer(), new FixedTimeProvider(now), new TestCorrelationIdProvider(), new TestAuditLogRepository(), new FakeHttpContextAccessor());
+
+    // Fake class cho IHttpContextAccessor
+    private sealed class FakeHttpContextAccessor : IHttpContextAccessor
+    {
+        public HttpContext? HttpContext { get; set; } = new DefaultHttpContext();
+    }
 
     private sealed class TestCorrelationIdProvider : ICorrelationIdProvider
     {

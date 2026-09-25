@@ -97,7 +97,9 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         string refreshTokenHash,
         DateTime utcNow,
         DateTime expiresAtUtc,
-        CancellationToken cancellationToken)
+        string? deviceName,
+        string? ipAddress,
+        CancellationToken cancellationToken = default)
     {
         AuthSessionPrincipal? principal = await GetActiveUserPrincipalAsync(userId, cancellationToken);
         if (principal is null)
@@ -109,6 +111,8 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         {
             Id = Guid.NewGuid(),
             UserId = userId,
+            DeviceName = deviceName,
+            IpAddress = ipAddress,
             CreatedAtUtc = utcNow,
             ExpiresAtUtc = expiresAtUtc
         };
@@ -163,9 +167,9 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
     public async Task<AuthSessionPrincipal?> ConsumeGoogleLoginTicketAndCreateSessionAsync(
         string ticketHash,
         string refreshTokenHash,
-        DateTime utcNow,
-        DateTime sessionExpiresAtUtc,
-        CancellationToken cancellationToken)
+        DateTime createdAtUtc,
+        DateTime expiresAtUtc,
+        CancellationToken cancellationToken = default)
     {
         await using var transaction = dbContext.Database.IsRelational()
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
@@ -174,7 +178,7 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         GoogleLoginTicket? ticket = await dbContext.GoogleLoginTickets
             .AsNoTracking()
             .SingleOrDefaultAsync(candidate => candidate.TicketHash == ticketHash, cancellationToken);
-        if (ticket is null || ticket.ExpiresAtUtc <= utcNow || ticket.UsedAtUtc is not null)
+        if (ticket is null || ticket.ExpiresAtUtc <= createdAtUtc || ticket.UsedAtUtc is not null)
         {
             return null;
         }
@@ -191,22 +195,22 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
             consumed = await dbContext.GoogleLoginTickets
                 .Where(candidate => candidate.Id == ticket.Id
                     && candidate.UsedAtUtc == null
-                    && candidate.ExpiresAtUtc > utcNow)
+                    && candidate.ExpiresAtUtc > createdAtUtc)
                 .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(candidate => candidate.UsedAtUtc, utcNow), cancellationToken);
+                    .SetProperty(candidate => candidate.UsedAtUtc, createdAtUtc), cancellationToken);
         }
         else
         {
             GoogleLoginTicket? trackedTicket = await dbContext.GoogleLoginTickets
                 .SingleOrDefaultAsync(candidate => candidate.Id == ticket.Id
                     && candidate.UsedAtUtc == null
-                    && candidate.ExpiresAtUtc > utcNow, cancellationToken);
+                    && candidate.ExpiresAtUtc > createdAtUtc, cancellationToken);
             if (trackedTicket is null)
             {
                 return null;
             }
 
-            trackedTicket.UsedAtUtc = utcNow;
+            trackedTicket.UsedAtUtc = createdAtUtc;
             consumed = 1;
         }
         if (consumed != 1)
@@ -218,20 +222,20 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         {
             Id = Guid.NewGuid(),
             UserId = ticket.UserId,
-            CreatedAtUtc = utcNow,
-            ExpiresAtUtc = sessionExpiresAtUtc
+            CreatedAtUtc = createdAtUtc,
+            ExpiresAtUtc = expiresAtUtc
         };
         dbContext.Sessions.Add(session);
         dbContext.RefreshTokens.Add(new RefreshToken
         {
             Id = Guid.NewGuid(),
             TokenHash = refreshTokenHash,
-            CreatedAt = utcNow,
+            CreatedAt = createdAtUtc,
             UserId = ticket.UserId,
             SessionId = session.Id,
-            ExpiryDate = sessionExpiresAtUtc,
-            CreatedAtUtc = utcNow,
-            ExpiresAtUtc = sessionExpiresAtUtc,
+            ExpiryDate = expiresAtUtc,
+            CreatedAtUtc = createdAtUtc,
+            ExpiresAtUtc = expiresAtUtc,
             IsRevoked = false
         });
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -393,16 +397,11 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
 
     public async Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default)
     {
-        // Dựa vào context cấu hình DbContext của bạn, project có bảng RefreshTokens.
-        // Nếu entity RefreshToken của bạn có cấu trúc chứa TokenHash và UserId, bạn dùng cách này:
         var tokenRecord = await dbContext.RefreshTokens
             .AsNoTracking()
             .FirstOrDefaultAsync(t => t.TokenHash == tokenHash, cancellationToken);
 
         return tokenRecord?.UserId;
-
-        // (Ghi chú: Nếu TokenHash của bạn được lưu trực tiếp trong bảng Sessions thay vì bảng RefreshTokens, 
-        // bạn chỉ cần đổi dbContext.RefreshTokens thành dbContext.Sessions và truy vấn đúng tên cột).
     }
 
     /// <inheritdoc />

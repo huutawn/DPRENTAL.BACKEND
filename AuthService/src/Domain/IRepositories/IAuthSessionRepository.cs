@@ -7,20 +7,25 @@ namespace Dprental.AuthService.Domain.IRepositories;
 public interface IAuthSessionRepository : IRepo<Session, Guid>
 {
     /// <summary>Tạo session mới cùng refresh token đầu tiên nếu user đang hoạt động.</summary>
-    Task<AuthSessionPrincipal?> CreateAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken);
+    Task<AuthSessionPrincipal?> CreateAsync(
+        Guid userId,
+        string refreshTokenHash,
+        DateTime utcNow,
+        DateTime expiresAtUtc,
+        string? deviceName,
+        string? ipAddress,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Tạo ticket Google ngắn hạn cho user đang active.</summary>
     Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken);
 
-    /// <summary>
-    /// Consume ticket Google một lần và tạo session/refresh token trong cùng transaction.
-    /// </summary>
+    /// <summary>Consume ticket Google một lần và tạo session/refresh token trong cùng transaction.</summary>
     Task<AuthSessionPrincipal?> ConsumeGoogleLoginTicketAndCreateSessionAsync(
         string ticketHash,
         string refreshTokenHash,
-        DateTime utcNow,
-        DateTime sessionExpiresAtUtc,
-        CancellationToken cancellationToken);
+        DateTime createdAtUtc,
+        DateTime expiresAtUtc,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Xoay refresh token một cách nguyên tử. Nếu phát hiện token đã dùng lại,

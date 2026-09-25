@@ -452,7 +452,15 @@ public sealed class UserAccountServiceTests
     {
         public List<Guid> RevokedUsers { get; } = [];
 
-        public Task<AuthSessionPrincipal?> CreateAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken) =>
+        // Đã bổ sung deviceName và ipAddress vào chữ ký hàm
+        public Task<AuthSessionPrincipal?> CreateAsync(
+            Guid userId,
+            string refreshTokenHash,
+            DateTime utcNow,
+            DateTime expiresAtUtc,
+            string? deviceName,
+            string? ipAddress,
+            CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
         public Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken) =>

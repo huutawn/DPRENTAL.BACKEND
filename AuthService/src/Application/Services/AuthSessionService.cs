@@ -6,7 +6,8 @@ using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
-using Dprental.AuthService.Domain.Repositories;
+using Microsoft.AspNetCore.Http;
+using UAParser;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -16,7 +17,8 @@ public sealed class AuthSessionService(
     IAccessTokenIssuer accessTokenIssuer,
     TimeProvider timeProvider,
     ICorrelationIdProvider correlationIdProvider,
-    IAuditLogRepository auditLogRepository) : IAuthSessionService
+    IAuditLogRepository auditLogRepository,
+    IHttpContextAccessor httpContextAccessor) : IAuthSessionService // <--- Inject IHttpContextAccessor
 {
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(30);
     private static readonly TimeSpan GoogleLoginTicketLifetime = TimeSpan.FromSeconds(90);
@@ -25,18 +27,32 @@ public sealed class AuthSessionService(
     {
         DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
         string refreshToken = RefreshTokenUtility.Create();
+
+        // --- BẮT VÀ DỊCH THÔNG TIN THIẾT BỊ ---
+        string? userAgent = httpContextAccessor.HttpContext?.Request.Headers["User-Agent"];
+        string? ipAddress = httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+        string deviceName = "Thiết bị không xác định";
+
+        if (!string.IsNullOrWhiteSpace(userAgent))
+        {
+            var uaParser = Parser.GetDefault();
+            var clientInfo = uaParser.Parse(userAgent);
+            deviceName = $"{clientInfo.UA.Family} trên {clientInfo.OS.Family}";
+        }
+        // -------------------------------------
+
         AuthSessionPrincipal? principal = await sessionRepository.CreateAsync(
             userId,
             RefreshTokenUtility.ComputeHash(refreshToken),
             utcNow,
             utcNow.Add(SessionLifetime),
+            deviceName, // <--- Truyền DeviceName xuống Repository
+            ipAddress,  // <--- Truyền IpAddress xuống Repository
             cancellationToken);
 
         if (principal is null) return null;
 
         AuthTokenPair tokens = IssueTokenPair(principal, refreshToken);
-        // Lưu ý: Đăng nhập thành công đã được log bên UserService.AuthenticateAsync, 
-        // có thể bỏ log ở đây để tránh trùng lặp 2 dòng log cho 1 lần login.
         return tokens;
     }
 
@@ -102,8 +118,6 @@ public sealed class AuthSessionService(
         }
         catch (SessionCompromisedException ex)
         {
-            // BẮT BỘC PHẢI CÓ CHO MVP: Xử lý Refresh-token reuse (Session Compromise)
-            // Kẻ gian đang cố dùng lại token cũ -> Kích hoạt Kill Switch thu hồi toàn bộ session của user này
             await sessionRepository.RevokeAllSessionsForUserAsync(ex.UserId, cancellationToken);
             await LogAuditAsync(ex.UserId, ex.UserId.ToString(), "Session_Compromised", "RevokedAll_ReuseDetected", cancellationToken);
             return null;
@@ -114,13 +128,12 @@ public sealed class AuthSessionService(
     {
         await RevokeSessionAsync(userId, sessionId, cancellationToken);
     }
+
     public async Task RevokeByRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(refreshToken)) return;
 
         string tokenHash = RefreshTokenUtility.ComputeHash(refreshToken);
-
-        // MVP: Để có ActorId cho Audit Log, bạn cần lấy UserId từ session trước khi revoke
         Guid? userId = await sessionRepository.GetUserIdByTokenHashAsync(tokenHash, cancellationToken);
 
         if (userId.HasValue)
@@ -161,8 +174,11 @@ public sealed class AuthSessionService(
         DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
         IReadOnlyList<Session> sessions = await sessionRepository.GetSessionsForUserAsync(userId, cancellationToken);
 
+        // Đã map thêm DeviceName và IpAddress vào Response
         return sessions.Select(s => new SessionResponse(
             s.Id,
+            s.DeviceName, 
+            s.IpAddress,
             s.CreatedAtUtc,
             s.ExpiresAtUtc,
             s.RevokedAtUtc,
