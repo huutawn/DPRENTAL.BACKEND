@@ -1,3 +1,4 @@
+# Maintained on auth/develop-ci-cd; auth/develop intentionally omits this workflow.
 name: AuthService CI/CD (dev)
 
 on:
