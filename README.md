@@ -64,13 +64,45 @@ Dockerfile ở repository root có hai target cho deploy, đều dùng cùng sou
 
 ```bash
 # Image runtime của AuthService
-docker build --target runtime -t ghcr.io/<org>/dprental-authservice:<git-sha> .
+docker build --target runtime -t ghcr.io/<org>/dprental-auth:<git-sha> .
 
 # Image chạy EF Core migration một lần trước khi khởi động API
 docker build --target migrator -t ghcr.io/<org>/dprental-auth-migrator:<git-sha> .
 ```
 
-Runtime lắng nghe cổng `8080`, chạy non-root UID `1654` và cung cấp `/health/live` cùng `/health/ready`. Readiness kiểm tra kết nối PostgreSQL; migrator nhận cùng cấu hình connection string và JWT key file với runtime.
+Runtime lắng nghe cổng `8080`, chạy non-root UID `1654` và cung cấp `/health/live` cùng `/health/ready`. Readiness kiểm tra kết nối PostgreSQL. Image migrator chứa EF Core migration bundle và các file `appsettings*.json`, không chứa SDK, source code hay `dotnet-ef`. Bundle nhận cấu hình môi trường, connection string và JWT key file từ Compose như migrator trước đó; không đưa secret vào image.
+
+## CI/CD AuthService cho dev
+
+Workflow [authservice-dev.yml](.github/workflows/authservice-dev.yml) chỉ chạy khi có push vào `auth/develop-ci-cd`; nó không chạy cho pull request và không kiểm tra branch nền hoặc chạy test. Job publish build và đẩy hai Docker image lên GHCR một lần, sau đó job deploy chạy trên VPS. Kiểm tra build và test .NET vẫn có trong [pre-push hook](scripts/pre-push-check.sh) ở máy lập trình viên, nhưng hook này có thể bị bỏ qua và không thay thế CI.
+
+Mỗi push sẽ publish hai image GHCR bất biến bằng full Git SHA:
+
+```text
+ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-auth:<git-sha>
+ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-auth-migrator:<git-sha>
+```
+
+Thiết lập GitHub Environment variable `GHCR_IMAGE_NAMESPACE` bằng namespace GHCR viết thường (ví dụ `huutawn`). Workflow gắn OCI source metadata để package mới tự liên kết repository. Với package đã từng được push thủ công, vào từng package GHCR và cấp repository workflow quyền **Write** trong phần Actions access trước lần CI đầu tiên. Tạo GitHub Environment tên `dev` với các secrets sau; không đặt PostgreSQL password, JWT private key hoặc nội dung `.env` vào GitHub:
+
+```text
+DEV_VPS_HOST              # IP hoặc hostname VPS
+DEV_VPS_USER              # user deploy thuộc group docker
+DEV_VPS_SSH_PRIVATE_KEY   # private key riêng của user deploy
+DEV_VPS_KNOWN_HOSTS       # dòng host key theo định dạng known_hosts
+DEV_VPS_PORT              # tùy chọn, mặc định 22
+```
+
+Workflow nạp deploy key vào `ssh-agent` qua stdin và kiểm tra host key đã lưu trong `DEV_VPS_KNOWN_HOSTS`. Nó truyền `GITHUB_TOKEN` cùng deploy script qua stdin của kết nối SSH, không đặt token trong câu lệnh SSH. Trên VPS, script đăng nhập GHCR bằng Docker config tạm rồi thực thi [deploy-authservice.sh](scripts/deploy-authservice.sh) từ commit đang phát hành. Docker credential tạm bị xóa ngay khi script kết thúc; user SSH của workflow cần quyền đọc `.env` và ghi `release.env`. `.env` và PEM JWT vẫn chỉ tồn tại trên VPS. `release.env` phải đã có hai image AuthService với tag để script thay bằng SHA mới. Script pull hai image bằng một lệnh Compose, chạy migration một lần, chỉ recreate `auth-service`, chờ healthcheck, rồi gọi `/health/ready` qua `DEV_DOMAIN` và kiểm tra JWKS trực tiếp trong AuthService container. Gateway không public JWKS; Gateway tự tải JWKS qua Docker network nội bộ. Nó không rollback database hoặc image nếu migration/healthcheck lỗi.
+
+Ví dụ cấp quyền ghi `release.env` cho user GitHub Actions trên VPS (thay `deploy` bằng user thực tế):
+
+```bash
+sudo chown deploy:deploy /opt/dprental/dev/release.env
+sudo chmod 600 /opt/dprental/dev/release.env
+```
+
+User `deploy` phải thuộc group `docker`; quyền Docker tương đương quyền quản trị VPS nên deploy key chỉ dùng cho automation này. Khóa host SSH có thể lấy từ máy tin cậy bằng `ssh-keyscan -H <vps-host>` rồi lưu nguyên kết quả vào `DEV_VPS_KNOWN_HOSTS`. Nếu chỉ muốn triển khai sau khi merge PR, cấu hình branch protection/ruleset cho `auth/develop-ci-cd` để yêu cầu PR và chặn push trực tiếp; event `push` tự nó không bảo đảm commit đến từ PR.
 
 ## Theo dõi trace phân tán
 
