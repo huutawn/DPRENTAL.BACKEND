@@ -272,12 +272,6 @@ public sealed class AuthorizationMatrixTests
         public Task<Organization> CreateAsync(Organization organization, OrganizationMembership initialMembership, CancellationToken cancellationToken = default) =>
             Task.FromResult(organization);
 
-        public Task<Organization> CreateAsync(
-            Organization organization,
-            OrganizationMembership initialMembership,
-            NavigationCatalog navigationCatalog,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(organization);
         public Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default)
         {
             Organizations[organization.Id] = organization;
