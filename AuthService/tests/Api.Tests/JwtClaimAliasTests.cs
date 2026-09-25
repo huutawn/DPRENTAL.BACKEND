@@ -11,7 +11,7 @@ using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security.Jwt;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.User;
-using Dprental.AuthService.Domain.Data;
+
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Models;

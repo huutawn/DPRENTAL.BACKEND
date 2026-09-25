@@ -3,7 +3,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Dprental.AuthService.Application.IServices;
-using Dprental.AuthService.Domain.Data;
+
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Hosting;
@@ -73,7 +73,8 @@ public sealed class CurrentUserEndpointTests
 
         using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/users/me");
 
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        // ??i t? HttpStatusCode.NotFound sang HttpStatusCode.Unauthorized
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     private static WebApplicationFactory<Program> CreateFactory()

@@ -5,8 +5,8 @@ using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Common.Enums;
-using Dprental.AuthService.Domain.Exceptions;
-using Dprental.AuthService.Domain.IRepositories;
+
+
 using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Application.Validators;
 using Microsoft.AspNetCore.Identity;
@@ -321,10 +321,11 @@ public sealed class UserServiceTests
             passwordHasher ?? new PasswordHasher<User>(),
             Options.Create(new AdminBootstrapOptions { CreationKey = creationKey }),
             timeProvider ?? TimeProvider.System,
-            correlationIdProvider: null!,
-            auditLogRepository: null!,
-            authSessionRepository: null!,
-            recoveryTokenRepository: null!
+            new FakeCorrelationIdProvider(),
+            new FakeAuditLogRepo(),
+            new FakeAuthSessionRepo(),
+            new FakeRecoveryTokenRepo(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<UserService>.Instance
         );
     }
 
@@ -383,7 +384,11 @@ public sealed class UserServiceTests
 
         public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(ProfileUser is not null && ProfileUser.Id == id ? ProfileUser : null);
-
+        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, CancellationToken cancellationToken = default)
+        {
+            IReadOnlyCollection<User> emptyList = Array.Empty<User>();
+            return Task.FromResult((emptyList, 0));
+        }
         public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
             Task.FromResult(normalizedEmail == ExistingEmail);
 
@@ -394,9 +399,8 @@ public sealed class UserServiceTests
         {
             if (RejectCreate)
             {
-                throw new DuplicateEmailException();
+                throw new StorageConstraintViolationException(StorageConstraintViolationType.Unique, StorageConstraints.UserEmail);
             }
-
             CreatedUsers.Add(entity);
             return Task.FromResult(entity);
         }
@@ -405,9 +409,8 @@ public sealed class UserServiceTests
         {
             if (RejectCreate)
             {
-                throw new DuplicateEmailException();
+                throw new StorageConstraintViolationException(StorageConstraintViolationType.Unique, StorageConstraints.UserEmail);
             }
-
             CreatedUsers.Add(user);
             CreatedWithRole.Add((user, roleId));
             return Task.FromResult(user);
@@ -424,10 +427,46 @@ public sealed class UserServiceTests
 
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("UserService.RegisterAsync does not delete users.");
+        public Task<bool> ChangePasswordAndRevokeSessionsAsync(Guid userId, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> ResetPasswordWithTokenAsync(Guid userId, string tokenHash, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(ProfileUser is not null ? ProfileUser.IsActive : true);
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => utcNow;
+    }
+    private sealed class FakeCorrelationIdProvider : ICorrelationIdProvider
+    {
+        public string GetCorrelationId() => "test-corr-id";
+    }
+    private sealed class FakeAuditLogRepo : IAuditLogRepository
+    {
+        public Task AddAsync(AuditLog auditLog, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+    private sealed class FakeAuthSessionRepo : IAuthSessionRepository
+    {
+        public Task<Session?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<Session>> GetAllAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Session> CreateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> UpdateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task CreateSessionAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Guid?> ConsumeGoogleLoginTicketAndCreateSessionAsync(string ticketHash, string refreshTokenHash, DateTime utcNow, DateTime sessionExpiresAtUtc, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> RotateTokenAsync(Guid currentTokenId, Guid sessionId, Guid userId, string replacementHash, DateTime sessionExpiresAtUtc, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Guid?> GetSessionIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> RevokeSessionForUserAsync(Guid userId, Guid sessionId, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+    private sealed class FakeRecoveryTokenRepo : IRecoveryTokenRepository
+    {
+        public Task AddAsync(RecoveryToken token, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<RecoveryToken?> FindByHashAsync(string tokenHash, CancellationToken cancellationToken = default) => Task.FromResult<RecoveryToken?>(null);
+        public Task UpdateAsync(RecoveryToken token, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

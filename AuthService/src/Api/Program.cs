@@ -1,21 +1,24 @@
+using AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Api.Endpoints;
 using Dprental.AuthService.Api.Observability;
 using Dprental.AuthService.Api.Routing;
 using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.DependencyInjection;
-using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Application.IServices;
-using Dprental.AuthService.Domain.DependencyInjection;
+using Dprental.AuthService.Infrastructure.Data;
+using Dprental.AuthService.Infrastructure.DependencyInjection;
+using Dprental.AuthService.Application.Repositories;
+using Dprental.AuthService.Infrastructure.Repositories;
+using FluentValidation;
+using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Dprental.AuthService.Domain.IRepositories;
-using Dprental.AuthService.Domain.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAuthServiceDistributedTracing(builder.Configuration);
 builder.Services.AddAuthApplication(builder.Configuration);
-builder.Services.AddAuthDomainPersistence(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddAuthInfrastructurePersistence(builder.Configuration.GetConnectionString("Postgres"));
 builder.Services.AddJwtBearerSecurity();
 builder.Services.AddAuthForwardedHeaders(builder.Configuration);
 builder.Services.AddGoogleLogin(builder.Configuration);
@@ -30,7 +33,8 @@ builder.Services.AddCors(options =>
     });
 });
 builder.Services.AddControllers(options => options.Conventions.Add(new ApiRoutePrefixConvention(ApiRoutes.Prefix)));
-
+builder.Services.AddFluentValidationAutoValidation();
+builder.Services.AddValidatorsFromAssemblyContaining<GetUsersRequestValidator>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICorrelationIdProvider, CorrelationIdProvider>();
 builder.Services.AddScoped<IAuditLogRepository, EfAuditLogRepository>();
@@ -45,6 +49,7 @@ builder.Services.AddSwaggerGen(options =>
 });
 builder.Services.AddScoped<IRecoveryTokenRepository, EfRecoveryTokenRepository>();
 builder.Services.AddHealthChecks()
+
     .AddDbContextCheck<AuthDbContext>(
         "postgres",
         failureStatus: HealthStatus.Unhealthy,

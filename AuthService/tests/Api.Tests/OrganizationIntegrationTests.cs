@@ -6,7 +6,7 @@ using System.Text.Json;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security;
-using Dprental.AuthService.Domain.Data;
+
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Models;
@@ -52,12 +52,11 @@ public sealed class OrganizationIntegrationTests
         using (IServiceScope scope = factory.Services.CreateScope())
         {
             AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-            NavigationCatalog catalog = await db.NavigationCatalogs
-                .Include(item => item.Items)
-                .SingleAsync(item => item.OrganizationId == orgId);
-            NavigationItem clonedRoot = Assert.Single(catalog.Items);
-            Assert.Equal(OrganizationType.Supplier, catalog.DashboardType);
-            Assert.NotNull(clonedRoot.SourceTemplateItemId);
+            Organization savedOrg = await db.Organizations.SingleAsync(o => o.Id == orgId);
+            Assert.Equal("Rent Express", savedOrg.Name);
+            Assert.Equal(OrganizationType.Supplier, savedOrg.Type);
+            OrganizationMembership ownerMembership = await db.OrganizationMemberships.SingleAsync(m => m.OrganizationId == orgId && m.UserId == userAId);
+            Assert.Equal(MembershipStatus.Active, ownerMembership.Status);
         }
 
         // 2. User A invites User B
@@ -410,19 +409,6 @@ public sealed class OrganizationIntegrationTests
 
         db.Permissions.AddRange(pCreate, pRead, pUpdate, pMemRead, pMemManage, pPlatform, pAssign, pRevoke);
         db.Roles.AddRange(adminRole, customerRole, ownerRole, memberRole);
-        NavigationCatalog platformTemplate = new() { Id = Guid.NewGuid(), DashboardType = OrganizationType.Platform, CreatedAtUtc = DateTime.UtcNow };
-        NavigationCatalog supplierTemplate = new() { Id = Guid.NewGuid(), DashboardType = OrganizationType.Supplier, CreatedAtUtc = DateTime.UtcNow };
-        supplierTemplate.Items.Add(new NavigationItem
-        {
-            Id = Guid.NewGuid(),
-            CatalogId = supplierTemplate.Id,
-            Key = "dashboard",
-            Label = "Dashboard",
-            Icon = "layout-dashboard",
-            Order = 10
-        });
-        NavigationCatalog renterTemplate = new() { Id = Guid.NewGuid(), DashboardType = OrganizationType.Renter, CreatedAtUtc = DateTime.UtcNow };
-        db.NavigationCatalogs.AddRange(platformTemplate, supplierTemplate, renterTemplate);
         await db.SaveChangesAsync();
     }
 

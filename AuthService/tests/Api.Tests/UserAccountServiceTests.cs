@@ -3,8 +3,8 @@ using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Exceptions;
-using Dprental.AuthService.Domain.IRepositories;
+
+
 using Dprental.AuthService.Domain.Models;
 using Xunit;
 
@@ -123,7 +123,7 @@ public sealed class UserAccountServiceTests
     }
 
     [Fact]
-    public async Task CompleteProfileAsyncDuplicateCitizenIdExceptionOnSaveReturnsConflict()
+    public async Task CompleteProfileAsyncDuplicateCitizenIdOnSaveReturnsConflict()
     {
         Guid userId = Guid.NewGuid();
         User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
@@ -346,16 +346,19 @@ public sealed class UserAccountServiceTests
         IAuditLogRepository? auditLogRepository = null,
         FakeExternalLoginRepository? externalLoginRepository = null,
         FakeAuthSessionRepository? authSessionRepository = null,
-        FakeOrganizationMembershipRepository? organizationMembershipRepository = null)
+        FakeOrganizationMembershipRepository? organizationMembershipRepository = null,
+        IOrganizationRepository? organizationRepository = null)
     {
         return new UserAccountService(
             userRepo,
             externalLoginRepository ?? new FakeExternalLoginRepository(),
             authSessionRepository ?? new FakeAuthSessionRepository(),
             organizationMembershipRepository ?? new FakeOrganizationMembershipRepository(),
+            organizationRepository ?? new FakeOrgRepo(),
             auditLogRepository ?? new TestAuditLogRepository(),
             new TestCorrelationIdProvider(),
-            new FixedTimeProvider(FixedNow));
+            new FixedTimeProvider(FixedNow),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<UserAccountService>.Instance);
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
@@ -401,7 +404,7 @@ public sealed class UserAccountServiceTests
         {
             if (ThrowDuplicateCitizenIdOnUpdate)
             {
-                throw new DuplicateCitizenIdException();
+                throw new StorageConstraintViolationException(StorageConstraintViolationType.Unique, StorageConstraints.UserCitizenId);
             }
             User = entity;
             return Task.FromResult(true);
@@ -424,6 +427,11 @@ public sealed class UserAccountServiceTests
 
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, CancellationToken cancellationToken = default) =>
+    throw new NotSupportedException();
+        public Task<bool> ChangePasswordAndRevokeSessionsAsync(Guid userId, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> ResetPasswordWithTokenAsync(Guid userId, string tokenHash, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(User is not null && User.Id == userId ? User.IsActive : true);
     }
 
     private sealed class FakeExternalLoginRepository : IExternalLoginRepository
@@ -450,16 +458,19 @@ public sealed class UserAccountServiceTests
     {
         public List<Guid> RevokedUsers { get; } = [];
 
-        public Task<AuthSessionPrincipal?> CreateAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken) =>
+        public Task CreateSessionAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
         public Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
-        public Task<AuthSessionPrincipal?> ConsumeGoogleLoginTicketAndCreateSessionAsync(string ticketHash, string refreshTokenHash, DateTime utcNow, DateTime sessionExpiresAtUtc, CancellationToken cancellationToken) =>
+        public Task<Guid?> ConsumeGoogleLoginTicketAndCreateSessionAsync(string ticketHash, string refreshTokenHash, DateTime utcNow, DateTime sessionExpiresAtUtc, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
-        public Task<AuthSessionPrincipal?> RotateAsync(string currentRefreshTokenHash, string replacementRefreshTokenHash, DateTime utcNow, CancellationToken cancellationToken) =>
+        public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<bool> RotateTokenAsync(Guid currentTokenId, Guid sessionId, Guid userId, string replacementHash, DateTime sessionExpiresAtUtc, DateTime utcNow, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
         public Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken) =>
@@ -534,13 +545,24 @@ public sealed class UserAccountServiceTests
         public Task<int> CountActiveOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
             Task.FromResult(ActiveOwnersCount);
 
-        public Task<IReadOnlyList<string>> GetEffectivePermissionsAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
         public Task<IReadOnlyList<OrganizationMembership>> GetMembershipsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<OrganizationMembership>>(Memberships.Where(m => m.UserId == userId).ToList());
+        public Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<IReadOnlyList<string>> GetScopedPermissionCodesAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
+    }
+    private sealed class FakeOrgRepo : IOrganizationRepository
+    {
+        public Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<Organization?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<Organization?>(null);
+        public Task<Organization?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult<Organization?>(null);
+        public Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<PagedResult<Organization>> GetAllAsync(PageRequest request, CancellationToken cancellationToken = default) => Task.FromResult(PagedResult.Create<Organization>([], 1, 10, 0));
+        public Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default) => Task.FromResult(PagedResult.Create<Organization>([], 1, 10, 0));
+        public Task<Organization> CreateAsync(Organization organization, OrganizationMembership initialMembership, CancellationToken cancellationToken = default) => Task.FromResult(organization);
+        public Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task LockOrganizationsAsync(IReadOnlyList<Guid> sortedOrganizationIds, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) => Task.FromResult(IExecutionTransaction.None);
     }
 }

@@ -35,4 +35,18 @@ public static class OrganizationMappingExtensions
             organization.RejectionReason,
             organization.ReviewedAtUtc);
     }
+
+    public static OrganizationMemberResponse ToResponse(this OrganizationMembership membership)
+    {
+        ArgumentNullException.ThrowIfNull(membership);
+        return new OrganizationMemberResponse(
+            membership.Id,
+            membership.UserId,
+            membership.User?.Email ?? string.Empty,
+            membership.User?.FullName ?? string.Empty,
+            membership.RoleId,
+            membership.Role?.Name ?? string.Empty,
+            membership.Status,
+            membership.JoinedAtUtc);
+    }
 }

@@ -1,11 +1,14 @@
 using System.Security.Cryptography;
+using Dprental.AuthService.Application.Exceptions;
+using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Application.Repositories;
 using Dprental.AuthService.Common;
+using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Exceptions;
-using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Logging;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -18,44 +21,59 @@ public sealed class ExternalLoginService(
     IUserRepository userRepository,
     IRoleRepository roleRepository,
     IPasswordHasher<User> passwordHasher,
-    TimeProvider timeProvider) : IExternalLoginService
+    TimeProvider timeProvider,
+    ICorrelationIdProvider correlationIdProvider,
+    ILogger<ExternalLoginService> logger) : IExternalLoginService
 {
     private const int FullNameMaxLength = 100;
 
     public async Task<Result<Guid>> SignInAsync(ExternalIdentity identity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(identity);
-        ArgumentException.ThrowIfNullOrWhiteSpace(identity.Provider);
-        ArgumentException.ThrowIfNullOrWhiteSpace(identity.Subject);
 
-        // Đã liên kết trước đó: tra theo subject, không theo email, nên vẫn đúng khi user đổi email ở nhà cung cấp.
-        ExternalLogin? existing = await externalLoginRepository.FindAsync(identity.Provider, identity.Subject, cancellationToken);
-        if (existing is not null)
+        if (string.IsNullOrWhiteSpace(identity.Provider) || string.IsNullOrWhiteSpace(identity.Subject))
         {
-            return existing.User.IsActive ? existing.UserId : AuthErrors.ExternalLogin.AccountDisabled;
+            return Result.Failure<Guid>(Error.Validation("Validation.Identity", "Thông tin danh tính bên ngoài không hợp lệ."));
         }
 
-        if (string.IsNullOrWhiteSpace(identity.Email))
-        {
-            return AuthErrors.ExternalLogin.MissingEmail;
-        }
+        return await ApplicationExecutor.ExecuteAsync(
+            "ExternalLoginSignIn",
+            async () =>
+            {
+                // Đã liên kết trước đó: tra theo subject, không theo email, nên vẫn đúng khi user đổi email ở nhà cung cấp.
+                ExternalLogin? existing = await externalLoginRepository.FindAsync(identity.Provider, identity.Subject, cancellationToken);
+                if (existing is not null)
+                {
+                    return existing.User.IsActive
+                        ? Result.Success(existing.UserId)
+                        : Result.Failure<Guid>(AuthErrors.ExternalLogin.AccountDisabled);
+                }
 
-        // Email chưa xác minh không đủ tin cậy để gắn vào tài khoản có sẵn: kẻ xấu có thể đăng ký email của người khác.
-        if (!identity.EmailVerified)
-        {
-            return AuthErrors.ExternalLogin.EmailNotVerified;
-        }
+                if (string.IsNullOrWhiteSpace(identity.Email))
+                {
+                    return Result.Failure<Guid>(AuthErrors.ExternalLogin.MissingEmail);
+                }
 
-        string email = UserService.NormalizeEmail(identity.Email);
-        DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
+                // Email chưa xác minh không đủ tin cậy để gắn vào tài khoản có sẵn: kẻ xấu có thể đăng ký email của người khác.
+                if (!identity.EmailVerified)
+                {
+                    return Result.Failure<Guid>(AuthErrors.ExternalLogin.EmailNotVerified);
+                }
 
-        User? user = await userRepository.FindByEmailAsync(email, cancellationToken);
-        if (user is not null)
-        {
-            return await LinkToExistingUserAsync(user, identity, email, utcNow, cancellationToken);
-        }
+                string email = UserService.NormalizeEmail(identity.Email);
+                DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
 
-        return await CreateUserAsync(identity, email, utcNow, cancellationToken);
+                User? user = await userRepository.FindByEmailAsync(email, cancellationToken);
+                if (user is not null)
+                {
+                    return await LinkToExistingUserAsync(user, identity, email, utcNow, cancellationToken);
+                }
+
+                return await CreateUserAsync(identity, email, utcNow, cancellationToken);
+            },
+            logger,
+            correlationIdProvider,
+            cancellationToken);
     }
 
     private async Task<Result<Guid>> LinkToExistingUserAsync(
@@ -67,19 +85,21 @@ public sealed class ExternalLoginService(
     {
         if (!user.IsActive)
         {
-            return AuthErrors.ExternalLogin.AccountDisabled;
+            return Result.Failure<Guid>(AuthErrors.ExternalLogin.AccountDisabled);
         }
 
         try
         {
             await externalLoginRepository.AddAsync(NewLogin(user.Id, identity, email, utcNow), cancellationToken);
-            return user.Id;
+            return Result.Success(user.Id);
         }
-        catch (DuplicateExternalLoginException)
+        catch (StorageConstraintViolationException)
         {
             // Hoặc request khác vừa liên kết cùng tài khoản (thì dùng lại), hoặc user này đã gắn một tài khoản khác.
             ExternalLogin? raced = await externalLoginRepository.FindAsync(identity.Provider, identity.Subject, cancellationToken);
-            return raced is not null && raced.UserId == user.Id ? user.Id : AuthErrors.ExternalLogin.AlreadyLinked;
+            return raced is not null && raced.UserId == user.Id
+                ? Result.Success(user.Id)
+                : Result.Failure<Guid>(AuthErrors.ExternalLogin.AlreadyLinked);
         }
     }
 
@@ -100,10 +120,11 @@ public sealed class ExternalLoginService(
         };
 
         // Mật khẩu ngẫu nhiên không ai biết: tài khoản chỉ đăng nhập được qua nhà cung cấp bên ngoài.
-        user.PasswordHash = passwordHasher.HashPassword(user, RandomNumberGenerator.GetHexString(64));
-        user.ExternalLogins.Add(NewLogin(user.Id, identity, email, utcNow));
+        string placeholderPassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        user.PasswordHash = passwordHasher.HashPassword(user, placeholderPassword);
 
         Role? customerRole = await roleRepository.GetByNameAsync(SystemRoleCode.Customer, cancellationToken);
+        user.ExternalLogins.Add(NewLogin(user.Id, identity, email, utcNow));
 
         try
         {
@@ -113,18 +134,21 @@ public sealed class ExternalLoginService(
             }
             else
             {
-                // Role customer chưa được seed (vd DB chưa chạy migration mới nhất) — vẫn cho tạo tài khoản,
-                // không chặn user chỉ vì thiếu 1 role không mang permission gì. Giống UserService.RegisterAsync.
                 await userRepository.CreateAsync(user, cancellationToken);
             }
 
-            return user.Id;
+            return Result.Success(user.Id);
         }
-        catch (DuplicateEmailException)
+        catch (StorageConstraintViolationException)
         {
             // Request khác vừa tạo xong cùng tài khoản: đọc lại thay vì báo lỗi cho người dùng.
             ExternalLogin? raced = await externalLoginRepository.FindAsync(identity.Provider, identity.Subject, cancellationToken);
-            return raced is not null ? raced.UserId : AuthErrors.User.EmailAlreadyExists;
+            if (raced is not null)
+            {
+                return Result.Success(raced.UserId);
+            }
+
+            return Result.Failure<Guid>(AuthErrors.User.EmailAlreadyExists);
         }
     }
 
@@ -136,7 +160,7 @@ public sealed class ExternalLoginService(
             Provider = identity.Provider,
             ProviderSubject = identity.Subject,
             Email = email,
-            CreatedAtUtc = utcNow,
+            CreatedAtUtc = utcNow
         };
 
     private static string BuildFullName(string? fullName, string email)
