@@ -1,5 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
-using Dprental.AuthService.Application.Exceptions;
+using Dprental.AuthService.Domain.Repositories;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
 using Microsoft.Extensions.Logging;

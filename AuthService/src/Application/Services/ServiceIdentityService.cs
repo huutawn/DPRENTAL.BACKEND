@@ -3,7 +3,7 @@ using System.Text;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
-using Dprental.AuthService.Application.Repositories;
+using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Utils;

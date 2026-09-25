@@ -1,5 +1,5 @@
 using Dprental.AuthService.Application.IServices;
-using Dprental.AuthService.Application.Repositories;
+using Dprental.AuthService.Domain.Repositories;
 using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.Entities;

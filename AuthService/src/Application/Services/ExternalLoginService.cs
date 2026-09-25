@@ -1,8 +1,8 @@
 using System.Security.Cryptography;
-using Dprental.AuthService.Application.Exceptions;
+using Dprental.AuthService.Domain.Repositories;
 using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
-using Dprental.AuthService.Application.Repositories;
+using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
