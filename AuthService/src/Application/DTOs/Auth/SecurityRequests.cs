@@ -18,3 +18,8 @@ public sealed record ResetPasswordRequest(
 
 /// <summary>Yêu cầu gửi email khôi phục mật khẩu.</summary>
 public sealed record RequestPasswordResetRequest(string Email);
+
+/// <summary>Yêu cầu thu hồi một phiên đăng nhập cụ thể.</summary>
+public sealed record RevokeDeviceSessionRequest(
+    [Required(ErrorMessage = "SessionId là bắt buộc.")] Guid SessionId
+);

@@ -358,16 +358,27 @@ public sealed class AuthController(
         return Ok(new { Message = "Đã đặt lại mật khẩu và hủy toàn bộ phiên cũ." });
     }
 
-    /// <summary>Thu hồi toàn bộ phiên đăng nhập của người dùng hiện tại.</summary>
+    /// <summary>Thu hồi một phiên đăng nhập cụ thể của người dùng (Đăng xuất khỏi thiết bị khác).</summary>
     [Authorize]
-    [HttpPost("revoke-all")]
-    public async Task<IActionResult> RevokeAllSessions(CancellationToken cancellationToken)
+    [HttpPost("revoke-session")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> RevokeDeviceSession([FromBody] RevokeDeviceSessionRequest request, CancellationToken cancellationToken)
     {
         if (User.GetJwtSub() is Guid userId)
         {
-            await authSessionService.RevokeAllSessionsForUserAsync(userId, cancellationToken);
+            // Gọi hàm đã có sẵn ở dưới cùng của Service
+            var result = await authSessionService.RevokeSessionAsync(userId, request.SessionId, cancellationToken);
+
+            if (result.IsFailure)
+            {
+                return this.ToProblem(result.Error);
+            }
+
+            return NoContent();
         }
-        return NoContent();
+
+        return Unauthorized();
     }
 
     private ObjectResult NotImplementedYet() => Problem(

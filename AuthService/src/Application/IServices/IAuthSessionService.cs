@@ -28,4 +28,6 @@ public interface IAuthSessionService
 
     /// <summary>Tra cứu SessionId từ chuỗi refresh token raw nếu hợp lệ.</summary>
     Task<Guid?> GetCurrentSessionIdAsync(string? currentRefreshToken, CancellationToken cancellationToken = default);
+    /// <summary>Thu hồi một phiên đăng nhập cụ thể của người dùng.</summary>
+    Task RevokeDeviceSessionAsync(Guid userId, Guid sessionId, CancellationToken cancellationToken = default);
 }
