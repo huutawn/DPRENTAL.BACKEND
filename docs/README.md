@@ -4,15 +4,15 @@
 
 | Lớp | Trách nhiệm | Không được chứa |
 | --- | --- | --- |
-| `Common` | Kiểu dữ liệu và concern thật sự dùng chung, gồm `IRepo<TEntity, TKey>` CRUD | Nghiệp vụ xác thực |
-| `Domain` | DTOs, Entities, Models, Utils, Validators, `IRepositories`, repository implementation, DbContext, EF Core và migration | HTTP pipeline, controller |
-| `Application` | Services, IServices, Security, Mapping, third-party integration và điều phối domain | Controller, HTTP pipeline |
+| `Common` | Kiểu dữ liệu và concern dùng chung (`Result`, `Error`, enums, utility) | Nghiệp vụ xác thực |
+| `Domain` | Entities và Domain Models; một số entity còn dùng EF Core mapping attributes | Repository, DbContext, migration, HTTP pipeline, controller |
+| `Application` | DTOs, Repository ports (interfaces), Services, Security, Mapping và điều phối domain | Controller, HTTP pipeline, DbContext |
+| `Infrastructure` | EF Core DbContext, Repository implementations, Migrations và data persistence | Business logic, HTTP pipeline, controller |
 | `Api` | Controllers, Filters, middleware, DI/composition root | Business logic |
 
 Chi tiết về `Result` và `Error` trong `Common`: xem [common-result-error.md](common-result-error.md).
 
-Domain là nơi sở hữu DTO, entity/model, utility/validator và persistence của Auth. `Domain/IRepositories` giữ contract theo nghiệp vụ; các contract đó kế thừa `Common/IRepo<TEntity, TKey>` khi cần CRUD chuẩn. Application chỉ gọi repository contract và giữ mapper giữa model/DTO; API chỉ đăng ký dependency tại composition root, controller và filter support.
-
+Application sở hữu các repository port (interfaces); Infrastructure thực thi các port đó bằng EF Core và PostgreSQL. Domain giữ entity và domain models; các EF Core mapping attributes trên entity vẫn cần được chuyển sang Infrastructure để Domain độc lập hoàn toàn với persistence.
 ## Cấu hình môi trường
 
 `Api/appsettings.Development.json` chỉ chứa giá trị không nhạy cảm. Docker Compose lấy credential local từ `.env`: sao chép `.env.example` thành `.env`, rồi thay password. `.env` đã bị Git bỏ qua.
@@ -174,7 +174,7 @@ Refresh token là chuỗi ngẫu nhiên chỉ dùng một lần; database chỉ 
 Sau khi pull thay đổi, áp dụng migration local (migration này xóa refresh token cũ, không xóa User):
 
 ```bash
-dotnet ef database update --project AuthService/src/Domain/AuthService.Domain.csproj --startup-project AuthService/src/Api/AuthService.Api.csproj
+dotnet ef database update --project AuthService/src/Infrastructure/AuthService.Infrastructure.csproj --startup-project AuthService/src/Api/AuthService.Api.csproj
 ```
 
 JWKS được cache công khai tối đa 5 phút. Để rotate key an toàn: thêm key pair mới nhưng chưa active, deploy để JWKS công bố cả hai public key, chờ cache hết hạn, đổi `ActiveKeyId`, sau đó giữ public key cũ ít nhất bằng access-token lifetime cộng clock skew trước khi gỡ nó.

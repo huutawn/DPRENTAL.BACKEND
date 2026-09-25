@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
 
+
 namespace Dprental.AuthService.Api.Controllers;
 
 /// <summary>Đăng ký, xác thực và quản lý phiên đăng nhập của người dùng hoặc service.</summary>
@@ -74,22 +75,21 @@ public sealed class AuthController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Login(LoginRequest request, CancellationToken cancellationToken)
     {
-        Guid? userId = await userService.AuthenticateAsync(request, cancellationToken);
-        if (userId is null)
+        Result<Guid> authResult = await userService.AuthenticateAsync(request, cancellationToken);
+        if (authResult.IsFailure)
         {
-            return this.ToProblem(AuthErrors.Auth.InvalidCredentials);
+            return this.ToProblem(authResult.Error);
         }
 
-        AuthTokenPair? tokens = await authSessionService.CreateSessionAsync(userId.Value, cancellationToken);
-        if (tokens is null)
+        Result<AuthTokenPair> sessionResult = await authSessionService.CreateSessionAsync(authResult.Value, cancellationToken);
+        if (sessionResult.IsFailure)
         {
-            return this.ToProblem(AuthErrors.Auth.InactiveAccount);
+            return this.ToProblem(sessionResult.Error);
         }
-        SetAuthCookies(tokens.AccessToken, tokens.RefreshToken);
+        SetAuthCookies(sessionResult.Value.AccessToken, sessionResult.Value.RefreshToken);
 
-        return Ok(new { Message = "Đăng nhập thành công.", UserId = userId });
+        return Ok(new { Message = "Đăng nhập thành công.", UserId = authResult.Value });
     }
-
     /// <summary>Làm mới phiên đăng nhập bằng refresh token trong cookie.</summary>
     [HttpPost("refresh")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -101,15 +101,14 @@ public sealed class AuthController(
             return this.ToProblem(AuthErrors.Auth.MissingCookie);
         }
 
-        AuthTokenPair? tokens = await authSessionService.RefreshAsync(currentRefreshToken, cancellationToken);
-        if (tokens is null)
+        Result<AuthTokenPair> result = await authSessionService.RefreshAsync(currentRefreshToken, cancellationToken);
+        if (result.IsFailure)
         {
-            return this.ToProblem(AuthErrors.Auth.InvalidRefreshToken);
+            return this.ToProblem(result.Error);
         }
 
         // Cập nhật lại Cookie với cặp token mới
-        SetAuthCookies(tokens.AccessToken, tokens.RefreshToken);
-
+        SetAuthCookies(result.Value.AccessToken, result.Value.RefreshToken);
         return Ok(new { Message = "Làm mới token thành công" });
     }
 
@@ -165,16 +164,13 @@ public sealed class AuthController(
                 detail: "Ticket là bắt buộc.");
         }
 
-        AuthTokenPair? tokens = await authSessionService.ExchangeGoogleLoginTicketAsync(request.Ticket, cancellationToken);
-        if (tokens is null)
+        Result<AuthTokenPair> tokensResult = await authSessionService.ExchangeGoogleLoginTicketAsync(request.Ticket, cancellationToken);
+        if (tokensResult.IsFailure)
         {
-            return Problem(
-                statusCode: StatusCodes.Status401Unauthorized,
-                title: "Auth.InvalidGoogleLoginTicket",
-                detail: "Ticket không hợp lệ, đã hết hạn hoặc đã được sử dụng.");
+            return this.ToProblem(tokensResult.Error);
         }
 
-        return Ok(new AuthTokenResponse(tokens.AccessToken, tokens.RefreshToken));
+        return Ok(new AuthTokenResponse(tokensResult.Value.AccessToken, tokensResult.Value.RefreshToken));
     }
 
     /// <summary>Bắt đầu đăng nhập Google sau khi kiểm tra return URL an toàn.</summary>
@@ -252,18 +248,25 @@ public sealed class AuthController(
         Result<Guid> result = await externalLoginService.SignInAsync(identity, cancellationToken);
         if (result.IsFailure)
         {
+            if (result.Error.Code == AuthErrorCode.Auth.Uncategorized)
+            {
+                return this.ToProblem(result.Error);
+            }
             return RedirectToBff(WithError(bffCallbackUrl, returnUrl, result.Error.Code));
         }
 
-        string? ticket = await authSessionService.CreateGoogleLoginTicketAsync(result.Value, cancellationToken);
-        if (ticket is null)
+        Result<string> ticketResult = await authSessionService.CreateGoogleLoginTicketAsync(result.Value, cancellationToken);
+        if (ticketResult.IsFailure)
         {
-            return RedirectToBff(WithError(bffCallbackUrl, returnUrl, "Auth.InactiveAccount"));
+            if (ticketResult.Error.Code == AuthErrorCode.Auth.Uncategorized)
+            {
+                return this.ToProblem(ticketResult.Error);
+            }
+            return RedirectToBff(WithError(bffCallbackUrl, returnUrl, ticketResult.Error.Code));
         }
 
-        return RedirectToBff(WithTicket(bffCallbackUrl, returnUrl, ticket));
+        return RedirectToBff(WithTicket(bffCallbackUrl, returnUrl, ticketResult.Value));
     }
-
     private ObjectResult InvalidReturnUrl() => Problem(
         statusCode: StatusCodes.Status400BadRequest,
         title: "Auth.InvalidReturnUrl",
@@ -307,25 +310,77 @@ public sealed class AuthController(
         return Ok(new { Message = "Yêu cầu khôi phục mật khẩu đã được xử lý." });
     }
 
+    /// <summary>Xác thực link từ email, gắn token vào Cookie và chuyển hướng về Frontend.</summary>
+    [HttpGet("verify-reset-link")]
+    public IActionResult VerifyResetLink([FromQuery] string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return BadRequest(new { Message = "Link khôi phục không hợp lệ hoặc đã hỏng." });
+        }
+
+        // Tạo HttpOnly Cookie chứa token
+        CookieOptions cookieOptions = new()
+        {
+            HttpOnly = true,
+            Secure = true, // Đảm bảo Cookie chỉ gửi qua HTTPS
+            SameSite = SameSiteMode.Strict, // Chống tấn công CSRF
+            Expires = DateTimeOffset.UtcNow.AddMinutes(30) // Khớp với TTL của Token trong DB
+        };
+
+        Response.Cookies.Append("ResetPasswordToken", token, cookieOptions);
+
+        // Chuyển hướng user về trang giao diện frontend để họ nhập mật khẩu mới.
+        // CẦN THAY ĐỔI: Sửa URL dưới đây thành địa chỉ thật của Frontend team bạn
+        return Redirect("https://localhost:3000/auth/create-new-password");
+    }
+
     /// <summary>Đặt lại mật khẩu bằng token hợp lệ và thu hồi toàn bộ phiên cũ.</summary>
     [HttpPost("reset-password")]
     public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request, CancellationToken cancellationToken)
     {
-        var result = await userService.ResetPasswordAsync(request, cancellationToken);
-        if (result.IsFailure) return this.ToProblem(result.Error);
+        // 1. Trích xuất Token từ HttpOnly Cookie do trình duyệt tự động gửi lên
+        if (!Request.Cookies.TryGetValue("ResetPasswordToken", out string? resetToken) || string.IsNullOrWhiteSpace(resetToken))
+        {
+            // Sử dụng cấu trúc Error tương tự như các lỗi khác trong hệ thống của bạn
+            return Unauthorized(new { Message = "Phiên đặt lại mật khẩu không hợp lệ hoặc đã hết hạn." });
+        }
+
+        // 2. Truyền resetToken vào vị trí tham số đầu tiên
+        var result = await userService.ResetPasswordAsync(resetToken, request, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        // 3. Xóa dọn Cookie chứa Token sau khi đã đổi mật khẩu thành công
+        Response.Cookies.Delete("ResetPasswordToken");
+
         return Ok(new { Message = "Đã đặt lại mật khẩu và hủy toàn bộ phiên cũ." });
     }
 
-    /// <summary>Thu hồi toàn bộ phiên đăng nhập của người dùng hiện tại.</summary>
+    /// <summary>Thu hồi một phiên đăng nhập cụ thể của người dùng (Đăng xuất khỏi thiết bị khác).</summary>
     [Authorize]
-    [HttpPost("revoke-all")]
-    public async Task<IActionResult> RevokeAllSessions(CancellationToken cancellationToken)
+    [HttpPost("revoke-session")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> RevokeDeviceSession([FromBody] RevokeDeviceSessionRequest request, CancellationToken cancellationToken)
     {
         if (User.GetJwtSub() is Guid userId)
         {
-            await authSessionService.RevokeAllSessionsForUserAsync(userId, cancellationToken);
+            // Gọi hàm đã có sẵn ở dưới cùng của Service
+            var result = await authSessionService.RevokeSessionAsync(userId, request.SessionId, cancellationToken);
+
+            if (result.IsFailure)
+            {
+                return this.ToProblem(result.Error);
+            }
+
+            return NoContent();
         }
-        return NoContent();
+
+        return Unauthorized();
     }
 
     private ObjectResult NotImplementedYet() => Problem(
