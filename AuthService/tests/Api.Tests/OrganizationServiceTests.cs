@@ -804,9 +804,14 @@ public sealed class OrganizationServiceTests
         public Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default) =>
             Task.FromResult(ExistingSlugs.Contains(slug) || Organizations.Values.Any(o => o.Slug == slug));
 
-        public Task<PagedResult<Organization>> GetAllAsync(PageRequest request, CancellationToken cancellationToken = default)
+        public Task<Organization?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default) =>
+            GetByIdAsync(id, cancellationToken);
+
+        public Task<PagedResult<Organization>> GetAllAsync(PageRequest request, OrganizationStatus? status = null, CancellationToken cancellationToken = default)
         {
-            List<Organization> list = Organizations.Values.OrderBy(o => o.CreatedAtUtc).ThenBy(o => o.Id).ToList();
+            List<Organization> list = Organizations.Values
+                .Where(o => status is null || o.Status == status)
+                .OrderBy(o => o.CreatedAtUtc).ThenBy(o => o.Id).ToList();
             List<Organization> paged = list.Skip((request.Page - 1) * request.PageSize).Take(request.PageSize).ToList();
             return Task.FromResult(PagedResult.Create(paged, request.Page, request.PageSize, list.Count));
         }

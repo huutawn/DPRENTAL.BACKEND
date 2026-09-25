@@ -158,14 +158,15 @@ public sealed class AuthorizationMatrixTests
     }
 
     [Fact]
-    public async Task OwnerCanUpdateOrgAndManageMembersButCannotSuspendOrgOrAssignGlobalRoles()
+    public async Task OwnerCannotRenameSuspendOrgOrAssignGlobalRoles()
     {
         OrganizationService orgService = new(_orgRepo, _memRepo, _userRepo, _roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
         RoleAssignmentService roleService = new(_roleRepo, _memRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
 
-        // 1. Can update org name
+        // 1. CANNOT rename org — tên là thông tin pháp lý đã được Platform xác minh
         Result nameRes = await orgService.UpdateAsync(OwnerUserId, OrganizationId, new UpdateOrganizationRequest(Name: "Renamed Org"));
-        Assert.True(nameRes.IsSuccess);
+        Assert.True(nameRes.IsFailure);
+        Assert.Equal(AuthErrors.Organization.LegalInfoLocked, nameRes.Error);
 
         // 2. CANNOT suspend/activate org (lacks identity.organizations.suspend)
         Result suspendRes = await orgService.UpdateAsync(OwnerUserId, OrganizationId, new UpdateOrganizationRequest(IsActive: false));
@@ -265,8 +266,9 @@ public sealed class AuthorizationMatrixTests
         public Task<Organization?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Organizations.GetValueOrDefault(id));
         public Task<Organization?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult(Organizations.Values.FirstOrDefault(o => o.Slug == slug));
         public Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult(false);
-        public Task<PagedResult<Organization>> GetAllAsync(PageRequest request, CancellationToken cancellationToken = default) =>
+        public Task<PagedResult<Organization>> GetAllAsync(PageRequest request, OrganizationStatus? status = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(PagedResult.Create<Organization>([.. Organizations.Values], request.Page, request.PageSize, Organizations.Count));
+        public Task<Organization?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default) => GetByIdAsync(id, cancellationToken);
         public Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default) =>
             Task.FromResult(PagedResult.Create<Organization>([.. Organizations.Values], request.Page, request.PageSize, Organizations.Count));
         public Task<Organization> CreateAsync(Organization organization, OrganizationMembership initialMembership, CancellationToken cancellationToken = default) =>

@@ -10,4 +10,14 @@ public interface IOrganizationRegistrationService
         Guid actorUserId,
         OrganizationProfileRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Owner sửa hồ sơ. Pending: sửa toàn bộ. Rejected: sửa toàn bộ và tự gửi lại (về Pending).
+    /// Active: chỉ đổi liên hệ/hiển thị. Suspended: không cho sửa.
+    /// </summary>
+    Task<Result<OrganizationResponse>> UpdateProfileAsync(
+        Guid actorUserId,
+        Guid organizationId,
+        UpdateOrganizationProfileRequest request,
+        CancellationToken cancellationToken = default);
 }
