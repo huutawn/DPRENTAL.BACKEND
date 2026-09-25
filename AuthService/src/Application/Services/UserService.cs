@@ -228,7 +228,7 @@ public sealed class UserService(
 
         // Tạo entity RecoveryToken lưu vào database (chỉ lưu mã băm Hash)
         RecoveryToken recoveryToken = new()
-        {
+        {   
             Id = Guid.NewGuid(),
             UserId = user.Id,
             TokenHash = RefreshTokenUtility.ComputeHash(rawToken),
@@ -246,41 +246,44 @@ public sealed class UserService(
         return Result.Success();
     }
 
-    public async Task<Result> ResetPasswordAsync(ResetPasswordRequest request, CancellationToken cancellationToken = default)
+    public async Task<Result> ResetPasswordAsync(string token, ResetPasswordRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         string corrId = correlationIdProvider.GetCorrelationId();
 
-        // 1. Tìm User
-        User? user = await userRepository.FindByEmailAsync(NormalizeEmail(request.Email), cancellationToken);
-        if (user is null)
+        if (string.IsNullOrWhiteSpace(token))
         {
-            // Ghi log chung chung để chống dò quét email (Email Enumeration)
-            await LogAuditAsync(null, request.Email, "Password_Reset", "Failed_UserNotFound", corrId, cancellationToken);
-            return Result.Failure(Error.Unauthorized("Auth.ResetFailed", "Mã không hợp lệ hoặc tài khoản không tồn tại."));
+            return Result.Failure(Error.Unauthorized("Auth.ResetFailed", "Mã khôi phục không hợp lệ."));
         }
 
-        // 2. Băm token từ request để tìm kiếm trong DB (Tuyệt đối không tìm bằng token raw)
-        string incomingTokenHash = RefreshTokenUtility.ComputeHash(request.Token); // Gọi hàm băm SHA256 tương tự như RefreshToken
+        // 1. Băm token (từ Cookie) để tìm kiếm trong DB
+        string incomingTokenHash = RefreshTokenUtility.ComputeHash(token);
 
-        // 3. Tìm token trong bảng RecoveryTokens
+        // 2. Tìm token trong bảng RecoveryTokens
         RecoveryToken? recoveryToken = await recoveryTokenRepository.FindByHashAsync(incomingTokenHash, cancellationToken);
 
-        // 4. Validate Token (Có tồn tại? Của đúng User? Đúng mục đích? Đã bị dùng chưa?)
+        // 3. Validate Token (Có tồn tại? Đúng mục đích? Đã bị dùng chưa?)
         if (recoveryToken is null ||
-            recoveryToken.UserId != user.Id ||
             recoveryToken.Purpose != "ResetPassword" ||
             recoveryToken.UsedAtUtc is not null)
         {
-            await LogAuditAsync(user.Id, user.Id.ToString(), "Password_Reset", "Failed_InvalidOrReusedToken", corrId, cancellationToken);
+            await LogAuditAsync(null, "Unknown", "Password_Reset", "Failed_InvalidOrReusedToken", corrId, cancellationToken);
             return Result.Failure(Error.Unauthorized("Auth.ResetFailed", "Mã khôi phục không hợp lệ hoặc đã được sử dụng."));
         }
 
-        // 5. Kiểm tra thời hạn (TTL)
+        // 4. Kiểm tra thời hạn (TTL)
         if (recoveryToken.ExpiresAtUtc <= timeProvider.GetUtcNow().UtcDateTime)
         {
-            await LogAuditAsync(user.Id, user.Id.ToString(), "Password_Reset", "Failed_TokenExpired", corrId, cancellationToken);
+            await LogAuditAsync(recoveryToken.UserId, recoveryToken.UserId.ToString(), "Password_Reset", "Failed_TokenExpired", corrId, cancellationToken);
             return Result.Failure(Error.Unauthorized("Auth.TokenExpired", "Mã khôi phục đã hết hạn."));
+        }
+
+        // 5. Tìm User dựa trên UserId lưu trong Token
+        User? user = await userRepository.GetByIdAsync(recoveryToken.UserId, cancellationToken);
+        if (user is null)
+        {
+            await LogAuditAsync(recoveryToken.UserId, recoveryToken.UserId.ToString(), "Password_Reset", "Failed_UserNotFound", corrId, cancellationToken);
+            return Result.Failure(Error.Unauthorized("Auth.ResetFailed", "Tài khoản không tồn tại."));
         }
 
         // 6. Đổi mật khẩu & Reset Abuse Protection (Mở khóa tài khoản)
@@ -336,7 +339,7 @@ public sealed class UserService(
         await authSessionRepository.RevokeAllSessionsForUserAsync(user.Id, cancellationToken);
         await LogAuditAsync(user.Id, user.Id.ToString(), "Password_Change", "Success", corrId, cancellationToken);
         return Result.Success();
-    }
+    }   
 
     private async Task LogAuditAsync(Guid? actorId, string target, string action, string result, string corrId, CancellationToken cancellationToken)
     {

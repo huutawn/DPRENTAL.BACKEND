@@ -1,11 +1,12 @@
+using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Application.DTOs.User;
+using Dprental.AuthService.Common.Utils;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
-using Dprental.AuthService.Common.Utils;
+using Dprental.AuthService.Domain.Repositories;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -109,6 +110,10 @@ public sealed class AuthSessionService(
         }
     }
 
+    public async Task RevokeDeviceSessionAsync(Guid userId, Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        await RevokeSessionAsync(userId, sessionId, cancellationToken);
+    }
     public async Task RevokeByRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(refreshToken)) return;
