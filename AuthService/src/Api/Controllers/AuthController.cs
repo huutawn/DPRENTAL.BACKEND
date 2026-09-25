@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
 
+
 namespace Dprental.AuthService.Api.Controllers;
 
 /// <summary>Đăng ký, xác thực và quản lý phiên đăng nhập của người dùng hoặc service.</summary>
@@ -307,12 +308,53 @@ public sealed class AuthController(
         return Ok(new { Message = "Yêu cầu khôi phục mật khẩu đã được xử lý." });
     }
 
+    /// <summary>Xác thực link từ email, gắn token vào Cookie và chuyển hướng về Frontend.</summary>
+    [HttpGet("verify-reset-link")]
+    public IActionResult VerifyResetLink([FromQuery] string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return BadRequest(new { Message = "Link khôi phục không hợp lệ hoặc đã hỏng." });
+        }
+
+        // Tạo HttpOnly Cookie chứa token
+        CookieOptions cookieOptions = new()
+        {
+            HttpOnly = true,
+            Secure = true, // Đảm bảo Cookie chỉ gửi qua HTTPS
+            SameSite = SameSiteMode.Strict, // Chống tấn công CSRF
+            Expires = DateTimeOffset.UtcNow.AddMinutes(30) // Khớp với TTL của Token trong DB
+        };
+
+        Response.Cookies.Append("ResetPasswordToken", token, cookieOptions);
+
+        // Chuyển hướng user về trang giao diện frontend để họ nhập mật khẩu mới.
+        // CẦN THAY ĐỔI: Sửa URL dưới đây thành địa chỉ thật của Frontend team bạn
+        return Redirect("https://localhost:3000/auth/create-new-password");
+    }
+
     /// <summary>Đặt lại mật khẩu bằng token hợp lệ và thu hồi toàn bộ phiên cũ.</summary>
     [HttpPost("reset-password")]
     public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request, CancellationToken cancellationToken)
     {
-        var result = await userService.ResetPasswordAsync(request, cancellationToken);
-        if (result.IsFailure) return this.ToProblem(result.Error);
+        // 1. Trích xuất Token từ HttpOnly Cookie do trình duyệt tự động gửi lên
+        if (!Request.Cookies.TryGetValue("ResetPasswordToken", out string? resetToken) || string.IsNullOrWhiteSpace(resetToken))
+        {
+            // Sử dụng cấu trúc Error tương tự như các lỗi khác trong hệ thống của bạn
+            return Unauthorized(new { Message = "Phiên đặt lại mật khẩu không hợp lệ hoặc đã hết hạn." });
+        }
+
+        // 2. Truyền resetToken vào vị trí tham số đầu tiên
+        var result = await userService.ResetPasswordAsync(resetToken, request, cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        // 3. Xóa dọn Cookie chứa Token sau khi đã đổi mật khẩu thành công
+        Response.Cookies.Delete("ResetPasswordToken");
+
         return Ok(new { Message = "Đã đặt lại mật khẩu và hủy toàn bộ phiên cũ." });
     }
 
