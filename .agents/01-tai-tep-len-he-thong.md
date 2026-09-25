@@ -2,12 +2,9 @@
 
 ## 1.1. User Story
 
-Là người dùng đang thực hiện một nghiệp vụ có sử dụng hình ảnh hoặc tài liệu, tôi muốn tải tệp lên hệ thống trước để nhận MediaId, sau đó sử dụng MediaId này khi gửi yêu cầu tạo hoặc cập nhật dữ liệu nghiệp vụ.
+Là người dùng đã đăng nhập vào hệ thống, tôi muốn tải tệp trực tiếp lên MinIO thông qua phiên upload do MediaService cấp, để nhận MediaId ở trạng thái Ready và sử dụng MediaId này khi tạo hoặc cập nhật dữ liệu nghiệp vụ.
 
-Là Business Service, tôi muốn kiểm tra quyền upload và cấp một phiên upload cho người dùng, để binary được tải trực tiếp lên Object Storage mà không đi qua service nghiệp vụ.
-
-Là Business Service, tôi muốn chỉ chấp nhận MediaId đã ở trạng thái Ready khi lưu tham chiếu vào entity nghiệp vụ.
-
+Là Business Service sở hữu đối tượng nghiệp vụ, tôi muốn kiểm tra quyền của người dùng trên đối tượng và xác minh MediaId (trạng thái Ready, đúng purpose, đúng người upload, đúng đối tượng dự kiến) qua API nội bộ trước khi lưu tham chiếu vào entity nghiệp vụ.
 ## 1.2. Đầu vào
 
 | STT | Tên trường         | Kiểu dữ liệu               | Bắt buộc | Mô tả / ràng buộc                                                 |
@@ -50,9 +47,9 @@ Ví dụ:
 
 ## 1.4. Tiêu chí chấp nhận
 
-**AC1:** Business Service gửi thông tin hợp lệ thì hệ thống tạo một MediaAsset và MediaUploadSession mới.
+**AC1:** Client đã đăng nhập gửi thông tin khởi tạo phiên (purpose, ownerEntityId, fileName, contentType, sizeBytes, Idempotency-Key) hợp lệ thì hệ thống tạo MediaAsset (PendingUpload) và MediaUploadSession (Pending). Service sở hữu và loại đối tượng được xác định từ cấu hình purpose, không nhận từ client.
 
-**AC2:** Response tạo upload phải có MediaId, UploadId, upload instruction và thời gian hết hạn.
+**AC2:** Response tạo upload phải có MediaId, UploadId, presigned PUT URL đến MinIO, requiredHeaders và thời gian hết hạn (15 phút).
 
 **AC3:** Binary được upload trực tiếp từ Browser đến Object Storage, không truyền qua MediaService.
 
@@ -75,9 +72,9 @@ Ví dụ:
 **1.5.1. Nguyên tắc tải tệp**
 
 Người dùng thực hiện tải tệp tại chức năng nghiệp vụ tương ứng.
+Người dùng đã đăng nhập thực hiện tải tệp trực tiếp lên Object Storage thông qua URL ký sẵn do MediaService cấp.
 
-Trước khi cho phép tải, hệ thống nghiệp vụ phải kiểm tra người dùng có quyền thao tác trên đối tượng liên quan.
-
+Quyền sử dụng Media trên đối tượng nghiệp vụ được Business Service kiểm tra khi người dùng gửi form lưu tham chiếu MediaId, thay vì kiểm tra trước khi upload. Business Service gọi API nội bộ `GET /api/v1/media/{mediaId}/verify` bằng service token để xác minh MediaId đã Ready, đúng purpose, đúng đối tượng dự kiến và đúng người upload trước khi lưu.
 Tệp được tải trực tiếp lên hệ thống lưu trữ tệp.
 
 Sau khi tải thành công, hệ thống tiến hành kiểm tra tệp trước khi cho phép sử dụng.

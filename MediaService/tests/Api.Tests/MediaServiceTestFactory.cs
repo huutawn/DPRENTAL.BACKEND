@@ -15,6 +15,7 @@ public class MediaServiceTestFactory : WebApplicationFactory<Program>
 {
     public IPostgreSqlHealthChecker? PostgreSqlHealthCheckerOverride { get; set; }
     public IMinioClient? MinioClientOverride { get; set; }
+    public Dprental.MediaService.Application.IServices.IMediaUploadService? MediaUploadServiceOverride { get; set; }
     public Dictionary<string, string?> ConfigurationOverrides { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -50,6 +51,12 @@ public class MediaServiceTestFactory : WebApplicationFactory<Program>
             {
                 services.RemoveAll<IMinioClient>();
                 services.AddSingleton(MinioClientOverride);
+            }
+
+            if (MediaUploadServiceOverride != null)
+            {
+                services.RemoveAll<Dprental.MediaService.Application.IServices.IMediaUploadService>();
+                services.AddSingleton(MediaUploadServiceOverride);
             }
         });
     }

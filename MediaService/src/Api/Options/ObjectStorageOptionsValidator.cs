@@ -31,6 +31,17 @@ public sealed class ObjectStorageOptionsValidator : IValidateOptions<ObjectStora
             failures.Add("ObjectStorage:SecretKey không được để trống.");
         }
 
+        if (options.UploadUrlExpiryMinutes is <= 0 or > 120)
+        {
+            failures.Add("ObjectStorage:UploadUrlExpiryMinutes phải nằm trong khoảng từ 1 đến 120 phút.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.BrowserEndpoint) &&
+            !Uri.TryCreate(options.BrowserEndpoint, UriKind.Absolute, out _))
+        {
+            failures.Add("ObjectStorage:BrowserEndpoint phải là một URL tuyệt đối hợp lệ.");
+        }
+
         return failures.Count > 0
             ? ValidateOptionsResult.Fail(failures)
             : ValidateOptionsResult.Success;

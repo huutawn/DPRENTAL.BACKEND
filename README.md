@@ -1,6 +1,26 @@
 # MediaService
 
-Dịch vụ Media cho hệ sinh thái DPRENTAL, được xây dựng bằng .NET 10 theo kiến trúc phân lớp sạch (Clean Architecture) tương đồng với AuthService. Ở giai đoạn khởi tạo, dịch vụ cung cấp hạ tầng kết nối, kiểm tra tính sẵn sàng (Health Checks) với PostgreSQL và MinIO Object Storage, chưa triển khai API upload hay lưu trữ metadata media.
+Dịch vụ Media cho hệ sinh thái DPRENTAL, được xây dựng bằng .NET 10 theo kiến trúc phân lớp sạch (Clean Architecture) tương đồng với AuthService. Dịch vụ cung cấp API tải media trực tiếp từ client lên MinIO Object Storage bằng URL ký sẵn (Presigned PUT URL), lưu trữ và xác minh metadata tệp trong PostgreSQL, cùng API nội bộ cho các Business Service xác thực MediaId trước khi lưu tham chiếu.
+
+## Luồng Tải Media Trực Tiếp (Client Direct Upload)
+
+1. **Khởi tạo phiên (`POST /api/v1/media/uploads`)**:
+   - Client đã đăng nhập gửi thông tin tệp: `purpose`, `ownerEntityId`, `fileName`, `contentType`, `sizeBytes`, `sha256Checksum` (tùy chọn) cùng tiêu đề `Idempotency-Key`.
+   - MediaService xác định `ownerService` và `ownerEntityType` từ cấu hình purpose (không nhận từ client) và kiểm tra dung lượng/MIME theo policy.
+   - Trả về `mediaId`, `uploadId`, `uploadUrl` (URL PUT ký sẵn 15 phút), `method` và `requiredHeaders`.
+
+2. **Tải binary trực tiếp lên MinIO**:
+   - Client (Browser/Mobile) thực hiện `PUT` binary trực tiếp lên MinIO thông qua `uploadUrl`, không truyền tải dữ liệu qua MediaService.
+
+3. **Hoàn tất & Xác minh (`POST /api/v1/media/uploads/{uploadId}/complete`)**:
+   - Chỉ người tạo phiên mới có quyền gọi Complete.
+   - MediaService đọc stream tệp thực tế từ MinIO (ngoài transaction PostgreSQL) để kiểm tra dung lượng, MIME, file signature (magic bytes) và checksum SHA-256 (nếu client đã khai báo).
+   - Nếu hợp lệ: chuyển tệp sang khóa lưu trữ chính thức (service-only write key) ngẫu nhiên, chuyển trạng thái MediaAsset thành `Ready` và MediaUploadSession thành `Completed`.
+   - Nếu sai định dạng/quá dung lượng/checksum sai: chuyển thành `Rejected` và đưa object tạm vào hàng đợi dọn dẹp.
+   - Gọi Complete lại cho phiên đã hoàn tất sẽ trả cùng kết quả (idempotent), không tạo media mới.
+
+4. **Xác minh MediaId nội bộ (`GET /api/v1/media/{mediaId}/verify`)**:
+   - Business Service dùng service token gọi endpoint này để kiểm tra MediaId đang ở trạng thái `Ready`, đúng `purpose`, đúng đối tượng và đúng người upload trước khi lưu tham chiếu vào entity nghiệp vụ.
 
 ## Cấu trúc Solution
 

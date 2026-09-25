@@ -34,4 +34,20 @@ public sealed class ObjectStorageOptions
     /// Tùy chọn bật/tắt kết nối SSL/TLS.
     /// </summary>
     public bool? UseSsl { get; set; }
+
+    /// <summary>
+    /// Endpoint trình duyệt truy cập được để tải tệp trực tiếp lên MinIO.
+    /// Nếu để trống, hệ thống sẽ sử dụng Endpoint nội bộ.
+    /// </summary>
+    public string? BrowserEndpoint { get; set; }
+
+    /// <summary>
+    /// Danh sách các Origin được phép gọi CORS khi upload từ trình duyệt.
+    /// </summary>
+    public string[] AllowedOrigins { get; set; } = [];
+
+    /// <summary>
+    /// Thời hạn hiệu lực của URL upload ký sẵn tính theo phút (mặc định 15 phút).
+    /// </summary>
+    public int UploadUrlExpiryMinutes { get; set; } = 15;
 }
