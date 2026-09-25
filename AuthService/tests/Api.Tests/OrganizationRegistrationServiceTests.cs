@@ -1,10 +1,10 @@
 using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.Data;
+
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Common.Enums;
-using Dprental.AuthService.Domain.Repositories;
+
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -124,7 +124,7 @@ public sealed class OrganizationRegistrationServiceTests
         User? reloaded = await new EfUserRepository(dbContext).GetByIdWithAccessAsync(owner.Id);
 
         Assert.NotNull(reloaded);
-        Assert.Empty(Dprental.AuthService.Domain.Access.UserAccessResolver.ActiveMemberships(reloaded));
+        Assert.Empty(Dprental.AuthService.Application.Security.UserAccessResolver.ActiveMemberships(reloaded));
     }
 
     private static OrganizationProfileRequest CreateProfile(string name = "Dong A Rental", string? slug = null) =>
@@ -165,5 +165,7 @@ public sealed class OrganizationRegistrationServiceTests
             new EfOrganizationRepository(dbContext),
             new EfUserRepository(dbContext),
             new EfRoleRepository(dbContext),
-            TimeProvider.System);
+            TimeProvider.System,
+            FixedCorrelationIdProvider.Instance,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationRegistrationService>.Instance);
 }

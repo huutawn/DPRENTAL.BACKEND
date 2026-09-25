@@ -6,7 +6,7 @@ using System.Text.Json;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security;
-using Dprental.AuthService.Domain.Data;
+
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Models;

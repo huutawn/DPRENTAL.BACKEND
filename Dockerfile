@@ -8,6 +8,7 @@ COPY Directory.Build.props ./
 COPY AuthService/src/Common/AuthService.Common.csproj AuthService/src/Common/
 COPY AuthService/src/Domain/AuthService.Domain.csproj AuthService/src/Domain/
 COPY AuthService/src/Application/AuthService.Application.csproj AuthService/src/Application/
+COPY AuthService/src/Infrastructure/AuthService.Infrastructure.csproj AuthService/src/Infrastructure/
 COPY AuthService/src/Api/AuthService.Api.csproj AuthService/src/Api/
 
 RUN dotnet restore AuthService/src/Api/AuthService.Api.csproj
@@ -21,7 +22,7 @@ RUN dotnet publish AuthService/src/Api/AuthService.Api.csproj \
 FROM build AS bundle-build
 COPY --from=ef-tools /tools /tools
 RUN /tools/dotnet-ef migrations bundle \
-    --project AuthService/src/Domain/AuthService.Domain.csproj \
+    --project AuthService/src/Infrastructure/AuthService.Infrastructure.csproj \
     --startup-project AuthService/src/Api/AuthService.Api.csproj \
     --configuration Release \
     --no-build \

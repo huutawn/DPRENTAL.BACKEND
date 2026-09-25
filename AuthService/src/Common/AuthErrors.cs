@@ -192,6 +192,9 @@ public static class AuthErrors
 
         public static readonly Error SessionNotFound =
             Error.NotFound(AuthErrorCode.Auth.SessionNotFound, "Phiên đăng nhập không tồn tại.");
+
+        public static readonly Error Uncategorized =
+            Error.Failure(AuthErrorCode.Auth.Uncategorized, "Đã xảy ra lỗi hệ thống ngoài dự kiến.");
     }
 
     public static class Paging

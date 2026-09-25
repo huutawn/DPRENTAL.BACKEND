@@ -3,7 +3,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Dprental.AuthService.Application.IServices;
-using Dprental.AuthService.Domain.Data;
+
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Hosting;

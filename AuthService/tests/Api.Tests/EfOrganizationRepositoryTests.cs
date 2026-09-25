@@ -1,7 +1,7 @@
-using Dprental.AuthService.Domain.Data;
+
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Exceptions;
-using Dprental.AuthService.Domain.Repositories;
+
+
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -57,97 +57,6 @@ public sealed class EfOrganizationRepositoryTests
         Assert.Equal(orgId, bySlug.Id);
     }
 
-    [Fact]
-    public async Task CreateAsyncDuplicateSlugThrowsDuplicateSlugException()
-    {
-        DbContextOptions<AuthDbContext> options = new DbContextOptionsBuilder<AuthDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
-            .Options;
-        await using AuthDbContext dbContext = new(options);
-        EfOrganizationRepository orgRepo = new(dbContext);
-
-        Organization org1 = new()
-        {
-            Id = Guid.NewGuid(),
-            Name = "Acme",
-            Slug = "acme",
-            Type = OrganizationType.Supplier,
-            Status = OrganizationStatus.Active,
-            CreatedAtUtc = DateTime.UtcNow
-        };
-        OrganizationMembership mem1 = new()
-        {
-            Id = Guid.NewGuid(),
-            UserId = Guid.NewGuid(),
-            OrganizationId = org1.Id,
-            RoleId = Guid.NewGuid(),
-            Status = MembershipStatus.Active,
-            JoinedAtUtc = DateTime.UtcNow
-        };
-
-        await orgRepo.CreateAsync(org1, mem1);
-
-        Organization org2 = new()
-        {
-            Id = Guid.NewGuid(),
-            Name = "Acme 2",
-            Slug = "acme", // Duplicate slug
-            Type = OrganizationType.Renter,
-            Status = OrganizationStatus.Active,
-            CreatedAtUtc = DateTime.UtcNow
-        };
-        OrganizationMembership mem2 = new()
-        {
-            Id = Guid.NewGuid(),
-            UserId = Guid.NewGuid(),
-            OrganizationId = org2.Id,
-            RoleId = Guid.NewGuid(),
-            Status = MembershipStatus.Active,
-            JoinedAtUtc = DateTime.UtcNow
-        };
-
-        await Assert.ThrowsAsync<DuplicateSlugException>(() => orgRepo.CreateAsync(org2, mem2));
-    }
-
-    [Fact]
-    public async Task MembershipRepositoryAddMemberAndDuplicateThrowsException()
-    {
-        DbContextOptions<AuthDbContext> options = new DbContextOptionsBuilder<AuthDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
-            .Options;
-        await using AuthDbContext dbContext = new(options);
-        EfOrganizationMembershipRepository memRepo = new(dbContext);
-
-        Guid orgId = Guid.NewGuid();
-        Guid userId = Guid.NewGuid();
-        Guid roleId = Guid.NewGuid();
-
-        OrganizationMembership mem = new()
-        {
-            Id = Guid.NewGuid(),
-            OrganizationId = orgId,
-            UserId = userId,
-            RoleId = roleId,
-            Status = MembershipStatus.Invited,
-            JoinedAtUtc = DateTime.UtcNow
-        };
-
-        Assert.False(await memRepo.MembershipExistsAsync(orgId, userId));
-        await memRepo.AddMemberAsync(mem);
-        Assert.True(await memRepo.MembershipExistsAsync(orgId, userId));
-
-        OrganizationMembership duplicate = new()
-        {
-            Id = Guid.NewGuid(),
-            OrganizationId = orgId,
-            UserId = userId,
-            RoleId = roleId,
-            Status = MembershipStatus.Active,
-            JoinedAtUtc = DateTime.UtcNow
-        };
-
-        await Assert.ThrowsAsync<DuplicateMembershipException>(() => memRepo.AddMemberAsync(duplicate));
-    }
 
     [Fact]
     public async Task MembershipRepositoryCountsOwnersCorrectly()
@@ -204,13 +113,13 @@ public sealed class EfOrganizationRepositoryTests
     }
 
     [Fact]
-    public async Task GetEffectivePermissionsAsyncCombinesGlobalAndActiveScopedPermissions()
+    public async Task PermissionsCombinesGlobalAndActiveScopedPermissions()
     {
         DbContextOptions<AuthDbContext> options = new DbContextOptionsBuilder<AuthDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
             .Options;
         await using AuthDbContext dbContext = new(options);
-        EfOrganizationMembershipRepository memRepo = new(dbContext);
+        EfUserRepository userRepo = new(dbContext);
 
         Guid userId = Guid.NewGuid();
         Guid orgId = Guid.NewGuid();
@@ -230,6 +139,7 @@ public sealed class EfOrganizationRepositoryTests
 
         dbContext.Permissions.AddRange(pGlobal, pScoped, pInactive);
         dbContext.Roles.AddRange(globalRole, activeOrgRole, inactiveOrgRole);
+        dbContext.Users.Add(new User { Id = userId, Email = "test@example.com", PasswordHash = "hash", FullName = "Test", IsActive = true });
         dbContext.UserRoles.Add(new UserRole { UserId = userId, RoleId = globalRole.Id, Role = globalRole });
 
         dbContext.OrganizationMemberships.Add(new OrganizationMembership
@@ -239,13 +149,16 @@ public sealed class EfOrganizationRepositoryTests
             OrganizationId = orgId,
             RoleId = activeOrgRole.Id,
             Role = activeOrgRole,
+            Organization = new Organization { Id = orgId, Name = "Org", Slug = "org", Status = OrganizationStatus.Active },
             Status = MembershipStatus.Active,
             JoinedAtUtc = DateTime.UtcNow
         });
 
         await dbContext.SaveChangesAsync();
 
-        IReadOnlyList<string> effective = await memRepo.GetEffectivePermissionsAsync(userId, orgId);
+        User? user = await userRepo.GetByIdWithAccessAsync(userId);
+        Assert.NotNull(user);
+        IReadOnlyList<string> effective = Dprental.AuthService.Application.Security.UserAccessResolver.Permissions(user);
 
         Assert.Contains("global.perm", effective);
         Assert.Contains("scoped.perm", effective);

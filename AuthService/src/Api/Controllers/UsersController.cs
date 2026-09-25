@@ -115,8 +115,12 @@ public sealed class UsersController(
         }
 
         Request.Cookies.TryGetValue(AuthCookies.RefreshTokenCookieName, out string? currentRefreshToken);
-        IReadOnlyList<SessionResponse> sessions = await authSessionService.GetSessionsAsync(userId, currentRefreshToken, cancellationToken);
-        return Ok(sessions);
+        Result<IReadOnlyList<SessionResponse>> sessionsResult = await authSessionService.GetSessionsAsync(userId, currentRefreshToken, cancellationToken);
+        if (sessionsResult.IsFailure)
+        {
+            return this.ToProblem(sessionsResult.Error);
+        }
+        return Ok(sessionsResult.Value);
     }
 
     /// <summary>Thu hồi một phiên đăng nhập cụ thể của người dùng.</summary>
@@ -134,7 +138,8 @@ public sealed class UsersController(
         }
 
         Request.Cookies.TryGetValue(AuthCookies.RefreshTokenCookieName, out string? currentRefreshToken);
-        Guid? currentSessionId = await authSessionService.GetCurrentSessionIdAsync(currentRefreshToken, cancellationToken);
+        Result<Guid> currentSessionIdResult = await authSessionService.GetCurrentSessionIdAsync(currentRefreshToken, cancellationToken);
+        Guid? currentSessionId = currentSessionIdResult.IsSuccess ? currentSessionIdResult.Value : null;
 
         Result result = await authSessionService.RevokeSessionAsync(userId, sessionId, cancellationToken);
         if (result.IsFailure)

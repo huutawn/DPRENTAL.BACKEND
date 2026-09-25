@@ -1,8 +1,9 @@
+using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Exceptions;
-using Dprental.AuthService.Domain.IRepositories;
+
+
 using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Identity;
 using Xunit;
@@ -248,7 +249,19 @@ public sealed class ExternalLoginServiceTests
     private static readonly Guid CustomerRoleId = Guid.NewGuid();
 
     private static ExternalLoginService CreateService(FakeExternalLogins logins, FakeUsers users, FakeRoles? roles = null) =>
-        new(logins, users, roles ?? CreateRolesWithCustomerSeeded(), new PasswordHasher<User>(), new FixedTimeProvider(Now));
+        new(
+            logins,
+            users,
+            roles ?? CreateRolesWithCustomerSeeded(),
+            new PasswordHasher<User>(),
+            new FixedTimeProvider(Now),
+            new TestCorrelationIdProvider(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ExternalLoginService>.Instance);
+
+    private sealed class TestCorrelationIdProvider : ICorrelationIdProvider
+    {
+        public string GetCorrelationId() => "test-corr-id";
+    }
 
     private static FakeRoles CreateRolesWithCustomerSeeded()
     {
@@ -308,7 +321,7 @@ public sealed class ExternalLoginServiceTests
             if (RejectAdd)
             {
                 RaceHappened = true;
-                throw new DuplicateExternalLoginException();
+                throw new StorageConstraintViolationException(StorageConstraintViolationType.Unique, StorageConstraints.ExternalLoginProviderSubject);
             }
 
             Added.Add(login);
@@ -349,7 +362,7 @@ public sealed class ExternalLoginServiceTests
             if (RejectCreate)
             {
                 OnCreateRejected?.Invoke();
-                throw new DuplicateEmailException();
+                throw new StorageConstraintViolationException(StorageConstraintViolationType.Unique, StorageConstraints.UserEmail);
             }
 
             Created.Add(entity);
@@ -361,7 +374,7 @@ public sealed class ExternalLoginServiceTests
             if (RejectCreate)
             {
                 OnCreateRejected?.Invoke();
-                throw new DuplicateEmailException();
+                throw new StorageConstraintViolationException(StorageConstraintViolationType.Unique, StorageConstraints.UserEmail);
             }
 
             Created.Add(user);
@@ -386,6 +399,9 @@ public sealed class ExternalLoginServiceTests
 
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("ExternalLoginService does not delete users.");
+        public Task<bool> ChangePasswordAndRevokeSessionsAsync(Guid userId, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> ResetPasswordWithTokenAsync(Guid userId, string tokenHash, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(Existing is not null ? Existing.IsActive : true);
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
