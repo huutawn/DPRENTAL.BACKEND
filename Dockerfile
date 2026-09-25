@@ -4,7 +4,7 @@ RUN dotnet tool install --tool-path /tools dotnet-ef --version 10.0.12
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-COPY Directory.Build.props ./
+COPY Directory.Build.props Directory.Packages.props ./
 COPY AuthService/src/Common/AuthService.Common.csproj AuthService/src/Common/
 COPY AuthService/src/Domain/AuthService.Domain.csproj AuthService/src/Domain/
 COPY AuthService/src/Application/AuthService.Application.csproj AuthService/src/Application/
