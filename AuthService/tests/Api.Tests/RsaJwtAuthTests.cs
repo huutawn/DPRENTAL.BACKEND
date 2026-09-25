@@ -54,6 +54,35 @@ public sealed class RsaJwtAuthTests
         Assert.Equal(now.AddMinutes(options.AccessTokenLifetimeMinutes), result.ExpiresAtUtc);
     }
 
+    [Theory]
+    [InlineData(true, "true")]
+    [InlineData(false, "false")]
+    public void IssueWritesProfileCompletedClaimForUserToken(bool isProfileCompleted, string expectedClaimValue)
+    {
+        JwtOptions options = CreateValidOptions();
+        using RsaJwtKeyRing keyRing = new(options);
+        RsaAccessTokenIssuer issuer = new(Options.Create(options), keyRing, new FixedTimeProvider(new DateTimeOffset(2026, 9, 17, 4, 0, 0, TimeSpan.Zero)));
+
+        IssuedAccessToken result = issuer.Issue(new AccessTokenRequest(Guid.NewGuid(), IsProfileCompleted: isProfileCompleted));
+        ClaimsPrincipal principal = ValidateToken(result.Value, options, keyRing);
+
+        Assert.Equal(expectedClaimValue, principal.FindFirstValue(JwtClaimCatalog.Claims.ProfileCompleted));
+    }
+
+    [Fact]
+    public void IssueOmitsProfileCompletedClaimForServiceToken()
+    {
+        // Service token (client_credentials) không có hồ sơ user — IsProfileCompleted để null, không phát claim "pc".
+        JwtOptions options = CreateValidOptions();
+        using RsaJwtKeyRing keyRing = new(options);
+        RsaAccessTokenIssuer issuer = new(Options.Create(options), keyRing, new FixedTimeProvider(new DateTimeOffset(2026, 9, 17, 4, 0, 0, TimeSpan.Zero)));
+
+        IssuedAccessToken result = issuer.Issue(new AccessTokenRequest(Guid.NewGuid(), TokenUse: "service"));
+        ClaimsPrincipal principal = ValidateToken(result.Value, options, keyRing);
+
+        Assert.Null(principal.FindFirst(JwtClaimCatalog.Claims.ProfileCompleted));
+    }
+
     [Fact]
     public void KeyRingVerifiesTokensFromRetiredPublicKey()
     {
