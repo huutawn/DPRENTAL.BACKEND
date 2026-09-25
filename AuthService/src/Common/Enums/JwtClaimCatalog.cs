@@ -19,6 +19,9 @@ public static class JwtClaimCatalog
 
         /// <summary>Rút gọn từ "token_use".</summary>
         public const string TokenUse = "u";
+
+        /// <summary>Rút gọn từ "profile_completed" — chỉ có ở user token, service token không mang claim này.</summary>
+        public const string ProfileCompleted = "pc";
     }
 
     public static class TokenUses

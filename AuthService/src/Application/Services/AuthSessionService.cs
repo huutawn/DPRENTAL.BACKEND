@@ -200,7 +200,8 @@ public sealed class AuthSessionService(
             principal.UserId,
             principal.Roles,
             principal.Permissions,
-            principal.OrganizationIds));
+            principal.OrganizationIds,
+            IsProfileCompleted: principal.IsProfileCompleted));
         return new AuthTokenPair(accessToken.Value, refreshToken);
     }
 }

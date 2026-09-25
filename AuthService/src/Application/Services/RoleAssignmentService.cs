@@ -42,9 +42,7 @@ public sealed class RoleAssignmentService(
                 return Result.Failure(AuthErrors.Role.AlreadyAssigned);
             }
 
-            if (orga)
-
-                membership.RoleId = request.RoleId;
+            membership.RoleId = request.RoleId;
             bool orgUpdated = await membershipRepository.UpdateAsync(membership, cancellationToken);
             return orgUpdated ? Result.Success() : Result.Failure(AuthErrors.Role.AssignmentFailed);
         }

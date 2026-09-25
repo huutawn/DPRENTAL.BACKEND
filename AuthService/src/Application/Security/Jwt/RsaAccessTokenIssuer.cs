@@ -30,6 +30,9 @@ public sealed class RsaAccessTokenIssuer(
     /// <summary>Tên claim scope rút gọn thành "s".</summary>
     private const string ScopeClaimType = JwtClaimCatalog.Claims.Scope;
 
+    /// <summary>Tên claim hồ sơ đã hoàn thiện rút gọn thành "pc".</summary>
+    private const string ProfileCompletedClaimType = JwtClaimCatalog.Claims.ProfileCompleted;
+
     /// <summary>Tạo access token RS256 với các standard claim và alias đã chuẩn hóa.</summary>
     public IssuedAccessToken Issue(AccessTokenRequest request)
     {
@@ -75,6 +78,15 @@ public sealed class RsaAccessTokenIssuer(
                 ? JwtClaimCatalog.TokenUses.Service
                 : request.TokenUse.Trim();
             claims.Add(new Claim(TokenUseClaimType, tokenUseValue));
+        }
+
+        // Service token (không có hồ sơ user) không mang claim này — request.IsProfileCompleted vẫn null.
+        if (request.IsProfileCompleted.HasValue)
+        {
+            claims.Add(new Claim(
+                ProfileCompletedClaimType,
+                request.IsProfileCompleted.Value ? "true" : "false",
+                ClaimValueTypes.Boolean));
         }
 
         SigningCredentials signingCredentials = new(keyRing.ActiveSigningKey, SecurityAlgorithms.RsaSha256);

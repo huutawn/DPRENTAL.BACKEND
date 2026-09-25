@@ -360,7 +360,7 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         return user is null ? null : BuildPrincipal(user);
     }
 
-    /// <summary>Gộp role, permission (global + theo organization active) và organization đang active thành principal.</summary>
+    /// <summary>Gộp role, permission (global + theo organization active), organization đang active và trạng thái hoàn thiện hồ sơ thành principal.</summary>
     private static AuthSessionPrincipal BuildPrincipal(User user) =>
         new(
             user.Id,
@@ -368,7 +368,8 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
             UserAccessResolver.Permissions(user),
             UserAccessResolver.ActiveMemberships(user)
                 .Select(membership => membership.OrganizationId)
-                .ToArray());
+                .ToArray(),
+            user.IsProfileCompleted);
 
     /// <summary>Kiểm tra session, token và user còn có thể dùng để refresh hay không.</summary>
     private static bool IsUsable(Session session, RefreshToken refreshToken, DateTime utcNow) =>
