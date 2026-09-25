@@ -82,7 +82,6 @@ public static class JwtClaimCatalog
         public const string IdentityServicePrincipalsManage = "id.sp.m";
         public const string IdentityServicePrincipalsRotateSecret = "id.sp.rs";
         public const string IdentityServicePrincipalsManageScopes = "id.sp.ms";
-        public const string IdentityNavigationManage = "id.nav.m";
 
         private static readonly Dictionary<string, string> CanonicalToAlias = new(StringComparer.Ordinal)
         {
@@ -103,7 +102,6 @@ public static class JwtClaimCatalog
             [PermissionCode.IdentityServicePrincipalsManage] = IdentityServicePrincipalsManage,
             [PermissionCode.IdentityServicePrincipalsRotateSecret] = IdentityServicePrincipalsRotateSecret,
             [PermissionCode.IdentityServicePrincipalsManageScopes] = IdentityServicePrincipalsManageScopes,
-            [PermissionCode.IdentityNavigationManage] = IdentityNavigationManage,
         };
 
         private static readonly Dictionary<string, string> AliasToCanonical = new(StringComparer.Ordinal)
@@ -125,7 +123,6 @@ public static class JwtClaimCatalog
             [IdentityServicePrincipalsManage] = PermissionCode.IdentityServicePrincipalsManage,
             [IdentityServicePrincipalsRotateSecret] = PermissionCode.IdentityServicePrincipalsRotateSecret,
             [IdentityServicePrincipalsManageScopes] = PermissionCode.IdentityServicePrincipalsManageScopes,
-            [IdentityNavigationManage] = PermissionCode.IdentityNavigationManage,
         };
 
         public static string ToAlias(string canonicalPermission) =>

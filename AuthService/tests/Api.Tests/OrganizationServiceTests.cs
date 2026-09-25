@@ -129,7 +129,7 @@ public sealed class OrganizationServiceTests
         FakeMembershipRepository memRepo = new();
         FakeUserRepository userRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo, new FakeNavigationCatalogRepository());
+        OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
 
         userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true, Email = "admin@example.com" };
         memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
@@ -147,6 +147,30 @@ public sealed class OrganizationServiceTests
         Assert.Equal(ActorAdminId, orgRepo.LastCreatedInitialMembership!.UserId);
         Assert.Equal(OwnerRoleId, orgRepo.LastCreatedInitialMembership.RoleId);
         Assert.Equal(MembershipStatus.Active, orgRepo.LastCreatedInitialMembership.Status);
+    }
+
+    [Fact]
+    public async Task CreateAsyncSucceedsWithoutNavigationTemplate()
+    {
+        FakeOrganizationRepository orgRepo = new();
+        FakeMembershipRepository memRepo = new();
+        FakeUserRepository userRepo = new();
+        FakeRoleRepository roleRepo = new();
+        OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo);
+
+        userRepo.Users[ActorAdminId] = new User { Id = ActorAdminId, IsActive = true, Email = "admin@example.com" };
+        memRepo.GlobalPermissions[ActorAdminId] = AdminPermissions;
+        roleRepo.Roles[OwnerRoleId] = new Role { Id = OwnerRoleId, Name = "Owner", Scope = RoleScope.Organization };
+
+        Result<OrganizationResponse> result = await service.CreateAsync(
+            ActorAdminId,
+            new CreateOrganizationRequest("No Template Org", "no-template-org", OrganizationType.Platform));
+
+        Assert.True(result.IsSuccess, result.Error.Code);
+        Assert.Equal("No Template Org", result.Value.Name);
+        Assert.Equal("no-template-org", result.Value.Slug);
+        Assert.NotNull(orgRepo.LastCreatedInitialMembership);
+        Assert.Equal(ActorAdminId, orgRepo.LastCreatedInitialMembership!.UserId);
     }
 
     [Fact]
@@ -806,12 +830,6 @@ public sealed class OrganizationServiceTests
             return Task.FromResult(organization);
         }
 
-        public Task<Organization> CreateAsync(
-            Organization organization,
-            OrganizationMembership initialMembership,
-            NavigationCatalog navigationCatalog,
-            CancellationToken cancellationToken = default) =>
-            CreateAsync(organization, initialMembership, cancellationToken);
 
         public Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default)
         {
@@ -939,30 +957,4 @@ public sealed class OrganizationServiceTests
         public Task<bool> RevokeAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) => Task.FromResult(true);
     }
 
-    private sealed class FakeNavigationCatalogRepository : INavigationCatalogRepository
-    {
-        public Task<NavigationCatalog?> GetTemplateAsync(OrganizationType dashboardType, CancellationToken cancellationToken = default) =>
-            Task.FromResult<NavigationCatalog?>(new NavigationCatalog { Id = Guid.NewGuid(), DashboardType = dashboardType });
-
-        public Task<NavigationCatalog?> GetOrganizationCatalogAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<NavigationCatalog?>(null);
-
-        public Task<IReadOnlyList<Permission>> GetAssignablePermissionsAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<Permission>>([]);
-
-        public Task<Permission?> GetAssignablePermissionAsync(Guid permissionId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<Permission?>(null);
-
-        public Task<NavigationItem?> GetItemAsync(Guid catalogId, Guid itemId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<NavigationItem?>(null);
-
-        public Task<bool> KeyExistsAsync(Guid catalogId, string key, Guid? excludingItemId = null, CancellationToken cancellationToken = default) =>
-            Task.FromResult(false);
-
-        public Task AddItemAsync(NavigationItem item, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task UpdateItemAsync(NavigationItem item, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task DeleteItemAsync(NavigationItem item, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task AddPermissionAsync(NavigationItemPermission permission, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<bool> RemovePermissionAsync(Guid itemId, Guid permissionId, CancellationToken cancellationToken = default) => Task.FromResult(false);
-    }
 }

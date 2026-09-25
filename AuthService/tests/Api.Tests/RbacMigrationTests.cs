@@ -107,23 +107,22 @@ public sealed class RbacMigrationTests
             [new Guid("c3030000-0000-0000-0000-000000000008")] = PermissionCode.IdentityServicePrincipalsManage,
             [new Guid("c3030000-0000-0000-0000-000000000009")] = PermissionCode.IdentityServicePrincipalsRotateSecret,
             [new Guid("c3030000-0000-0000-0000-000000000010")] = PermissionCode.IdentityServicePrincipalsManageScopes,
-            [new Guid("f7200000-0000-0000-0000-000000000001")] = PermissionCode.IdentityNavigationManage
         };
 
         // All canonical permissions present, and zero legacy permissions
-        Assert.Equal(18, permissions.Count);
+        Assert.Equal(17, permissions.Count);
         Assert.All(permissions.Values, code => Assert.StartsWith("identity.", code, StringComparison.Ordinal));
         Assert.Equal(PermissionCode.All.OrderBy(x => x), permissions.Values.OrderBy(x => x));
 
-        // Admin: all permissions, including navigation management
+        // Admin: all permissions
         HashSet<string> adminPerms = [.. permissions.Values];
-        Assert.Equal(18, adminPerms.Count);
+        Assert.Equal(17, adminPerms.Count);
 
         // Platform Admin: all except global role assign/revoke
         HashSet<string> platformAdminPerms = [.. permissions.Values];
         platformAdminPerms.Remove(PermissionCode.IdentityRolesAssignGlobal);
         platformAdminPerms.Remove(PermissionCode.IdentityRolesRevokeGlobal);
-        Assert.Equal(16, platformAdminPerms.Count);
+        Assert.Equal(15, platformAdminPerms.Count);
         Assert.DoesNotContain(PermissionCode.IdentityRolesAssignGlobal, platformAdminPerms);
         Assert.DoesNotContain(PermissionCode.IdentityRolesRevokeGlobal, platformAdminPerms);
 
@@ -148,6 +147,57 @@ public sealed class RbacMigrationTests
             PermissionCode.IdentityRolesRead
         ];
         Assert.Equal(3, memberPerms.Count);
+    }
+
+    [Fact]
+    public void RemoveDynamicNavigationMigrationDropsTablesAndRemovesNavigationPermissionAndRoleBindings()
+    {
+        RemoveDynamicNavigation migration = new();
+        MigrationBuilder builder = new("Npgsql");
+
+        MethodInfo? upMethod = typeof(RemoveDynamicNavigation).GetMethod(
+            "Up",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(upMethod);
+        upMethod.Invoke(migration, [builder]);
+
+        IReadOnlyList<MigrationOperation> ops = builder.Operations;
+        Assert.NotEmpty(ops);
+
+        Guid navPermId = new("f7200000-0000-0000-0000-000000000001");
+
+        // 1. Drops the 3 navigation tables in auth schema
+        List<DropTableOperation> dropTables = ops.OfType<DropTableOperation>().ToList();
+        Assert.Contains(dropTables, t => t.Name == "NavigationItemPermissions" && t.Schema == "auth");
+        Assert.Contains(dropTables, t => t.Name == "NavigationItems" && t.Schema == "auth");
+        Assert.Contains(dropTables, t => t.Name == "NavigationCatalogs" && t.Schema == "auth");
+
+        // 2. Removes role permissions for navigation manager
+        List<DeleteDataOperation> deleteOps = ops.OfType<DeleteDataOperation>().ToList();
+        Assert.Contains(deleteOps, d =>
+            d.Table == "RolePermissions" &&
+            d.KeyValues != null &&
+            d.KeyValues.Cast<object>().Contains(AdminRoleId) &&
+            d.KeyValues.Cast<object>().Contains(navPermId));
+
+        Assert.Contains(deleteOps, d =>
+            d.Table == "RolePermissions" &&
+            d.KeyValues != null &&
+            d.KeyValues.Cast<object>().Contains(AdminPlatformRoleId) &&
+            d.KeyValues.Cast<object>().Contains(navPermId));
+
+        // 3. Removes the navigation manage permission
+        Assert.Contains(deleteOps, d =>
+            d.Table == "Permissions" &&
+            d.KeyValues != null &&
+            d.KeyValues.Cast<object>().Contains(navPermId));
+
+        // 4. Confirms business permissions are NOT deleted
+        Assert.DoesNotContain(deleteOps, d =>
+            d.Table == "Permissions" &&
+            d.KeyValues != null &&
+            (d.KeyValues.Cast<object>().Contains(new Guid("b2020000-0000-0000-0000-000000000001")) ||
+             d.KeyValues.Cast<object>().Contains(new Guid("c3030000-0000-0000-0000-000000000001"))));
     }
 
     private static IEnumerable<object> EnumerateValues(Array? array)

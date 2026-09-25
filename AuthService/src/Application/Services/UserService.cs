@@ -455,7 +455,7 @@ public sealed class UserService(
         if (user is null)
         {
             await LogAuditAsync(adminId, targetUserId.ToString(), "Account_Activate", "Failed_UserNotFound", corrId, cancellationToken);
-            return Result.Failure(AuthErrors.User.NotFound); 
+            return Result.Failure(AuthErrors.User.NotFound);
         }
 
         if (user.IsActive) return Result.Success();
