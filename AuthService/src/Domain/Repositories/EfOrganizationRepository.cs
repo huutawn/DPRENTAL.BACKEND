@@ -1,4 +1,5 @@
 using Dprental.AuthService.Common;
+using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -23,21 +24,47 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
             .AsNoTracking()
             .AnyAsync(org => org.Slug == slug, cancellationToken);
 
-    public async Task<PagedResult<Organization>> GetAllAsync(PageRequest request, CancellationToken cancellationToken = default)
+    public async Task<PagedResult<Organization>> GetAllAsync(
+        PageRequest request,
+        OrganizationStatus? status = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        int totalCount = await dbContext.Organizations.CountAsync(cancellationToken);
+        IQueryable<Organization> query = dbContext.Organizations.AsNoTracking();
+        IOrderedQueryable<Organization> ordered;
+        if (status is OrganizationStatus filter)
+        {
+            ordered = query.Where(o => o.Status == filter).OrderBy(o => o.CreatedAtUtc).ThenBy(o => o.Id);
+        }
+        else
+        {
+            ordered = query.OrderBy(o => o.Name);
+        }
+
+        int totalCount = await ordered.CountAsync(cancellationToken);
 
         int skip = (request.Page - 1) * request.PageSize;
-        List<Organization> items = await dbContext.Organizations
-            .AsNoTracking()
-            .OrderBy(o => o.Name)
+        List<Organization> items = await ordered
             .Skip(skip)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
 
         return new PagedResult<Organization>(items, request.Page, request.PageSize, totalCount);
+    }
+
+    public async Task<Organization?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        if (dbContext.Database.IsRelational())
+        {
+            List<Organization> locked = await dbContext.Organizations
+                .FromSqlRaw("SELECT * FROM auth.\"Organizations\" WHERE \"Id\" = {0} FOR UPDATE", id)
+                .ToListAsync(cancellationToken);
+            return locked.SingleOrDefault();
+        }
+
+        // InMemory không có khóa row; test chỉ kiểm tra logic chuyển trạng thái.
+        return await dbContext.Organizations.SingleOrDefaultAsync(org => org.Id == id, cancellationToken);
     }
 
     public async Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default)

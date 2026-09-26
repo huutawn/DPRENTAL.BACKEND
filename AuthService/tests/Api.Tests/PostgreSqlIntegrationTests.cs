@@ -509,6 +509,69 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         Assert.Equal(1, remainingOwners);
     }
 
+    [Fact]
+    public async Task PostgreSql_ConcurrentApproveAndReject_OnlyFirstDecisionWins()
+    {
+        await using var db = CreateDbContext();
+
+        Permission suspend = await db.Permissions.SingleAsync(p => p.Code == PermissionCode.IdentityOrganizationsSuspend);
+        Role reviewerRole = new() { Id = Guid.NewGuid(), Name = $"reviewer_{Guid.NewGuid():N}", Scope = RoleScope.Global };
+        db.Roles.Add(reviewerRole);
+        db.RolePermissions.Add(new RolePermission { RoleId = reviewerRole.Id, PermissionId = suspend.Id });
+
+        Guid adminAId = Guid.NewGuid();
+        Guid adminBId = Guid.NewGuid();
+        foreach (Guid adminId in new[] { adminAId, adminBId })
+        {
+            db.Users.Add(new User { Id = adminId, Email = $"reviewer_{adminId:N}@example.com", FullName = "Reviewer", PasswordHash = "h", IsActive = true, CreatedAt = DateTime.UtcNow });
+            db.UserRoles.Add(new UserRole { UserId = adminId, RoleId = reviewerRole.Id });
+        }
+
+        Guid orgId = Guid.NewGuid();
+        db.Organizations.Add(new Organization
+        {
+            Id = orgId,
+            Name = "Pending Review Org",
+            Slug = $"pending-review-{Guid.NewGuid():N}",
+            Status = OrganizationStatus.Pending,
+            CreatedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        static OrganizationReviewService CreateReviewService(AuthDbContext context) => new(
+            new EfOrganizationRepository(context),
+            new EfOrganizationMembershipRepository(context),
+            new EfRoleRepository(context),
+            new EfAuditLogRepository(context),
+            TimeProvider.System,
+            FixedCorrelationIdProvider.Instance,
+            NullLogger<OrganizationReviewService>.Instance);
+
+        // Hai admin cùng mở hàng chờ và bấm cùng lúc: một người duyệt, một người từ chối.
+        Task<Result<OrganizationResponse>> approve = Task.Run(async () =>
+        {
+            await using var dbA = CreateDbContext();
+            return await CreateReviewService(dbA).ApproveAsync(adminAId, orgId);
+        });
+        Task<Result<OrganizationResponse>> reject = Task.Run(async () =>
+        {
+            await using var dbB = CreateDbContext();
+            return await CreateReviewService(dbB).RejectAsync(adminBId, orgId, new RejectOrganizationRequest("Thiếu giấy phép"));
+        });
+
+        Result<OrganizationResponse>[] results = await Task.WhenAll(approve, reject);
+
+        Assert.Single(results, r => r.IsSuccess);
+        Assert.Single(results, r => r.IsFailure && r.Error == AuthErrors.Organization.NotPendingReview);
+
+        // Trạng thái trong DB phải khớp đúng người thắng — không có chuyện "duyệt rồi bị ghi đè thành từ chối".
+        OrganizationResponse winner = results.Single(r => r.IsSuccess).Value;
+        await using var verifyDb = CreateDbContext();
+        Organization stored = await verifyDb.Organizations.SingleAsync(o => o.Id == orgId);
+        Assert.Equal(winner.Status, stored.Status);
+        Assert.Equal(stored.Status == OrganizationStatus.Active ? adminAId : adminBId, stored.ReviewedByUserId);
+    }
+
     private sealed class DummyAccessTokenIssuer : IAccessTokenIssuer
     {
         public IssuedAccessToken Issue(AccessTokenRequest request) =>

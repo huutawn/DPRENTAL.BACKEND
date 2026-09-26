@@ -150,19 +150,22 @@ public sealed partial class OrganizationService(
 
                 IReadOnlyList<string> globalPerms = await GetGlobalPermissionsAsync(actorUserId, cancellationToken);
                 bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
+                bool canReadAll = globalPerms.Contains(PermissionCode.IdentityOrganizationsRead, StringComparer.Ordinal);
 
-                if (org.Status != OrganizationStatus.Active && !canManageSuspended)
+                OrganizationMembership? membership = canManageSuspended && canReadAll
+                    ? null
+                    : await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
+                bool isActiveMember = membership is { Status: MembershipStatus.Active };
+
+                // Owner luôn xem được hồ sơ của mình (kể cả Pending/Rejected) để theo dõi kết quả duyệt và sửa lại.
+                if (org.Status != OrganizationStatus.Active && !canManageSuspended && !(isActiveMember && IsOwner(membership!.Role)))
                 {
                     return Result.Failure<OrganizationResponse>(InactiveError(org));
                 }
 
-                if (!globalPerms.Contains(PermissionCode.IdentityOrganizationsRead, StringComparer.Ordinal))
+                if (!canReadAll && !isActiveMember)
                 {
-                    OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
-                    if (membership is null || membership.Status != MembershipStatus.Active)
-                    {
-                        return Result.Failure<OrganizationResponse>(AuthErrors.Organization.CrossOrganizationAccessDenied);
-                    }
+                    return Result.Failure<OrganizationResponse>(AuthErrors.Organization.CrossOrganizationAccessDenied);
                 }
 
                 return Result.Success(org.ToResponse());
@@ -175,6 +178,7 @@ public sealed partial class OrganizationService(
     public async Task<Result<PagedResult<OrganizationResponse>>> ListAsync(
         Guid actorUserId,
         PageRequest request,
+        OrganizationStatus? status = null,
         CancellationToken cancellationToken = default)
     {
         if (request is null)
@@ -202,7 +206,12 @@ public sealed partial class OrganizationService(
                 PagedResult<Organization> paged;
                 if (globalPerms.Contains(PermissionCode.IdentityOrganizationsRead, StringComparer.Ordinal))
                 {
-                    paged = await organizationRepository.GetAllAsync(request, cancellationToken);
+                    paged = await organizationRepository.GetAllAsync(request, status, cancellationToken);
+                }
+                else if (status is not null)
+                {
+                    // Lọc theo trạng thái là công cụ của hàng chờ duyệt; user thường không được bỏ qua lặng lẽ.
+                    return Result.Failure<PagedResult<OrganizationResponse>>(AuthErrors.Organization.PlatformAdminRequired);
                 }
                 else
                 {
@@ -263,7 +272,8 @@ public sealed partial class OrganizationService(
                     return Result.Failure(InactiveError(org));
                 }
 
-                if (!globalPerms.Contains(PermissionCode.IdentityOrganizationsUpdate, StringComparer.Ordinal))
+                bool isPlatformEditor = globalPerms.Contains(PermissionCode.IdentityOrganizationsUpdate, StringComparer.Ordinal);
+                if (!isPlatformEditor)
                 {
                     OrganizationMembership? actorMembership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
                     if (actorMembership is null || actorMembership.Status != MembershipStatus.Active)
@@ -281,6 +291,12 @@ public sealed partial class OrganizationService(
                 bool nameChanged = trimmedName is not null && !string.Equals(trimmedName, org.Name, StringComparison.Ordinal);
                 bool activeChanged = request.IsActive.HasValue && request.IsActive.Value != (org.Status == OrganizationStatus.Active);
 
+                // Tên là thông tin pháp lý Platform đã xác minh khi duyệt — Owner không tự đổi, giống PUT /profile.
+                if (nameChanged && !isPlatformEditor)
+                {
+                    return Result.Failure(AuthErrors.Organization.LegalInfoLocked);
+                }
+
                 if (!nameChanged && !activeChanged)
                 {
                     return Result.Failure(AuthErrors.Organization.NoOpPatch);
@@ -289,9 +305,10 @@ public sealed partial class OrganizationService(
                 OrganizationStatus? newStatus = null;
                 if (activeChanged)
                 {
+                    // Pending -> Active chỉ đi qua POST /approve để luôn ghi lại người duyệt.
                     newStatus = (request.IsActive!.Value, org.Status) switch
                     {
-                        (true, OrganizationStatus.Pending or OrganizationStatus.Suspended) => OrganizationStatus.Active,
+                        (true, OrganizationStatus.Suspended) => OrganizationStatus.Active,
                         (false, OrganizationStatus.Active) => OrganizationStatus.Suspended,
                         _ => null
                     };

@@ -29,6 +29,8 @@ public static class AuthErrorCode
         public const string PendingApproval = "Organization.PendingApproval";
         public const string TaxCodeAlreadyExists = "Organization.TaxCodeAlreadyExists";
         public const string SelfRegistrationTypeNotAllowed = "Organization.SelfRegistrationTypeNotAllowed";
+        public const string NotPendingReview = "Organization.NotPendingReview";
+        public const string LegalInfoLocked = "Organization.LegalInfoLocked";
     }
 
     public static class Role

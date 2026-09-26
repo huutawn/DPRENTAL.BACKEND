@@ -78,6 +78,13 @@ public static class AuthErrors
 
         public static readonly Error SelfRegistrationTypeNotAllowed =
             Error.Validation(AuthErrorCode.Organization.SelfRegistrationTypeNotAllowed, "Chỉ được tự đăng ký organization loại Supplier hoặc Renter.");
+
+        /// <summary>Conflict vì thường gặp khi admin khác vừa duyệt/từ chối trước.</summary>
+        public static readonly Error NotPendingReview =
+            Error.Conflict(AuthErrorCode.Organization.NotPendingReview, "Organization không còn ở trạng thái chờ duyệt.");
+
+        public static readonly Error LegalInfoLocked =
+            Error.Validation(AuthErrorCode.Organization.LegalInfoLocked, "Thông tin pháp lý đã được xác minh, không thể tự thay đổi. Vui lòng liên hệ quản trị viên.");
     }
 
     public static class Role
