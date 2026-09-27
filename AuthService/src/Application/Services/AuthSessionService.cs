@@ -378,7 +378,8 @@ public sealed class AuthSessionService(
             UserAccessResolver.Permissions(user),
             UserAccessResolver.ActiveMemberships(user)
                 .Select(membership => membership.OrganizationId)
-                .ToArray());
+                .ToArray(),
+            user.IsProfileCompleted);
 
     private Task LogAuditAsync(Guid? actorId, string target, string action, string result, CancellationToken cancellationToken) =>
         auditLogRepository.AddAsync(new AuditLog
@@ -398,8 +399,8 @@ public sealed class AuthSessionService(
             principal.UserId,
             principal.Roles,
             principal.Permissions,
-            principal.OrganizationIds));
-
+            principal.OrganizationIds,
+            IsProfileCompleted: principal.IsProfileCompleted));
         return new AuthTokenPair(accessToken.Value, refreshToken);
     }
 }

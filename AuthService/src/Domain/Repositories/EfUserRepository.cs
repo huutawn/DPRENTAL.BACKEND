@@ -142,13 +142,22 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
             .AsNoTracking()
             .AnyAsync(user => user.CitizenId == citizenId, cancellationToken);
 
-    public async Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, CancellationToken cancellationToken = default)
+    public async Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, CancellationToken cancellationToken = default)
     {
-        int totalCount = await dbContext.Users.CountAsync(cancellationToken);
+        IQueryable<User> query = dbContext.Users.AsNoTracking();
+        if (search is not null)
+        {
+            // EF Core translates these overloads to SQL; culture/StringComparison overloads are not translatable.
+#pragma warning disable CA1304, CA1311, CA1862
+            query = query.Where(u => u.FullName.ToLower().Contains(search) || u.Email.ToLower().Contains(search));
+#pragma warning restore CA1304, CA1311, CA1862
+        }
 
-        List<User> items = await dbContext.Users
-            .AsNoTracking()
+        int totalCount = await query.CountAsync(cancellationToken);
+
+        List<User> items = await query
             .OrderByDescending(u => u.CreatedAt)
+            .ThenBy(u => u.Id)
             .Skip(skip)
             .Take(take)
             .ToListAsync(cancellationToken);

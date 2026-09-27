@@ -163,8 +163,10 @@ public sealed class OrganizationRegistrationServiceTests
     private static OrganizationRegistrationService CreateService(AuthDbContext dbContext) =>
         new(
             new EfOrganizationRepository(dbContext),
+            new EfOrganizationMembershipRepository(dbContext),
             new EfUserRepository(dbContext),
             new EfRoleRepository(dbContext),
+            new EfAuditLogRepository(dbContext),
             TimeProvider.System,
             FixedCorrelationIdProvider.Instance,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationRegistrationService>.Instance);

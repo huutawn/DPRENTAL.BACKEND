@@ -1,4 +1,5 @@
 using Dprental.AuthService.Common;
+using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -23,21 +24,48 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
             .AsNoTracking()
             .AnyAsync(org => org.Slug == slug, cancellationToken);
 
-    public async Task<PagedResult<Organization>> GetAllAsync(PageRequest request, CancellationToken cancellationToken = default)
+    public async Task<PagedResult<Organization>> GetAllAsync(
+        PageRequest request,
+        OrganizationStatus? status = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        int totalCount = await dbContext.Organizations.CountAsync(cancellationToken);
+        IQueryable<Organization> query = ApplySearch(dbContext.Organizations.AsNoTracking(), request.GetSearchTerm());
+
+        IOrderedQueryable<Organization> ordered;
+        if (status is OrganizationStatus filter)
+        {
+            ordered = query.Where(o => o.Status == filter).OrderBy(o => o.CreatedAtUtc).ThenBy(o => o.Id);
+        }
+        else
+        {
+            ordered = query.OrderBy(o => o.Name).ThenBy(o => o.Id);
+        }
+
+        int totalCount = await ordered.CountAsync(cancellationToken);
 
         int skip = (request.Page - 1) * request.PageSize;
-        List<Organization> items = await dbContext.Organizations
-            .AsNoTracking()
-            .OrderBy(o => o.Name)
+        List<Organization> items = await ordered
             .Skip(skip)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
 
         return new PagedResult<Organization>(items, request.Page, request.PageSize, totalCount);
+    }
+
+    public async Task<Organization?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        if (dbContext.Database.IsRelational())
+        {
+            List<Organization> locked = await dbContext.Organizations
+                .FromSqlRaw("SELECT * FROM auth.\"Organizations\" WHERE \"Id\" = {0} FOR UPDATE", id)
+                .ToListAsync(cancellationToken);
+            return locked.SingleOrDefault();
+        }
+
+        // InMemory không có khóa row; test chỉ kiểm tra logic chuyển trạng thái.
+        return await dbContext.Organizations.SingleOrDefaultAsync(org => org.Id == id, cancellationToken);
     }
 
     public async Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default)
@@ -49,16 +77,32 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
             .Where(m => m.UserId == userId)
             .Select(m => m.Organization);
 
+        query = ApplySearch(query, request.GetSearchTerm());
+
         int totalCount = await query.CountAsync(cancellationToken);
 
         int skip = (request.Page - 1) * request.PageSize;
         List<Organization> items = await query
             .OrderBy(o => o.Name)
+            .ThenBy(o => o.Id)
             .Skip(skip)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
 
         return new PagedResult<Organization>(items, request.Page, request.PageSize, totalCount);
+    }
+
+    private static IQueryable<Organization> ApplySearch(IQueryable<Organization> query, string? searchTerm)
+    {
+        if (searchTerm is null)
+        {
+            return query;
+        }
+
+        // EF Core translates these overloads to SQL; culture/StringComparison overloads are not translatable.
+#pragma warning disable CA1304, CA1311, CA1862
+        return query.Where(o => o.Name.ToLower().Contains(searchTerm) || o.Slug.ToLower().Contains(searchTerm));
+#pragma warning restore CA1304, CA1311, CA1862
     }
 
     public async Task<Organization> CreateAsync(
