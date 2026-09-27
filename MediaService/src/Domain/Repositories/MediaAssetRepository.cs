@@ -19,6 +19,12 @@ public class MediaAssetRepository : IMediaAssetRepository
             .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
     }
 
+    public async Task<MediaAsset?> GetByIdUntrackedAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _context.MediaAssets.AsNoTracking()
+            .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
+    }
+
     public async Task AddAsync(MediaAsset asset, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(asset);

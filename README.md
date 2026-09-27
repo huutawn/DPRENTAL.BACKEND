@@ -1,26 +1,32 @@
 # MediaService
 
-Dịch vụ Media cho hệ sinh thái DPRENTAL, được xây dựng bằng .NET 10 theo kiến trúc phân lớp sạch (Clean Architecture) tương đồng với AuthService. Dịch vụ cung cấp API tải media trực tiếp từ client lên MinIO Object Storage bằng URL ký sẵn (Presigned PUT URL), lưu trữ và xác minh metadata tệp trong PostgreSQL, cùng API nội bộ cho các Business Service xác thực MediaId trước khi lưu tham chiếu.
+Dịch vụ Media cho hệ sinh thái DPRENTAL, được xây dựng bằng .NET 10 theo kiến trúc phân lớp sạch (Clean Architecture) tương đồng với AuthService. Dịch vụ nhận file trong một request multipart, lưu trên MinIO, xác minh metadata trong PostgreSQL và cung cấp API nội bộ cho Business Service kiểm tra MediaId trước khi lưu tham chiếu.
 
-## Luồng Tải Media Trực Tiếp (Client Direct Upload)
+## Upload file trong một request
 
-1. **Khởi tạo phiên (`POST /api/v1/media/uploads`)**:
-   - Client đã đăng nhập gửi thông tin tệp: `purpose`, `ownerEntityId`, `fileName`, `contentType`, `sizeBytes`, `sha256Checksum` (tùy chọn) cùng tiêu đề `Idempotency-Key`.
-   - MediaService xác định `ownerService` và `ownerEntityType` từ cấu hình purpose (không nhận từ client) và kiểm tra dung lượng/MIME theo policy.
-   - Trả về `mediaId`, `uploadId`, `uploadUrl` (URL PUT ký sẵn, mặc định 15 phút), `method` và `requiredHeaders`.
+1. **Client đã đăng nhập gọi `POST /api/v1/media/uploads`** bằng `multipart/form-data`. Form gồm `file`, `purpose`, `ownerEntityId` và `sha256Checksum` tùy chọn. Có thể gửi header `Idempotency-Key` để retry cùng file mà không tạo Media khác. Swagger UI cho phép chọn file trực tiếp.
 
-2. **Tải binary trực tiếp lên MinIO**:
-   - Client (Browser/Mobile) thực hiện `PUT` binary trực tiếp lên MinIO thông qua `uploadUrl`, không truyền tải dữ liệu qua MediaService.
+2. **MediaService xử lý file trong request đó**: xác định owner từ purpose, giới hạn dung lượng, ghi file vào MinIO, xác minh signature/MIME/checksum, rồi chuyển Media sang `Ready`. Response HTTP 200 gồm `mediaId`, metadata và `previewUrl` ký ngắn hạn để người upload xem file đã lưu. Nếu việc ký URL lỗi sau khi file đã lưu, `previewUrl` là null nhưng upload vẫn thành công.
 
-3. **Hoàn tất & Xác minh (`POST /api/v1/media/uploads/{uploadId}/complete`)**:
-   - Chỉ người tạo phiên mới có quyền gọi Complete.
-   - MediaService đọc stream tệp thực tế từ MinIO (ngoài transaction PostgreSQL) để kiểm tra dung lượng, MIME, file signature (magic bytes) và checksum SHA-256 (nếu client đã khai báo).
-   - Nếu hợp lệ: xác minh bản sao tại khóa lưu trữ chính thức chỉ service được ghi, chuyển MediaAsset thành `Ready` và MediaUploadSession thành `Completed`.
-   - Nếu sai định dạng/quá dung lượng/checksum sai: chuyển thành `Rejected` và đưa object tạm vào hàng đợi dọn dẹp.
-   - Gọi Complete lại cho phiên đã hoàn tất sẽ trả cùng kết quả (idempotent), không tạo media mới.
+3. **Business Service gọi `GET /api/v1/media/{mediaId}/verify`** bằng service token để xác nhận MediaId đang `Ready`, đúng purpose, đối tượng và người upload trước khi lưu tham chiếu vào entity nghiệp vụ.
 
-4. **Xác minh MediaId nội bộ (`GET /api/v1/media/{mediaId}/verify`)**:
-   - Business Service dùng service token gọi endpoint này để kiểm tra MediaId đang ở trạng thái `Ready`, đúng `purpose`, đúng đối tượng và đúng người upload trước khi lưu tham chiếu vào entity nghiệp vụ.
+Client không cần gọi MinIO trực tiếp hoặc gọi `/complete`. Bản ghi upload nội bộ vẫn phục vụ idempotency, retry và dọn dẹp request bị gián đoạn.
+
+## Lấy thông tin, xem và tải Media
+
+Business Service chỉ lưu `mediaId` trong entity. Khi trả entity, service kiểm tra quyền và có thể lấy metadata bằng `GET /api/v1/media/{mediaId}` (scope `media.read`). Metadata gồm tên file, MIME/dung lượng đã xác minh, purpose, status, visibility và thời điểm tạo; không chứa URL hay khóa lưu trữ.
+
+Để xem/tải file Private, Business Service xác nhận người dùng có quyền trên entity **và mediaId thực sự được entity tham chiếu**, rồi gọi `POST /api/v1/media/{mediaId}/access` bằng service token scope `media.read`:
+
+```json
+{ "action": "read", "ownerEntityType": "Equipment", "ownerEntityId": "equipment-123", "download": false }
+```
+
+MediaService trả `{ "mediaId": "...", "url": "...", "expiresAtUtc": "..." }`. Business Service chuyển URL này cho client ở thời điểm cần xem/tải; `download: true` yêu cầu Content-Disposition attachment. URL GET MinIO ký sẵn mặc định hết hạn sau 300 giây (`ObjectStorage:ReadUrlExpirySeconds`, cho phép 1–900 giây). Browser phải truy cập được `ObjectStorage:BrowserEndpoint` qua HTTPS trong môi trường triển khai. URL ký sẵn là quyền tạm thời: có thể chứa bucket, object key ngẫu nhiên và access-key ID theo giao thức S3; không lưu URL, không ghi vào log, không dùng nó làm khóa nghiệp vụ. Bucket luôn Private.
+
+Khi entity được công bố, Business Service gọi `PUT /api/v1/media/{mediaId}/visibility` bằng scope `media.publish`, gửi `visibility` (`public` hoặc `private`), `ownerEntityType` và `ownerEntityId`. Chỉ `equipment-image` và `organization-logo` có thể Public; `equipment-document` luôn Private. URL Public ổn định là `GET /api/v1/media/{mediaId}/content` (thêm `?download=true` nếu cần); MediaService kiểm tra trạng thái mỗi lần gọi rồi chuyển hướng tới URL MinIO ký ngắn hạn. Sau khi đổi về Private, URL Public này không cấp quyền mới; URL đã ký có thể còn hiệu lực cho đến khi hết hạn.
+
+Service token phải có claim `u=svc`, `sub` ánh xạ trong `Jwt:ServicePrincipals` và claim `s` đúng scope (`media.verify`, `media.read` hoặc `media.publish`). AuthService cần cấp các scope này cho service nghiệp vụ tương ứng. Hiện workspace chưa có CatalogService/OrganizationService để tích hợp phía Business Service. MVP upload hỗ trợ JPEG, PNG, WebP và PDF; video chưa được hỗ trợ.
 
 ## Cấu trúc Solution
 
@@ -66,7 +72,7 @@ Các cổng mặc định trên máy chủ (chỉ mở cho localhost `127.0.0.1`
 - MinIO API: `127.0.0.1:9000`
 - MinIO Web Console: `127.0.0.1:9001`
 - Bucket `dprental-media` được tự động tạo với quyền riêng tư (`private`).
-- `.env` cấu hình `MINIO_CORS_ALLOWED_ORIGINS` cho các origin trình duyệt được phép PUT trực tiếp.
+- `.env` cấu hình `MINIO_CORS_ALLOWED_ORIGINS` nếu trình duyệt cần đọc URL GET ký sẵn bằng `fetch` khác origin.
 
 > **Lưu ý quan trọng**: File `.env` chỉ cung cấp biến môi trường cho Docker Compose. Khi chạy API bằng `dotnet run`, bạn cần cấu hình credentials qua .NET User Secrets theo hướng dẫn bên dưới.
 
@@ -109,6 +115,8 @@ ConnectionStrings__Postgres="Host=127.0.0.1;Port=${POSTGRES_PORT};Database=${POS
 ```bash
 dotnet run --project MediaService/src/Api/MediaService.Api.csproj
 ```
+
+Trong môi trường Development, mở `/swagger` trên địa chỉ mà API in ra khi khởi chạy. Chọn `POST /api/v1/media/uploads`, nhập user bearer token bằng nút **Authorize**, chọn file, nhập `purpose` và `ownerEntityId`, rồi bấm **Execute**. Response trả `mediaId` khi file đã `Ready`.
 
 3. Kiểm tra trạng thái sức khỏe:
 - Liveness probe: `GET http://localhost:5000/health/live` (hoặc cổng HTTP do ứng dụng lắng nghe)

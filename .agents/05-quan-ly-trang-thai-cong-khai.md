@@ -309,13 +309,15 @@ visibility = public không đồng nghĩa:
 
 Object Storage bucket = public
 
-MediaService vẫn che giấu:
+Metadata và URL Public ổn định vẫn che giấu:
 
 - Bucket;
 
 - ObjectKey;
 
 - Provider URL nội bộ.
+
+MVP dùng chuyển hướng tới URL GET MinIO ký ngắn hạn; URL tạm này có thể chứa Bucket và ObjectKey ngẫu nhiên như ngoại lệ được mô tả trong tài liệu 03. Bucket không được đặt Public.
 
 Public Media được phân phối thông qua cơ chế delivery phù hợp của hệ thống.
 
@@ -447,7 +449,7 @@ Equipment = Unpublished
 
 - Public Media không đồng nghĩa Object Storage được cấu hình public.
 
-- Không expose Bucket, ObjectKey hoặc storage credential.
+- Không expose Bucket, ObjectKey hoặc storage credential trong metadata hay URL Public ổn định; URL GET ký ngắn hạn theo giao thức S3 là ngoại lệ MVP.
 
 - Chuyển Media về Private phải ngừng cấp public access mới.
 
@@ -458,3 +460,9 @@ Equipment = Unpublished
 - MediaService không tự xác định thời điểm entity nghiệp vụ được publish/unpublish.
 
 - Business Service phải chủ động đồng bộ visibility của Media với lifecycle nghiệp vụ.
+
+## 5.8. Hợp đồng MVP
+
+Business Service có service token scope `media.publish` gọi `PUT /api/v1/media/{mediaId}/visibility` với `{ "visibility": "public", "ownerEntityType": "Equipment", "ownerEntityId": "equipment-123" }`; đổi về `private` dùng cùng endpoint. MediaService xác định ownerService từ token, kiểm tra entity/status/purpose và trả `{ "mediaId": "...", "visibility": "Public" }`. Cùng yêu cầu lặp lại là thành công.
+
+Trong ba purpose hiện có, `equipment-image` và `organization-logo` cho phép Public; `equipment-document` chỉ Private. Video và purpose của service nghiệp vụ khác chưa nằm trong MVP này.

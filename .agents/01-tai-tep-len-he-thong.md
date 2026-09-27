@@ -1,260 +1,54 @@
 # 1. Tải tệp lên hệ thống
 
-## 1.1. User Story
+## 1.1. Mục tiêu
 
-Là người dùng đã đăng nhập vào hệ thống, tôi muốn tải tệp trực tiếp lên MinIO thông qua phiên upload do MediaService cấp, để nhận MediaId ở trạng thái Ready và sử dụng MediaId này khi tạo hoặc cập nhật dữ liệu nghiệp vụ.
+Người dùng đã đăng nhập gửi file trong **một request** tới MediaService và nhận `mediaId` ở trạng thái `Ready` sau khi hệ thống lưu và xác minh file. Business Service sở hữu entity gọi API `/verify` để kiểm tra mediaId trước khi lưu tham chiếu nghiệp vụ. Client không gọi MinIO trực tiếp và không gọi API `complete`.
 
-Là Business Service sở hữu đối tượng nghiệp vụ, tôi muốn kiểm tra quyền của người dùng trên đối tượng và xác minh MediaId (trạng thái Ready, đúng purpose, đúng người upload, đúng đối tượng dự kiến) qua API nội bộ trước khi lưu tham chiếu vào entity nghiệp vụ.
-## 1.2. Đầu vào
+## 1.2. API MVP
 
-| STT | Tên trường         | Kiểu dữ liệu               | Bắt buộc | Mô tả / ràng buộc                                                 |
-|-----|--------------------|----------------------------|----------|-------------------------------------------------------------------|
-| 1   | Tệp                | File                       | Có       | Tệp hình ảnh hoặc tài liệu phù hợp với chức năng đang sử dụng     |
-| 2   | Mục đích sử dụng   | Lựa chọn/Hệ thống xác định | Có       | Ví dụ: ảnh thiết bị, logo tổ chức, giấy phép kinh doanh, chứng từ |
-| 3   | Đối tượng liên kết | Định danh                  | Có       | Đối tượng nghiệp vụ mà tệp được sử dụng                           |
-| 4   | Tên tệp            | Chuỗi ký tự                | Tự động  | Lấy từ tệp người dùng lựa chọn                                    |
-| 5   | Định dạng tệp      | Chuỗi ký tự                | Tự động  | Hệ thống kiểm tra theo loại tệp được phép                         |
-| 6   | Dung lượng tệp     | Số                         | Tự động  | Không được vượt giới hạn cấu hình theo mục đích sử dụng           |
+`POST /api/v1/media/uploads` nhận `multipart/form-data` và user token. Các phần của form:
 
-## 1.3. Đầu ra
+| Trường | Bắt buộc | Ý nghĩa |
+| --- | --- | --- |
+| `file` | Có | Binary của ảnh hoặc PDF. MediaService lấy tên, MIME và dung lượng từ file do trình duyệt gửi. |
+| `purpose` | Có | Một trong `equipment-image`, `organization-logo`, `equipment-document`. |
+| `ownerEntityId` | Có | ID entity dự kiến tham chiếu media. Entity có thể được cấp ID trước khi lưu. |
+| `sha256Checksum` | Không | SHA-256 do client tính nếu muốn đối chiếu thêm. |
+| Header `Idempotency-Key` | Không | Khóa do client tạo để gửi lại cùng request an toàn. |
 
-| **STT** | **Trường hợp**                              | **Kết quả hệ thống**                                                                     | **Dữ liệu / Thông báo trả về**                                           |
-|---------|---------------------------------------------|------------------------------------------------------------------------------------------|--------------------------------------------------------------------------|
-| 1       | Khởi tạo phiên upload thành công            | Tạo MediaAsset ở trạng thái PendingUpload và MediaUploadSession ở trạng thái Pending     | mediaId, uploadId, uploadUrl, method, requiredHeaders, expiresAtUtc      |
-| 2       | Upload binary lên Object Storage thành công | File đã được lưu tạm tại Object Storage nhưng **chưa được phép sử dụng trong nghiệp vụ** | FE ghi nhận upload thành công và tiếp tục bước Complete                  |
-| 3       | Complete upload thành công                  | MediaService xác minh file hợp lệ; MediaAsset → Ready, MediaUploadSession → Completed    | mediaId, status = Ready, metadata cơ bản của file                        |
-| 4       | File không hợp lệ                           | Media không được sử dụng; MediaAsset → Rejected; object được đưa vào cleanup             | Thông báo lỗi tương ứng: sai định dạng, vượt dung lượng, checksum sai... |
-| 5       | Chưa upload file nhưng gọi Complete         | Không chuyển Media sang Ready; session vẫn Pending nếu chưa hết hạn                      | "Tệp chưa được tải lên hoặc tải lên chưa hoàn tất."                      |
-| 6       | Upload session hết hạn                      | MediaUploadSession → Expired; phiên cũ không được tiếp tục sử dụng                       | "Phiên tải tệp đã hết hạn. Vui lòng tải lại tệp."                        |
-| 7       | Retry cùng Idempotency-Key hợp lệ           | Không tạo Media mới; trả lại kết quả/session đã tạo trước đó                             | Cùng mediaId, uploadId và trạng thái hiện tại                            |
-| 8       | Idempotency-Key trùng nhưng dữ liệu khác    | Không tạo upload session mới                                                             | "Yêu cầu tải tệp bị xung đột."                                           |
-| 9       | Object Storage hoặc hệ thống tạm thời lỗi   | Không trả Media ở trạng thái Ready                                                       | Thông báo lỗi tạm thời, cho phép người dùng thử lại                      |
-| 10      | Media đã Ready                              | FE có thể sử dụng mediaId trong request nghiệp vụ tiếp theo                              | Ví dụ imageMediaIds: \["\<mediaId\>"\]                                   |
+MediaService lấy `ownerService` và `ownerEntityType` từ policy của `purpose`, không nhận từ client. `fileName`, `contentType` và `sizeBytes` không phải các form field riêng; client chỉ chọn file.
 
-Sau khi quá trình tải và xác minh tệp hoàn tất thành công, hệ thống trả về một MediaId ở trạng thái Ready. MediaId là định danh ổn định được Frontend sử dụng trong các yêu cầu nghiệp vụ tiếp theo. URL upload chỉ có giá trị tạm thời và không được sử dụng làm tham chiếu nghiệp vụ.
+Response thành công HTTP 200:
 
-Ví dụ:
-
-```text
+```json
 {
-"mediaId": "0199...abc",
-"status": "Ready",
-"originalFileName": "may-xuc.jpg",
-"contentType": "image/jpeg",
-"sizeBytes": 1250340
+  "mediaId": "<guid>",
+  "status": "Ready",
+  "originalFileName": "may-xuc.jpg",
+  "contentType": "image/jpeg",
+  "sizeBytes": 1250340,
+  "previewUrl": "https://storage.example/signed-read-url",
+  "previewUrlExpiresAtUtc": "2026-09-27T10:05:00Z"
 }
 ```
+
+Request chỉ trả thành công sau khi file đã được lưu, kiểm tra dung lượng, file signature, MIME và checksum. `previewUrl` là URL GET ký ngắn hạn để người upload xem đúng file đã lưu; chỉ cấp khi Media đã `Ready` và đúng người upload. Nếu ký URL lỗi sau khi file đã lưu, request vẫn thành công với `mediaId`, còn `previewUrl` và `previewUrlExpiresAtUtc` là null. Response không chứa URL upload hay định danh phiên nội bộ. Client dùng `mediaId` khi lưu form nghiệp vụ. Business Service gọi `GET /api/v1/media/{mediaId}/verify` bằng service token, đối chiếu purpose, owner entity và người upload trước khi lưu tham chiếu.
+
+## 1.3. Quy tắc xử lý
+
+- Media mới mặc định `Private`. File hợp lệ chuyển từ `PendingUpload` sang `Ready` trong cùng request HTTP. Trạng thái Pending chỉ phục vụ xử lý nội bộ và khôi phục sau lỗi, không phải bước client phải hoàn tất.
+- Policy hiện hỗ trợ JPEG, PNG, WebP tối đa 10 MiB cho `equipment-image`/`organization-logo`, và PDF tối đa 20 MiB cho `equipment-document`. Video, Office document, OCR và quét malware chưa thuộc MVP.
+- Application xác minh dữ liệu thực tế; không tin tên, MIME hay dung lượng client khai báo. Tên file được làm sạch và không dùng làm khóa lưu trữ.
+- File không hợp lệ trả lỗi, Media không trở thành `Ready`. Object tạm hoặc bản sao bị từ chối được đưa vào hàng đợi dọn dẹp. Lỗi MinIO hoặc PostgreSQL không trả một `mediaId` có thể sử dụng.
+- MediaService giữ một bản ghi upload nội bộ cho mỗi request để xử lý idempotency, retry và dọn object nếu request bị gián đoạn. Bản ghi này không phải API công khai. Bản ghi cũ trong `media_upload_sessions` vẫn được giữ để cleanup an toàn, không cần migration phá dữ liệu.
+- Khi có `Idempotency-Key`, cùng user + cùng key + cùng metadata và nội dung file trả cùng `mediaId` nếu upload đã thành công. Cùng key nhưng dữ liệu khác trả 409. Request còn Pending có thể thử lại trong 15 phút; sau khi hết hạn hoặc bị từ chối, dùng key mới. Không gửi key thì mỗi request là một upload mới.
+- Cancellation được truyền tới thao tác lưu trữ và database. Không giữ transaction database trong lúc gọi MinIO. Cleanup worker dọn object của phiên Pending đã hết hạn; không xóa ngay Media `Ready` chỉ vì Business Service chưa lưu tham chiếu.
 
 ## 1.4. Tiêu chí chấp nhận
 
-**AC1:** Client đã đăng nhập gửi thông tin khởi tạo phiên (purpose, ownerEntityId, fileName, contentType, sizeBytes, Idempotency-Key) hợp lệ thì hệ thống tạo MediaAsset (PendingUpload) và MediaUploadSession (Pending). Service sở hữu và loại đối tượng được xác định từ cấu hình purpose, không nhận từ client.
-
-**AC2:** Response tạo upload phải có MediaId, UploadId, presigned PUT URL đến MinIO, requiredHeaders và thời gian hết hạn (15 phút).
-
-**AC3:** Binary được upload trực tiếp từ Browser đến Object Storage, không truyền qua MediaService.
-
-**AC4:** Chưa upload object mà gọi Complete thì Media không được chuyển sang Ready.
-
-**AC5:** Object có dung lượng thực tế, định dạng hoặc file signature không phù hợp policy thì Media bị từ chối và không trở thành Ready.
-
-**AC6:** Chỉ khi Complete thành công Business Service mới được sử dụng MediaId cho entity nghiệp vụ.
-
-**AC7:** Gọi Complete lại cho một session đã Completed phải trả cùng kết quả, không tạo Media mới.
-
-**AC8:** Session đã Expired không được hồi sinh hoặc cấp lại URL upload. Muốn upload lại phải tạo request mới với Idempotency-Key mới.
-
-**AC9:** Cùng caller + cùng Idempotency-Key + cùng request phải trả cùng upload session; cùng key nhưng nội dung khác phải bị từ chối.
-
-**AC10:** Response metadata không chứa Bucket, ObjectKey hoặc storage secret. URL PUT ký sẵn ngắn hạn có thể chứa tên bucket, object key ngẫu nhiên và access-key ID theo giao thức S3; client không được dùng URL này làm tham chiếu nghiệp vụ.
-
-## 1.5. Nguyên tắc hoạt động
-
-**1.5.1. Nguyên tắc tải tệp**
-
-Người dùng thực hiện tải tệp tại chức năng nghiệp vụ tương ứng.
-Người dùng đã đăng nhập thực hiện tải tệp trực tiếp lên Object Storage thông qua URL ký sẵn do MediaService cấp.
-
-Quyền sử dụng Media trên đối tượng nghiệp vụ được Business Service kiểm tra khi người dùng gửi form lưu tham chiếu MediaId, thay vì kiểm tra trước khi upload. Business Service gọi API nội bộ `GET /api/v1/media/{mediaId}/verify` bằng service token để xác minh MediaId đã Ready, đúng purpose, đúng đối tượng dự kiến và đúng người upload trước khi lưu.
-Tệp được tải trực tiếp lên hệ thống lưu trữ tệp.
-
-Sau khi tải thành công, hệ thống tiến hành kiểm tra tệp trước khi cho phép sử dụng.
-
-Tệp chỉ được sử dụng khi trạng thái là Ready.
-
-**1.5.2. Nguyên tắc tham chiếu Media**
-
-Mỗi tệp tải thành công được hệ thống cấp một MediaId duy nhất.
-
-Các service nghiệp vụ lưu MediaId thay vì lưu binary hoặc đường dẫn lưu trữ.
-
-Một MediaId đại diện cho một Media cụ thể và không được tái sử dụng cho nội dung tệp khác.
-
-Khi tạo hoặc cập nhật dữ liệu nghiệp vụ, Frontend gửi MediaId tương ứng cho Business Service.
-
-Ví dụ:
-
-> Người dùng tải ba ảnh thiết bị → hệ thống trả ba MediaId → khi tạo thiết bị, Frontend gửi ba MediaId trong thông tin thiết bị.
-
-**1.5.3. Nguyên tắc liên kết với đối tượng nghiệp vụ**
-
-Media phải xác định được đối tượng nghiệp vụ mà tệp dự kiến được sử dụng.
-
-Mỗi Media trong MVP gắn với:
-
-- Service sở hữu;
-
-- Loại đối tượng;
-
-- ID đối tượng.
-
-Nếu đối tượng nghiệp vụ chưa được lưu, hệ thống có thể tạo ID của đối tượng trước khi thực hiện tải tệp.
-
-Business Service chịu trách nhiệm kiểm tra MediaId có đúng đối tượng và đúng mục đích sử dụng trước khi lưu tham chiếu.
-
-**1.5.4. Nguyên tắc kiểm tra tệp**
-
-- Hệ thống kiểm tra tệp theo chính sách của từng mục đích sử dụng.
-
-- Việc kiểm tra tối thiểu bao gồm:
-
-  - định dạng;
-
-  - dung lượng;
-
-  - loại nội dung;
-
-  - tính hợp lệ cơ bản của file.
-
-- Không chỉ dựa vào phần mở rộng của tên file để xác định loại file.
-
-- Tệp không đạt yêu cầu bị từ chối và không được sử dụng trong nghiệp vụ.
-
-**1.5.5. Nguyên tắc trạng thái tải tệp**
-
-Quá trình tải tệp có các trạng thái chính:
-
-- PendingUpload: đang chờ hoặc đang thực hiện tải tệp.
-
-- Ready: tệp đã tải và kiểm tra thành công.
-
-- Rejected: tệp không đáp ứng yêu cầu.
-
-- Deleted: tệp đã bị xóa về mặt logic.
-
-Chỉ Media ở trạng thái Ready được phép liên kết mới với dữ liệu nghiệp vụ.
-
-**1.5.6. Nguyên tắc tải lại**
-
-- Nếu quá trình tải bị lỗi trước khi hoàn tất, người dùng có thể thực hiện tải lại.
-
-- Nếu phiên tải đã hết hạn, phiên cũ không được tiếp tục sử dụng.
-
-- Việc tải lại sau khi phiên hết hạn tạo một phiên tải mới.
-
-- Hệ thống phải tránh tạo nhiều Media do cùng một yêu cầu bị gửi lại ngoài ý muốn.
-
-**1.5.7. Nguyên tắc tệp chưa được sử dụng**
-
-- Tệp có thể được tải lên trước khi người dùng hoàn tất thao tác nghiệp vụ.
-
-- Nếu người dùng không hoàn tất nghiệp vụ hoặc dữ liệu nghiệp vụ không được lưu, Media có thể không có tham chiếu thực tế.
-
-- Các Media không còn được sử dụng phải được xác định và dọn dẹp theo chính sách vòng đời của hệ thống.
-
-- Không xóa ngay một Media nếu hệ thống chưa xác định chắc chắn Media không còn được sử dụng.
-
-## 1.6. Mô tả yêu cầu
-
-### **1.6.1 Tải tệp**
-
-| **STT** | **Tên**        | **Mô tả**                              | **Control**         | **Giá trị mặc định** | **Bắt buộc**                  | **Quy tắc**                                         |
-|---------|----------------|----------------------------------------|---------------------|----------------------|-------------------------------|-----------------------------------------------------|
-| 1       | Chọn tệp       | Chọn hình ảnh/tài liệu cần tải         | File Upload         | Trống                | Có khi chức năng yêu cầu file | Chỉ cho phép loại file phù hợp với mục đích sử dụng |
-| 2       | Tên tệp        | Hiển thị tên tệp đã chọn               | Text                | Tên tệp được chọn    | —                             | Không cho sửa nếu UI không có nhu cầu đổi tên       |
-| 3       | Dung lượng     | Hiển thị dung lượng tệp                | Text                | Tự động              | —                             | Vượt giới hạn thì báo lỗi                           |
-| 4       | Trạng thái tải | Hiển thị trạng thái hiện tại           | Label/Status        | Chưa tải             | —                             | Đang tải / Đang xử lý / Hoàn tất / Lỗi              |
-| 5       | Tiến trình tải | Hiển thị tiến trình                    | Progress Bar        | 0%                   | —                             | Hiển thị khi đang tải                               |
-| 6       | Thử lại        | Tải lại khi có lỗi                     | Button              | Ẩn                   | —                             | Chỉ hiển thị khi tải thất bại                       |
-| 7       | Xóa tệp        | Bỏ tệp khỏi dữ liệu đang nhập          | Icon/Button         | —                    | —                             | Bỏ Media khỏi form hiện tại                         |
-| 8       | MediaId        | Định danh Media sau khi tải thành công | Hidden/System Value | Trống                | —                             | Frontend giữ để gửi trong request nghiệp vụ         |
-
-#### 
-
-### **1.6.2 Quy tắc tải tệp**
-
-| **STT** | **Trường hợp**    | **Nội dung**                                    |
-|---------|-------------------|-------------------------------------------------|
-| 1       | Chưa chọn tệp     | Vui lòng chọn tệp cần tải.                      |
-| 2       | Tệp rỗng          | Tệp không có nội dung.                          |
-| 3       | Sai định dạng     | Định dạng tệp không được hỗ trợ.                |
-| 4       | Vượt dung lượng   | Dung lượng tệp vượt quá giới hạn cho phép.      |
-| 5       | Tải tệp thất bại  | Không thể tải tệp lên. Vui lòng thử lại.        |
-| 6       | Phiên tải hết hạn | Phiên tải tệp đã hết hạn. Vui lòng tải lại tệp. |
-| 7       | Tệp không hợp lệ  | Tệp không hợp lệ hoặc không đáp ứng yêu cầu.    |
-| 8       | Thành công        | Tải tệp thành công.                             |
-
-**1.6.3 Sử dụng Media sau khi tải**
-
-Sau khi Media ở trạng thái Ready:
-
-- Frontend lưu tạm MediaId trong dữ liệu của form.
-
-- Khi người dùng nhấn **Lưu / Tạo mới / Cập nhật** ở chức năng nghiệp vụ, Frontend gửi MediaId cùng các trường dữ liệu khác.
-
-- Business Service kiểm tra MediaId hợp lệ trước khi lưu.
-
-- Business Service không nhận lại binary của tệp trong request nghiệp vụ.
-
-Ví dụ trên form thiết bị:
-
-Ảnh thiết bị
-
-\[ may-xuc-1.jpg ✓ \]
-
-\[ may-xuc-2.jpg ✓ \]
-
-→ MediaId A
-
-→ MediaId B
-
-Người dùng nhấn "Tạo thiết bị"
-
-Request nghiệp vụ chứa:
-
-```text
-{
-"name": "Máy xúc Komatsu",
-"imageMediaIds": [
-"media-id-A",
-"media-id-B"
-]
-}
-```
-
-## 1.7. Ràng buộc
-
-- Chỉ các định dạng tệp nằm trong danh sách cho phép của từng mục đích sử dụng mới được chấp nhận.
-
-- Dung lượng tối đa của tệp được cấu hình theo từng mục đích sử dụng.
-
-- Tệp không hợp lệ không được sử dụng trong dữ liệu nghiệp vụ.
-
-- Chỉ Media có trạng thái Ready được phép tạo tham chiếu mới.
-
-- Mỗi Media được định danh bằng một MediaId duy nhất.
-
-- Các service nghiệp vụ chỉ lưu MediaId, không lưu binary file hoặc đường dẫn lưu trữ nội bộ.
-
-- Tên file người dùng cung cấp không được dùng trực tiếp làm khóa lưu trữ.
-
-- Không cho phép người dùng tự xác định Service sở hữu Media.
-
-- Không để lộ thông tin nội bộ của Object Storage cho người dùng.
-
-- Phiên tải tệp có thời hạn; phiên hết hạn không được tiếp tục sử dụng.
-
-- Media không còn được sử dụng phải được xử lý theo chính sách vòng đời và dọn dẹp của hệ thống.
-
-- Việc kiểm tra định dạng tệp không được xem là cơ chế kiểm tra mã độc.
-
-- Chức năng quét malware không thuộc phạm vi MVP.
+1. User token hợp lệ gửi form có file và purpose/ownerEntityId hợp lệ: một request trả `mediaId` `Ready`, metadata đúng và object đọc được từ MinIO.
+2. Thiếu file hoặc input sai bị từ chối; user token thiếu trả 401. Service token không thay thế user token cho upload.
+3. File rỗng, vượt giới hạn, signature/MIME/checksum sai không tạo Media `Ready`.
+4. Retry cùng `Idempotency-Key` và cùng nội dung không tạo Media khác; trùng key nhưng nội dung khác bị từ chối.
+5. Business Service chỉ sử dụng `mediaId` sau khi `/verify` xác nhận đúng purpose, owner và người upload.
+6. Client không cần lấy presigned PUT URL, không PUT file tới MinIO và không gọi `/complete`.

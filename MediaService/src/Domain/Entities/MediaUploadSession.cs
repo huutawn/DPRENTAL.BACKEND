@@ -3,7 +3,7 @@ using Dprental.MediaService.Common.Enums;
 namespace Dprental.MediaService.Domain.Entities;
 
 /// <summary>
-/// Đại diện cho một phiên tải lên tệp trực tiếp từ client lên MinIO.
+/// Theo dõi upload nội bộ để xử lý retry, idempotency và dọn dẹp nếu request gián đoạn.
 /// </summary>
 public class MediaUploadSession
 {
@@ -25,17 +25,17 @@ public class MediaUploadSession
     public string CallerIdentity { get; set; } = string.Empty;
 
     /// <summary>
-    /// Khóa Idempotency được client gửi kèm để chống trùng lặp phiên.
+    /// Khóa Idempotency do client gửi hoặc khóa ngẫu nhiên khi client không gửi.
     /// </summary>
     public string IdempotencyKey { get; set; } = string.Empty;
 
     /// <summary>
-    /// Mã băm của toàn bộ nội dung yêu cầu khởi tạo để phát hiện xung đột dữ liệu cùng IdempotencyKey.
+    /// Mã băm của metadata và nội dung file để phát hiện trùng key nhưng khác dữ liệu.
     /// </summary>
     public string RequestPayloadHash { get; set; } = string.Empty;
 
     /// <summary>
-    /// Khóa lưu trữ tạm thời trên MinIO được cấp URL ký sẵn PUT (ngẫu nhiên, không chứa tên file gốc).
+    /// Khóa lưu trữ tạm thời trên MinIO, chỉ MediaService ghi.
     /// </summary>
     public string TemporaryStorageKey { get; set; } = string.Empty;
 

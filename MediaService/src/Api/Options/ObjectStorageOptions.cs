@@ -36,7 +36,7 @@ public sealed class ObjectStorageOptions
     public bool? UseSsl { get; set; }
 
     /// <summary>
-    /// Endpoint trình duyệt truy cập được để tải tệp trực tiếp lên MinIO.
+    /// Endpoint trình duyệt truy cập được cho URL GET ký sẵn.
     /// Nếu để trống, hệ thống sẽ sử dụng Endpoint nội bộ.
     /// </summary>
     public string? BrowserEndpoint { get; set; }
@@ -46,8 +46,6 @@ public sealed class ObjectStorageOptions
     /// </summary>
     public string[] AllowedOrigins { get; set; } = [];
 
-    /// <summary>
-    /// Thời hạn hiệu lực của URL upload ký sẵn tính theo phút (mặc định 15 phút).
-    /// </summary>
-    public int UploadUrlExpiryMinutes { get; set; } = 15;
+    /// <summary>Thời hạn URL GET ký sẵn, tính bằng giây (mặc định 5 phút).</summary>
+    public int ReadUrlExpirySeconds { get; set; } = 300;
 }

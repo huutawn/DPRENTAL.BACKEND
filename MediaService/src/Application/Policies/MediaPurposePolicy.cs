@@ -8,7 +8,8 @@ public sealed record MediaPurposePolicy(
     string OwnerService,
     string OwnerEntityType,
     IReadOnlySet<string> AllowedContentTypes,
-    long MaxSizeBytes)
+    long MaxSizeBytes,
+    bool AllowsPublic)
 {
     public const long TenMegabytes = 10L * 1024 * 1024;
     public const long TwentyMegabytes = 20L * 1024 * 1024;
@@ -31,9 +32,9 @@ public sealed record MediaPurposePolicy(
 
     private static readonly Dictionary<string, MediaPurposePolicy> Policies = new(StringComparer.OrdinalIgnoreCase)
     {
-        [EquipmentImage] = new(EquipmentImage, "CatalogService", "Equipment", StandardImageContentTypes, TenMegabytes),
-        [OrganizationLogo] = new(OrganizationLogo, "OrganizationService", "Organization", StandardImageContentTypes, TenMegabytes),
-        [EquipmentDocument] = new(EquipmentDocument, "CatalogService", "Equipment", StandardDocumentContentTypes, TwentyMegabytes)
+        [EquipmentImage] = new(EquipmentImage, "CatalogService", "Equipment", StandardImageContentTypes, TenMegabytes, true),
+        [OrganizationLogo] = new(OrganizationLogo, "OrganizationService", "Organization", StandardImageContentTypes, TenMegabytes, true),
+        [EquipmentDocument] = new(EquipmentDocument, "CatalogService", "Equipment", StandardDocumentContentTypes, TwentyMegabytes, false)
     };
 
     /// <summary>

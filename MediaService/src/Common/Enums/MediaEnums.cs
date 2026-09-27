@@ -48,7 +48,7 @@ public enum MediaVisibility
 public enum UploadSessionStatus
 {
     /// <summary>
-    /// Phiên đang mở, chờ client PUT binary lên MinIO và gọi Complete.
+    /// Request upload đã được ghi nhận nhưng chưa xác minh file xong.
     /// </summary>
     Pending = 0,
 
@@ -63,7 +63,7 @@ public enum UploadSessionStatus
     Expired = 2,
 
     /// <summary>
-    /// Tệp tải lên bị từ chối trong bước Complete.
+    /// Tệp tải lên bị từ chối trong bước xác minh nội bộ.
     /// </summary>
     Rejected = 3
 }

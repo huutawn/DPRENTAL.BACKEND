@@ -5,12 +5,19 @@ namespace Dprental.MediaService.Domain.IStorage;
 /// </summary>
 public interface IObjectStorageService
 {
-    /// <summary>
-    /// Sinh URL ký sẵn để client tải tệp trực tiếp lên MinIO bằng phương thức PUT.
-    /// </summary>
-    Task<PresignedUploadUrlResult> GeneratePresignedUploadUrlAsync(
+    /// <summary>Ghi nội dung file do MediaService nhận lên vùng lưu trữ tạm.</summary>
+    Task PutObjectAsync(
+        string objectKey,
+        Stream content,
+        long sizeBytes,
+        string contentType,
+        CancellationToken cancellationToken = default);
+
+    Task<string> GeneratePresignedReadUrlAsync(
         string objectKey,
         string contentType,
+        string fileName,
+        bool download,
         TimeSpan expiry,
         CancellationToken cancellationToken = default);
 

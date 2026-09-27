@@ -2,11 +2,14 @@ namespace Dprental.MediaService.Application.DTOs;
 
 /// <summary>
 /// Kết quả hoàn tất tải tệp và xác minh metadata.
-/// Tuyệt đối không trả Bucket, ObjectKey hoặc vị trí lưu trữ nội bộ.
+/// Không trả riêng khóa lưu trữ nội bộ; URL preview ký ngắn hạn có thể chứa
+/// bucket và object key theo giao thức S3.
 /// </summary>
 public sealed record MediaCompletedDto(
     Guid MediaId,
     string Status,
     string OriginalFileName,
     string ContentType,
-    long SizeBytes);
+    long SizeBytes,
+    string? PreviewUrl = null,
+    DateTimeOffset? PreviewUrlExpiresAtUtc = null);

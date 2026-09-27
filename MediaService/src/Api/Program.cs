@@ -79,11 +79,13 @@ builder.Services.AddSingleton<IObjectStorageService>(sp =>
 
 // 3. Application Services
 builder.Services.AddScoped<IMediaUploadService, MediaUploadService>();
+builder.Services.AddScoped<IMediaAccessService, MediaAccessService>();
 builder.Services.AddScoped<IMediaCleanupService, MediaCleanupService>();
 builder.Services.AddHostedService<MediaCleanupWorker>();
-builder.Services.AddOptions<UploadSettings>()
+builder.Services.AddOptions<UploadSettings>();
+builder.Services.AddOptions<MediaAccessSettings>()
     .Configure<IOptions<ObjectStorageOptions>>((settings, storage) =>
-        settings.SessionLifetimeMinutes = storage.Value.UploadUrlExpiryMinutes);
+        settings.ReadUrlExpirySeconds = storage.Value.ReadUrlExpirySeconds);
 
 // 4. Security & CORS
 builder.Services.AddMediaAuthentication(builder.Configuration);

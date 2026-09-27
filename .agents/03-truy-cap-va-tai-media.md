@@ -119,13 +119,13 @@ thì không cấp quyền truy cập nội dung.
 
 - URL của Media Private không được sử dụng như một URL công khai lâu dài.
 
-- Hệ thống không được để lộ:
+- Metadata và phản hồi lỗi không được để lộ:
 
   - Bucket;
 
   - ObjectKey;
 
-  - storage credential;
+  - storage credential hoặc URL có chữ ký;
 
   - thông tin xác thực nội bộ.
 
@@ -239,7 +239,7 @@ Ví dụ mặc định không public:
 
 - incident evidence.
 
-Public không có nghĩa Browser được biết Bucket hoặc ObjectKey.
+Bucket vẫn là Private. Trong MVP, URL GET ký ngắn hạn của MinIO có thể chứa Bucket và ObjectKey ngẫu nhiên theo giao thức S3; xem ngoại lệ ở cuối tài liệu.
 
 ### **d. Nguyên tắc URL truy cập**
 
@@ -431,7 +431,7 @@ Không yêu cầu MediaService thực hiện:
 
 - Các Business Service chỉ lưu MediaId.
 
-- Không expose ObjectKey, Bucket hoặc credential của Object Storage.
+- Metadata và URL Public ổn định không expose ObjectKey, Bucket hoặc storage credential. URL GET ký ngắn hạn là ngoại lệ giao thức S3 được mô tả bên dưới.
 
 - Media ở trạng thái Deleted hoặc Rejected không được cấp quyền truy cập mới.
 
@@ -440,3 +440,12 @@ Không yêu cầu MediaService thực hiện:
 - Public Media không đồng nghĩa Object Storage phải được cấu hình public.
 
 - Thao tác Preview phụ thuộc loại tệp và khả năng của client; MediaService không chịu trách nhiệm chỉnh sửa hoặc chuyển đổi document trong MVP.
+
+## 3.8. Hợp đồng API MVP
+
+- `GET /api/v1/media/{mediaId}`: Business Service có service token scope `media.read` lấy metadata. MediaService chỉ trả media thuộc service đó; `Deleted` trả 404. `PendingUpload` và `Rejected` có status nhưng không giả định MIME/dung lượng chưa xác minh là dữ liệu thực tế. Endpoint này không trả URL file.
+- `POST /api/v1/media/{mediaId}/access`: Business Service có scope `media.read` gửi `{ "action": "read", "ownerEntityType": "Equipment", "ownerEntityId": "equipment-123", "download": false }`. Sau khi Business Service đã kiểm tra quyền người dùng và mediaId có trong entity, MediaService đối chiếu owner/status rồi trả `{ "mediaId": "...", "url": "...", "expiresAtUtc": "..." }`. `download: true` đặt Content-Disposition để trình duyệt tải với tên file gốc đã được làm sạch.
+- Response của `POST /api/v1/media/uploads` có `previewUrl` và `previewUrlExpiresAtUtc` để chính người upload xem file vừa lưu trước khi entity nghiệp vụ được ghi. URL này là GET ký ngắn hạn, không thay thế quyền đọc qua Business Service sau khi entity đã được lưu. Nếu ký URL lỗi sau khi upload thành công, hai trường preview là null.
+- `GET /api/v1/media/{mediaId}/content`: URL Public ổn định, không cần token. MediaService chỉ chuyển hướng (302) tới URL GET ký ngắn hạn nếu Media đang `Ready`, `Public` và purpose cho phép Public; `?download=true` yêu cầu tải xuống. Sau khi chuyển Private, request mới tới URL này trả 404. URL đã ký trước đó có thể còn hiệu lực đến khi hết hạn.
+- URL đọc ký sẵn mặc định sống 300 giây, cấu hình bằng `ObjectStorage:ReadUrlExpirySeconds` trong khoảng 1–900 giây. Bucket MinIO vẫn Private. Business Service lưu `mediaId`, không lưu URL đọc; client xin URL mới khi hết hạn.
+- URL S3 ký sẵn là ngoại lệ kỹ thuật đã chọn cho MVP: nó có thể chứa Bucket, ObjectKey ngẫu nhiên và access-key ID, nhưng không chứa secret key. Không ghi URL này vào log, không lưu lâu dài hoặc dùng làm định danh nghiệp vụ. Để tránh lộ cả đường dẫn MinIO cần một cơ chế proxy/CDN khác trong giai đoạn sau.

@@ -11,7 +11,7 @@ namespace Dprental.MediaService.Application.Services;
 
 public partial class MediaUploadService
 {
-    public async Task<Result<MediaCompletedDto>> CompleteUploadAsync(
+    private async Task<Result<MediaCompletedDto>> FinalizeStoredUploadAsync(
         string authenticatedUserId,
         Guid uploadId,
         CancellationToken cancellationToken = default)
@@ -39,7 +39,7 @@ public partial class MediaUploadService
                 Error.NotFound("SessionNotFound", "Phiên tải tệp không tồn tại."));
         }
 
-        // 2. Kiểm tra quyền sở hữu phiên: chỉ người tạo phiên được gọi Complete
+        // Chỉ thao tác upload đang xử lý cho caller đã tạo phiên nội bộ.
         if (!string.Equals(session.CallerIdentity, caller, StringComparison.OrdinalIgnoreCase))
         {
             return Result.Failure<MediaCompletedDto>(
@@ -118,8 +118,8 @@ public partial class MediaUploadService
             return Result.Failure<MediaCompletedDto>(Error.Unprocessable("FileSizeExceeded", reason));
         }
 
-        // Mỗi lần Complete tạo một bản sao riêng. URL PUT chỉ có quyền ghi khóa tạm;
-        // xác minh bản sao cuối để không có khoảng đua với một PUT khác.
+        // Mỗi lần retry tạo một bản sao riêng để không đọc object tạm đang được
+        // request đồng thời ghi lại. Chỉ bản sao đã xác minh mới trở thành Ready.
         string permanentKey = $"media/{asset.Id:N}/{Guid.NewGuid():N}.bin";
         try
         {

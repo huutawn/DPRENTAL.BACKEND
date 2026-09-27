@@ -26,9 +26,9 @@ MediaService sử dụng 2 nhóm cấu hình bắt buộc:
    - `ObjectStorage:AccessKey`: Tên tài khoản hoặc Access Key truy cập MinIO.
    - `ObjectStorage:SecretKey`: Mật khẩu hoặc Secret Key tương ứng.
    - `ObjectStorage:UseSsl` *(tùy chọn)*: Giá trị boolean (`true`/`false`). Nếu không thiết lập, hệ thống tự động suy diễn dựa trên scheme của `Endpoint`.
-   - `ObjectStorage:BrowserEndpoint` *(tùy chọn)*: Địa chỉ truy cập MinIO từ trình duyệt / client bên ngoài (ví dụ: `http://127.0.0.1:9000` hoặc domain CDN/gateway). Dùng để sinh presigned PUT URL. Nếu không cấu hình, tự động dùng `Endpoint`.
-   - `ObjectStorage:AllowedOrigins` *(tùy chọn)*: Mảng danh sách origin được phép gọi CORS khi upload từ trình duyệt.
-   - `ObjectStorage:UploadUrlExpiryMinutes` *(tùy chọn)*: Thời hạn phiên và URL upload ký sẵn tính theo phút (mặc định 15 phút, giới hạn 1 - 120 phút).
+   - `ObjectStorage:BrowserEndpoint` *(tùy chọn)*: Địa chỉ MinIO mà trình duyệt truy cập được để đọc URL GET ký sẵn. Nếu không cấu hình, dùng `Endpoint`.
+   - `ObjectStorage:AllowedOrigins` *(tùy chọn)*: Các origin được phép gọi MediaService qua CORS.
+   - `ObjectStorage:ReadUrlExpirySeconds` *(tùy chọn)*: Thời hạn URL đọc ký sẵn, mặc định 300 giây.
    - `Jwt:Issuer`, `Jwt:Audience`, `Jwt:JwksUri`: Thông tin xác thực JWT RS256 từ AuthService. Không có khóa ký JWT mặc định trong MediaService.
    - `Jwt:ServicePrincipals`: Ánh xạ `sub` (GUID service principal) sang tên service sở hữu; token service cần scope `media.verify`.
 ### Cơ chế Startup Validation
@@ -139,62 +139,30 @@ Kết quả mong đợi: `HTTP/1.1 200 OK` kèm nội dung `Healthy`.
 
 Tất cả các endpoint nghiệp vụ media đều sử dụng tiền tố chuẩn hóa `/api/v1/media`:
 
-### 6.1. Khởi tạo phiên upload (`POST /api/v1/media/uploads`)
+### 6.1. Tải file trực tiếp (`POST /api/v1/media/uploads`)
 - **Xác thực**: Yêu cầu User Access Token (Bearer) hợp lệ; header tự khai báo danh tính không được tin cậy.
-- **Header bắt buộc**: `Idempotency-Key` (chống trùng lặp yêu cầu).
-- **Body**:
-```json
-{
-  "purpose": "equipment-image",
-  "ownerEntityId": "equipment-123",
-  "fileName": "may-xuc.jpg",
-  "contentType": "image/jpeg",
-  "sizeBytes": 1250340,
-  "sha256Checksum": "a1b2c3...optional"
-}
-```
+- **Header tùy chọn**: `Idempotency-Key` để gửi lại cùng request mà không tạo media khác.
+- **Body**: `multipart/form-data` gồm `file` (binary), `purpose`, `ownerEntityId`; `sha256Checksum` là tùy chọn. Tên, MIME và kích thước lấy từ phần `file`, không cần khai báo riêng.
 - **Quy tắc policy ban đầu**:
   - `equipment-image` & `organization-logo`: nhận `image/jpeg`, `image/png`, `image/webp`, tối đa 10 MiB.
   - `equipment-document`: nhận `application/pdf`, tối đa 20 MiB.
   - Purpose khác: bị từ chối cho đến khi được cấu hình.
   - `ownerService` và `ownerEntityType` được xác định từ cấu hình purpose, không nhận từ client.
-- **Kết quả**: HTTP 200 OK
-```json
-{
-  "mediaId": "uuid",
-  "uploadId": "uuid",
-  "uploadUrl": "http://127.0.0.1:9000/dprental-media/temp/uploads/...presigned-put-url...",
-  "method": "PUT",
-  "requiredHeaders": {
-    "Content-Type": "image/jpeg"
-  },
-  "expiresAtUtc": "2026-09-25T10:15:00Z"
-}
-```
-Retry cùng key sau khi Complete trả `status: "Completed"`, `uploadUrl: null` và cùng `mediaId`/`uploadId`; phiên hết hạn hoặc bị từ chối không được cấp URL mới.
-
-### 6.2. Hoàn tất phiên upload (`POST /api/v1/media/uploads/{uploadId}/complete`)
-- **Xác thực**: Yêu cầu User Access Token của chính người dùng đã tạo phiên upload.
-- **Hành vi**:
-  - Đọc stream object thực tế từ MinIO ngoài transaction PostgreSQL.
-  - Xác minh dung lượng tệp, MIME và file signature (magic bytes: JPEG `FF D8 FF`, PNG `89 50 4E 47`, WebP `RIFF...WEBP`, PDF `%PDF-`).
-  - Đối chiếu checksum SHA-256 nếu client đã khai báo ban đầu.
-  - Nếu hợp lệ: chuyển tệp sang khóa lưu trữ chính thức (`media/{mediaId}/{random}.bin` chỉ service có quyền ghi), cập nhật trạng thái `Ready` và session `Completed`.
-  - Nếu không hợp lệ: chuyển sang `Rejected` và đưa object tạm vào hàng đợi dọn dẹp có retry.
-  - Nếu chưa upload object lên MinIO: trả về lỗi 400 và giữ nguyên trạng thái `Pending`.
-  - Gọi lại Complete cho phiên đã hoàn tất trả cùng kết quả (idempotent), không tạo duplicate media.
-- **Kết quả**: HTTP 200 OK
+- **Kết quả**: HTTP 200 OK sau khi MediaService lưu file vào MinIO, xác minh và chuyển media sang `Ready`:
 ```json
 {
   "mediaId": "uuid",
   "status": "Ready",
   "originalFileName": "may-xuc.jpg",
   "contentType": "image/jpeg",
-  "sizeBytes": 1250340
+  "sizeBytes": 1250340,
+  "previewUrl": "https://storage.example/signed-read-url",
+  "previewUrlExpiresAtUtc": "2026-09-27T10:05:00Z"
 }
 ```
+MediaService tự xác minh file signature, MIME và checksum nếu có. File không hợp lệ bị từ chối; object tạm được dọn qua worker. `previewUrl` chỉ dành cho người upload, hết hạn sau `ObjectStorage:ReadUrlExpirySeconds`; nếu ký URL lỗi sau khi file đã lưu, hai trường preview là null và `mediaId` vẫn sử dụng được. Retry cùng `Idempotency-Key` và cùng file trả cùng `mediaId` cùng một URL preview mới. Client không cần gọi MinIO hoặc endpoint `/complete`.
 
-### 6.3. Xác minh MediaId nội bộ (`GET /api/v1/media/{mediaId}/verify`)
+### 6.2. Xác minh MediaId nội bộ (`GET /api/v1/media/{mediaId}/verify`)
 - **Xác thực**: Yêu cầu Service Token AuthService (`u=svc`, scope `media.verify`), có `sub` nằm trong `Jwt:ServicePrincipals`. MediaService chỉ trả Media Ready thuộc service đó.
 - **Mục đích**: Cho phép Business Service kiểm tra trạng thái Media trước khi lưu tham chiếu vào entity nghiệp vụ.
 - **Kết quả**: HTTP 200 OK

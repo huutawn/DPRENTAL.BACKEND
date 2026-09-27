@@ -3,10 +3,10 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using Dprental.MediaService.Application.DTOs;
-using Dprental.MediaService.Application.IServices;
 using Dprental.MediaService.Common.Enums;
 using Dprental.MediaService.Domain;
 using Dprental.MediaService.Domain.IStorage;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -16,10 +16,9 @@ namespace Dprental.MediaService.Api.Tests;
 [Collection("Integration")]
 public class MediaIntegrationTests
 {
-    private static byte[] CreateValidJpegBytes(int size = 1024)
+    private static byte[] ValidJpeg(int size = 1024)
     {
         byte[] bytes = new byte[size];
-        // JPEG magic header: FF D8 FF E0 00 10 4A 46
         bytes[0] = 0xFF;
         bytes[1] = 0xD8;
         bytes[2] = 0xFF;
@@ -28,290 +27,176 @@ public class MediaIntegrationTests
         bytes[5] = 0x10;
         bytes[6] = 0x4A;
         bytes[7] = 0x46;
-        for (int i = 8; i < size; i++)
-        {
-            bytes[i] = (byte)(i % 256);
-        }
         return bytes;
     }
 
+    private static MultipartFormDataContent Form(byte[] bytes, string ownerId = "equipment-test-1")
+    {
+        var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(bytes);
+        file.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
+        form.Add(file, "file", "excavator.jpg");
+        form.Add(new StringContent("equipment-image"), "purpose");
+        form.Add(new StringContent(ownerId), "ownerEntityId");
+        return form;
+    }
+
     [Fact]
-    public async Task DirectUploadFlow_EndToEnd_ShouldSucceedAndStoreMetadata()
+    public async Task MultipartUpload_EndToEnd_ReturnsReadyAndSupportsReadAndPublicAccess()
     {
         using var factory = new MediaServiceTestFactory();
-        using var client = factory.CreateClient();
-
-        string userId = $"user-{Guid.NewGuid():N}";
+        using var userClient = factory.CreateClient();
+        MediaServiceTestFactory.SetUserToken(userClient, $"user-{Guid.NewGuid():N}");
         string idempotencyKey = Guid.NewGuid().ToString("N");
-        byte[] jpegBytes = CreateValidJpegBytes(2048);
-        string sha256Hex = Convert.ToHexString(SHA256.HashData(jpegBytes)).ToLowerInvariant();
+        userClient.DefaultRequestHeaders.Add("Idempotency-Key", idempotencyKey);
+        byte[] jpeg = ValidJpeg();
 
-        MediaServiceTestFactory.SetUserToken(client, userId);
-        client.DefaultRequestHeaders.Add("Idempotency-Key", idempotencyKey);
+        using var uploadForm = Form(jpeg);
+        var uploadResponse = await userClient.PostAsync("/api/v1/media/uploads", uploadForm);
+        Assert.Equal(HttpStatusCode.OK, uploadResponse.StatusCode);
+        var uploaded = await uploadResponse.Content.ReadFromJsonAsync<MediaCompletedDto>();
+        Assert.NotNull(uploaded);
+        Assert.Equal("Ready", uploaded.Status);
+        Assert.Equal("excavator.jpg", uploaded.OriginalFileName);
+        Assert.Equal("image/jpeg", uploaded.ContentType);
+        Assert.Equal(jpeg.Length, uploaded.SizeBytes);
+        Assert.False(string.IsNullOrWhiteSpace(uploaded.PreviewUrl));
+        Assert.True(uploaded.PreviewUrlExpiresAtUtc > DateTimeOffset.UtcNow);
+        using var previewClient = new HttpClient();
+        using var previewDownload = await previewClient.GetAsync(uploaded.PreviewUrl);
+        Assert.Equal(HttpStatusCode.OK, previewDownload.StatusCode);
+        Assert.Equal(jpeg, await previewDownload.Content.ReadAsByteArrayAsync());
+        string uploadJson = await uploadResponse.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("uploadUrl", uploadJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("uploadId", uploadJson, StringComparison.OrdinalIgnoreCase);
 
-        // 1. Khởi tạo phiên upload
-        var initRequest = new InitializeUploadRequest(
-            Purpose: "equipment-image",
-            OwnerEntityId: "equipment-test-1",
-            FileName: "excavator.jpg",
-            ContentType: "image/jpeg",
-            SizeBytes: jpegBytes.Length,
-            Sha256Checksum: sha256Hex);
+        using var replayForm = Form(jpeg);
+        var replayResponse = await userClient.PostAsync("/api/v1/media/uploads", replayForm);
+        Assert.Equal(HttpStatusCode.OK, replayResponse.StatusCode);
+        var replayed = await replayResponse.Content.ReadFromJsonAsync<MediaCompletedDto>();
+        Assert.Equal(uploaded.MediaId, replayed?.MediaId);
+        Assert.False(string.IsNullOrWhiteSpace(replayed?.PreviewUrl));
 
-        var initRes = await client.PostAsJsonAsync("/api/v1/media/uploads", initRequest);
-        Assert.Equal(HttpStatusCode.OK, initRes.StatusCode);
-
-        var sessionDto = await initRes.Content.ReadFromJsonAsync<UploadSessionDto>();
-        Assert.NotNull(sessionDto);
-        Assert.NotEqual(Guid.Empty, sessionDto.MediaId);
-        Assert.NotEqual(Guid.Empty, sessionDto.UploadId);
-        Assert.NotNull(sessionDto.UploadUrl);
-
-        // 2. Client tải binary trực tiếp lên MinIO bằng URL ký sẵn (PUT)
-        using var minioClient = new HttpClient();
-        using var content = new ByteArrayContent(jpegBytes);
-        content.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
-
-        var putRes = await minioClient.PutAsync(sessionDto.UploadUrl, content);
-        Assert.True(putRes.IsSuccessStatusCode, $"Tải binary lên MinIO thất bại với mã {putRes.StatusCode}");
-
-        // 3. Client gọi Complete phiên upload
-        var completeRes = await client.PostAsync($"/api/v1/media/uploads/{sessionDto.UploadId}/complete", null);
-        Assert.Equal(HttpStatusCode.OK, completeRes.StatusCode);
-
-        var completedDto = await completeRes.Content.ReadFromJsonAsync<MediaCompletedDto>();
-        Assert.NotNull(completedDto);
-        Assert.Equal(sessionDto.MediaId, completedDto.MediaId);
-        Assert.Equal("Ready", completedDto.Status);
-        Assert.Equal("excavator.jpg", completedDto.OriginalFileName);
-        Assert.Equal("image/jpeg", completedDto.ContentType);
-        Assert.Equal(jpegBytes.Length, completedDto.SizeBytes);
-
-        // 4. Gọi lại Complete lần 2 -> Trả cùng kết quả (Idempotent)
-        var repeatRes = await client.PostAsync($"/api/v1/media/uploads/{sessionDto.UploadId}/complete", null);
-        Assert.Equal(HttpStatusCode.OK, repeatRes.StatusCode);
-        var repeatDto = await repeatRes.Content.ReadFromJsonAsync<MediaCompletedDto>();
-        Assert.NotNull(repeatDto);
-        Assert.Equal(completedDto.MediaId, repeatDto.MediaId);
-        Assert.Equal("Ready", repeatDto.Status);
-
-        var retryInit = await client.PostAsJsonAsync("/api/v1/media/uploads", initRequest);
-        Assert.Equal(HttpStatusCode.OK, retryInit.StatusCode);
-        var completedSession = await retryInit.Content.ReadFromJsonAsync<UploadSessionDto>();
-        Assert.NotNull(completedSession);
-        Assert.Equal(sessionDto.MediaId, completedSession.MediaId);
-        Assert.Equal("Completed", completedSession.Status);
-        Assert.Null(completedSession.UploadUrl);
-
-        // 5. Backend nghiệp vụ gọi verify MediaId bằng service token
         using var serviceClient = factory.CreateClient();
-        MediaServiceTestFactory.SetServiceToken(serviceClient);
+        MediaServiceTestFactory.SetServiceToken(serviceClient, "media.verify", "media.read", "media.publish");
+        var verifyResponse = await serviceClient.GetAsync($"/api/v1/media/{uploaded.MediaId}/verify");
+        Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
+        var verified = await verifyResponse.Content.ReadFromJsonAsync<MediaVerificationDto>();
+        Assert.Equal("CatalogService", verified?.OwnerService);
+        Assert.Equal("equipment-test-1", verified?.OwnerEntityId);
 
-        var verifyRes = await serviceClient.GetAsync($"/api/v1/media/{sessionDto.MediaId}/verify");
-        Assert.Equal(HttpStatusCode.OK, verifyRes.StatusCode);
+        var metadataResponse = await serviceClient.GetAsync($"/api/v1/media/{uploaded.MediaId}");
+        Assert.Equal(HttpStatusCode.OK, metadataResponse.StatusCode);
+        var metadata = await metadataResponse.Content.ReadFromJsonAsync<MediaMetadataDto>();
+        Assert.Equal("Private", metadata?.Visibility);
+        Assert.Equal(jpeg.Length, metadata?.SizeBytes);
+        string metadataJson = await metadataResponse.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("storageKey", metadataJson, StringComparison.OrdinalIgnoreCase);
 
-        var verifyDto = await verifyRes.Content.ReadFromJsonAsync<MediaVerificationDto>();
-        Assert.NotNull(verifyDto);
-        Assert.Equal(sessionDto.MediaId, verifyDto.MediaId);
-        Assert.Equal("Ready", verifyDto.Status);
-        Assert.Equal("CatalogService", verifyDto.OwnerService);
-        Assert.Equal("Equipment", verifyDto.OwnerEntityType);
-        Assert.Equal("equipment-test-1", verifyDto.OwnerEntityId);
-        Assert.Equal("equipment-image", verifyDto.Purpose);
-        Assert.Equal(userId, verifyDto.UploadedByUserId);
+        var denied = await serviceClient.PostAsJsonAsync($"/api/v1/media/{uploaded.MediaId}/access",
+            new MediaAccessRequest("read", "Equipment", "wrong-equipment"));
+        Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
 
-        // 6. Kiểm tra trực tiếp trong PostgreSQL
-        using var scope = factory.Services.CreateScope();
+        var accessResponse = await serviceClient.PostAsJsonAsync($"/api/v1/media/{uploaded.MediaId}/access",
+            new MediaAccessRequest("read", "Equipment", "equipment-test-1", true));
+        Assert.Equal(HttpStatusCode.OK, accessResponse.StatusCode);
+        var access = await accessResponse.Content.ReadFromJsonAsync<MediaReadUrlDto>();
+        Assert.NotNull(access);
+        Assert.Contains("X-Amz-Expires=300", access.Url, StringComparison.Ordinal);
+        using var storageClient = new HttpClient();
+        using var downloaded = await storageClient.GetAsync(access.Url);
+        Assert.Equal(HttpStatusCode.OK, downloaded.StatusCode);
+        Assert.Equal(jpeg, await downloaded.Content.ReadAsByteArrayAsync());
+        Assert.Equal("attachment", downloaded.Content.Headers.ContentDisposition?.DispositionType);
+        Assert.Equal("excavator.jpg", downloaded.Content.Headers.ContentDisposition?.FileName?.Trim('"'));
+
+        var publish = await serviceClient.PutAsJsonAsync($"/api/v1/media/{uploaded.MediaId}/visibility",
+            new ChangeMediaVisibilityRequest("public", "Equipment", "equipment-test-1"));
+        Assert.Equal(HttpStatusCode.OK, publish.StatusCode);
+        using var anonymous = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var publicResponse = await anonymous.GetAsync($"/api/v1/media/{uploaded.MediaId}/content");
+        Assert.Equal(HttpStatusCode.Redirect, publicResponse.StatusCode);
+        Assert.NotNull(publicResponse.Headers.Location);
+        using var publicDownload = await storageClient.GetAsync(publicResponse.Headers.Location);
+        Assert.Equal(jpeg, await publicDownload.Content.ReadAsByteArrayAsync());
+
+        var unpublish = await serviceClient.PutAsJsonAsync($"/api/v1/media/{uploaded.MediaId}/visibility",
+            new ChangeMediaVisibilityRequest("private", "Equipment", "equipment-test-1"));
+        Assert.Equal(HttpStatusCode.OK, unpublish.StatusCode);
+        using var stopped = await anonymous.GetAsync($"/api/v1/media/{uploaded.MediaId}/content");
+        Assert.Equal(HttpStatusCode.NotFound, stopped.StatusCode);
+
+        using IServiceScope scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MediaDbContext>();
-
-        var assetInDb = await db.MediaAssets.FirstOrDefaultAsync(a => a.Id == sessionDto.MediaId);
-        Assert.NotNull(assetInDb);
-        Assert.Equal(MediaStatus.Ready, assetInDb.Status);
-        Assert.NotNull(assetInDb.StorageKey);
-        Assert.StartsWith("media/", assetInDb.StorageKey);
-        Assert.Equal(sha256Hex, assetInDb.ActualChecksumSha256);
-
-        // URL PUT còn hạn chỉ ghi lại khóa tạm, không thay đổi object đã Ready.
-        byte[] replacement = CreateValidJpegBytes(1024);
-        replacement[replacement.Length - 1] ^= 0xFF;
-        using var replacementContent = new ByteArrayContent(replacement);
-        replacementContent.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
-        var secondPut = await minioClient.PutAsync(sessionDto.UploadUrl, replacementContent);
-        Assert.True(secondPut.IsSuccessStatusCode);
-
-        var storage = scope.ServiceProvider.GetRequiredService<IObjectStorageService>();
-        await using var storedObject = await storage.GetObjectStreamAsync(assetInDb.StorageKey);
+        var asset = await db.MediaAssets.SingleAsync(a => a.Id == uploaded.MediaId);
+        Assert.Equal(MediaStatus.Ready, asset.Status);
+        Assert.Equal(MediaVisibility.Private, asset.Visibility);
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(jpeg)).ToLowerInvariant(), asset.ActualChecksumSha256);
+        await using Stream? storedObject = await scope.ServiceProvider.GetRequiredService<IObjectStorageService>()
+            .GetObjectStreamAsync(asset.StorageKey!);
         Assert.NotNull(storedObject);
-        string storedHash = Convert.ToHexString(await SHA256.HashDataAsync(storedObject)).ToLowerInvariant();
-        Assert.Equal(sha256Hex, storedHash);
+        Assert.Equal(jpeg, await ReadAllAsync(storedObject));
     }
 
     [Fact]
-    public async Task CompleteUpload_WhenNotUploadedYet_ShouldReturn400AndKeepPending()
+    public async Task MultipartUpload_InvalidFileIsRejectedAndCleanupScheduled()
     {
         using var factory = new MediaServiceTestFactory();
         using var client = factory.CreateClient();
+        MediaServiceTestFactory.SetUserToken(client, $"user-{Guid.NewGuid():N}");
+        string key = Guid.NewGuid().ToString("N");
+        client.DefaultRequestHeaders.Add("Idempotency-Key", key);
+        using var form = Form([0x00, 0x01, 0x02, 0x03]);
 
-        string userId = $"user-{Guid.NewGuid():N}";
-        string idempotencyKey = Guid.NewGuid().ToString("N");
+        var response = await client.PostAsync("/api/v1/media/uploads", form);
 
-        MediaServiceTestFactory.SetUserToken(client, userId);
-        client.DefaultRequestHeaders.Add("Idempotency-Key", idempotencyKey);
-
-        var initRequest = new InitializeUploadRequest(
-            Purpose: "equipment-image",
-            OwnerEntityId: "equipment-test-not-uploaded",
-            FileName: "not-yet.jpg",
-            ContentType: "image/jpeg",
-            SizeBytes: 1000);
-
-        var initRes = await client.PostAsJsonAsync("/api/v1/media/uploads", initRequest);
-        var sessionDto = await initRes.Content.ReadFromJsonAsync<UploadSessionDto>();
-        Assert.NotNull(sessionDto);
-
-        // Gọi Complete NGAY mà chưa tải binary lên MinIO
-        var completeRes = await client.PostAsync($"/api/v1/media/uploads/{sessionDto.UploadId}/complete", null);
-        Assert.Equal(HttpStatusCode.BadRequest, completeRes.StatusCode);
-
-        // Kiểm tra database: vẫn ở trạng thái PendingUpload và Pending
-        using var scope = factory.Services.CreateScope();
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        using IServiceScope scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MediaDbContext>();
-        var session = await db.MediaUploadSessions.Include(s => s.MediaAsset).FirstOrDefaultAsync(s => s.Id == sessionDto.UploadId);
-        Assert.NotNull(session);
-        Assert.Equal(UploadSessionStatus.Pending, session.Status);
-        Assert.Equal(MediaStatus.PendingUpload, session.MediaAsset!.Status);
+        var session = await db.MediaUploadSessions.Include(s => s.MediaAsset)
+            .SingleAsync(s => s.IdempotencyKey == key);
+        Assert.Equal(UploadSessionStatus.Rejected, session.Status);
+        Assert.Equal(MediaStatus.Rejected, session.MediaAsset?.Status);
+        Assert.True(await db.MediaCleanupItems.AnyAsync(item => item.StorageKey == session.TemporaryStorageKey));
     }
 
     [Fact]
-    public async Task CompleteUpload_WhenFileRejected_ShouldMarkRejectedAndCleanupObject()
-    {
-        using var factory = new MediaServiceTestFactory();
-        using var client = factory.CreateClient();
-
-        string userId = $"user-{Guid.NewGuid():N}";
-        string idempotencyKey = Guid.NewGuid().ToString("N");
-
-        MediaServiceTestFactory.SetUserToken(client, userId);
-        client.DefaultRequestHeaders.Add("Idempotency-Key", idempotencyKey);
-
-        var initRequest = new InitializeUploadRequest(
-            Purpose: "equipment-image",
-            OwnerEntityId: "equipment-test-reject",
-            FileName: "fake.jpg",
-            ContentType: "image/jpeg",
-            SizeBytes: 500);
-
-        var initRes = await client.PostAsJsonAsync("/api/v1/media/uploads", initRequest);
-        var sessionDto = await initRes.Content.ReadFromJsonAsync<UploadSessionDto>();
-        Assert.NotNull(sessionDto);
-
-        // Tải binary giả mạo (không phải JPEG magic bytes)
-        byte[] fakeBytes = System.Text.Encoding.UTF8.GetBytes("THIS IS PLAIN TEXT NOT A JPEG IMAGE!!");
-        using var minioClient = new HttpClient();
-        using var content = new ByteArrayContent(fakeBytes);
-        content.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
-
-        var putRes = await minioClient.PutAsync(sessionDto.UploadUrl, content);
-        Assert.True(putRes.IsSuccessStatusCode);
-
-        // Gọi Complete
-        var completeRes = await client.PostAsync($"/api/v1/media/uploads/{sessionDto.UploadId}/complete", null);
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, completeRes.StatusCode);
-
-        // Kiểm tra database: MediaAsset và Session chuyển sang Rejected
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MediaDbContext>();
-            var session = await db.MediaUploadSessions.Include(s => s.MediaAsset).FirstOrDefaultAsync(s => s.Id == sessionDto.UploadId);
-            Assert.NotNull(session);
-            Assert.Equal(UploadSessionStatus.Rejected, session.Status);
-            Assert.Equal(MediaStatus.Rejected, session.MediaAsset!.Status);
-
-            var cleanupItem = await db.MediaCleanupItems.FirstOrDefaultAsync(c => c.StorageKey == session.TemporaryStorageKey);
-            Assert.NotNull(cleanupItem);
-            Assert.Equal(CleanupItemStatus.Pending, cleanupItem.Status);
-            cleanupItem.EligibleAtUtc = DateTimeOffset.UtcNow.AddSeconds(-1);
-            await db.SaveChangesAsync();
-        }
-
-        // Chạy service dọn dẹp để xóa object rác khỏi MinIO
-        using (var scope = factory.Services.CreateScope())
-        {
-            var cleanupService = scope.ServiceProvider.GetRequiredService<IMediaCleanupService>();
-            int processed = await cleanupService.ProcessPendingCleanupsAsync();
-            Assert.True(processed >= 1);
-        }
-    }
-
-    [Fact]
-    public async Task CompleteUpload_WhenCalledConcurrently_ShouldSucceedWithoutConflict()
-    {
-        using var factory = new MediaServiceTestFactory();
-        using var client = factory.CreateClient();
-
-        string userId = $"user-{Guid.NewGuid():N}";
-        string idempotencyKey = Guid.NewGuid().ToString("N");
-        byte[] jpegBytes = CreateValidJpegBytes(1024);
-
-        MediaServiceTestFactory.SetUserToken(client, userId);
-        client.DefaultRequestHeaders.Add("Idempotency-Key", idempotencyKey);
-
-        var initRequest = new InitializeUploadRequest(
-            Purpose: "equipment-image",
-            OwnerEntityId: "equipment-test-concurrent",
-            FileName: "concurrent.jpg",
-            ContentType: "image/jpeg",
-            SizeBytes: jpegBytes.Length);
-
-        var initRes = await client.PostAsJsonAsync("/api/v1/media/uploads", initRequest);
-        var sessionDto = await initRes.Content.ReadFromJsonAsync<UploadSessionDto>();
-        Assert.NotNull(sessionDto);
-
-        // Upload file lên MinIO
-        using var minioClient = new HttpClient();
-        using var content = new ByteArrayContent(jpegBytes);
-        content.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
-        var putRes = await minioClient.PutAsync(sessionDto.UploadUrl, content);
-        Assert.True(putRes.IsSuccessStatusCode);
-
-        // Gửi 2 request Complete đồng thời
-        using var client1 = factory.CreateClient();
-        MediaServiceTestFactory.SetUserToken(client1, userId);
-
-        using var client2 = factory.CreateClient();
-        MediaServiceTestFactory.SetUserToken(client2, userId);
-
-        var task1 = client1.PostAsync($"/api/v1/media/uploads/{sessionDto.UploadId}/complete", null);
-        var task2 = client2.PostAsync($"/api/v1/media/uploads/{sessionDto.UploadId}/complete", null);
-
-        var responses = await Task.WhenAll(task1, task2);
-
-        Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
-    }
-
-    [Fact]
-    public async Task InitializeUpload_WhenSameRequestArrivesConcurrently_ShouldReturnOneSession()
+    public async Task MultipartUpload_SameKeyConcurrentRequestsCreateOneMedia()
     {
         using var factory = new MediaServiceTestFactory();
         using var firstClient = factory.CreateClient();
         using var secondClient = factory.CreateClient();
         string userId = $"user-{Guid.NewGuid():N}";
-        string idempotencyKey = Guid.NewGuid().ToString("N");
-        MediaServiceTestFactory.SetUserToken(firstClient, userId);
-        MediaServiceTestFactory.SetUserToken(secondClient, userId);
-        firstClient.DefaultRequestHeaders.Add("Idempotency-Key", idempotencyKey);
-        secondClient.DefaultRequestHeaders.Add("Idempotency-Key", idempotencyKey);
-        var request = new InitializeUploadRequest("equipment-image", "eq-concurrent", "image.jpg", "image/jpeg", 1024);
+        string key = Guid.NewGuid().ToString("N");
+        foreach (HttpClient client in new[] { firstClient, secondClient })
+        {
+            MediaServiceTestFactory.SetUserToken(client, userId);
+            client.DefaultRequestHeaders.Add("Idempotency-Key", key);
+        }
 
-        var responses = await Task.WhenAll(
-            firstClient.PostAsJsonAsync("/api/v1/media/uploads", request),
-            secondClient.PostAsJsonAsync("/api/v1/media/uploads", request));
+        using var firstForm = Form(ValidJpeg(), "eq-concurrent");
+        using var secondForm = Form(ValidJpeg(), "eq-concurrent");
+        var results = await Task.WhenAll(
+            firstClient.PostAsync("/api/v1/media/uploads", firstForm),
+            secondClient.PostAsync("/api/v1/media/uploads", secondForm));
+        Assert.All(results, result => Assert.Contains(result.StatusCode,
+            new[] { HttpStatusCode.OK, HttpStatusCode.Conflict }));
 
-        Assert.All(responses, response => Assert.Equal(HttpStatusCode.OK, response.StatusCode));
-        var sessions = await Task.WhenAll(responses.Select(response => response.Content.ReadFromJsonAsync<UploadSessionDto>()));
-        var firstSession = Assert.IsType<UploadSessionDto>(sessions[0]);
-        var secondSession = Assert.IsType<UploadSessionDto>(sessions[1]);
-        Assert.Equal(firstSession.MediaId, secondSession.MediaId);
-        Assert.Equal(firstSession.UploadId, secondSession.UploadId);
+        using var replayForm = Form(ValidJpeg(), "eq-concurrent");
+        var replayResponse = await firstClient.PostAsync("/api/v1/media/uploads", replayForm);
+        Assert.Equal(HttpStatusCode.OK, replayResponse.StatusCode);
+        var replayed = await replayResponse.Content.ReadFromJsonAsync<MediaCompletedDto>();
+        Assert.NotNull(replayed);
+        using IServiceScope scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MediaDbContext>();
+        Assert.Equal(1, await db.MediaUploadSessions.CountAsync(s => s.CallerIdentity == userId && s.IdempotencyKey == key));
+        Assert.Equal(1, await db.MediaAssets.CountAsync(a => a.Id == replayed.MediaId));
+    }
+
+    private static async Task<byte[]> ReadAllAsync(Stream stream)
+    {
+        using var memory = new MemoryStream();
+        await stream.CopyToAsync(memory);
+        return memory.ToArray();
     }
 }

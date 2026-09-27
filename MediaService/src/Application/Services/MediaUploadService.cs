@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -20,6 +21,7 @@ public partial class MediaUploadService : IMediaUploadService
     private readonly IMediaAssetRepository _assetRepository;
     private readonly IMediaCleanupRepository _cleanupRepository;
     private readonly IObjectStorageService _objectStorageService;
+    private readonly IMediaAccessService _accessService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<MediaUploadService> _logger;
     private readonly TimeSpan _sessionLifetime;
@@ -29,6 +31,7 @@ public partial class MediaUploadService : IMediaUploadService
         IMediaAssetRepository assetRepository,
         IMediaCleanupRepository cleanupRepository,
         IObjectStorageService objectStorageService,
+        IMediaAccessService accessService,
         IUnitOfWork unitOfWork,
         IOptions<UploadSettings> settings,
         ILogger<MediaUploadService> logger)
@@ -37,293 +40,257 @@ public partial class MediaUploadService : IMediaUploadService
         _assetRepository = assetRepository ?? throw new ArgumentNullException(nameof(assetRepository));
         _cleanupRepository = cleanupRepository ?? throw new ArgumentNullException(nameof(cleanupRepository));
         _objectStorageService = objectStorageService ?? throw new ArgumentNullException(nameof(objectStorageService));
+        _accessService = accessService ?? throw new ArgumentNullException(nameof(accessService));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _sessionLifetime = TimeSpan.FromMinutes(settings?.Value.SessionLifetimeMinutes
             ?? throw new ArgumentNullException(nameof(settings)));
     }
 
-    public async Task<Result<UploadSessionDto>> InitializeUploadAsync(
+    public async Task<Result<MediaCompletedDto>> UploadAsync(
         string authenticatedUserId,
-        string idempotencyKey,
-        InitializeUploadRequest request,
+        string? idempotencyKey,
+        UploadMediaRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-
         if (string.IsNullOrWhiteSpace(authenticatedUserId))
         {
-            return Result.Failure<UploadSessionDto>(
+            return Result.Failure<MediaCompletedDto>(
                 Error.Unauthorized("UnauthorizedUser", "Yêu cầu phải được xác thực từ một người dùng hợp lệ."));
         }
 
-        if (string.IsNullOrWhiteSpace(idempotencyKey))
+        if (idempotencyKey?.Trim().Length > 200)
         {
-            return Result.Failure<UploadSessionDto>(
-                Error.Validation("MissingIdempotencyKey", "Idempotency-Key không được để trống."));
-        }
-
-        if (idempotencyKey.Trim().Length > 200)
-        {
-            return Result.Failure<UploadSessionDto>(
+            return Result.Failure<MediaCompletedDto>(
                 Error.Validation("InvalidIdempotencyKey", "Idempotency-Key không được vượt quá 200 ký tự."));
         }
 
-        if (string.IsNullOrWhiteSpace(request.Purpose))
+        MediaPurposePolicy? policy = MediaPurposePolicy.GetPolicy(request.Purpose);
+        if (policy is null)
         {
-            return Result.Failure<UploadSessionDto>(
-                Error.Validation("MissingPurpose", "Mục đích sử dụng (purpose) không được để trống."));
+            return Result.Failure<MediaCompletedDto>(
+                Error.Validation("UnsupportedPurpose", "Mục đích sử dụng không được hỗ trợ."));
         }
 
-        var policy = MediaPurposePolicy.GetPolicy(request.Purpose);
-        if (policy == null)
+        if (string.IsNullOrWhiteSpace(request.OwnerEntityId) || request.OwnerEntityId.Trim().Length > 100 ||
+            string.IsNullOrWhiteSpace(request.FileName) || request.FileName.Length > 1024 ||
+            string.IsNullOrWhiteSpace(request.ContentType) || request.ContentType.Length > 100 ||
+            request.Content is null)
         {
-            return Result.Failure<UploadSessionDto>(
-                Error.Validation("UnsupportedPurpose", $"Mục đích sử dụng '{request.Purpose}' chưa được cấu hình hoặc không được hỗ trợ."));
-        }
-
-        if (string.IsNullOrWhiteSpace(request.OwnerEntityId) || request.OwnerEntityId.Trim().Length > 100)
-        {
-            return Result.Failure<UploadSessionDto>(
-                Error.Validation("MissingOwnerEntityId", "ID đối tượng nghiệp vụ dự kiến (ownerEntityId) không được để trống."));
-        }
-
-        if (string.IsNullOrWhiteSpace(request.FileName) || request.FileName.Length > 1024)
-        {
-            return Result.Failure<UploadSessionDto>(
-                Error.Validation("MissingFileName", "Tên tệp không được để trống."));
-        }
-
-        if (string.IsNullOrWhiteSpace(request.ContentType) || request.ContentType.Length > 100)
-        {
-            return Result.Failure<UploadSessionDto>(
-                Error.Validation("MissingContentType", "Loại nội dung (contentType) không được để trống."));
-        }
-
-        if (request.SizeBytes <= 0)
-        {
-            return Result.Failure<UploadSessionDto>(
-                Error.Validation("InvalidFileSize", "Dung lượng tệp phải lớn hơn 0."));
-        }
-
-        if (!policy.IsContentTypeAllowed(request.ContentType))
-        {
-            return Result.Failure<UploadSessionDto>(
-                Error.Validation("UnsupportedContentType", "Định dạng tệp không được hỗ trợ cho mục đích này."));
+            return Result.Failure<MediaCompletedDto>(
+                Error.Validation("InvalidUploadInput", "Thông tin file hoặc đối tượng liên kết không hợp lệ."));
         }
 
         if (!policy.IsSizeAllowed(request.SizeBytes))
         {
-            return Result.Failure<UploadSessionDto>(
-                Error.Validation("FileSizeExceeded", "Dung lượng tệp vượt quá giới hạn cho phép."));
+            return Result.Failure<MediaCompletedDto>(
+                Error.Validation("FileSizeExceeded", "Dung lượng tệp không hợp lệ hoặc vượt giới hạn cho phép."));
+        }
+
+        if (!policy.IsContentTypeAllowed(request.ContentType))
+        {
+            return Result.Failure<MediaCompletedDto>(
+                Error.Validation("UnsupportedContentType", "Định dạng tệp không được hỗ trợ cho mục đích này."));
         }
 
         if (request.Sha256Checksum is { Length: > 0 } checksum &&
             (checksum.Trim().Length != 64 || !checksum.Trim().All(Uri.IsHexDigit)))
         {
-            return Result.Failure<UploadSessionDto>(
+            return Result.Failure<MediaCompletedDto>(
                 Error.Validation("InvalidChecksum", "Checksum SHA-256 phải gồm 64 ký tự hex."));
         }
 
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        string caller = authenticatedUserId.Trim();
-        string key = idempotencyKey.Trim();
-
-        string payloadHash = ComputePayloadHash(request);
-
-        // 1. Kiểm tra Idempotency cho cặp (caller, idempotencyKey)
-        var existingSession = await _sessionRepository.FindByCallerAndIdempotencyKeyAsync(caller, key, cancellationToken);
-        if (existingSession != null)
-        {
-            return await ResumeExistingSessionAsync(existingSession, payloadHash, now, cancellationToken);
-        }
-
-        // 2. Khởi tạo MediaAsset và MediaUploadSession
-        // service sở hữu và loại đối tượng được xác định từ cấu hình purpose, không nhận từ client
-        string sanitizedFileName = FileNameSanitizer.Sanitize(request.FileName);
-        Guid mediaId = Guid.NewGuid();
-        Guid uploadId = Guid.NewGuid();
-        DateTimeOffset sessionExpiresAtUtc = now.Add(_sessionLifetime);
-        string tempStorageKey = $"temp/uploads/{uploadId:N}/{Guid.NewGuid():N}.tmp";
-
-        var mediaAsset = new MediaAsset
-        {
-            Id = mediaId,
-            OwnerService = policy.OwnerService,
-            OwnerEntityType = policy.OwnerEntityType,
-            OwnerEntityId = request.OwnerEntityId.Trim(),
-            Purpose = policy.Purpose,
-            Status = MediaStatus.PendingUpload,
-            Visibility = MediaVisibility.Private,
-            OriginalFileName = sanitizedFileName,
-            DeclaredContentType = request.ContentType.Trim().ToLowerInvariant(),
-            DeclaredSizeBytes = request.SizeBytes,
-            DeclaredChecksumSha256 = string.IsNullOrWhiteSpace(request.Sha256Checksum) ? null : request.Sha256Checksum.Trim().ToLowerInvariant(),
-            CreatedByUserId = caller,
-            CreatedAtUtc = now,
-            Version = 1
-        };
-
-        var uploadSession = new MediaUploadSession
-        {
-            Id = uploadId,
-            MediaAssetId = mediaId,
-            CallerIdentity = caller,
-            IdempotencyKey = key,
-            RequestPayloadHash = payloadHash,
-            TemporaryStorageKey = tempStorageKey,
-            Status = UploadSessionStatus.Pending,
-            ExpiresAtUtc = sessionExpiresAtUtc,
-            CreatedAtUtc = now,
-            Version = 1
-        };
-
-        await _assetRepository.AddAsync(mediaAsset, cancellationToken);
-        await _sessionRepository.AddAsync(uploadSession, cancellationToken);
+        // Chỉ giữ tối đa giới hạn của purpose trong bộ nhớ. Hash nội dung giúp phát hiện
+        // cùng Idempotency-Key nhưng khác binary, kể cả khi tên và dung lượng giống nhau.
+        await using var buffer = new MemoryStream((int)request.SizeBytes);
+        byte[] chunk = ArrayPool<byte>.Shared.Rent(81920);
         try
         {
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            int read;
+            while ((read = await request.Content.ReadAsync(chunk.AsMemory(), cancellationToken)) > 0)
+            {
+                if (buffer.Length + read > policy.MaxSizeBytes)
+                {
+                    return Result.Failure<MediaCompletedDto>(
+                        Error.Validation("FileSizeExceeded", "Dung lượng tệp vượt giới hạn cho phép."));
+                }
+
+                await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken);
+            }
         }
-        catch (MediaWriteConflictException)
+        finally
         {
-            existingSession = await _sessionRepository.FindByCallerAndIdempotencyKeyAsync(caller, key, cancellationToken);
-            return existingSession is null
-                ? Result.Failure<UploadSessionDto>(Error.Conflict("UploadConflict", "Yêu cầu tải tệp đang được xử lý. Vui lòng thử lại."))
-                : await ResumeExistingSessionAsync(existingSession, payloadHash, now, cancellationToken);
+            ArrayPool<byte>.Shared.Return(chunk);
         }
 
-        // Sinh URL ký sẵn sau khi metadata được lưu; không kéo dài hạn phiên.
-        TimeSpan remaining = sessionExpiresAtUtc - DateTimeOffset.UtcNow;
-        if (remaining <= TimeSpan.Zero)
+        if (buffer.Length != request.SizeBytes)
         {
-            return Result.Failure<UploadSessionDto>(
-                Error.Expired("SessionExpired", "Phiên tải tệp đã hết hạn. Vui lòng tải lại tệp."));
+            return Result.Failure<MediaCompletedDto>(
+                Error.Validation("FileSizeMismatch", "Dung lượng file không khớp với nội dung nhận được."));
         }
 
-        var presigned = await _objectStorageService.GeneratePresignedUploadUrlAsync(
-            tempStorageKey,
-            mediaAsset.DeclaredContentType,
-            remaining,
-            cancellationToken);
+        string fileHash = Convert.ToHexString(SHA256.HashData(buffer.GetBuffer().AsSpan(0, (int)buffer.Length)))
+            .ToLowerInvariant();
+        string payloadHash = ComputePayloadHash(request, fileHash);
+        string caller = authenticatedUserId.Trim();
+        string key = string.IsNullOrWhiteSpace(idempotencyKey) ? Guid.NewGuid().ToString("N") : idempotencyKey.Trim();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        var responseDto = new UploadSessionDto(
-            mediaId,
-            uploadId,
-            presigned.UploadUrl,
-            presigned.Method,
-            presigned.RequiredHeaders,
-            sessionExpiresAtUtc);
+        MediaUploadSession? session = await _sessionRepository.FindByCallerAndIdempotencyKeyAsync(
+            caller, key, cancellationToken);
+        if (session is not null)
+        {
+            if (!string.Equals(session.RequestPayloadHash, payloadHash, StringComparison.Ordinal))
+            {
+                return Result.Failure<MediaCompletedDto>(
+                    Error.Conflict("IdempotencyConflict", "Idempotency-Key đã dùng cho file hoặc thông tin khác."));
+            }
 
-        return Result.Success(responseDto);
+            if (session.Status == UploadSessionStatus.Completed)
+            {
+                MediaAsset? completed = session.MediaAsset ??
+                    await _assetRepository.GetByIdAsync(session.MediaAssetId, cancellationToken);
+                return completed is null
+                    ? Result.Failure<MediaCompletedDto>(Error.Failure("MissingMedia", "Không tìm thấy Media đã tải."))
+                    : await AddPreviewUrlAsync(caller, ToCompletedDto(completed), cancellationToken);
+            }
+
+            if (session.Status != UploadSessionStatus.Pending || now >= session.ExpiresAtUtc)
+            {
+                return Result.Failure<MediaCompletedDto>(
+                    Error.Conflict("UploadNotRetryable", "Lần tải trước đã hết hạn hoặc bị từ chối. Hãy dùng Idempotency-Key mới."));
+            }
+        }
+        else
+        {
+            Guid mediaId = Guid.NewGuid();
+            Guid uploadId = Guid.NewGuid();
+            MediaAsset asset = new()
+            {
+                Id = mediaId,
+                OwnerService = policy.OwnerService,
+                OwnerEntityType = policy.OwnerEntityType,
+                OwnerEntityId = request.OwnerEntityId.Trim(),
+                Purpose = policy.Purpose,
+                Status = MediaStatus.PendingUpload,
+                Visibility = MediaVisibility.Private,
+                OriginalFileName = FileNameSanitizer.Sanitize(request.FileName),
+                DeclaredContentType = request.ContentType.Trim().ToLowerInvariant(),
+                DeclaredSizeBytes = request.SizeBytes,
+                DeclaredChecksumSha256 = string.IsNullOrWhiteSpace(request.Sha256Checksum)
+                    ? null : request.Sha256Checksum.Trim().ToLowerInvariant(),
+                CreatedByUserId = caller,
+                CreatedAtUtc = now
+            };
+            session = new MediaUploadSession
+            {
+                Id = uploadId,
+                MediaAssetId = mediaId,
+                CallerIdentity = caller,
+                IdempotencyKey = key,
+                RequestPayloadHash = payloadHash,
+                TemporaryStorageKey = $"temp/uploads/{uploadId:N}/{Guid.NewGuid():N}.tmp",
+                Status = UploadSessionStatus.Pending,
+                ExpiresAtUtc = now.Add(_sessionLifetime),
+                CreatedAtUtc = now,
+                MediaAsset = asset
+            };
+
+            await _assetRepository.AddAsync(asset, cancellationToken);
+            await _sessionRepository.AddAsync(session, cancellationToken);
+            try
+            {
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+            catch (MediaWriteConflictException)
+            {
+                return Result.Failure<MediaCompletedDto>(
+                    Error.Conflict("UploadInProgress", "Yêu cầu tải tệp đang được xử lý. Vui lòng thử lại."));
+            }
+        }
+
+        buffer.Position = 0;
+        try
+        {
+            await _objectStorageService.PutObjectAsync(
+                session.TemporaryStorageKey, buffer, buffer.Length,
+                request.ContentType.Trim().ToLowerInvariant(), cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            LogUploadFailure(_logger, exception.GetType().Name, session.Id);
+            return Result.Failure<MediaCompletedDto>(
+                Error.Failure("StorageUnavailable", "Không thể tải file lên hệ thống. Vui lòng thử lại."));
+        }
+
+        Result<MediaCompletedDto> finalized = await FinalizeStoredUploadAsync(caller, session.Id, cancellationToken);
+        return finalized.IsFailure
+            ? finalized
+            : await AddPreviewUrlAsync(caller, finalized.Value, cancellationToken);
     }
 
-    public async Task<Result<MediaVerificationDto>> VerifyMediaAsync(
-        string authenticatedServiceName,
-        Guid mediaId,
-        CancellationToken cancellationToken = default)
+    private async Task<Result<MediaCompletedDto>> AddPreviewUrlAsync(
+        string caller, MediaCompletedDto completed, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(authenticatedServiceName))
+        if (!string.Equals(completed.Status, MediaStatus.Ready.ToString(), StringComparison.Ordinal))
         {
-            return Result.Failure<MediaVerificationDto>(
-                Error.Unauthorized("UnauthorizedService", "Yêu cầu phải được xác thực từ một service hợp lệ."));
+            return Result.Success(completed);
         }
 
-        if (mediaId == Guid.Empty)
+        try
         {
-            return Result.Failure<MediaVerificationDto>(
-                Error.Validation("InvalidMediaId", "Mã media (mediaId) không hợp lệ."));
+            Result<MediaReadUrlDto> preview = await _accessService.CreateUploaderPreviewUrlAsync(
+                caller, completed.MediaId, cancellationToken);
+            if (preview.IsSuccess)
+            {
+                return Result.Success(completed with
+                {
+                    PreviewUrl = preview.Value.Url,
+                    PreviewUrlExpiresAtUtc = preview.Value.ExpiresAtUtc
+                });
+            }
+
+            LogPreviewFailure(_logger, completed.MediaId, preview.Error.Code);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            LogPreviewFailure(_logger, completed.MediaId, exception.GetType().Name);
         }
 
-        var asset = await _assetRepository.GetByIdAsync(mediaId, cancellationToken);
-        if (asset == null)
-        {
-            return Result.Failure<MediaVerificationDto>(
-                Error.NotFound("MediaNotFound", "Không tìm thấy thông tin Media."));
-        }
-
-        if (!string.Equals(asset.OwnerService, authenticatedServiceName, StringComparison.Ordinal))
-        {
-            return Result.Failure<MediaVerificationDto>(
-                Error.NotFound("MediaNotFound", "Không tìm thấy thông tin Media."));
-        }
-
-        if (asset.Status != MediaStatus.Ready)
-        {
-            return Result.Failure<MediaVerificationDto>(
-                Error.Conflict("MediaNotReady", "Media chưa sẵn sàng để sử dụng."));
-        }
-
-        var dto = new MediaVerificationDto(
-            asset.Id,
-            asset.Status.ToString(),
-            asset.OwnerService,
-            asset.OwnerEntityType,
-            asset.OwnerEntityId,
-            asset.Purpose,
-            asset.CreatedByUserId,
-            asset.OriginalFileName,
-            asset.ActualContentType ?? asset.DeclaredContentType,
-            asset.ActualSizeBytes ?? asset.DeclaredSizeBytes,
-            asset.CreatedAtUtc);
-
-        return Result.Success(dto);
+        // File đã Ready; lỗi ký URL không được biến upload thành lỗi để client gửi lại file.
+        return Result.Success(completed);
     }
 
-    private async Task<Result<UploadSessionDto>> ResumeExistingSessionAsync(
-        MediaUploadSession session,
-        string payloadHash,
-        DateTimeOffset now,
-        CancellationToken cancellationToken)
-    {
-        if (!string.Equals(session.RequestPayloadHash, payloadHash, StringComparison.Ordinal))
-        {
-            return Result.Failure<UploadSessionDto>(
-                Error.Conflict("IdempotencyConflict", "Yêu cầu tải tệp bị xung đột."));
-        }
+    private static MediaCompletedDto ToCompletedDto(MediaAsset asset) => new(
+        asset.Id, asset.Status.ToString(), asset.OriginalFileName,
+        asset.ActualContentType ?? asset.DeclaredContentType,
+        asset.ActualSizeBytes ?? asset.DeclaredSizeBytes);
 
-        if (session.Status == UploadSessionStatus.Completed)
-        {
-            return Result.Success(new UploadSessionDto(
-                session.MediaAssetId, session.Id, null, null,
-                new Dictionary<string, string>(), session.ExpiresAtUtc, "Completed"));
-        }
-
-        if (session.Status == UploadSessionStatus.Rejected)
-        {
-            return Result.Failure<UploadSessionDto>(
-                Error.Unprocessable("FileRejected", "Tệp không hợp lệ hoặc không đáp ứng yêu cầu."));
-        }
-
-        TimeSpan remaining = session.ExpiresAtUtc - now;
-        if (session.Status == UploadSessionStatus.Expired || remaining <= TimeSpan.Zero)
-        {
-            return Result.Failure<UploadSessionDto>(
-                Error.Expired("SessionExpired", "Phiên tải tệp đã hết hạn. Vui lòng tải lại tệp."));
-        }
-
-        var presigned = await _objectStorageService.GeneratePresignedUploadUrlAsync(
-            session.TemporaryStorageKey,
-            session.MediaAsset!.DeclaredContentType,
-            remaining,
-            cancellationToken);
-
-        return Result.Success(new UploadSessionDto(
-            session.MediaAssetId, session.Id, presigned.UploadUrl,
-            presigned.Method, presigned.RequiredHeaders, session.ExpiresAtUtc));
-    }
-
-    private static string ComputePayloadHash(InitializeUploadRequest request)
+    private static string ComputePayloadHash(UploadMediaRequest request, string fileHash)
     {
         string raw = JsonSerializer.Serialize(new object?[]
         {
-            request.Purpose?.Trim().ToLowerInvariant(),
-            request.OwnerEntityId?.Trim(),
-            request.FileName?.Trim(),
-            request.ContentType?.Trim().ToLowerInvariant(),
-            request.SizeBytes,
-            request.Sha256Checksum?.Trim().ToLowerInvariant()
+            request.Purpose?.Trim().ToLowerInvariant(), request.OwnerEntityId?.Trim(),
+            request.FileName?.Trim(), request.ContentType?.Trim().ToLowerInvariant(),
+            request.SizeBytes, request.Sha256Checksum?.Trim().ToLowerInvariant(), fileHash
         });
-        byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
-        return Convert.ToHexString(bytes).ToLowerInvariant();
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw))).ToLowerInvariant();
     }
+
+    [LoggerMessage(EventId = 2, Level = LogLevel.Warning,
+        Message = "Failed to store upload for session {SessionId}: {ErrorType}")]
+    private static partial void LogUploadFailure(ILogger logger, string errorType, Guid sessionId);
+
+    [LoggerMessage(EventId = 3, Level = LogLevel.Warning,
+        Message = "Could not create upload preview URL for media {MediaId}: {ErrorCode}")]
+    private static partial void LogPreviewFailure(ILogger logger, Guid mediaId, string errorCode);
 }

@@ -28,16 +28,20 @@ public class MediaServiceTestFactory : WebApplicationFactory<Program>
     public static void SetUserToken(HttpClient client, string userId) =>
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken(userId));
 
-    public static void SetServiceToken(HttpClient client) =>
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken(CatalogServiceId, true));
+    public static void SetServiceToken(HttpClient client, params string[] scopes) =>
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            CreateToken(CatalogServiceId, true, scopes.Length == 0 ? ["media.verify"] : scopes));
 
-    private static string CreateToken(string subject, bool isService = false)
+    private static string CreateToken(string subject, bool isService = false, string[]? scopes = null)
     {
         var claims = new List<Claim> { new("sub", subject) };
         if (isService)
         {
             claims.Add(new Claim("u", "svc"));
-            claims.Add(new Claim("s", "media.verify"));
+            foreach (string scope in scopes ?? ["media.verify"])
+            {
+                claims.Add(new Claim("s", scope));
+            }
         }
 
         var token = new JwtSecurityToken(
@@ -52,6 +56,7 @@ public class MediaServiceTestFactory : WebApplicationFactory<Program>
     public IPostgreSqlHealthChecker? PostgreSqlHealthCheckerOverride { get; set; }
     public IMinioClient? MinioClientOverride { get; set; }
     public Dprental.MediaService.Application.IServices.IMediaUploadService? MediaUploadServiceOverride { get; set; }
+    public Dprental.MediaService.Application.IServices.IMediaAccessService? MediaAccessServiceOverride { get; set; }
     public Dictionary<string, string?> ConfigurationOverrides { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -102,6 +107,12 @@ public class MediaServiceTestFactory : WebApplicationFactory<Program>
             {
                 services.RemoveAll<Dprental.MediaService.Application.IServices.IMediaUploadService>();
                 services.AddSingleton(MediaUploadServiceOverride);
+            }
+
+            if (MediaAccessServiceOverride != null)
+            {
+                services.RemoveAll<Dprental.MediaService.Application.IServices.IMediaAccessService>();
+                services.AddSingleton(MediaAccessServiceOverride);
             }
         });
     }

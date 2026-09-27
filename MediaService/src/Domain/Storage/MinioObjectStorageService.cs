@@ -21,28 +21,67 @@ public class MinioObjectStorageService : IObjectStorageService
         _bucket = string.IsNullOrWhiteSpace(bucket) ? throw new ArgumentException("Bucket không được để trống.", nameof(bucket)) : bucket;
     }
 
-    public async Task<PresignedUploadUrlResult> GeneratePresignedUploadUrlAsync(
+    public async Task PutObjectAsync(
+        string objectKey,
+        Stream content,
+        long sizeBytes,
+        string contentType,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(objectKey);
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentType);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sizeBytes);
+
+        var args = new PutObjectArgs()
+            .WithBucket(_bucket)
+            .WithObject(objectKey)
+            .WithStreamData(content)
+            .WithObjectSize(sizeBytes)
+            .WithContentType(contentType);
+
+        await _internalClient.PutObjectAsync(args, cancellationToken);
+    }
+
+    public async Task<string> GeneratePresignedReadUrlAsync(
         string objectKey,
         string contentType,
+        string fileName,
+        bool download,
         TimeSpan expiry,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(objectKey);
-
-        var args = new PresignedPutObjectArgs()
-            .WithBucket(_bucket)
-            .WithObject(objectKey)
-            .WithExpiry((int)expiry.TotalSeconds);
-
-        string url = await _presignClient.PresignedPutObjectAsync(args);
-
-        var requiredHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(contentType))
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+        if (expiry.TotalSeconds is < 1 or > 900)
         {
-            requiredHeaders["Content-Type"] = contentType;
+            throw new ArgumentOutOfRangeException(nameof(expiry));
         }
 
-        return new PresignedUploadUrlResult(url, "PUT", requiredHeaders);
+        cancellationToken.ThrowIfCancellationRequested();
+        string safeFileName = new(fileName
+            .Where(c => !char.IsControl(c) && c != '"' && c != '\\')
+            .Take(255).ToArray());
+        string asciiFileName = new(safeFileName
+            .Select(c => c is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9' or '.' or '-' or '_' or ' '
+                ? c : '_')
+            .ToArray());
+        string disposition = $"{(download ? "attachment" : "inline")}; filename=\"{asciiFileName}\"; filename*=UTF-8''{Uri.EscapeDataString(safeFileName)}";
+
+        var args = new PresignedGetObjectArgs()
+            .WithBucket(_bucket)
+            .WithObject(objectKey)
+            .WithExpiry((int)expiry.TotalSeconds)
+            .WithHeaders(new Dictionary<string, string>
+            {
+                ["response-content-type"] = contentType,
+                ["response-content-disposition"] = disposition
+            });
+
+        string url = await _presignClient.PresignedGetObjectAsync(args);
+        cancellationToken.ThrowIfCancellationRequested();
+        return url;
     }
 
     public async Task<ObjectMetadataResult?> GetObjectMetadataAsync(string objectKey, CancellationToken cancellationToken = default)

@@ -4,32 +4,16 @@ using Dprental.MediaService.Common;
 namespace Dprental.MediaService.Application.IServices;
 
 /// <summary>
-/// Service xử lý toàn bộ logic nghiệp vụ tải tệp media: khởi tạo phiên upload, hoàn tất kiểm tra, và xác minh nội bộ.
+/// Service nhận file và chỉ trả MediaId sau khi file đã được xác minh.
 /// </summary>
 public interface IMediaUploadService
 {
     /// <summary>
-    /// Client dùng user token để khởi tạo phiên tải tệp trực tiếp lên MinIO.
+    /// Upload file trong một request; phiên nội bộ chỉ phục vụ idempotency và dọn dẹp.
     /// </summary>
-    Task<Result<UploadSessionDto>> InitializeUploadAsync(
+    Task<Result<MediaCompletedDto>> UploadAsync(
         string authenticatedUserId,
-        string idempotencyKey,
-        InitializeUploadRequest request,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Client xác nhận đã hoàn tất upload binary, MediaService tiến hành kiểm tra object thực tế và chuyển trạng thái Ready.
-    /// </summary>
-    Task<Result<MediaCompletedDto>> CompleteUploadAsync(
-        string authenticatedUserId,
-        Guid uploadId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// API nội bộ để Business Service kiểm tra trạng thái Ready, purpose, ownerEntityId, và người upload trước khi lưu tham chiếu.
-    /// </summary>
-    Task<Result<MediaVerificationDto>> VerifyMediaAsync(
-        string authenticatedServiceName,
-        Guid mediaId,
+        string? idempotencyKey,
+        UploadMediaRequest request,
         CancellationToken cancellationToken = default);
 }
