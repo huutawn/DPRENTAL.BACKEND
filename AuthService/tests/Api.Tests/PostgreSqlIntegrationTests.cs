@@ -572,6 +572,52 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         Assert.Equal(stored.Status == OrganizationStatus.Active ? adminAId : adminBId, stored.ReviewedByUserId);
     }
 
+    [Fact]
+    public async Task PostgreSql_PagedSearchTranslatesForAllRepositories()
+    {
+        await using AuthDbContext db = CreateDbContext();
+        string suffix = Guid.NewGuid().ToString("N");
+        User user = new()
+        {
+            Id = Guid.NewGuid(),
+            Email = $"search-{suffix}@example.com",
+            FullName = $"Search {suffix}",
+            PasswordHash = "hash"
+        };
+        Role role = new() { Id = Guid.NewGuid(), Name = $"SearchRole{suffix}", Scope = RoleScope.Organization };
+        Organization organization = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = $"Search Org {suffix}",
+            Slug = $"search-org-{suffix}",
+            Status = OrganizationStatus.Active
+        };
+        db.OrganizationMemberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(),
+            User = user,
+            Organization = organization,
+            Role = role,
+            Status = MembershipStatus.Active
+        });
+        await db.SaveChangesAsync();
+
+        string term = suffix[..12];
+        PageRequest request = new(Search: $" {term.ToUpperInvariant()} ");
+        PagedResult<Organization> all = await new EfOrganizationRepository(db).GetAllAsync(request);
+        PagedResult<Organization> scoped = await new EfOrganizationRepository(db).GetUserOrganizationsAsync(user.Id, request);
+        PagedResult<OrganizationMembership> members = await new EfOrganizationMembershipRepository(db).GetMembersAsync(organization.Id, request);
+        var (users, userCount) = await new EfUserRepository(db).GetUsersPagedAsync(0, 20, request.GetSearchTerm());
+
+        Assert.Equal(organization.Id, Assert.Single(all.Items).Id);
+        Assert.Equal(1, all.TotalCount);
+        Assert.Equal(organization.Id, Assert.Single(scoped.Items).Id);
+        Assert.Equal(user.Id, Assert.Single(members.Items).UserId);
+        Assert.Equal(1, members.TotalCount);
+        Assert.Equal(user.Id, Assert.Single(users).Id);
+        Assert.Equal(1, userCount);
+    }
+
     private sealed class DummyAccessTokenIssuer : IAccessTokenIssuer
     {
         public IssuedAccessToken Issue(AccessTokenRequest request) =>

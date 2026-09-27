@@ -85,6 +85,7 @@ public sealed class OrganizationsController(
     /// <summary>
     /// Lấy danh sách organization có phân trang mà người gọi được phép xem.
     /// Platform truyền <c>status=Pending</c> để lấy hàng chờ duyệt (cũ nhất trước).
+    /// <c>search</c> tìm theo tên hoặc slug.
     /// </summary>
     [HttpGet]
     [ProducesResponseType<PagedResult<OrganizationResponse>>(StatusCodes.Status200OK)]
@@ -182,7 +183,7 @@ public sealed class OrganizationsController(
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
 
-    /// <summary>Lấy danh sách thành viên của organization theo trang.</summary>
+    /// <summary>Lấy danh sách thành viên của organization theo trang; search tìm theo tên, email hoặc vai trò.</summary>
     [HttpGet("{id:guid}/members")]
     [ProducesResponseType<PagedResult<OrganizationMemberResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
