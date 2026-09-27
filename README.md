@@ -48,6 +48,7 @@ AuthService sử dụng Central Package Management (CPM) để quản lý toàn 
 ## Kiểm tra trước khi push
 
 Mỗi developer cần cài hook một lần cho mỗi clone. Hook fetch `origin/auth/develop`, chặn push nếu branch hiện tại chưa chứa commit mới nhất của branch này, sau đó build và chạy toàn bộ test của `AuthService.sln` ở cấu hình Release.
+Máy chạy test cần Docker đang hoạt động; các test PostgreSQL dùng chung container `authservice-pg-test` trên cổng 5435 và tự khởi động container khi cần.
 
 Linux/macOS:
 
