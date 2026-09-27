@@ -40,6 +40,11 @@ public class MediaCleanupItem
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
     /// <summary>
+    /// Không xóa khóa tạm trước khi URL PUT đã hết hạn; URL còn hạn có thể ghi lại object.
+    /// </summary>
+    public DateTimeOffset EligibleAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>
     /// Thời điểm tác vụ được xử lý hoàn tất hoặc dừng retry.
     /// </summary>
     public DateTimeOffset? ProcessedAtUtc { get; set; }

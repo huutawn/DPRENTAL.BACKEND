@@ -1,15 +1,18 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Dprental.MediaService.Application.DTOs;
+using Dprental.MediaService.Application.Policies;
 using Dprental.MediaService.Application.Services;
 using Dprental.MediaService.Common;
 using Dprental.MediaService.Common.Enums;
 using Dprental.MediaService.Domain.Entities;
 using Dprental.MediaService.Domain.IRepositories;
 using Dprental.MediaService.Domain.IStorage;
-using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Dprental.MediaService.Api.Tests;
@@ -31,7 +34,17 @@ public class MediaUploadServiceTests
             _assetRepo,
             _cleanupRepo,
             _storageService,
-            _unitOfWork);
+            _unitOfWork,
+            Microsoft.Extensions.Options.Options.Create(new UploadSettings()),
+            NullLogger<MediaUploadService>.Instance);
+    }
+
+    private void ConfigureStoredObject(byte[] bytes)
+    {
+        _storageService.GetObjectMetadataAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new ObjectMetadataResult(bytes.Length, "image/jpeg", null));
+        _storageService.GetObjectStreamAsync(Arg.Is<string>(key => key.StartsWith("media/", StringComparison.Ordinal)), Arg.Any<CancellationToken>())
+            .Returns(_ => new MemoryStream(bytes));
     }
 
     [Fact]
@@ -129,7 +142,7 @@ public class MediaUploadServiceTests
             .Returns(existingSession);
 
         _storageService.GeneratePresignedUploadUrlAsync(existingSession.TemporaryStorageKey, "image/jpeg", Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-            .Returns(new PresignedUploadUrlResult("http://storage/upload", "PUT", new Dictionary<string, string>(), DateTimeOffset.UtcNow.AddMinutes(10)));
+            .Returns(new PresignedUploadUrlResult("http://storage/upload", "PUT", new Dictionary<string, string>()));
 
         var result = await _sut.InitializeUploadAsync("user-1", "key-1", request);
 
@@ -167,7 +180,7 @@ public class MediaUploadServiceTests
     public async Task InitializeUpload_WhenValid_ShouldCreateAssetAndSessionWithPresignedUrl()
     {
         _storageService.GeneratePresignedUploadUrlAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-            .Returns(new PresignedUploadUrlResult("http://storage/signed-put", "PUT", new Dictionary<string, string> { ["Content-Type"] = "image/jpeg" }, DateTimeOffset.UtcNow.AddMinutes(15)));
+            .Returns(new PresignedUploadUrlResult("http://storage/signed-put", "PUT", new Dictionary<string, string> { ["Content-Type"] = "image/jpeg" }));
 
         var request = new InitializeUploadRequest("equipment-image", "eq-100", "excavator.jpg", "image/jpeg", 2048);
         var result = await _sut.InitializeUploadAsync("user-1", "new-key", request);
@@ -250,7 +263,7 @@ public class MediaUploadServiceTests
         Assert.Equal(asset.Id, result.Value.MediaId);
         Assert.Equal("Ready", result.Value.Status);
         Assert.Equal("excavator.jpg", result.Value.OriginalFileName);
-        await _storageService.DidNotReceive().MoveObjectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _storageService.DidNotReceive().CopyObjectAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -291,7 +304,6 @@ public class MediaUploadServiceTests
             }
         };
         _sessionRepo.GetByIdAsync(session.Id, Arg.Any<CancellationToken>()).Returns(session);
-        _storageService.ObjectExistsAsync("temp/missing.tmp", Arg.Any<CancellationToken>()).Returns(false);
 
         var result = await _sut.CompleteUploadAsync("user-1", session.Id);
 
@@ -324,11 +336,8 @@ public class MediaUploadServiceTests
         };
 
         _sessionRepo.GetByIdAsync(session.Id, Arg.Any<CancellationToken>()).Returns(session);
-        _storageService.ObjectExistsAsync(session.TemporaryStorageKey, Arg.Any<CancellationToken>()).Returns(true);
-
         byte[] fakeBytes = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
-        _storageService.GetObjectStreamAsync(session.TemporaryStorageKey, Arg.Any<CancellationToken>())
-            .Returns(new MemoryStream(fakeBytes));
+        ConfigureStoredObject(fakeBytes);
 
         var result = await _sut.CompleteUploadAsync("user-1", session.Id);
 
@@ -336,7 +345,7 @@ public class MediaUploadServiceTests
         Assert.Equal(ErrorType.Unprocessable, result.Error!.Type);
         Assert.Equal(MediaStatus.Rejected, asset.Status);
         Assert.Equal(UploadSessionStatus.Rejected, session.Status);
-        await _cleanupRepo.Received(1).AddAsync(Arg.Any<MediaCleanupItem>(), Arg.Any<CancellationToken>());
+        await _cleanupRepo.Received(2).AddAsync(Arg.Any<MediaCleanupItem>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -362,11 +371,8 @@ public class MediaUploadServiceTests
         };
 
         _sessionRepo.GetByIdAsync(session.Id, Arg.Any<CancellationToken>()).Returns(session);
-        _storageService.ObjectExistsAsync(session.TemporaryStorageKey, Arg.Any<CancellationToken>()).Returns(true);
-
         byte[] jpegBytes = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46];
-        _storageService.GetObjectStreamAsync(session.TemporaryStorageKey, Arg.Any<CancellationToken>())
-            .Returns(new MemoryStream(jpegBytes));
+        ConfigureStoredObject(jpegBytes);
 
         var result = await _sut.CompleteUploadAsync("user-1", session.Id);
 
@@ -376,7 +382,7 @@ public class MediaUploadServiceTests
     }
 
     [Fact]
-    public async Task CompleteUpload_WhenValid_ShouldMoveObjectAndSetReady()
+    public async Task CompleteUpload_WhenValid_ShouldCopyObjectAndSetReady()
     {
         byte[] jpegBytes = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x00, 0x01];
         string sha256 = Convert.ToHexString(SHA256.HashData(jpegBytes)).ToLowerInvariant();
@@ -402,9 +408,7 @@ public class MediaUploadServiceTests
         };
 
         _sessionRepo.GetByIdAsync(session.Id, Arg.Any<CancellationToken>()).Returns(session);
-        _storageService.ObjectExistsAsync(session.TemporaryStorageKey, Arg.Any<CancellationToken>()).Returns(true);
-        _storageService.GetObjectStreamAsync(session.TemporaryStorageKey, Arg.Any<CancellationToken>())
-            .Returns(new MemoryStream(jpegBytes));
+        ConfigureStoredObject(jpegBytes);
 
         var result = await _sut.CompleteUploadAsync("user-1", session.Id);
 
@@ -420,9 +424,40 @@ public class MediaUploadServiceTests
         Assert.NotNull(asset.StorageKey);
         Assert.StartsWith("media/", asset.StorageKey);
 
-        await _storageService.Received(1).MoveObjectAsync(session.TemporaryStorageKey, asset.StorageKey, Arg.Any<CancellationToken>());
+        await _storageService.Received(1).CopyObjectAsync(session.TemporaryStorageKey, asset.StorageKey, Arg.Any<CancellationToken>());
         await _assetRepo.Received(1).UpdateAsync(asset, Arg.Any<CancellationToken>());
         await _sessionRepo.Received(1).UpdateAsync(session, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CompleteUpload_WhenCopiedObjectCannotBeRead_ShouldRemoveTheCopy()
+    {
+        var asset = new MediaAsset
+        {
+            Id = Guid.NewGuid(),
+            Status = MediaStatus.PendingUpload,
+            Purpose = "equipment-image"
+        };
+        var session = new MediaUploadSession
+        {
+            Id = Guid.NewGuid(),
+            CallerIdentity = "user-1",
+            Status = UploadSessionStatus.Pending,
+            ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(5),
+            TemporaryStorageKey = "temp/read-failure.jpg",
+            MediaAsset = asset
+        };
+        _sessionRepo.GetByIdAsync(session.Id, Arg.Any<CancellationToken>()).Returns(session);
+        _storageService.GetObjectMetadataAsync(session.TemporaryStorageKey, Arg.Any<CancellationToken>())
+            .Returns(new ObjectMetadataResult(10, "image/jpeg", null));
+        _storageService.GetObjectMetadataAsync(Arg.Is<string>(key => key.StartsWith("media/", StringComparison.Ordinal)), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new IOException("Storage read failed"));
+
+        await Assert.ThrowsAsync<IOException>(() => _sut.CompleteUploadAsync("user-1", session.Id));
+
+        await _storageService.Received(1).DeleteObjectAsync(
+            Arg.Is<string>(key => key.StartsWith("media/", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
+        await _storageService.DidNotReceive().DeleteObjectAsync(session.TemporaryStorageKey, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -464,15 +499,12 @@ public class MediaUploadServiceTests
             MediaAsset = completedAsset
         };
 
-        _sessionRepo.GetByIdAsync(session.Id, Arg.Any<CancellationToken>())
-            .Returns(session, completedSession);
-
-        _storageService.ObjectExistsAsync(session.TemporaryStorageKey, Arg.Any<CancellationToken>()).Returns(true);
-        _storageService.GetObjectStreamAsync(session.TemporaryStorageKey, Arg.Any<CancellationToken>())
-            .Returns(new MemoryStream(jpegBytes));
+        _sessionRepo.GetByIdAsync(session.Id, Arg.Any<CancellationToken>()).Returns(session);
+        _sessionRepo.GetByIdUntrackedAsync(session.Id, Arg.Any<CancellationToken>()).Returns(completedSession);
+        ConfigureStoredObject(jpegBytes);
 
         _unitOfWork.SaveChangesAsync(Arg.Any<CancellationToken>())
-            .ThrowsAsync(new DbUpdateConcurrencyException("Concurrency conflict"));
+            .ThrowsAsync(new MediaWriteConflictException("Concurrency conflict", new InvalidOperationException("test")));
 
         var result = await _sut.CompleteUploadAsync("user-1", session.Id);
 
@@ -535,9 +567,38 @@ public class MediaUploadServiceTests
         Assert.Equal(1250340, result.Value.SizeBytes);
     }
 
+    [Fact]
+    public async Task VerifyMedia_WhenServiceDoesNotOwnAsset_ShouldNotRevealIt()
+    {
+        Guid mediaId = Guid.NewGuid();
+        _assetRepo.GetByIdAsync(mediaId, Arg.Any<CancellationToken>())
+            .Returns(new MediaAsset { Id = mediaId, Status = MediaStatus.Ready, OwnerService = "CatalogService" });
+
+        var result = await _sut.VerifyMediaAsync("OrganizationService", mediaId);
+
+        Assert.Equal(ErrorType.NotFound, result.Error.Type);
+    }
+
+    [Fact]
+    public async Task VerifyMedia_WhenPending_ShouldNotReturnMetadata()
+    {
+        Guid mediaId = Guid.NewGuid();
+        _assetRepo.GetByIdAsync(mediaId, Arg.Any<CancellationToken>())
+            .Returns(new MediaAsset { Id = mediaId, Status = MediaStatus.PendingUpload, OwnerService = "CatalogService" });
+
+        var result = await _sut.VerifyMediaAsync("CatalogService", mediaId);
+
+        Assert.Equal("MediaNotReady", result.Error.Code);
+    }
+
     private static string ComputeHash(InitializeUploadRequest request)
     {
-        string raw = $"{request.Purpose?.Trim()}|{request.OwnerEntityId?.Trim()}|{request.FileName?.Trim()}|{request.ContentType?.Trim().ToLowerInvariant()}|{request.SizeBytes}|{request.Sha256Checksum?.Trim().ToLowerInvariant()}";
+        string raw = JsonSerializer.Serialize(new object?[]
+        {
+            request.Purpose?.Trim().ToLowerInvariant(), request.OwnerEntityId?.Trim(),
+            request.FileName?.Trim(), request.ContentType?.Trim().ToLowerInvariant(),
+            request.SizeBytes, request.Sha256Checksum?.Trim().ToLowerInvariant()
+        });
         byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }

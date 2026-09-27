@@ -28,7 +28,9 @@ MediaService sử dụng 2 nhóm cấu hình bắt buộc:
    - `ObjectStorage:UseSsl` *(tùy chọn)*: Giá trị boolean (`true`/`false`). Nếu không thiết lập, hệ thống tự động suy diễn dựa trên scheme của `Endpoint`.
    - `ObjectStorage:BrowserEndpoint` *(tùy chọn)*: Địa chỉ truy cập MinIO từ trình duyệt / client bên ngoài (ví dụ: `http://127.0.0.1:9000` hoặc domain CDN/gateway). Dùng để sinh presigned PUT URL. Nếu không cấu hình, tự động dùng `Endpoint`.
    - `ObjectStorage:AllowedOrigins` *(tùy chọn)*: Mảng danh sách origin được phép gọi CORS khi upload từ trình duyệt.
-   - `ObjectStorage:UploadUrlExpiryMinutes` *(tùy chọn)*: Thời hạn hiệu lực của URL upload ký sẵn tính theo phút (mặc định 15 phút, giới hạn 1 - 120 phút).
+   - `ObjectStorage:UploadUrlExpiryMinutes` *(tùy chọn)*: Thời hạn phiên và URL upload ký sẵn tính theo phút (mặc định 15 phút, giới hạn 1 - 120 phút).
+   - `Jwt:Issuer`, `Jwt:Audience`, `Jwt:JwksUri`: Thông tin xác thực JWT RS256 từ AuthService. Không có khóa ký JWT mặc định trong MediaService.
+   - `Jwt:ServicePrincipals`: Ánh xạ `sub` (GUID service principal) sang tên service sở hữu; token service cần scope `media.verify`.
 ### Cơ chế Startup Validation
 Khi dịch vụ khởi động, extension `ValidateRequiredConfiguration()` và `ObjectStorageOptionsValidator` (thông qua `ValidateOnStart()`) sẽ được kích hoạt:
 - Nếu thiếu hoặc để trống `ConnectionStrings:Postgres`: Ứng dụng lập tức dừng và ném ngoại lệ `InvalidOperationException` thông báo rõ ràng: `"Thiếu cấu hình bắt buộc: ConnectionStrings:Postgres."`
@@ -138,7 +140,7 @@ Kết quả mong đợi: `HTTP/1.1 200 OK` kèm nội dung `Healthy`.
 Tất cả các endpoint nghiệp vụ media đều sử dụng tiền tố chuẩn hóa `/api/v1/media`:
 
 ### 6.1. Khởi tạo phiên upload (`POST /api/v1/media/uploads`)
-- **Xác thực**: Yêu cầu User Access Token (Bearer) hoặc header `X-User-Id`.
+- **Xác thực**: Yêu cầu User Access Token (Bearer) hợp lệ; header tự khai báo danh tính không được tin cậy.
 - **Header bắt buộc**: `Idempotency-Key` (chống trùng lặp yêu cầu).
 - **Body**:
 ```json
@@ -169,6 +171,7 @@ Tất cả các endpoint nghiệp vụ media đều sử dụng tiền tố chu�
   "expiresAtUtc": "2026-09-25T10:15:00Z"
 }
 ```
+Retry cùng key sau khi Complete trả `status: "Completed"`, `uploadUrl: null` và cùng `mediaId`/`uploadId`; phiên hết hạn hoặc bị từ chối không được cấp URL mới.
 
 ### 6.2. Hoàn tất phiên upload (`POST /api/v1/media/uploads/{uploadId}/complete`)
 - **Xác thực**: Yêu cầu User Access Token của chính người dùng đã tạo phiên upload.
@@ -192,7 +195,7 @@ Tất cả các endpoint nghiệp vụ media đều sử dụng tiền tố chu�
 ```
 
 ### 6.3. Xác minh MediaId nội bộ (`GET /api/v1/media/{mediaId}/verify`)
-- **Xác thực**: Yêu cầu Service Token (chủ thể là service, ví dụ CatalogService, RentalService) hoặc header `X-Service-Name`.
+- **Xác thực**: Yêu cầu Service Token AuthService (`u=svc`, scope `media.verify`), có `sub` nằm trong `Jwt:ServicePrincipals`. MediaService chỉ trả Media Ready thuộc service đó.
 - **Mục đích**: Cho phép Business Service kiểm tra trạng thái Media trước khi lưu tham chiếu vào entity nghiệp vụ.
 - **Kết quả**: HTTP 200 OK
 ```json

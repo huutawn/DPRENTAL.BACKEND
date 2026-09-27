@@ -7,8 +7,8 @@ public sealed class JwtOptions
 {
     public const string SectionName = "Jwt";
 
-    public string? Issuer { get; set; }
-    public string? Audience { get; set; }
-    public string? SecretKey { get; set; }
-    public string? Authority { get; set; }
+    public string Issuer { get; set; } = string.Empty;
+    public string Audience { get; set; } = string.Empty;
+    public string JwksUri { get; set; } = string.Empty;
+    public Dictionary<string, string> ServicePrincipals { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

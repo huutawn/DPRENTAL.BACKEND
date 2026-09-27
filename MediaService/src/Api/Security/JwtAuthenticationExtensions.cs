@@ -1,72 +1,51 @@
-using System.Text;
+using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Dprental.MediaService.Api.Security;
 
 public static class JwtAuthenticationExtensions
 {
-    // Khóa bí mật mặc định dùng cho môi trường Development / Testing nếu chưa cấu hình secret ngoài
-    public const string DefaultDevelopmentSecretKey = "media_service_default_jwt_secret_key_minimum_32_bytes_long!!";
-
-    public static IServiceCollection AddMediaAuthentication(
-        this IServiceCollection services,
-        IConfiguration configuration)
+    public static IServiceCollection AddMediaAuthentication(this IServiceCollection services, IConfiguration configuration)
     {
-        var jwtSection = configuration.GetSection(JwtOptions.SectionName);
-        var jwtOptions = jwtSection.Get<JwtOptions>() ?? new JwtOptions();
+        services.AddOptions<JwtOptions>()
+            .Bind(configuration.GetSection(JwtOptions.SectionName))
+            .Validate(o => !string.IsNullOrWhiteSpace(o.Issuer)
+                && !string.IsNullOrWhiteSpace(o.Audience)
+                && Uri.TryCreate(o.JwksUri, UriKind.Absolute, out Uri? uri)
+                && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
+                && o.ServicePrincipals.All(p => Guid.TryParse(p.Key, out _) && !string.IsNullOrWhiteSpace(p.Value)),
+                "Jwt:Issuer, Jwt:Audience and an absolute HTTP(S) Jwt:JwksUri are required.")
+            .ValidateOnStart();
 
-        services.Configure<JwtOptions>(jwtSection);
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUserContext, CurrentUserContext>();
+        services.AddHttpClient<JwksConfigurationManager>(client => client.Timeout = TimeSpan.FromSeconds(5));
 
-        services.AddAuthentication(options =>
-        {
-            options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-            options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-        })
-        .AddJwtBearer(options =>
-        {
-            string secretKey = !string.IsNullOrWhiteSpace(jwtOptions.SecretKey)
-                ? jwtOptions.SecretKey
-                : DefaultDevelopmentSecretKey;
-
-            var keyBytes = Encoding.UTF8.GetBytes(secretKey);
-
-            options.RequireHttpsMetadata = false;
-            options.SaveToken = true;
-            options.TokenValidationParameters = new TokenValidationParameters
+        services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
+        services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+            .Configure<JwksConfigurationManager, IOptions<JwtOptions>>((bearer, keys, jwt) =>
             {
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
-                ValidateIssuer = !string.IsNullOrWhiteSpace(jwtOptions.Issuer),
-                ValidIssuer = jwtOptions.Issuer,
-                ValidateAudience = !string.IsNullOrWhiteSpace(jwtOptions.Audience),
-                ValidAudience = jwtOptions.Audience,
-                ValidateLifetime = true,
-                ClockSkew = TimeSpan.FromSeconds(30)
-            };
-
-            options.Events = new JwtBearerEvents
-            {
-                OnMessageReceived = context =>
+                bearer.MapInboundClaims = false;
+                bearer.ConfigurationManager = keys;
+                bearer.RefreshOnIssuerKeyNotFound = true;
+                bearer.TokenValidationParameters = new TokenValidationParameters
                 {
-                    if (string.IsNullOrWhiteSpace(context.Token) &&
-                        context.Request.Cookies.TryGetValue("accessToken", out string? cookieToken) &&
-                        !string.IsNullOrWhiteSpace(cookieToken))
-                    {
-                        context.Token = cookieToken;
-                    }
-
-                    return Task.CompletedTask;
-                }
-            };
-        });
-
+                    ValidateIssuer = true,
+                    ValidIssuer = jwt.Value.Issuer,
+                    ValidateAudience = true,
+                    ValidAudience = jwt.Value.Audience,
+                    ValidateIssuerSigningKey = true,
+                    ValidateLifetime = true,
+                    RequireSignedTokens = true,
+                    RequireExpirationTime = true,
+                    ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
+                    ClockSkew = TimeSpan.FromSeconds(30),
+                    NameClaimType = JwtRegisteredClaimNames.Sub
+                };
+            });
         services.AddAuthorization();
-
         return services;
     }
 }

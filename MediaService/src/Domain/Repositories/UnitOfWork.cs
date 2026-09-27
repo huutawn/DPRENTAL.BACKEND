@@ -1,4 +1,6 @@
 using Dprental.MediaService.Domain.IRepositories;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace Dprental.MediaService.Domain.Repositories;
 
@@ -13,6 +15,17 @@ public class UnitOfWork : IUnitOfWork
 
     public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        return await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            return await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new MediaWriteConflictException("Media state changed concurrently.", ex);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            throw new MediaWriteConflictException("Media idempotency key already exists.", ex);
+        }
     }
 }

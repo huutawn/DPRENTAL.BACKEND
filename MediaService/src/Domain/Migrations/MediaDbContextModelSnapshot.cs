@@ -132,6 +132,9 @@ namespace MediaService.Domain.Migrations
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset>("EligibleAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("LastError")
                         .HasColumnType("text");
 
@@ -160,7 +163,7 @@ namespace MediaService.Domain.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Status", "RetryCount");
+                    b.HasIndex("Status", "EligibleAtUtc");
 
                     b.ToTable("media_cleanup_items", "media");
                 });

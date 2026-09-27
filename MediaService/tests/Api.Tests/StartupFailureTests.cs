@@ -35,4 +35,18 @@ public class StartupFailureTests
 
         Assert.Contains(missingKey, exception.ToString(), StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("Jwt:Issuer")]
+    [InlineData("Jwt:Audience")]
+    [InlineData("Jwt:JwksUri")]
+    public void Startup_WhenJwtTrustSettingMissing_ShouldFailStartup(string missingKey)
+    {
+        using var factory = new MediaServiceTestFactory();
+        factory.ConfigurationOverrides[missingKey] = "";
+
+        var exception = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
+
+        Assert.Contains("Jwt:", exception.ToString(), StringComparison.Ordinal);
+    }
 }

@@ -23,7 +23,8 @@ public class MediaCleanupRepository : IMediaCleanupRepository
     public async Task<IReadOnlyList<MediaCleanupItem>> GetPendingItemsAsync(int limit, CancellationToken cancellationToken = default)
     {
         return await _context.MediaCleanupItems
-            .Where(c => c.Status == CleanupItemStatus.Pending || (c.Status == CleanupItemStatus.Failed && c.RetryCount < 3))
+            .Where(c => c.EligibleAtUtc <= DateTimeOffset.UtcNow &&
+                (c.Status == CleanupItemStatus.Pending || (c.Status == CleanupItemStatus.Failed && c.RetryCount < 3)))
             .OrderBy(c => c.CreatedAtUtc)
             .Take(limit)
             .ToListAsync(cancellationToken);

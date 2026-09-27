@@ -2,6 +2,7 @@ using Dprental.MediaService.Api.Security;
 using Dprental.MediaService.Application.DTOs;
 using Dprental.MediaService.Application.IServices;
 using Dprental.MediaService.Common;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,6 +13,7 @@ namespace Dprental.MediaService.Api.Controllers;
 /// Tất cả endpoint đều sử dụng tiền tố chuẩn hóa: /api/v1/media.
 /// </summary>
 [ApiController]
+[Authorize]
 [Route("api/v1/media")]
 public class MediaController : ControllerBase
 {
@@ -41,25 +43,9 @@ public class MediaController : ControllerBase
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (string.IsNullOrWhiteSpace(_userContext.UserId))
-        {
-            return Problem(
-                detail: "Yêu cầu phải được xác thực từ một người dùng hợp lệ.",
-                statusCode: StatusCodes.Status401Unauthorized,
-                title: "UnauthorizedUser");
-        }
-
-        if (string.IsNullOrWhiteSpace(idempotencyKey))
-        {
-            return Problem(
-                detail: "Tiêu đề Idempotency-Key là bắt buộc.",
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "MissingIdempotencyKey");
-        }
-
         var result = await _uploadService.InitializeUploadAsync(
-            _userContext.UserId,
-            idempotencyKey,
+            _userContext.UserId ?? string.Empty,
+            idempotencyKey ?? string.Empty,
             request,
             cancellationToken);
 
@@ -80,16 +66,8 @@ public class MediaController : ControllerBase
         [FromRoute] Guid uploadId,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_userContext.UserId))
-        {
-            return Problem(
-                detail: "Yêu cầu phải được xác thực từ một người dùng hợp lệ.",
-                statusCode: StatusCodes.Status401Unauthorized,
-                title: "UnauthorizedUser");
-        }
-
         var result = await _uploadService.CompleteUploadAsync(
-            _userContext.UserId,
+            _userContext.UserId ?? string.Empty,
             uploadId,
             cancellationToken);
 
@@ -109,16 +87,8 @@ public class MediaController : ControllerBase
         [FromRoute] Guid mediaId,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_userContext.ServiceName))
-        {
-            return Problem(
-                detail: "Yêu cầu phải được xác thực từ một service hợp lệ.",
-                statusCode: StatusCodes.Status401Unauthorized,
-                title: "UnauthorizedService");
-        }
-
         var result = await _uploadService.VerifyMediaAsync(
-            _userContext.ServiceName,
+            _userContext.ServiceName ?? string.Empty,
             mediaId,
             cancellationToken);
 

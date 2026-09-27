@@ -8,6 +8,7 @@ namespace Dprental.MediaService.Domain.IRepositories;
 public interface IMediaUploadSessionRepository
 {
     Task<MediaUploadSession?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<MediaUploadSession?> GetByIdUntrackedAsync(Guid id, CancellationToken cancellationToken = default);
     Task<MediaUploadSession?> FindByCallerAndIdempotencyKeyAsync(string callerIdentity, string idempotencyKey, CancellationToken cancellationToken = default);
     Task AddAsync(MediaUploadSession session, CancellationToken cancellationToken = default);
     Task UpdateAsync(MediaUploadSession session, CancellationToken cancellationToken = default);

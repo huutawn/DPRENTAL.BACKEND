@@ -23,7 +23,7 @@ public static partial class FileNameSanitizer
         }
 
         // Loại bỏ đường dẫn thư mục nếu có
-        string fileName = Path.GetFileName(rawFileName.Trim());
+        string fileName = Path.GetFileName(rawFileName.Trim().Replace('\\', '/'));
 
         // Loại bỏ các ký tự null byte và ký tự điều khiển
         fileName = new string(fileName.Where(c => !char.IsControl(c) && c != '\0').ToArray());

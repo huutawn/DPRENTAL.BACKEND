@@ -42,25 +42,7 @@ public class MinioObjectStorageService : IObjectStorageService
             requiredHeaders["Content-Type"] = contentType;
         }
 
-        DateTimeOffset expiresAtUtc = DateTimeOffset.UtcNow.Add(expiry);
-        return new PresignedUploadUrlResult(url, "PUT", requiredHeaders, expiresAtUtc);
-    }
-
-    public async Task<bool> ObjectExistsAsync(string objectKey, CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(objectKey);
-
-        try
-        {
-            var stat = await _internalClient.StatObjectAsync(
-                new StatObjectArgs().WithBucket(_bucket).WithObject(objectKey),
-                cancellationToken);
-            return stat != null && stat.Size >= 0;
-        }
-        catch (Exception ex) when (IsNotFound(ex))
-        {
-            return false;
-        }
+        return new PresignedUploadUrlResult(url, "PUT", requiredHeaders);
     }
 
     public async Task<ObjectMetadataResult?> GetObjectMetadataAsync(string objectKey, CancellationToken cancellationToken = default)
@@ -113,7 +95,7 @@ public class MinioObjectStorageService : IObjectStorageService
         }
     }
 
-    public async Task MoveObjectAsync(string sourceKey, string destinationKey, CancellationToken cancellationToken = default)
+    public async Task CopyObjectAsync(string sourceKey, string destinationKey, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceKey);
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationKey);
@@ -129,11 +111,6 @@ public class MinioObjectStorageService : IObjectStorageService
                 .WithCopyObjectSource(copySource),
             cancellationToken);
 
-        await _internalClient.RemoveObjectAsync(
-            new RemoveObjectArgs()
-                .WithBucket(_bucket)
-                .WithObject(sourceKey),
-            cancellationToken);
     }
 
     public async Task DeleteObjectAsync(string objectKey, CancellationToken cancellationToken = default)
@@ -159,10 +136,8 @@ public class MinioObjectStorageService : IObjectStorageService
         return ex switch
         {
             ObjectNotFoundException => true,
-            BucketNotFoundException => true,
             ErrorResponseException errorEx when errorEx.Response.Code is "NoSuchKey" or "NotFound" => true,
-            _ => ex.Message.Contains("NoSuchKey", StringComparison.OrdinalIgnoreCase) ||
-                 ex.Message.Contains("Not Found", StringComparison.OrdinalIgnoreCase)
+            _ => false
         };
     }
 }

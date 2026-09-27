@@ -6,8 +6,7 @@ namespace Dprental.MediaService.Domain.IStorage;
 public sealed record PresignedUploadUrlResult(
     string UploadUrl,
     string Method,
-    IReadOnlyDictionary<string, string> RequiredHeaders,
-    DateTimeOffset ExpiresAtUtc);
+    IReadOnlyDictionary<string, string> RequiredHeaders);
 
 /// <summary>
 /// Metadata cơ bản của object trong Object Storage.

@@ -17,7 +17,8 @@ public sealed record InitializeUploadRequest(
 public sealed record UploadSessionDto(
     Guid MediaId,
     Guid UploadId,
-    string UploadUrl,
-    string Method,
+    string? UploadUrl,
+    string? Method,
     IReadOnlyDictionary<string, string> RequiredHeaders,
-    DateTimeOffset ExpiresAtUtc);
+    DateTimeOffset ExpiresAtUtc,
+    string Status = "Pending");

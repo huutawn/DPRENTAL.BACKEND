@@ -65,7 +65,7 @@ Ví dụ:
 
 **AC9:** Cùng caller + cùng Idempotency-Key + cùng request phải trả cùng upload session; cùng key nhưng nội dung khác phải bị từ chối.
 
-**AC10:** Client không được nhìn thấy Bucket, ObjectKey hoặc storage credential nội bộ.
+**AC10:** Response metadata không chứa Bucket, ObjectKey hoặc storage secret. URL PUT ký sẵn ngắn hạn có thể chứa tên bucket, object key ngẫu nhiên và access-key ID theo giao thức S3; client không được dùng URL này làm tham chiếu nghiệp vụ.
 
 ## 1.5. Nguyên tắc hoạt động
 

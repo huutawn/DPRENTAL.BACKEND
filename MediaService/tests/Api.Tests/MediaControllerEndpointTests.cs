@@ -23,11 +23,36 @@ public class MediaControllerEndpointTests
     }
 
     [Fact]
+    public async Task InitializeUpload_WhenIdentityHeaderIsSpoofed_ShouldReturn401()
+    {
+        using var factory = new MediaServiceTestFactory();
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-User-Id", "attacker");
+
+        var response = await client.PostAsJsonAsync("/api/v1/media/uploads",
+            new InitializeUploadRequest("equipment-image", "eq-1", "file.jpg", "image/jpeg", 1000));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task VerifyMedia_WhenServiceHeaderIsSpoofed_ShouldReturn401()
+    {
+        using var factory = new MediaServiceTestFactory();
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Service-Name", "CatalogService");
+
+        var response = await client.GetAsync($"/api/v1/media/{Guid.NewGuid()}/verify");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task InitializeUpload_WhenAuthPresentButNoIdempotencyKey_ShouldReturn400()
     {
         using var factory = new MediaServiceTestFactory();
         using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-User-Id", "user-123");
+        MediaServiceTestFactory.SetUserToken(client, "user-123");
 
         var request = new InitializeUploadRequest("equipment-image", "eq-1", "file.jpg", "image/jpeg", 1000);
         var response = await client.PostAsJsonAsync("/api/v1/media/uploads", request);
@@ -56,7 +81,7 @@ public class MediaControllerEndpointTests
 
         using var factory = new MediaServiceTestFactory { MediaUploadServiceOverride = uploadService };
         using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-User-Id", "user-123");
+        MediaServiceTestFactory.SetUserToken(client, "user-123");
         client.DefaultRequestHeaders.Add("Idempotency-Key", "key-123");
 
         var request = new InitializeUploadRequest("equipment-image", "eq-1", "file.jpg", "image/jpeg", 1000);
@@ -97,7 +122,7 @@ public class MediaControllerEndpointTests
 
         using var factory = new MediaServiceTestFactory { MediaUploadServiceOverride = uploadService };
         using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-User-Id", "user-123");
+        MediaServiceTestFactory.SetUserToken(client, "user-123");
 
         var response = await client.PostAsync($"/api/v1/media/uploads/{uploadId}/complete", null);
 
@@ -142,7 +167,7 @@ public class MediaControllerEndpointTests
 
         using var factory = new MediaServiceTestFactory { MediaUploadServiceOverride = uploadService };
         using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Service-Name", "CatalogService");
+        MediaServiceTestFactory.SetServiceToken(client);
 
         var response = await client.GetAsync($"/api/v1/media/{mediaId}/verify");
 

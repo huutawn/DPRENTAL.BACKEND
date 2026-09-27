@@ -21,6 +21,13 @@ public class MediaUploadSessionRepository : IMediaUploadSessionRepository
             .FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
     }
 
+    public async Task<MediaUploadSession?> GetByIdUntrackedAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _context.MediaUploadSessions.AsNoTracking()
+            .Include(s => s.MediaAsset)
+            .FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
+    }
+
     public async Task<MediaUploadSession?> FindByCallerAndIdempotencyKeyAsync(
         string callerIdentity,
         string idempotencyKey,

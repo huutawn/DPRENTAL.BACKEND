@@ -33,6 +33,9 @@ public class MediaCleanupItemConfiguration : IEntityTypeConfiguration<MediaClean
         builder.Property(c => c.CreatedAtUtc)
             .IsRequired();
 
-        builder.HasIndex(c => new { c.Status, c.RetryCount });
+        builder.Property(c => c.EligibleAtUtc)
+            .IsRequired();
+
+        builder.HasIndex(c => new { c.Status, c.EligibleAtUtc });
     }
 }

@@ -15,11 +15,6 @@ public interface IObjectStorageService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Kiểm tra sự tồn tại của object trên storage.
-    /// </summary>
-    Task<bool> ObjectExistsAsync(string objectKey, CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Lấy metadata của object trên storage.
     /// </summary>
     Task<ObjectMetadataResult?> GetObjectMetadataAsync(string objectKey, CancellationToken cancellationToken = default);
@@ -32,7 +27,7 @@ public interface IObjectStorageService
     /// <summary>
     /// Sao chép/chuyển object từ khóa tạm sang khóa lưu trữ chính thức.
     /// </summary>
-    Task MoveObjectAsync(string sourceKey, string destinationKey, CancellationToken cancellationToken = default);
+    Task CopyObjectAsync(string sourceKey, string destinationKey, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Xóa object khỏi storage.
