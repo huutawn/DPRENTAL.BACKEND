@@ -34,4 +34,18 @@ public sealed class ObjectStorageOptions
     /// Tùy chọn bật/tắt kết nối SSL/TLS.
     /// </summary>
     public bool? UseSsl { get; set; }
+
+    /// <summary>
+    /// Endpoint trình duyệt truy cập được cho URL GET ký sẵn.
+    /// Nếu để trống, hệ thống sẽ sử dụng Endpoint nội bộ.
+    /// </summary>
+    public string? BrowserEndpoint { get; set; }
+
+    /// <summary>
+    /// Danh sách các Origin được phép gọi CORS khi upload từ trình duyệt.
+    /// </summary>
+    public string[] AllowedOrigins { get; set; } = [];
+
+    /// <summary>Thời hạn URL GET ký sẵn, tính bằng giây (mặc định 5 phút).</summary>
+    public int ReadUrlExpirySeconds { get; set; } = 300;
 }

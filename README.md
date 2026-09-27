@@ -1,16 +1,42 @@
 # MediaService
 
-Dịch vụ Media cho hệ sinh thái DPRENTAL, được xây dựng bằng .NET 10 theo kiến trúc phân lớp sạch (Clean Architecture) tương đồng với AuthService. Ở giai đoạn khởi tạo, dịch vụ cung cấp hạ tầng kết nối, kiểm tra tính sẵn sàng (Health Checks) với PostgreSQL và MinIO Object Storage, chưa triển khai API upload hay lưu trữ metadata media.
+Dịch vụ Media cho hệ sinh thái DPRENTAL, được xây dựng bằng .NET 10 theo kiến trúc phân lớp sạch (Clean Architecture) tương đồng với AuthService. Dịch vụ nhận file trong một request multipart, lưu trên MinIO, xác minh metadata trong PostgreSQL và cung cấp API nội bộ cho Business Service kiểm tra MediaId trước khi lưu tham chiếu.
+
+## Upload file trong một request
+
+1. **Client đã đăng nhập gọi `POST /api/v1/media/uploads`** bằng `multipart/form-data`. Form gồm `file`, `purpose`, `ownerEntityId` và `sha256Checksum` tùy chọn. Có thể gửi header `Idempotency-Key` để retry cùng file mà không tạo Media khác. Swagger UI cho phép chọn file trực tiếp.
+
+2. **MediaService xử lý file trong request đó**: xác định owner từ purpose, giới hạn dung lượng, ghi file vào MinIO, xác minh signature/MIME/checksum, rồi chuyển Media sang `Ready`. Response HTTP 200 gồm `mediaId`, metadata và `previewUrl` ký ngắn hạn để người upload xem file đã lưu. Nếu việc ký URL lỗi sau khi file đã lưu, `previewUrl` là null nhưng upload vẫn thành công.
+
+3. **Business Service gọi `GET /api/v1/media/{mediaId}/verify`** bằng service token để xác nhận MediaId đang `Ready`, đúng purpose, đối tượng và người upload trước khi lưu tham chiếu vào entity nghiệp vụ.
+
+Client không cần gọi MinIO trực tiếp hoặc gọi `/complete`. Bản ghi upload nội bộ vẫn phục vụ idempotency, retry và dọn dẹp request bị gián đoạn.
+
+## Lấy thông tin, xem và tải Media
+
+Business Service chỉ lưu `mediaId` trong entity. Khi trả entity, service kiểm tra quyền và có thể lấy metadata bằng `GET /api/v1/media/{mediaId}` (scope `media.read`). Metadata gồm tên file, MIME/dung lượng đã xác minh, purpose, status, visibility và thời điểm tạo; không chứa URL hay khóa lưu trữ.
+
+Để xem/tải file Private, Business Service xác nhận người dùng có quyền trên entity **và mediaId thực sự được entity tham chiếu**, rồi gọi `POST /api/v1/media/{mediaId}/access` bằng service token scope `media.read`:
+
+```json
+{ "action": "read", "ownerEntityType": "Equipment", "ownerEntityId": "equipment-123", "download": false }
+```
+
+MediaService trả `{ "mediaId": "...", "url": "...", "expiresAtUtc": "..." }`. Business Service chuyển URL này cho client ở thời điểm cần xem/tải; `download: true` yêu cầu Content-Disposition attachment. URL GET MinIO ký sẵn mặc định hết hạn sau 300 giây (`ObjectStorage:ReadUrlExpirySeconds`, cho phép 1–900 giây). Browser phải truy cập được `ObjectStorage:BrowserEndpoint` qua HTTPS trong môi trường triển khai. URL ký sẵn là quyền tạm thời: có thể chứa bucket, object key ngẫu nhiên và access-key ID theo giao thức S3; không lưu URL, không ghi vào log, không dùng nó làm khóa nghiệp vụ. Bucket luôn Private.
+
+Khi entity được công bố, Business Service gọi `PUT /api/v1/media/{mediaId}/visibility` bằng scope `media.publish`, gửi `visibility` (`public` hoặc `private`), `ownerEntityType` và `ownerEntityId`. Chỉ `equipment-image` và `organization-logo` có thể Public; `equipment-document` luôn Private. URL Public ổn định là `GET /api/v1/media/{mediaId}/content` (thêm `?download=true` nếu cần); MediaService kiểm tra trạng thái mỗi lần gọi rồi chuyển hướng tới URL MinIO ký ngắn hạn. Sau khi đổi về Private, URL Public này không cấp quyền mới; URL đã ký có thể còn hiệu lực cho đến khi hết hạn.
+
+Service token phải có claim `u=svc`, `sub` ánh xạ trong `Jwt:ServicePrincipals` và claim `s` đúng scope (`media.verify`, `media.read` hoặc `media.publish`). AuthService cần cấp các scope này cho service nghiệp vụ tương ứng. Hiện workspace chưa có CatalogService/OrganizationService để tích hợp phía Business Service. MVP upload hỗ trợ JPEG, PNG, WebP và PDF; video chưa được hỗ trợ.
 
 ## Cấu trúc Solution
 
 ```text
 MediaService/
   src/
-    Common/          # Kiểu dùng chung, tiện ích nền tảng (dạng khung)
-    Domain/          # Domain models, rules (dạng khung, không tạo entity/migration giả định)
-    Application/     # Use cases, interfaces (dạng khung, không tạo DTO/service giả định)
-    Api/             # HTTP endpoints (/health/live, /health/ready), DI composition root, Options
+    Common/          # Kết quả và trạng thái dùng giữa các lớp
+    Domain/          # Media entities, PostgreSQL, MinIO và migrations
+    Application/     # Upload, xác minh và dọn dẹp
+    Api/             # HTTP, JWT, cấu hình và DI
   tests/
     Api.Tests/       # Kiểm thử tích hợp và unit test
 Directory.Build.props
@@ -22,7 +48,7 @@ docs/                # Tài liệu kỹ thuật chi tiết
 scripts/             # Script tiện ích và Git hooks
 ```
 
-Hướng phụ thuộc chuẩn: `Api -> Application -> Domain -> Common`. Các project nghiệp vụ hiện tại được giữ ở dạng khung chuẩn chỉ và sẽ được mở rộng khi có use case nghiệp vụ cụ thể.
+Hướng phụ thuộc chuẩn: `Api -> Application -> Domain -> Common`.
 
 ## Quản lý NuGet tập trung (CPM)
 
@@ -46,6 +72,7 @@ Các cổng mặc định trên máy chủ (chỉ mở cho localhost `127.0.0.1`
 - MinIO API: `127.0.0.1:9000`
 - MinIO Web Console: `127.0.0.1:9001`
 - Bucket `dprental-media` được tự động tạo với quyền riêng tư (`private`).
+- `.env` cấu hình `MINIO_CORS_ALLOWED_ORIGINS` nếu trình duyệt cần đọc URL GET ký sẵn bằng `fetch` khác origin.
 
 > **Lưu ý quan trọng**: File `.env` chỉ cung cấp biến môi trường cho Docker Compose. Khi chạy API bằng `dotnet run`, bạn cần cấu hình credentials qua .NET User Secrets theo hướng dẫn bên dưới.
 
@@ -71,11 +98,25 @@ dotnet user-secrets set "ObjectStorage:SecretKey" "mediasecretpassword" \
   --project MediaService/src/Api/MediaService.Api.csproj
 ```
 
+MediaService xác minh JWT RS256 bằng JWKS của AuthService. Môi trường Development đã có issuer, audience và JWKS URI mẫu; chỉnh `Jwt:JwksUri` nếu AuthService chạy ở địa chỉ khác. API xác minh nội bộ chỉ chấp nhận service token có scope `media.verify` và `sub` được ánh xạ trong `Jwt:ServicePrincipals` (ví dụ cấu hình `Jwt:ServicePrincipals:<service-principal-guid>=CatalogService`). Header `X-User-Id` và `X-Service-Name` không cấp quyền truy cập.
+
+Trước khi chạy API trên cơ sở dữ liệu mới, áp dụng migration. Factory thiết kế chỉ đọc `ConnectionStrings__Postgres` từ môi trường; không lưu mật khẩu trong source:
+
+```bash
+set -a
+. ./.env
+set +a
+ConnectionStrings__Postgres="Host=127.0.0.1;Port=${POSTGRES_PORT};Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}" \
+  dotnet ef database update --project MediaService/src/Domain/MediaService.Domain.csproj
+```
+
 2. Khởi chạy API:
 
 ```bash
 dotnet run --project MediaService/src/Api/MediaService.Api.csproj
 ```
+
+Trong môi trường Development, mở `/swagger` trên địa chỉ mà API in ra khi khởi chạy. Chọn `POST /api/v1/media/uploads`, nhập user bearer token bằng nút **Authorize**, chọn file, nhập `purpose` và `ownerEntityId`, rồi bấm **Execute**. Response trả `mediaId` khi file đã `Ready`.
 
 3. Kiểm tra trạng thái sức khỏe:
 - Liveness probe: `GET http://localhost:5000/health/live` (hoặc cổng HTTP do ứng dụng lắng nghe)

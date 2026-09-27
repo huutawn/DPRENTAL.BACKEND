@@ -227,21 +227,21 @@ Không hồi sinh Media cũ.
 Trường hợp:
 
 ```text
-Create Upload Session
+MediaService ghi phiên upload nội bộ
 ↓
-User không upload
+Request bị gián đoạn trước khi xác minh xong
 ↓
 Session Expired
 ```
 
-### **f. Nguyên tắc object đã upload nhưng chưa Complete**
+### **f. Nguyên tắc object đã ghi nhưng chưa xác minh xong**
 
 Có thể xảy ra:
 
 ```text
-Browser PUT file thành công
+MediaService ghi object tạm
 ↓
-không gọi Complete
+Request bị gián đoạn trước khi cập nhật Ready
 ↓
 UploadSession Expired
 ```
@@ -408,7 +408,7 @@ Các trường hợp hệ thống có thể đưa Media vào cleanup gồm:
 | **STT** | **Trường hợp**                                     | **Hướng xử lý**                                   |
 |---------|----------------------------------------------------|---------------------------------------------------|
 | 1       | UploadSession hết hạn và không có file             | Đóng phiên upload và cleanup metadata theo policy |
-| 2       | File đã upload nhưng chưa Complete                 | Cleanup object sau thời gian an toàn              |
+| 2       | File đã ghi nhưng request chưa xác minh xong       | Cleanup object sau thời gian an toàn              |
 | 3       | Media bị rejected                                  | Không cho sử dụng, cleanup binary theo policy     |
 | 4       | Media ready nhưng business request bị hủy/thất bại | Xác định orphan trước khi cleanup                 |
 | 5       | Media đã deleted                                   | Physical delete sau retention                     |

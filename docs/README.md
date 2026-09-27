@@ -6,16 +6,10 @@ MediaService áp dụng mô hình phân lớp sạch (Clean Architecture) tươn
 
 | Dự án | Trách nhiệm | Không được chứa |
 | --- | --- | --- |
-| `Common` | Kiểu dữ liệu, hằng số, tiện ích nền tảng dùng chung trên toàn hệ thống | Logic nghiệp vụ, truy cập dữ liệu, HTTP controller |
-| `Domain` | Mô hình nghiệp vụ (Domain Entities, Value Objects), Domain Exceptions, Repository Interfaces | HTTP pipeline, ASP.NET Core framework, controller |
-| `Application` | Use Cases, DTOs, Application Services, Interfaces điều phối domain | Entity Framework DbContext, HTTP Controller, xử lý giao thức HTTP |
-| `Api` | Composition root, cấu hình DI, Endpoints, Middleware, Health Checks, Swagger | Logic nghiệp vụ cốt lõi, truy vấn cơ sở dữ liệu trực tiếp |
-
-### Nguyên tắc khởi tạo hiện tại
-Ở giai đoạn khởi tạo ban đầu:
-- Các project `Common`, `Domain`, `Application` được giữ ở dạng khung (skeleton) với assembly markers.
-- Không tạo entity, repository, DTO, migration hoặc service nghiệp vụ giả định trước khi có use case thực tế.
-- Các abstraction nghiệp vụ (như lưu trữ metadata, tạo upload token) sẽ chỉ được bổ sung khi có nghiệp vụ cụ thể.
+| `Common` | Kiểu dữ liệu, Enums (`MediaStatus`, `UploadSessionStatus`, ...), Result, Error dùng chung | Logic nghiệp vụ, truy cập dữ liệu, HTTP controller |
+| `Domain` | Entities, `IRepositories`, `Repositories`, `IStorage`, `Storage`, `Configurations`, `Migrations`, `MediaDbContext` | HTTP pipeline, ASP.NET Core framework, controller |
+| `Application` | DTOs, Policies (kiểm tra MIME, magic bytes, sanitize tên file), `IServices`, `Services` | Entity Framework DbContext, HTTP Controller, xử lý giao thức HTTP |
+| `Api` | `Controllers/MediaController`, Composition root, cấu hình DI, Security (JWT), Middleware, Health Checks | Logic nghiệp vụ cốt lõi, truy vấn cơ sở dữ liệu trực tiếp |
 
 ## 2. Quản lý cấu hình & Bảo mật
 
@@ -31,8 +25,12 @@ MediaService sử dụng 2 nhóm cấu hình bắt buộc:
    - `ObjectStorage:Bucket`: Tên bucket lưu trữ media (ví dụ: `dprental-media`).
    - `ObjectStorage:AccessKey`: Tên tài khoản hoặc Access Key truy cập MinIO.
    - `ObjectStorage:SecretKey`: Mật khẩu hoặc Secret Key tương ứng.
-   - `ObjectStorage:UseSsl` *(tùy chọn)*: Giá trị boolean (`true`/`false`). Nếu không thiết lập, hệ thống tự động suy diễn dựa trên scheme của `Endpoint` (`https://` => `true`, ngược lại `false`).
-
+   - `ObjectStorage:UseSsl` *(tùy chọn)*: Giá trị boolean (`true`/`false`). Nếu không thiết lập, hệ thống tự động suy diễn dựa trên scheme của `Endpoint`.
+   - `ObjectStorage:BrowserEndpoint` *(tùy chọn)*: Địa chỉ MinIO mà trình duyệt truy cập được để đọc URL GET ký sẵn. Nếu không cấu hình, dùng `Endpoint`.
+   - `ObjectStorage:AllowedOrigins` *(tùy chọn)*: Các origin được phép gọi MediaService qua CORS.
+   - `ObjectStorage:ReadUrlExpirySeconds` *(tùy chọn)*: Thời hạn URL đọc ký sẵn, mặc định 300 giây.
+   - `Jwt:Issuer`, `Jwt:Audience`, `Jwt:JwksUri`: Thông tin xác thực JWT RS256 từ AuthService. Không có khóa ký JWT mặc định trong MediaService.
+   - `Jwt:ServicePrincipals`: Ánh xạ `sub` (GUID service principal) sang tên service sở hữu; token service cần scope `media.verify`.
 ### Cơ chế Startup Validation
 Khi dịch vụ khởi động, extension `ValidateRequiredConfiguration()` và `ObjectStorageOptionsValidator` (thông qua `ValidateOnStart()`) sẽ được kích hoạt:
 - Nếu thiếu hoặc để trống `ConnectionStrings:Postgres`: Ứng dụng lập tức dừng và ném ngoại lệ `InvalidOperationException` thông báo rõ ràng: `"Thiếu cấu hình bắt buộc: ConnectionStrings:Postgres."`
@@ -136,3 +134,106 @@ Kết quả mong đợi: `HTTP/1.1 200 OK` kèm nội dung `Healthy`.
 - **Lỗi 2: Build hoặc Test thất bại**:
   - Khắc phục: Khắc phục lỗi biên dịch hoặc các bài kiểm thử bị hỏng, đảm bảo lệnh `dotnet build MediaService.sln --configuration Release` và `dotnet test MediaService.sln --configuration Release --no-build` vượt qua thành công.
 - **Lưu ý đối với lần push đầu tiên**: Nếu branch `origin/media/develop` chưa từng tồn tại trên remote, hook sẽ phát hiện qua `git ls-remote` và tự động cho phép bỏ qua kiểm tra ancestry mà vẫn đảm bảo quá trình build/test chạy đầy đủ.
+
+## 6. Hợp đồng API Upload Media & Xác minh
+
+Tất cả các endpoint nghiệp vụ media đều sử dụng tiền tố chuẩn hóa `/api/v1/media`:
+
+### 6.1. Tải file trực tiếp (`POST /api/v1/media/uploads`)
+- **Xác thực**: Yêu cầu User Access Token (Bearer) hợp lệ; header tự khai báo danh tính không được tin cậy.
+- **Header tùy chọn**: `Idempotency-Key` để gửi lại cùng request mà không tạo media khác.
+- **Body**: `multipart/form-data` gồm `file` (binary), `purpose`, `ownerEntityId`; `sha256Checksum` là tùy chọn. Tên, MIME và kích thước lấy từ phần `file`, không cần khai báo riêng.
+- **Quy tắc policy ban đầu**:
+  - `equipment-image` & `organization-logo`: nhận `image/jpeg`, `image/png`, `image/webp`, tối đa 10 MiB.
+  - `equipment-document`: nhận `application/pdf`, tối đa 20 MiB.
+  - Purpose khác: bị từ chối cho đến khi được cấu hình.
+  - `ownerService` và `ownerEntityType` được xác định từ cấu hình purpose, không nhận từ client.
+- **Kết quả**: HTTP 200 OK sau khi MediaService lưu file vào MinIO, xác minh và chuyển media sang `Ready`:
+```json
+{
+  "mediaId": "uuid",
+  "status": "Ready",
+  "originalFileName": "may-xuc.jpg",
+  "contentType": "image/jpeg",
+  "sizeBytes": 1250340,
+  "previewUrl": "https://storage.example/signed-read-url",
+  "previewUrlExpiresAtUtc": "2026-09-27T10:05:00Z"
+}
+```
+MediaService tự xác minh file signature, MIME và checksum nếu có. File không hợp lệ bị từ chối; object tạm được dọn qua worker. `previewUrl` chỉ dành cho người upload, hết hạn sau `ObjectStorage:ReadUrlExpirySeconds`; nếu ký URL lỗi sau khi file đã lưu, hai trường preview là null và `mediaId` vẫn sử dụng được. Retry cùng `Idempotency-Key` và cùng file trả cùng `mediaId` cùng một URL preview mới. Client không cần gọi MinIO hoặc endpoint `/complete`.
+
+### 6.2. Xác minh MediaId nội bộ (`GET /api/v1/media/{mediaId}/verify`)
+- **Xác thực**: Yêu cầu Service Token AuthService (`u=svc`, scope `media.verify`), có `sub` nằm trong `Jwt:ServicePrincipals`. MediaService chỉ trả Media Ready thuộc service đó.
+- **Mục đích**: Cho phép Business Service kiểm tra trạng thái Media trước khi lưu tham chiếu vào entity nghiệp vụ.
+- **Kết quả**: HTTP 200 OK
+```json
+{
+  "mediaId": "uuid",
+  "status": "Ready",
+  "ownerService": "CatalogService",
+  "ownerEntityType": "Equipment",
+  "ownerEntityId": "equipment-123",
+  "purpose": "equipment-image",
+  "uploadedByUserId": "user-456",
+  "originalFileName": "may-xuc.jpg",
+  "contentType": "image/jpeg",
+  "sizeBytes": 1250340,
+  "createdAtUtc": "2026-09-25T10:00:00Z"
+}
+```
+
+## 7. Hướng dẫn thiết lập tài khoản MinIO giới hạn quyền cho Môi trường Triển khai
+
+Trong môi trường sản xuất (Production), **tuyệt đối không sử dụng tài khoản Root (`MINIO_ROOT_USER`)** cho MediaService. Thay vào đó, tạo một Service Account với chính sách IAM tối thiểu (Least Privilege Principle) chỉ trên bucket `dprental-media`:
+
+### 7.1. Tạo IAM Policy giới hạn
+Tạo file policy `mediaservice-policy.json`:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "MediaBucketLocationAndList",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::dprental-media"
+      ]
+    },
+    {
+      "Sid": "MediaObjectOperations",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::dprental-media/*"
+      ]
+    }
+  ]
+}
+```
+
+### 7.2. Áp dụng Policy và Tạo Service Account bằng MinIO Client (`mc`)
+```bash
+# 1. Cấu hình alias kết nối tới MinIO Cluster
+mc alias set localminio http://127.0.0.1:9000 mediaadmin mediasecretpassword
+
+# 2. Tạo policy mediaservice-policy
+mc admin policy create localminio mediaservice-policy mediaservice-policy.json
+
+# 3. Tạo service account dành riêng cho MediaService với policy vừa tạo
+mc admin user svcacct add \
+  --access-key "mediaservice-app" \
+  --secret-key "strong-service-account-secret-key" \
+  --policy mediaservice-policy \
+  localminio mediaadmin
+```
+
+### 7.3. Cập nhật cấu hình dịch vụ MediaService
+Cung cấp AccessKey `mediaservice-app` và SecretKey `strong-service-account-secret-key` vào cấu hình `ObjectStorage:AccessKey` và `ObjectStorage:SecretKey` của MediaService. Tài khoản này chỉ có quyền thao tác trên bucket `dprental-media`, không có quyền quản trị cluster hay truy cập các bucket khác.

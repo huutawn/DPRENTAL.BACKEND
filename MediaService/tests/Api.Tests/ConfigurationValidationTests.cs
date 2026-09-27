@@ -103,4 +103,24 @@ public class ConfigurationValidationTests
 
         Assert.True(result.Succeeded);
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(901)]
+    public void ObjectStorageOptionsValidator_WhenReadUrlExpiryOutOfRange_ShouldFail(int seconds)
+    {
+        var options = new ObjectStorageOptions
+        {
+            Endpoint = "http://localhost:9000",
+            Bucket = "media",
+            AccessKey = "key",
+            SecretKey = "secret",
+            ReadUrlExpirySeconds = seconds
+        };
+
+        var result = new ObjectStorageOptionsValidator().Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, f => f.Contains("ReadUrlExpirySeconds", StringComparison.Ordinal));
+    }
 }
