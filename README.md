@@ -92,7 +92,7 @@ cp .env.example .env
 # MEDIA_POSTGRES_PASSWORD, MEDIA_MINIO_ROOT_PASSWORD và MEDIA_SERVICE_CLIENT_SECRET.
 docker compose up --build -d
 docker compose ps
-./AuthService/scripts/bootstrap-local-media-principal.sh
+./MediaService/scripts/bootstrap-local-media-principal.sh
 ```
 
 Stack tự build Gateway, AuthService và MediaService; khởi động PostgreSQL riêng cho từng service, MinIO private, Valkey và Kafka; tạo RSA key pair local và chạy migration trước khi nhận traffic. Script bootstrap chỉ tạo `CatalogService` local với ba scope Media trong database AuthService.
