@@ -213,7 +213,7 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         DateTime utcNow,
         CancellationToken cancellationToken)
     {
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        
         RefreshToken? currentToken = await dbContext.RefreshTokens
             .AsNoTracking()
             .Include(token => token.Session)
@@ -231,6 +231,8 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
             .SingleOrDefaultAsync(token => token.TokenHash == currentRefreshTokenHash, cancellationToken);
 
         if (currentToken is null) return null;
+
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
         if (currentToken.IsRevoked || currentToken.UsedAtUtc is not null || currentToken.RevokedAtUtc is not null)
         {

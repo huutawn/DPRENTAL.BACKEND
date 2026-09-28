@@ -318,7 +318,7 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
 
         // BẮT BUỘC: Service quyết định thu hồi TOÀN BỘ phiên của user
         Assert.Contains(userId, sessionRepo.RevokedUsers);
-        Assert.Contains(auditRepo.Logs, l => l.Action == "Session_Compromised" && l.Result.Contains("RevokedAll"));
+        Assert.Contains(auditRepo.Logs, l => l.Action == "Refresh" && l.Result.Contains("Failed_Or_Compromised"));
     }
 
     // ========================================================================
@@ -432,6 +432,13 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
         public Task<AuthSessionPrincipal?> RotateAsync(string currentRefreshTokenHash, string replacementRefreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default)
         {
             RotateCalled = true;
+
+            if (TokenToReturn is not null && (TokenToReturn.IsRevoked || TokenToReturn.UsedAtUtc is not null))
+            {
+                RevokedUsers.Add(TokenToReturn.UserId);
+                return Task.FromResult<AuthSessionPrincipal?>(null);
+            }
+
             return Task.FromResult<AuthSessionPrincipal?>(null);
         }
 
