@@ -209,11 +209,11 @@ public sealed class UserService(
             cancellationToken);
     }
 
-    public async Task<Result> RequestPasswordResetAsync(RequestPasswordResetRequest request, CancellationToken cancellationToken = default)
+    public async Task<Result<string?>> RequestPasswordResetAsync(RequestPasswordResetRequest request, string? testKey, CancellationToken cancellationToken = default)
     {
         if (!DtoValidator.TryValidate(request, out Error? validationError))
         {
-            return Result.Failure(validationError);
+            return Result.Failure<string?>(validationError);
         }
 
         return await ApplicationExecutor.ExecuteAsync(
@@ -228,13 +228,13 @@ public sealed class UserService(
                 if (user is null)
                 {
                     await LogAuditAsync(null, email, "Password_ResetRequest", "Success_NoUser", corrId, cancellationToken);
-                    return Result.Success();
+                    return Result.Success<string?>(null);
                 }
 
                 if (!user.IsActive)
                 {
                     await LogAuditAsync(user.Id, user.Id.ToString(), "Password_ResetRequest", "Failed_AccountDisabled", corrId, cancellationToken);
-                    return Result.Success();
+                    return Result.Success<string?>(null);
                 }
 
                 string rawToken = RefreshTokenUtility.Create();
@@ -252,7 +252,7 @@ public sealed class UserService(
                 await recoveryTokenRepository.AddAsync(recoveryToken, cancellationToken);
                 await LogAuditAsync(user.Id, user.Id.ToString(), "Password_ResetRequest", "Success", corrId, cancellationToken);
 
-                return Result.Success();
+                return Result.Success<string?>(IsAdminCreationKeyValid(testKey) ? rawToken : null);
             },
             logger,
             correlationIdProvider,
