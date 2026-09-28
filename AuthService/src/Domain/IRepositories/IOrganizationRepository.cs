@@ -24,8 +24,6 @@ public interface IOrganizationRepository
     /// </summary>
     Task<Organization?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default);
 
-    Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default);
-
     /// <summary>
     /// Tạo organization và membership ban đầu trong một transaction.
     /// Không chứa business validation — chỉ đảm bảo tính nguyên tử DB.

@@ -11,11 +11,11 @@ using Microsoft.Extensions.Logging;
 namespace Dprental.AuthService.Application.Services;
 
 /// <summary>
-/// Gán/thu hồi role trên user — cả role toàn cục (bảng UserRole) lẫn role theo Organization.
+/// Gán/thu hồi role toàn cục (bảng UserRole). Role phạm vi Organization bị từ chối: MVP chỉ có Owner,
+/// nếu cho đổi ở đây thì có thể hạ Owner duy nhất và để tổ chức không còn ai quản lý.
 /// </summary>
 public sealed class RoleAssignmentService(
     IRoleRepository roleRepository,
-    IOrganizationMembershipRepository membershipRepository,
     ICorrelationIdProvider correlationIdProvider,
     ILogger<RoleAssignmentService> logger) : IRoleAssignmentService
 {
@@ -49,24 +49,6 @@ public sealed class RoleAssignmentService(
                 if (guard.IsFailure)
                 {
                     return guard;
-                }
-
-                if (request.OrganizationId is Guid organizationId)
-                {
-                    OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, request.TargetUserId, cancellationToken);
-                    if (membership is null)
-                    {
-                        return Result.Failure(AuthErrors.Organization.MembershipNotFound);
-                    }
-
-                    if (membership.RoleId == request.RoleId)
-                    {
-                        return Result.Failure(AuthErrors.Role.AlreadyAssigned);
-                    }
-
-                    membership.RoleId = request.RoleId;
-                    bool orgUpdated = await membershipRepository.UpdateAsync(membership, cancellationToken);
-                    return orgUpdated ? Result.Success() : Result.Failure(AuthErrors.Role.AssignmentFailed);
                 }
 
                 if (await roleRepository.IsAssignedAsync(request.TargetUserId, request.RoleId, cancellationToken))
@@ -140,88 +122,25 @@ public sealed class RoleAssignmentService(
             return Result.Failure(AuthErrors.Role.RoleNotFound);
         }
 
-        if (role.Scope == RoleScope.Global)
+        if (role.Scope != RoleScope.Global)
         {
-            if (request.OrganizationId is not null)
-            {
-                return Result.Failure(AuthErrors.Role.InvalidScope);
-            }
-
-            IReadOnlyList<string> actorPermissions = await roleRepository.GetUserPermissionCodesAsync(actorUserId, cancellationToken);
-            string requiredPermission = isAssign
-                ? PermissionCode.IdentityRolesAssignGlobal
-                : PermissionCode.IdentityRolesRevokeGlobal;
-
-            if (!actorPermissions.Contains(requiredPermission, StringComparer.Ordinal))
-            {
-                return Result.Failure(AuthErrors.Role.InsufficientPermission);
-            }
-
-            IReadOnlyList<string> rolePermissions = await roleRepository.GetPermissionCodesAsync(request.RoleId, cancellationToken);
-            return rolePermissions.Except(actorPermissions, StringComparer.Ordinal).Any()
-                ? Result.Failure(AuthErrors.Role.InsufficientPermission)
-                : Result.Success();
+            return Result.Failure(AuthErrors.Role.InvalidScope);
         }
 
-        // role.Scope == RoleScope.Organization từ đây.
-        if (!isAssign)
+        IReadOnlyList<string> actorPermissions = await roleRepository.GetUserPermissionCodesAsync(actorUserId, cancellationToken);
+        string requiredPermission = isAssign
+            ? PermissionCode.IdentityRolesAssignGlobal
+            : PermissionCode.IdentityRolesRevokeGlobal;
+
+        if (!actorPermissions.Contains(requiredPermission, StringComparer.Ordinal))
         {
-            return request.OrganizationId is not null
-                ? Result.Failure(AuthErrors.Role.OrganizationRevokeNotSupported)
-                : Result.Failure(AuthErrors.Role.InvalidScope);
+            return Result.Failure(AuthErrors.Role.InsufficientPermission);
         }
 
-        if (request.OrganizationId is not Guid organizationId)
-        {
-            return Result.Failure(AuthErrors.Role.OrganizationRequired);
-        }
-
-        OrganizationMembership? targetMembership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, request.TargetUserId, cancellationToken);
-        if (targetMembership is null || targetMembership.Status != MembershipStatus.Active)
-        {
-            return Result.Failure(AuthErrors.Organization.MembershipNotFound);
-        }
-
-        IReadOnlyList<string> actorGlobalPermissions = await GetGlobalPermissionsAsync(actorUserId, cancellationToken);
-        bool hasGlobalOverride = actorGlobalPermissions.Contains(PermissionCode.IdentityRolesAssignOrganization, StringComparer.Ordinal)
-            || actorGlobalPermissions.Contains(PermissionCode.IdentityRolesAssignGlobal, StringComparer.Ordinal);
-
-        IReadOnlyList<string> actorEffectivePermissions = actorGlobalPermissions;
-        if (!hasGlobalOverride)
-        {
-            OrganizationMembership? actorMembership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
-            if (actorMembership is null || actorMembership.Status != MembershipStatus.Active)
-            {
-                return Result.Failure(AuthErrors.Organization.CrossOrganizationAccessDenied);
-            }
-
-            actorEffectivePermissions = await GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
-            if (!actorEffectivePermissions.Contains(PermissionCode.IdentityRolesAssignOrganization, StringComparer.Ordinal))
-            {
-                return Result.Failure(AuthErrors.Organization.Forbidden);
-            }
-        }
-
-        IReadOnlyList<string> targetRolePermissions = await roleRepository.GetPermissionCodesAsync(request.RoleId, cancellationToken);
-        return targetRolePermissions.Except(actorEffectivePermissions, StringComparer.Ordinal).Any()
-            ? Result.Failure(AuthErrors.Organization.PrivilegeEscalation)
+        // Không cho gán role mang permission mà chính actor không có — tránh tự nâng quyền gián tiếp.
+        IReadOnlyList<string> rolePermissions = await roleRepository.GetPermissionCodesAsync(request.RoleId, cancellationToken);
+        return rolePermissions.Except(actorPermissions, StringComparer.Ordinal).Any()
+            ? Result.Failure(AuthErrors.Role.InsufficientPermission)
             : Result.Success();
-    }
-
-    private async Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken)
-    {
-        IReadOnlyList<string> perms = await membershipRepository.GetGlobalPermissionsAsync(userId, cancellationToken);
-        if (perms.Count > 0)
-        {
-            return perms;
-        }
-        return await roleRepository.GetUserPermissionCodesAsync(userId, cancellationToken);
-    }
-
-    private async Task<IReadOnlyList<string>> GetEffectivePermissionsAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken)
-    {
-        IReadOnlyList<string> globalPerms = await GetGlobalPermissionsAsync(userId, cancellationToken);
-        IReadOnlyList<string> scopedPerms = await membershipRepository.GetScopedPermissionCodesAsync(userId, organizationId, cancellationToken);
-        return globalPerms.Concat(scopedPerms).Distinct(StringComparer.Ordinal).ToArray();
     }
 }

@@ -119,21 +119,37 @@ public sealed class OrganizationReviewTests
         Guid older = await f.AddOrganizationAsync("Older", OrganizationStatus.Pending, createdAt: DateTime.UtcNow.AddDays(-3));
         await f.AddOrganizationAsync("Approved", OrganizationStatus.Active, createdAt: DateTime.UtcNow.AddDays(-5));
 
-        Result<PagedResult<OrganizationResponse>> result = await f.Organizations.ListAsync(f.AdminId, new PageRequest(), OrganizationStatus.Pending);
+        Result<PagedResult<OrganizationSummaryResponse>> result = await f.Organizations.ListAsync(f.AdminId, new PageRequest(), OrganizationStatus.Pending);
 
         Assert.True(result.IsSuccess);
         Assert.Equal([older, f.OrgId], result.Value.Items.Select(o => o.Id));
     }
 
-    [Fact]
-    public async Task NonAdminCannotFilterByStatus()
+    [Theory]
+    [InlineData(null)]
+    [InlineData(OrganizationStatus.Pending)]
+    public async Task NonAdminCannotListOrganizations(OrganizationStatus? status)
     {
         await using Fixture f = await Fixture.CreateAsync();
 
-        Result<PagedResult<OrganizationResponse>> result = await f.Organizations.ListAsync(f.OwnerId, new PageRequest(), OrganizationStatus.Pending);
+        // User thường (kể cả Owner) xem tổ chức của mình qua GET /users/me/organizations.
+        Result<PagedResult<OrganizationSummaryResponse>> result = await f.Organizations.ListAsync(f.OwnerId, new PageRequest(), status);
 
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.Organization.PlatformAdminRequired, result.Error);
+    }
+
+    [Fact]
+    public async Task OwnerSeesOwnOrganizationViaMyOrganizations()
+    {
+        await using Fixture f = await Fixture.CreateAsync();
+
+        Result<IReadOnlyList<MyOrganizationResponse>> result = await f.Organizations.GetMyOrganizationsAsync(f.OwnerId);
+
+        Assert.True(result.IsSuccess);
+        MyOrganizationResponse mine = Assert.Single(result.Value);
+        Assert.Equal(f.OrgId, mine.OrganizationId);
+        Assert.Equal(OrganizationStatus.Pending, mine.OrganizationStatus);
     }
 
     [Theory]
@@ -149,7 +165,7 @@ public sealed class OrganizationReviewTests
         Assert.True(owner.IsSuccess);
         Assert.Equal(status, owner.Value.Status);
         Assert.True(outsider.IsFailure);
-        Assert.Equal(AuthErrors.Organization.PendingApproval, outsider.Error);
+        Assert.Equal(AuthErrors.Organization.CrossOrganizationAccessDenied, outsider.Error);
     }
 
     [Fact]
@@ -269,7 +285,6 @@ public sealed class OrganizationReviewTests
         public OrganizationService Organizations => new(
             new EfOrganizationRepository(Db),
             new EfOrganizationMembershipRepository(Db),
-            new EfUserRepository(Db),
             new EfRoleRepository(Db),
             FixedCorrelationIdProvider.Instance,
             NullLogger<OrganizationService>.Instance);

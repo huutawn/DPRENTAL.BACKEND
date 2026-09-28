@@ -8,6 +8,8 @@ using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
 using Microsoft.Extensions.Logging;
+using Dprental.AuthService.Common.Utils;
+using Dprental.AuthService.Application.Rules;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -75,12 +77,12 @@ public sealed class UserAccountService(
                 user.DateOfBirth = dob;
                 user.ProfileCompletedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
 
-                if (CustomerAccountRules.NullIfBlank(request.FullName) is string fullName)
+                if (StringUtility.NullIfBlank(request.FullName) is string fullName)
                 {
                     user.FullName = fullName;
                 }
 
-                if (CustomerAccountRules.NullIfBlank(request.AvatarUrl) is string avatarUrl)
+                if (StringUtility.NullIfBlank(request.AvatarUrl) is string avatarUrl)
                 {
                     user.AvatarUrl = avatarUrl;
                 }
@@ -169,7 +171,7 @@ public sealed class UserAccountService(
 
                 if (request.AvatarUrl is not null)
                 {
-                    user.AvatarUrl = CustomerAccountRules.NullIfBlank(request.AvatarUrl);
+                    user.AvatarUrl = StringUtility.NullIfBlank(request.AvatarUrl);
                 }
 
                 await userRepository.UpdateAsync(user, cancellationToken);
