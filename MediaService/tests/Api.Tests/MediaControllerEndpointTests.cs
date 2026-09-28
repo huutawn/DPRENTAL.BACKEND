@@ -173,7 +173,7 @@ public class MediaControllerEndpointTests
             DateTimeOffset.UtcNow);
 
         accessService.VerifyMediaAsync(
-                Arg.Is<ServiceCaller>(caller => caller.Name == "CatalogService" && caller.HasScope("media.verify")),
+                Arg.Is<ServiceCaller>(caller => caller.Id == "11111111-1111-1111-1111-111111111111" && caller.HasScope("media.verify")),
                 mediaId, Arg.Any<CancellationToken>())
             .Returns(Result.Success(dto));
 

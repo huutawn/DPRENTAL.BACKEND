@@ -224,7 +224,7 @@ public sealed class MediaAccessService : IMediaAccessService
         ServiceCaller caller, string requiredScope, Guid mediaId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(caller);
-        if (string.IsNullOrWhiteSpace(caller.Name))
+        if (!Guid.TryParse(caller.Id, out Guid serviceId) || serviceId == Guid.Empty)
         {
             return Result.Failure<MediaAsset>(
                 Error.Unauthorized("UnauthorizedService", "Yêu cầu phải được xác thực từ một service hợp lệ."));

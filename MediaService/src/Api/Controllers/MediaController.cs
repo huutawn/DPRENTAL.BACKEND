@@ -19,7 +19,7 @@ public class MediaController : ControllerBase
 {
     private static readonly Action<ILogger, Guid, string?, string, Exception?> LogPrivateGrant =
         LoggerMessage.Define<Guid, string?, string>(LogLevel.Information, new EventId(1, "PrivateMediaRead"),
-            "Media read grant: {MediaId} {ServiceName} {Result}");
+            "Media read grant: {MediaId} {ServiceId} {Result}");
     private static readonly Action<ILogger, Guid, string, Exception?> LogPublicGrant =
         LoggerMessage.Define<Guid, string>(LogLevel.Information, new EventId(2, "PublicMediaRead"),
             "Public media read grant: {MediaId} {Result}");
@@ -117,7 +117,7 @@ public class MediaController : ControllerBase
     {
         var result = await _accessService.CreatePrivateReadUrlAsync(CurrentService(), mediaId, request, cancellationToken);
         Response.Headers.CacheControl = "no-store";
-        LogPrivateGrant(_logger, mediaId, _userContext.ServiceName,
+        LogPrivateGrant(_logger, mediaId, _userContext.ServiceId,
             result.IsSuccess ? "granted" : result.Error.Code, null);
         return ToActionResult(result, StatusCodes.Status200OK);
     }
@@ -149,7 +149,7 @@ public class MediaController : ControllerBase
     }
 
     private ServiceCaller CurrentService() =>
-        new(_userContext.ServiceName, _userContext.ServiceScopes);
+        new(_userContext.ServiceId, _userContext.ServiceScopes);
 
     private ObjectResult ToActionResult<T>(Result<T> result, int successStatusCode)
     {

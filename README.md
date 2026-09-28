@@ -30,7 +30,7 @@ MediaService trả `{ "mediaId": "...", "url": "...", "expiresAtUtc": "..." }`. 
 
 Khi entity được công bố, Business Service gọi `PUT /api/v1/media/{mediaId}/visibility` bằng scope `media.publish`, gửi `visibility` (`public` hoặc `private`) sau khi đã kiểm tra entity đang tham chiếu mediaId. Business Service quyết định file nào có thể Public theo nghiệp vụ; MediaService chỉ yêu cầu file `Ready` và service token scope `media.publish`. URL Public ổn định là `GET /api/v1/media/{mediaId}/content` (thêm `?download=true` nếu cần); MediaService kiểm tra trạng thái mỗi lần gọi rồi chuyển hướng tới URL MinIO ký ngắn hạn. Sau khi đổi về Private, URL Public này không cấp quyền mới; URL đã ký có thể còn hiệu lực cho đến khi hết hạn.
 
-Service token phải có claim `u=svc`, `sub` ánh xạ trong `Jwt:ServicePrincipals` và claim `s` đúng scope (`media.verify`, `media.read` hoặc `media.publish`). AuthService cần cấp các scope này cho service nghiệp vụ tương ứng. Hiện workspace chưa có CatalogService/OrganizationService để tích hợp phía Business Service. MVP upload hỗ trợ JPEG, PNG, WebP và PDF; video chưa được hỗ trợ.
+Service token phải có claim `u=svc`, `sub` là GUID service principal và claim `s` đúng scope (`media.verify`, `media.read` hoặc `media.publish`). MediaService xác thực chữ ký, issuer, audience, hạn dùng và scope; AuthService quyết định service nào được cấp scope. Hiện workspace chưa có CatalogService/OrganizationService để tích hợp phía Business Service. MVP upload hỗ trợ JPEG, PNG, WebP và PDF; video chưa được hỗ trợ.
 
 ## Cấu trúc Solution
 
@@ -102,7 +102,7 @@ dotnet user-secrets set "ObjectStorage:SecretKey" "mediasecretpassword" \
   --project MediaService/src/Api/MediaService.Api.csproj
 ```
 
-MediaService xác minh JWT RS256 bằng JWKS của AuthService. Môi trường Development đã có issuer, audience và JWKS URI mẫu; chỉnh `Jwt:JwksUri` nếu AuthService chạy ở địa chỉ khác. API xác minh nội bộ chỉ chấp nhận service token có scope `media.verify` và `sub` được ánh xạ trong `Jwt:ServicePrincipals` (ví dụ cấu hình `Jwt:ServicePrincipals:<service-principal-guid>=CatalogService`). Header `X-User-Id` và `X-Service-Name` không cấp quyền truy cập.
+MediaService xác minh JWT RS256 bằng JWKS của AuthService. Môi trường Development đã có issuer, audience và JWKS URI mẫu; chỉnh `Jwt:JwksUri` nếu AuthService chạy ở địa chỉ khác. API xác minh nội bộ chỉ chấp nhận service token có claim `u=svc`, `sub` là GUID và scope `media.verify`. Không cần danh sách service principal riêng trong MediaService. Header `X-User-Id` và `X-Service-Name` không cấp quyền truy cập.
 
 Trước khi chạy API trên cơ sở dữ liệu mới, áp dụng migration. Factory thiết kế chỉ đọc `ConnectionStrings__Postgres` từ môi trường; không lưu mật khẩu trong source:
 

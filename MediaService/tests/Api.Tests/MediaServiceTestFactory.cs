@@ -72,8 +72,7 @@ public class MediaServiceTestFactory : WebApplicationFactory<Program>
                 ["ObjectStorage:SecretKey"] = "mediasecretpassword",
                 ["Jwt:Issuer"] = Issuer,
                 ["Jwt:Audience"] = Audience,
-                ["Jwt:JwksUri"] = "https://auth.test/.well-known/jwks.json",
-                [$"Jwt:ServicePrincipals:{CatalogServiceId}"] = "CatalogService"
+                ["Jwt:JwksUri"] = "https://auth.test/.well-known/jwks.json"
             };
 
             foreach (var (k, v) in ConfigurationOverrides)

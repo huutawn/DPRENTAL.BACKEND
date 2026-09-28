@@ -14,8 +14,7 @@ public static class JwtAuthenticationExtensions
             .Validate(o => !string.IsNullOrWhiteSpace(o.Issuer)
                 && !string.IsNullOrWhiteSpace(o.Audience)
                 && Uri.TryCreate(o.JwksUri, UriKind.Absolute, out Uri? uri)
-                && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
-                && o.ServicePrincipals.All(p => Guid.TryParse(p.Key, out _) && !string.IsNullOrWhiteSpace(p.Value)),
+                && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp),
                 "Jwt:Issuer, Jwt:Audience and an absolute HTTP(S) Jwt:JwksUri are required.")
             .ValidateOnStart();
 

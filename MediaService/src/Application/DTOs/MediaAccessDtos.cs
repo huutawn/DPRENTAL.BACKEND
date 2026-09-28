@@ -1,6 +1,6 @@
 namespace Dprental.MediaService.Application.DTOs;
 
-public sealed record ServiceCaller(string? Name, IReadOnlySet<string> Scopes)
+public sealed record ServiceCaller(string? Id, IReadOnlySet<string> Scopes)
 {
     public bool HasScope(string scope) => Scopes?.Contains(scope) == true;
 }

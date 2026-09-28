@@ -20,9 +20,9 @@ public class MediaAccessServiceTests
     private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
     private readonly MediaAccessService _sut;
 
-    private static readonly ServiceCaller VerifyCaller = new("CatalogService", new HashSet<string> { "media.verify" });
-    private static readonly ServiceCaller ReadCaller = new("CatalogService", new HashSet<string> { "media.read" });
-    private static readonly ServiceCaller PublishCaller = new("CatalogService", new HashSet<string> { "media.publish" });
+    private static readonly ServiceCaller VerifyCaller = new("11111111-1111-4111-8111-111111111111", new HashSet<string> { "media.verify" });
+    private static readonly ServiceCaller ReadCaller = new("11111111-1111-4111-8111-111111111111", new HashSet<string> { "media.read" });
+    private static readonly ServiceCaller PublishCaller = new("11111111-1111-4111-8111-111111111111", new HashSet<string> { "media.publish" });
 
     public MediaAccessServiceTests()
     {
@@ -61,9 +61,11 @@ public class MediaAccessServiceTests
     public async Task Verify_RequiresServiceIdentityAndScope()
     {
         var anonymous = await _sut.VerifyMediaAsync(new ServiceCaller(null, new HashSet<string>()), Guid.NewGuid());
+        var invalidId = await _sut.VerifyMediaAsync(new ServiceCaller("not-a-guid", new HashSet<string> { "media.verify" }), Guid.NewGuid());
         var wrongScope = await _sut.VerifyMediaAsync(ReadCaller, Guid.NewGuid());
 
         Assert.Equal("UnauthorizedService", anonymous.Error.Code);
+        Assert.Equal("UnauthorizedService", invalidId.Error.Code);
         Assert.Equal("MissingServiceScope", wrongScope.Error.Code);
         await _assets.DidNotReceive().GetByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
@@ -75,7 +77,7 @@ public class MediaAccessServiceTests
         Store(asset);
 
         var otherService = await _sut.VerifyMediaAsync(
-            new ServiceCaller("OrganizationService", new HashSet<string> { "media.verify" }), asset.Id);
+            new ServiceCaller("22222222-2222-4222-8222-222222222222", new HashSet<string> { "media.verify" }), asset.Id);
         Assert.True(otherService.IsSuccess);
 
         asset.Status = MediaStatus.PendingUpload;

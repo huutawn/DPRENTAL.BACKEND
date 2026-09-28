@@ -11,9 +11,9 @@ public interface ICurrentUserContext
     string? UserId { get; }
 
     /// <summary>
-    /// Tên service ánh xạ từ sub của service token đã xác thực.
+    /// ID service lấy từ claim sub của service token đã xác thực.
     /// </summary>
-    string? ServiceName { get; }
+    string? ServiceId { get; }
 
     /// <summary>Danh sách scope từ các claim s của service token đã xác thực.</summary>
     IReadOnlySet<string> ServiceScopes { get; }
