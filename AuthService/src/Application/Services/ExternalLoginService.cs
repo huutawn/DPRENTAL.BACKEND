@@ -14,13 +14,15 @@ namespace Dprental.AuthService.Application.Services;
 
 /// <summary>
 /// Đăng nhập bằng nhà cung cấp bên ngoài: tra theo subject trước, chỉ liên kết theo email khi nhà cung cấp
-/// đã xác minh email đó, và chỉ tạo user mới khi chưa có ai dùng email này.
+/// đã xác minh email đó, và chỉ tạo user mới khi chưa có ai dùng email này. Liên kết vào tài khoản đang có
+/// mật khẩu thì vô hiệu mật khẩu đó, vì email của tài khoản đăng ký bằng mật khẩu chưa được xác minh.
 /// </summary>
 public sealed class ExternalLoginService(
     IExternalLoginRepository externalLoginRepository,
     IUserRepository userRepository,
     IRoleRepository roleRepository,
     IPasswordHasher<User> passwordHasher,
+    IAuditLogRepository auditLogRepository,
     TimeProvider timeProvider,
     ICorrelationIdProvider correlationIdProvider,
     ILogger<ExternalLoginService> logger) : IExternalLoginService
@@ -90,7 +92,19 @@ public sealed class ExternalLoginService(
 
         try
         {
-            await externalLoginRepository.AddAsync(NewLogin(user.Id, identity, email, utcNow), cancellationToken);
+            ExternalLogin login = NewLogin(user.Id, identity, email, utcNow);
+            if (user.HasPassword)
+            {
+                // /register không xác minh email nên không biết ai đã đặt mật khẩu này; nhà cung cấp thì đã xác minh
+                // người đang đăng nhập là chủ email. Vô hiệu mật khẩu cũ và mọi phiên để người đặt nó không vào được nữa.
+                await externalLoginRepository.AddAndInvalidatePasswordAsync(login, CreateUnusablePasswordHash(user), utcNow, cancellationToken);
+                await LogAuditAsync(user.Id, identity.Provider, "ExternalLogin_LinkInvalidatedPassword", cancellationToken);
+            }
+            else
+            {
+                await externalLoginRepository.AddAsync(login, cancellationToken);
+            }
+
             return Result.Success(user.Id);
         }
         catch (StorageConstraintViolationException)
@@ -119,9 +133,7 @@ public sealed class ExternalLoginService(
             IsActive = true,
         };
 
-        // Mật khẩu ngẫu nhiên không ai biết: tài khoản chỉ đăng nhập được qua nhà cung cấp bên ngoài.
-        string placeholderPassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
-        user.PasswordHash = passwordHasher.HashPassword(user, placeholderPassword);
+        user.PasswordHash = CreateUnusablePasswordHash(user);
 
         Role? customerRole = await roleRepository.GetByNameAsync(SystemRoleCode.Customer, cancellationToken);
         user.ExternalLogins.Add(NewLogin(user.Id, identity, email, utcNow));
@@ -151,6 +163,22 @@ public sealed class ExternalLoginService(
             return Result.Failure<Guid>(AuthErrors.User.EmailAlreadyExists);
         }
     }
+
+    /// <summary>Hash của mật khẩu ngẫu nhiên không ai biết: tài khoản chỉ đăng nhập được qua nhà cung cấp bên ngoài.</summary>
+    private string CreateUnusablePasswordHash(User user) =>
+        passwordHasher.HashPassword(user, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+
+    private Task LogAuditAsync(Guid userId, string provider, string action, CancellationToken cancellationToken) =>
+        auditLogRepository.AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorId = userId,
+            Target = userId.ToString(),
+            Action = action,
+            Result = $"Success: {provider}",
+            CorrelationId = correlationIdProvider.GetCorrelationId(),
+            Timestamp = timeProvider.GetUtcNow()
+        }, cancellationToken);
 
     private static ExternalLogin NewLogin(Guid userId, ExternalIdentity identity, string email, DateTime utcNow) =>
         new()

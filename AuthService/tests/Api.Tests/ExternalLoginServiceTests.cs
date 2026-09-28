@@ -110,6 +110,70 @@ public sealed class ExternalLoginServiceTests
         Assert.Equal("len@example.com", link.Email);
         Assert.Equal(Now.UtcDateTime, link.CreatedAtUtc);
         Assert.Empty(users.Created);
+        Assert.Empty(logins.AddedWithPasswordInvalidated);
+    }
+
+    [Fact]
+    public async Task SignInAsyncVerifiedEmailMatchingPasswordAccountLinksAndInvalidatesPassword()
+    {
+        // Kịch bản chiếm trước tài khoản: ai đó đã đăng ký bằng email này qua /register với mật khẩu của họ.
+        PasswordHasher<User> hasher = new();
+        User squatted = CreateUser("len@example.com");
+        squatted.HasPassword = true;
+        squatted.PasswordHash = hasher.HashPassword(squatted, "MatKhauCuaKeXau1!");
+        FakeUsers users = new() { Existing = squatted };
+        FakeExternalLogins logins = new();
+        RecordingAuditLogs audit = new();
+        ExternalLoginService service = CreateService(logins, users, audit: audit);
+
+        Result<Guid> result = await service.SignInAsync(CreateIdentity("google-sub-owner", email: "len@example.com"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(squatted.Id, result.Value);
+        Assert.Empty(logins.Added);
+        var (link, newHash, utcNow) = Assert.Single(logins.AddedWithPasswordInvalidated);
+        Assert.Equal(squatted.Id, link.UserId);
+        Assert.Equal("google-sub-owner", link.ProviderSubject);
+        Assert.Equal(Now.UtcDateTime, utcNow);
+        Assert.Equal(PasswordVerificationResult.Failed, hasher.VerifyHashedPassword(squatted, newHash, "MatKhauCuaKeXau1!"));
+        Assert.Equal(PasswordVerificationResult.Failed, hasher.VerifyHashedPassword(squatted, newHash, string.Empty));
+
+        AuditLog log = Assert.Single(audit.Logs);
+        Assert.Equal("ExternalLogin_LinkInvalidatedPassword", log.Action);
+        Assert.Equal(squatted.Id, log.ActorId);
+        Assert.Equal(squatted.Id.ToString(), log.Target);
+    }
+
+    [Fact]
+    public async Task SignInAsyncPasswordAccountLinkRaceReturnsExistingUserWithoutAudit()
+    {
+        User existing = CreateUser("len@example.com");
+        existing.HasPassword = true;
+        FakeExternalLogins logins = new() { RejectAdd = true, LinkVisibleAfterRace = CreateLink(existing, "google-sub-1") };
+        RecordingAuditLogs audit = new();
+        ExternalLoginService service = CreateService(logins, new FakeUsers { Existing = existing }, audit: audit);
+
+        Result<Guid> result = await service.SignInAsync(CreateIdentity("google-sub-1", email: "len@example.com"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(existing.Id, result.Value);
+        Assert.Empty(audit.Logs);
+    }
+
+    [Fact]
+    public async Task SignInAsyncPasswordAccountAlreadyLinkedToAnotherGoogleAccountReturnsConflictWithoutAudit()
+    {
+        User existing = CreateUser("len@example.com");
+        existing.HasPassword = true;
+        FakeExternalLogins logins = new() { RejectAdd = true };
+        RecordingAuditLogs audit = new();
+        ExternalLoginService service = CreateService(logins, new FakeUsers { Existing = existing }, audit: audit);
+
+        Result<Guid> result = await service.SignInAsync(CreateIdentity("second-google-sub", email: "len@example.com"));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.ExternalLogin.AlreadyLinked, result.Error);
+        Assert.Empty(audit.Logs);
     }
 
     [Fact]
@@ -248,12 +312,13 @@ public sealed class ExternalLoginServiceTests
 
     private static readonly Guid CustomerRoleId = Guid.NewGuid();
 
-    private static ExternalLoginService CreateService(FakeExternalLogins logins, FakeUsers users, FakeRoles? roles = null) =>
+    private static ExternalLoginService CreateService(FakeExternalLogins logins, FakeUsers users, FakeRoles? roles = null, RecordingAuditLogs? audit = null) =>
         new(
             logins,
             users,
             roles ?? CreateRolesWithCustomerSeeded(),
             new PasswordHasher<User>(),
+            audit ?? new RecordingAuditLogs(),
             new FixedTimeProvider(Now),
             new TestCorrelationIdProvider(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ExternalLoginService>.Instance);
@@ -261,6 +326,17 @@ public sealed class ExternalLoginServiceTests
     private sealed class TestCorrelationIdProvider : ICorrelationIdProvider
     {
         public string GetCorrelationId() => "test-corr-id";
+    }
+
+    private sealed class RecordingAuditLogs : IAuditLogRepository
+    {
+        public List<AuditLog> Logs { get; } = [];
+
+        public Task AddAsync(AuditLog auditLog, CancellationToken cancellationToken = default)
+        {
+            Logs.Add(auditLog);
+            return Task.CompletedTask;
+        }
     }
 
     private static FakeRoles CreateRolesWithCustomerSeeded()
@@ -301,6 +377,7 @@ public sealed class ExternalLoginServiceTests
     {
         public List<ExternalLogin> Links { get; } = [];
         public List<ExternalLogin> Added { get; } = [];
+        public List<(ExternalLogin Login, string PasswordHash, DateTime UtcNow)> AddedWithPasswordInvalidated { get; } = [];
         public bool RejectAdd { get; init; }
         public bool RaceHappened { get; set; }
         public ExternalLogin? LinkVisibleAfterRace { get; init; }
@@ -325,6 +402,18 @@ public sealed class ExternalLoginServiceTests
             }
 
             Added.Add(login);
+            return Task.CompletedTask;
+        }
+
+        public Task AddAndInvalidatePasswordAsync(ExternalLogin login, string unusablePasswordHash, DateTime utcNow, CancellationToken cancellationToken = default)
+        {
+            if (RejectAdd)
+            {
+                RaceHappened = true;
+                throw new StorageConstraintViolationException(StorageConstraintViolationType.Unique, StorageConstraints.ExternalLoginProviderSubject);
+            }
+
+            AddedWithPasswordInvalidated.Add((login, unusablePasswordHash, utcNow));
             return Task.CompletedTask;
         }
 

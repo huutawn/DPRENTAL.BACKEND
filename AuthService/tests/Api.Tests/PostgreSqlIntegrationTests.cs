@@ -26,6 +26,7 @@ namespace Dprental.AuthService.Api.Tests;
 /// - Refresh token dùng lại đồng thời -> một request thành công, request kia phát hiện reuse và thu hồi TOÀN BỘ phiên của user.
 /// - Ticket dùng 1 lần (Google login ticket) đồng thời -> đúng 1 request thành công.
 /// - Giao dịch đổi mật khẩu -> nguyên tử, cập nhật mật khẩu và thu hồi toàn bộ session.
+/// - Liên kết Google vào tài khoản có mật khẩu -> liên kết lỗi thì mật khẩu và session giữ nguyên (rollback).
 /// - Hai admin cùng duyệt/từ chối một organization -> khóa row, chỉ quyết định đầu tiên được ghi, người sau nhận NotPendingReview.
 /// </summary>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test method naming convention")]
@@ -375,6 +376,38 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         // Toàn bộ session cũ của user phải bị thu hồi
         List<Session> activeSessions = await verifyDb.Sessions.Where(s => s.UserId == userId && s.RevokedAtUtc == null).ToListAsync();
         Assert.Empty(activeSessions);
+    }
+
+    [Fact]
+    public async Task PostgreSql_LinkWithPasswordInvalidation_RollsBackWhenLinkViolatesUniqueConstraint()
+    {
+        await using var db = CreateDbContext();
+        DateTime utcNow = DateTime.UtcNow;
+        string subject = $"sub_{Guid.NewGuid():N}";
+
+        // Subject Google này đã thuộc về một user khác -> thêm liên kết sẽ vi phạm unique (Provider, ProviderSubject).
+        User other = new() { Id = Guid.NewGuid(), Email = $"link_other_{Guid.NewGuid():N}@example.com", FullName = "Other", PasswordHash = "x", IsActive = true, CreatedAt = utcNow };
+        other.ExternalLogins.Add(new ExternalLogin { Id = Guid.NewGuid(), UserId = other.Id, Provider = "Google", ProviderSubject = subject, CreatedAtUtc = utcNow });
+        User target = new() { Id = Guid.NewGuid(), Email = $"link_target_{Guid.NewGuid():N}@example.com", FullName = "Target", PasswordHash = "original-hash", HasPassword = true, IsActive = true, CreatedAt = utcNow };
+        Session session = new() { Id = Guid.NewGuid(), UserId = target.Id, CreatedAtUtc = utcNow, ExpiresAtUtc = utcNow.AddDays(7) };
+        db.Users.AddRange(other, target);
+        db.Sessions.Add(session);
+        await db.SaveChangesAsync();
+
+        var repository = new EfExternalLoginRepository(db);
+        ExternalLogin conflicting = new() { Id = Guid.NewGuid(), UserId = target.Id, Provider = "Google", ProviderSubject = subject, CreatedAtUtc = utcNow };
+
+        StorageConstraintViolationException ex = await Assert.ThrowsAsync<StorageConstraintViolationException>(
+            () => repository.AddAndInvalidatePasswordAsync(conflicting, "unusable-hash", utcNow));
+        Assert.Equal(StorageConstraintViolationType.Unique, ex.ViolationType);
+
+        // Không được xoá mật khẩu hay thu hồi phiên khi liên kết thất bại.
+        await using var verifyDb = CreateDbContext();
+        User reloaded = await verifyDb.Users.SingleAsync(u => u.Id == target.Id);
+        Assert.Equal("original-hash", reloaded.PasswordHash);
+        Assert.True(reloaded.HasPassword);
+        Assert.Null((await verifyDb.Sessions.SingleAsync(s => s.Id == session.Id)).RevokedAtUtc);
+        Assert.False(await verifyDb.ExternalLogins.AnyAsync(l => l.UserId == target.Id));
     }
 
     [Fact]

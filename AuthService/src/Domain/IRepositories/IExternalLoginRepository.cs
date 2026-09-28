@@ -13,6 +13,12 @@ public interface IExternalLoginRepository
     /// <summary>Thêm liên kết mới cho một user đã tồn tại.</summary>
     Task AddAsync(ExternalLogin login, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Thêm liên kết cho user đang có mật khẩu chưa ai xác minh: trong một transaction, thay mật khẩu bằng
+    /// <paramref name="unusablePasswordHash"/>, thu hồi mọi phiên rồi thêm liên kết. Liên kết lỗi thì không đổi gì.
+    /// </summary>
+    Task AddAndInvalidatePasswordAsync(ExternalLogin login, string unusablePasswordHash, DateTime utcNow, CancellationToken cancellationToken = default);
+
     /// <summary>Lấy danh sách liên kết đăng nhập bên ngoài của một user.</summary>
     Task<IReadOnlyList<ExternalLogin>> GetByUserAsync(Guid userId, CancellationToken cancellationToken = default);
 

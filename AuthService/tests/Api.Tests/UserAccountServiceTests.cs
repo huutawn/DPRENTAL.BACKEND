@@ -444,6 +444,9 @@ public sealed class UserAccountServiceTests
         public Task AddAsync(ExternalLogin login, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task AddAndInvalidatePasswordAsync(ExternalLogin login, string unusablePasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<IReadOnlyList<ExternalLogin>> GetByUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<ExternalLogin>>(Logins.Where(l => l.UserId == userId).ToList());
 

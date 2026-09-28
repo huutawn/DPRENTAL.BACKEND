@@ -44,6 +44,51 @@ public sealed class EfExternalLoginRepositoryTests
         Assert.Equal(1, await dbContext.ExternalLogins.CountAsync());
     }
 
+    [Fact]
+    public async Task AddAndInvalidatePasswordAsyncReplacesPasswordRevokesSessionsAndAddsLink()
+    {
+        DbContextOptions<AuthDbContext> options = CreateOptions();
+        DateTime utcNow = new(2026, 9, 28, 8, 0, 0, DateTimeKind.Utc);
+        User user = CreateUser("len@example.com");
+        user.HasPassword = true;
+        Session session = new() { Id = Guid.NewGuid(), UserId = user.Id, CreatedAtUtc = utcNow.AddDays(-1), ExpiresAtUtc = utcNow.AddDays(6) };
+        RefreshToken token = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            SessionId = session.Id,
+            TokenHash = "refresh-hash",
+            CreatedAtUtc = utcNow.AddDays(-1),
+            ExpiresAtUtc = utcNow.AddDays(6)
+        };
+        await using (AuthDbContext seed = new(options))
+        {
+            seed.Users.Add(user);
+            seed.Sessions.Add(session);
+            seed.RefreshTokens.Add(token);
+            await seed.SaveChangesAsync();
+        }
+
+        await using (AuthDbContext dbContext = new(options))
+        {
+            await new EfExternalLoginRepository(dbContext).AddAndInvalidatePasswordAsync(
+                CreateLink(user.Id, "Google", "sub-owner"), "unusable-hash", utcNow);
+        }
+
+        await using AuthDbContext verify = new(options);
+        User reloaded = await verify.Users.SingleAsync(u => u.Id == user.Id);
+        Assert.Equal("unusable-hash", reloaded.PasswordHash);
+        Assert.False(reloaded.HasPassword);
+        Assert.Equal(utcNow, (await verify.Sessions.SingleAsync()).RevokedAtUtc);
+        RefreshToken revoked = await verify.RefreshTokens.SingleAsync();
+        Assert.True(revoked.IsRevoked);
+        Assert.Equal(utcNow, revoked.RevokedAtUtc);
+        Assert.Equal("ExternalLoginLinked", revoked.RevokedReason);
+        ExternalLogin link = await verify.ExternalLogins.SingleAsync();
+        Assert.Equal(user.Id, link.UserId);
+        Assert.Equal("sub-owner", link.ProviderSubject);
+    }
+
     private static DbContextOptions<AuthDbContext> CreateOptions() =>
         new DbContextOptionsBuilder<AuthDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
