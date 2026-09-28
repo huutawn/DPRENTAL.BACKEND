@@ -19,6 +19,7 @@ using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Dprental.AuthService.Application.Rules;
 
 namespace Dprental.AuthService.Application.Services;
 

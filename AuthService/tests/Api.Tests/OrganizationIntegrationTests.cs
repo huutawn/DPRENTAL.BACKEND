@@ -29,128 +29,98 @@ public sealed class OrganizationIntegrationTests
     private static readonly Guid MemberRoleId = new("a1010000-0000-0000-0000-000000000002");
 
     [Fact]
-    public async Task CompleteOrganizationLifecycleEndToEnd()
-    {
-        using WebApplicationFactory<Program> factory = CreateFactory();
-        await SeedDatabaseAsync(factory);
-
-        Guid userAId = Guid.NewGuid();
-        Guid userBId = Guid.NewGuid();
-        await CreateUserAsync(factory, userAId, "usera@example.com", "User A", AdminRoleId);
-        await CreateUserAsync(factory, userBId, "userb@example.com", "User B", CustomerRoleId);
-
-        using HttpClient clientA = CreateAuthenticatedClient(factory, userAId, "admin");
-        using HttpClient clientB = CreateAuthenticatedClient(factory, userBId, "customer");
-
-        // 1. User A creates organization
-        CreateOrganizationRequest createReq = new("Rent Express", "rent-express", OrganizationType.Supplier);
-        using HttpResponseMessage createRes = await clientA.PostAsJsonAsync("/api/v1/auth/organizations", createReq);
-        Assert.Equal(HttpStatusCode.Created, createRes.StatusCode);
-        OrganizationResponse? org = await createRes.Content.ReadFromJsonAsync<OrganizationResponse>();
-        Assert.NotNull(org);
-        Guid orgId = org.Id;
-        using (IServiceScope scope = factory.Services.CreateScope())
-        {
-            AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-            Organization savedOrg = await db.Organizations.SingleAsync(o => o.Id == orgId);
-            Assert.Equal("Rent Express", savedOrg.Name);
-            Assert.Equal(OrganizationType.Supplier, savedOrg.Type);
-            OrganizationMembership ownerMembership = await db.OrganizationMemberships.SingleAsync(m => m.OrganizationId == orgId && m.UserId == userAId);
-            Assert.Equal(MembershipStatus.Active, ownerMembership.Status);
-        }
-
-        // 2. User A invites User B
-        AddOrganizationMemberRequest addReq = new(userBId, MemberRoleId);
-        using HttpResponseMessage addRes = await clientA.PostAsJsonAsync($"/api/v1/auth/organizations/{orgId}/members", addReq);
-        Assert.Equal(HttpStatusCode.Created, addRes.StatusCode);
-        OrganizationMemberResponse? invitedMember = await addRes.Content.ReadFromJsonAsync<OrganizationMemberResponse>();
-        Assert.NotNull(invitedMember);
-        Assert.Equal(MembershipStatus.Invited, invitedMember.Status);
-
-        // 3. User B checks /users/me - organization is NOT reflected because status is Invited
-        using HttpResponseMessage meBeforeAccept = await clientB.GetAsync("/api/v1/auth/users/me");
-        Assert.Equal(HttpStatusCode.OK, meBeforeAccept.StatusCode);
-        using JsonDocument docBefore = JsonDocument.Parse(await meBeforeAccept.Content.ReadAsStringAsync());
-        Assert.Empty(docBefore.RootElement.GetProperty("organizations").EnumerateArray());
-
-        // 4. User B self-accepts invitation
-        using HttpResponseMessage acceptRes = await clientB.PostAsync($"/api/v1/auth/organizations/{orgId}/members/accept", null);
-        Assert.Equal(HttpStatusCode.NoContent, acceptRes.StatusCode);
-
-        // 5. User A assigns Organization Owner role to User B
-        PatchOrganizationMemberRequest patchRoleReq = new(RoleId: OwnerRoleId);
-        using HttpResponseMessage patchRoleRes = await clientA.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}/members/{userBId}", patchRoleReq);
-        Assert.Equal(HttpStatusCode.NoContent, patchRoleRes.StatusCode);
-
-        // 6. User B checks /users/me - now reflects organization and Owner role!
-        using HttpResponseMessage meAfterRole = await clientB.GetAsync("/api/v1/auth/users/me");
-        Assert.Equal(HttpStatusCode.OK, meAfterRole.StatusCode);
-        using JsonDocument docAfter = JsonDocument.Parse(await meAfterRole.Content.ReadAsStringAsync());
-        JsonElement orgElement = Assert.Single(docAfter.RootElement.GetProperty("organizations").EnumerateArray());
-        Assert.Equal(orgId, orgElement.GetProperty("organizationId").GetGuid());
-        Assert.Equal("rent-express", orgElement.GetProperty("slug").GetString());
-        Assert.Equal("Owner", orgElement.GetProperty("roleName").GetString());
-
-        // 7. User B can access organization API
-        using HttpResponseMessage getOrgRes = await clientB.GetAsync($"/api/v1/auth/organizations/{orgId}");
-        Assert.Equal(HttpStatusCode.OK, getOrgRes.StatusCode);
-
-        // 8. User A suspends User B
-        PatchOrganizationMemberRequest suspendReq = new(Status: MembershipStatus.Suspended);
-        using HttpResponseMessage suspendRes = await clientA.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}/members/{userBId}", suspendReq);
-        Assert.Equal(HttpStatusCode.NoContent, suspendRes.StatusCode);
-
-        // 9. /users/me no longer grants rights, and organization API returns 403
-        using HttpResponseMessage meAfterSuspend = await clientB.GetAsync("/api/v1/auth/users/me");
-        using JsonDocument docSuspend = JsonDocument.Parse(await meAfterSuspend.Content.ReadAsStringAsync());
-        Assert.Empty(docSuspend.RootElement.GetProperty("organizations").EnumerateArray());
-
-        using HttpResponseMessage getOrgAfterSuspend = await clientB.GetAsync($"/api/v1/auth/organizations/{orgId}");
-        Assert.Equal(HttpStatusCode.Forbidden, getOrgAfterSuspend.StatusCode);
-
-        // 10. User A reactivates and then removes User B
-        PatchOrganizationMemberRequest reactivateReq = new(Status: MembershipStatus.Active);
-        using HttpResponseMessage reactivateRes = await clientA.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}/members/{userBId}", reactivateReq);
-        Assert.Equal(HttpStatusCode.NoContent, reactivateRes.StatusCode);
-
-        using HttpResponseMessage deleteRes = await clientA.DeleteAsync($"/api/v1/auth/organizations/{orgId}/members/{userBId}");
-        Assert.Equal(HttpStatusCode.NoContent, deleteRes.StatusCode);
-
-        // User B API access is gone
-        using HttpResponseMessage getOrgAfterDelete = await clientB.GetAsync($"/api/v1/auth/organizations/{orgId}");
-        Assert.Equal(HttpStatusCode.Forbidden, getOrgAfterDelete.StatusCode);
-    }
-
-    [Fact]
-    public async Task MemberListVisibilityReturnsExpectedProperties()
+    public async Task RegisterApproveLifecycleEndToEnd()
     {
         using WebApplicationFactory<Program> factory = CreateFactory();
         await SeedDatabaseAsync(factory);
 
         Guid adminId = Guid.NewGuid();
-        await CreateUserAsync(factory, adminId, "admin@example.com", "Admin User", AdminRoleId);
+        Guid ownerId = Guid.NewGuid();
+        Guid outsiderId = Guid.NewGuid();
+        await CreateUserAsync(factory, adminId, "admin@example.com", "Admin", AdminRoleId);
+        await CreateUserAsync(factory, ownerId, "owner@example.com", "Owner", CustomerRoleId);
+        await CreateUserAsync(factory, outsiderId, "outsider@example.com", "Outsider", CustomerRoleId);
 
+        using HttpClient adminClient = CreateAuthenticatedClient(factory, adminId, "admin");
+        using HttpClient ownerClient = CreateAuthenticatedClient(factory, ownerId, "customer");
+        using HttpClient outsiderClient = CreateAuthenticatedClient(factory, outsiderId, "customer");
+
+        // 1. Người dùng tự đăng ký tổ chức -> Pending, họ là Owner
+        using HttpResponseMessage registerRes = await ownerClient.PostAsJsonAsync("/api/v1/auth/organizations/register", Profile("rent-express"));
+        Assert.Equal(HttpStatusCode.Created, registerRes.StatusCode);
+        OrganizationRegisteredResponse? registered = await registerRes.Content.ReadFromJsonAsync<OrganizationRegisteredResponse>();
+        Assert.NotNull(registered);
+        Assert.Equal(OrganizationStatus.Pending, registered.Status);
+        Guid orgId = registered.OrganizationId;
+
+        // 2. Owner xem được hồ sơ đang chờ duyệt, người ngoài thì không
+        using HttpResponseMessage ownerGet = await ownerClient.GetAsync($"/api/v1/auth/organizations/{orgId}");
+        Assert.Equal(HttpStatusCode.OK, ownerGet.StatusCode);
+        using HttpResponseMessage outsiderGet = await outsiderClient.GetAsync($"/api/v1/auth/organizations/{orgId}");
+        Assert.Equal(HttpStatusCode.Forbidden, outsiderGet.StatusCode);
+
+        // 3. Admin duyệt bằng PATCH
+        using HttpResponseMessage approveRes = await adminClient.PatchAsync($"/api/v1/auth/organizations/{orgId}/approve", null);
+        Assert.Equal(HttpStatusCode.OK, approveRes.StatusCode);
+        OrganizationResponse? approved = await approveRes.Content.ReadFromJsonAsync<OrganizationResponse>();
+        Assert.NotNull(approved);
+        Assert.Equal(OrganizationStatus.Active, approved.Status);
+
+        // 4. Owner thấy tổ chức trong /users/me với vai trò Owner
+        using HttpResponseMessage meRes = await ownerClient.GetAsync("/api/v1/auth/users/me");
+        Assert.Equal(HttpStatusCode.OK, meRes.StatusCode);
+        using JsonDocument meDoc = JsonDocument.Parse(await meRes.Content.ReadAsStringAsync());
+        JsonElement orgElement = Assert.Single(meDoc.RootElement.GetProperty("organizations").EnumerateArray());
+        Assert.Equal(orgId, orgElement.GetProperty("organizationId").GetGuid());
+        Assert.Equal("Owner", orgElement.GetProperty("roleName").GetString());
+
+        // 5. MVP không có API thành viên
+        using HttpResponseMessage membersRes = await ownerClient.GetAsync($"/api/v1/auth/organizations/{orgId}/members");
+        Assert.Equal(HttpStatusCode.NotFound, membersRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task AdminCannotReviewOwnOrganizationButAnotherAdminCan()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedDatabaseAsync(factory);
+
+        Guid adminOwnerId = Guid.NewGuid();
+        Guid otherAdminId = Guid.NewGuid();
+        await CreateUserAsync(factory, adminOwnerId, "admin-owner@example.com", "Admin Owner", AdminRoleId);
+        await CreateUserAsync(factory, otherAdminId, "other-admin@example.com", "Other Admin", AdminRoleId);
+
+        using HttpClient adminOwnerClient = CreateAuthenticatedClient(factory, adminOwnerId, "admin");
+        using HttpClient otherAdminClient = CreateAuthenticatedClient(factory, otherAdminId, "admin");
+
+        using HttpResponseMessage registerRes = await adminOwnerClient.PostAsJsonAsync("/api/v1/auth/organizations/register", Profile("platform-rental"));
+        OrganizationRegisteredResponse? registered = await registerRes.Content.ReadFromJsonAsync<OrganizationRegisteredResponse>();
+        Assert.NotNull(registered);
+
+        using HttpResponseMessage selfApprove = await adminOwnerClient.PatchAsync($"/api/v1/auth/organizations/{registered.OrganizationId}/approve", null);
+        Assert.Equal(HttpStatusCode.Forbidden, selfApprove.StatusCode);
+
+        using HttpResponseMessage selfReject = await adminOwnerClient.PatchAsJsonAsync(
+            $"/api/v1/auth/organizations/{registered.OrganizationId}/reject", new RejectOrganizationRequest("Tự từ chối"));
+        Assert.Equal(HttpStatusCode.Forbidden, selfReject.StatusCode);
+
+        using HttpResponseMessage otherApprove = await otherAdminClient.PatchAsync($"/api/v1/auth/organizations/{registered.OrganizationId}/approve", null);
+        Assert.Equal(HttpStatusCode.OK, otherApprove.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateOrganizationEndpointIsRemoved()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedDatabaseAsync(factory);
+
+        Guid adminId = Guid.NewGuid();
+        await CreateUserAsync(factory, adminId, "admin@example.com", "Admin", AdminRoleId);
         using HttpClient client = CreateAuthenticatedClient(factory, adminId, "admin");
 
-        CreateOrganizationRequest createReq = new("List Corp", "list-corp", OrganizationType.Supplier);
-        using HttpResponseMessage createRes = await client.PostAsJsonAsync("/api/v1/auth/organizations", createReq);
-        OrganizationResponse? org = await createRes.Content.ReadFromJsonAsync<OrganizationResponse>();
-        Assert.NotNull(org);
-
-        using HttpResponseMessage listRes = await client.GetAsync($"/api/v1/auth/organizations/{org.Id}/members");
-        Assert.Equal(HttpStatusCode.OK, listRes.StatusCode);
-
-        PagedResult<OrganizationMemberResponse>? paged = await listRes.Content.ReadFromJsonAsync<PagedResult<OrganizationMemberResponse>>();
-        Assert.NotNull(paged);
-        OrganizationMemberResponse creator = Assert.Single(paged.Items);
-
-        Assert.Equal(adminId, creator.UserId);
-        Assert.Equal("admin@example.com", creator.Email);
-        Assert.Equal("Admin User", creator.FullName);
-        Assert.Equal(OwnerRoleId, creator.RoleId);
-        Assert.Equal("Owner", creator.RoleName);
-        Assert.Equal(MembershipStatus.Active, creator.Status);
-        Assert.True(creator.JoinedAtUtc <= DateTime.UtcNow);
+        // Route /organizations chỉ còn GET (danh sách); mọi tổ chức phải đi qua /register rồi được duyệt.
+        using HttpResponseMessage res = await client.PostAsJsonAsync("/api/v1/auth/organizations", new { name = "Direct", slug = "direct", type = 1 });
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, res.StatusCode);
     }
 
     [Fact]
@@ -159,25 +129,16 @@ public sealed class OrganizationIntegrationTests
         using WebApplicationFactory<Program> factory = CreateFactory();
         await SeedDatabaseAsync(factory);
 
-        Guid user1 = Guid.NewGuid();
-        Guid user2 = Guid.NewGuid();
-        await CreateUserAsync(factory, user1, "u1@example.com", "User 1", AdminRoleId);
-        await CreateUserAsync(factory, user2, "u2@example.com", "User 2", CustomerRoleId);
+        Guid ownerId = Guid.NewGuid();
+        Guid outsiderId = Guid.NewGuid();
+        await CreateUserAsync(factory, ownerId, "u1@example.com", "User 1", CustomerRoleId);
+        await CreateUserAsync(factory, outsiderId, "u2@example.com", "User 2", CustomerRoleId);
+        Guid orgId = await SeedOrganizationAsync(factory, ownerId, "org-1", OrganizationStatus.Active);
 
-        using HttpClient client1 = CreateAuthenticatedClient(factory, user1, "admin");
-        using HttpClient client2 = CreateAuthenticatedClient(factory, user2, "customer");
+        using HttpClient outsiderClient = CreateAuthenticatedClient(factory, outsiderId, "customer");
 
-        CreateOrganizationRequest createReq = new("Org 1", "org-1", OrganizationType.Supplier);
-        using HttpResponseMessage createRes = await client1.PostAsJsonAsync("/api/v1/auth/organizations", createReq);
-        OrganizationResponse? org = await createRes.Content.ReadFromJsonAsync<OrganizationResponse>();
-        Assert.NotNull(org);
-
-        // User 2 (not member) accesses Org 1 -> 403
-        using HttpResponseMessage getRes = await client2.GetAsync($"/api/v1/auth/organizations/{org.Id}");
+        using HttpResponseMessage getRes = await outsiderClient.GetAsync($"/api/v1/auth/organizations/{orgId}");
         Assert.Equal(HttpStatusCode.Forbidden, getRes.StatusCode);
-
-        using HttpResponseMessage listMembersRes = await client2.GetAsync($"/api/v1/auth/organizations/{org.Id}/members");
-        Assert.Equal(HttpStatusCode.Forbidden, listMembersRes.StatusCode);
     }
 
     [Fact]
@@ -188,73 +149,52 @@ public sealed class OrganizationIntegrationTests
 
         Guid adminId = Guid.NewGuid();
         Guid normalUserId = Guid.NewGuid();
+        Guid ownerId = Guid.NewGuid();
         await CreateUserAsync(factory, adminId, "admin@example.com", "Admin", AdminRoleId);
         await CreateUserAsync(factory, normalUserId, "normal@example.com", "Normal", CustomerRoleId);
+        await CreateUserAsync(factory, ownerId, "owner@example.com", "Owner", CustomerRoleId);
+        Guid orgId = await SeedOrganizationAsync(factory, ownerId, "deact-corp", OrganizationStatus.Active);
 
         using HttpClient adminClient = CreateAuthenticatedClient(factory, adminId, "admin");
         using HttpClient normalClient = CreateAuthenticatedClient(factory, normalUserId, "customer");
 
-        CreateOrganizationRequest createReq = new("Deact Corp", "deact-corp", OrganizationType.Supplier);
-        using HttpResponseMessage createRes = await adminClient.PostAsJsonAsync("/api/v1/auth/organizations", createReq);
-        OrganizationResponse? org = await createRes.Content.ReadFromJsonAsync<OrganizationResponse>();
-        Assert.NotNull(org);
-
         // Normal user attempts to change isActive -> 403
-        UpdateOrganizationRequest normalUpdate = new(IsActive: false);
-        using HttpResponseMessage normalUpdateRes = await normalClient.PatchAsJsonAsync($"/api/v1/auth/organizations/{org.Id}", normalUpdate);
+        using HttpResponseMessage normalUpdateRes = await normalClient.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}", new UpdateOrganizationRequest(IsActive: false));
         Assert.Equal(HttpStatusCode.Forbidden, normalUpdateRes.StatusCode);
 
         // Platform admin deactivates organization -> 204
-        UpdateOrganizationRequest adminDeact = new(IsActive: false);
-        using HttpResponseMessage adminDeactRes = await adminClient.PatchAsJsonAsync($"/api/v1/auth/organizations/{org.Id}", adminDeact);
+        using HttpResponseMessage adminDeactRes = await adminClient.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}", new UpdateOrganizationRequest(IsActive: false));
         Assert.Equal(HttpStatusCode.NoContent, adminDeactRes.StatusCode);
 
         // Normal user accesses deactivated organization -> 403
-        using HttpResponseMessage normalGet = await normalClient.GetAsync($"/api/v1/auth/organizations/{org.Id}");
+        using HttpResponseMessage normalGet = await normalClient.GetAsync($"/api/v1/auth/organizations/{orgId}");
         Assert.Equal(HttpStatusCode.Forbidden, normalGet.StatusCode);
 
         // Platform admin can inspect deactivated organization -> 200
-        using HttpResponseMessage adminGet = await adminClient.GetAsync($"/api/v1/auth/organizations/{org.Id}");
+        using HttpResponseMessage adminGet = await adminClient.GetAsync($"/api/v1/auth/organizations/{orgId}");
         Assert.Equal(HttpStatusCode.OK, adminGet.StatusCode);
 
         // Platform admin reactivates organization -> 204
-        UpdateOrganizationRequest adminReact = new(IsActive: true);
-        using HttpResponseMessage adminReactRes = await adminClient.PatchAsJsonAsync($"/api/v1/auth/organizations/{org.Id}", adminReact);
+        using HttpResponseMessage adminReactRes = await adminClient.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}", new UpdateOrganizationRequest(IsActive: true));
         Assert.Equal(HttpStatusCode.NoContent, adminReactRes.StatusCode);
     }
 
     [Fact]
-    public async Task DuplicateSlugAndDuplicateMembershipReturnConflict409()
+    public async Task DuplicateSlugReturnsConflict409()
     {
         using WebApplicationFactory<Program> factory = CreateFactory();
         await SeedDatabaseAsync(factory);
 
-        Guid adminId = Guid.NewGuid();
-        Guid targetUserId = Guid.NewGuid();
-        await CreateUserAsync(factory, adminId, "admin@example.com", "Admin", AdminRoleId);
-        await CreateUserAsync(factory, targetUserId, "target@example.com", "Target", CustomerRoleId);
+        Guid existingOwnerId = Guid.NewGuid();
+        Guid userId = Guid.NewGuid();
+        await CreateUserAsync(factory, existingOwnerId, "existing@example.com", "Existing", CustomerRoleId);
+        await CreateUserAsync(factory, userId, "user@example.com", "User", CustomerRoleId);
+        await SeedOrganizationAsync(factory, existingOwnerId, "conflict-corp", OrganizationStatus.Active);
 
-        using HttpClient client = CreateAuthenticatedClient(factory, adminId, "admin");
+        using HttpClient client = CreateAuthenticatedClient(factory, userId, "customer");
 
-        CreateOrganizationRequest create1 = new("Conflict Corp", "conflict-corp", OrganizationType.Supplier);
-        using HttpResponseMessage res1 = await client.PostAsJsonAsync("/api/v1/auth/organizations", create1);
-        Assert.Equal(HttpStatusCode.Created, res1.StatusCode);
-        OrganizationResponse? org = await res1.Content.ReadFromJsonAsync<OrganizationResponse>();
-        Assert.NotNull(org);
-
-        // Duplicate slug -> 409
-        CreateOrganizationRequest create2 = new("Conflict Corp 2", "conflict-corp", OrganizationType.Renter);
-        using HttpResponseMessage res2 = await client.PostAsJsonAsync("/api/v1/auth/organizations", create2);
-        Assert.Equal(HttpStatusCode.Conflict, res2.StatusCode);
-
-        // Add member once -> 201
-        AddOrganizationMemberRequest addMem = new(targetUserId, MemberRoleId);
-        using HttpResponseMessage addMemRes1 = await client.PostAsJsonAsync($"/api/v1/auth/organizations/{org.Id}/members", addMem);
-        Assert.Equal(HttpStatusCode.Created, addMemRes1.StatusCode);
-
-        // Duplicate member -> 409
-        using HttpResponseMessage addMemRes2 = await client.PostAsJsonAsync($"/api/v1/auth/organizations/{org.Id}/members", addMem);
-        Assert.Equal(HttpStatusCode.Conflict, addMemRes2.StatusCode);
+        using HttpResponseMessage res = await client.PostAsJsonAsync("/api/v1/auth/organizations/register", Profile("conflict-corp") with { TaxCode = "0399999999" });
+        Assert.Equal(HttpStatusCode.Conflict, res.StatusCode);
     }
 
     [Fact]
@@ -269,23 +209,11 @@ public sealed class OrganizationIntegrationTests
 
         Guid randomOrgId = Guid.NewGuid();
 
-        // Missing org GET -> 404
         using HttpResponseMessage getRes = await client.GetAsync($"/api/v1/auth/organizations/{randomOrgId}");
         Assert.Equal(HttpStatusCode.NotFound, getRes.StatusCode);
 
-        // Missing org member list -> 404
-        using HttpResponseMessage getMembersRes = await client.GetAsync($"/api/v1/auth/organizations/{randomOrgId}/members");
-        Assert.Equal(HttpStatusCode.NotFound, getMembersRes.StatusCode);
-
-        // Missing user on add member -> 404
-        CreateOrganizationRequest createReq = new("Valid Org", "valid-org", OrganizationType.Supplier);
-        using HttpResponseMessage createRes = await client.PostAsJsonAsync("/api/v1/auth/organizations", createReq);
-        OrganizationResponse? org = await createRes.Content.ReadFromJsonAsync<OrganizationResponse>();
-        Assert.NotNull(org);
-
-        AddOrganizationMemberRequest missingUserReq = new(Guid.NewGuid(), MemberRoleId);
-        using HttpResponseMessage addMissingUserRes = await client.PostAsJsonAsync($"/api/v1/auth/organizations/{org.Id}/members", missingUserReq);
-        Assert.Equal(HttpStatusCode.NotFound, addMissingUserRes.StatusCode);
+        using HttpResponseMessage approveRes = await client.PatchAsync($"/api/v1/auth/organizations/{randomOrgId}/approve", null);
+        Assert.Equal(HttpStatusCode.NotFound, approveRes.StatusCode);
     }
 
     [Fact]
@@ -295,52 +223,76 @@ public sealed class OrganizationIntegrationTests
         await SeedDatabaseAsync(factory);
 
         Guid adminId = Guid.NewGuid();
+        Guid ownerId = Guid.NewGuid();
         await CreateUserAsync(factory, adminId, "admin@example.com", "Admin", AdminRoleId);
+        await CreateUserAsync(factory, ownerId, "owner@example.com", "Owner", CustomerRoleId);
+        Guid orgId = await SeedOrganizationAsync(factory, ownerId, "good-org", OrganizationStatus.Active, name: "Good Org");
+
         using HttpClient client = CreateAuthenticatedClient(factory, adminId, "admin");
 
-        // Invalid slug format -> 400
-        CreateOrganizationRequest invalidSlug = new("Bad Slug", "invalid slug format!", OrganizationType.Supplier);
-        using HttpResponseMessage invalidSlugRes = await client.PostAsJsonAsync("/api/v1/auth/organizations", invalidSlug);
+        // Invalid slug format khi đăng ký -> 400
+        using HttpResponseMessage invalidSlugRes = await client.PostAsJsonAsync("/api/v1/auth/organizations/register", Profile("invalid slug format!"));
         Assert.Equal(HttpStatusCode.BadRequest, invalidSlugRes.StatusCode);
 
-        CreateOrganizationRequest validCreate = new("Good Org", "good-org", OrganizationType.Supplier);
-        using HttpResponseMessage validRes = await client.PostAsJsonAsync("/api/v1/auth/organizations", validCreate);
-        OrganizationResponse? org = await validRes.Content.ReadFromJsonAsync<OrganizationResponse>();
-        Assert.NotNull(org);
-
         // Empty PATCH -> 400
-        using HttpResponseMessage emptyPatchRes = await client.PatchAsJsonAsync($"/api/v1/auth/organizations/{org.Id}", new { });
+        using HttpResponseMessage emptyPatchRes = await client.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}", new { });
         Assert.Equal(HttpStatusCode.BadRequest, emptyPatchRes.StatusCode);
 
         // No-op PATCH -> 400
-        UpdateOrganizationRequest noopPatch = new(Name: "Good Org", IsActive: true);
-        using HttpResponseMessage noopRes = await client.PatchAsJsonAsync($"/api/v1/auth/organizations/{org.Id}", noopPatch);
+        using HttpResponseMessage noopRes = await client.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}", new UpdateOrganizationRequest(Name: "Good Org", IsActive: true));
         Assert.Equal(HttpStatusCode.BadRequest, noopRes.StatusCode);
+
+        // Reject thiếu lý do -> 400
+        using HttpResponseMessage rejectRes = await client.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}/reject", new { reason = "" });
+        Assert.Equal(HttpStatusCode.BadRequest, rejectRes.StatusCode);
     }
 
-    [Fact]
-    public async Task CannotRemoveOrSuspendLastOwnerReturnsBadRequest400()
+    private static OrganizationProfileRequest Profile(string slug) =>
+        new(
+            Name: "Rent Express",
+            Type: OrganizationType.Supplier,
+            TaxCode: "0312345678",
+            LegalRepresentativeName: "Nguyen Van A",
+            ContactEmail: "contact@rentexpress.vn",
+            ContactPhone: "0281234567",
+            Address: "12 Nguyen Hue",
+            Province: "TP. Ho Chi Minh",
+            Ward: "Phuong Sai Gon",
+            BusinessLicenseDocumentUrl: "https://files.example.com/license.pdf",
+            Slug: slug);
+
+    /// <summary>Dựng sẵn organization + Owner trong DB (thay cho POST /organizations đã bỏ).</summary>
+    private static async Task<Guid> SeedOrganizationAsync(
+        WebApplicationFactory<Program> factory,
+        Guid ownerId,
+        string slug,
+        OrganizationStatus status,
+        string name = "Seeded Org")
     {
-        using WebApplicationFactory<Program> factory = CreateFactory();
-        await SeedDatabaseAsync(factory);
+        using IServiceScope scope = factory.Services.CreateScope();
+        AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
 
-        Guid adminId = Guid.NewGuid();
-        await CreateUserAsync(factory, adminId, "admin@example.com", "Admin", AdminRoleId);
-        using HttpClient client = CreateAuthenticatedClient(factory, adminId, "admin");
-
-        CreateOrganizationRequest createReq = new("Solo Owner Org", "solo-owner", OrganizationType.Supplier);
-        using HttpResponseMessage createRes = await client.PostAsJsonAsync("/api/v1/auth/organizations", createReq);
-        OrganizationResponse? org = await createRes.Content.ReadFromJsonAsync<OrganizationResponse>();
-        Assert.NotNull(org);
-
-        // Attempt to suspend sole owner -> 400
-        PatchOrganizationMemberRequest suspendReq = new(Status: MembershipStatus.Suspended);
-        using HttpResponseMessage suspendRes = await client.PatchAsJsonAsync($"/api/v1/auth/organizations/{org.Id}/members/{adminId}", suspendReq);
-        Assert.Equal(HttpStatusCode.BadRequest, suspendRes.StatusCode);
-
-        // Attempt to remove sole owner -> 400
-        using HttpResponseMessage deleteRes = await client.DeleteAsync($"/api/v1/auth/organizations/{org.Id}/members/{adminId}");
-        Assert.Equal(HttpStatusCode.BadRequest, deleteRes.StatusCode);
+        Guid orgId = Guid.NewGuid();
+        db.Organizations.Add(new Organization
+        {
+            Id = orgId,
+            Name = name,
+            Slug = slug,
+            Type = OrganizationType.Supplier,
+            Status = status,
+            CreatedAtUtc = DateTime.UtcNow
+        });
+        db.OrganizationMemberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = orgId,
+            UserId = ownerId,
+            RoleId = OwnerRoleId,
+            Status = MembershipStatus.Active,
+            JoinedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+        return orgId;
     }
 
     private static WebApplicationFactory<Program> CreateFactory()

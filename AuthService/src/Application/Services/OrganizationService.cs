@@ -13,120 +13,16 @@ using Microsoft.Extensions.Logging;
 namespace Dprental.AuthService.Application.Services;
 
 /// <summary>
-/// Quản lý organization, thành viên và lời mời.
-/// Một implementation duy nhất, chia file theo trách nhiệm quản lý tổ chức, thành viên và lời mời.
+/// Đọc thông tin organization. Admin xem mọi tổ chức (GET /organizations); user xem tổ chức của mình
+/// qua <see cref="GetMyOrganizationsAsync"/>. MVP không có thành viên — mỗi tổ chức chỉ có Owner.
 /// </summary>
-public sealed partial class OrganizationService(
+public sealed class OrganizationService(
     IOrganizationRepository organizationRepository,
     IOrganizationMembershipRepository membershipRepository,
-    IUserRepository userRepository,
     IRoleRepository roleRepository,
     ICorrelationIdProvider correlationIdProvider,
     ILogger<OrganizationService> logger) : IOrganizationService
 {
-    private static readonly Guid SeededOwnerRoleId = new("a1010000-0000-0000-0000-000000000001");
-    public async Task<Result<OrganizationResponse>> CreateAsync(
-        Guid actorUserId,
-        CreateOrganizationRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        if (!DtoValidator.TryValidateId(actorUserId, nameof(actorUserId), out Error? actorError))
-        {
-            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.UserNotFound);
-        }
-
-        if (!DtoValidator.TryValidate(request, out Error? validationError))
-        {
-            return Result.Failure<OrganizationResponse>(validationError);
-        }
-
-        string trimmedName = request.Name.Trim();
-        if (string.IsNullOrWhiteSpace(trimmedName) || trimmedName.Length > 150)
-        {
-            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.InvalidName);
-        }
-
-        string trimmedSlug = request.Slug.Trim();
-        if (string.IsNullOrWhiteSpace(trimmedSlug) || !OrganizationSlug.IsCanonical(trimmedSlug))
-        {
-            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.InvalidSlugFormat);
-        }
-
-        if (!Enum.IsDefined(request.Type))
-        {
-            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.InvalidStateTransition);
-        }
-
-        return await ApplicationExecutor.ExecuteAsync(
-            "CreateOrganization",
-            async () =>
-            {
-                User? actor = await userRepository.GetByIdAsync(actorUserId, cancellationToken);
-                if (actor is null || !actor.IsActive)
-                {
-                    return Result.Failure<OrganizationResponse>(AuthErrors.Organization.UserNotFound);
-                }
-
-                IReadOnlyList<string> globalPerms = await GetGlobalPermissionsAsync(actorUserId, cancellationToken);
-
-                if (request.Type == OrganizationType.Platform)
-                {
-                    if (!globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal))
-                    {
-                        return Result.Failure<OrganizationResponse>(AuthErrors.Organization.PlatformAdminRequired);
-                    }
-                }
-                else
-                {
-                    if (!globalPerms.Contains(PermissionCode.IdentityOrganizationsCreate, StringComparer.Ordinal))
-                    {
-                        return Result.Failure<OrganizationResponse>(AuthErrors.Organization.CreationNotAllowed);
-                    }
-                }
-
-                // Service quyết định kiểm tra trùng slug
-                if (await organizationRepository.SlugExistsAsync(trimmedSlug, cancellationToken))
-                {
-                    return Result.Failure<OrganizationResponse>(AuthErrors.Organization.SlugAlreadyExists);
-                }
-
-                Role? ownerRole = await roleRepository.GetByNameAsync("Owner", cancellationToken)
-                    ?? await roleRepository.GetByIdAsync(SeededOwnerRoleId, cancellationToken);
-
-                if (ownerRole is null)
-                {
-                    return Result.Failure<OrganizationResponse>(AuthErrors.Organization.RoleNotFound);
-                }
-
-                DateTime now = DateTime.UtcNow;
-                Organization organization = new()
-                {
-                    Id = Guid.NewGuid(),
-                    Name = trimmedName,
-                    Slug = trimmedSlug,
-                    Type = request.Type,
-                    Status = OrganizationStatus.Active,
-                    CreatedAtUtc = now
-                };
-
-                OrganizationMembership initialMembership = new()
-                {
-                    Id = Guid.NewGuid(),
-                    UserId = actorUserId,
-                    OrganizationId = organization.Id,
-                    RoleId = ownerRole.Id,
-                    Status = MembershipStatus.Active,
-                    JoinedAtUtc = now
-                };
-
-                await organizationRepository.CreateAsync(organization, initialMembership, cancellationToken);
-                return Result.Success(organization.ToResponse());
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
-    }
-
     public async Task<Result<OrganizationResponse>> GetByIdAsync(
         Guid actorUserId,
         Guid organizationId,
@@ -148,22 +44,10 @@ public sealed partial class OrganizationService(
                     return Result.Failure<OrganizationResponse>(AuthErrors.Organization.OrganizationNotFound);
                 }
 
-                IReadOnlyList<string> globalPerms = await GetGlobalPermissionsAsync(actorUserId, cancellationToken);
-                bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
-                bool canReadAll = globalPerms.Contains(PermissionCode.IdentityOrganizationsRead, StringComparer.Ordinal);
-
-                OrganizationMembership? membership = canManageSuspended && canReadAll
-                    ? null
-                    : await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
-                bool isActiveMember = membership is { Status: MembershipStatus.Active };
-
-                // Owner luôn xem được hồ sơ của mình (kể cả Pending/Rejected) để theo dõi kết quả duyệt và sửa lại.
-                if (org.Status != OrganizationStatus.Active && !canManageSuspended && !(isActiveMember && IsOwner(membership!.Role)))
-                {
-                    return Result.Failure<OrganizationResponse>(InactiveError(org));
-                }
-
-                if (!canReadAll && !isActiveMember)
+                // Hai đối tượng được xem, mỗi bên một điều kiện. Người khác nhận cùng một lỗi dù tổ chức
+                // đang ở trạng thái nào, để không lộ tổ chức đang chờ duyệt hay bị khoá.
+                if (!await CanPlatformReadAsync(actorUserId, cancellationToken) &&
+                    !await IsActiveOwnerAsync(organizationId, actorUserId, cancellationToken))
                 {
                     return Result.Failure<OrganizationResponse>(AuthErrors.Organization.CrossOrganizationAccessDenied);
                 }
@@ -175,7 +59,7 @@ public sealed partial class OrganizationService(
             cancellationToken);
     }
 
-    public async Task<Result<PagedResult<OrganizationResponse>>> ListAsync(
+    public async Task<Result<PagedResult<OrganizationSummaryResponse>>> ListAsync(
         Guid actorUserId,
         PageRequest request,
         OrganizationStatus? status = null,
@@ -183,43 +67,34 @@ public sealed partial class OrganizationService(
     {
         if (request is null)
         {
-            return Result.Failure<PagedResult<OrganizationResponse>>(AuthErrors.Paging.InvalidPage);
+            return Result.Failure<PagedResult<OrganizationSummaryResponse>>(AuthErrors.Paging.InvalidPage);
         }
 
         Result validation = request.Validate();
         if (validation.IsFailure)
         {
-            return Result.Failure<PagedResult<OrganizationResponse>>(validation.Error);
+            return Result.Failure<PagedResult<OrganizationSummaryResponse>>(validation.Error);
         }
 
         if (!DtoValidator.TryValidateId(actorUserId, nameof(actorUserId), out _))
         {
-            return Result.Failure<PagedResult<OrganizationResponse>>(AuthErrors.Organization.UserNotFound);
+            return Result.Failure<PagedResult<OrganizationSummaryResponse>>(AuthErrors.Organization.UserNotFound);
         }
 
         return await ApplicationExecutor.ExecuteAsync(
             "ListOrganizations",
             async () =>
             {
-                IReadOnlyList<string> globalPerms = await GetGlobalPermissionsAsync(actorUserId, cancellationToken);
-
-                PagedResult<Organization> paged;
-                if (globalPerms.Contains(PermissionCode.IdentityOrganizationsRead, StringComparer.Ordinal))
+                // User thường xem tổ chức của mình qua GET /users/me/organizations.
+                if (!await CanPlatformReadAsync(actorUserId, cancellationToken))
                 {
-                    paged = await organizationRepository.GetAllAsync(request, status, cancellationToken);
-                }
-                else if (status is not null)
-                {
-                    // Lọc theo trạng thái là công cụ của hàng chờ duyệt; user thường không được bỏ qua lặng lẽ.
-                    return Result.Failure<PagedResult<OrganizationResponse>>(AuthErrors.Organization.PlatformAdminRequired);
-                }
-                else
-                {
-                    paged = await organizationRepository.GetUserOrganizationsAsync(actorUserId, request, cancellationToken);
+                    return Result.Failure<PagedResult<OrganizationSummaryResponse>>(AuthErrors.Organization.PlatformAdminRequired);
                 }
 
-                var items = paged.Items.Select(org => org.ToResponse()).ToList();
-                return Result.Success(new PagedResult<OrganizationResponse>(items, paged.Page, paged.PageSize, paged.TotalCount));
+                PagedResult<Organization> paged = await organizationRepository.GetAllAsync(request, status, cancellationToken);
+
+                var items = paged.Items.Select(org => org.ToSummaryResponse()).ToList();
+                return Result.Success(new PagedResult<OrganizationSummaryResponse>(items, paged.Page, paged.PageSize, paged.TotalCount));
             },
             logger,
             correlationIdProvider,
@@ -305,7 +180,7 @@ public sealed partial class OrganizationService(
                 OrganizationStatus? newStatus = null;
                 if (activeChanged)
                 {
-                    // Pending -> Active chỉ đi qua POST /approve để luôn ghi lại người duyệt.
+                    // Pending -> Active chỉ đi qua PATCH /approve để luôn ghi lại người duyệt.
                     newStatus = (request.IsActive!.Value, org.Status) switch
                     {
                         (true, OrganizationStatus.Suspended) => OrganizationStatus.Active,
@@ -336,6 +211,53 @@ public sealed partial class OrganizationService(
             correlationIdProvider,
             cancellationToken);
     }
+
+    public async Task<Result<IReadOnlyList<MyOrganizationResponse>>> GetMyOrganizationsAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!DtoValidator.TryValidateId(userId, nameof(userId), out _))
+        {
+            return Result.Failure<IReadOnlyList<MyOrganizationResponse>>(AuthErrors.User.NotFound);
+        }
+
+        return await ApplicationExecutor.ExecuteAsync(
+            "GetMyOrganizations",
+            async () =>
+            {
+                IReadOnlyList<OrganizationMembership> memberships = await membershipRepository.GetMembershipsForUserAsync(userId, cancellationToken);
+
+                IReadOnlyList<MyOrganizationResponse> result = memberships
+                    .Where(m => m.Status == MembershipStatus.Active)
+                    .OrderBy(m => m.JoinedAtUtc)
+                    .ThenBy(m => m.Id)
+                    .Select(m => new MyOrganizationResponse(
+                        m.Id,
+                        m.OrganizationId,
+                        m.Organization?.Name ?? string.Empty,
+                        m.Organization?.Slug ?? string.Empty,
+                        m.Organization?.Type ?? OrganizationType.Supplier,
+                        m.Organization?.Status ?? OrganizationStatus.Active,
+                        m.Role?.Name ?? string.Empty,
+                        m.Status,
+                        m.JoinedAtUtc))
+                    .ToList();
+
+                return Result.Success(result);
+            },
+            logger,
+            correlationIdProvider,
+            cancellationToken);
+    }
+
+    /// <summary>Platform (admin, ops) xem được mọi tổ chức ở mọi trạng thái.</summary>
+    private async Task<bool> CanPlatformReadAsync(Guid userId, CancellationToken cancellationToken) =>
+        (await GetGlobalPermissionsAsync(userId, cancellationToken)).Contains(PermissionCode.IdentityOrganizationsRead, StringComparer.Ordinal);
+
+    /// <summary>Owner xem được tổ chức của mình ở mọi trạng thái, để theo dõi kết quả duyệt và sửa hồ sơ.</summary>
+    private async Task<bool> IsActiveOwnerAsync(Guid organizationId, Guid userId, CancellationToken cancellationToken) =>
+        await membershipRepository.GetByOrganizationAndUserAsync(organizationId, userId, cancellationToken) is { Status: MembershipStatus.Active } membership
+        && IsOwner(membership.Role);
 
     private async Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken)
     {

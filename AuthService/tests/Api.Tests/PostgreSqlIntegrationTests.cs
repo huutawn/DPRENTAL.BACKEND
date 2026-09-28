@@ -28,7 +28,7 @@ namespace Dprental.AuthService.Api.Tests;
 /// - Refresh token dùng lại đồng thời -> một request thành công, request kia phát hiện reuse và thu hồi TOÀN BỘ phiên của user.
 /// - Ticket dùng 1 lần (Google login ticket) đồng thời -> đúng 1 request thành công.
 /// - Giao dịch đổi mật khẩu -> nguyên tử, cập nhật mật khẩu và thu hồi toàn bộ session.
-/// - Hai yêu cầu cùng thay đổi Owner cuối cùng -> khóa organization theo thứ tự cố định, chỉ 1 request thành công, request kia bị chặn với LastOwner.
+/// - Hai admin cùng duyệt/từ chối một organization -> khóa row, chỉ quyết định đầu tiên được ghi, người sau nhận NotPendingReview.
 /// </summary>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test method naming convention")]
 public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
@@ -119,7 +119,6 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
 
         var userRepo = new EfUserRepository(db);
         var orgRepo = new EfOrganizationRepository(db);
-        var memRepo = new EfOrganizationMembershipRepository(db);
         var roleRepo = new EfRoleRepository(db);
 
         var userService = new UserService(
@@ -128,11 +127,6 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
             TimeProvider.System, FixedCorrelationIdProvider.Instance,
             new EfAuditLogRepository(db), new EfAuthSessionRepository(db, TimeProvider.System),
             new EfRecoveryTokenRepository(db), NullLogger<UserService>.Instance);
-
-        var orgService = new OrganizationService(
-            orgRepo, memRepo, userRepo, roleRepo,
-            FixedCorrelationIdProvider.Instance,
-            NullLogger<OrganizationService>.Instance);
 
         string uniqueSuffix = Guid.NewGuid().ToString("N")[..8];
         string email = $"pg_unique_{uniqueSuffix}@example.com";
@@ -163,23 +157,39 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         Assert.True(StorageConstraintMapping.TryMap(violation, out Error? mappedError));
         Assert.Equal(AuthErrors.User.EmailAlreadyExists, mappedError);
 
-        // Cấp quyền IdentityOrganizationsCreate cho user để có thể tạo Organization
-        Role? adminPlatformRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "admin_platform");
-        if (adminPlatformRole is not null)
+        // 3. Hai organization cùng slug: ghi thẳng qua repository (bỏ qua pre-check) để chính Postgres chặn.
+        Role? ownerRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == SystemRoleCode.Owner);
+        Assert.NotNull(ownerRole);
+        Organization first = NewOrganization("Acme", slug);
+        await orgRepo.CreateAsync(first, NewOwnerMembership(first.Id, reg1.Value.AccountId, ownerRole.Id));
+
+        Organization second = NewOrganization("Acme Two", slug);
+        StorageConstraintViolationException slugViolation = await Assert.ThrowsAsync<StorageConstraintViolationException>(
+            () => orgRepo.CreateAsync(second, NewOwnerMembership(second.Id, reg1.Value.AccountId, ownerRole.Id)));
+        Assert.Equal(StorageConstraints.OrganizationSlug, slugViolation.ConstraintName);
+        Assert.True(StorageConstraintMapping.TryMap(slugViolation, out Error? slugError));
+        Assert.Equal(AuthErrors.Organization.SlugAlreadyExists, slugError);
+        Assert.Equal(ErrorType.Conflict, slugError.Type);
+
+        static Organization NewOrganization(string name, string organizationSlug) => new()
         {
-            db.UserRoles.Add(new UserRole { UserId = reg1.Value.AccountId, RoleId = adminPlatformRole.Id });
-            await db.SaveChangesAsync();
-        }
+            Id = Guid.NewGuid(),
+            Name = name,
+            Slug = organizationSlug,
+            Type = OrganizationType.Supplier,
+            Status = OrganizationStatus.Pending,
+            CreatedAtUtc = DateTime.UtcNow
+        };
 
-        // 3. Tạo Organization đầu tiên thành công
-        var createOrg1 = await orgService.CreateAsync(reg1.Value.AccountId, new CreateOrganizationRequest("Acme", slug, OrganizationType.Supplier));
-        Assert.True(createOrg1.IsSuccess, createOrg1.Error.Message);
-
-        // 4. Vi phạm Unique Constraint Slug ở mức Postgres -> trả về 409 Organization.SlugAlreadyExists
-        var createOrg2 = await orgService.CreateAsync(reg1.Value.AccountId, new CreateOrganizationRequest("Acme Two", slug, OrganizationType.Supplier));
-        Assert.True(createOrg2.IsFailure);
-        Assert.Equal(AuthErrors.Organization.SlugAlreadyExists, createOrg2.Error);
-        Assert.Equal(ErrorType.Conflict, createOrg2.Error.Type);
+        static OrganizationMembership NewOwnerMembership(Guid organizationId, Guid userId, Guid roleId) => new()
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organizationId,
+            UserId = userId,
+            RoleId = roleId,
+            Status = MembershipStatus.Active,
+            JoinedAtUtc = DateTime.UtcNow
+        };
     }
 
     [Fact]
@@ -423,90 +433,6 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         // Toàn bộ session cũ của user phải bị thu hồi
         List<Session> activeSessions = await verifyDb.Sessions.Where(s => s.UserId == userId && s.RevokedAtUtc == null).ToListAsync();
         Assert.Empty(activeSessions);
-    }
-
-    [Fact]
-    public async Task PostgreSql_ConcurrentOwnerChange_DeterministicLockingPreventsZeroOwners()
-    {
-        await using var db = CreateDbContext();
-
-        var orgRepo = new EfOrganizationRepository(db);
-        var memRepo = new EfOrganizationMembershipRepository(db);
-        var userRepo = new EfUserRepository(db);
-        var roleRepo = new EfRoleRepository(db);
-
-        // Tạo 2 Owner và 1 Organization
-        Guid orgId = Guid.NewGuid();
-        Guid ownerAId = Guid.NewGuid();
-        Guid ownerBId = Guid.NewGuid();
-
-        Role? ownerRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == "Owner");
-        if (ownerRole is null)
-        {
-            ownerRole = new Role { Id = Guid.NewGuid(), Name = "Owner", Scope = RoleScope.Organization };
-            db.Roles.Add(ownerRole);
-        }
-
-        Organization org = new()
-        {
-            Id = orgId,
-            Name = "Two Owners Org",
-            Slug = $"two-owners-{Guid.NewGuid():N}",
-            Status = OrganizationStatus.Active,
-            CreatedAtUtc = DateTime.UtcNow
-        };
-        db.Organizations.Add(org);
-
-        User userA = new() { Id = ownerAId, Email = $"owner_a_{Guid.NewGuid():N}@example.com", FullName = "Owner A", PasswordHash = "h", IsActive = true, CreatedAt = DateTime.UtcNow };
-        User userB = new() { Id = ownerBId, Email = $"owner_b_{Guid.NewGuid():N}@example.com", FullName = "Owner B", PasswordHash = "h", IsActive = true, CreatedAt = DateTime.UtcNow };
-        db.Users.AddRange(userA, userB);
-
-        OrganizationMembership memA = new() { Id = Guid.NewGuid(), OrganizationId = orgId, UserId = ownerAId, RoleId = ownerRole.Id, Status = MembershipStatus.Active, JoinedAtUtc = DateTime.UtcNow };
-        OrganizationMembership memB = new() { Id = Guid.NewGuid(), OrganizationId = orgId, UserId = ownerBId, RoleId = ownerRole.Id, Status = MembershipStatus.Active, JoinedAtUtc = DateTime.UtcNow };
-        db.OrganizationMemberships.AddRange(memA, memB);
-        await db.SaveChangesAsync();
-
-        // 2 request cùng lúc cố gắng xóa / rời khỏi org (cả 2 đều là Owner)
-        // Nhờ LockOrganizationsAsync (SELECT ... FOR UPDATE), một trong hai request sẽ được serialize
-        Task<Result> taskA = Task.Run(async () =>
-        {
-            await using var dbA = CreateDbContext();
-            var serviceA = new OrganizationService(
-                new EfOrganizationRepository(dbA),
-                new EfOrganizationMembershipRepository(dbA),
-                new EfUserRepository(dbA),
-                new EfRoleRepository(dbA),
-                FixedCorrelationIdProvider.Instance,
-                NullLogger<OrganizationService>.Instance);
-            return await serviceA.LeaveAsync(ownerAId, orgId);
-        });
-
-        Task<Result> taskB = Task.Run(async () =>
-        {
-            await using var dbB = CreateDbContext();
-            var serviceB = new OrganizationService(
-                new EfOrganizationRepository(dbB),
-                new EfOrganizationMembershipRepository(dbB),
-                new EfUserRepository(dbB),
-                new EfRoleRepository(dbB),
-                FixedCorrelationIdProvider.Instance,
-                NullLogger<OrganizationService>.Instance);
-            return await serviceB.LeaveAsync(ownerBId, orgId);
-        });
-
-        Result[] results = await Task.WhenAll(taskA, taskB);
-
-        int successCount = results.Count(r => r.IsSuccess);
-        int lastOwnerCount = results.Count(r => r.IsFailure && r.Error == AuthErrors.Organization.LastOwner);
-        Assert.Equal(1, successCount);
-        Assert.Equal(1, lastOwnerCount);
-
-        // Kiểm tra trong PostgreSQL: tổ chức BẮT BUỘC còn đúng 1 Owner, KHÔNG BAO GIỜ bị 0 Owner!
-        await using var verifyDb = CreateDbContext();
-        int remainingOwners = await verifyDb.OrganizationMemberships
-            .CountAsync(m => m.OrganizationId == orgId && m.RoleId == ownerRole.Id && m.Status == MembershipStatus.Active);
-
-        Assert.Equal(1, remainingOwners);
     }
 
     [Fact]

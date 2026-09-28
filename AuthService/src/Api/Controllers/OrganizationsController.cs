@@ -9,7 +9,10 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Dprental.AuthService.Api.Controllers;
 
-/// <summary>Quản lý organization và thành viên của organization mà người dùng được phép truy cập.</summary>
+/// <summary>
+/// Quản lý organization mà người dùng được phép truy cập. MVP: mỗi organization chỉ có Owner (người đăng ký),
+/// chưa có API quản lý thành viên/lời mời.
+/// </summary>
 [ApiController]
 [Route("organizations")]
 [Produces("application/json")]
@@ -19,7 +22,7 @@ public sealed class OrganizationsController(
     IOrganizationRegistrationService organizationRegistrationService,
     IOrganizationReviewService organizationReviewService) : ControllerBase
 {
-    /// <summary>Người dùng đang đăng nhập tự đăng ký tổ chức Supplier/Renter và trở thành Owner; tổ chức chờ Platform duyệt.</summary>
+    /// <summary>Người dùng đang đăng nhập chọn đăng ký tổ chức Supplier/Renter và trở thành Owner; tổ chức chờ Platform duyệt.</summary>
     [HttpPost("register")]
     [ProducesResponseType<OrganizationRegisteredResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -34,29 +37,6 @@ public sealed class OrganizationsController(
         }
 
         Result<OrganizationRegisteredResponse> result = await organizationRegistrationService.RegisterForExistingUserAsync(userId, request, cancellationToken);
-        if (result.IsFailure)
-        {
-            return this.ToProblem(result.Error);
-        }
-
-        return StatusCode(StatusCodes.Status201Created, result.Value);
-    }
-
-    /// <summary>Tạo organization mới và thêm người gọi làm thành viên ban đầu.</summary>
-    [HttpPost]
-    [ProducesResponseType<OrganizationResponse>(StatusCodes.Status201Created)]
-    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> Create(CreateOrganizationRequest request, CancellationToken cancellationToken)
-    {
-        if (!TryGetCurrentUserId(out Guid userId))
-        {
-            return Unauthorized();
-        }
-
-        Result<OrganizationResponse> result = await organizationService.CreateAsync(userId, request, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);
@@ -83,11 +63,11 @@ public sealed class OrganizationsController(
     }
 
     /// <summary>
-    /// Lấy danh sách organization có phân trang mà người gọi được phép xem.
-    /// Platform truyền <c>status=Pending</c> để lấy hàng chờ duyệt (cũ nhất trước).
+    /// Chỉ Platform: danh sách mọi organization (rút gọn, có phân trang). Truyền <c>status=Pending</c> để lấy
+    /// hàng chờ duyệt (cũ nhất trước). User xem tổ chức của mình qua GET /users/me/organizations.
     /// </summary>
     [HttpGet]
-    [ProducesResponseType<PagedResult<OrganizationResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<PagedResult<OrganizationSummaryResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
@@ -101,12 +81,12 @@ public sealed class OrganizationsController(
             return Unauthorized();
         }
 
-        Result<PagedResult<OrganizationResponse>> result = await organizationService.ListAsync(userId, request, status, cancellationToken);
+        Result<PagedResult<OrganizationSummaryResponse>> result = await organizationService.ListAsync(userId, request, status, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
     /// <summary>Platform duyệt organization đang Pending: chuyển sang Active, ghi người duyệt và thời điểm.</summary>
-    [HttpPost("{id:guid}/approve")]
+    [HttpPatch("{id:guid}/approve")]
     [ProducesResponseType<OrganizationResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
@@ -124,7 +104,7 @@ public sealed class OrganizationsController(
     }
 
     /// <summary>Platform từ chối organization đang Pending kèm lý do; Owner xem lý do, sửa hồ sơ rồi gửi lại.</summary>
-    [HttpPost("{id:guid}/reject")]
+    [HttpPatch("{id:guid}/reject")]
     [ProducesResponseType<OrganizationResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -179,136 +159,6 @@ public sealed class OrganizationsController(
         }
 
         Result result = await organizationService.UpdateAsync(userId, id, request, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
-    }
-
-    /// <summary>Lấy danh sách thành viên của organization theo trang.</summary>
-    [HttpGet("{id:guid}/members")]
-    [ProducesResponseType<PagedResult<OrganizationMemberResponse>>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetMembers(Guid id, [FromQuery] PageRequest request, CancellationToken cancellationToken)
-    {
-        if (!TryGetCurrentUserId(out Guid userId))
-        {
-            return Unauthorized();
-        }
-
-        Result<PagedResult<OrganizationMemberResponse>> result = await organizationService.GetMembersAsync(userId, id, request, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
-    }
-
-    /// <summary>Thêm hoặc mời người dùng trở thành thành viên của organization.</summary>
-    [HttpPost("{id:guid}/members")]
-    [ProducesResponseType<OrganizationMemberResponse>(StatusCodes.Status201Created)]
-    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> AddMember(Guid id, AddOrganizationMemberRequest request, CancellationToken cancellationToken)
-    {
-        if (!TryGetCurrentUserId(out Guid userId))
-        {
-            return Unauthorized();
-        }
-
-        Result<OrganizationMemberResponse> result = await organizationService.AddMemberAsync(userId, id, request, cancellationToken);
-        if (result.IsFailure)
-        {
-            return this.ToProblem(result.Error);
-        }
-
-        return StatusCode(StatusCodes.Status201Created, result.Value);
-    }
-
-    /// <summary>Cập nhật vai trò hoặc trạng thái của một thành viên trong organization.</summary>
-    [HttpPatch("{id:guid}/members/{memberId:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> PatchMember(Guid id, Guid memberId, PatchOrganizationMemberRequest request, CancellationToken cancellationToken)
-    {
-        if (!TryGetCurrentUserId(out Guid userId))
-        {
-            return Unauthorized();
-        }
-
-        Result result = await organizationService.PatchMemberAsync(userId, id, memberId, request, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
-    }
-
-    /// <summary>Xóa một thành viên khỏi organization.</summary>
-    [HttpDelete("{id:guid}/members/{memberId:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeleteMember(Guid id, Guid memberId, CancellationToken cancellationToken)
-    {
-        if (!TryGetCurrentUserId(out Guid userId))
-        {
-            return Unauthorized();
-        }
-
-        Result result = await organizationService.DeleteMemberAsync(userId, id, memberId, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
-    }
-
-    /// <summary>Chấp nhận lời mời tham gia organization của người dùng hiện tại.</summary>
-    [HttpPost("{id:guid}/members/accept")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> AcceptInvitation(Guid id, CancellationToken cancellationToken)
-    {
-        if (!TryGetCurrentUserId(out Guid userId))
-        {
-            return Unauthorized();
-        }
-
-        Result result = await organizationService.AcceptInvitationAsync(userId, id, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
-    }
-
-    /// <summary>Từ chối lời mời tham gia organization của người dùng hiện tại.</summary>
-    [HttpPost("{id:guid}/members/decline")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeclineInvitation(Guid id, CancellationToken cancellationToken)
-    {
-        if (!TryGetCurrentUserId(out Guid userId))
-        {
-            return Unauthorized();
-        }
-
-        Result result = await organizationService.DeclineInvitationAsync(userId, id, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
-    }
-
-    /// <summary>Người dùng hiện tại tự rời khỏi organization (chặn nếu là Owner duy nhất).</summary>
-    [HttpDelete("{id:guid}/members/me")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> LeaveOrganization(Guid id, CancellationToken cancellationToken)
-    {
-        if (!TryGetCurrentUserId(out Guid userId))
-        {
-            return Unauthorized();
-        }
-
-        Result result = await organizationService.LeaveAsync(userId, id, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
 

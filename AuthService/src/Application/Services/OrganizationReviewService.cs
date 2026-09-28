@@ -71,6 +71,12 @@ public sealed class OrganizationReviewService(
                     return Result.Failure<OrganizationResponse>(AuthErrors.Organization.OrganizationNotFound);
                 }
 
+                // Nguyên tắc bốn mắt: admin là thành viên (Owner) của tổ chức thì phải để admin khác duyệt.
+                if (await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken) is not null)
+                {
+                    return Result.Failure<OrganizationResponse>(AuthErrors.Organization.SelfReviewNotAllowed);
+                }
+
                 if (org.Status != OrganizationStatus.Pending)
                 {
                     return Result.Failure<OrganizationResponse>(AuthErrors.Organization.NotPendingReview);
