@@ -15,7 +15,7 @@ public interface IUserService
     Task<Result> SuspendUserAsync(Guid targetUserId, Guid adminId, CancellationToken cancellationToken = default);
     Task<Result> ActivateUserAsync(Guid targetUserId, Guid adminId, CancellationToken cancellationToken = default);
     Task<Result<Guid>> AuthenticateAsync(LoginRequest request, CancellationToken cancellationToken = default);
-    Task<Result> RequestPasswordResetAsync(RequestPasswordResetRequest request, CancellationToken cancellationToken = default);
+    Task<Result<string?>> RequestPasswordResetAsync(RequestPasswordResetRequest request, string? testKey, CancellationToken cancellationToken = default);
     Task<Result> ResetPasswordAsync(string token, ResetPasswordRequest request, CancellationToken cancellationToken = default);
     Task<Result> ChangePasswordAsync(Guid userId, ChangePasswordRequest request, CancellationToken cancellationToken = default);
     Task<Result<PagedResult<AdminUserListItemDto>>> GetUsersPagedAsync(PageRequest pageRequest, CancellationToken cancellationToken = default);
