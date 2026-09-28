@@ -1,11 +1,13 @@
+using Dprental.AuthService.Application.DTOs.User;
+using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Mapping;
-using Dprental.AuthService.Common;
-using Dprental.AuthService.Application.DTOs.User;
-using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Common.Enums;
-using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Application.Validation;
+using Dprental.AuthService.Common;
+using Dprental.AuthService.Common.Enums;
+using Dprental.AuthService.Domain.Entities;
+using Microsoft.Extensions.Logging;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -15,73 +17,83 @@ public sealed class UserAccountService(
     IExternalLoginRepository externalLoginRepository,
     IAuthSessionRepository authSessionRepository,
     IOrganizationMembershipRepository organizationMembershipRepository,
+    IOrganizationRepository organizationRepository,
     IAuditLogRepository auditLogRepository,
     ICorrelationIdProvider correlationIdProvider,
-    TimeProvider timeProvider) : IUserAccountService
+    TimeProvider timeProvider,
+    ILogger<UserAccountService> logger) : IUserAccountService
 {
     public async Task<Result<CurrentUserResponse>> CompleteProfileAsync(
         Guid userId,
         CompleteProfileRequest request,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-
-        User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
-        if (user is null)
+        if (!DtoValidator.TryValidateId(userId, nameof(userId), out Error? idError))
         {
-            return AuthErrors.User.NotFound;
+            return Result.Failure<CurrentUserResponse>(idError);
         }
 
-        if (!user.IsActive)
+        if (!DtoValidator.TryValidate(request, out Error? validationError))
         {
-            return AuthErrors.Auth.InactiveAccount;
+            return Result.Failure<CurrentUserResponse>(validationError);
         }
 
-        if (user.IsProfileCompleted)
-        {
-            return AuthErrors.Profile.AlreadyCompleted;
-        }
+        return await ApplicationExecutor.ExecuteAsync(
+            "CompleteProfile",
+            async () =>
+            {
+                User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+                if (user is null)
+                {
+                    return Result.Failure<CurrentUserResponse>(AuthErrors.User.NotFound);
+                }
 
-        DateOnly dob = request.DateOfBirth!.Value;
-        if (CustomerAccountRules.IsUnderage(dob, timeProvider.GetUtcNow()))
-        {
-            return AuthErrors.User.Underage;
-        }
+                if (!user.IsActive)
+                {
+                    return Result.Failure<CurrentUserResponse>(AuthErrors.Auth.InactiveAccount);
+                }
 
-        string citizenId = request.CitizenId.Trim();
-        if (await userRepository.CitizenIdExistsAsync(citizenId, cancellationToken))
-        {
-            return AuthErrors.User.CitizenIdAlreadyExists;
-        }
+                if (user.IsProfileCompleted)
+                {
+                    return Result.Failure<CurrentUserResponse>(AuthErrors.Profile.AlreadyCompleted);
+                }
 
-        user.CitizenId = citizenId;
-        user.PhoneNumber = request.PhoneNumber.Trim();
-        user.DateOfBirth = dob;
-        user.ProfileCompletedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
+                DateOnly dob = request.DateOfBirth!.Value;
+                if (CustomerAccountRules.IsUnderage(dob, timeProvider.GetUtcNow()))
+                {
+                    return Result.Failure<CurrentUserResponse>(AuthErrors.User.Underage);
+                }
 
-        if (CustomerAccountRules.NullIfBlank(request.FullName) is string fullName)
-        {
-            user.FullName = fullName;
-        }
+                string citizenId = request.CitizenId.Trim();
+                if (await userRepository.CitizenIdExistsAsync(citizenId, cancellationToken))
+                {
+                    return Result.Failure<CurrentUserResponse>(AuthErrors.User.CitizenIdAlreadyExists);
+                }
 
-        if (CustomerAccountRules.NullIfBlank(request.AvatarUrl) is string avatarUrl)
-        {
-            user.AvatarUrl = avatarUrl;
-        }
+                user.CitizenId = citizenId;
+                user.PhoneNumber = request.PhoneNumber.Trim();
+                user.DateOfBirth = dob;
+                user.ProfileCompletedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
 
-        try
-        {
-            await userRepository.UpdateAsync(user, cancellationToken);
-        }
-        catch (DuplicateCitizenIdException)
-        {
-            return AuthErrors.User.CitizenIdAlreadyExists;
-        }
+                if (CustomerAccountRules.NullIfBlank(request.FullName) is string fullName)
+                {
+                    user.FullName = fullName;
+                }
 
-        await LogAuditAsync(user.Id, user.Id.ToString(), "Profile_Complete", "Success", cancellationToken);
+                if (CustomerAccountRules.NullIfBlank(request.AvatarUrl) is string avatarUrl)
+                {
+                    user.AvatarUrl = avatarUrl;
+                }
 
-        User? reloaded = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
-        return (reloaded ?? user).ToCurrentUserResponse();
+                await userRepository.UpdateAsync(user, cancellationToken);
+                await LogAuditAsync(user.Id, user.Id.ToString(), "Profile_Complete", "Success", cancellationToken);
+
+                User? reloaded = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
+                return Result.Success((reloaded ?? user).ToCurrentUserResponse());
+            },
+            logger,
+            correlationIdProvider,
+            cancellationToken);
     }
 
     public async Task<Result<CurrentUserResponse>> UpdateProfileAsync(
@@ -89,87 +101,122 @@ public sealed class UserAccountService(
         UpdateProfileRequest request,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-
-        User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
-        if (user is null)
+        if (!DtoValidator.TryValidateId(userId, nameof(userId), out Error? idError))
         {
-            return AuthErrors.User.NotFound;
+            return Result.Failure<CurrentUserResponse>(idError);
         }
 
-        if (!user.IsActive)
+        if (request is null)
         {
-            return AuthErrors.Auth.InactiveAccount;
+            return Result.Failure<CurrentUserResponse>(AuthErrors.Profile.EmptyPatch);
         }
 
-        if (request.FullName is null && request.PhoneNumber is null && request.DateOfBirth is null && request.AvatarUrl is null)
+        string? trimmedFullName = request.FullName?.Trim();
+        if (trimmedFullName is not null && trimmedFullName.Length == 0)
         {
-            return AuthErrors.Profile.EmptyPatch;
+            return Result.Failure<CurrentUserResponse>(AuthErrors.Profile.InvalidFullName);
         }
 
-        if (request.FullName is not null)
+        bool hasAnyField = trimmedFullName is not null
+            || request.PhoneNumber is not null
+            || request.DateOfBirth.HasValue
+            || request.AvatarUrl is not null;
+
+        if (!hasAnyField)
         {
-            string? trimmedName = CustomerAccountRules.NullIfBlank(request.FullName);
-            if (trimmedName is null)
+            return Result.Failure<CurrentUserResponse>(AuthErrors.Profile.EmptyPatch);
+        }
+
+        if (!DtoValidator.TryValidate(request, out Error? validationError))
+        {
+            return Result.Failure<CurrentUserResponse>(validationError);
+        }
+
+        return await ApplicationExecutor.ExecuteAsync(
+            "UpdateProfile",
+            async () =>
             {
-                return AuthErrors.Profile.InvalidFullName;
-            }
-            user.FullName = trimmedName;
-        }
+                User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+                if (user is null)
+                {
+                    return Result.Failure<CurrentUserResponse>(AuthErrors.User.NotFound);
+                }
 
-        if (request.PhoneNumber is not null)
-        {
-            string? trimmedPhone = CustomerAccountRules.NullIfBlank(request.PhoneNumber);
-            if (trimmedPhone is null)
-            {
-                return AuthErrors.Profile.EmptyPatch;
-            }
-            user.PhoneNumber = trimmedPhone;
-        }
+                if (!user.IsActive)
+                {
+                    return Result.Failure<CurrentUserResponse>(AuthErrors.Auth.InactiveAccount);
+                }
 
-        if (request.DateOfBirth is not null)
-        {
-            if (CustomerAccountRules.IsUnderage(request.DateOfBirth.Value, timeProvider.GetUtcNow()))
-            {
-                return AuthErrors.User.Underage;
-            }
-            user.DateOfBirth = request.DateOfBirth.Value;
-        }
 
-        if (request.AvatarUrl is not null)
-        {
-            // AvatarUrl: null = không đổi, "" = xoá về null (field duy nhất xoá được qua self-service)
-            user.AvatarUrl = string.IsNullOrWhiteSpace(request.AvatarUrl) ? null : request.AvatarUrl.Trim();
-        }
+                if (trimmedFullName is not null)
+                {
+                    user.FullName = trimmedFullName;
+                }
 
-        await userRepository.UpdateAsync(user, cancellationToken);
-        await LogAuditAsync(user.Id, user.Id.ToString(), "Profile_Update", "Success", cancellationToken);
+                if (request.PhoneNumber is not null)
+                {
+                    user.PhoneNumber = request.PhoneNumber.Trim();
+                }
 
-        User? reloaded = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
-        return (reloaded ?? user).ToCurrentUserResponse();
+                if (request.DateOfBirth.HasValue)
+                {
+                    if (CustomerAccountRules.IsUnderage(request.DateOfBirth.Value, timeProvider.GetUtcNow()))
+                    {
+                        return Result.Failure<CurrentUserResponse>(AuthErrors.User.Underage);
+                    }
+                    user.DateOfBirth = request.DateOfBirth.Value;
+                }
+
+                if (request.AvatarUrl is not null)
+                {
+                    user.AvatarUrl = CustomerAccountRules.NullIfBlank(request.AvatarUrl);
+                }
+
+                await userRepository.UpdateAsync(user, cancellationToken);
+                await LogAuditAsync(user.Id, user.Id.ToString(), "Profile_Update", "Success", cancellationToken);
+
+                User? reloaded = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
+                return Result.Success((reloaded ?? user).ToCurrentUserResponse());
+            },
+            logger,
+            correlationIdProvider,
+            cancellationToken);
     }
 
     public async Task<Result<IReadOnlyList<ExternalLoginResponse>>> GetExternalLoginsAsync(
         Guid userId,
         CancellationToken cancellationToken = default)
     {
-        User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
-        if (user is null)
+        if (!DtoValidator.TryValidateId(userId, nameof(userId), out Error? idError))
         {
-            return AuthErrors.User.NotFound;
+            return Result.Failure<IReadOnlyList<ExternalLoginResponse>>(idError);
         }
 
-        if (!user.IsActive)
-        {
-            return AuthErrors.Auth.InactiveAccount;
-        }
+        return await ApplicationExecutor.ExecuteAsync(
+            "GetExternalLogins",
+            async () =>
+            {
+                User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+                if (user is null)
+                {
+                    return Result.Failure<IReadOnlyList<ExternalLoginResponse>>(AuthErrors.User.NotFound);
+                }
 
-        IReadOnlyList<ExternalLogin> logins = await externalLoginRepository.GetByUserAsync(userId, cancellationToken);
-        IReadOnlyList<ExternalLoginResponse> responses = logins
-            .Select(l => new ExternalLoginResponse(l.Provider, l.Email, l.CreatedAtUtc))
-            .ToList();
+                if (!user.IsActive)
+                {
+                    return Result.Failure<IReadOnlyList<ExternalLoginResponse>>(AuthErrors.Auth.InactiveAccount);
+                }
 
-        return Result.Success(responses);
+                IReadOnlyList<ExternalLogin> logins = await externalLoginRepository.GetByUserAsync(userId, cancellationToken);
+                var responses = logins
+                    .Select(login => new ExternalLoginResponse(login.Provider, login.Email, login.CreatedAtUtc))
+                    .ToList();
+
+                return Result.Success<IReadOnlyList<ExternalLoginResponse>>(responses);
+            },
+            logger,
+            correlationIdProvider,
+            cancellationToken);
     }
 
     public async Task<Result> UnlinkExternalLoginAsync(
@@ -177,80 +224,131 @@ public sealed class UserAccountService(
         string provider,
         CancellationToken cancellationToken = default)
     {
+        if (!DtoValidator.TryValidateId(userId, nameof(userId), out Error? idError))
+        {
+            return Result.Failure(idError);
+        }
+
         if (string.IsNullOrWhiteSpace(provider) || !string.Equals(provider, "Google", StringComparison.OrdinalIgnoreCase))
         {
             return Result.Failure(AuthErrors.ExternalLogin.NotLinked);
         }
 
-        User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
-        if (user is null)
-        {
-            return Result.Failure(AuthErrors.User.NotFound);
-        }
+        return await ApplicationExecutor.ExecuteAsync(
+            "UnlinkExternalLogin",
+            async () =>
+            {
+                User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+                if (user is null)
+                {
+                    return Result.Failure(AuthErrors.User.NotFound);
+                }
 
-        if (!user.IsActive)
-        {
-            return Result.Failure(AuthErrors.Auth.InactiveAccount);
-        }
+                if (!user.IsActive)
+                {
+                    return Result.Failure(AuthErrors.Auth.InactiveAccount);
+                }
 
-        IReadOnlyList<ExternalLogin> logins = await externalLoginRepository.GetByUserAsync(userId, cancellationToken);
-        ExternalLogin? target = logins.FirstOrDefault(l => string.Equals(l.Provider, provider, StringComparison.OrdinalIgnoreCase));
-        if (target is null)
-        {
-            return Result.Failure(AuthErrors.ExternalLogin.NotLinked);
-        }
+                IReadOnlyList<ExternalLogin> logins = await externalLoginRepository.GetByUserAsync(userId, cancellationToken);
+                ExternalLogin? targetLogin = logins.FirstOrDefault(l => string.Equals(l.Provider, provider, StringComparison.OrdinalIgnoreCase));
+                if (targetLogin is null)
+                {
+                    return Result.Failure(AuthErrors.ExternalLogin.NotLinked);
+                }
 
-        if (!user.HasPassword && logins.Count <= 1)
-        {
-            return Result.Failure(AuthErrors.ExternalLogin.CannotUnlinkLastCredential);
-        }
+                bool hasOtherCredentials = user.HasPassword || logins.Count > 1;
+                if (!hasOtherCredentials)
+                {
+                    return Result.Failure(AuthErrors.ExternalLogin.CannotUnlinkLastCredential);
+                }
 
-        bool deleted = await externalLoginRepository.DeleteAsync(userId, target.Provider, cancellationToken);
-        if (!deleted)
-        {
-            return Result.Failure(AuthErrors.ExternalLogin.NotLinked);
-        }
-
-        await LogAuditAsync(user.Id, user.Id.ToString(), "ExternalLogin_Unlink", "Success", cancellationToken);
-        return Result.Success();
+                await externalLoginRepository.DeleteAsync(userId, provider, cancellationToken);
+                await LogAuditAsync(user.Id, user.Id.ToString(), "ExternalLogin_Unlink", "Success", cancellationToken);
+                return Result.Success();
+            },
+            logger,
+            correlationIdProvider,
+            cancellationToken);
     }
 
     public async Task<Result> DeactivateAsync(
         Guid userId,
         CancellationToken cancellationToken = default)
     {
-        User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
-        if (user is null)
+        if (!DtoValidator.TryValidateId(userId, nameof(userId), out Error? idError))
         {
-            return Result.Failure(AuthErrors.User.NotFound);
+            return Result.Failure(idError);
         }
 
-        if (!user.IsActive)
-        {
-            return Result.Failure(AuthErrors.Auth.InactiveAccount);
-        }
-
-        IReadOnlyList<OrganizationMembership> memberships = await organizationMembershipRepository.GetMembershipsForUserAsync(userId, cancellationToken);
-
-        foreach (OrganizationMembership membership in memberships)
-        {
-            if (membership.Status == MembershipStatus.Active &&
-                membership.Role is not null &&
-                string.Equals(membership.Role.Name, "Owner", StringComparison.OrdinalIgnoreCase))
+        return await ApplicationExecutor.ExecuteAsync(
+            "DeactivateAccount",
+            async () =>
             {
-                int activeOwners = await organizationMembershipRepository.CountActiveOwnersAsync(membership.OrganizationId, cancellationToken);
-                if (activeOwners <= 1)
+                User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+                if (user is null)
                 {
-                    return Result.Failure(AuthErrors.User.LastOwnerOrganization);
+                    return Result.Failure(AuthErrors.User.NotFound);
                 }
-            }
-        }
 
-        user.IsActive = false;
-        await userRepository.UpdateAsync(user, cancellationToken);
-        await authSessionRepository.RevokeAllSessionsForUserAsync(userId, cancellationToken);
-        await LogAuditAsync(user.Id, user.Id.ToString(), "Account_Deactivate", "Success", cancellationToken);
-        return Result.Success();
+                if (!user.IsActive)
+                {
+                    return Result.Failure(AuthErrors.Auth.InactiveAccount);
+                }
+
+                IReadOnlyList<OrganizationMembership> memberships = await organizationMembershipRepository.GetMembershipsForUserAsync(userId, cancellationToken);
+
+                // Khóa các organization liên quan theo thứ tự cố định trước khi Service kiểm tra Owner cuối cùng
+                List<Guid> ownerOrgIds = memberships
+                    .Where(m => m.Status == MembershipStatus.Active &&
+                        m.Role is not null &&
+                        string.Equals(m.Role.Name, "Owner", StringComparison.OrdinalIgnoreCase))
+                    .Select(m => m.OrganizationId)
+                    .Distinct()
+                    .OrderBy(id => id)
+                    .ToList();
+                IExecutionTransaction? ownerTransaction = null;
+                if (ownerOrgIds.Count > 0)
+                {
+                    ownerTransaction = await organizationRepository.BeginTransactionAsync(cancellationToken);
+                }
+
+                try
+                {
+                    if (ownerOrgIds.Count > 0)
+                    {
+                        await organizationRepository.LockOrganizationsAsync(ownerOrgIds, cancellationToken);
+
+                        foreach (Guid orgId in ownerOrgIds)
+                        {
+                            int activeOwners = await organizationMembershipRepository.CountActiveOwnersAsync(orgId, cancellationToken);
+                            if (activeOwners <= 1)
+                            {
+                                return Result.Failure(AuthErrors.User.LastOwnerOrganization);
+                            }
+                        }
+                    }
+
+                    user.IsActive = false;
+                    await userRepository.UpdateAsync(user, cancellationToken);
+                    await authSessionRepository.RevokeAllSessionsForUserAsync(userId, cancellationToken);
+                    if (ownerTransaction is not null)
+                    {
+                        await ownerTransaction.CommitAsync(cancellationToken);
+                    }
+                    await LogAuditAsync(user.Id, user.Id.ToString(), "Account_Deactivate", "Success", cancellationToken);
+                    return Result.Success();
+                }
+                finally
+                {
+                    if (ownerTransaction is not null)
+                    {
+                        await ownerTransaction.DisposeAsync();
+                    }
+                }
+            },
+            logger,
+            correlationIdProvider,
+            cancellationToken);
     }
 
     private Task LogAuditAsync(Guid? actorId, string target, string action, string result, CancellationToken cancellationToken) =>

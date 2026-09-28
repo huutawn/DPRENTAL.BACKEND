@@ -10,16 +10,14 @@ public sealed record ChangePasswordRequest(
 /// <summary>Yêu cầu đặt lại mật khẩu bằng token khôi phục.</summary>
 public sealed record ResetPasswordRequest(
     [Required, StringLength(128, MinimumLength = 8)] string NewPassword,
-
     [Required]
     [property: Compare("NewPassword", ErrorMessage = "Mật khẩu xác nhận không khớp.")]
-    string ConfirmNewPassword
-);
+    string ConfirmNewPassword);
 
 /// <summary>Yêu cầu gửi email khôi phục mật khẩu.</summary>
-public sealed record RequestPasswordResetRequest(string Email);
+public sealed record RequestPasswordResetRequest(
+    [Required, EmailAddress, StringLength(254)] string Email);
 
 /// <summary>Yêu cầu thu hồi một phiên đăng nhập cụ thể.</summary>
 public sealed record RevokeDeviceSessionRequest(
-    [Required(ErrorMessage = "SessionId là bắt buộc.")] Guid SessionId
-);
+    [Required(ErrorMessage = "SessionId là bắt buộc.")] Guid SessionId);

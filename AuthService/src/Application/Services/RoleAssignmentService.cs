@@ -1,73 +1,130 @@
-using Dprental.AuthService.Application.IServices;
-using Dprental.AuthService.Common;
 using Dprental.AuthService.Application.DTOs.Auth;
-using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Application.Execution;
+using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Application.Validation;
+using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
+using Dprental.AuthService.Domain.Entities;
+using Microsoft.Extensions.Logging;
 
 namespace Dprental.AuthService.Application.Services;
 
 /// <summary>
-/// Gán/thu hồi role trên user — cả role toàn cục (bảng UserRole) lẫn role theo Organization
-/// (đổi <see cref="Domain.Entities.OrganizationMembership.RoleId"/> của một member đang active).
-/// Chặn actor tự gán/tự thu hồi role của chính mình, yêu cầu actor có permission tương ứng
-/// (global hoặc scoped theo đúng organization — luôn truy vấn DB tại thời điểm gọi, không tin JWT),
-/// và chặn actor thao tác trên role mang permission mà actor không có — tránh tự nâng quyền.
-/// Thu hồi role theo Organization KHÔNG hỗ trợ qua đây — dùng DELETE /organizations/{id}/members/{memberId}.
+/// Gán/thu hồi role trên user — cả role toàn cục (bảng UserRole) lẫn role theo Organization.
 /// </summary>
 public sealed class RoleAssignmentService(
     IRoleRepository roleRepository,
-    IOrganizationMembershipRepository membershipRepository) : IRoleAssignmentService
+    IOrganizationMembershipRepository membershipRepository,
+    ICorrelationIdProvider correlationIdProvider,
+    ILogger<RoleAssignmentService> logger) : IRoleAssignmentService
 {
     public async Task<Result> AssignAsync(Guid actorUserId, AssignRoleRequest request, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-
-        Result guard = await GuardAsync(actorUserId, request, isAssign: true, cancellationToken);
-        if (guard.IsFailure)
+        if (!DtoValidator.TryValidateId(actorUserId, nameof(actorUserId), out Error? actorError))
         {
-            return guard;
+            return Result.Failure(actorError);
         }
 
-        if (request.OrganizationId is Guid organizationId)
+        if (!DtoValidator.TryValidate(request, out Error? validationError))
         {
-            OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, request.TargetUserId, cancellationToken);
-            if (membership is null)
+            return Result.Failure(validationError);
+        }
+
+        if (!DtoValidator.TryValidateId(request.TargetUserId, nameof(request.TargetUserId), out Error? targetError))
+        {
+            return Result.Failure(targetError);
+        }
+
+        if (!DtoValidator.TryValidateId(request.RoleId, nameof(request.RoleId), out Error? roleError))
+        {
+            return Result.Failure(roleError);
+        }
+
+        return await ApplicationExecutor.ExecuteAsync(
+            "AssignRole",
+            async () =>
             {
-                return Result.Failure(AuthErrors.Organization.MembershipNotFound);
-            }
+                Result guard = await GuardAsync(actorUserId, request, isAssign: true, cancellationToken);
+                if (guard.IsFailure)
+                {
+                    return guard;
+                }
 
-            if (membership.RoleId == request.RoleId)
-            {
-                return Result.Failure(AuthErrors.Role.AlreadyAssigned);
-            }
+                if (request.OrganizationId is Guid organizationId)
+                {
+                    OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, request.TargetUserId, cancellationToken);
+                    if (membership is null)
+                    {
+                        return Result.Failure(AuthErrors.Organization.MembershipNotFound);
+                    }
 
-            membership.RoleId = request.RoleId;
-            bool orgUpdated = await membershipRepository.UpdateAsync(membership, cancellationToken);
-            return orgUpdated ? Result.Success() : Result.Failure(AuthErrors.Role.AssignmentFailed);
-        }
+                    if (membership.RoleId == request.RoleId)
+                    {
+                        return Result.Failure(AuthErrors.Role.AlreadyAssigned);
+                    }
 
-        if (await roleRepository.IsAssignedAsync(request.TargetUserId, request.RoleId, cancellationToken))
-        {
-            return Result.Failure(AuthErrors.Role.AlreadyAssigned);
-        }
+                    membership.RoleId = request.RoleId;
+                    bool orgUpdated = await membershipRepository.UpdateAsync(membership, cancellationToken);
+                    return orgUpdated ? Result.Success() : Result.Failure(AuthErrors.Role.AssignmentFailed);
+                }
 
-        bool assigned = await roleRepository.AssignAsync(request.TargetUserId, request.RoleId, cancellationToken);
-        return assigned ? Result.Success() : Result.Failure(AuthErrors.Role.AssignmentFailed);
+                if (await roleRepository.IsAssignedAsync(request.TargetUserId, request.RoleId, cancellationToken))
+                {
+                    return Result.Failure(AuthErrors.Role.AlreadyAssigned);
+                }
+
+                bool assigned = await roleRepository.AssignAsync(request.TargetUserId, request.RoleId, cancellationToken);
+                return assigned ? Result.Success() : Result.Failure(AuthErrors.Role.AssignmentFailed);
+            },
+            logger,
+            correlationIdProvider,
+            cancellationToken);
     }
 
     public async Task<Result> RevokeAsync(Guid actorUserId, AssignRoleRequest request, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-
-        Result guard = await GuardAsync(actorUserId, request, isAssign: false, cancellationToken);
-        if (guard.IsFailure)
+        if (!DtoValidator.TryValidateId(actorUserId, nameof(actorUserId), out Error? actorError))
         {
-            return guard;
+            return Result.Failure(actorError);
         }
 
-        bool revoked = await roleRepository.RevokeAsync(request.TargetUserId, request.RoleId, cancellationToken);
-        return revoked ? Result.Success() : Result.Failure(AuthErrors.Role.NotAssigned);
+        if (!DtoValidator.TryValidate(request, out Error? validationError))
+        {
+            return Result.Failure(validationError);
+        }
+
+        if (!DtoValidator.TryValidateId(request.TargetUserId, nameof(request.TargetUserId), out Error? targetError))
+        {
+            return Result.Failure(targetError);
+        }
+
+        if (!DtoValidator.TryValidateId(request.RoleId, nameof(request.RoleId), out Error? roleError))
+        {
+            return Result.Failure(roleError);
+        }
+
+        return await ApplicationExecutor.ExecuteAsync(
+            "RevokeRole",
+            async () =>
+            {
+                Result guard = await GuardAsync(actorUserId, request, isAssign: false, cancellationToken);
+                if (guard.IsFailure)
+                {
+                    return guard;
+                }
+
+                if (!await roleRepository.IsAssignedAsync(request.TargetUserId, request.RoleId, cancellationToken))
+                {
+                    return Result.Failure(AuthErrors.Role.NotAssigned);
+                }
+
+                bool revoked = await roleRepository.RevokeAsync(request.TargetUserId, request.RoleId, cancellationToken);
+                return revoked ? Result.Success() : Result.Failure(AuthErrors.Role.NotAssigned);
+            },
+            logger,
+            correlationIdProvider,
+            cancellationToken);
     }
 
     private async Task<Result> GuardAsync(Guid actorUserId, AssignRoleRequest request, bool isAssign, CancellationToken cancellationToken)
@@ -109,9 +166,6 @@ public sealed class RoleAssignmentService(
         // role.Scope == RoleScope.Organization từ đây.
         if (!isAssign)
         {
-            // Revoke role theo Organization không có nghĩa rõ ràng: mỗi membership luôn phải có
-            // đúng 1 role (không giống UserRole toàn cục là nhiều-role tuỳ ý), nên "thu hồi" thực chất
-            // là xoá membership — việc đó thuộc về Organizations API (đã có LastOwner protection sẵn).
             return request.OrganizationId is not null
                 ? Result.Failure(AuthErrors.Role.OrganizationRevokeNotSupported)
                 : Result.Failure(AuthErrors.Role.InvalidScope);
@@ -128,7 +182,7 @@ public sealed class RoleAssignmentService(
             return Result.Failure(AuthErrors.Organization.MembershipNotFound);
         }
 
-        IReadOnlyList<string> actorGlobalPermissions = await membershipRepository.GetGlobalPermissionsAsync(actorUserId, cancellationToken);
+        IReadOnlyList<string> actorGlobalPermissions = await GetGlobalPermissionsAsync(actorUserId, cancellationToken);
         bool hasGlobalOverride = actorGlobalPermissions.Contains(PermissionCode.IdentityRolesAssignOrganization, StringComparer.Ordinal)
             || actorGlobalPermissions.Contains(PermissionCode.IdentityRolesAssignGlobal, StringComparer.Ordinal);
 
@@ -141,7 +195,7 @@ public sealed class RoleAssignmentService(
                 return Result.Failure(AuthErrors.Organization.CrossOrganizationAccessDenied);
             }
 
-            actorEffectivePermissions = await membershipRepository.GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
+            actorEffectivePermissions = await GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
             if (!actorEffectivePermissions.Contains(PermissionCode.IdentityRolesAssignOrganization, StringComparer.Ordinal))
             {
                 return Result.Failure(AuthErrors.Organization.Forbidden);
@@ -152,5 +206,22 @@ public sealed class RoleAssignmentService(
         return targetRolePermissions.Except(actorEffectivePermissions, StringComparer.Ordinal).Any()
             ? Result.Failure(AuthErrors.Organization.PrivilegeEscalation)
             : Result.Success();
+    }
+
+    private async Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<string> perms = await membershipRepository.GetGlobalPermissionsAsync(userId, cancellationToken);
+        if (perms.Count > 0)
+        {
+            return perms;
+        }
+        return await roleRepository.GetUserPermissionCodesAsync(userId, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<string>> GetEffectivePermissionsAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<string> globalPerms = await GetGlobalPermissionsAsync(userId, cancellationToken);
+        IReadOnlyList<string> scopedPerms = await membershipRepository.GetScopedPermissionCodesAsync(userId, organizationId, cancellationToken);
+        return globalPerms.Concat(scopedPerms).Distinct(StringComparer.Ordinal).ToArray();
     }
 }

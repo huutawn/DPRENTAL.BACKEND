@@ -5,8 +5,6 @@ using Dprental.AuthService.Api.Routing;
 using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.DependencyInjection;
 using Dprental.AuthService.Application.IServices;
-using Dprental.AuthService.Domain.Data;
-using Dprental.AuthService.Domain.DependencyInjection;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Repositories;
 using FluentValidation;
@@ -18,7 +16,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAuthServiceDistributedTracing(builder.Configuration);
 builder.Services.AddAuthApplication(builder.Configuration);
-builder.Services.AddAuthDomainPersistence(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddAuthDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
 builder.Services.AddJwtBearerSecurity();
 builder.Services.AddAuthForwardedHeaders(builder.Configuration);
 builder.Services.AddGoogleLogin(builder.Configuration);
@@ -37,7 +35,6 @@ builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<GetUsersRequestValidator>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICorrelationIdProvider, CorrelationIdProvider>();
-builder.Services.AddScoped<IAuditLogRepository, EfAuditLogRepository>();
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -47,7 +44,6 @@ builder.Services.AddSwaggerGen(options =>
         Path.Combine(AppContext.BaseDirectory, $"{typeof(Program).Assembly.GetName().Name}.xml"),
         includeControllerXmlComments: true);
 });
-builder.Services.AddScoped<IRecoveryTokenRepository, EfRecoveryTokenRepository>();
 builder.Services.AddHealthChecks()
 
     .AddDbContextCheck<AuthDbContext>(

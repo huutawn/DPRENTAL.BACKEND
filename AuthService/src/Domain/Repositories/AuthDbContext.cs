@@ -1,7 +1,7 @@
 using Dprental.AuthService.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
-namespace Dprental.AuthService.Domain.Data;
+namespace Dprental.AuthService.Domain.Repositories;
 
 public sealed class AuthDbContext : DbContext
 {
@@ -29,6 +29,5 @@ public sealed class AuthDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-
     }
 }

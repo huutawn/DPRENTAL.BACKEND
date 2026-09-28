@@ -85,6 +85,7 @@ public static class AuthErrorCode
         public const string MissingCookie = "Auth.MissingCookie";
         public const string InvalidRefreshToken = "Auth.InvalidRefreshToken";
         public const string SessionNotFound = "Auth.SessionNotFound";
+        public const string Uncategorized = "Auth.Uncategorized";
     }
 
     public static class Paging

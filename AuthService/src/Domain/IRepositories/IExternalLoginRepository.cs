@@ -3,8 +3,7 @@ using Dprental.AuthService.Domain.Entities;
 namespace Dprental.AuthService.Domain.IRepositories;
 
 /// <summary>
-/// Repository của liên kết đăng nhập bên ngoài. <see cref="AddAsync"/> ném
-/// <see cref="Exceptions.DuplicateExternalLoginException"/> khi liên kết đã tồn tại.
+/// Repository của liên kết đăng nhập bên ngoài.
 /// </summary>
 public interface IExternalLoginRepository
 {

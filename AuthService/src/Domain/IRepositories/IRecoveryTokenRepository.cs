@@ -1,4 +1,4 @@
-﻿using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Domain.Entities;
 
 namespace Dprental.AuthService.Domain.IRepositories;
 

@@ -1,19 +1,20 @@
-    <Project Sdk="Microsoft.NET.Sdk">
-  <ItemGroup>
-    <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.12" />
-    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.19.2" />
-    <PackageReference Include="UAParser" Version="3.1.47" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="../Domain/AuthService.Domain.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Identity.Core" Version="10.0.12" />
-    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.12" />
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.19.2" />
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Interfaces\" />
-  </ItemGroup>
+<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<PackageReference Include="BCrypt.Net-Next" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore" />
+		<PackageReference Include="Microsoft.IdentityModel.Tokens" />
+		<PackageReference Include="FluentValidation.AspNetCore" />
+		<PackageReference Include="UAParser" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="../Domain/AuthService.Domain.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Extensions.Identity.Core" />
+		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+		<PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+	</ItemGroup>
+	<ItemGroup>
+		<Folder Include="Interfaces\" />
+	</ItemGroup>
 </Project>

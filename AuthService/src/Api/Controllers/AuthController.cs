@@ -75,22 +75,21 @@ public sealed class AuthController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Login(LoginRequest request, CancellationToken cancellationToken)
     {
-        Guid? userId = await userService.AuthenticateAsync(request, cancellationToken);
-        if (userId is null)
+        Result<Guid> authResult = await userService.AuthenticateAsync(request, cancellationToken);
+        if (authResult.IsFailure)
         {
-            return this.ToProblem(AuthErrors.Auth.InvalidCredentials);
+            return this.ToProblem(authResult.Error);
         }
 
-        AuthTokenPair? tokens = await authSessionService.CreateSessionAsync(userId.Value, cancellationToken);
-        if (tokens is null)
+        Result<AuthTokenPair> sessionResult = await authSessionService.CreateSessionAsync(authResult.Value, cancellationToken);
+        if (sessionResult.IsFailure)
         {
-            return this.ToProblem(AuthErrors.Auth.InactiveAccount);
+            return this.ToProblem(sessionResult.Error);
         }
-        SetAuthCookies(tokens.AccessToken, tokens.RefreshToken);
+        SetAuthCookies(sessionResult.Value.AccessToken, sessionResult.Value.RefreshToken);
 
-        return Ok(new { Message = "Đăng nhập thành công.", UserId = userId });
+        return Ok(new { Message = "Đăng nhập thành công.", UserId = authResult.Value });
     }
-
     /// <summary>Làm mới phiên đăng nhập bằng refresh token trong cookie.</summary>
     [HttpPost("refresh")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -102,15 +101,14 @@ public sealed class AuthController(
             return this.ToProblem(AuthErrors.Auth.MissingCookie);
         }
 
-        AuthTokenPair? tokens = await authSessionService.RefreshAsync(currentRefreshToken, cancellationToken);
-        if (tokens is null)
+        Result<AuthTokenPair> result = await authSessionService.RefreshAsync(currentRefreshToken, cancellationToken);
+        if (result.IsFailure)
         {
-            return this.ToProblem(AuthErrors.Auth.InvalidRefreshToken);
+            return this.ToProblem(result.Error);
         }
 
         // Cập nhật lại Cookie với cặp token mới
-        SetAuthCookies(tokens.AccessToken, tokens.RefreshToken);
-
+        SetAuthCookies(result.Value.AccessToken, result.Value.RefreshToken);
         return Ok(new { Message = "Làm mới token thành công" });
     }
 
@@ -185,16 +183,13 @@ public sealed class AuthController(
                 detail: "Ticket là bắt buộc.");
         }
 
-        AuthTokenPair? tokens = await authSessionService.ExchangeGoogleLoginTicketAsync(request.Ticket, cancellationToken);
-        if (tokens is null)
+        Result<AuthTokenPair> tokensResult = await authSessionService.ExchangeGoogleLoginTicketAsync(request.Ticket, cancellationToken);
+        if (tokensResult.IsFailure)
         {
-            return Problem(
-                statusCode: StatusCodes.Status401Unauthorized,
-                title: "Auth.InvalidGoogleLoginTicket",
-                detail: "Ticket không hợp lệ, đã hết hạn hoặc đã được sử dụng.");
+            return this.ToProblem(tokensResult.Error);
         }
 
-        return Ok(new AuthTokenResponse(tokens.AccessToken, tokens.RefreshToken));
+        return Ok(new AuthTokenResponse(tokensResult.Value.AccessToken, tokensResult.Value.RefreshToken));
     }
 
     /// <summary>Bắt đầu đăng nhập Google sau khi kiểm tra return URL an toàn.</summary>
@@ -272,18 +267,25 @@ public sealed class AuthController(
         Result<Guid> result = await externalLoginService.SignInAsync(identity, cancellationToken);
         if (result.IsFailure)
         {
+            if (result.Error.Code == AuthErrorCode.Auth.Uncategorized)
+            {
+                return this.ToProblem(result.Error);
+            }
             return RedirectToBff(WithError(bffCallbackUrl, returnUrl, result.Error.Code));
         }
 
-        string? ticket = await authSessionService.CreateGoogleLoginTicketAsync(result.Value, cancellationToken);
-        if (ticket is null)
+        Result<string> ticketResult = await authSessionService.CreateGoogleLoginTicketAsync(result.Value, cancellationToken);
+        if (ticketResult.IsFailure)
         {
-            return RedirectToBff(WithError(bffCallbackUrl, returnUrl, "Auth.InactiveAccount"));
+            if (ticketResult.Error.Code == AuthErrorCode.Auth.Uncategorized)
+            {
+                return this.ToProblem(ticketResult.Error);
+            }
+            return RedirectToBff(WithError(bffCallbackUrl, returnUrl, ticketResult.Error.Code));
         }
 
-        return RedirectToBff(WithTicket(bffCallbackUrl, returnUrl, ticket));
+        return RedirectToBff(WithTicket(bffCallbackUrl, returnUrl, ticketResult.Value));
     }
-
     private ObjectResult InvalidReturnUrl() => Problem(
         statusCode: StatusCodes.Status400BadRequest,
         title: "Auth.InvalidReturnUrl",

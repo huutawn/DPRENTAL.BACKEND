@@ -1,7 +1,7 @@
-using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
+
+using Dprental.AuthService.Domain.IRepositories;
 
 namespace Dprental.AuthService.Domain.Repositories;
 
@@ -45,9 +45,22 @@ public sealed class EfRoleRepository(AuthDbContext dbContext) : IRoleRepository
             return false;
         }
 
-        dbContext.UserRoles.Add(new UserRole { UserId = userId, RoleId = roleId });
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+        UserRole userRole = new() { UserId = userId, RoleId = roleId };
+        dbContext.UserRoles.Add(userRole);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException exception)
+        {
+            dbContext.Entry(userRole).State = EntityState.Detached;
+            if (DbExceptionTranslator.TryTranslate(exception, out var constraintEx))
+            {
+                throw constraintEx;
+            }
+            throw;
+        }
     }
 
     public async Task<bool> RevokeAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default)

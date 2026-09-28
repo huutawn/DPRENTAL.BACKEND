@@ -1,9 +1,8 @@
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Exceptions;
-using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
+
+using Dprental.AuthService.Domain.IRepositories;
 
 namespace Dprental.AuthService.Domain.Repositories;
 
@@ -28,45 +27,40 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        IQueryable<Organization> query = dbContext.Organizations.AsNoTracking();
-        int totalCount = await query.CountAsync(cancellationToken);
+        int totalCount = await dbContext.Organizations.CountAsync(cancellationToken);
 
-        List<Organization> items = await query
-            .OrderBy(org => org.CreatedAtUtc)
-            .ThenBy(org => org.Id)
-            .Skip((request.Page - 1) * request.PageSize)
+        int skip = (request.Page - 1) * request.PageSize;
+        List<Organization> items = await dbContext.Organizations
+            .AsNoTracking()
+            .OrderBy(o => o.Name)
+            .Skip(skip)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
 
-        return PagedResult.Create(items, request.Page, request.PageSize, totalCount);
+        return new PagedResult<Organization>(items, request.Page, request.PageSize, totalCount);
     }
 
     public async Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        IQueryable<Organization> query = dbContext.OrganizationMemberships
+        var query = dbContext.OrganizationMemberships
             .AsNoTracking()
-            .Where(m => m.UserId == userId && m.Status == MembershipStatus.Active && m.Organization.Status == OrganizationStatus.Active)
-            .Select(m => m.Organization)
-            .Distinct();
+            .Where(m => m.UserId == userId)
+            .Select(m => m.Organization);
 
         int totalCount = await query.CountAsync(cancellationToken);
 
+        int skip = (request.Page - 1) * request.PageSize;
         List<Organization> items = await query
-            .OrderBy(org => org.CreatedAtUtc)
-            .ThenBy(org => org.Id)
-            .Skip((request.Page - 1) * request.PageSize)
+            .OrderBy(o => o.Name)
+            .Skip(skip)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
 
-        return PagedResult.Create(items, request.Page, request.PageSize, totalCount);
+        return new PagedResult<Organization>(items, request.Page, request.PageSize, totalCount);
     }
 
-    /// <summary>
-    /// Tạo organization và membership ban đầu trong một transaction. Ném <see cref="Exceptions.DuplicateSlugException"/>
-    /// hoặc <see cref="Exceptions.DuplicateTaxCodeException"/> khi vi phạm unique.
-    /// </summary>
     public async Task<Organization> CreateAsync(
         Organization organization,
         OrganizationMembership initialMembership,
@@ -74,11 +68,6 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
     {
         ArgumentNullException.ThrowIfNull(organization);
         ArgumentNullException.ThrowIfNull(initialMembership);
-
-        if (await SlugExistsAsync(organization.Slug, cancellationToken))
-        {
-            throw new DuplicateSlugException("Slug của organization đã tồn tại.");
-        }
 
         dbContext.Organizations.Add(organization);
         dbContext.OrganizationMemberships.Add(initialMembership);
@@ -92,12 +81,12 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
             dbContext.Entry(organization).State = EntityState.Detached;
             dbContext.Entry(initialMembership).State = EntityState.Detached;
 
-            if (UniqueConstraintViolations.IsUniqueViolation(exception))
+            if (DbExceptionTranslator.TryTranslate(exception, out var constraintEx))
             {
-                throw UniqueConstraintViolations.ToOrganizationException(exception);
+                throw constraintEx;
             }
 
-            throw new DuplicateSlugException("Slug của organization đã tồn tại.", exception);
+            throw;
         }
     }
 
@@ -120,7 +109,66 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
         }
 
         dbContext.Organizations.Update(organization);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException exception)
+        {
+            dbContext.Entry(organization).State = EntityState.Detached;
+            if (DbExceptionTranslator.TryTranslate(exception, out var constraintEx))
+            {
+                throw constraintEx;
+            }
+            throw;
+        }
+    }
+
+    public async Task LockOrganizationsAsync(IReadOnlyList<Guid> sortedOrganizationIds, CancellationToken cancellationToken = default)
+    {
+        if (sortedOrganizationIds.Count == 0)
+        {
+            return;
+        }
+
+        if (dbContext.Database.IsRelational())
+        {
+            Guid[] ids = sortedOrganizationIds.ToArray();
+            await dbContext.Organizations
+                .FromSqlRaw("SELECT * FROM auth.\"Organizations\" WHERE \"Id\" = ANY({0}) ORDER BY \"Id\" FOR UPDATE", ids)
+                .ToListAsync(cancellationToken);
+        }
+        else
+        {
+            Guid[] ids = sortedOrganizationIds.ToArray();
+            await dbContext.Organizations
+                .Where(o => ids.Contains(o.Id))
+                .ToListAsync(cancellationToken);
+        }
+    }
+
+    public async Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+    {
+        if (dbContext.Database.IsRelational())
+        {
+            var efTransaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+            return new EfExecutionTransaction(efTransaction);
+        }
+        return new NullExecutionTransaction();
+    }
+
+    private sealed class EfExecutionTransaction(Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction) : IExecutionTransaction
+    {
+        public Task CommitAsync(CancellationToken cancellationToken = default) => transaction.CommitAsync(cancellationToken);
+        public Task RollbackAsync(CancellationToken cancellationToken = default) => transaction.RollbackAsync(cancellationToken);
+        public ValueTask DisposeAsync() => transaction.DisposeAsync();
+    }
+
+    private sealed class NullExecutionTransaction : IExecutionTransaction
+    {
+        public Task CommitAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task RollbackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

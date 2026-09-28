@@ -3,7 +3,9 @@ using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Domain.Entities;
-using Microsoft.AspNetCore.Http; // Đã thêm
+using Dprental.AuthService.Common;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Dprental.AuthService.Api.Tests;
@@ -18,11 +20,11 @@ public sealed class AuthSessionServiceTests
         RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), ["member"]));
         AuthSessionService service = CreateService(repository, now);
 
-        AuthTokenPair? result = await service.CreateSessionAsync(repository.Principal!.UserId);
+        Result<AuthTokenPair> result = await service.CreateSessionAsync(repository.Principal!.Id);
 
-        Assert.NotNull(result);
-        Assert.Equal("access-token", result.AccessToken);
-        Assert.NotEqual(result.RefreshToken, repository.CreatedRefreshTokenHash);
+        Assert.True(result.IsSuccess);
+        Assert.Equal("access-token", result.Value.AccessToken);
+        Assert.NotEqual(result.Value.RefreshToken, repository.CreatedRefreshTokenHash);
         Assert.Equal(64, repository.CreatedRefreshTokenHash!.Length);
         Assert.Equal(now.UtcDateTime, repository.CreatedAtUtc);
         Assert.Equal(now.AddDays(30).UtcDateTime, repository.ExpiresAtUtc);
@@ -34,14 +36,12 @@ public sealed class AuthSessionServiceTests
         RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), ["admin"]));
         AuthSessionService service = CreateService(repository, DateTimeOffset.UnixEpoch);
 
-        AuthTokenPair? result = await service.RefreshAsync("refresh-token-cu");
+        Result<AuthTokenPair> result = await service.RefreshAsync("refresh-token-cu");
 
-        Assert.NotNull(result);
-        Assert.Equal("access-token", result.AccessToken);
-        Assert.NotEqual("refresh-token-cu", result.RefreshToken);
-        Assert.Equal(64, repository.CurrentRefreshTokenHash!.Length);
+        Assert.True(result.IsSuccess);
+        Assert.Equal("access-token", result.Value.AccessToken);
+        Assert.NotEqual("refresh-token-cu", result.Value.RefreshToken);
         Assert.Equal(64, repository.ReplacementRefreshTokenHash!.Length);
-        Assert.NotEqual(repository.CurrentRefreshTokenHash, repository.ReplacementRefreshTokenHash);
     }
 
     [Fact]
@@ -50,9 +50,9 @@ public sealed class AuthSessionServiceTests
         RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), []));
         AuthSessionService service = CreateService(repository, DateTimeOffset.UtcNow);
 
-        AuthTokenPair? result = await service.RefreshAsync(" ");
+        Result<AuthTokenPair> result = await service.RefreshAsync(" ");
 
-        Assert.Null(result);
+        Assert.True(result.IsFailure);
         Assert.False(repository.RotateCalled);
     }
 
@@ -62,8 +62,9 @@ public sealed class AuthSessionServiceTests
         RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), []));
         AuthSessionService service = CreateService(repository, DateTimeOffset.UtcNow);
 
-        await service.RevokeByRefreshTokenAsync(string.Empty);
+        Result result = await service.RevokeByRefreshTokenAsync(string.Empty);
 
+        Assert.True(result.IsSuccess);
         Assert.False(repository.RevokeCalled);
     }
 
@@ -74,10 +75,11 @@ public sealed class AuthSessionServiceTests
         RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), []));
         AuthSessionService service = CreateService(repository, now);
 
-        string? ticket = await service.CreateGoogleLoginTicketAsync(repository.Principal!.UserId);
+        Result<string> result = await service.CreateGoogleLoginTicketAsync(repository.Principal!.Id);
 
-        Assert.NotNull(ticket);
-        Assert.NotEqual(ticket, repository.CreatedTicketHash);
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Value);
+        Assert.NotEqual(result.Value, repository.CreatedTicketHash);
         Assert.Equal(64, repository.CreatedTicketHash!.Length);
         Assert.Equal(now.UtcDateTime, repository.TicketCreatedAtUtc);
         Assert.Equal(now.AddSeconds(90).UtcDateTime, repository.TicketExpiresAtUtc);
@@ -90,25 +92,23 @@ public sealed class AuthSessionServiceTests
         RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), ["member"]));
         AuthSessionService service = CreateService(repository, now);
 
-        AuthTokenPair? result = await service.ExchangeGoogleLoginTicketAsync("google-ticket");
+        Result<AuthTokenPair> result = await service.ExchangeGoogleLoginTicketAsync("google-ticket");
 
-        Assert.NotNull(result);
-        Assert.Equal("access-token", result.AccessToken);
-        Assert.NotEqual(result.RefreshToken, repository.ExchangedRefreshTokenHash);
+        Assert.True(result.IsSuccess);
+        Assert.Equal("access-token", result.Value.AccessToken);
+        Assert.NotEqual(result.Value.RefreshToken, repository.ExchangedRefreshTokenHash);
         Assert.Equal(64, repository.ExchangedTicketHash!.Length);
         Assert.Equal(64, repository.ExchangedRefreshTokenHash!.Length);
         Assert.Equal(now.UtcDateTime, repository.ExchangeAtUtc);
         Assert.Equal(now.AddDays(30).UtcDateTime, repository.ExchangeSessionExpiresAtUtc);
     }
 
-    /// <summary>Repository ghi nhận tham số để test luật application mà không mô phỏng EF Core.</summary>
     private sealed class RecordingAuthSessionRepository(AuthSessionPrincipal? principal) : IAuthSessionRepository
     {
         public AuthSessionPrincipal? Principal { get; } = principal;
         public string? CreatedRefreshTokenHash { get; private set; }
         public DateTime CreatedAtUtc { get; private set; }
         public DateTime ExpiresAtUtc { get; private set; }
-        public string? CurrentRefreshTokenHash { get; private set; }
         public string? ReplacementRefreshTokenHash { get; private set; }
         public bool RotateCalled { get; private set; }
         public bool RevokeCalled { get; private set; }
@@ -120,30 +120,15 @@ public sealed class AuthSessionServiceTests
         public DateTime ExchangeAtUtc { get; private set; }
         public DateTime ExchangeSessionExpiresAtUtc { get; private set; }
 
-        public Task<Session?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("AuthSessionService does not use generic CRUD reads.");
+        public Task<Session?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<Session>> GetAllAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Session> CreateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> UpdateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        public Task<IReadOnlyList<Session>> GetAllAsync(CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("AuthSessionService does not use generic CRUD reads.");
-
-        public Task<Session> CreateAsync(Session entity, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("AuthSessionService creates sessions through its atomic Auth operation.");
-
-        public Task<bool> UpdateAsync(Session entity, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("AuthSessionService does not use generic CRUD updates.");
-
-        public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("AuthSessionService revokes sessions instead of deleting them.");
-
-        // Đã bổ sung deviceName và ipAddress vào chữ ký hàm
         public Task<AuthSessionPrincipal?> CreateAsync(
-            Guid userId,
-            string refreshTokenHash,
-            DateTime utcNow,
-            DateTime expiresAtUtc,
-            string? deviceName,
-            string? ipAddress,
-            CancellationToken cancellationToken)
+            Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc,
+            string? deviceName, string? ipAddress, CancellationToken cancellationToken = default)
         {
             CreatedRefreshTokenHash = refreshTokenHash;
             CreatedAtUtc = utcNow;
@@ -151,28 +136,46 @@ public sealed class AuthSessionServiceTests
             return Task.FromResult(Principal);
         }
 
-        public Task<AuthSessionPrincipal?> RotateAsync(string currentRefreshTokenHash, string replacementRefreshTokenHash, DateTime utcNow, CancellationToken cancellationToken)
+        public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default)
         {
-            RotateCalled = true;
-            CurrentRefreshTokenHash = currentRefreshTokenHash;
-            ReplacementRefreshTokenHash = replacementRefreshTokenHash;
-            return Task.FromResult(Principal);
+            if (Principal is null) return Task.FromResult<RefreshToken?>(null);
+            User user = new() { Id = Principal.Id, IsActive = true };
+            foreach (string roleName in Principal.Roles)
+            {
+                user.UserRoles.Add(new UserRole { Role = new Role { Name = roleName } });
+            }
+            Session session = new() { Id = Guid.NewGuid(), UserId = user.Id, User = user, ExpiresAtUtc = DateTime.UtcNow.AddDays(30) };
+            RefreshToken token = new()
+            {
+                Id = Guid.NewGuid(),
+                TokenHash = tokenHash,
+                SessionId = session.Id,
+                Session = session,
+                UserId = user.Id,
+                ExpiresAtUtc = DateTime.UtcNow.AddDays(30)
+            };
+            return Task.FromResult<RefreshToken?>(token);
         }
 
-        public Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken)
+        public Task<bool> RotateTokenAsync(
+            Guid currentTokenId, Guid sessionId, Guid userId, string replacementHash,
+            DateTime sessionExpiresAtUtc, DateTime utcNow, CancellationToken cancellationToken = default)
+        {
+            RotateCalled = true;
+            ReplacementRefreshTokenHash = replacementHash;
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
         {
             CreatedTicketHash = ticketHash;
             TicketCreatedAtUtc = utcNow;
             TicketExpiresAtUtc = expiresAtUtc;
-            return Task.FromResult(Principal?.UserId == userId);
+            return Task.FromResult(Principal?.Id == userId);
         }
 
         public Task<AuthSessionPrincipal?> ConsumeGoogleLoginTicketAndCreateSessionAsync(
-            string ticketHash,
-            string refreshTokenHash,
-            DateTime utcNow,
-            DateTime sessionExpiresAtUtc,
-            CancellationToken cancellationToken)
+            string ticketHash, string refreshTokenHash, DateTime utcNow, DateTime sessionExpiresAtUtc, CancellationToken cancellationToken = default)
         {
             ExchangedTicketHash = ticketHash;
             ExchangedRefreshTokenHash = refreshTokenHash;
@@ -181,33 +184,66 @@ public sealed class AuthSessionServiceTests
             return Task.FromResult(Principal);
         }
 
-        public Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken)
+        public Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default)
         {
             RevokeCalled = true;
             return Task.CompletedTask;
         }
 
         public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(Principal?.UserId);
-        }
-
-        public Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<Session>>([]);
-
-        public Task<Guid?> GetSessionIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) =>
-            Task.FromResult<Guid?>(null);
-
-        public Task<bool> RevokeSessionForUserAsync(Guid userId, Guid sessionId, DateTime utcNow, CancellationToken cancellationToken = default) =>
-            Task.FromResult(true);
+        public Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => Task.FromResult(Principal?.Id);
+        public Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<Session>>([]);
+        public Task<Guid?> GetSessionIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => Task.FromResult<Guid?>(null);
+        public Task<bool> RevokeSessionForUserAsync(Guid userId, Guid sessionId, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
     }
 
-    // Đã truyền FakeHttpContextAccessor vào constructor
     private static AuthSessionService CreateService(RecordingAuthSessionRepository repository, DateTimeOffset now) =>
-        new(repository, new FakeAccessTokenIssuer(), new FixedTimeProvider(now), new TestCorrelationIdProvider(), new TestAuditLogRepository(), new FakeHttpContextAccessor());
+        new(
+            repository,
+            new FakeUserRepo(repository.Principal),
+            new FakeAccessTokenIssuer(),
+            new FixedTimeProvider(now),
+            new TestCorrelationIdProvider(),
+            new TestAuditLogRepository(),
+            NullLogger<AuthSessionService>.Instance,
+            new FakeHttpContextAccessor()
+        );
 
-    // Fake class cho IHttpContextAccessor
+    private sealed class FakeUserRepo(AuthSessionPrincipal? principal) : IUserRepository
+    {
+        public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            if (principal is null || principal.Id != id) return Task.FromResult<User?>(null);
+            return Task.FromResult<User?>(new User { Id = id, IsActive = true });
+        }
+
+        public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            if (principal is null || principal.Id != id) return Task.FromResult<User?>(null);
+            User user = new() { Id = id, IsActive = true };
+            foreach (string role in principal.Roles)
+            {
+                user.UserRoles.Add(new UserRole { Role = new Role { Name = role } });
+            }
+            return Task.FromResult<User?>(user);
+        }
+
+        public Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(principal is not null && principal.Id == userId);
+
+        public Task<IReadOnlyList<User>> GetAllAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<User> CreateAsync(User entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> UpdateAsync(User entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<User> CreateWithRoleAsync(User user, Guid roleId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> CitizenIdExistsAsync(string citizenId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> ChangePasswordAndRevokeSessionsAsync(Guid userId, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> ResetPasswordWithTokenAsync(Guid userId, string tokenHash, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
+    }
+
     private sealed class FakeHttpContextAccessor : IHttpContextAccessor
     {
         public HttpContext? HttpContext { get; set; } = new DefaultHttpContext();
@@ -221,15 +257,14 @@ public sealed class AuthSessionServiceTests
     private sealed class TestAuditLogRepository : IAuditLogRepository
     {
         public Task AddAsync(AuditLog auditLog, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<AuditLog>> GetRecentLogsAsync(int count, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
-    /// <summary>Issuer cố định giúp assertion không phụ thuộc JWT cryptography.</summary>
     private sealed class FakeAccessTokenIssuer : IAccessTokenIssuer
     {
         public IssuedAccessToken Issue(AccessTokenRequest request) => new("access-token", DateTimeOffset.UnixEpoch.AddMinutes(15));
     }
 
-    /// <summary>TimeProvider cố định để kiểm tra chính xác hạn 30 ngày.</summary>
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => utcNow;

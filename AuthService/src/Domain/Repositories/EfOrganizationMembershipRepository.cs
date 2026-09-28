@@ -1,9 +1,9 @@
+using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Exceptions;
-using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
+
+using Dprental.AuthService.Domain.IRepositories;
 
 namespace Dprental.AuthService.Domain.Repositories;
 
@@ -40,23 +40,26 @@ public sealed class EfOrganizationMembershipRepository(AuthDbContext dbContext) 
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        IQueryable<OrganizationMembership> query = dbContext.OrganizationMemberships
+        int totalCount = await dbContext.OrganizationMemberships
+            .Where(m => m.OrganizationId == organizationId)
+            .CountAsync(cancellationToken);
+
+        int skip = (request.Page - 1) * request.PageSize;
+        List<OrganizationMembership> items = await dbContext.OrganizationMemberships
             .AsNoTracking()
             .Include(m => m.User)
             .Include(m => m.Role)
-            .Where(m => m.OrganizationId == organizationId);
-
-        int totalCount = await query.CountAsync(cancellationToken);
-
-        List<OrganizationMembership> items = await query
+                .ThenInclude(r => r.RolePermissions)
+                    .ThenInclude(rp => rp.Permission)
+            .Where(m => m.OrganizationId == organizationId)
             .OrderBy(m => m.JoinedAtUtc)
-            .ThenBy(m => m.Id)
-            .Skip((request.Page - 1) * request.PageSize)
+            .Skip(skip)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
 
-        return PagedResult.Create(items, request.Page, request.PageSize, totalCount);
+        return new PagedResult<OrganizationMembership>(items, request.Page, request.PageSize, totalCount);
     }
+
     public Task<bool> MembershipExistsAsync(Guid organizationId, Guid userId, CancellationToken cancellationToken = default) =>
         dbContext.OrganizationMemberships
             .AsNoTracking()
@@ -65,11 +68,6 @@ public sealed class EfOrganizationMembershipRepository(AuthDbContext dbContext) 
     public async Task<OrganizationMembership> AddMemberAsync(OrganizationMembership membership, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(membership);
-
-        if (await MembershipExistsAsync(membership.OrganizationId, membership.UserId, cancellationToken))
-        {
-            throw new DuplicateMembershipException("User đã là thành viên của organization này.");
-        }
 
         dbContext.OrganizationMemberships.Add(membership);
         try
@@ -80,7 +78,11 @@ public sealed class EfOrganizationMembershipRepository(AuthDbContext dbContext) 
         catch (DbUpdateException exception)
         {
             dbContext.Entry(membership).State = EntityState.Detached;
-            throw new DuplicateMembershipException("User đã là thành viên của organization này.", exception);
+            if (DbExceptionTranslator.TryTranslate(exception, out var constraintEx))
+            {
+                throw constraintEx;
+            }
+            throw;
         }
     }
 
@@ -100,8 +102,20 @@ public sealed class EfOrganizationMembershipRepository(AuthDbContext dbContext) 
         existing.Status = membership.Status;
         existing.JoinedAtUtc = membership.JoinedAtUtc;
 
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException exception)
+        {
+            dbContext.Entry(existing).State = EntityState.Detached;
+            if (DbExceptionTranslator.TryTranslate(exception, out var constraintEx))
+            {
+                throw constraintEx;
+            }
+            throw;
+        }
     }
 
     public async Task<bool> DeleteAsync(Guid membershipId, CancellationToken cancellationToken = default)
@@ -129,28 +143,19 @@ public sealed class EfOrganizationMembershipRepository(AuthDbContext dbContext) 
             .Where(m => m.OrganizationId == organizationId && (m.Role.Name == "Owner" || m.Role.Name == "owner") && m.Status == MembershipStatus.Active)
             .CountAsync(cancellationToken);
 
-    public async Task<IReadOnlyList<string>> GetEffectivePermissionsAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default)
-    {
-        List<string> globalPermissions = await dbContext.UserRoles
-            .AsNoTracking()
-            .Where(ur => ur.UserId == userId)
-            .SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Code))
-            .ToListAsync(cancellationToken);
-
-        List<string> scopedPermissions = await dbContext.OrganizationMemberships
-            .AsNoTracking()
-            .Where(m => m.UserId == userId && m.OrganizationId == organizationId && m.Status == MembershipStatus.Active)
-            .SelectMany(m => m.Role.RolePermissions.Select(rp => rp.Permission.Code))
-            .ToListAsync(cancellationToken);
-
-        return globalPermissions.Concat(scopedPermissions).Distinct(StringComparer.Ordinal).ToList();
-    }
-
     public async Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) =>
         await dbContext.UserRoles
             .AsNoTracking()
             .Where(ur => ur.UserId == userId)
             .SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Code))
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<string>> GetScopedPermissionCodesAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default) =>
+        await dbContext.OrganizationMemberships
+            .AsNoTracking()
+            .Where(m => m.UserId == userId && m.OrganizationId == organizationId && m.Status == MembershipStatus.Active)
+            .SelectMany(m => m.Role.RolePermissions.Select(rp => rp.Permission.Code))
             .Distinct()
             .ToListAsync(cancellationToken);
 

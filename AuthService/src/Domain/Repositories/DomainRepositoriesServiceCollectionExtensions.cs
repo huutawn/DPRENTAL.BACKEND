@@ -1,16 +1,14 @@
-using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.IRepositories;
-using Dprental.AuthService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Dprental.AuthService.Domain.DependencyInjection;
+namespace Dprental.AuthService.Domain.Repositories;
 
-/// <summary>Registers the Domain-owned EF persistence and repositories.</summary>
-public static class DomainServiceCollectionExtensions
+/// <summary>Registers Domain EF repositories and DbContext.</summary>
+public static class DomainRepositoriesServiceCollectionExtensions
 {
     /// <summary>Registers PostgreSQL persistence for the Auth domain.</summary>
-    public static IServiceCollection AddAuthDomainPersistence(this IServiceCollection services, string? connectionString)
+    public static IServiceCollection AddAuthDomainRepositories(this IServiceCollection services, string? connectionString)
     {
         services.AddDbContext<AuthDbContext>(options => options.UseNpgsql(connectionString));
         services.AddScoped<IAuthSessionRepository, EfAuthSessionRepository>();
@@ -20,6 +18,12 @@ public static class DomainServiceCollectionExtensions
         services.AddScoped<IExternalLoginRepository, EfExternalLoginRepository>();
         services.AddScoped<IOrganizationRepository, EfOrganizationRepository>();
         services.AddScoped<IOrganizationMembershipRepository, EfOrganizationMembershipRepository>();
+        services.AddScoped<IAuditLogRepository, EfAuditLogRepository>();
+        services.AddScoped<IRecoveryTokenRepository, EfRecoveryTokenRepository>();
         return services;
     }
+
+    /// <summary>Alias tương thích cho AddAuthDomainRepositories.</summary>
+    public static IServiceCollection AddAuthDomainPersistence(this IServiceCollection services, string? connectionString) =>
+        services.AddAuthDomainRepositories(connectionString);
 }

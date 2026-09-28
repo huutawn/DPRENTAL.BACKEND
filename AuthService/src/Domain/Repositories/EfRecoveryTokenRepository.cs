@@ -1,9 +1,9 @@
-﻿using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
 
-namespace Dprental.AuthService.Domain.Repositories; // Đổi namespace nếu thư mục của bạn tên khác
+using Dprental.AuthService.Domain.IRepositories;
+
+namespace Dprental.AuthService.Domain.Repositories;
 
 public class EfRecoveryTokenRepository(AuthDbContext dbContext) : IRecoveryTokenRepository
 {

@@ -1,9 +1,7 @@
-using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Exceptions;
-using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
+
+using Dprental.AuthService.Domain.IRepositories;
 
 namespace Dprental.AuthService.Domain.Repositories;
 
@@ -29,11 +27,14 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
             await dbContext.SaveChangesAsync(cancellationToken);
             return entity;
         }
-        catch (DbUpdateException exception) when (exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        catch (DbUpdateException exception)
         {
-            // Bỏ entity lỗi khỏi DbContext để lần SaveChanges sau không thử insert lại.
             dbContext.Entry(entity).State = EntityState.Detached;
-            throw UniqueConstraintViolations.ToUserException(exception);
+            if (DbExceptionTranslator.TryTranslate(exception, out var constraintEx))
+            {
+                throw constraintEx;
+            }
+            throw;
         }
     }
 
@@ -49,12 +50,6 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
                 await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
                 try
                 {
-                    bool roleExists = await dbContext.Roles.AnyAsync(r => r.Id == roleId, cancellationToken);
-                    if (!roleExists)
-                    {
-                        throw new KeyNotFoundException($"Role {roleId} does not exist.");
-                    }
-
                     dbContext.Users.Add(user);
                     dbContext.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = roleId });
                     await dbContext.SaveChangesAsync(cancellationToken);
@@ -65,15 +60,9 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
                 {
                     await transaction.RollbackAsync(cancellationToken);
                     dbContext.Entry(user).State = EntityState.Detached;
-                    if (UniqueConstraintViolations.IsUniqueViolation(exception))
+                    if (DbExceptionTranslator.TryTranslate(exception, out var constraintEx))
                     {
-                        throw UniqueConstraintViolations.ToUserException(exception);
-                    }
-
-                    if (exception.Message.Contains("Unique", StringComparison.OrdinalIgnoreCase) ||
-                        exception.InnerException?.Message.Contains("Unique", StringComparison.OrdinalIgnoreCase) == true)
-                    {
-                        throw new DuplicateEmailException("Email đã được sử dụng.", exception);
+                        throw constraintEx;
                     }
                     throw;
                 }
@@ -87,12 +76,6 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
         }
         else
         {
-            bool roleExists = await dbContext.Roles.AnyAsync(r => r.Id == roleId, cancellationToken);
-            if (!roleExists)
-            {
-                throw new KeyNotFoundException($"Role {roleId} does not exist.");
-            }
-
             dbContext.Users.Add(user);
             dbContext.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = roleId });
             try
@@ -103,7 +86,11 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
             catch (DbUpdateException exception)
             {
                 dbContext.Entry(user).State = EntityState.Detached;
-                throw new DuplicateEmailException("Email đã được sử dụng.", exception);
+                if (DbExceptionTranslator.TryTranslate(exception, out var constraintEx))
+                {
+                    throw constraintEx;
+                }
+                throw;
             }
         }
     }
@@ -126,10 +113,14 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
             await dbContext.SaveChangesAsync(cancellationToken);
             return true;
         }
-        catch (DbUpdateException exception) when (UniqueConstraintViolations.IsUniqueViolation(exception))
+        catch (DbUpdateException exception)
         {
             dbContext.Entry(entity).State = EntityState.Detached;
-            throw UniqueConstraintViolations.ToUserException(exception);
+            if (DbExceptionTranslator.TryTranslate(exception, out var constraintEx))
+            {
+                throw constraintEx;
+            }
+            throw;
         }
     }
 
@@ -153,13 +144,11 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
 
     public async Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, CancellationToken cancellationToken = default)
     {
-        var query = dbContext.Users.AsNoTracking();
+        int totalCount = await dbContext.Users.CountAsync(cancellationToken);
 
-        int totalCount = await query.CountAsync(cancellationToken);
-
-        var items = await query
+        List<User> items = await dbContext.Users
+            .AsNoTracking()
             .OrderByDescending(u => u.CreatedAt)
-            .ThenBy(u => u.Id)
             .Skip(skip)
             .Take(take)
             .ToListAsync(cancellationToken);
@@ -192,4 +181,134 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
                     .ThenInclude(role => role.RolePermissions)
                         .ThenInclude(rolePermission => rolePermission.Permission)
             .SingleOrDefaultAsync(user => user.Id == id && user.IsActive, cancellationToken);
+
+    public async Task<bool> ChangePasswordAndRevokeSessionsAsync(
+        Guid userId,
+        string newPasswordHash,
+        DateTime utcNow,
+        CancellationToken cancellationToken = default)
+    {
+        await using var transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+
+        User? user = await dbContext.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+        if (user is null)
+        {
+            return false;
+        }
+
+        user.PasswordHash = newPasswordHash;
+        user.HasPassword = true;
+
+        List<Session> sessions = await dbContext.Sessions
+            .Where(s => s.UserId == userId && s.RevokedAtUtc == null)
+            .ToListAsync(cancellationToken);
+        foreach (Session s in sessions)
+        {
+            s.RevokedAtUtc = utcNow;
+        }
+
+        List<RefreshToken> tokens = await dbContext.RefreshTokens
+            .Where(t => t.UserId == userId && !t.IsRevoked)
+            .ToListAsync(cancellationToken);
+        foreach (RefreshToken t in tokens)
+        {
+            t.IsRevoked = true;
+            t.RevokedAtUtc = utcNow;
+            t.RevokedReason = "PasswordChanged";
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+        return true;
+    }
+
+    public async Task<bool> ResetPasswordWithTokenAsync(
+        Guid userId,
+        string tokenHash,
+        string newPasswordHash,
+        DateTime utcNow,
+        CancellationToken cancellationToken = default)
+    {
+        await using var transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+
+        int tokenConsumed;
+        if (dbContext.Database.IsRelational())
+        {
+            tokenConsumed = await dbContext.RecoveryTokens
+                .Where(t => t.TokenHash == tokenHash
+                    && t.UserId == userId
+                    && t.Purpose == "ResetPassword"
+                    && t.UsedAtUtc == null
+                    && t.ExpiresAtUtc > utcNow)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.UsedAtUtc, utcNow), cancellationToken);
+        }
+        else
+        {
+            RecoveryToken? trackedToken = await dbContext.RecoveryTokens
+                .FirstOrDefaultAsync(t => t.TokenHash == tokenHash
+                    && t.UserId == userId
+                    && t.Purpose == "ResetPassword"
+                    && t.UsedAtUtc == null
+                    && t.ExpiresAtUtc > utcNow, cancellationToken);
+            if (trackedToken is null)
+            {
+                return false;
+            }
+            trackedToken.UsedAtUtc = utcNow;
+            tokenConsumed = 1;
+        }
+
+        if (tokenConsumed != 1)
+        {
+            return false;
+        }
+
+        User? user = await dbContext.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+        if (user is null)
+        {
+            return false;
+        }
+
+        user.PasswordHash = newPasswordHash;
+        user.HasPassword = true;
+        user.AccessFailedCount = 0;
+        user.LockoutEnd = null;
+
+        List<Session> sessions = await dbContext.Sessions
+            .Where(s => s.UserId == userId && s.RevokedAtUtc == null)
+            .ToListAsync(cancellationToken);
+        foreach (Session s in sessions)
+        {
+            s.RevokedAtUtc = utcNow;
+        }
+
+        List<RefreshToken> tokens = await dbContext.RefreshTokens
+            .Where(t => t.UserId == userId && !t.IsRevoked)
+            .ToListAsync(cancellationToken);
+        foreach (RefreshToken t in tokens)
+        {
+            t.IsRevoked = true;
+            t.RevokedAtUtc = utcNow;
+            t.RevokedReason = "PasswordReset";
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+        return true;
+    }
+
+    public Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        dbContext.Users
+            .AsNoTracking()
+            .AnyAsync(u => u.Id == userId && u.IsActive, cancellationToken);
 }

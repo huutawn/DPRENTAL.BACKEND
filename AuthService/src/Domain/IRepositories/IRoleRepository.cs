@@ -9,7 +9,6 @@ public interface IRoleRepository
     Task<Role?> GetByIdAsync(Guid roleId, CancellationToken cancellationToken = default);
     Task<Role?> GetByNameAsync(string name, CancellationToken cancellationToken = default);
 
-
     /// <summary>Mã các permission mà role này mang — dùng để kiểm tra actor có đủ quyền trước khi gán/thu hồi.</summary>
     Task<IReadOnlyList<string>> GetPermissionCodesAsync(Guid roleId, CancellationToken cancellationToken = default);
 

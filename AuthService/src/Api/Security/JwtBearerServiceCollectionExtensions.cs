@@ -1,9 +1,9 @@
+using Dprental.AuthService.Application.Security.Jwt;
 using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Application.Options;
-using Dprental.AuthService.Application.Security.Jwt;
-using Dprental.AuthService.Domain.IRepositories;
-using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Common;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
@@ -82,13 +82,17 @@ internal static class JwtBearerServiceCollectionExtensions
         return;
     }
 
-    var userRepository = context.HttpContext.RequestServices
-        .GetRequiredService<IUserRepository>();
+    var userService = context.HttpContext.RequestServices
+        .GetRequiredService<IUserService>();
 
-    var user = await userRepository.GetByIdAsync(userId);
-
-    if (user is null || !user.IsActive)
+    var result = await userService.ValidateActiveUserAsync(userId, context.HttpContext.RequestAborted);
+    if (result.IsFailure)
     {
+        if (result.Error.Code == AuthErrorCode.Auth.Uncategorized)
+        {
+            throw new InvalidOperationException(result.Error.Message);
+        }
+
         context.Fail("Tài khoản không tồn tại hoặc đã bị khóa.");
     }
 },

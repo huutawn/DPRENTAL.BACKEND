@@ -1,9 +1,12 @@
-using Dprental.AuthService.Application.IServices;
-using Dprental.AuthService.Common;
 using Dprental.AuthService.Application.DTOs.Organization;
-using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Exceptions;
+using Dprental.AuthService.Application.Execution;
+using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Application.Validation;
+using Dprental.AuthService.Common;
+using Dprental.AuthService.Common.Enums;
+using Dprental.AuthService.Domain.Entities;
+using Microsoft.Extensions.Logging;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -11,7 +14,9 @@ public sealed class OrganizationRegistrationService(
     IOrganizationRepository organizationRepository,
     IUserRepository userRepository,
     IRoleRepository roleRepository,
-    TimeProvider timeProvider) : IOrganizationRegistrationService
+    TimeProvider timeProvider,
+    ICorrelationIdProvider correlationIdProvider,
+    ILogger<OrganizationRegistrationService> logger) : IOrganizationRegistrationService
 {
     private static readonly Guid SeededOwnerRoleId = new("a1010000-0000-0000-0000-000000000001");
     private const int MaxSlugAttempts = 5;
@@ -21,123 +26,132 @@ public sealed class OrganizationRegistrationService(
         OrganizationProfileRequest request,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-
-        User? actor = actorUserId == Guid.Empty ? null : await userRepository.GetByIdAsync(actorUserId, cancellationToken);
-        if (actor is null || !actor.IsActive)
+        if (!DtoValidator.TryValidateId(actorUserId, nameof(actorUserId), out Error? idError))
         {
-            return AuthErrors.User.NotFound;
+            return Result.Failure<OrganizationRegisteredResponse>(AuthErrors.User.NotFound);
         }
 
-        if (ProfileCompletionGuard.Check(actor) is Error profileError)
+        if (!DtoValidator.TryValidate(request, out Error? validationError))
         {
-            return profileError;
+            return Result.Failure<OrganizationRegisteredResponse>(validationError);
         }
 
-        if (request.Type is not (OrganizationType.Supplier or OrganizationType.Renter))
-        {
-            return AuthErrors.Organization.SelfRegistrationTypeNotAllowed;
-        }
+        return await ApplicationExecutor.ExecuteAsync(
+            "RegisterOrganization",
+            async () =>
+            {
+                User? actor = await userRepository.GetByIdAsync(actorUserId, cancellationToken);
+                if (actor is null || !actor.IsActive)
+                {
+                    return Result.Failure<OrganizationRegisteredResponse>(AuthErrors.User.NotFound);
+                }
 
-        string name = request.Name.Trim();
-        if (name.Length == 0)
-        {
-            return AuthErrors.Organization.InvalidName;
-        }
+                if (ProfileCompletionGuard.Check(actor) is Error profileError)
+                {
+                    return Result.Failure<OrganizationRegisteredResponse>(profileError);
+                }
 
-        string taxCode = request.TaxCode.Trim();
-        if (await organizationRepository.TaxCodeExistsAsync(taxCode, cancellationToken))
-        {
-            return AuthErrors.Organization.TaxCodeAlreadyExists;
-        }
+                if (request.Type is not (OrganizationType.Supplier or OrganizationType.Renter))
+                {
+                    return Result.Failure<OrganizationRegisteredResponse>(AuthErrors.Organization.SelfRegistrationTypeNotAllowed);
+                }
 
-        Result<string> slug = await ResolveSlugAsync(request.Slug, name, cancellationToken);
-        if (slug.IsFailure)
-        {
-            return slug.Error;
-        }
+                string name = request.Name.Trim();
+                if (name.Length == 0)
+                {
+                    return Result.Failure<OrganizationRegisteredResponse>(AuthErrors.Organization.InvalidName);
+                }
 
-        Role? ownerRole = await roleRepository.GetByNameAsync(SystemRoleCode.Owner, cancellationToken)
-            ?? await roleRepository.GetByIdAsync(SeededOwnerRoleId, cancellationToken);
-        if (ownerRole is null)
-        {
-            return AuthErrors.Organization.RoleNotFound;
-        }
+                string taxCode = request.TaxCode.Trim();
+                if (await organizationRepository.TaxCodeExistsAsync(taxCode, cancellationToken))
+                {
+                    return Result.Failure<OrganizationRegisteredResponse>(AuthErrors.Organization.TaxCodeAlreadyExists);
+                }
 
-        DateTime now = timeProvider.GetUtcNow().UtcDateTime;
-        Organization organization = new()
-        {
-            Id = Guid.NewGuid(),
-            Name = name,
-            Slug = slug.Value,
-            Type = request.Type,
-            Status = OrganizationStatus.Pending,
-            CreatedAtUtc = now,
-            TaxCode = taxCode,
-            BusinessLicenseNumber = CustomerAccountRules.NullIfBlank(request.BusinessLicenseNumber),
-            BusinessLicenseIssuedDate = request.BusinessLicenseIssuedDate,
-            BusinessLicenseIssuedPlace = CustomerAccountRules.NullIfBlank(request.BusinessLicenseIssuedPlace),
-            EstablishedDate = request.EstablishedDate,
-            LegalRepresentativeName = request.LegalRepresentativeName.Trim(),
-            // Ưu tiên CCCD được nhập riêng (trường hợp người đại diện pháp luật khác với người đăng ký);
-            // nếu không nhập, mặc định lấy CCCD đã có trong hồ sơ của actor (trường hợp phổ biến: actor tự đại diện).
-            LegalRepresentativeCitizenId = CustomerAccountRules.NullIfBlank(request.LegalRepresentativeCitizenId) ?? actor.CitizenId,
-            ContactEmail = UserService.NormalizeEmail(request.ContactEmail),
-            ContactPhone = request.ContactPhone.Trim(),
-            Address = request.Address.Trim(),
-            Province = request.Province.Trim(),
-            Ward = request.Ward.Trim(),
-            Website = CustomerAccountRules.NullIfBlank(request.Website),
-            LogoUrl = CustomerAccountRules.NullIfBlank(request.LogoUrl),
-            Description = CustomerAccountRules.NullIfBlank(request.Description),
-            BusinessLicenseDocumentUrl = request.BusinessLicenseDocumentUrl.Trim(),
-        };
+                Result<string> slug = await ResolveSlugAsync(request.Slug, name, cancellationToken);
+                if (slug.IsFailure)
+                {
+                    return Result.Failure<OrganizationRegisteredResponse>(slug.Error);
+                }
 
-        // Membership Owner Active ngay, nhưng org Pending nên chưa đóng góp permission/organization context vào JWT.
-        OrganizationMembership ownerMembership = new()
-        {
-            Id = Guid.NewGuid(),
-            UserId = actor.Id,
-            OrganizationId = organization.Id,
-            RoleId = ownerRole.Id,
-            Status = MembershipStatus.Active,
-            JoinedAtUtc = now
-        };
+                Role? ownerRole = await roleRepository.GetByNameAsync(SystemRoleCode.Owner, cancellationToken)
+                    ?? await roleRepository.GetByIdAsync(SeededOwnerRoleId, cancellationToken);
+                if (ownerRole is null)
+                {
+                    return Result.Failure<OrganizationRegisteredResponse>(AuthErrors.Organization.RoleNotFound);
+                }
 
-        try
-        {
-            await organizationRepository.CreateAsync(organization, ownerMembership, cancellationToken);
-        }
-        catch (DuplicateTaxCodeException)
-        {
-            return AuthErrors.Organization.TaxCodeAlreadyExists;
-        }
-        catch (DuplicateSlugException)
-        {
-            return AuthErrors.Organization.SlugAlreadyExists;
-        }
+                DateTime now = timeProvider.GetUtcNow().UtcDateTime;
+                Organization organization = new()
+                {
+                    Id = Guid.NewGuid(),
+                    Name = name,
+                    Slug = slug.Value,
+                    Type = request.Type,
+                    Status = OrganizationStatus.Pending,
+                    CreatedAtUtc = now,
+                    TaxCode = taxCode,
+                    BusinessLicenseNumber = CustomerAccountRules.NullIfBlank(request.BusinessLicenseNumber),
+                    BusinessLicenseIssuedDate = request.BusinessLicenseIssuedDate,
+                    BusinessLicenseIssuedPlace = CustomerAccountRules.NullIfBlank(request.BusinessLicenseIssuedPlace),
+                    EstablishedDate = request.EstablishedDate,
+                    LegalRepresentativeName = request.LegalRepresentativeName.Trim(),
+                    LegalRepresentativeCitizenId = CustomerAccountRules.NullIfBlank(request.LegalRepresentativeCitizenId)
+                        ?? actor.CitizenId,
+                    ContactEmail = UserService.NormalizeEmail(request.ContactEmail),
+                    ContactPhone = request.ContactPhone.Trim(),
+                    Address = request.Address.Trim(),
+                    Province = request.Province.Trim(),
+                    Ward = request.Ward.Trim(),
+                    Website = CustomerAccountRules.NullIfBlank(request.Website),
+                    LogoUrl = CustomerAccountRules.NullIfBlank(request.LogoUrl),
+                    Description = CustomerAccountRules.NullIfBlank(request.Description),
+                    BusinessLicenseDocumentUrl = request.BusinessLicenseDocumentUrl.Trim()
+                };
 
-        return new OrganizationRegisteredResponse(actor.Id, organization.Id, organization.Slug, organization.Status);
+                // Membership Owner Active ngay, nhưng org Pending nên chưa đóng góp permission/organization context vào JWT.
+                OrganizationMembership ownerMembership = new()
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = actor.Id,
+                    OrganizationId = organization.Id,
+                    RoleId = ownerRole.Id,
+                    Status = MembershipStatus.Active,
+                    JoinedAtUtc = now
+                };
+
+                await organizationRepository.CreateAsync(organization, ownerMembership, cancellationToken);
+
+                return Result.Success(new OrganizationRegisteredResponse(actor.Id, organization.Id, organization.Slug, organization.Status));
+            },
+            logger,
+            correlationIdProvider,
+            cancellationToken);
     }
 
     /// <summary>Slug do người dùng nhập phải hợp lệ và chưa bị dùng; slug tự sinh sẽ được thêm hậu tố khi trùng.</summary>
     private async Task<Result<string>> ResolveSlugAsync(string? requestedSlug, string name, CancellationToken cancellationToken)
     {
-        string? explicitSlug = CustomerAccountRules.NullIfBlank(requestedSlug);
-        if (explicitSlug is not null)
+        string? trimmed = requestedSlug?.Trim();
+
+        if (trimmed is not null && trimmed.Length > 0)
         {
-            if (!OrganizationSlug.IsCanonical(explicitSlug))
+            if (!OrganizationSlug.IsCanonical(trimmed))
             {
-                return Result.Failure<string>(AuthErrors.Organization.InvalidSlugFormat);
+                return AuthErrors.Organization.InvalidSlugFormat;
             }
 
-            return await organizationRepository.SlugExistsAsync(explicitSlug, cancellationToken)
-                ? Result.Failure<string>(AuthErrors.Organization.SlugAlreadyExists)
-                : explicitSlug;
+            if (await organizationRepository.SlugExistsAsync(trimmed, cancellationToken))
+            {
+                return AuthErrors.Organization.SlugAlreadyExists;
+            }
+
+            return trimmed;
         }
 
-        string generated = OrganizationSlug.FromName(name);
-        string candidate = generated.Length == 0 ? OrganizationSlug.WithRandomSuffix("org") : generated;
+        string baseSlug = OrganizationSlug.FromName(name);
+        string candidate = baseSlug;
+
         for (int attempt = 0; attempt < MaxSlugAttempts; attempt++)
         {
             if (!await organizationRepository.SlugExistsAsync(candidate, cancellationToken))
@@ -145,9 +159,9 @@ public sealed class OrganizationRegistrationService(
                 return candidate;
             }
 
-            candidate = OrganizationSlug.WithRandomSuffix(generated);
+            candidate = OrganizationSlug.WithRandomSuffix(baseSlug);
         }
 
-        return Result.Failure<string>(AuthErrors.Organization.SlugAlreadyExists);
+        return candidate;
     }
 }

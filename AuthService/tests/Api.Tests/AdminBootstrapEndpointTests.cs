@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.Data;
+
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Models;

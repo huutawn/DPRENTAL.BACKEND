@@ -24,9 +24,8 @@ public interface IOrganizationMembershipRepository
     Task<int> CountOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default);
 
     Task<int> CountActiveOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default);
-
-    Task<IReadOnlyList<string>> GetEffectivePermissionsAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default);
-
     Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<string>> GetScopedPermissionCodesAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<OrganizationMembership>> GetMembershipsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
 }

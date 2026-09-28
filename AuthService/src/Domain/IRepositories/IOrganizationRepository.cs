@@ -16,13 +16,19 @@ public interface IOrganizationRepository
     Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Tạo organization và membership ban đầu trong một transaction. Ném <see cref="Exceptions.DuplicateSlugException"/>
-    /// hoặc <see cref="Exceptions.DuplicateTaxCodeException"/> khi vi phạm unique.
+    /// Tạo organization và membership ban đầu trong một transaction.
+    /// Không chứa business validation — chỉ đảm bảo tính nguyên tử DB.
     /// </summary>
     Task<Organization> CreateAsync(Organization organization, OrganizationMembership initialMembership, CancellationToken cancellationToken = default);
 
+    Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default);
 
     Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default);
 
-    Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Khóa (row-level lock) các organization liên quan theo thứ tự cố định để chống race condition và deadlock khi thay đổi Owner.
+    /// </summary>
+    Task LockOrganizationsAsync(IReadOnlyList<Guid> sortedOrganizationIds, CancellationToken cancellationToken = default);
+
+    Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);
 }

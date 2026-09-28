@@ -4,15 +4,14 @@
 
 | Lớp | Trách nhiệm | Không được chứa |
 | --- | --- | --- |
-| `Common` | Kiểu dữ liệu và concern thật sự dùng chung, gồm `IRepo<TEntity, TKey>` CRUD | Nghiệp vụ xác thực |
-| `Domain` | DTOs, Entities, Models, Utils, Validators, `IRepositories`, repository implementation, DbContext, EF Core và migration | HTTP pipeline, controller |
-| `Application` | Services, IServices, Security, Mapping, third-party integration và điều phối domain | Controller, HTTP pipeline |
+| `Common` | Kiểu dữ liệu và concern dùng chung (`Result`, `Error`, enums, utility) | Nghiệp vụ xác thực |
+| `Domain` | Entities, Domain Models, Repository contracts, EF Core DbContext, Repositories, Migrations và data persistence | Business logic xác thực cấp cao, HTTP pipeline, controller |
+| `Application` | DTOs, Services, Security, Mapping và điều phối domain | Controller, HTTP pipeline, DbContext |
 | `Api` | Controllers, Filters, middleware, DI/composition root | Business logic |
 
 Chi tiết về `Result` và `Error` trong `Common`: xem [common-result-error.md](common-result-error.md).
 
-Domain là nơi sở hữu DTO, entity/model, utility/validator và persistence của Auth. `Domain/IRepositories` giữ contract theo nghiệp vụ; các contract đó kế thừa `Common/IRepo<TEntity, TKey>` khi cần CRUD chuẩn. Application chỉ gọi repository contract và giữ mapper giữa model/DTO; API chỉ đăng ký dependency tại composition root, controller và filter support.
-
+Domain sở hữu repository contracts (interfaces), EF Core DbContext, repository implementations và migrations. Application gọi các repository contract này; API composition root đăng ký persistence Domain qua `AddAuthDomainPersistence`.
 ## Cấu hình môi trường
 
 `Api/appsettings.Development.json` chỉ chứa giá trị không nhạy cảm. Docker Compose lấy credential local từ `.env`: sao chép `.env.example` thành `.env`, rồi thay password. `.env` đã bị Git bỏ qua.

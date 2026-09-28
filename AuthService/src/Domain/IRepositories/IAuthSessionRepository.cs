@@ -17,7 +17,12 @@ public interface IAuthSessionRepository : IRepo<Session, Guid>
         CancellationToken cancellationToken = default);
 
     /// <summary>Tạo ticket Google ngắn hạn cho user đang active.</summary>
-    Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken);
+    Task<bool> CreateGoogleLoginTicketAsync(
+        Guid userId,
+        string ticketHash,
+        DateTime utcNow,
+        DateTime expiresAtUtc,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Consume ticket Google một lần và tạo session/refresh token trong cùng transaction.</summary>
     Task<AuthSessionPrincipal?> ConsumeGoogleLoginTicketAndCreateSessionAsync(
@@ -27,25 +32,49 @@ public interface IAuthSessionRepository : IRepo<Session, Guid>
         DateTime expiresAtUtc,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Lấy thông tin RefreshToken kèm Session và User để Service kiểm tra trạng thái và phát hiện reuse.</summary>
+    Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(
+        string tokenHash,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Xoay refresh token một cách nguyên tử. Nếu phát hiện token đã dùng lại,
     /// Repository sẽ thu hồi session trước khi trả kết quả.
     /// </summary>
-    Task<AuthSessionPrincipal?> RotateAsync(string currentRefreshTokenHash, string replacementRefreshTokenHash, DateTime utcNow, CancellationToken cancellationToken);
+    Task<AuthSessionPrincipal?> RotateAsync(
+        string currentRefreshTokenHash,
+        string replacementRefreshTokenHash,
+        DateTime utcNow,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Thu hồi session được xác định bởi hash refresh token.</summary>
-    Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken);
+    Task RevokeByRefreshTokenHashAsync(
+        string refreshTokenHash,
+        DateTime utcNow,
+        CancellationToken cancellationToken = default);
 
-    Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task RevokeAllSessionsForUserAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
 
-    Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default);
+    Task<Guid?> GetUserIdByTokenHashAsync(
+        string tokenHash,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Lấy tối đa 50 session gần nhất của người dùng.</summary>
-    Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Session>> GetSessionsForUserAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Lấy SessionId tương ứng với tokenHash của refresh token.</summary>
-    Task<Guid?> GetSessionIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default);
+    Task<Guid?> GetSessionIdByTokenHashAsync(
+        string tokenHash,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Thu hồi một session cụ thể của user cùng các refresh token con chưa thu hồi.</summary>
-    Task<bool> RevokeSessionForUserAsync(Guid userId, Guid sessionId, DateTime utcNow, CancellationToken cancellationToken = default);
+    Task<bool> RevokeSessionForUserAsync(
+        Guid userId,
+        Guid sessionId,
+        DateTime utcNow,
+        CancellationToken cancellationToken = default);
 }

@@ -1,9 +1,7 @@
-using Dprental.AuthService.Domain.Data;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Exceptions;
-using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
+
+using Dprental.AuthService.Domain.IRepositories;
 
 namespace Dprental.AuthService.Domain.Repositories;
 
@@ -26,11 +24,14 @@ public sealed class EfExternalLoginRepository(AuthDbContext dbContext) : IExtern
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException exception) when (exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        catch (DbUpdateException exception)
         {
-            // Bỏ entity lỗi khỏi DbContext để lần SaveChanges sau không thử insert lại.
             dbContext.Entry(login).State = EntityState.Detached;
-            throw new DuplicateExternalLoginException("Liên kết đăng nhập bên ngoài đã tồn tại.", exception);
+            if (DbExceptionTranslator.TryTranslate(exception, out var constraintEx))
+            {
+                throw constraintEx;
+            }
+            throw;
         }
     }
 
