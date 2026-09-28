@@ -104,6 +104,8 @@ dotnet user-secrets set "ObjectStorage:SecretKey" "mediasecretpassword" \
 
 MediaService xác minh JWT RS256 bằng JWKS của AuthService. Môi trường Development đã có issuer, audience và JWKS URI mẫu; chỉnh `Jwt:JwksUri` nếu AuthService chạy ở địa chỉ khác. API xác minh nội bộ chỉ chấp nhận service token có claim `u=svc`, `sub` là GUID và scope `media.verify`. Không cần danh sách service principal riêng trong MediaService. Header `X-User-Id` và `X-Service-Name` không cấp quyền truy cập.
 
+Khi chạy Compose chung ở thư mục `DPRENTAL/` để thử API nội bộ, chạy `./MediaService/scripts/bootstrap-local-media-principal.sh` sau Auth migration. Script này chỉ tạo principal và scope thử nghiệm trong database AuthService local; không dùng để provision môi trường dev.
+
 Trước khi chạy API trên cơ sở dữ liệu mới, áp dụng migration. Factory thiết kế chỉ đọc `ConnectionStrings__Postgres` từ môi trường; không lưu mật khẩu trong source:
 
 ```bash
