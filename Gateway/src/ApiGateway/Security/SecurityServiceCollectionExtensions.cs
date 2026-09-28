@@ -1,7 +1,6 @@
 using Dprental.Gateway.Application.Security;
 using Dprental.Gateway.Domain.Security;
 using Dprental.Gateway.Infrastructure.Security.ForwardedHeaders;
-using Dprental.Gateway.Infrastructure.Security.Transforms;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Options;
 
@@ -37,9 +36,6 @@ public static class SecurityServiceCollectionExtensions
         services.AddSingleton<IHeaderSanitizer, HeaderSanitizer>();
         services.AddSingleton<IIdentityExtractor, IdentityExtractor>();
         services.AddSingleton<IIdentityContextAccessor, IdentityContextAccessor>();
-
-        // 4. Đăng ký Provider chuyển đổi request của YARP (Infrastructure Layer)
-        services.AddSingleton<TrustedIdentityTransformProvider>();
 
         // 5. Cấu hình ForwardedHeadersOptions của ASP.NET Core
         services.AddOptions<ForwardedHeadersOptions>()

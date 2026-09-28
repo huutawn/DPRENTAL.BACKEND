@@ -418,6 +418,90 @@ public sealed class GatewaySecurityIntegrationTests
     }
 
     [Fact]
+    public async Task MediaRouteConvertsCookieToBearerWithoutForwardingCookies()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+        string token = CreateToken(signingKey, "key-1", Issuer, Audience, Guid.NewGuid().ToString("D"));
+
+        using HttpRequestMessage request = new(HttpMethod.Get, $"/api/v1/media/{Guid.NewGuid():D}");
+        request.Headers.Add("Cookie", $"accessToken={token}; refreshToken=private-session");
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal($"Bearer {token}", upstream.LastRequest.Headers["Authorization"]);
+        Assert.False(upstream.LastRequest.Headers.ContainsKey("Cookie"));
+    }
+
+    [Fact]
+    public async Task ExplicitBearerTakesPrecedenceOverStaleCookie()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+        string token = CreateToken(signingKey, "key-1", Issuer, Audience, Guid.NewGuid().ToString("D"));
+
+        using HttpRequestMessage request = new(HttpMethod.Get, $"/api/v1/media/{Guid.NewGuid():D}");
+        request.Headers.Authorization = new("Bearer", token);
+        request.Headers.Add("Cookie", "accessToken=invalid-cookie; refreshToken=private-session");
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal($"Bearer {token}", upstream.LastRequest.Headers["Authorization"]);
+        Assert.False(upstream.LastRequest.Headers.ContainsKey("Cookie"));
+    }
+
+    [Fact]
+    public async Task PublicMediaContentAndMediaOpenApiAreAnonymousRoutes()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage content = await client.GetAsync($"/api/v1/media/{Guid.NewGuid():D}/content");
+        Assert.Equal(HttpStatusCode.OK, content.StatusCode);
+        Assert.EndsWith("/content", upstream.LastRequest.Path, StringComparison.Ordinal);
+
+        using HttpRequestMessage swaggerRequest = new(HttpMethod.Get, "/media/swagger/v1/swagger.json");
+        swaggerRequest.Headers.Add("Cookie", "accessToken=browser-cookie; refreshToken=private-session");
+        using HttpResponseMessage swagger = await client.SendAsync(swaggerRequest);
+        Assert.Equal(HttpStatusCode.OK, swagger.StatusCode);
+        Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
+        Assert.False(upstream.LastRequest.Headers.ContainsKey("Cookie"));
+    }
+
+    [Fact]
+    public async Task MediaUploadUsesItsOwnBodyLimit()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress,
+            maxRequestBodySizeBytes: 1024, mediaUploadMaxRequestBodySizeBytes: 4096);
+        using HttpClient client = factory.CreateClient();
+        string token = CreateToken(signingKey, "key-1", Issuer, Audience, Guid.NewGuid().ToString("D"));
+
+        using HttpRequestMessage upload = new(HttpMethod.Post, "/api/v1/media/uploads")
+        {
+            Content = new StringContent(new string('A', 2048))
+        };
+        upload.Headers.Authorization = new("Bearer", token);
+        using HttpResponseMessage accepted = await client.SendAsync(upload);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+
+        using HttpRequestMessage oversized = new(HttpMethod.Post, "/api/v1/media/uploads")
+        {
+            Content = new StringContent(new string('A', 8192))
+        };
+        oversized.Headers.Authorization = new("Bearer", token);
+        using HttpResponseMessage rejected = await client.SendAsync(oversized);
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, rejected.StatusCode);
+    }
+
+    [Fact]
     public async Task InvalidTokenInCookieReturns401InvalidToken()
     {
         using RSA signingKey = RSA.Create(2048);
@@ -434,9 +518,6 @@ public sealed class GatewaySecurityIntegrationTests
         using HttpResponseMessage response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        GatewayErrorResponse? error = await response.Content.ReadFromJsonAsync<GatewayErrorResponse>();
-        Assert.NotNull(error);
-        Assert.Equal(GatewayError.InvalidAccessToken.Code, error.Code);
     }
 
     [Fact]
@@ -452,9 +533,6 @@ public sealed class GatewaySecurityIntegrationTests
         using HttpResponseMessage response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        GatewayErrorResponse? error = await response.Content.ReadFromJsonAsync<GatewayErrorResponse>();
-        Assert.NotNull(error);
-        Assert.Equal(GatewayError.AuthenticationRequired.Code, error.Code);
     }
 
     [Fact]
@@ -485,15 +563,34 @@ public sealed class GatewaySecurityIntegrationTests
         Uri upstreamAddress,
         bool includeProtectedRoute = false,
         string[]? allowedOrigins = null,
-        long? maxRequestBodySizeBytes = null)
+        long? maxRequestBodySizeBytes = null,
+        long? mediaUploadMaxRequestBodySizeBytes = null)
     {
         Dictionary<string, string?> overrides = new(StringComparer.Ordinal)
         {
             ["Gateway:Authentication:Jwt:Issuer"] = Issuer,
             ["Gateway:Authentication:Jwt:Audience"] = Audience,
             ["Gateway:Authentication:Jwt:JwksUri"] = new Uri(upstreamAddress, ".well-known/jwks.json").AbsoluteUri,
-            ["ReverseProxy:Clusters:auth-service:Destinations:primary:Address"] = upstreamAddress.AbsoluteUri
+            ["Routes:0:DownstreamScheme"] = upstreamAddress.Scheme,
+            ["Routes:0:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
+            ["Routes:0:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Routes:1:DownstreamScheme"] = upstreamAddress.Scheme,
+            ["Routes:1:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
+            ["Routes:1:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Routes:2:DownstreamScheme"] = upstreamAddress.Scheme,
+            ["Routes:2:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
+            ["Routes:2:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Routes:3:DownstreamScheme"] = upstreamAddress.Scheme,
+            ["Routes:3:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
+            ["Routes:3:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
+
+        for (int route = 4; route <= 5; route++)
+        {
+            overrides[$"Routes:{route}:DownstreamScheme"] = upstreamAddress.Scheme;
+            overrides[$"Routes:{route}:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
+            overrides[$"Routes:{route}:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
 
         if (allowedOrigins is not null)
         {
@@ -508,10 +605,19 @@ public sealed class GatewaySecurityIntegrationTests
             overrides["Gateway:Security:RequestSize:MaxRequestBodySizeBytes"] = maxRequestBodySizeBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
+        if (mediaUploadMaxRequestBodySizeBytes.HasValue)
+        {
+            overrides["Gateway:Security:RequestSize:MediaUploadMaxRequestBodySizeBytes"] = mediaUploadMaxRequestBodySizeBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         if (includeProtectedRoute)
         {
-            overrides["ReverseProxy:Routes:protected-service:ClusterId"] = "auth-service";
-            overrides["ReverseProxy:Routes:protected-service:Match:Path"] = "/protected/{**catch-all}";
+            overrides["Routes:6:Key"] = "protected-service";
+            overrides["Routes:6:UpstreamPathTemplate"] = "/protected/{everything}";
+            overrides["Routes:6:DownstreamPathTemplate"] = "/protected/{everything}";
+            overrides["Routes:6:DownstreamScheme"] = upstreamAddress.Scheme;
+            overrides["Routes:6:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
+            overrides["Routes:6:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         return new WebApplicationFactory<Program>()

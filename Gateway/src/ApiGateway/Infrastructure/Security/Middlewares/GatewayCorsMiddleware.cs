@@ -81,9 +81,7 @@ public sealed class GatewayCorsMiddleware
             context.Response.StatusCode = StatusCodes.Status204NoContent;
             return;
         }
-
-        // 4. YARP sẽ sao chép response headers từ downstream. Chờ đến lúc response bắt đầu
-        // để Gateway có thể thay thế mọi header CORS downstream bằng policy authoritative này.
+        // 4. Response headers từ downstream: Gateway thay thế mọi header CORS downstream bằng policy authoritative này.
         context.Response.OnStarting(() =>
         {
             ApplyActualRequestHeaders(context.Response, requestOrigin, corsOptions);
@@ -184,7 +182,7 @@ public sealed class GatewayCorsMiddleware
 /// <summary>Loại bỏ các CORS response headers do downstream phát để Gateway là nơi duy nhất xác lập policy CORS.</summary>
 internal static class GatewayCorsResponseHeaders
 {
-    private static readonly string[] Names =
+    internal static readonly string[] Names =
     [
         HeaderNames.AccessControlAllowOrigin,
         HeaderNames.AccessControlAllowCredentials,

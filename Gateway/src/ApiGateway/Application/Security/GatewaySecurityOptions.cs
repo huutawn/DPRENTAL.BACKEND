@@ -55,7 +55,7 @@ public sealed class GatewayCorsOptions
     /// <summary>
     /// Danh sách các tiêu đề HTTP (Headers) mà client được phép gửi lên.
     /// </summary>
-    public string[] AllowedHeaders { get; set; } = ["Authorization", "Content-Type", "X-Correlation-ID", "Accept", "Origin", "X-Requested-With"];
+    public string[] AllowedHeaders { get; set; } = ["Authorization", "Content-Type", "Idempotency-Key", "X-Correlation-ID", "Accept", "Origin", "X-Requested-With"];
 
     /// <summary>
     /// Danh sách các tiêu đề HTTP mà trình duyệt của client được phép đọc từ phản hồi.
@@ -110,6 +110,9 @@ public sealed class GatewayRequestSizeOptions
     /// Mặc định: 10 MB (10,485,760 bytes).
     /// </summary>
     public long MaxRequestBodySizeBytes { get; set; } = 10 * 1024 * 1024;
+
+    /// <summary>Multipart upload limit for POST /api/v1/media/uploads.</summary>
+    public long MediaUploadMaxRequestBodySizeBytes { get; set; } = 25 * 1024 * 1024;
 }
 
 /// <summary>

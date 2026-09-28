@@ -17,7 +17,7 @@ public interface IGatewayMetrics
     void RecordRequest(string route, string method, int statusCode, double durationSeconds, string upstreamService);
 
     /// <summary>
-    /// Ghi nhận một trường hợp request bị timeout khi chờ dịch vụ upstream (HTTP 504).
+    /// Ghi nhận một trường hợp request bị timeout khi chờ dịch vụ upstream.
     /// </summary>
     /// <param name="route">Tên route hoặc pattern tuyến đường.</param>
     /// <param name="method">Phương thức HTTP.</param>

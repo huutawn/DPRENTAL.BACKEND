@@ -18,13 +18,7 @@ public sealed class GatewayTrafficOptionsValidator : IValidateOptions<GatewayTra
 
         List<string> failures = new();
 
-        // 1. Kiểm tra cấu hình Resilience (Timeout)
-        if (options.Resilience.DefaultTimeoutSeconds <= 0)
-        {
-            failures.Add("Gateway:Traffic:Resilience:DefaultTimeoutSeconds phải là một số nguyên dương (> 0).");
-        }
-
-        // 2. Kiểm tra cấu hình Rate Limiting
+        // Kiểm tra cấu hình Rate Limiting
         ValidateTier("Anonymous", options.RateLimiting.Anonymous, failures);
         ValidateTier("Authenticated", options.RateLimiting.Authenticated, failures);
         ValidateTier("Sensitive", options.RateLimiting.Sensitive, failures);

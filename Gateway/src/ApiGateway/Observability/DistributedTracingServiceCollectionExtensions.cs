@@ -9,15 +9,14 @@ using Dprental.Gateway.Domain.Observability;
 namespace Dprental.Gateway.Observability;
 
 /// <summary>
-/// Đăng ký W3C trace context và OpenTelemetry cho HTTP ingress, HTTP egress và các hoạt động proxy của YARP.
+/// Đăng ký W3C trace context và OpenTelemetry cho HTTP ingress và HTTP egress.
 /// </summary>
 internal static class DistributedTracingServiceCollectionExtensions
 {
     private const string ServiceName = "dprental-api-gateway";
-    private const string YarpActivitySourceName = "Yarp.ReverseProxy";
 
     /// <summary>
-    /// Thiết lập lấy mẫu trace gốc, tạo span cho HTTP/YARP và chỉ xuất OTLP khi môi trường đã cấu hình collector.
+    /// Thiết lập lấy mẫu trace gốc, tạo span cho HTTP và chỉ xuất OTLP khi môi trường đã cấu hình collector.
     /// </summary>
     internal static IServiceCollection AddGatewayDistributedTracing(this IServiceCollection services, IConfiguration configuration)
     {
@@ -51,8 +50,7 @@ internal static class DistributedTracingServiceCollectionExtensions
                             !context.Request.Path.StartsWithSegments("/_health", StringComparison.Ordinal) &&
                             !context.Request.Path.StartsWithSegments("/health", StringComparison.Ordinal);
                     })
-                    .AddHttpClientInstrumentation()
-                    .AddSource(YarpActivitySourceName);
+                    .AddHttpClientInstrumentation();
 
                 if (!string.IsNullOrWhiteSpace(options.Otlp.TracesEndpoint))
                 {

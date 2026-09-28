@@ -16,10 +16,6 @@ public sealed class GatewayTrafficOptionsValidatorTests
     {
         GatewayTrafficOptions options = new()
         {
-            Resilience = new GatewayResilienceOptions
-            {
-                DefaultTimeoutSeconds = 10
-            },
             RateLimiting = new GatewayRateLimitingOptions
             {
                 Anonymous = new RateLimitTierOptions { PermitLimit = 20, WindowSeconds = 60 },
@@ -40,22 +36,6 @@ public sealed class GatewayTrafficOptionsValidatorTests
 
         Assert.True(result.Failed);
         Assert.Contains("không được để trống", result.FailureMessage);
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-5)]
-    public void InvalidDefaultTimeoutSecondsFailsValidation(int invalidTimeout)
-    {
-        GatewayTrafficOptions options = new()
-        {
-            Resilience = new GatewayResilienceOptions { DefaultTimeoutSeconds = invalidTimeout }
-        };
-
-        ValidateOptionsResult result = validator.Validate(null, options);
-
-        Assert.True(result.Failed);
-        Assert.Contains("DefaultTimeoutSeconds", result.FailureMessage);
     }
 
     [Theory]

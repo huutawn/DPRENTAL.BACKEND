@@ -1,72 +1,67 @@
+using System;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Dprental.Gateway.Application.Security;
 using Dprental.Gateway.Domain.Security;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
-using Yarp.ReverseProxy.Transforms;
-using Yarp.ReverseProxy.Transforms.Builder;
 
-namespace Dprental.Gateway.Infrastructure.Security.Transforms;
+namespace Dprental.Gateway.Infrastructure.Security.DelegatingHandlers;
 
 /// <summary>
-/// Cung cấp bộ chuyển đổi request (YARP Request Transform) nhằm thực thi Trusted Identity Forwarding
-/// và Header Sanitization ngay tại ranh giới chuyển tiếp request tới downstream microservices.
+/// Ocelot DelegatingHandler nhằm thực thi Trusted Identity Forwarding,
+/// Header Sanitization, CorrelationId và Public Origin Forwarding ngay trước khi gửi request tới downstream service.
 /// </summary>
-public sealed class TrustedIdentityTransformProvider : ITransformProvider
+public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
 {
+    private readonly IHttpContextAccessor httpContextAccessor;
     private readonly IIdentityExtractor identityExtractor;
     private readonly IIdentityContextAccessor identityContextAccessor;
     private readonly IOptions<GatewaySecurityOptions> securityOptions;
 
     /// <summary>
-    /// Khởi tạo provider chuyển đổi danh tính đáng tin cậy.
+    /// Khởi tạo DelegatingHandler với các dịch vụ bảo mật và truy xuất ngữ cảnh HTTP.
     /// </summary>
-    /// <param name="identityExtractor">Bộ trích xuất danh tính từ token.</param>
-    /// <param name="identityContextAccessor">Bộ lưu trữ ngữ cảnh danh tính của request.</param>
-    /// <param name="securityOptions">Cấu hình bảo mật Gateway.</param>
-    public TrustedIdentityTransformProvider(
+    public TrustedIdentityDelegatingHandler(
+        IHttpContextAccessor httpContextAccessor,
         IIdentityExtractor identityExtractor,
         IIdentityContextAccessor identityContextAccessor,
         IOptions<GatewaySecurityOptions> securityOptions)
     {
+        this.httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         this.identityExtractor = identityExtractor ?? throw new ArgumentNullException(nameof(identityExtractor));
         this.identityContextAccessor = identityContextAccessor ?? throw new ArgumentNullException(nameof(identityContextAccessor));
         this.securityOptions = securityOptions ?? throw new ArgumentNullException(nameof(securityOptions));
     }
 
     /// <inheritdoc />
-    public void ValidateRoute(TransformRouteValidationContext context)
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        // Tuyến đường không yêu cầu thẩm định thêm quy tắc cấu hình route tĩnh
-    }
-
-    /// <inheritdoc />
-    public void ValidateCluster(TransformClusterValidationContext context)
-    {
-        // Cluster không yêu cầu thẩm định thêm quy tắc cấu hình cluster tĩnh
-    }
-
-    /// <inheritdoc />
-    public void Apply(TransformBuilderContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-
-        context.AddRequestTransform(transformContext =>
+        HttpContext? httpContext = httpContextAccessor.HttpContext;
+        if (httpContext is not null)
         {
-            var proxyHeaders = transformContext.ProxyRequest.Headers;
-            var httpContext = transformContext.HttpContext;
+            var headers = request.Headers;
+
+            // MediaService receives only the authenticated bearer token, never browser session cookies.
+            if (httpContext.Request.Path.StartsWithSegments("/api/v1/media") ||
+                httpContext.Request.Path.StartsWithSegments("/media/swagger"))
+            {
+                headers.Remove("Cookie");
+            }
 
             // 1. Header Sanitization: Loại bỏ toàn bộ tiêu đề nhạy cảm client tự gửi lên
             foreach (string untrustedHeader in GatewayHeaderConstants.UntrustedClientHeaders)
             {
-                proxyHeaders.Remove(untrustedHeader);
+                headers.Remove(untrustedHeader);
             }
 
-            // Gateway has already accepted forwarded metadata only from a configured trusted proxy.
-            // Replace any downstream values so AuthService receives the public origin, never an
-            // internal Docker destination such as auth-service:8080.
-            proxyHeaders.Remove(GatewayHeaderConstants.ForwardedProto);
-            proxyHeaders.TryAddWithoutValidation(GatewayHeaderConstants.ForwardedProto, httpContext.Request.Scheme);
-            proxyHeaders.Remove(GatewayHeaderConstants.ForwardedHost);
-            proxyHeaders.TryAddWithoutValidation(GatewayHeaderConstants.ForwardedHost, httpContext.Request.Host.Value);
+            // Gateway đã chấp nhận forwarded metadata chỉ từ trusted proxy đã cấu hình.
+            // Ghi đè các giá trị downstream để upstream nhận đúng public origin, không phải địa chỉ nội bộ Docker.
+            headers.Remove(GatewayHeaderConstants.ForwardedProto);
+            headers.TryAddWithoutValidation(GatewayHeaderConstants.ForwardedProto, httpContext.Request.Scheme);
+            headers.Remove(GatewayHeaderConstants.ForwardedHost);
+            headers.TryAddWithoutValidation(GatewayHeaderConstants.ForwardedHost, httpContext.Request.Host.Value);
 
             // 2. CorrelationId Forwarding: Đảm bảo downstream luôn nhận CorrelationId an toàn
             string correlationId = httpContext.TraceIdentifier;
@@ -78,16 +73,16 @@ public sealed class TrustedIdentityTransformProvider : ITransformProvider
 
             if (!string.IsNullOrWhiteSpace(correlationId))
             {
-                proxyHeaders.Remove(GatewayHeaderConstants.CorrelationId);
-                proxyHeaders.TryAddWithoutValidation(GatewayHeaderConstants.CorrelationId, correlationId);
+                headers.Remove(GatewayHeaderConstants.CorrelationId);
+                headers.TryAddWithoutValidation(GatewayHeaderConstants.CorrelationId, correlationId);
             }
 
             // 3. Service Name Forwarding: Ghi đè tên Gateway xác thực, không cho phép client giả mạo
             string serviceName = securityOptions.Value.Identity.ServiceName;
             if (!string.IsNullOrWhiteSpace(serviceName))
             {
-                proxyHeaders.Remove(GatewayHeaderConstants.ServiceName);
-                proxyHeaders.TryAddWithoutValidation(GatewayHeaderConstants.ServiceName, serviceName);
+                headers.Remove(GatewayHeaderConstants.ServiceName);
+                headers.TryAddWithoutValidation(GatewayHeaderConstants.ServiceName, serviceName);
             }
 
             // 4. Trusted Identity Forwarding:
@@ -98,20 +93,23 @@ public sealed class TrustedIdentityTransformProvider : ITransformProvider
                 if (identity.IsAuthenticated && !string.IsNullOrWhiteSpace(identity.UserId))
                 {
                     // Chuyển tiếp UserId thật trích xuất từ claim "sub" của JWT
-                    proxyHeaders.TryAddWithoutValidation(GatewayHeaderConstants.UserId, identity.UserId);
+                    headers.Remove(GatewayHeaderConstants.UserId);
+                    headers.TryAddWithoutValidation(GatewayHeaderConstants.UserId, identity.UserId);
 
                     // Chuyển tiếp PartyId nếu tồn tại trong token
+                    headers.Remove(GatewayHeaderConstants.PartyId);
                     if (!string.IsNullOrWhiteSpace(identity.PartyId))
                     {
-                        proxyHeaders.TryAddWithoutValidation(GatewayHeaderConstants.PartyId, identity.PartyId);
+                        headers.TryAddWithoutValidation(GatewayHeaderConstants.PartyId, identity.PartyId);
                     }
 
                     // Chuyển tiếp các vai trò (Roles) hợp lệ đã xác thực
+                    headers.Remove(GatewayHeaderConstants.Role);
                     foreach (string role in identity.Roles)
                     {
                         if (!string.IsNullOrWhiteSpace(role))
                         {
-                            proxyHeaders.TryAddWithoutValidation(GatewayHeaderConstants.Role, role);
+                            headers.TryAddWithoutValidation(GatewayHeaderConstants.Role, role);
                         }
                     }
 
@@ -120,15 +118,15 @@ public sealed class TrustedIdentityTransformProvider : ITransformProvider
                 }
 
                 // Chuyển đổi Cookie token sang Authorization Bearer cho downstream nếu client chỉ gửi Cookie
-                if (proxyHeaders.Authorization is null &&
+                if (headers.Authorization is null &&
                     httpContext.Request.Cookies.TryGetValue("accessToken", out string? cookieToken) &&
                     !string.IsNullOrWhiteSpace(cookieToken))
                 {
-                    proxyHeaders.TryAddWithoutValidation("Authorization", $"Bearer {cookieToken}");
+                    headers.TryAddWithoutValidation("Authorization", $"Bearer {cookieToken}");
                 }
             }
+        }
 
-            return ValueTask.CompletedTask;
-        });
+        return await base.SendAsync(request, cancellationToken);
     }
 }

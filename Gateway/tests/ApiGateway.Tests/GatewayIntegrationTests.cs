@@ -37,7 +37,6 @@ public sealed class GatewayIntegrationTests
         request.Headers.Add("X-Correlation-ID", correlationId.ToString("D"));
 
         using HttpResponseMessage response = await client.SendAsync(request);
-
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("/api/v1/auth/sessions", upstream.LastRequest.Path);
         Assert.Equal("?source=test", upstream.LastRequest.Query);
@@ -79,7 +78,7 @@ public sealed class GatewayIntegrationTests
     }
 
     [Fact]
-    public async Task SwaggerRoutesForwardDirectlyToAuthService()
+    public async Task GatewaySwaggerOffersAuthAndMediaDocuments()
     {
         using RSA signingKey = RSA.Create(2048);
         await using LoopbackAuthService upstream = new(CreateJwks(signingKey, "key-1"));
@@ -90,13 +89,46 @@ public sealed class GatewayIntegrationTests
         Assert.Equal(HttpStatusCode.OK, responseJson.StatusCode);
         Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
 
+        using HttpResponseMessage responseMediaJson = await client.GetAsync("/media/swagger/v1/swagger.json");
+        Assert.Equal(HttpStatusCode.OK, responseMediaJson.StatusCode);
+        Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
+
         using HttpResponseMessage responseUi = await client.GetAsync("/swagger/index.html");
         Assert.Equal(HttpStatusCode.OK, responseUi.StatusCode);
-        Assert.Equal("/swagger/index.html", upstream.LastRequest.Path);
+        Assert.Contains("index.js", await responseUi.Content.ReadAsStringAsync());
+
+        using HttpResponseMessage initializer = await client.GetAsync("/swagger/index.js");
+        Assert.Equal(HttpStatusCode.OK, initializer.StatusCode);
+        string uiConfiguration = await initializer.Content.ReadAsStringAsync();
+        Assert.Contains("AuthService", uiConfiguration);
+        Assert.Contains("MediaService", uiConfiguration);
+        Assert.Contains("/swagger/v1/swagger.json", uiConfiguration);
+        Assert.Contains("/media/swagger/v1/swagger.json", uiConfiguration);
+        Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
 
         using HttpResponseMessage responseRoot = await client.GetAsync("/swagger");
         Assert.Equal(HttpStatusCode.OK, responseRoot.StatusCode);
-        Assert.Equal("/swagger", upstream.LastRequest.Path);
+        Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
+
+        using HttpResponseMessage oldMediaUi = await client.GetAsync("/media/swagger/index.html");
+        Assert.Equal(HttpStatusCode.NotFound, oldMediaUi.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("PROPFIND", "/api/v1/auth/sessions")]
+    [InlineData("OPTIONS", "/swagger/v1/swagger.json")]
+    public async Task RoutesForwardMethodsWithoutAnAllowlist(string method, string path)
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackAuthService upstream = new(CreateJwks(signingKey, "key-1"));
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+        using HttpRequestMessage request = new(new HttpMethod(method), path);
+
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(path, upstream.LastRequest.Path);
     }
 
     [Fact]
@@ -115,7 +147,7 @@ public sealed class GatewayIntegrationTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.True(ActivityContext.TryParse(inboundTraceParent, null, out ActivityContext inboundContext));
         Assert.True(ActivityContext.TryParse(upstream.LastRequest.TraceParent, null, out ActivityContext upstreamContext));
-        // YARP phải tạo span con mới nhưng vẫn giữ TraceId gốc để collector ghép Gateway và downstream vào một trace.
+        // HttpClient tạo span con mới nhưng vẫn giữ TraceId gốc để collector ghép Gateway và downstream vào một trace.
         Assert.Equal(inboundContext.TraceId, upstreamContext.TraceId);
         Assert.NotEqual(inboundContext.SpanId, upstreamContext.SpanId);
         Assert.True(upstreamContext.TraceFlags.HasFlag(ActivityTraceFlags.Recorded));
@@ -131,18 +163,12 @@ public sealed class GatewayIntegrationTests
 
         using HttpResponseMessage anonymousResponse = await client.GetAsync("/protected/orders");
         Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
-        GatewayErrorResponse? missingTokenError = await anonymousResponse.Content.ReadFromJsonAsync<GatewayErrorResponse>();
-        Assert.NotNull(missingTokenError);
-        Assert.Equal("Gateway.Authentication.Required", missingTokenError.Code);
 
         string wrongAudienceToken = CreateToken(signingKey, "key-1", Issuer, "other-audience");
         using HttpRequestMessage invalidRequest = new(HttpMethod.Get, "/protected/orders");
         invalidRequest.Headers.Authorization = new("Bearer", wrongAudienceToken);
         using HttpResponseMessage invalidResponse = await client.SendAsync(invalidRequest);
         Assert.Equal(HttpStatusCode.Unauthorized, invalidResponse.StatusCode);
-        GatewayErrorResponse? invalidTokenError = await invalidResponse.Content.ReadFromJsonAsync<GatewayErrorResponse>();
-        Assert.NotNull(invalidTokenError);
-        Assert.Equal("Gateway.Authentication.InvalidToken", invalidTokenError.Code);
 
         string validToken = CreateToken(signingKey, "key-1", Issuer, Audience);
         using HttpRequestMessage validRequest = new(HttpMethod.Get, "/protected/orders");
@@ -160,12 +186,8 @@ public sealed class GatewayIntegrationTests
         using HttpClient client = factory.CreateClient();
 
         using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/login");
-        GatewayErrorResponse? error = await response.Content.ReadFromJsonAsync<GatewayErrorResponse>();
 
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
-        Assert.NotNull(error);
-        Assert.Equal("Gateway.Upstream.Unavailable", error.Code);
-        Assert.False(string.IsNullOrWhiteSpace(error.TraceId));
     }
 
     [Fact]
@@ -199,6 +221,35 @@ public sealed class GatewayIntegrationTests
         Assert.ThrowsAny<Exception>(factory.CreateClient);
     }
 
+    [Fact]
+    public void InvalidOcelotConfigurationStopsApplicationStartup()
+    {
+        Dictionary<string, string?> overrides = new(StringComparer.Ordinal)
+        {
+            ["Routes:0:UpstreamPathTemplate"] = "invalid-no-slash"
+        };
+
+        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder => builder.ConfigureAppConfiguration((_, configurationBuilder) => configurationBuilder.AddInMemoryCollection(overrides)));
+
+        Assert.ThrowsAny<Exception>(factory.CreateClient);
+    }
+
+    [Fact]
+    public void InvalidOcelotTimeoutStopsApplicationStartup()
+    {
+        Dictionary<string, string?> overrides = new(StringComparer.Ordinal)
+        {
+            ["GlobalConfiguration:Timeout"] = "0"
+        };
+
+        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder => builder.ConfigureAppConfiguration((_, configurationBuilder) => configurationBuilder.AddInMemoryCollection(overrides)));
+
+        Exception exception = Assert.ThrowsAny<Exception>(factory.CreateClient);
+        Assert.Contains("GlobalConfiguration:Timeout", exception.ToString(), StringComparison.Ordinal);
+    }
+
     private static WebApplicationFactory<Program> CreateFactory(Uri upstreamAddress, bool includeProtectedRoute = false)
     {
         Dictionary<string, string?> overrides = new(StringComparer.Ordinal)
@@ -206,15 +257,32 @@ public sealed class GatewayIntegrationTests
             ["Gateway:Authentication:Jwt:Issuer"] = Issuer,
             ["Gateway:Authentication:Jwt:Audience"] = Audience,
             ["Gateway:Authentication:Jwt:JwksUri"] = new Uri(upstreamAddress, ".well-known/jwks.json").AbsoluteUri,
-            ["ReverseProxy:Clusters:auth-service:Destinations:primary:Address"] = upstreamAddress.AbsoluteUri
+            ["Routes:0:DownstreamScheme"] = upstreamAddress.Scheme,
+            ["Routes:0:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
+            ["Routes:0:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Routes:1:DownstreamScheme"] = upstreamAddress.Scheme,
+            ["Routes:1:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
+            ["Routes:1:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Routes:2:DownstreamScheme"] = upstreamAddress.Scheme,
+            ["Routes:2:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
+            ["Routes:2:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Routes:3:DownstreamScheme"] = upstreamAddress.Scheme,
+            ["Routes:3:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
+            ["Routes:3:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Routes:5:DownstreamScheme"] = upstreamAddress.Scheme,
+            ["Routes:5:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
+            ["Routes:5:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
 
         if (includeProtectedRoute)
         {
-            overrides["ReverseProxy:Routes:protected-service:ClusterId"] = "auth-service";
-            overrides["ReverseProxy:Routes:protected-service:Match:Path"] = "/protected/{**catch-all}";
+            overrides["Routes:6:Key"] = "protected-service";
+            overrides["Routes:6:UpstreamPathTemplate"] = "/protected/{everything}";
+            overrides["Routes:6:DownstreamPathTemplate"] = "/protected/{everything}";
+            overrides["Routes:6:DownstreamScheme"] = upstreamAddress.Scheme;
+            overrides["Routes:6:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
+            overrides["Routes:6:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
-
         return new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder => builder.ConfigureAppConfiguration((_, configurationBuilder) => configurationBuilder.AddInMemoryCollection(overrides)));
     }

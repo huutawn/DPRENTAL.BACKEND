@@ -35,7 +35,7 @@ public static class GatewayMetricNames
     public const string Error5xxTotal = "gateway_5xx_total";
 
     /// <summary>
-    /// Tổng số lượng request bị timeout khi chờ downstream service phản hồi (504).
+    /// Tổng số lượng request bị timeout khi chờ downstream service phản hồi.
     /// </summary>
     public const string UpstreamTimeoutTotal = "gateway_upstream_timeout_total";
 
@@ -57,7 +57,7 @@ public static class GatewayMetricNames
     public const string LabelMethod = "method";
 
     /// <summary>
-    /// Nhãn mã trạng thái HTTP (ví dụ: "200", "401", "403", "429", "502", "504").
+    /// Nhãn mã trạng thái HTTP (ví dụ: "200", "401", "403", "429", "502", "503").
     /// </summary>
     public const string LabelStatus = "status";
 

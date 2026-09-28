@@ -1,8 +1,7 @@
 namespace Dprental.Gateway.Application.Traffic;
 
 /// <summary>
-/// Cấu hình tổng thể về kiểm soát lưu lượng (Traffic Control), giới hạn tần suất (Rate Limiting)
-/// và khả năng phục hồi (Resilience) của API Gateway.
+/// Cấu hình giới hạn tần suất request của API Gateway.
 /// </summary>
 public sealed class GatewayTrafficOptions
 {
@@ -12,32 +11,9 @@ public sealed class GatewayTrafficOptions
     public const string SectionName = "Gateway:Traffic";
 
     /// <summary>
-    /// Cấu hình về thời gian chờ (Timeout) và cơ chế thử lại (Retry Safety).
-    /// </summary>
-    public GatewayResilienceOptions Resilience { get; set; } = new();
-
-    /// <summary>
     /// Cấu hình về chính sách giới hạn tần suất request (Rate Limiting).
     /// </summary>
     public GatewayRateLimitingOptions RateLimiting { get; set; } = new();
-}
-
-/// <summary>
-/// Cấu hình khả năng phục hồi (Resilience) và thời gian chờ (Timeout) cho Gateway.
-/// </summary>
-public sealed class GatewayResilienceOptions
-{
-    /// <summary>
-    /// Thời gian chờ mặc định (tính bằng giây) trước khi Gateway ngắt kết nối và trả về 504 Gateway Timeout.
-    /// Mặc định: 10 giây.
-    /// </summary>
-    public int DefaultTimeoutSeconds { get; set; } = 10;
-
-    /// <summary>
-    /// Cho phép hay nghiêm cấm tự động thử lại (Retry) đối với các lệnh thay đổi trạng thái (POST, PATCH, v.v.).
-    /// Mặc định là false nhằm đảm bảo an toàn nghiệp vụ, tránh tạo duplicate business effect.
-    /// </summary>
-    public bool AllowUnsafeCommandRetries { get; set; }
 }
 
 /// <summary>

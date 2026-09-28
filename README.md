@@ -10,7 +10,7 @@ Gateway được tổ chức theo kiến trúc Clean Architecture rõ ràng:
 Gateway/src/ApiGateway/
   Domain/
     Security/        # Hằng số header (GatewayHeaderConstants), IdentityContext, IIdentityContextAccessor
-    Traffic/         # Hằng số và tên chính sách điều phối (TrafficPolicyNames, ResilienceConstants)
+    Traffic/         # Tên chính sách điều phối (TrafficPolicyNames)
     Observability/   # Tên metric chuẩn hóa (GatewayMetricNames), IGatewayMetrics
   Application/
     Security/        # Cấu hình GatewaySecurityOptions, Validator, IHeaderSanitizer, IIdentityExtractor
@@ -19,18 +19,17 @@ Gateway/src/ApiGateway/
   Infrastructure/
     Security/
       Middlewares/   # HeaderSanitization, GatewayCors, RequestSizeProtection, SecurityHeaders
-      Transforms/    # TrustedIdentityTransformProvider cho YARP
+      DelegatingHandlers/ # TrustedIdentityDelegatingHandler, GatewayCorsDelegatingHandler cho Ocelot
       ForwardedHeaders/ # Cấu hình mạng tin cậy CIDR và KnownProxies
     Traffic/
       RateLimiting/  # GatewayRateLimitingConfiguration phân vùng Anonymous, Authenticated, Sensitive
-      Resilience/    # UpstreamTimeoutMiddleware, NoUnsafeRetryPolicy
     Observability/   # GatewayRequestLoggingMiddleware, GatewayMetrics, GatewayMetricsMiddleware
   Security/          # Extension methods đăng ký DI và Middleware Pipeline Bảo mật
   Traffic/           # Extension methods đăng ký DI và Middleware Pipeline Điều phối lưu lượng
   Observability/     # DistributedTracing, RequestLogging, Metrics DI & Middleware
   Authentication/    # JWT RS256 và JWKS của AuthService
   Health/            # Health checks (JwksReadinessHealthCheck, GatewayConfigurationHealthCheck)
-  Proxy/             # YARP composition và error mapping
+  Proxy/             # Ocelot composition và configuration validation
 Gateway/tests/ApiGateway.Tests/
 ```
 Gateway nhận JWT được AuthService ký và chỉ tải public key từ JWKS. Không đặt private key, token, hoặc password vào `appsettings*.json`.
@@ -71,40 +70,53 @@ docker run -d --name dprental-gateway \
   -e Gateway__Authentication__Jwt__Issuer=dprental-authservice-dev \
   -e Gateway__Authentication__Jwt__Audience=dprental-clients \
   -e Gateway__Authentication__Jwt__JwksUri=http://auth-service:5000/.well-known/jwks.json \
-  -e ReverseProxy__Clusters__auth-service__Destinations__primary__Address=http://auth-service:5000/ \
+  -e Routes__0__DownstreamHostAndPorts__0__Host=auth-service \
+  -e Routes__0__DownstreamHostAndPorts__0__Port=5000 \
+  -e Routes__1__DownstreamHostAndPorts__0__Host=auth-service \
+  -e Routes__1__DownstreamHostAndPorts__0__Port=5000 \
+  -e Routes__2__DownstreamHostAndPorts__0__Host=auth-service \
+  -e Routes__2__DownstreamHostAndPorts__0__Port=5000 \
+  -e Routes__3__DownstreamHostAndPorts__0__Host=auth-service \
+  -e Routes__3__DownstreamHostAndPorts__0__Port=5000 \
   -e Gateway__Security__Cors__AllowedOrigins__0=http://localhost:3000 \
   dprental-gateway:latest
 ```
 
 ### Quick start — Docker stack tổng
 
-Từ thư mục gốc `DPRENTAL/` (nơi có `compose.yaml`), chạy:
+Từ thư mục gốc `DPRENTAL/` (nơi có `compose.yaml`), cần có ba checkout con `Gateway/`, `AuthService/` và `MediaService/`, rồi chạy:
 
 ```bash
 cp .env.example .env
-# Đổi POSTGRES_PASSWORD sang giá trị local riêng.
+# Đặt giá trị riêng cho POSTGRES_PASSWORD, AUTH_ADMIN_BOOTSTRAP_CREATION_KEY,
+# MEDIA_POSTGRES_PASSWORD, MEDIA_MINIO_ROOT_PASSWORD và MEDIA_SERVICE_CLIENT_SECRET.
 docker compose up --build -d
 docker compose ps
+./MediaService/scripts/bootstrap-local-media-principal.sh
 ```
 
-Stack tự build Gateway và AuthService, khởi động PostgreSQL, Valkey và Kafka, tạo RSA key pair chỉ dành cho local development, rồi chạy migration trước khi AuthService nhận traffic. Không cần cấp PEM hoặc chạy `dotnet ef` thủ công cho quick start.
+Stack tự build Gateway, AuthService và MediaService; khởi động PostgreSQL riêng cho từng service, MinIO private, Valkey và Kafka; tạo RSA key pair local và chạy migration trước khi nhận traffic. Script bootstrap chỉ tạo `CatalogService` local với ba scope Media trong database AuthService.
 
 Gateway là điểm vào công khai tại `http://localhost:5050`:
 
-- [Swagger UI](http://localhost:5050/swagger)
+- [Swagger UI cho AuthService và MediaService](http://localhost:5050/swagger/index.html). Chọn service trong menu ở đầu trang.
 - `GET /health/live` (hoặc `/_health/live`): kiểm tra tiến trình Gateway.
 - `GET /health/ready` (hoặc `/_health/ready`): yêu cầu JWKS và cấu hình proxy sẵn sàng.
 - `POST /api/v1/auth/register`: được proxy nguyên đường dẫn tới AuthService.
 
-AuthService chỉ mở trong Docker network tại `auth-service:8080`. Các port local của hạ tầng là PostgreSQL `55432`, Valkey `56379` và Kafka `29092`; chúng chỉ bind vào loopback. Dừng stack bằng `docker compose down`; named volumes được giữ lại.
+Trong Swagger UI, chọn **AuthService**, gọi `/api/v1/auth/register` để tạo user local, rồi `/api/v1/auth/login`. Browser lưu cookie HttpOnly `accessToken` do AuthService đặt trên cùng Gateway origin. Sau đó chuyển menu sang **MediaService** và gọi `POST /api/v1/media/uploads` với `file`; không cần tạo entity hoặc nhập Bearer cho upload. Gateway xác thực cookie, chuyển thành Bearer và MediaService xác thực lại JWT bằng JWKS. Cookie không được chuyển tới MediaService.
+
+Để thử API nội bộ, chọn **AuthService** và gọi `/api/v1/auth/service-token` với `clientId=local-catalog-service`, `clientSecret=MEDIA_SERVICE_CLIENT_SECRET` trong `.env`, `audience=dprental-clients` và lần lượt một scope `media.verify`, `media.read` hoặc `media.publish`. Chuyển sang **MediaService**, dùng Bearer được trả về trong nút **Authorize** cho `/verify`, `/access` hoặc `/visibility`. Bearer tường minh được ưu tiên hơn cookie user đang có. Chuyển ảnh sang public bằng `PUT /api/v1/media/{mediaId}/visibility`, sau đó mở `/api/v1/media/{mediaId}/content` không cần token; chuyển về private thì đường dẫn này trả 404.
+
+AuthService, MediaService và PostgreSQL Media chỉ mở trong Docker network. Các port local của hạ tầng gồm PostgreSQL Auth `55432`, MinIO `9002` (console `9003`), Valkey `56379` và Kafka `29092`; chúng chỉ bind vào loopback. Dừng stack bằng `docker compose down`; named volumes được giữ lại.
 ## Gateway error response
 
-Chỉ lỗi do Gateway tạo ra (JWT, authorization, upstream không sẵn sàng hoặc exception) có payload JSON cố định:
+Các middleware do Gateway sở hữu (CORS, giới hạn payload, rate limit và lỗi nội bộ) trả payload JSON:
 
 ```json
 {
-  "code": "Gateway.Authentication.Required",
-  "message": "Authentication is required to access this resource.",
+  "code": "Gateway.Security.CorsOriginDenied",
+  "message": "The request origin is not allowed by CORS policy.",
   "traceId": "b4777951-602a-4f76-b067-fcd27c68a6d2"
 }
 ```
@@ -113,20 +125,15 @@ Danh mục mã lỗi canonical chuẩn hóa của Gateway:
 
 | HTTP Status | Mã lỗi (`code`) | Ý nghĩa |
 | :--- | :--- | :--- |
-| `401 Unauthorized` | `Gateway.Authentication.Required` | Thiếu Bearer token trên tài nguyên yêu cầu xác thực. |
-| `401 Unauthorized` | `Gateway.Authentication.InvalidToken` | Token không hợp lệ, sai chữ ký hoặc đã hết hạn. |
-| `403 Forbidden` | `Gateway.Authorization.Forbidden` | Người dùng không đủ quyền truy cập tài nguyên. |
 | `403 Forbidden` | `Gateway.Security.CorsOriginDenied` | Nguồn gốc (Origin) của request không nằm trong whitelist CORS. |
 | `413 Payload Too Large` | `Gateway.Request.PayloadTooLarge` | Kích thước request body vượt quá ngưỡng cho phép (MaxRequestBodySize). |
 | `429 Too Many Requests` | `Gateway.Traffic.RateLimitExceeded` | Vượt quá số lượng request cho phép trong khung thời gian (Rate Limit). |
-| `502 Bad Gateway` | `Gateway.Upstream.Unavailable` | Downstream service không thể kết nối, từ chối socket hoặc lỗi mạng. |
-| `504 Gateway Timeout` | `Gateway.Upstream.Timeout` | Downstream service không phản hồi trong ngân sách thời gian chờ (Timeout Budget). |
 | `500 Internal Error` | `Gateway.UnexpectedFailure` | Lỗi không mong đợi phát sinh trong nội bộ Gateway. |
 
-`code` và `message` theo cùng contract ổn định của `AuthService.Common.Error`; `traceId` khớp `X-Correlation-ID` để tra log. Response hợp lệ hoặc lỗi nghiệp vụ từ service đích được Gateway chuyển tiếp nguyên trạng, không bị bọc lại.
+Ocelot xử lý xác thực và lỗi proxy theo phản hồi riêng: route được bảo vệ trả `401` khi thiếu hoặc sai JWT; lỗi kết nối upstream trả `502`; timeout upstream trả `503` trên Ocelot 25.0. Những phản hồi này không dùng payload JSON ở trên. Phản hồi và lỗi nghiệp vụ từ service đích được chuyển tiếp nguyên trạng.
 ## Theo dõi trace phân tán
 
-Gateway dùng W3C `traceparent` và OpenTelemetry để giữ cùng một trace khi YARP chuyển request tới service đích. Root trace được sample 100% ở Development và 10% ở các môi trường khác; quyết định sample từ caller luôn được giữ nguyên.
+Gateway dùng W3C `traceparent` và OpenTelemetry để giữ cùng một trace khi Ocelot chuyển request tới service đích. Root trace được sample 100% ở Development và 10% ở các môi trường khác; quyết định sample từ caller luôn được giữ nguyên.
 
 Để export trace qua OTLP HTTP/protobuf, cấu hình đầy đủ signal endpoint trong environment (không ghi token collector vào source control):
 
@@ -142,7 +149,9 @@ Trong production, cấu hình bằng environment variables, ví dụ:
 Gateway__Authentication__Jwt__Issuer
 Gateway__Authentication__Jwt__Audience
 Gateway__Authentication__Jwt__JwksUri
-ReverseProxy__Clusters__auth-service__Destinations__primary__Address
+Routes__0__DownstreamHostAndPorts__0__Host
+Routes__0__DownstreamHostAndPorts__0__Port
+GlobalConfiguration__Timeout
 ```
 ## Gateway Security & Request Protection (DPR-78)
 
@@ -150,7 +159,7 @@ Gateway đóng vai trò là ranh giới bảo mật vững chắc trước khi r
 
 1. **Header Sanitization & Chống giả mạo danh tính**:
    - Client không được phép tự ý gửi các tiêu đề nội bộ: `X-User-Id`, `X-Party-Id`, `X-Role`, `X-Service-Name`, `X-Permissions`, `X-Scope`.
-   - Gateway tự động loại bỏ (remove) các tiêu đề này ngay tại middleware đầu vào và tại transform của YARP.
+   - Gateway tự động loại bỏ (remove) các tiêu đề này ngay tại middleware đầu vào và tại delegating handler của Ocelot.
    - Nếu token JWT hợp lệ, Gateway trích xuất thông tin danh tính thật (`sub`, `party_id`, `role`) và chuyển tiếp qua `X-User-Id`, `X-Party-Id`, `X-Role`, `X-Service-Name`, `X-Correlation-ID`.
    - Nếu JWT không hợp lệ hoặc request ẩn danh, Gateway tuyệt đối không chuyển tiếp bất kỳ identity header nào.
 
@@ -176,12 +185,12 @@ Gateway đóng vai trò là ranh giới bảo mật vững chắc trước khi r
 
 Gateway cung cấp cơ chế điều phối lưu lượng và phục hồi mạng tin cậy:
 
-1. **Upstream Timeout (504 Gateway Timeout)**:
-   - Ngân sách thời gian chờ mặc định được cấu hình qua `Gateway:Traffic:Resilience:DefaultTimeoutSeconds` (mặc định: 10 giây).
-   - Khi downstream service không phản hồi trong ngân sách, Gateway chủ động ngắt kết nối và trả về HTTP `504 Gateway Timeout` (`Gateway.Upstream.Timeout`).
+1. **Upstream Timeout (503 Service Unavailable trên Ocelot 25.0)**:
+   - Ocelot dùng `GlobalConfiguration:Timeout` (giây; mặc định cấu hình của Gateway là 10). Docker Compose ánh xạ `DEFAULT_TIMEOUT_SECONDS` vào khóa này; Development đặt 15 giây.
+   - Khi downstream không phản hồi kịp, Ocelot ngắt request và trả `503`.
 
-2. **Service Unavailable / Connection Failure (502 / 503)**:
-   - Khi downstream service bị sập, từ chối kết nối hoặc lỗi DNS, Gateway trả về mã lỗi canonical `502 Bad Gateway` (`Gateway.Upstream.Unavailable`) mà không gây crash tiến trình.
+2. **Connection Failure (502 Bad Gateway)**:
+   - Khi downstream service từ chối kết nối hoặc gặp lỗi mạng, Ocelot trả `502`.
 
 3. **Rate Limiting (429 Too Many Requests)**:
    - Hỗ trợ 3 phân tầng kiểm soát tần suất truy cập:
@@ -194,16 +203,15 @@ Gateway cung cấp cơ chế điều phối lưu lượng và phục hồi mạn
 4. **Client Cancellation**:
    - Khi client chủ động ngắt kết nối (`RequestAborted`), tín hiệu hủy được chuyển tiếp xuống downstream service để giải phóng tài nguyên.
 
-5. **Cấm tự ý Retry các lệnh nghiệp vụ không an toàn (No Unsafe Retries)**:
-   - Gateway tuyệt đối **không tự động retry** các lệnh nghiệp vụ không an toàn (`POST`, `PATCH`, `CONNECT`).
-   - Ví dụ: `POST /rentals` gặp timeout sẽ lập tức trả về 504 thay vì tự gửi lại 3 lần, tránh nguy cơ tạo trùng lặp giao dịch (Duplicate Business Effects).
+5. **Không tự động retry**:
+   - Gateway không cấu hình retry cho Ocelot; request `POST` bị timeout không được gửi lại. Kiểm thử tích hợp đếm số lần upstream nhận request.
 
 Cấu hình mẫu trong production qua biến môi trường:
 ```text
 Gateway__Security__Cors__AllowedOrigins__0=https://app.dprental.vn
 Gateway__Security__ForwardedHeaders__KnownNetworks__0=10.0.0.0/8
 Gateway__Security__RequestSize__MaxRequestBodySizeBytes=10485760
-Gateway__Traffic__Resilience__DefaultTimeoutSeconds=10
+GlobalConfiguration__Timeout=10
 Gateway__Traffic__RateLimiting__Anonymous__PermitLimit=20
 Gateway__Traffic__RateLimiting__Authenticated__PermitLimit=100
 Gateway__Traffic__RateLimiting__Sensitive__PermitLimit=5
@@ -219,11 +227,11 @@ Mỗi request đi qua Gateway đều xuất một bản ghi structured log chứ
   - `Timestamp`: Thời gian UTC chuẩn ISO 8601.
   - `CorrelationId`: Mã tương quan từ `X-Correlation-ID` (đồng bộ giữa Gateway và downstream).
   - `TraceId`: W3C TraceId tương thích chuẩn OpenTelemetry.
-  - `Route`: Mã định danh route hoặc pattern đường dẫn YARP.
+  - `Route`: Mã định danh route hoặc pattern đường dẫn Ocelot.
   - `Method`: Phương thức HTTP (GET, POST, PUT, DELETE,...).
   - `StatusCode`: Mã trạng thái phản hồi HTTP.
   - `DurationMs`: Thời gian xử lý request tính bằng mili-giây.
-  - `Upstream`: Tên cụm dịch vụ downstream đích (ClusterId) hoặc `gateway`.
+  - `Upstream`: Tên dịch vụ downstream đích (ServiceName / Route Key) hoặc `gateway`.
 * **Ranh giới bảo mật (Zero Leakage)**:
   - Tuyệt đối **không ghi log** `Authorization` header, Bearer token, JWT, refresh token, mật khẩu, API key hay nội dung nhạy cảm của request body.
 
@@ -237,7 +245,7 @@ Hệ thống sử dụng `System.Diagnostics.Metrics.Meter` với tên chuẩn `
 | `gateway_request_duration_seconds` | Histogram (`double`) | Phân phối thời gian xử lý request qua Gateway. |
 | `gateway_4xx_total` | Counter (`long`) | Tổng số lượng phản hồi lỗi client 4xx. |
 | `gateway_5xx_total` | Counter (`long`) | Tổng số lượng phản hồi lỗi server 5xx. |
-| `gateway_upstream_timeout_total` | Counter (`long`) | Tổng số request bị upstream timeout (504). |
+| `gateway_upstream_timeout_total` | Counter (`long`) | Tổng số request bị upstream timeout (503 do Ocelot báo timeout, hoặc 504). |
 | `gateway_rate_limit_total` | Counter (`long`) | Tổng số request bị từ chối do vượt rate limit (429). |
 
 * **Quy tắc gán nhãn (Labels/Dimensions)**:
@@ -253,7 +261,7 @@ Gateway cung cấp các probe giám sát riêng biệt theo chuẩn Kubernetes /
 * **Readiness Probe (`/health/ready` và `/_health/ready`)**:
   - Trả về `200 OK` chỉ khi Gateway đã sẵn sàng nhận traffic thực tế:
     1. Đã tải và nạp thành công khóa công khai JWKS từ AuthService (`auth-jwks`).
-    2. Cấu hình các tuyến đường (routes) và cụm dịch vụ (clusters) của Reverse Proxy đã sẵn sàng (`proxy-config`).
+    2. Cấu hình các tuyến đường của Ocelot đã được nạp (`proxy-config`).
   - Trả về `503 Service Unavailable` nếu các phụ thuộc cốt lõi chưa khả dụng.
 
 ## Kiểm tra trước khi push
