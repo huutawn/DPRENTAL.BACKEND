@@ -149,7 +149,8 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
             .AnyAsync(user => user.CitizenId == citizenId, cancellationToken);
 
     public async Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(
-    int skip, int take, string? search, string? type, CancellationToken cancellationToken = default)
+    int skip, int take, string? search = null, string? type = null,
+    CancellationToken cancellationToken = default)
     {
         var query = dbContext.Users.AsNoTracking().AsQueryable();
 

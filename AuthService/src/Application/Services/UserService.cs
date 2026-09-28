@@ -21,6 +21,9 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Dprental.AuthService.Application.Rules;
+using System.Text;
+using System.Security.Cryptography;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Dprental.AuthService.Application.Services;
 
