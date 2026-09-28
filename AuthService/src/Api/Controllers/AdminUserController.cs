@@ -1,4 +1,5 @@
-﻿using AuthService.Domain.DTOs.User;
+﻿using AuthService.Application.DTOs.User;
+using AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Api.Filters;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security;
@@ -28,9 +29,7 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
      [FromQuery] GetUsersRequest request,
      CancellationToken cancellationToken = default)
     {
-        var pageRequest = new PageRequest(request.Page, request.PageSize, request.Search);
-
-        var result = await userService.GetUsersPagedAsync(pageRequest, cancellationToken);
+        var result = await userService.GetUsersPagedAsync(request, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
@@ -74,6 +73,39 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
         if (!Guid.TryParse(User.Identity?.Name, out Guid adminId)) return Unauthorized();
 
         var result = await userService.ActivateUserAsync(id, adminId, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
+    }
+
+    /// <summary>Tạo mới người dùng/admin.</summary>
+    /// <param name="request">Thông tin tạo mới.</param>
+    /// <param name="cancellationToken">Token hủy request.</param>
+    [HttpPost]
+    [Authorize(Policy = Permissions.Users.Manage)] // Tùy chỉnh Policy nếu bạn có quyền riêng cho Create
+    [ProducesResponseType<Guid>(StatusCodes.Status200OK)] // Trả về Id của user mới tạo
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> CreateUser(
+        [FromBody] CreateUserRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await userService.CreateUserAsync(request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Cập nhật thông tin và quyền của người dùng.</summary>
+    /// <param name="id">Id người dùng.</param>
+    /// <param name="request">Thông tin cập nhật.</param>
+    /// <param name="cancellationToken">Token hủy request.</param>
+    [HttpPut("{id:guid}")]
+    [Authorize(Policy = Permissions.Users.Manage)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateUser(
+        Guid id,
+        [FromBody] UpdateUserRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await userService.UpdateUserAsync(id, request, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
 }

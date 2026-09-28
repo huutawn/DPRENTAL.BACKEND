@@ -558,7 +558,13 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         PagedResult<Organization> all = await new EfOrganizationRepository(db).GetAllAsync(request);
         PagedResult<Organization> scoped = await new EfOrganizationRepository(db).GetUserOrganizationsAsync(user.Id, request);
         PagedResult<OrganizationMembership> members = await new EfOrganizationMembershipRepository(db).GetMembersAsync(organization.Id, request);
-        var (users, userCount) = await new EfUserRepository(db).GetUsersPagedAsync(0, 20, request.GetSearchTerm());
+        var (users, userCount) = await new EfUserRepository(db).GetUsersPagedAsync(
+        skip: 0,
+        take: 20,
+        search: request.GetSearchTerm(),
+        type: null,
+        cancellationToken: default
+        );
 
         Assert.Equal(organization.Id, Assert.Single(all.Items).Id);
         Assert.Equal(1, all.TotalCount);

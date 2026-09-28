@@ -355,8 +355,15 @@ public sealed class ExternalLoginServiceTests
             LastLookupEmail = normalizedEmail;
             return Task.FromResult(Existing is not null && Existing.Email == normalizedEmail ? Existing : null);
         }
-        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, CancellationToken cancellationToken = default) =>
+
+        // Đã thêm tham số string? type vào hàm này
+        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, string? type, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("ExternalLoginService does not use pagination.");
+
+        // Bổ sung hàm GetByIdWithRolesAsync còn thiếu
+        public Task<User?> GetByIdWithRolesAsync(Guid id, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("ExternalLoginService does not read roles.");
+
         public Task<User> CreateAsync(User entity, CancellationToken cancellationToken = default)
         {
             if (RejectCreate)
@@ -399,6 +406,7 @@ public sealed class ExternalLoginServiceTests
 
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("ExternalLoginService does not delete users.");
+
         public Task<bool> ChangePasswordAndRevokeSessionsAsync(Guid userId, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> ResetPasswordWithTokenAsync(Guid userId, string tokenHash, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(Existing is not null ? Existing.IsActive : true);

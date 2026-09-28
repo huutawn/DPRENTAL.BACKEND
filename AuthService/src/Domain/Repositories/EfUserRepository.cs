@@ -5,11 +5,17 @@ using Dprental.AuthService.Domain.IRepositories;
 
 namespace Dprental.AuthService.Domain.Repositories;
 
+
 public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
 {
     public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         dbContext.Users
             .AsNoTracking()
+            .SingleOrDefaultAsync(user => user.Id == id, cancellationToken);
+
+    public Task<User?> GetByIdWithRolesAsync(Guid id, CancellationToken cancellationToken = default) =>
+        dbContext.Users
+            .Include(u => u.UserRoles)
             .SingleOrDefaultAsync(user => user.Id == id, cancellationToken);
 
     public async Task<IReadOnlyList<User>> GetAllAsync(CancellationToken cancellationToken = default) =>
@@ -142,28 +148,44 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
             .AsNoTracking()
             .AnyAsync(user => user.CitizenId == citizenId, cancellationToken);
 
-    public async Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, CancellationToken cancellationToken = default)
+    public async Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(
+    int skip, int take, string? search, string? type, CancellationToken cancellationToken = default)
     {
-        IQueryable<User> query = dbContext.Users.AsNoTracking();
-        if (search is not null)
+        var query = dbContext.Users.AsNoTracking().AsQueryable();
+
+        // 1. Lọc theo keyword
+        if (!string.IsNullOrWhiteSpace(search))
         {
-            // EF Core translates these overloads to SQL; culture/StringComparison overloads are not translatable.
-#pragma warning disable CA1304, CA1311, CA1862
-            query = query.Where(u => u.FullName.ToLower().Contains(search) || u.Email.ToLower().Contains(search));
-#pragma warning restore CA1304, CA1311, CA1862
+            var pattern = $"%{EscapeLike(search.Trim())}%";
+            query = query.Where(u =>
+                EF.Functions.ILike(u.Email, pattern) ||
+                EF.Functions.ILike(u.FullName, pattern));
         }
 
-        int totalCount = await query.CountAsync(cancellationToken);
+        // 2. Lọc theo role
+        if (!string.IsNullOrWhiteSpace(type))
+        {
+            var roleName = EscapeLike(type.Trim());
+            query = query.Where(u => u.UserRoles.Any(ur =>
+                EF.Functions.ILike(ur.Role.Name, roleName)));
+        }
 
-        List<User> items = await query
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var users = await query
+            .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
             .OrderByDescending(u => u.CreatedAt)
-            .ThenBy(u => u.Id)
             .Skip(skip)
             .Take(take)
             .ToListAsync(cancellationToken);
 
-        return (items, totalCount);
+        return (users, totalCount);
     }
+
+    // Escape ký tự đặc biệt của LIKE để user gõ "%" hay "_" không bị hiểu là wildcard
+    private static string EscapeLike(string value) =>
+        value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
         dbContext.Users

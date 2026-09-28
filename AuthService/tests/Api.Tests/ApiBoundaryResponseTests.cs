@@ -1,27 +1,29 @@
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.AspNetCore.Identity;
+using AuthService.Application.DTOs.User;
+using AuthService.Domain.DTOs.User;
+using Dprental.AuthService.Api.Security;
+using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.User;
+using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.User;
+using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Domain.Models;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Security.Cryptography;
-using Dprental.AuthService.Api.Security;
-using Dprental.AuthService.Application.DTOs.Auth;
-using Dprental.AuthService.Application.IServices;
-using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Models;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.TestHost;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.IdentityModel.Tokens;
 using Xunit;
 
 namespace Dprental.AuthService.Api.Tests;
@@ -292,6 +294,12 @@ public sealed class ApiBoundaryResponseTests
         public Task<Result> RequestPasswordResetAsync(RequestPasswordResetRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> ResetPasswordAsync(string token, ResetPasswordRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> ChangePasswordAsync(Guid userId, ChangePasswordRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<Result<PagedResult<AdminUserListItemDto>>> GetUsersPagedAsync(PageRequest pageRequest, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        // Đã cập nhật thành GetUsersRequest
+        public Task<Result<PagedResult<AdminUserListItemDto>>> GetUsersPagedAsync(GetUsersRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        // Đã bổ sung 2 hàm mới
+        public Task<Result<Guid>> CreateUserAsync(CreateUserRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Result> UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }
