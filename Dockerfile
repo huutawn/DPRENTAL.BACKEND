@@ -1,3 +1,6 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS ef-tools
+RUN dotnet tool install --tool-path /tools dotnet-ef --version 10.0.12
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
@@ -14,6 +17,11 @@ RUN dotnet publish MediaService/src/Api/MediaService.Api.csproj \
     --configuration Release \
     --output /app/publish \
     --no-restore
+
+FROM build AS migrator
+COPY --from=ef-tools /tools /tools
+ENV PATH="${PATH}:/tools"
+ENTRYPOINT ["/tools/dotnet-ef"]
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
