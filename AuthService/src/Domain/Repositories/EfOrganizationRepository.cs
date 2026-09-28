@@ -68,30 +68,6 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
         return await dbContext.Organizations.SingleOrDefaultAsync(org => org.Id == id, cancellationToken);
     }
 
-    public async Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        var query = dbContext.OrganizationMemberships
-            .AsNoTracking()
-            .Where(m => m.UserId == userId)
-            .Select(m => m.Organization);
-
-        query = ApplySearch(query, request.GetSearchTerm());
-
-        int totalCount = await query.CountAsync(cancellationToken);
-
-        int skip = (request.Page - 1) * request.PageSize;
-        List<Organization> items = await query
-            .OrderBy(o => o.Name)
-            .ThenBy(o => o.Id)
-            .Skip(skip)
-            .Take(request.PageSize)
-            .ToListAsync(cancellationToken);
-
-        return new PagedResult<Organization>(items, request.Page, request.PageSize, totalCount);
-    }
-
     private static IQueryable<Organization> ApplySearch(IQueryable<Organization> query, string? searchTerm)
     {
         if (searchTerm is null)

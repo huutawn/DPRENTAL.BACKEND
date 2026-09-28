@@ -227,21 +227,6 @@ public sealed class UsersController(
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
-    /// <summary>Lấy danh sách các lời mời tham gia organization đang chờ xử lý của người dùng hiện tại.</summary>
-    [HttpGet("me/invitations")]
-    [ProducesResponseType<IReadOnlyList<OrganizationInvitationResponse>>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<IReadOnlyList<OrganizationInvitationResponse>>> GetMyInvitations(CancellationToken cancellationToken)
-    {
-        if (User.GetJwtSub() is not Guid userId)
-        {
-            return Unauthorized();
-        }
-
-        Result<IReadOnlyList<OrganizationInvitationResponse>> result = await organizationService.GetMyInvitationsAsync(userId, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
-    }
-
     /// <summary>Cập nhật hồ sơ (tên, số điện thoại, avatar) của người dùng hiện tại.</summary>
     /// <param name="request">Thông tin hồ sơ cần cập nhật.</param>
     /// <param name="cancellationToken">Token hủy request.</param>

@@ -154,10 +154,6 @@ public sealed class PagingTests
         Assert.Single(platformPage.Items);
         Assert.Equal(second.Id, platformPage.Items[0].Id);
 
-        PagedResult<Organization> scoped = await organizations.GetUserOrganizationsAsync(bob.Id, new PageRequest(Search: "blue"));
-        Assert.Equal(first.Id, Assert.Single(scoped.Items).Id);
-        Assert.Equal(1, scoped.TotalCount);
-        Assert.Empty((await organizations.GetUserOrganizationsAsync(bob.Id, new PageRequest(Search: "green"))).Items);
         Assert.Equal(second.Id, Assert.Single((await organizations.GetAllAsync(new PageRequest(Search: "two"), OrganizationStatus.Pending)).Items).Id);
 
         EfUserRepository users = new(db);
@@ -165,14 +161,6 @@ public sealed class PagingTests
         Assert.Equal(2, userCount);
         Assert.Single(userItems);
         Assert.Equal(0, (await users.GetUsersPagedAsync(0, 10, "missing")).TotalCount);
-
-        EfOrganizationMembershipRepository members = new(db);
-        PagedResult<OrganizationMembership> ownerMatch = await members.GetMembersAsync(first.Id, new PageRequest(Search: "OWN"));
-        Assert.Equal(alice.Id, Assert.Single(ownerMatch.Items).UserId);
-        Assert.Equal(1, ownerMatch.TotalCount);
-        PagedResult<OrganizationMembership> emailMatch = await members.GetMembersAsync(first.Id, new PageRequest(Search: "BOB@"));
-        Assert.Equal(bob.Id, Assert.Single(emailMatch.Items).UserId);
-        Assert.Equal(1, emailMatch.TotalCount);
     }
 
     [Fact]
@@ -184,14 +172,14 @@ public sealed class PagingTests
         FakeUserRepo userRepo = new();
         FakeRoleRepo roleRepo = new();
 
-        OrganizationService service = new(orgRepo, memRepo, userRepo, roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
 
-        Result<PagedResult<OrganizationResponse>> result = await service.ListAsync(actorId, new PageRequest(Page: 0, PageSize: 20));
+        Result<PagedResult<OrganizationSummaryResponse>> result = await service.ListAsync(actorId, new PageRequest(Page: 0, PageSize: 20));
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.Paging.InvalidPage, result.Error);
         Assert.Equal(ErrorType.Validation, result.Error.Type);
 
-        Result<PagedResult<OrganizationResponse>> result2 = await service.ListAsync(actorId, new PageRequest(Page: 1, PageSize: 101));
+        Result<PagedResult<OrganizationSummaryResponse>> result2 = await service.ListAsync(actorId, new PageRequest(Page: 1, PageSize: 101));
         Assert.True(result2.IsFailure);
         Assert.Equal(AuthErrors.Paging.InvalidPageSize, result2.Error);
         Assert.Equal(ErrorType.Validation, result2.Error.Type);
@@ -209,8 +197,6 @@ public sealed class PagingTests
         public Task<PagedResult<Organization>> GetAllAsync(PageRequest request, OrganizationStatus? status = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(PagedResult.Create<Organization>([], request.Page, request.PageSize, 0));
         public Task<Organization?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<Organization?>(null);
-        public Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(PagedResult.Create<Organization>([], request.Page, request.PageSize, 0));
         public Task<Organization> CreateAsync(Organization organization, OrganizationMembership initialMembership, CancellationToken cancellationToken = default) =>
             Task.FromResult(organization);
 
@@ -221,16 +207,7 @@ public sealed class PagingTests
 
     private sealed class FakeMemRepository : IOrganizationMembershipRepository
     {
-        public Task<OrganizationMembership?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<OrganizationMembership?>(null);
         public Task<OrganizationMembership?> GetByOrganizationAndUserAsync(Guid organizationId, Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<OrganizationMembership?>(null);
-        public Task<OrganizationMembership?> FindMemberAsync(Guid organizationId, Guid memberOrUserId, CancellationToken cancellationToken = default) => Task.FromResult<OrganizationMembership?>(null);
-        public Task<PagedResult<OrganizationMembership>> GetMembersAsync(Guid organizationId, PageRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(PagedResult.Create<OrganizationMembership>([], request.Page, request.PageSize, 0));
-        public Task<bool> MembershipExistsAsync(Guid organizationId, Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(false);
-        public Task<OrganizationMembership> AddMemberAsync(OrganizationMembership membership, CancellationToken cancellationToken = default) => Task.FromResult(membership);
-        public Task<bool> UpdateAsync(OrganizationMembership membership, CancellationToken cancellationToken = default) => Task.FromResult(true);
-        public Task<bool> DeleteAsync(Guid membershipId, CancellationToken cancellationToken = default) => Task.FromResult(true);
-        public Task<int> CountOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult(0);
         public Task<int> CountActiveOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult(0);
         public Task<IReadOnlyList<OrganizationMembership>> GetMembershipsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<OrganizationMembership>>([]);
         public Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
