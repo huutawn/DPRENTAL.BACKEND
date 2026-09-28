@@ -7,10 +7,12 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
+using Dprental.AuthService.Common.Utils;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Authentication;
@@ -37,6 +39,82 @@ namespace Dprental.AuthService.Api.Tests;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test method naming convention")]
 public sealed class ApiBoundaryResponseTests
 {
+    private const string BootstrapKey = "test-bootstrap-creation-key";
+
+    [Fact]
+    public async Task ForgotPassword_DevelopmentWithValidKey_ReturnsUsableToken()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory(environmentName: "Development");
+        Guid userId = await SeedUserAsync(factory, "reset@example.com", "OldPassword123!", isActive: true);
+        using HttpClient client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Admin-Creation-Key", BootstrapKey);
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/v1/auth/forgot-password", new RequestPasswordResetRequest("reset@example.com"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        string token = body.RootElement.GetProperty("token").GetString()!;
+        Assert.False(string.IsNullOrWhiteSpace(token));
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        RecoveryToken saved = await db.RecoveryTokens.SingleAsync(t => t.UserId == userId);
+        Assert.Equal(RefreshTokenUtility.ComputeHash(token), saved.TokenHash);
+
+        using HttpRequestMessage reset = new(HttpMethod.Post, "/api/v1/auth/reset-password")
+        {
+            Content = JsonContent.Create(new ResetPasswordRequest("NewPassword123!", "NewPassword123!"))
+        };
+        reset.Headers.Add("Cookie", $"ResetPasswordToken={token}");
+        using HttpResponseMessage resetResponse = await client.SendAsync(reset);
+        Assert.Equal(HttpStatusCode.OK, resetResponse.StatusCode);
+        db.ChangeTracker.Clear();
+        Assert.NotNull((await db.RecoveryTokens.SingleAsync(t => t.UserId == userId)).UsedAtUtc);
+    }
+
+    [Theory]
+    [InlineData("Development", null, "reset@example.com")]
+    [InlineData("Development", "wrong-key", "reset@example.com")]
+    [InlineData("Production", BootstrapKey, "reset@example.com")]
+    [InlineData("Development", BootstrapKey, "missing@example.com")]
+    [InlineData("Development", BootstrapKey, "inactive@example.com")]
+    public async Task ForgotPassword_WithoutAuthorizedActiveAccount_HidesToken(
+        string environmentName, string? key, string email)
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory(environmentName: environmentName);
+        await SeedUserAsync(factory, "reset@example.com", "OldPassword123!", isActive: true);
+        await SeedUserAsync(factory, "inactive@example.com", "OldPassword123!", isActive: false);
+        using HttpClient client = factory.CreateClient();
+        if (key is not null)
+        {
+            client.DefaultRequestHeaders.Add("X-Admin-Creation-Key", key);
+        }
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/v1/auth/forgot-password", new RequestPasswordResetRequest(email));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(body.RootElement.TryGetProperty("token", out _));
+    }
+
+    [Fact]
+    public async Task ForgotPassword_InvalidEmail_ReturnsBadRequestWithoutToken()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory(environmentName: "Development");
+        using HttpClient client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Admin-Creation-Key", BootstrapKey);
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/v1/auth/forgot-password", new RequestPasswordResetRequest("invalid-email"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(body.RootElement.TryGetProperty("token", out _));
+    }
+
     [Fact]
     public async Task Login_InvalidEmailOrPassword_DoesNotDiscloseEmailExistence()
     {
@@ -202,11 +280,17 @@ public sealed class ApiBoundaryResponseTests
     // HELPERS & FAILING TEST SERVICES
     // ========================================================================
 
-    private static WebApplicationFactory<Program> CreateFactory(Action<IServiceCollection>? configureServices = null)
+    private static WebApplicationFactory<Program> CreateFactory(
+        Action<IServiceCollection>? configureServices = null,
+        string environmentName = "Development")
     {
         string inMemoryDatabaseName = Guid.NewGuid().ToString("N");
+        using RSA rsa = RSA.Create(2048);
+        string publicKey = rsa.ExportRSAPublicKeyPem();
+        string privateKey = rsa.ExportRSAPrivateKeyPem();
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseEnvironment(environmentName);
             builder.ConfigureAppConfiguration((_, config) =>
             {
                 config.AddInMemoryCollection(new Dictionary<string, string?>
@@ -214,7 +298,12 @@ public sealed class ApiBoundaryResponseTests
                     ["Auth:Google:ClientId"] = "test-google-client-id",
                     ["Auth:Google:ClientSecret"] = "test-google-client-secret",
                     ["Auth:Google:AllowedReturnUrls:0"] = "http://localhost:3000",
-                    ["Auth:Google:BffCallbackUrls:0"] = "http://localhost:3000/api/auth/google/callback"
+                    ["Auth:Google:BffCallbackUrls:0"] = "http://localhost:3000/api/auth/google/callback",
+                    ["Auth:AdminBootstrap:CreationKey"] = BootstrapKey,
+                    ["Auth:Jwt:ActiveKeyId"] = "key-2026-01",
+                    ["Auth:Jwt:Keys:0:KeyId"] = "key-2026-01",
+                    ["Auth:Jwt:Keys:0:PublicKeyPem"] = publicKey,
+                    ["Auth:Jwt:Keys:0:PrivateKeyPem"] = privateKey
                 });
             });
 
@@ -289,7 +378,7 @@ public sealed class ApiBoundaryResponseTests
         public Task<Result> SuspendUserAsync(Guid targetUserId, Guid adminId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> ActivateUserAsync(Guid targetUserId, Guid adminId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<Guid>> AuthenticateAsync(LoginRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<Result> RequestPasswordResetAsync(RequestPasswordResetRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Result<string?>> RequestPasswordResetAsync(RequestPasswordResetRequest request, string? testKey, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> ResetPasswordAsync(string token, ResetPasswordRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> ChangePasswordAsync(Guid userId, ChangePasswordRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<PagedResult<AdminUserListItemDto>>> GetUsersPagedAsync(PageRequest pageRequest, CancellationToken cancellationToken = default) => throw new NotSupportedException();

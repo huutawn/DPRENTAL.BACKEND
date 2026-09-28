@@ -293,20 +293,29 @@ public sealed class AuthController(
         Response.Headers["Referrer-Policy"] = "no-referrer";
         return Redirect(destination);
     }
-    /// <summary>Yêu cầu đặt lại mật khẩu mà không tiết lộ email có tồn tại hay không.</summary>
+    /// <summary>Yêu cầu đặt lại mật khẩu. Development: khóa admin hợp lệ trong X-Admin-Creation-Key trả token để thử nghiệm.</summary>
     [HttpPost("forgot-password")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> ForgotPassword([FromBody] RequestPasswordResetRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> ForgotPassword(
+        [FromBody] RequestPasswordResetRequest request,
+        [FromHeader(Name = "X-Admin-Creation-Key")] string? testKey,
+        CancellationToken cancellationToken)
     {
-        var result = await userService.RequestPasswordResetAsync(request, cancellationToken);
+        Result<string?> result = await userService.RequestPasswordResetAsync(
+            request, environment.IsDevelopment() ? testKey : null, cancellationToken);
 
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);
         }
 
-        // Luôn trả về thông báo thành công chung chung để chống dò quét email (Email Enumeration)
+        if (result.Value is string token)
+        {
+            Response.Headers.CacheControl = "no-store";
+            return Ok(new { Message = "Yêu cầu khôi phục mật khẩu đã được xử lý.", Token = token });
+        }
+
         return Ok(new { Message = "Yêu cầu khôi phục mật khẩu đã được xử lý." });
     }
 
