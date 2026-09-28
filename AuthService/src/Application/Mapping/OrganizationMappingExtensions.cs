@@ -14,7 +14,6 @@ public static class OrganizationMappingExtensions
             organization.Name,
             organization.Slug,
             organization.Type,
-            organization.Status == OrganizationStatus.Active,
             organization.CreatedAtUtc,
             organization.Status,
             organization.TaxCode,
@@ -36,17 +35,17 @@ public static class OrganizationMappingExtensions
             organization.ReviewedAtUtc);
     }
 
-    public static OrganizationMemberResponse ToResponse(this OrganizationMembership membership)
+    public static OrganizationSummaryResponse ToSummaryResponse(this Organization organization)
     {
-        ArgumentNullException.ThrowIfNull(membership);
-        return new OrganizationMemberResponse(
-            membership.Id,
-            membership.UserId,
-            membership.User?.Email ?? string.Empty,
-            membership.User?.FullName ?? string.Empty,
-            membership.RoleId,
-            membership.Role?.Name ?? string.Empty,
-            membership.Status,
-            membership.JoinedAtUtc);
+        ArgumentNullException.ThrowIfNull(organization);
+        return new OrganizationSummaryResponse(
+            organization.Id,
+            organization.Name,
+            organization.Slug,
+            organization.Type,
+            organization.Status,
+            organization.LogoUrl,
+            organization.Province,
+            organization.CreatedAtUtc);
     }
 }

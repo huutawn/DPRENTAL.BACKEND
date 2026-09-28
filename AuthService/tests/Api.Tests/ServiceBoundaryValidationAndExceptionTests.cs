@@ -138,34 +138,6 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
     }
 
     [Fact]
-    public async Task OrganizationService_CreateAsync_InvalidSlugFormat_ReturnsValidationAndDoesNotAccessDb()
-    {
-        RecordingOrgRepo orgRepo = new();
-        OrganizationService service = CreateOrganizationService(orgRepo);
-
-        CreateOrganizationRequest request = new("My Org", "INVALID_SLUG_WITH_UPPER", OrganizationType.Supplier);
-        Result<OrganizationResponse> result = await service.CreateAsync(Guid.NewGuid(), request);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(AuthErrors.Organization.InvalidSlugFormat, result.Error);
-        Assert.False(orgRepo.CreateCalled);
-    }
-
-    [Fact]
-    public async Task OrganizationService_PatchMemberAsync_InvalidStatusEnum_ReturnsInvalidStateTransition()
-    {
-        RecordingOrgRepo orgRepo = new();
-        RecordingMemRepo memRepo = new();
-        OrganizationService service = CreateOrganizationService(orgRepo, memRepo);
-
-        PatchOrganizationMemberRequest request = new(Status: (MembershipStatus)999);
-        Result result = await service.PatchMemberAsync(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), request);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(AuthErrors.Organization.InvalidStateTransition, result.Error);
-    }
-
-    [Fact]
     public async Task ServiceIdentityService_IssueTokenAsync_EmptyClientId_ReturnsValidation()
     {
         ServiceIdentityService service = new(
@@ -214,68 +186,6 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
 
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.User.EmailAlreadyExists, result.Error);
-        Assert.Equal(ErrorType.Conflict, result.Error.Type);
-    }
-
-    [Fact]
-    public async Task OrganizationService_CreateAsync_DuplicateSlugConstraint_ReturnsConflict()
-    {
-        Guid actorUserId = Guid.NewGuid();
-        RecordingOrgRepo orgRepo = new()
-        {
-            ThrowOnCreate = new StorageConstraintViolationException(
-                StorageConstraintViolationType.Unique,
-                StorageConstraints.OrganizationSlug)
-        };
-        RecordingUserRepo userRepo = new()
-        {
-            UserToReturn = new User { Id = actorUserId, IsActive = true }
-        };
-        RecordingMemRepo memRepo = new();
-        memRepo.GlobalPermissions[actorUserId] = [PermissionCode.IdentityOrganizationsCreate];
-
-        OrganizationService service = CreateOrganizationService(orgRepo, memRepo, userRepo);
-
-        CreateOrganizationRequest request = new("Acme Corp", "acme-corp", OrganizationType.Supplier);
-        Result<OrganizationResponse> result = await service.CreateAsync(actorUserId, request);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(AuthErrors.Organization.SlugAlreadyExists, result.Error);
-        Assert.Equal(ErrorType.Conflict, result.Error.Type);
-    }
-
-    [Fact]
-    public async Task OrganizationService_AddMemberAsync_DuplicateMembershipConstraint_ReturnsConflict()
-    {
-        Guid actorUserId = Guid.NewGuid();
-        Guid organizationId = Guid.NewGuid();
-        Guid targetUserId = Guid.NewGuid();
-        Guid roleId = Guid.NewGuid();
-
-        RecordingOrgRepo orgRepo = new();
-        RecordingMemRepo memRepo = new()
-        {
-            ThrowOnAddMember = new StorageConstraintViolationException(
-                StorageConstraintViolationType.Unique,
-                StorageConstraints.MembershipUserOrganization)
-        };
-        memRepo.GlobalPermissions[actorUserId] = [PermissionCode.IdentityMembersManage];
-
-        RecordingUserRepo userRepo = new()
-        {
-            UserToReturn = new User { Id = targetUserId, IsActive = true }
-        };
-
-        RecordingRoleRepo roleRepo = new();
-        roleRepo.Roles["Member"] = new Role { Id = roleId, Name = "Member", Scope = RoleScope.Organization };
-
-        OrganizationService service = CreateOrganizationService(orgRepo, memRepo, userRepo, roleRepo);
-
-        AddOrganizationMemberRequest request = new(targetUserId, roleId);
-        Result<OrganizationMemberResponse> result = await service.AddMemberAsync(actorUserId, organizationId, request);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(AuthErrors.Organization.MembershipAlreadyExists, result.Error);
         Assert.Equal(ErrorType.Conflict, result.Error.Type);
     }
 
@@ -359,18 +269,6 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
     }
 
     [Fact]
-    public async Task OrganizationService_CreateAsync_CancellationRequested_RethrowsOperationCanceledException()
-    {
-        OrganizationService service = CreateOrganizationService(new RecordingOrgRepo());
-
-        using CancellationTokenSource cts = new();
-        cts.Cancel();
-
-        CreateOrganizationRequest request = new("Org Name", "org-name", OrganizationType.Supplier);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CreateAsync(Guid.NewGuid(), request, cts.Token));
-    }
-
-    [Fact]
     public async Task AuthSessionService_RefreshAsync_CancellationRequested_RethrowsOperationCanceledException()
     {
         AuthSessionService service = CreateAuthSessionService(new RecordingSessionRepo());
@@ -446,31 +344,6 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
             new RecordingSessionRepo(),
             new RecordingRecoveryTokenRepo(),
             logger ?? new TestLogger<UserService>());
-    }
-
-    private static OrganizationService CreateOrganizationService(
-        RecordingOrgRepo orgRepo,
-        RecordingMemRepo? memRepo = null,
-        RecordingUserRepo? userRepo = null,
-        RecordingRoleRepo? roleRepo = null)
-    {
-        userRepo ??= new RecordingUserRepo
-        {
-            UserToReturn = new User { Id = Guid.NewGuid(), IsActive = true }
-        };
-        memRepo ??= new RecordingMemRepo();
-        memRepo.GlobalPermissions[userRepo.UserToReturn!.Id] = [PermissionCode.IdentityOrganizationsCreate, PermissionCode.IdentityOrganizationsRead, PermissionCode.IdentityMembersManage];
-
-        roleRepo ??= new RecordingRoleRepo();
-        roleRepo.Roles["Owner"] = new Role { Id = Guid.NewGuid(), Name = "Owner", Scope = RoleScope.Organization };
-
-        return new OrganizationService(
-            orgRepo,
-            memRepo,
-            userRepo,
-            roleRepo,
-            new TestCorrelationIdProvider(),
-            new TestLogger<OrganizationService>());
     }
 
     private static AuthSessionService CreateAuthSessionService(
@@ -608,7 +481,6 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
         public Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task<PagedResult<Organization>> GetAllAsync(PageRequest request, OrganizationStatus? status = null, CancellationToken cancellationToken = default) => Task.FromResult(PagedResult.Create<Organization>([], 1, 10, 0));
         public Task<Organization?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default) => GetByIdAsync(id, cancellationToken);
-        public Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default) => Task.FromResult(PagedResult.Create<Organization>([], 1, 10, 0));
         public Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task LockOrganizationsAsync(IReadOnlyList<Guid> sortedOrganizationIds, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) => Task.FromResult(IExecutionTransaction.None);
@@ -617,28 +489,14 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
     private sealed class RecordingMemRepo : IOrganizationMembershipRepository
     {
         public Dictionary<Guid, IReadOnlyList<string>> GlobalPermissions { get; } = [];
-        public Exception? ThrowOnAddMember { get; set; }
 
         public Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(GlobalPermissions.GetValueOrDefault(userId) ?? (IReadOnlyList<string>)[]);
         public Task<IReadOnlyList<string>> GetScopedPermissionCodesAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<string>>([]);
 
-        public Task<OrganizationMembership> AddMemberAsync(OrganizationMembership membership, CancellationToken cancellationToken = default)
-        {
-            if (ThrowOnAddMember is not null) throw ThrowOnAddMember;
-            return Task.FromResult(membership);
-        }
-
-        public Task<OrganizationMembership?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<OrganizationMembership?>(null);
         public Task<OrganizationMembership?> GetByOrganizationAndUserAsync(Guid organizationId, Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult<OrganizationMembership?>(new OrganizationMembership { OrganizationId = organizationId, UserId = userId, Status = MembershipStatus.Active });
-        public Task<OrganizationMembership?> FindMemberAsync(Guid organizationId, Guid memberOrUserId, CancellationToken cancellationToken = default) => Task.FromResult<OrganizationMembership?>(null);
-        public Task<PagedResult<OrganizationMembership>> GetMembersAsync(Guid organizationId, PageRequest request, CancellationToken cancellationToken = default) => Task.FromResult(PagedResult.Create<OrganizationMembership>([], 1, 10, 0));
-        public Task<bool> MembershipExistsAsync(Guid organizationId, Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(false);
-        public Task<bool> UpdateAsync(OrganizationMembership membership, CancellationToken cancellationToken = default) => Task.FromResult(true);
-        public Task<bool> DeleteAsync(Guid membershipId, CancellationToken cancellationToken = default) => Task.FromResult(true);
-        public Task<int> CountOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult(2);
         public Task<int> CountActiveOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult(2);
         public Task<IReadOnlyList<OrganizationMembership>> GetMembershipsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<OrganizationMembership>>([]);
     }

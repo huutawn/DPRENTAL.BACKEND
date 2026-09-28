@@ -108,7 +108,6 @@ public sealed class EfOrganizationRepositoryTests
         dbContext.OrganizationMemberships.AddRange(activeOwner, suspendedOwner, activeMember);
         await dbContext.SaveChangesAsync();
 
-        Assert.Equal(2, await memRepo.CountOwnersAsync(orgId));
         Assert.Equal(1, await memRepo.CountActiveOwnersAsync(orgId));
     }
 

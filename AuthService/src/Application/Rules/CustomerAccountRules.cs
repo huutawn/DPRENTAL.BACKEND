@@ -3,8 +3,9 @@ using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.AspNetCore.Identity;
+using Dprental.AuthService.Common.Utils;
 
-namespace Dprental.AuthService.Application.Services;
+namespace Dprental.AuthService.Application.Rules;
 
 /// <summary>Quy tắc dựng tài khoản customer, dùng chung cho đăng ký cá nhân và tài khoản Owner khi đăng ký tổ chức.</summary>
 internal static class CustomerAccountRules
@@ -51,8 +52,8 @@ internal static class CustomerAccountRules
             Email = normalizedEmail,
             FullName = request.FullName.Trim(),
             // CitizenId để trống lúc đăng ký — chỉ được set khi đăng ký tổ chức hoặc hoàn thiện hồ sơ để thuê cá nhân.
-            AvatarUrl = NullIfBlank(request.AvatarUrl),
-            PhoneNumber = NullIfBlank(request.PhoneNumber),
+            AvatarUrl = StringUtility.NullIfBlank(request.AvatarUrl),
+            PhoneNumber = StringUtility.NullIfBlank(request.PhoneNumber),
             DateOfBirth = request.DateOfBirth,
             CreatedAt = utcNow,
             HasPassword = true,
@@ -61,16 +62,4 @@ internal static class CustomerAccountRules
         user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
         return user;
     }
-
-    /// <summary>Che CCCD, chỉ để lộ 4 số cuối.</summary>
-    internal static string? MaskCitizenId(string? citizenId) =>
-        citizenId switch
-        {
-            null or "" => null,
-            { Length: <= 4 } => new string('*', citizenId.Length),
-            _ => new string('*', citizenId.Length - 4) + citizenId[^4..]
-        };
-
-    internal static string? NullIfBlank(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

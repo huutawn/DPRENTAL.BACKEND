@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace Dprental.AuthService.Application.Services;
+namespace Dprental.AuthService.Application.Rules;
 
 /// <summary>Quy tắc slug của organization: chữ thường, số và dấu gạch ngang đơn.</summary>
 internal static partial class OrganizationSlug

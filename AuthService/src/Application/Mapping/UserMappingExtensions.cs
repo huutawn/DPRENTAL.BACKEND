@@ -2,6 +2,7 @@ using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Application.Security;
+using Dprental.AuthService.Common.Utils;
 
 namespace Dprental.AuthService.Application.Mapping;
 
@@ -32,7 +33,7 @@ internal static class UserMappingExtensions
             user.AvatarUrl,
             user.PhoneNumber,
             user.DateOfBirth,
-            CustomerAccountRules.MaskCitizenId(user.CitizenId),
+            StringUtility.MaskCitizenId(user.CitizenId),
             user.HasPassword);
     }
 }

@@ -8,6 +8,8 @@ using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
 using Microsoft.Extensions.Logging;
+using Dprental.AuthService.Common.Utils;
+using Dprental.AuthService.Application.Rules;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -94,21 +96,21 @@ public sealed class OrganizationRegistrationService(
                     Status = OrganizationStatus.Pending,
                     CreatedAtUtc = now,
                     TaxCode = taxCode,
-                    BusinessLicenseNumber = CustomerAccountRules.NullIfBlank(request.BusinessLicenseNumber),
+                    BusinessLicenseNumber = StringUtility.NullIfBlank(request.BusinessLicenseNumber),
                     BusinessLicenseIssuedDate = request.BusinessLicenseIssuedDate,
-                    BusinessLicenseIssuedPlace = CustomerAccountRules.NullIfBlank(request.BusinessLicenseIssuedPlace),
+                    BusinessLicenseIssuedPlace = StringUtility.NullIfBlank(request.BusinessLicenseIssuedPlace),
                     EstablishedDate = request.EstablishedDate,
                     LegalRepresentativeName = request.LegalRepresentativeName.Trim(),
-                    LegalRepresentativeCitizenId = CustomerAccountRules.NullIfBlank(request.LegalRepresentativeCitizenId)
+                    LegalRepresentativeCitizenId = StringUtility.NullIfBlank(request.LegalRepresentativeCitizenId)
                         ?? actor.CitizenId,
                     ContactEmail = UserService.NormalizeEmail(request.ContactEmail),
                     ContactPhone = request.ContactPhone.Trim(),
                     Address = request.Address.Trim(),
                     Province = request.Province.Trim(),
                     Ward = request.Ward.Trim(),
-                    Website = CustomerAccountRules.NullIfBlank(request.Website),
-                    LogoUrl = CustomerAccountRules.NullIfBlank(request.LogoUrl),
-                    Description = CustomerAccountRules.NullIfBlank(request.Description),
+                    Website = StringUtility.NullIfBlank(request.Website),
+                    LogoUrl = StringUtility.NullIfBlank(request.LogoUrl),
+                    Description = StringUtility.NullIfBlank(request.Description),
                     BusinessLicenseDocumentUrl = request.BusinessLicenseDocumentUrl.Trim()
                 };
 
@@ -196,9 +198,9 @@ public sealed class OrganizationRegistrationService(
                 org.Address = request.Address.Trim();
                 org.Province = request.Province.Trim();
                 org.Ward = request.Ward.Trim();
-                org.Website = CustomerAccountRules.NullIfBlank(request.Website);
-                org.LogoUrl = CustomerAccountRules.NullIfBlank(request.LogoUrl);
-                org.Description = CustomerAccountRules.NullIfBlank(request.Description);
+                org.Website = StringUtility.NullIfBlank(request.Website);
+                org.LogoUrl = StringUtility.NullIfBlank(request.LogoUrl);
+                org.Description = StringUtility.NullIfBlank(request.Description);
 
                 bool resubmitted = org.Status == OrganizationStatus.Rejected;
                 if (resubmitted)
@@ -247,10 +249,10 @@ public sealed class OrganizationRegistrationService(
                 request.Name.Trim(),
                 request.TaxCode.Trim(),
                 request.LegalRepresentativeName.Trim(),
-                CustomerAccountRules.NullIfBlank(request.LegalRepresentativeCitizenId) ?? ownerCitizenId,
-                CustomerAccountRules.NullIfBlank(request.BusinessLicenseNumber),
+                StringUtility.NullIfBlank(request.LegalRepresentativeCitizenId) ?? ownerCitizenId,
+                StringUtility.NullIfBlank(request.BusinessLicenseNumber),
                 request.BusinessLicenseIssuedDate,
-                CustomerAccountRules.NullIfBlank(request.BusinessLicenseIssuedPlace),
+                StringUtility.NullIfBlank(request.BusinessLicenseIssuedPlace),
                 request.EstablishedDate,
                 request.BusinessLicenseDocumentUrl.Trim());
 

@@ -67,9 +67,6 @@ public static class AuthErrors
         public static readonly Error PlatformAdminRequired =
             Error.Forbidden(AuthErrorCode.Organization.PlatformAdminRequired, "Chỉ quản trị viên nền tảng mới có quyền thực hiện thao tác này.");
 
-        public static readonly Error CreationNotAllowed =
-            Error.Forbidden(AuthErrorCode.Organization.CreationNotAllowed, "Bạn không có quyền tạo organization.");
-
         public static readonly Error PendingApproval =
             Error.Forbidden(AuthErrorCode.Organization.PendingApproval, "Organization chưa được Platform duyệt.");
 
@@ -82,6 +79,9 @@ public static class AuthErrors
         /// <summary>Conflict vì thường gặp khi admin khác vừa duyệt/từ chối trước.</summary>
         public static readonly Error NotPendingReview =
             Error.Conflict(AuthErrorCode.Organization.NotPendingReview, "Organization không còn ở trạng thái chờ duyệt.");
+
+        public static readonly Error SelfReviewNotAllowed =
+            Error.Forbidden(AuthErrorCode.Organization.SelfReviewNotAllowed, "Không thể tự duyệt hoặc từ chối organization mà bạn là thành viên. Cần một quản trị viên khác.");
 
         public static readonly Error LegalInfoLocked =
             Error.Validation(AuthErrorCode.Organization.LegalInfoLocked, "Thông tin pháp lý đã được xác minh, không thể tự thay đổi. Vui lòng liên hệ quản trị viên.");
