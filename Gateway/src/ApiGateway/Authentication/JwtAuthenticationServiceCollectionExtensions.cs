@@ -48,7 +48,8 @@ internal static class JwtAuthenticationServiceCollectionExtensions
         {
             OnMessageReceived = context =>
             {
-                if (string.IsNullOrWhiteSpace(context.Token) &&
+                if (string.IsNullOrWhiteSpace(context.Request.Headers.Authorization) &&
+                    string.IsNullOrWhiteSpace(context.Token) &&
                     context.Request.Cookies.TryGetValue("accessToken", out string? accessToken) &&
                     !string.IsNullOrWhiteSpace(accessToken))
                 {

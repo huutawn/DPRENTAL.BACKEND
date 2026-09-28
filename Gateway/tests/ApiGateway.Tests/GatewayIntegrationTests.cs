@@ -78,7 +78,7 @@ public sealed class GatewayIntegrationTests
     }
 
     [Fact]
-    public async Task SwaggerRoutesForwardDirectlyToAuthService()
+    public async Task GatewaySwaggerOffersAuthAndMediaDocuments()
     {
         using RSA signingKey = RSA.Create(2048);
         await using LoopbackAuthService upstream = new(CreateJwks(signingKey, "key-1"));
@@ -89,18 +89,34 @@ public sealed class GatewayIntegrationTests
         Assert.Equal(HttpStatusCode.OK, responseJson.StatusCode);
         Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
 
+        using HttpResponseMessage responseMediaJson = await client.GetAsync("/media/swagger/v1/swagger.json");
+        Assert.Equal(HttpStatusCode.OK, responseMediaJson.StatusCode);
+        Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
+
         using HttpResponseMessage responseUi = await client.GetAsync("/swagger/index.html");
         Assert.Equal(HttpStatusCode.OK, responseUi.StatusCode);
-        Assert.Equal("/swagger/index.html", upstream.LastRequest.Path);
+        Assert.Contains("index.js", await responseUi.Content.ReadAsStringAsync());
+
+        using HttpResponseMessage initializer = await client.GetAsync("/swagger/index.js");
+        Assert.Equal(HttpStatusCode.OK, initializer.StatusCode);
+        string uiConfiguration = await initializer.Content.ReadAsStringAsync();
+        Assert.Contains("AuthService", uiConfiguration);
+        Assert.Contains("MediaService", uiConfiguration);
+        Assert.Contains("/swagger/v1/swagger.json", uiConfiguration);
+        Assert.Contains("/media/swagger/v1/swagger.json", uiConfiguration);
+        Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
 
         using HttpResponseMessage responseRoot = await client.GetAsync("/swagger");
         Assert.Equal(HttpStatusCode.OK, responseRoot.StatusCode);
-        Assert.Equal("/swagger", upstream.LastRequest.Path);
+        Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
+
+        using HttpResponseMessage oldMediaUi = await client.GetAsync("/media/swagger/index.html");
+        Assert.Equal(HttpStatusCode.NotFound, oldMediaUi.StatusCode);
     }
 
     [Theory]
     [InlineData("PROPFIND", "/api/v1/auth/sessions")]
-    [InlineData("OPTIONS", "/swagger")]
+    [InlineData("OPTIONS", "/swagger/v1/swagger.json")]
     public async Task RoutesForwardMethodsWithoutAnAllowlist(string method, string path)
     {
         using RSA signingKey = RSA.Create(2048);
@@ -253,16 +269,19 @@ public sealed class GatewayIntegrationTests
             ["Routes:3:DownstreamScheme"] = upstreamAddress.Scheme,
             ["Routes:3:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
             ["Routes:3:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Routes:5:DownstreamScheme"] = upstreamAddress.Scheme,
+            ["Routes:5:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
+            ["Routes:5:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
 
         if (includeProtectedRoute)
         {
-            overrides["Routes:4:Key"] = "protected-service";
-            overrides["Routes:4:UpstreamPathTemplate"] = "/protected/{everything}";
-            overrides["Routes:4:DownstreamPathTemplate"] = "/protected/{everything}";
-            overrides["Routes:4:DownstreamScheme"] = upstreamAddress.Scheme;
-            overrides["Routes:4:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
-            overrides["Routes:4:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            overrides["Routes:6:Key"] = "protected-service";
+            overrides["Routes:6:UpstreamPathTemplate"] = "/protected/{everything}";
+            overrides["Routes:6:DownstreamPathTemplate"] = "/protected/{everything}";
+            overrides["Routes:6:DownstreamScheme"] = upstreamAddress.Scheme;
+            overrides["Routes:6:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
+            overrides["Routes:6:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
         return new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder => builder.ConfigureAppConfiguration((_, configurationBuilder) => configurationBuilder.AddInMemoryCollection(overrides)));

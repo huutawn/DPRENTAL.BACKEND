@@ -84,25 +84,31 @@ docker run -d --name dprental-gateway \
 
 ### Quick start — Docker stack tổng
 
-Từ thư mục gốc `DPRENTAL/` (nơi có `compose.yaml`), chạy:
+Từ thư mục gốc `DPRENTAL/` (nơi có `compose.yaml`), cần có ba checkout con `Gateway/`, `AuthService/` và `MediaService/`, rồi chạy:
 
 ```bash
 cp .env.example .env
-# Đổi POSTGRES_PASSWORD sang giá trị local riêng.
+# Đặt giá trị riêng cho POSTGRES_PASSWORD, AUTH_ADMIN_BOOTSTRAP_CREATION_KEY,
+# MEDIA_POSTGRES_PASSWORD, MEDIA_MINIO_ROOT_PASSWORD và MEDIA_SERVICE_CLIENT_SECRET.
 docker compose up --build -d
 docker compose ps
+./AuthService/scripts/bootstrap-local-media-principal.sh
 ```
 
-Stack tự build Gateway và AuthService, khởi động PostgreSQL, Valkey và Kafka, tạo RSA key pair chỉ dành cho local development, rồi chạy migration trước khi AuthService nhận traffic. Không cần cấp PEM hoặc chạy `dotnet ef` thủ công cho quick start.
+Stack tự build Gateway, AuthService và MediaService; khởi động PostgreSQL riêng cho từng service, MinIO private, Valkey và Kafka; tạo RSA key pair local và chạy migration trước khi nhận traffic. Script bootstrap chỉ tạo `CatalogService` local với ba scope Media trong database AuthService.
 
 Gateway là điểm vào công khai tại `http://localhost:5050`:
 
-- [Swagger UI](http://localhost:5050/swagger)
+- [Swagger UI cho AuthService và MediaService](http://localhost:5050/swagger/index.html). Chọn service trong menu ở đầu trang.
 - `GET /health/live` (hoặc `/_health/live`): kiểm tra tiến trình Gateway.
 - `GET /health/ready` (hoặc `/_health/ready`): yêu cầu JWKS và cấu hình proxy sẵn sàng.
 - `POST /api/v1/auth/register`: được proxy nguyên đường dẫn tới AuthService.
 
-AuthService chỉ mở trong Docker network tại `auth-service:8080`. Các port local của hạ tầng là PostgreSQL `55432`, Valkey `56379` và Kafka `29092`; chúng chỉ bind vào loopback. Dừng stack bằng `docker compose down`; named volumes được giữ lại.
+Trong Swagger UI, chọn **AuthService**, gọi `/api/v1/auth/register` để tạo user local, rồi `/api/v1/auth/login`. Browser lưu cookie HttpOnly `accessToken` do AuthService đặt trên cùng Gateway origin. Sau đó chuyển menu sang **MediaService** và gọi `POST /api/v1/media/uploads` với `file`; không cần tạo entity hoặc nhập Bearer cho upload. Gateway xác thực cookie, chuyển thành Bearer và MediaService xác thực lại JWT bằng JWKS. Cookie không được chuyển tới MediaService.
+
+Để thử API nội bộ, chọn **AuthService** và gọi `/api/v1/auth/service-token` với `clientId=local-catalog-service`, `clientSecret=MEDIA_SERVICE_CLIENT_SECRET` trong `.env`, `audience=dprental-clients` và lần lượt một scope `media.verify`, `media.read` hoặc `media.publish`. Chuyển sang **MediaService**, dùng Bearer được trả về trong nút **Authorize** cho `/verify`, `/access` hoặc `/visibility`. Bearer tường minh được ưu tiên hơn cookie user đang có. Chuyển ảnh sang public bằng `PUT /api/v1/media/{mediaId}/visibility`, sau đó mở `/api/v1/media/{mediaId}/content` không cần token; chuyển về private thì đường dẫn này trả 404.
+
+AuthService, MediaService và PostgreSQL Media chỉ mở trong Docker network. Các port local của hạ tầng gồm PostgreSQL Auth `55432`, MinIO `9002` (console `9003`), Valkey `56379` và Kafka `29092`; chúng chỉ bind vào loopback. Dừng stack bằng `docker compose down`; named volumes được giữ lại.
 ## Gateway error response
 
 Các middleware do Gateway sở hữu (CORS, giới hạn payload, rate limit và lỗi nội bộ) trả payload JSON:

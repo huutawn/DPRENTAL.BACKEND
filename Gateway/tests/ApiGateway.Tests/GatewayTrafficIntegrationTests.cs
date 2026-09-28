@@ -278,12 +278,12 @@ public sealed class GatewayTrafficIntegrationTests
 
         if (includeProtectedRoute)
         {
-            overrides["Routes:4:Key"] = "protected-service";
-            overrides["Routes:4:UpstreamPathTemplate"] = "/protected/{everything}";
-            overrides["Routes:4:DownstreamPathTemplate"] = "/protected/{everything}";
-            overrides["Routes:4:DownstreamScheme"] = upstreamAddress.Scheme;
-            overrides["Routes:4:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
-            overrides["Routes:4:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            overrides["Routes:8:Key"] = "protected-service";
+            overrides["Routes:8:UpstreamPathTemplate"] = "/protected/{everything}";
+            overrides["Routes:8:DownstreamPathTemplate"] = "/protected/{everything}";
+            overrides["Routes:8:DownstreamScheme"] = upstreamAddress.Scheme;
+            overrides["Routes:8:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
+            overrides["Routes:8:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         return new WebApplicationFactory<Program>()

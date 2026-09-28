@@ -50,7 +50,10 @@ public sealed class RequestSizeProtectionMiddleware
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        long maxSizeBytes = securityOptions.Value.RequestSize.MaxRequestBodySizeBytes;
+        long maxSizeBytes = HttpMethods.IsPost(context.Request.Method) &&
+            context.Request.Path.Equals("/api/v1/media/uploads", StringComparison.OrdinalIgnoreCase)
+            ? securityOptions.Value.RequestSize.MediaUploadMaxRequestBodySizeBytes
+            : securityOptions.Value.RequestSize.MaxRequestBodySizeBytes;
 
         // 1. Cấu hình giới hạn kích thước đọc của server feature (Kestrel) nếu có thể ghi
         IHttpMaxRequestBodySizeFeature? sizeFeature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();

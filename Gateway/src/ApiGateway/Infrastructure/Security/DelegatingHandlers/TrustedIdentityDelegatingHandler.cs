@@ -43,6 +43,13 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
         {
             var headers = request.Headers;
 
+            // MediaService receives only the authenticated bearer token, never browser session cookies.
+            if (httpContext.Request.Path.StartsWithSegments("/api/v1/media") ||
+                httpContext.Request.Path.StartsWithSegments("/media/swagger"))
+            {
+                headers.Remove("Cookie");
+            }
+
             // 1. Header Sanitization: Loại bỏ toàn bộ tiêu đề nhạy cảm client tự gửi lên
             foreach (string untrustedHeader in GatewayHeaderConstants.UntrustedClientHeaders)
             {

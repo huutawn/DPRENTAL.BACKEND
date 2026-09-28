@@ -28,6 +28,11 @@ public sealed class GatewaySecurityOptionsValidator : IValidateOptions<GatewaySe
             failures.Add("Gateway:Security:RequestSize:MaxRequestBodySizeBytes phải lớn hơn 0.");
         }
 
+        if (options.RequestSize.MediaUploadMaxRequestBodySizeBytes <= 0)
+        {
+            failures.Add("Gateway:Security:RequestSize:MediaUploadMaxRequestBodySizeBytes phải lớn hơn 0.");
+        }
+
         // 2. Kiểm tra cấu hình CORS
         if (options.Cors.PreflightMaxAgeSeconds < 0)
         {

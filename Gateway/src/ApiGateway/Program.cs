@@ -31,6 +31,16 @@ app.UseGatewaySecurity();
 app.UseAuthentication();
 app.UseGatewayTrafficControl();
 
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwaggerUI(options =>
+    {
+        options.DocumentTitle = "DPRental API";
+        options.SwaggerEndpoint("/swagger/v1/swagger.json", "AuthService");
+        options.SwaggerEndpoint("/media/swagger/v1/swagger.json", "MediaService");
+    });
+}
+
 HealthCheckOptions livenessOptions = new()
 {
     Predicate = _ => false,
