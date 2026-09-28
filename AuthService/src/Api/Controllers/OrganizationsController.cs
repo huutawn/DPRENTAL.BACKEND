@@ -2,6 +2,7 @@ using Dprental.AuthService.Api.Filters;
 using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
+using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Application.DTOs.Organization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -15,7 +16,8 @@ namespace Dprental.AuthService.Api.Controllers;
 [Authorize]
 public sealed class OrganizationsController(
     IOrganizationService organizationService,
-    IOrganizationRegistrationService organizationRegistrationService) : ControllerBase
+    IOrganizationRegistrationService organizationRegistrationService,
+    IOrganizationReviewService organizationReviewService) : ControllerBase
 {
     /// <summary>Người dùng đang đăng nhập tự đăng ký tổ chức Supplier/Renter và trở thành Owner; tổ chức chờ Platform duyệt.</summary>
     [HttpPost("register")]
@@ -80,20 +82,86 @@ public sealed class OrganizationsController(
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
-    /// <summary>Lấy danh sách organization có phân trang mà người gọi được phép xem.</summary>
+    /// <summary>
+    /// Lấy danh sách organization có phân trang mà người gọi được phép xem.
+    /// Platform truyền <c>status=Pending</c> để lấy hàng chờ duyệt (cũ nhất trước).
+    /// <c>search</c> tìm theo tên hoặc slug.
+    /// </summary>
     [HttpGet]
     [ProducesResponseType<PagedResult<OrganizationResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-    public async Task<IActionResult> List([FromQuery] PageRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> List(
+        [FromQuery] PageRequest request,
+        [FromQuery] OrganizationStatus? status,
+        CancellationToken cancellationToken)
     {
         if (!TryGetCurrentUserId(out Guid userId))
         {
             return Unauthorized();
         }
 
-        Result<PagedResult<OrganizationResponse>> result = await organizationService.ListAsync(userId, request, cancellationToken);
+        Result<PagedResult<OrganizationResponse>> result = await organizationService.ListAsync(userId, request, status, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Platform duyệt organization đang Pending: chuyển sang Active, ghi người duyệt và thời điểm.</summary>
+    [HttpPost("{id:guid}/approve")]
+    [ProducesResponseType<OrganizationResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Approve(Guid id, CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        Result<OrganizationResponse> result = await organizationReviewService.ApproveAsync(userId, id, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Platform từ chối organization đang Pending kèm lý do; Owner xem lý do, sửa hồ sơ rồi gửi lại.</summary>
+    [HttpPost("{id:guid}/reject")]
+    [ProducesResponseType<OrganizationResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Reject(Guid id, RejectOrganizationRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        Result<OrganizationResponse> result = await organizationReviewService.RejectAsync(userId, id, request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>
+    /// Owner gửi lại toàn bộ hồ sơ. Pending: sửa tự do. Rejected: sửa và tự chuyển về Pending.
+    /// Active: chỉ đổi liên hệ/hiển thị — đổi thông tin pháp lý trả 400.
+    /// </summary>
+    [HttpPut("{id:guid}/profile")]
+    [ProducesResponseType<OrganizationResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> UpdateProfile(Guid id, UpdateOrganizationProfileRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        Result<OrganizationResponse> result = await organizationRegistrationService.UpdateProfileAsync(userId, id, request, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
@@ -115,7 +183,7 @@ public sealed class OrganizationsController(
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
 
-    /// <summary>Lấy danh sách thành viên của organization theo trang.</summary>
+    /// <summary>Lấy danh sách thành viên của organization theo trang; search tìm theo tên, email hoặc vai trò.</summary>
     [HttpGet("{id:guid}/members")]
     [ProducesResponseType<PagedResult<OrganizationMemberResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]

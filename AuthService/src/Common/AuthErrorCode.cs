@@ -29,6 +29,8 @@ public static class AuthErrorCode
         public const string PendingApproval = "Organization.PendingApproval";
         public const string TaxCodeAlreadyExists = "Organization.TaxCodeAlreadyExists";
         public const string SelfRegistrationTypeNotAllowed = "Organization.SelfRegistrationTypeNotAllowed";
+        public const string NotPendingReview = "Organization.NotPendingReview";
+        public const string LegalInfoLocked = "Organization.LegalInfoLocked";
     }
 
     public static class Role
@@ -92,6 +94,7 @@ public static class AuthErrorCode
     {
         public const string InvalidPage = "Paging.InvalidPage";
         public const string InvalidPageSize = "Paging.InvalidPageSize";
+        public const string InvalidSearch = "Paging.InvalidSearch";
     }
 
     public static class AdminBootstrap

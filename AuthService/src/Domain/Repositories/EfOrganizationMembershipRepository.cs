@@ -40,19 +40,32 @@ public sealed class EfOrganizationMembershipRepository(AuthDbContext dbContext) 
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        int totalCount = await dbContext.OrganizationMemberships
-            .Where(m => m.OrganizationId == organizationId)
+        IQueryable<OrganizationMembership> query = dbContext.OrganizationMemberships
+            .AsNoTracking()
+            .Where(m => m.OrganizationId == organizationId);
+
+        string? searchTerm = request.GetSearchTerm();
+        if (searchTerm is not null)
+        {
+            // EF Core translates these overloads to SQL; culture/StringComparison overloads are not translatable.
+#pragma warning disable CA1304, CA1311, CA1862
+            query = query.Where(m => m.User.FullName.ToLower().Contains(searchTerm) ||
+                m.User.Email.ToLower().Contains(searchTerm) ||
+                m.Role.Name.ToLower().Contains(searchTerm));
+#pragma warning restore CA1304, CA1311, CA1862
+        }
+
+        int totalCount = await query
             .CountAsync(cancellationToken);
 
         int skip = (request.Page - 1) * request.PageSize;
-        List<OrganizationMembership> items = await dbContext.OrganizationMemberships
-            .AsNoTracking()
+        List<OrganizationMembership> items = await query
             .Include(m => m.User)
             .Include(m => m.Role)
                 .ThenInclude(r => r.RolePermissions)
                     .ThenInclude(rp => rp.Permission)
-            .Where(m => m.OrganizationId == organizationId)
             .OrderBy(m => m.JoinedAtUtc)
+            .ThenBy(m => m.Id)
             .Skip(skip)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);

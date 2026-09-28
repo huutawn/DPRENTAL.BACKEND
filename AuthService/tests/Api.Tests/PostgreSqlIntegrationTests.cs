@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using Npgsql;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Application.DTOs.User;
@@ -31,14 +29,13 @@ namespace Dprental.AuthService.Api.Tests;
 /// - Hai yêu cầu cùng thay đổi Owner cuối cùng -> khóa organization theo thứ tự cố định, chỉ 1 request thành công, request kia bị chặn với LastOwner.
 /// </summary>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test method naming convention")]
+[Collection(PostgreSqlTestGroup.Name)]
 public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
 {
     private const string ConnectionString = "Host=localhost;Port=5435;Database=authservice_test;Username=postgres;Password=postgres;Include Error Detail=true";
 
     public async Task InitializeAsync()
     {
-        await EnsurePostgresContainerRunningAsync();
-
         var options = new DbContextOptionsBuilder<AuthDbContext>()
             .UseNpgsql(ConnectionString)
             .Options;
@@ -55,61 +52,6 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
             .UseNpgsql(ConnectionString)
             .Options;
         return new AuthDbContext(options);
-    }
-
-    private static async Task EnsurePostgresContainerRunningAsync()
-    {
-        if (await CanConnectAsync())
-        {
-            return;
-        }
-
-        ProcessStartInfo psi = new("docker")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-        foreach (string argument in new[] { "run", "--rm", "-d", "--name", "authservice-pg-test", "-e", "POSTGRES_PASSWORD", "-e", "POSTGRES_DB", "-p", "5435:5432", "postgres:17-alpine" })
-        {
-            psi.ArgumentList.Add(argument);
-        }
-        psi.Environment["POSTGRES_PASSWORD"] = "postgres";
-        psi.Environment["POSTGRES_DB"] = "authservice_test";
-
-        using Process process = Process.Start(psi) ?? throw new InvalidOperationException("Không thể khởi động Docker để chạy PostgreSQL integration tests.");
-        await process.WaitForExitAsync();
-        if (process.ExitCode != 0)
-        {
-            string error = await process.StandardError.ReadToEndAsync();
-            throw new InvalidOperationException($"Không thể khởi động PostgreSQL test container: {error}");
-        }
-
-        for (int attempt = 0; attempt < 60; attempt++)
-        {
-            if (await CanConnectAsync())
-            {
-                return;
-            }
-            await Task.Delay(500);
-        }
-
-        throw new TimeoutException("PostgreSQL test container chưa sẵn sàng sau 30 giây.");
-    }
-
-    private static async Task<bool> CanConnectAsync()
-    {
-        try
-        {
-            await using NpgsqlConnection connection = new(ConnectionString);
-            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(1));
-            await connection.OpenAsync(timeout.Token);
-            return true;
-        }
-        catch (Exception exception) when (exception is NpgsqlException or TimeoutException or OperationCanceledException)
-        {
-            return false;
-        }
     }
 
     [Fact]
@@ -516,6 +458,115 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
             .CountAsync(m => m.OrganizationId == orgId && m.RoleId == ownerRole.Id && m.Status == MembershipStatus.Active);
 
         Assert.Equal(1, remainingOwners);
+    }
+
+    [Fact]
+    public async Task PostgreSql_ConcurrentApproveAndReject_OnlyFirstDecisionWins()
+    {
+        await using var db = CreateDbContext();
+
+        Permission suspend = await db.Permissions.SingleAsync(p => p.Code == PermissionCode.IdentityOrganizationsSuspend);
+        Role reviewerRole = new() { Id = Guid.NewGuid(), Name = $"reviewer_{Guid.NewGuid():N}", Scope = RoleScope.Global };
+        db.Roles.Add(reviewerRole);
+        db.RolePermissions.Add(new RolePermission { RoleId = reviewerRole.Id, PermissionId = suspend.Id });
+
+        Guid adminAId = Guid.NewGuid();
+        Guid adminBId = Guid.NewGuid();
+        foreach (Guid adminId in new[] { adminAId, adminBId })
+        {
+            db.Users.Add(new User { Id = adminId, Email = $"reviewer_{adminId:N}@example.com", FullName = "Reviewer", PasswordHash = "h", IsActive = true, CreatedAt = DateTime.UtcNow });
+            db.UserRoles.Add(new UserRole { UserId = adminId, RoleId = reviewerRole.Id });
+        }
+
+        Guid orgId = Guid.NewGuid();
+        db.Organizations.Add(new Organization
+        {
+            Id = orgId,
+            Name = "Pending Review Org",
+            Slug = $"pending-review-{Guid.NewGuid():N}",
+            Status = OrganizationStatus.Pending,
+            CreatedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        static OrganizationReviewService CreateReviewService(AuthDbContext context) => new(
+            new EfOrganizationRepository(context),
+            new EfOrganizationMembershipRepository(context),
+            new EfRoleRepository(context),
+            new EfAuditLogRepository(context),
+            TimeProvider.System,
+            FixedCorrelationIdProvider.Instance,
+            NullLogger<OrganizationReviewService>.Instance);
+
+        // Hai admin cùng mở hàng chờ và bấm cùng lúc: một người duyệt, một người từ chối.
+        Task<Result<OrganizationResponse>> approve = Task.Run(async () =>
+        {
+            await using var dbA = CreateDbContext();
+            return await CreateReviewService(dbA).ApproveAsync(adminAId, orgId);
+        });
+        Task<Result<OrganizationResponse>> reject = Task.Run(async () =>
+        {
+            await using var dbB = CreateDbContext();
+            return await CreateReviewService(dbB).RejectAsync(adminBId, orgId, new RejectOrganizationRequest("Thiếu giấy phép"));
+        });
+
+        Result<OrganizationResponse>[] results = await Task.WhenAll(approve, reject);
+
+        Assert.Single(results, r => r.IsSuccess);
+        Assert.Single(results, r => r.IsFailure && r.Error == AuthErrors.Organization.NotPendingReview);
+
+        // Trạng thái trong DB phải khớp đúng người thắng — không có chuyện "duyệt rồi bị ghi đè thành từ chối".
+        OrganizationResponse winner = results.Single(r => r.IsSuccess).Value;
+        await using var verifyDb = CreateDbContext();
+        Organization stored = await verifyDb.Organizations.SingleAsync(o => o.Id == orgId);
+        Assert.Equal(winner.Status, stored.Status);
+        Assert.Equal(stored.Status == OrganizationStatus.Active ? adminAId : adminBId, stored.ReviewedByUserId);
+    }
+
+    [Fact]
+    public async Task PostgreSql_PagedSearchTranslatesForAllRepositories()
+    {
+        await using AuthDbContext db = CreateDbContext();
+        string suffix = Guid.NewGuid().ToString("N");
+        User user = new()
+        {
+            Id = Guid.NewGuid(),
+            Email = $"search-{suffix}@example.com",
+            FullName = $"Search {suffix}",
+            PasswordHash = "hash"
+        };
+        Role role = new() { Id = Guid.NewGuid(), Name = $"SearchRole{suffix}", Scope = RoleScope.Organization };
+        Organization organization = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = $"Search Org {suffix}",
+            Slug = $"search-org-{suffix}",
+            Status = OrganizationStatus.Active
+        };
+        db.OrganizationMemberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(),
+            User = user,
+            Organization = organization,
+            Role = role,
+            Status = MembershipStatus.Active
+        });
+        await db.SaveChangesAsync();
+
+        string term = suffix[..12];
+        PageRequest request = new(Search: $" {term.ToUpperInvariant()} ");
+        PagedResult<Organization> all = await new EfOrganizationRepository(db).GetAllAsync(request);
+        PagedResult<Organization> scoped = await new EfOrganizationRepository(db).GetUserOrganizationsAsync(user.Id, request);
+        PagedResult<OrganizationMembership> members = await new EfOrganizationMembershipRepository(db).GetMembersAsync(organization.Id, request);
+        var (users, userCount) = await new EfUserRepository(db).GetUsersPagedAsync(0, 20, request.GetSearchTerm());
+
+        Assert.Equal(organization.Id, Assert.Single(all.Items).Id);
+        Assert.Equal(1, all.TotalCount);
+        Assert.Equal(organization.Id, Assert.Single(scoped.Items).Id);
+        Assert.Equal(user.Id, Assert.Single(members.Items).UserId);
+        Assert.Equal(1, members.TotalCount);
+        Assert.Equal(user.Id, Assert.Single(users).Id);
+        Assert.Equal(1, userCount);
     }
 
     private sealed class DummyAccessTokenIssuer : IAccessTokenIssuer

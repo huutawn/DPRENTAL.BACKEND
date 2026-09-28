@@ -1,4 +1,5 @@
 using Dprental.AuthService.Common;
+using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
 
 namespace Dprental.AuthService.Domain.IRepositories;
@@ -11,7 +12,17 @@ public interface IOrganizationRepository
 
     Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default);
 
-    Task<PagedResult<Organization>> GetAllAsync(PageRequest request, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Không truyền <paramref name="status"/>: sắp theo tên. Có truyền: chỉ lấy đúng trạng thái đó, cũ nhất trước
+    /// để hàng chờ duyệt được xử lý theo thứ tự nộp.
+    /// </summary>
+    Task<PagedResult<Organization>> GetAllAsync(PageRequest request, OrganizationStatus? status = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Đọc organization dạng tracked và khóa row (SELECT ... FOR UPDATE) tới hết transaction hiện tại,
+    /// để kiểm tra trạng thái rồi ghi mà không bị request khác chen vào giữa. Phải gọi bên trong <see cref="BeginTransactionAsync"/>.
+    /// </summary>
+    Task<Organization?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default);
 
     Task<PagedResult<Organization>> GetUserOrganizationsAsync(Guid userId, PageRequest request, CancellationToken cancellationToken = default);
 

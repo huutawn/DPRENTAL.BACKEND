@@ -385,7 +385,7 @@ public sealed class UserServiceTests
 
         public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(ProfileUser is not null && ProfileUser.Id == id ? ProfileUser : null);
-        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, CancellationToken cancellationToken = default)
+        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, CancellationToken cancellationToken = default)
         {
             IReadOnlyCollection<User> emptyList = Array.Empty<User>();
             return Task.FromResult((emptyList, 0));
