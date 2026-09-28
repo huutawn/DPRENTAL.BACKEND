@@ -491,7 +491,7 @@ public sealed class UserService(
             {
                 int skip = (pageRequest.Page - 1) * pageRequest.PageSize;
 
-                var (users, totalCount) = await userRepository.GetUsersPagedAsync(skip, pageRequest.PageSize, cancellationToken);
+                var (users, totalCount) = await userRepository.GetUsersPagedAsync(skip, pageRequest.PageSize, pageRequest.GetSearchTerm(), cancellationToken);
                 int totalPages = (int)Math.Ceiling(totalCount / (double)pageRequest.PageSize);
 
                 var items = users.Select(u => new AdminUserListItemDto(

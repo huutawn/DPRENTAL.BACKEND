@@ -31,7 +31,8 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        IQueryable<Organization> query = dbContext.Organizations.AsNoTracking();
+        IQueryable<Organization> query = ApplySearch(dbContext.Organizations.AsNoTracking(), request.GetSearchTerm());
+
         IOrderedQueryable<Organization> ordered;
         if (status is OrganizationStatus filter)
         {
@@ -39,7 +40,7 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
         }
         else
         {
-            ordered = query.OrderBy(o => o.Name);
+            ordered = query.OrderBy(o => o.Name).ThenBy(o => o.Id);
         }
 
         int totalCount = await ordered.CountAsync(cancellationToken);
@@ -65,6 +66,19 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
 
         // InMemory không có khóa row; test chỉ kiểm tra logic chuyển trạng thái.
         return await dbContext.Organizations.SingleOrDefaultAsync(org => org.Id == id, cancellationToken);
+    }
+
+    private static IQueryable<Organization> ApplySearch(IQueryable<Organization> query, string? searchTerm)
+    {
+        if (searchTerm is null)
+        {
+            return query;
+        }
+
+        // EF Core translates these overloads to SQL; culture/StringComparison overloads are not translatable.
+#pragma warning disable CA1304, CA1311, CA1862
+        return query.Where(o => o.Name.ToLower().Contains(searchTerm) || o.Slug.ToLower().Contains(searchTerm));
+#pragma warning restore CA1304, CA1311, CA1862
     }
 
     public async Task<Organization> CreateAsync(

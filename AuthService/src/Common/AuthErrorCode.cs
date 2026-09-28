@@ -94,6 +94,7 @@ public static class AuthErrorCode
     {
         public const string InvalidPage = "Paging.InvalidPage";
         public const string InvalidPageSize = "Paging.InvalidPageSize";
+        public const string InvalidSearch = "Paging.InvalidSearch";
     }
 
     public static class AdminBootstrap

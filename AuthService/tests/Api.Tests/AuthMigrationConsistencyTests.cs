@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Dprental.AuthService.Api.Tests;
 
+[Collection(PostgreSqlTestGroup.Name)]
 public sealed class AuthMigrationConsistencyTests
 {
     [Fact]

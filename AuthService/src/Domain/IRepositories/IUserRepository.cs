@@ -17,7 +17,7 @@ public interface IUserRepository : IRepo<User, Guid>
 
     Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default);
 
-    Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, CancellationToken cancellationToken = default);
+    Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, CancellationToken cancellationToken = default);
 
     /// <summary>Thực hiện đổi mật khẩu và thu hồi toàn bộ session của user trong một transaction nguyên tử.</summary>
     Task<bool> ChangePasswordAndRevokeSessionsAsync(Guid userId, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default);

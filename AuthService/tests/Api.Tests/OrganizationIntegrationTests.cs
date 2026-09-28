@@ -8,6 +8,7 @@ using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security;
 
 using Dprental.AuthService.Application.DTOs.Organization;
+using Dprental.AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Hosting;
@@ -295,6 +296,54 @@ public sealed class OrganizationIntegrationTests
         return orgId;
     }
 
+    [Fact]
+    public async Task PagedGetEndpointsBindAndApplySearch()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedDatabaseAsync(factory);
+        Guid adminId = Guid.NewGuid();
+        Guid targetId = Guid.NewGuid();
+        await CreateUserAsync(factory, adminId, "admin@example.com", "Admin", AdminRoleId);
+        await CreateUserAsync(factory, targetId, "target@example.com", "Target User", CustomerRoleId);
+
+        Guid blueId = Guid.NewGuid();
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            Organization blue = new() { Id = blueId, Name = "Blue Rentals", Slug = "blue-rentals", Status = OrganizationStatus.Active };
+            Organization red = new() { Id = Guid.NewGuid(), Name = "Red Rentals", Slug = "red-rentals", Status = OrganizationStatus.Pending };
+            db.Organizations.AddRange(blue, red);
+            db.OrganizationMemberships.AddRange(
+                new OrganizationMembership { Id = Guid.NewGuid(), Organization = blue, UserId = adminId, RoleId = OwnerRoleId, Status = MembershipStatus.Active },
+                new OrganizationMembership { Id = Guid.NewGuid(), Organization = blue, UserId = targetId, RoleId = MemberRoleId, Status = MembershipStatus.Active });
+            await db.SaveChangesAsync();
+        }
+
+        using HttpClient admin = factory.CreateClient();
+        IAccessTokenIssuer issuer = factory.Services.GetRequiredService<IAccessTokenIssuer>();
+        IssuedAccessToken adminToken = issuer.Issue(new AccessTokenRequest(adminId, ["admin"], [Permissions.Users.Read]));
+        admin.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken.Value);
+        using HttpResponseMessage usersResponse = await admin.GetAsync("/api/v1/auth/admin/users?search=TARGET&Page=1&PageSize=1");
+        Assert.Equal(HttpStatusCode.OK, usersResponse.StatusCode);
+        PagedResult<AdminUserListItemDto>? users = await usersResponse.Content.ReadFromJsonAsync<PagedResult<AdminUserListItemDto>>();
+        Assert.NotNull(users);
+        Assert.Equal(targetId, Assert.Single(users.Items).Id);
+        Assert.Equal(1, users.TotalCount);
+
+        using HttpResponseMessage organizationsResponse = await admin.GetAsync("/api/v1/auth/organizations?search=BLUE&status=Active");
+        Assert.Equal(HttpStatusCode.OK, organizationsResponse.StatusCode);
+        PagedResult<OrganizationSummaryResponse>? organizations = await organizationsResponse.Content.ReadFromJsonAsync<PagedResult<OrganizationSummaryResponse>>();
+        Assert.NotNull(organizations);
+        Assert.Equal(blueId, Assert.Single(organizations.Items).Id);
+        Assert.Equal(1, organizations.TotalCount);
+
+        string tooLong = new('x', PageRequest.MaxSearchLength + 1);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.GetAsync($"/api/v1/auth/admin/users?search={tooLong}")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.GetAsync($"/api/v1/auth/organizations?search={tooLong}")).StatusCode);
+        using HttpClient target = CreateAuthenticatedClient(factory, targetId, "customer");
+        Assert.Equal(HttpStatusCode.Forbidden, (await target.GetAsync("/api/v1/auth/admin/users?search=admin")).StatusCode);
+    }
+
     private static WebApplicationFactory<Program> CreateFactory()
     {
         string inMemoryDatabaseName = Guid.NewGuid().ToString("N");
@@ -341,6 +390,7 @@ public sealed class OrganizationIntegrationTests
         Permission pPlatform = new() { Id = Guid.NewGuid(), Code = Permissions.Organizations.Suspend };
         Permission pAssign = new() { Id = Guid.NewGuid(), Code = Permissions.Roles.Assign };
         Permission pRevoke = new() { Id = Guid.NewGuid(), Code = Permissions.Roles.Revoke };
+        Permission pUsersRead = new() { Id = Guid.NewGuid(), Code = Permissions.Users.Read };
 
         adminRole.RolePermissions.Add(new RolePermission { Role = adminRole, Permission = pCreate });
         adminRole.RolePermissions.Add(new RolePermission { Role = adminRole, Permission = pRead });
@@ -350,6 +400,7 @@ public sealed class OrganizationIntegrationTests
         adminRole.RolePermissions.Add(new RolePermission { Role = adminRole, Permission = pPlatform });
         adminRole.RolePermissions.Add(new RolePermission { Role = adminRole, Permission = pAssign });
         adminRole.RolePermissions.Add(new RolePermission { Role = adminRole, Permission = pRevoke });
+        adminRole.RolePermissions.Add(new RolePermission { Role = adminRole, Permission = pUsersRead });
 
         ownerRole.RolePermissions.Add(new RolePermission { Role = ownerRole, Permission = pRead });
         ownerRole.RolePermissions.Add(new RolePermission { Role = ownerRole, Permission = pUpdate });
@@ -359,7 +410,7 @@ public sealed class OrganizationIntegrationTests
         memberRole.RolePermissions.Add(new RolePermission { Role = memberRole, Permission = pRead });
         memberRole.RolePermissions.Add(new RolePermission { Role = memberRole, Permission = pMemRead });
 
-        db.Permissions.AddRange(pCreate, pRead, pUpdate, pMemRead, pMemManage, pPlatform, pAssign, pRevoke);
+        db.Permissions.AddRange(pCreate, pRead, pUpdate, pMemRead, pMemManage, pPlatform, pAssign, pRevoke, pUsersRead);
         db.Roles.AddRange(adminRole, customerRole, ownerRole, memberRole);
         await db.SaveChangesAsync();
     }

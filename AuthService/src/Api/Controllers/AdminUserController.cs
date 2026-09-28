@@ -18,7 +18,7 @@ namespace Dprental.AuthService.Api.Controllers;
 public sealed class AdminUsersController(IUserService userService) : ControllerBase
 {
     /// <summary>Lấy danh sách người dùng có phân trang.</summary>
-    /// <param name="request">Tham số phân trang (page, pageSize).</param>
+    /// <param name="request">Tham số phân trang và tìm kiếm (page, pageSize, search).</param>
     /// <param name="cancellationToken">Token hủy request.</param>
     [HttpGet]
     [Authorize(Policy = Permissions.Users.Read)]
@@ -28,7 +28,7 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
      [FromQuery] GetUsersRequest request,
      CancellationToken cancellationToken = default)
     {
-        var pageRequest = new PageRequest(request.Page, request.PageSize);
+        var pageRequest = new PageRequest(request.Page, request.PageSize, request.Search);
 
         var result = await userService.GetUsersPagedAsync(pageRequest, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);

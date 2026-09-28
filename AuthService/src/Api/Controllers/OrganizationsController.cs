@@ -64,7 +64,8 @@ public sealed class OrganizationsController(
 
     /// <summary>
     /// Chỉ Platform: danh sách mọi organization (rút gọn, có phân trang). Truyền <c>status=Pending</c> để lấy
-    /// hàng chờ duyệt (cũ nhất trước). User xem tổ chức của mình qua GET /users/me/organizations.
+    /// hàng chờ duyệt (cũ nhất trước); <c>search</c> tìm theo tên hoặc slug.
+    /// User xem tổ chức của mình qua GET /users/me/organizations.
     /// </summary>
     [HttpGet]
     [ProducesResponseType<PagedResult<OrganizationSummaryResponse>>(StatusCodes.Status200OK)]

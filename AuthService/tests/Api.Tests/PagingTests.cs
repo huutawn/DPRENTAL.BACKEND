@@ -49,6 +49,16 @@ public sealed class PagingTests
     }
 
     [Fact]
+    public void PageRequestNormalizesSearchAndRejectsOverlongTerm()
+    {
+        Assert.Null(new PageRequest(Search: "  ").GetSearchTerm());
+        Assert.Equal("alice", new PageRequest(Search: "  ALICE  ").GetSearchTerm());
+        Assert.True(new PageRequest(Search: new string('x', PageRequest.MaxSearchLength)).Validate().IsSuccess);
+        Assert.Equal(AuthErrors.Paging.InvalidSearch,
+            new PageRequest(Search: new string('x', PageRequest.MaxSearchLength + 1)).Validate().Error);
+    }
+
+    [Fact]
     public void PagedResultCalculatesTotalPagesCorrectly()
     {
         // Empty set
@@ -108,6 +118,49 @@ public sealed class PagingTests
         Assert.Equal(2, page2.TotalPages);
         Assert.Single(page2.Items);
         Assert.Equal(id3, page2.Items[0].Id);
+    }
+
+    [Fact]
+    public async Task PagedRepositoriesFilterBeforeCountingAndPaging()
+    {
+        DbContextOptions<AuthDbContext> options = new DbContextOptionsBuilder<AuthDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+        await using AuthDbContext db = new(options);
+
+        Organization first = new() { Id = Guid.NewGuid(), Name = "Blue One", Slug = "blue-one", Status = OrganizationStatus.Active };
+        Organization second = new() { Id = Guid.NewGuid(), Name = "Blue Two", Slug = "blue-two", Status = OrganizationStatus.Pending };
+        Organization other = new() { Id = Guid.NewGuid(), Name = "Green", Slug = "green", Status = OrganizationStatus.Active };
+        User alice = new() { Id = Guid.NewGuid(), Email = "alice@example.com", FullName = "Alice", PasswordHash = "hash" };
+        User alicia = new() { Id = Guid.NewGuid(), Email = "alicia@example.com", FullName = "Alicia", PasswordHash = "hash" };
+        User bob = new() { Id = Guid.NewGuid(), Email = "bob@example.com", FullName = "Bob", PasswordHash = "hash" };
+        Role owner = new() { Id = Guid.NewGuid(), Name = "Owner", Scope = RoleScope.Organization };
+        Role viewer = new() { Id = Guid.NewGuid(), Name = "Viewer", Scope = RoleScope.Organization };
+        db.Organizations.AddRange(first, second, other);
+        db.Users.AddRange(alice, alicia, bob);
+        db.Roles.AddRange(owner, viewer);
+        db.OrganizationMemberships.AddRange(
+            new OrganizationMembership { Id = Guid.NewGuid(), Organization = first, User = alice, Role = owner },
+            new OrganizationMembership { Id = Guid.NewGuid(), Organization = first, User = alicia, Role = viewer },
+            new OrganizationMembership { Id = Guid.NewGuid(), Organization = first, User = bob, Role = viewer },
+            new OrganizationMembership { Id = Guid.NewGuid(), Organization = second, User = alice, Role = owner });
+        await db.SaveChangesAsync();
+
+        EfOrganizationRepository organizations = new(db);
+        PageRequest secondPage = new(Page: 2, PageSize: 1, Search: " BLUE ");
+        PagedResult<Organization> platformPage = await organizations.GetAllAsync(secondPage);
+        Assert.Equal(2, platformPage.TotalCount);
+        Assert.Equal(2, platformPage.TotalPages);
+        Assert.Single(platformPage.Items);
+        Assert.Equal(second.Id, platformPage.Items[0].Id);
+
+        Assert.Equal(second.Id, Assert.Single((await organizations.GetAllAsync(new PageRequest(Search: "two"), OrganizationStatus.Pending)).Items).Id);
+
+        EfUserRepository users = new(db);
+        var (userItems, userCount) = await users.GetUsersPagedAsync(1, 1, "ali");
+        Assert.Equal(2, userCount);
+        Assert.Single(userItems);
+        Assert.Equal(0, (await users.GetUsersPagedAsync(0, 10, "missing")).TotalCount);
     }
 
     [Fact]
@@ -175,7 +228,7 @@ public sealed class PagingTests
         public Task<bool> UpdateAsync(User user, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<User?>(null);
-        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, CancellationToken cancellationToken = default)
+        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, CancellationToken cancellationToken = default)
         => Task.FromResult<(IReadOnlyCollection<User> Items, int TotalCount)>((Array.Empty<User>(), 0));
         public Task<bool> ChangePasswordAndRevokeSessionsAsync(Guid userId, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> ResetPasswordWithTokenAsync(Guid userId, string tokenHash, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);

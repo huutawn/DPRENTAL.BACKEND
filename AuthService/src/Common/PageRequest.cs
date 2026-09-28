@@ -1,11 +1,19 @@
 namespace Dprental.AuthService.Common;
 
 /// <summary>Yêu cầu phân trang dùng chung cho các API danh sách.</summary>
-public sealed record PageRequest(int Page = PageRequest.DefaultPage, int PageSize = PageRequest.DefaultPageSize)
+public sealed record PageRequest(int Page = PageRequest.DefaultPage, int PageSize = PageRequest.DefaultPageSize, string? Search = null)
 {
     public const int DefaultPage = 1;
     public const int DefaultPageSize = 20;
     public const int MaxPageSize = 100;
+    public const int MaxSearchLength = 200;
+
+    /// <summary>Chuẩn hóa từ khóa một lần trước khi tạo điều kiện tìm kiếm.</summary>
+    public string? GetSearchTerm()
+    {
+        string? trimmed = Search?.Trim();
+        return string.IsNullOrEmpty(trimmed) ? null : trimmed.ToLowerInvariant();
+    }
 
     /// <summary>Kiểm tra tính hợp lệ của tham số phân trang: page &gt; 0, 1 &lt;= pageSize &lt;= 100.</summary>
     public Result Validate()
@@ -18,6 +26,11 @@ public sealed record PageRequest(int Page = PageRequest.DefaultPage, int PageSiz
         if (PageSize is <= 0 or > MaxPageSize)
         {
             return Result.Failure(AuthErrors.Paging.InvalidPageSize);
+        }
+
+        if (Search?.Trim().Length > MaxSearchLength)
+        {
+            return Result.Failure(AuthErrors.Paging.InvalidSearch);
         }
 
         return Result.Success();
