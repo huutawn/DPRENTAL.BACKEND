@@ -157,10 +157,22 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
         // 1. Lọc theo keyword
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var pattern = $"%{EscapeLike(search.Trim())}%";
-            query = query.Where(u =>
-                EF.Functions.ILike(u.Email, pattern) ||
-                EF.Functions.ILike(u.FullName, pattern));
+            var keyword = search.Trim();
+
+            if (dbContext.Database.IsNpgsql())
+            {
+                var pattern = $"%{EscapeLike(keyword)}%";
+                query = query.Where(u =>
+                    EF.Functions.ILike(u.Email, pattern) ||
+                    EF.Functions.ILike(u.FullName, pattern));
+            }
+            else
+            {
+                // Chỉ chạy trên InMemory (test), thực thi trong bộ nhớ nên dùng được StringComparison
+                query = query.Where(u =>
+                    u.Email.Contains(keyword, StringComparison.OrdinalIgnoreCase) ||
+                    u.FullName.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+            }
         }
 
         // 2. Lọc theo role

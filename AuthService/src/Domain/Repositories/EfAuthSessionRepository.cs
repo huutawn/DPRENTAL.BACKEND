@@ -30,7 +30,7 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
     public async Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
-
+            
         List<Session> sessions = await dbContext.Sessions
             .Where(session => session.UserId == userId && session.RevokedAtUtc == null)
             .ToListAsync(cancellationToken);
@@ -234,7 +234,7 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
 
         if (currentToken.IsRevoked || currentToken.UsedAtUtc is not null || currentToken.RevokedAtUtc is not null)
         {
-            await RevokeCompromisedSessionAsync(currentToken.SessionId, utcNow, cancellationToken);
+            await RevokeAllSessionsForUserAsync(currentToken.Session.UserId, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return null;
         }
@@ -247,7 +247,7 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
 
         if (usedTokenCount != 1)
         {
-            await RevokeCompromisedSessionAsync(currentToken.SessionId, utcNow, cancellationToken);
+            await RevokeAllSessionsForUserAsync(currentToken.Session.UserId, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return null;
         }

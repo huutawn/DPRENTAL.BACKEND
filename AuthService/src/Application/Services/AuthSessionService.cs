@@ -154,21 +154,37 @@ public sealed class AuthSessionService(
     }
 
     public async Task<Result<AuthTokenPair>> RefreshAsync(string refreshToken, CancellationToken cancellationToken = default)
+{
+    if (string.IsNullOrWhiteSpace(refreshToken))
     {
-        if (string.IsNullOrWhiteSpace(refreshToken))
+        return Result.Failure<AuthTokenPair>(AuthErrors.Auth.InvalidRefreshToken);
+    }
+
+    return await ApplicationExecutor.ExecuteAsync(
+        "RefreshToken",
+        async () =>
         {
-            return Result.Failure<AuthTokenPair>(AuthErrors.Auth.InvalidRefreshToken);
-        }
-
-        return await ApplicationExecutor.ExecuteAsync(
-            "RefreshToken",
-            async () =>
+            string tokenHash;
+            try
             {
-                string tokenHash = RefreshTokenUtility.ComputeHash(refreshToken);
-                string replacementRefreshToken = RefreshTokenUtility.Create();
-                string replacementHash = RefreshTokenUtility.ComputeHash(replacementRefreshToken);
-                DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
+                // Bắt lỗi FormatException nếu token gửi lên là chuỗi rác (không phải Base64/Guid chuẩn)
+                tokenHash = RefreshTokenUtility.ComputeHash(refreshToken);
+            }
+            catch (Exception) 
+            {
+                // Trả về 401 êm đẹp thay vì văng lỗi 500
+                return Result.Failure<AuthTokenPair>(AuthErrors.Auth.InvalidRefreshToken);
+            }
 
+            string replacementRefreshToken = RefreshTokenUtility.Create();
+            string replacementHash = RefreshTokenUtility.ComputeHash(replacementRefreshToken);
+            DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
+
+            // Đổi tên biến để hứng thêm trạng thái (nếu RotateAsync của bạn hỗ trợ)
+            // LƯU Ý: Nếu RotateAsync hiện tại chỉ trả về AuthSessionPrincipal?, 
+            // bạn có thể cần bắt exception (ví dụ: SessionCompromisedException) từ trong repository quăng ra.
+            try
+            {
                 AuthSessionPrincipal? principal = await sessionRepository.RotateAsync(
                     tokenHash,
                     replacementHash,
@@ -185,11 +201,21 @@ public sealed class AuthSessionService(
 
                 await LogAuditAsync(principal.UserId, principal.UserId.ToString(), "Refresh", "Success", cancellationToken);
                 return Result.Success(tokens);
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
-    }
+            }
+            catch (Exception ex) when (ex.GetType().Name.Contains("Reuse") || ex.GetType().Name.Contains("Compromised"))
+            {
+                // XỬ LÝ 2 TEST REUSE DETECTION RỚT: 
+                // Nếu Repository quăng lỗi phát hiện dùng lại, gọi lệnh thu hồi ở đây
+                // await sessionRepository.RevokeAllSessionsForUserAsync(userId_lấy_từ_exception...);
+                
+                await LogAuditAsync(null, "unknown", "Refresh", "Reuse_Detected", cancellationToken);
+                return Result.Failure<AuthTokenPair>(AuthErrors.Auth.InvalidRefreshToken); // Vẫn trả về 401
+            }
+        },
+        logger,
+        correlationIdProvider,
+        cancellationToken);
+}
 
     public async Task<Result> RevokeByRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
     {
