@@ -170,7 +170,6 @@ Có thể hiển thị:
 
 - dung lượng;
 
-- purpose;
 
 - trạng thái;
 
@@ -220,59 +219,9 @@ Media đã được xóa về mặt logic.
 
 Không được hiển thị như Media đang hoạt động.
 
-### **e. Nguyên tắc Purpose**
+### **f. Quan hệ với entity nghiệp vụ**
 
-Mỗi Media có một MediaPurpose.
-
-Ví dụ:
-
-- user-avatar;
-
-- organization-logo;
-
-- business-license;
-
-- equipment-image;
-
-- equipment-document;
-
-- qc-evidence.
-
-Business Service phải kiểm tra MediaPurpose phù hợp với nghiệp vụ.
-
-Ví dụ:
-
-Không được sử dụng:
-
-purpose = user-avatar
-
-làm:
-
-equipment-image
-
-chỉ vì người dùng có MediaId.
-
-### **f. Nguyên tắc Owner**
-
-Media được liên kết với:
-
-- OwnerService;
-
-- OwnerEntityType;
-
-- OwnerEntityId.
-
-Ví dụ:
-
-OwnerService = CatalogService
-
-OwnerEntityType = Equipment
-
-OwnerEntityId = equipment-123
-
-Khi CatalogService sử dụng MediaId cho Equipment khác, hệ thống phải kiểm tra sự phù hợp của owner.
-
-MediaId không được tự do chuyển sang một entity khác nếu không có nghiệp vụ cho phép.
+MediaService không lưu ownerService, ownerEntityType hay ownerEntityId. Business Service lưu mediaId trong entity của mình, xác minh người upload và định dạng file phù hợp nghiệp vụ trước khi gắn, rồi kiểm tra quyền người dùng cùng quan hệ entity–media trước mỗi lần xin URL đọc hoặc đổi visibility. MediaId không được dùng cho entity khác nếu nghiệp vụ không cho phép.
 
 ### **g. Nguyên tắc metadata và nội dung file**
 
@@ -296,7 +245,6 @@ Không đồng nghĩa với:
 | 2       | Tên tệp          | Tên file khi người dùng upload | Hiển thị tên đã được hệ thống xử lý an toàn                                          |
 | 3       | Loại tệp         | Loại nội dung của Media        | Ví dụ JPG, PNG, PDF                                                                  |
 | 4       | Dung lượng       | Dung lượng thực tế của file    | Hiển thị theo KB/MB phù hợp                                                          |
-| 5       | Mục đích sử dụng | MediaPurpose                   | Hiển thị theo tên nghiệp vụ phù hợp nếu cần                                          |
 | 6       | Trạng thái       | Trạng thái Media               | PendingUpload / Ready / Rejected / Deleted                                           |
 | 7       | Quyền hiển thị   | Private/Public                 | Không đồng nghĩa với quyền nghiệp vụ của người dùng                                  |
 | 8       | Ngày tải         | Thời điểm Media được tạo       | Hiển thị theo định dạng thời gian của hệ thống                                       |
@@ -327,13 +275,11 @@ Trước khi gắn MediaId vào dữ liệu nghiệp vụ, Business Service ph�
 
 - Media ở trạng thái Ready;
 
-- MediaPurpose phù hợp;
+- Định dạng file phù hợp với trường dữ liệu nghiệp vụ;
 
-- Media thuộc đúng OwnerService;
+- Người upload từ `/verify` phù hợp với người dùng đang tạo hoặc chỉnh sửa entity;
 
-- Media thuộc đúng OwnerEntityType;
-
-- Media thuộc đúng OwnerEntityId.
+- Business Service quyết định entity nào được tham chiếu mediaId.
 
 Ví dụ:
 
@@ -345,8 +291,8 @@ imageMediaId = M1
 CatalogService kiểm tra:
 M1 tồn tại? Có
 M1 Ready? Có
-Purpose equipment-image? Có
-Owner = Equipment X? Có
+Định dạng ảnh phù hợp? Có
+Người upload hợp lệ? Có
 ↓
 Cho phép lưu reference
 Nếu một trong các điều kiện không phù hợp:
@@ -373,9 +319,9 @@ Việc biết MediaId không đồng nghĩa người dùng có quyền xem hoặ
 
 Business Service chịu trách nhiệm xác định quyền của người dùng trên entity nghiệp vụ.
 
-MediaPurpose phải phù hợp với nghiệp vụ sử dụng Media.
+Business Service kiểm tra định dạng Media phù hợp với nghiệp vụ sử dụng.
 
-Media phải thuộc đúng OwnerService, OwnerEntityType và OwnerEntityId khi được sử dụng.
+Business Service phải kiểm tra người upload, quyền người dùng và quan hệ entity–media khi sử dụng MediaId.
 
 Không trả Bucket, ObjectKey hoặc thông tin credential của Object Storage cho client.
 
@@ -391,6 +337,6 @@ Chức năng xem metadata không tự động cấp quyền truy cập binary.
 
 ## 2.8. Hợp đồng API MVP
 
-Business Service có service token scope `media.read` gọi `GET /api/v1/media/{mediaId}` sau khi đã kiểm tra người dùng có quyền trên entity và mediaId được entity tham chiếu. MediaService chỉ trả Media thuộc ownerService xác định từ token; Media đã `Deleted` hoặc không thuộc service đó trả 404. Response gồm `mediaId`, `originalFileName`, `contentType`, `sizeBytes`, `purpose`, `status`, `visibility`, `createdAtUtc`. Với Media chưa xác minh, `contentType` và `sizeBytes` là null, không lấy giá trị client tự khai báo làm số liệu thực tế.
+Business Service có service token scope `media.read` gọi `GET /api/v1/media/{mediaId}` sau khi đã kiểm tra người dùng có quyền trên entity và mediaId được entity tham chiếu. MediaService xác thực service token và scope; Media đã `Deleted` trả 404. Response gồm `mediaId`, `originalFileName`, `contentType`, `sizeBytes`, `status`, `visibility`, `createdAtUtc`. Với Media chưa xác minh, `contentType` và `sizeBytes` là null, không lấy giá trị client tự khai báo làm số liệu thực tế.
 
 Endpoint metadata không trả URL đọc, Bucket hay ObjectKey. Business Service xin URL đọc qua chức năng truy cập trong tài liệu 03 khi người dùng thực sự cần xem hoặc tải tệp.

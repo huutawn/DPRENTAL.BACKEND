@@ -26,6 +26,8 @@ public class MediaControllerEndpointTests
         JsonElement multipart = upload.GetProperty("requestBody").GetProperty("content")
             .GetProperty("multipart/form-data");
         Assert.True(multipart.TryGetProperty("schema", out _));
+        Assert.DoesNotContain("ownerEntityId", multipart.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("purpose", multipart.GetRawText(), StringComparison.OrdinalIgnoreCase);
         Assert.False(document.RootElement.GetProperty("paths")
             .TryGetProperty("/api/v1/media/uploads/{uploadId}/complete", out _));
     }
@@ -36,8 +38,6 @@ public class MediaControllerEndpointTests
         var file = new ByteArrayContent(bytes);
         file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
         form.Add(file, "file", "machine.jpg");
-        form.Add(new StringContent("equipment-image"), "purpose");
-        form.Add(new StringContent("eq-1"), "ownerEntityId");
         return form;
     }
 
@@ -99,8 +99,6 @@ public class MediaControllerEndpointTests
         MediaServiceTestFactory.SetUserToken(client, "user-123");
 
         using var form = new MultipartFormDataContent();
-        form.Add(new StringContent("equipment-image"), "purpose");
-        form.Add(new StringContent("eq-1"), "ownerEntityId");
         var response = await client.PostAsync("/api/v1/media/uploads", form);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -116,8 +114,7 @@ public class MediaControllerEndpointTests
         uploadService.UploadAsync(
             "user-123",
             "key-123",
-            Arg.Is<UploadMediaRequest>(request => request.Purpose == "equipment-image" &&
-                request.OwnerEntityId == "eq-1" && request.FileName == "machine.jpg" &&
+            Arg.Is<UploadMediaRequest>(request => request.FileName == "machine.jpg" &&
                 request.ContentType == "image/jpeg" && request.SizeBytes == 3),
             Arg.Any<CancellationToken>())
             .Returns(Result.Success(dto));
@@ -169,10 +166,6 @@ public class MediaControllerEndpointTests
         var dto = new MediaVerificationDto(
             mediaId,
             "Ready",
-            "CatalogService",
-            "Equipment",
-            "eq-100",
-            "equipment-image",
             "user-123",
             "machine.jpg",
             "image/jpeg",
@@ -195,7 +188,7 @@ public class MediaControllerEndpointTests
         Assert.NotNull(body);
         Assert.Equal(mediaId, body.MediaId);
         Assert.Equal("Ready", body.Status);
-        Assert.Equal("CatalogService", body.OwnerService);
+        Assert.Equal("user-123", body.UploadedByUserId);
     }
 
     [Fact]
@@ -204,8 +197,8 @@ public class MediaControllerEndpointTests
         using var factory = new MediaServiceTestFactory();
         using var anonymous = factory.CreateClient();
         Guid mediaId = Guid.NewGuid();
-        var readRequest = new MediaAccessRequest("read", "Equipment", "eq-1");
-        var visibilityRequest = new ChangeMediaVisibilityRequest("public", "Equipment", "eq-1");
+        var readRequest = new MediaAccessRequest("read");
+        var visibilityRequest = new ChangeMediaVisibilityRequest("public");
 
         Assert.Equal(HttpStatusCode.Unauthorized,
             (await anonymous.GetAsync($"/api/v1/media/{mediaId}")).StatusCode);

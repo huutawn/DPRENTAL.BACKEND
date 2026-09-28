@@ -17,17 +17,14 @@ Thông tin yêu cầu xóa Media:
 | **STT** | **Tên trường**  | **Kiểu dữ liệu** | **Bắt buộc** | **Mô tả / ràng buộc**                           |
 |---------|-----------------|------------------|--------------|-------------------------------------------------|
 | 1       | mediaId         | UUID/ULID        | Có           | Định danh Media cần xóa                         |
-| 2       | ownerEntityType | Chuỗi            | Có           | Loại đối tượng nghiệp vụ đang sở hữu Media      |
-| 3       | ownerEntityId   | UUID/ULID        | Có           | Định danh đối tượng nghiệp vụ đang sở hữu Media |
 
 **Hệ thống tự xác định:**
 
 | **Thông tin**       | **Nguồn**              | **Mô tả**                                                   |
 |---------------------|------------------------|-------------------------------------------------------------|
 | Người dùng hiện tại | Authentication Context | Business Service dùng để kiểm tra quyền xóa/thay đổi entity |
-| ownerService        | Service Identity       | MediaService xác định từ service đang gọi                   |
+| Service identity    | Service token          | MediaService xác thực service và scope phù hợp             |
 | status              | Media Metadata         | Xác định Media có thể thực hiện thao tác xóa hay không      |
-| purpose             | Media Metadata         | Phục vụ kiểm tra Media thuộc đúng ngữ cảnh nghiệp vụ        |
 
 ## 6.3. Đầu ra
 
@@ -83,13 +80,7 @@ Media không tồn tại
 
 - Business Service phải kiểm tra quyền người dùng trước khi yêu cầu MediaService xóa Media.
 
-- Media phải thuộc đúng:
-
-  - ownerService;
-
-  - ownerEntityType;
-
-  - ownerEntityId.
+- Business Service phải xác nhận entity của mình đang tham chiếu mediaId trước khi yêu cầu xóa.
 
 - Business Service phải loại bỏ business reference đến Media trước khi yêu cầu xóa Media.
 
@@ -431,7 +422,7 @@ Các trường hợp hệ thống có thể đưa Media vào cleanup gồm:
 
 - MediaService không được trực tiếp sửa hoặc truy vấn database của Business Service để xóa reference.
 
-- Media phải thuộc đúng ownerService, ownerEntityType và ownerEntityId.
+- Business Service phải kiểm tra quyền người dùng và quan hệ entity–media trước khi yêu cầu xóa.
 
 - Xóa Media là logical delete trước; physical delete được thực hiện theo lifecycle policy.
 

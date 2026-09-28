@@ -4,27 +4,31 @@ Dịch vụ Media cho hệ sinh thái DPRENTAL, được xây dựng bằng .NET
 
 ## Upload file trong một request
 
-1. **Client đã đăng nhập gọi `POST /api/v1/media/uploads`** bằng `multipart/form-data`. Form gồm `file`, `purpose`, `ownerEntityId` và `sha256Checksum` tùy chọn. Có thể gửi header `Idempotency-Key` để retry cùng file mà không tạo Media khác. Swagger UI cho phép chọn file trực tiếp.
+Khi chạy bằng Docker Compose chung tại thư mục `DPRENTAL/`, mở Swagger UI ở `http://localhost:5050/swagger/index.html` rồi chọn AuthService hoặc MediaService trong menu. Login ở AuthService tạo cookie `accessToken` trên Gateway origin; Gateway xác thực và chuyển thành Bearer để MediaService xác thực lại bằng JWKS. API `/verify`, `/access` và `/visibility` vẫn yêu cầu service token theo scope tương ứng. Xem hướng dẫn bootstrap principal local trong `Gateway/README.md`.
 
-2. **MediaService xử lý file trong request đó**: xác định owner từ purpose, giới hạn dung lượng, ghi file vào MinIO, xác minh signature/MIME/checksum, rồi chuyển Media sang `Ready`. Response HTTP 200 gồm `mediaId`, metadata và `previewUrl` ký ngắn hạn để người upload xem file đã lưu. Nếu việc ký URL lỗi sau khi file đã lưu, `previewUrl` là null nhưng upload vẫn thành công.
+1. **Client đã đăng nhập gọi `POST /api/v1/media/uploads`** bằng `multipart/form-data`. Form gồm `file` và `sha256Checksum` tùy chọn. Không cần tạo entity trước khi upload. Có thể gửi header `Idempotency-Key` để retry cùng file mà không tạo Media khác. Swagger UI cho phép chọn file trực tiếp.
 
-3. **Business Service gọi `GET /api/v1/media/{mediaId}/verify`** bằng service token để xác nhận MediaId đang `Ready`, đúng purpose, đối tượng và người upload trước khi lưu tham chiếu vào entity nghiệp vụ.
+2. **MediaService xử lý file trong request đó**: áp dụng giới hạn theo định dạng file, ghi file vào MinIO, xác minh signature/MIME/checksum, rồi chuyển Media sang `Ready`. Response HTTP 200 gồm `mediaId`, metadata và `previewUrl` ký ngắn hạn để người upload xem file đã lưu. Nếu việc ký URL lỗi sau khi file đã lưu, `previewUrl` là null nhưng upload vẫn thành công.
+
+3. **Business Service gọi `GET /api/v1/media/{mediaId}/verify`** bằng service token để xác nhận MediaId đang `Ready`, đúng người upload và định dạng phù hợp với nghiệp vụ trước khi lưu tham chiếu vào entity nghiệp vụ. Business Service giữ quan hệ entity–media và kiểm tra quyền người dùng trước các thao tác đọc hoặc công bố.
+
+Migrations `RemoveMediaOwner` và `RemoveMediaPurpose` xóa các cột owner cũ cùng cột purpose khỏi `media.media_assets`; dữ liệu trong các cột này sẽ mất. Trước khi áp dụng trên database đã có dữ liệu, dừng phiên bản MediaService cũ và sao lưu database. Muốn quay lại bản cũ phải khôi phục backup, không thể đảo migration để lấy lại owner hoặc purpose. Bản mới không tương thích với ứng dụng cũ còn đang dùng các cột owner. Idempotency key của request upload cũ có thể trả 409 sau khi bỏ owner/purpose khỏi payload hash; client cần dùng key mới khi gửi request theo contract mới.
 
 Client không cần gọi MinIO trực tiếp hoặc gọi `/complete`. Bản ghi upload nội bộ vẫn phục vụ idempotency, retry và dọn dẹp request bị gián đoạn.
 
 ## Lấy thông tin, xem và tải Media
 
-Business Service chỉ lưu `mediaId` trong entity. Khi trả entity, service kiểm tra quyền và có thể lấy metadata bằng `GET /api/v1/media/{mediaId}` (scope `media.read`). Metadata gồm tên file, MIME/dung lượng đã xác minh, purpose, status, visibility và thời điểm tạo; không chứa URL hay khóa lưu trữ.
+Business Service chỉ lưu `mediaId` trong entity. Khi trả entity, service kiểm tra quyền và có thể lấy metadata bằng `GET /api/v1/media/{mediaId}` (scope `media.read`). Metadata gồm tên file, MIME/dung lượng đã xác minh, status, visibility và thời điểm tạo; không chứa URL hay khóa lưu trữ.
 
 Để xem/tải file Private, Business Service xác nhận người dùng có quyền trên entity **và mediaId thực sự được entity tham chiếu**, rồi gọi `POST /api/v1/media/{mediaId}/access` bằng service token scope `media.read`:
 
 ```json
-{ "action": "read", "ownerEntityType": "Equipment", "ownerEntityId": "equipment-123", "download": false }
+{ "action": "read", "download": false }
 ```
 
 MediaService trả `{ "mediaId": "...", "url": "...", "expiresAtUtc": "..." }`. Business Service chuyển URL này cho client ở thời điểm cần xem/tải; `download: true` yêu cầu Content-Disposition attachment. URL GET MinIO ký sẵn mặc định hết hạn sau 300 giây (`ObjectStorage:ReadUrlExpirySeconds`, cho phép 1–900 giây). Browser phải truy cập được `ObjectStorage:BrowserEndpoint` qua HTTPS trong môi trường triển khai. URL ký sẵn là quyền tạm thời: có thể chứa bucket, object key ngẫu nhiên và access-key ID theo giao thức S3; không lưu URL, không ghi vào log, không dùng nó làm khóa nghiệp vụ. Bucket luôn Private.
 
-Khi entity được công bố, Business Service gọi `PUT /api/v1/media/{mediaId}/visibility` bằng scope `media.publish`, gửi `visibility` (`public` hoặc `private`), `ownerEntityType` và `ownerEntityId`. Chỉ `equipment-image` và `organization-logo` có thể Public; `equipment-document` luôn Private. URL Public ổn định là `GET /api/v1/media/{mediaId}/content` (thêm `?download=true` nếu cần); MediaService kiểm tra trạng thái mỗi lần gọi rồi chuyển hướng tới URL MinIO ký ngắn hạn. Sau khi đổi về Private, URL Public này không cấp quyền mới; URL đã ký có thể còn hiệu lực cho đến khi hết hạn.
+Khi entity được công bố, Business Service gọi `PUT /api/v1/media/{mediaId}/visibility` bằng scope `media.publish`, gửi `visibility` (`public` hoặc `private`) sau khi đã kiểm tra entity đang tham chiếu mediaId. Business Service quyết định file nào có thể Public theo nghiệp vụ; MediaService chỉ yêu cầu file `Ready` và service token scope `media.publish`. URL Public ổn định là `GET /api/v1/media/{mediaId}/content` (thêm `?download=true` nếu cần); MediaService kiểm tra trạng thái mỗi lần gọi rồi chuyển hướng tới URL MinIO ký ngắn hạn. Sau khi đổi về Private, URL Public này không cấp quyền mới; URL đã ký có thể còn hiệu lực cho đến khi hết hạn.
 
 Service token phải có claim `u=svc`, `sub` ánh xạ trong `Jwt:ServicePrincipals` và claim `s` đúng scope (`media.verify`, `media.read` hoặc `media.publish`). AuthService cần cấp các scope này cho service nghiệp vụ tương ứng. Hiện workspace chưa có CatalogService/OrganizationService để tích hợp phía Business Service. MVP upload hỗ trợ JPEG, PNG, WebP và PDF; video chưa được hỗ trợ.
 
@@ -116,7 +120,7 @@ ConnectionStrings__Postgres="Host=127.0.0.1;Port=${POSTGRES_PORT};Database=${POS
 dotnet run --project MediaService/src/Api/MediaService.Api.csproj
 ```
 
-Trong môi trường Development, mở `/swagger` trên địa chỉ mà API in ra khi khởi chạy. Chọn `POST /api/v1/media/uploads`, nhập user bearer token bằng nút **Authorize**, chọn file, nhập `purpose` và `ownerEntityId`, rồi bấm **Execute**. Response trả `mediaId` khi file đã `Ready`.
+Trong môi trường Development, mở `/swagger` trên địa chỉ mà API in ra khi khởi chạy. Chọn `POST /api/v1/media/uploads`, nhập user bearer token bằng nút **Authorize**, chọn file rồi bấm **Execute**. Response trả `mediaId` khi file đã `Ready`.
 
 3. Kiểm tra trạng thái sức khỏe:
 - Liveness probe: `GET http://localhost:5000/health/live` (hoặc cổng HTTP do ứng dụng lắng nghe)

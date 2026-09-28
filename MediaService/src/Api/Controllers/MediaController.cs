@@ -68,8 +68,6 @@ public class MediaController : ControllerBase
             _userContext.UserId ?? string.Empty,
             idempotencyKey,
             new UploadMediaRequest(
-                form.Purpose ?? string.Empty,
-                form.OwnerEntityId ?? string.Empty,
                 form.File.FileName,
                 form.File.ContentType,
                 form.File.Length,
@@ -82,7 +80,7 @@ public class MediaController : ControllerBase
     }
 
     /// <summary>
-    /// API nội bộ để Business Service kiểm tra MediaId đang ở trạng thái Ready, đúng purpose, người upload và đối tượng trước khi lưu tham chiếu.
+    /// API nội bộ để Business Service kiểm tra MediaId đang Ready và người upload trước khi lưu tham chiếu.
     /// Yêu cầu Service token đã xác thực.
     /// </summary>
     [HttpGet("{mediaId:guid}/verify")]
@@ -102,7 +100,7 @@ public class MediaController : ControllerBase
         return ToActionResult(result, StatusCodes.Status200OK);
     }
 
-    /// <summary>Metadata cho service sở hữu Media; không cấp quyền đọc binary.</summary>
+    /// <summary>Metadata cho service có scope media.read; không cấp quyền đọc binary.</summary>
     [HttpGet("{mediaId:guid}")]
     [ProducesResponseType<MediaMetadataDto>(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetMetadata(Guid mediaId, CancellationToken cancellationToken)
@@ -184,7 +182,5 @@ public class MediaController : ControllerBase
 public sealed class UploadMediaForm
 {
     public IFormFile? File { get; set; }
-    public string? Purpose { get; set; }
-    public string? OwnerEntityId { get; set; }
     public string? Sha256Checksum { get; set; }
 }

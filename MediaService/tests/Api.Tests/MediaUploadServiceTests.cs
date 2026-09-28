@@ -48,8 +48,8 @@ public class MediaUploadServiceTests
 
     private static byte[] ValidJpeg() => [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x01, 0x02];
 
-    private static UploadMediaRequest Request(byte[] bytes, string purpose = "equipment-image", string? checksum = null) =>
-        new(purpose, "eq-1", "machine.jpg", "image/jpeg", bytes.Length, new MemoryStream(bytes), checksum);
+    private static UploadMediaRequest Request(byte[] bytes, string contentType = "image/jpeg", string? checksum = null) =>
+        new("machine.jpg", contentType, bytes.Length, new MemoryStream(bytes), checksum);
 
     private void ConfigureStoredObject(byte[] bytes)
     {
@@ -65,9 +65,7 @@ public class MediaUploadServiceTests
         byte[] bytes = ValidJpeg();
 
         Assert.Equal("UnauthorizedUser", (await _sut.UploadAsync("", null, Request(bytes))).Error.Code);
-        Assert.Equal("UnsupportedPurpose", (await _sut.UploadAsync("user-1", null, Request(bytes, "unknown"))).Error.Code);
-        Assert.Equal("UnsupportedContentType", (await _sut.UploadAsync("user-1", null,
-            Request(bytes) with { ContentType = "application/pdf" })).Error.Code);
+        Assert.Equal("UnsupportedContentType", (await _sut.UploadAsync("user-1", null, Request(bytes, "application/unknown"))).Error.Code);
         Assert.Equal("FileSizeExceeded", (await _sut.UploadAsync("user-1", null,
             Request(bytes) with { SizeBytes = 11 * 1024 * 1024 })).Error.Code);
         Assert.Equal("FileSizeMismatch", (await _sut.UploadAsync("user-1", null,
@@ -130,6 +128,18 @@ public class MediaUploadServiceTests
         Assert.Equal(UploadSessionStatus.Rejected, _storedSession?.Status);
         Assert.Equal(MediaStatus.Rejected, _storedSession?.MediaAsset?.Status);
         await _cleanup.Received().AddAsync(Arg.Any<MediaCleanupItem>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Upload_DeclaredMimeMustMatchFileSignature()
+    {
+        byte[] bytes = ValidJpeg();
+        ConfigureStoredObject(bytes);
+
+        var result = await _sut.UploadAsync("user-1", "mismatch", Request(bytes, "application/pdf"));
+
+        Assert.Equal("ContentTypeMismatch", result.Error.Code);
+        Assert.Equal(MediaStatus.Rejected, _storedSession?.MediaAsset?.Status);
     }
 
     [Fact]

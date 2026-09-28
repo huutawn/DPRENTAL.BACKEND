@@ -30,13 +30,9 @@ public class MediaAccessServiceTests
             Microsoft.Extensions.Options.Options.Create(new MediaAccessSettings()), NullLogger<MediaAccessService>.Instance);
     }
 
-    private static MediaAsset Asset(string purpose = "equipment-image") => new()
+    private static MediaAsset Asset() => new()
     {
         Id = Guid.NewGuid(),
-        OwnerService = "CatalogService",
-        OwnerEntityType = "Equipment",
-        OwnerEntityId = "eq-100",
-        Purpose = purpose,
         Status = MediaStatus.Ready,
         Visibility = MediaVisibility.Private,
         OriginalFileName = "may-xuc.jpg",
@@ -73,14 +69,14 @@ public class MediaAccessServiceTests
     }
 
     [Fact]
-    public async Task Verify_OnlyReadyMediaFromOwningService()
+    public async Task Verify_OnlyReadyMediaForScopedService()
     {
         MediaAsset asset = Asset();
         Store(asset);
 
-        var denied = await _sut.VerifyMediaAsync(
+        var otherService = await _sut.VerifyMediaAsync(
             new ServiceCaller("OrganizationService", new HashSet<string> { "media.verify" }), asset.Id);
-        Assert.Equal("MediaNotFound", denied.Error.Code);
+        Assert.True(otherService.IsSuccess);
 
         asset.Status = MediaStatus.PendingUpload;
         var pending = await _sut.VerifyMediaAsync(VerifyCaller, asset.Id);
@@ -89,7 +85,7 @@ public class MediaAccessServiceTests
         asset.Status = MediaStatus.Ready;
         var ready = await _sut.VerifyMediaAsync(VerifyCaller, asset.Id);
         Assert.True(ready.IsSuccess);
-        Assert.Equal("eq-100", ready.Value.OwnerEntityId);
+        Assert.Equal("image/jpeg", ready.Value.ContentType);
         Assert.Equal("user-1", ready.Value.UploadedByUserId);
         Assert.Equal(1250340, ready.Value.SizeBytes);
     }
@@ -115,16 +111,14 @@ public class MediaAccessServiceTests
     }
 
     [Fact]
-    public async Task PrivateAccess_ValidatesActionOwnerStateAndStorage()
+    public async Task PrivateAccess_ValidatesActionScopeStateAndStorage()
     {
         MediaAsset asset = Asset();
         Store(asset);
-        var request = new MediaAccessRequest("read", "Equipment", "eq-100", true);
+        var request = new MediaAccessRequest("read", true);
 
         Assert.Equal("InvalidAction", (await _sut.CreatePrivateReadUrlAsync(
             ReadCaller, asset.Id, request with { Action = "write" })).Error.Code);
-        Assert.Equal("MediaNotFound", (await _sut.CreatePrivateReadUrlAsync(
-            ReadCaller, asset.Id, request with { OwnerEntityId = "eq-200" })).Error.Code);
         Assert.Equal("MissingServiceScope", (await _sut.CreatePrivateReadUrlAsync(
             VerifyCaller, asset.Id, request)).Error.Code);
 
@@ -155,7 +149,7 @@ public class MediaAccessServiceTests
             .ThrowsAsync(new InvalidOperationException("internal storage detail"));
 
         var result = await _sut.CreatePrivateReadUrlAsync(
-            ReadCaller, asset.Id, new MediaAccessRequest("read", "Equipment", "eq-100"));
+            ReadCaller, asset.Id, new MediaAccessRequest("read"));
 
         Assert.Equal("StorageUnavailable", result.Error.Code);
         Assert.DoesNotContain("internal storage detail", result.Error.Message, StringComparison.Ordinal);
@@ -164,7 +158,7 @@ public class MediaAccessServiceTests
     [Fact]
     public async Task UploaderPreview_OnlyGrantsReadyMediaToUploader()
     {
-        MediaAsset asset = Asset("equipment-document");
+        MediaAsset asset = Asset();
         Store(asset);
         ConfigureStorage();
 
@@ -184,7 +178,7 @@ public class MediaAccessServiceTests
     }
 
     [Fact]
-    public async Task PublicAccess_OnlyGrantsReadyPublicAllowedPurpose()
+    public async Task PublicAccess_OnlyGrantsReadyPublicMedia()
     {
         MediaAsset asset = Asset();
         Store(asset);
@@ -195,24 +189,18 @@ public class MediaAccessServiceTests
         asset.Status = MediaStatus.Deleted;
         Assert.Equal("MediaNotFound", (await _sut.CreatePublicReadUrlAsync(asset.Id, false)).Error.Code);
         asset.Status = MediaStatus.Ready;
-        asset.Purpose = "equipment-document";
-        Assert.Equal("MediaNotFound", (await _sut.CreatePublicReadUrlAsync(asset.Id, false)).Error.Code);
-        asset.Purpose = "equipment-image";
+        asset.ActualContentType = "application/pdf";
         Assert.True((await _sut.CreatePublicReadUrlAsync(asset.Id, false)).IsSuccess);
     }
 
     [Fact]
-    public async Task Visibility_RequiresOwnerScopeReadyAndAllowedPurpose()
+    public async Task Visibility_RequiresScopeAndReadyMedia()
     {
-        MediaAsset asset = Asset("equipment-document");
+        MediaAsset asset = Asset();
         Store(asset);
-        var request = new ChangeMediaVisibilityRequest("public", "Equipment", "eq-100");
+        var request = new ChangeMediaVisibilityRequest("public");
 
         Assert.Equal("MissingServiceScope", (await _sut.SetVisibilityAsync(ReadCaller, asset.Id, request)).Error.Code);
-        Assert.Equal("MediaNotFound", (await _sut.SetVisibilityAsync(
-            PublishCaller, asset.Id, request with { OwnerEntityId = "other" })).Error.Code);
-        Assert.Equal("PublicNotAllowed", (await _sut.SetVisibilityAsync(PublishCaller, asset.Id, request)).Error.Code);
-        asset.Purpose = "equipment-image";
         asset.Status = MediaStatus.PendingUpload;
         Assert.Equal("MediaNotReady", (await _sut.SetVisibilityAsync(PublishCaller, asset.Id, request)).Error.Code);
         await _unitOfWork.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
@@ -223,7 +211,7 @@ public class MediaAccessServiceTests
     {
         MediaAsset asset = Asset();
         Store(asset);
-        var request = new ChangeMediaVisibilityRequest("public", "Equipment", "eq-100");
+        var request = new ChangeMediaVisibilityRequest("public");
 
         var first = await _sut.SetVisibilityAsync(PublishCaller, asset.Id, request);
         Assert.True(first.IsSuccess);
@@ -240,9 +228,6 @@ public class MediaAccessServiceTests
             {
                 Id = asset.Id,
                 Status = MediaStatus.Ready,
-                OwnerService = asset.OwnerService,
-                OwnerEntityType = asset.OwnerEntityType,
-                OwnerEntityId = asset.OwnerEntityId,
                 Visibility = MediaVisibility.Public
             });
 

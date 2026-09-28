@@ -14,16 +14,14 @@
 |---------|-----------------|------------------|--------------|--------------------------------------------------------|
 | 1       | oldMediaId      | UUID/ULID        | Có           | Media hiện đang được entity nghiệp vụ sử dụng          |
 | 2       | newMediaId      | UUID/ULID        | Có           | Media mới đã được tải thành công và ở trạng thái Ready |
-| 3       | ownerEntityType | Chuỗi            | Có           | Loại đối tượng nghiệp vụ đang sử dụng Media            |
-| 4       | ownerEntityId   | UUID/ULID        | Có           | Định danh đối tượng nghiệp vụ đang sử dụng Media       |
 
 **Hệ thống tự xác định:**
 
 | **Thông tin**       | **Nguồn**              | **Mô tả**                                                           |
 |---------------------|------------------------|---------------------------------------------------------------------|
 | Người dùng hiện tại | Authentication Context | Business Service dùng để kiểm tra quyền chỉnh sửa entity            |
-| ownerService        | Service Identity       | MediaService xác định từ Business Service đang gọi                  |
-| purpose             | Metadata của Media     | Media mới phải phù hợp với mục đích sử dụng của vị trí cần thay thế |
+| Service identity    | Service token          | MediaService xác thực service và scope phù hợp                     |
+| contentType         | Metadata của Media     | Business Service kiểm tra định dạng file phù hợp với vị trí cần thay thế |
 
 ## 4.3. Đầu ra
 
@@ -73,11 +71,9 @@ newMediaId phải tồn tại.
 
 newMediaId phải ở trạng thái Ready.
 
-newMediaId phải thuộc đúng ownerService.
+Business Service phải xác minh người upload, định dạng file và quyền thay thế trên entity trước khi gắn newMediaId.
 
-newMediaId phải phù hợp với ownerEntityType và ownerEntityId.
-
-newMediaId phải có purpose phù hợp với vị trí Media cần thay thế.
+Business Service phải kiểm tra định dạng của newMediaId phù hợp với vị trí Media cần thay thế.
 
 Không được thay thế bằng Media ở trạng thái:
 
@@ -173,23 +169,13 @@ Trước khi thay reference, Business Service phải kiểm tra newMediaId:
 
 - status = ready;
 
-- đúng owner;
+- người upload phù hợp với thao tác nghiệp vụ;
 
-- đúng entity;
-
-- đúng purpose.
+- định dạng file phù hợp với vị trí thay thế.
 
 Ví dụ:
 
-Một Media có:
-
-purpose = business-license
-
-không được dùng để thay:
-
-purpose = organization-logo
-
-chỉ vì file cùng định dạng ảnh.
+Business Service quyết định Media nào có thể thay thế theo quy tắc của entity; MediaService không lưu ngữ cảnh nghiệp vụ.
 
 ### **d. Nguyên tắc cập nhật reference**
 
@@ -353,9 +339,9 @@ Nếu Media mới đã upload thành công nhưng người dùng hủy form:
 
 - newMediaId phải ở trạng thái Ready trước khi được sử dụng.
 
-- newMediaId phải phù hợp với purpose của vị trí cần thay thế.
+- Business Service kiểm tra định dạng và ngữ cảnh của newMediaId phù hợp vị trí cần thay thế.
 
-- newMediaId phải thuộc đúng ownerService, ownerEntityType và ownerEntityId.
+- Business Service phải xác minh người upload và quyền thay thế của người dùng trên entity.
 
 - MediaService không được tự chỉnh sửa database của Business Service.
 

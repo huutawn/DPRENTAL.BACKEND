@@ -66,32 +66,25 @@ public partial class MediaUploadService : IMediaUploadService
                 Error.Validation("InvalidIdempotencyKey", "Idempotency-Key không được vượt quá 200 ký tự."));
         }
 
-        MediaPurposePolicy? policy = MediaPurposePolicy.GetPolicy(request.Purpose);
-        if (policy is null)
+        long? maximumSize = MediaFilePolicy.MaxSizeBytesFor(request.ContentType);
+        if (maximumSize is null)
         {
             return Result.Failure<MediaCompletedDto>(
-                Error.Validation("UnsupportedPurpose", "Mục đích sử dụng không được hỗ trợ."));
+                Error.Validation("UnsupportedContentType", "Định dạng tệp không được hỗ trợ."));
         }
 
-        if (string.IsNullOrWhiteSpace(request.OwnerEntityId) || request.OwnerEntityId.Trim().Length > 100 ||
-            string.IsNullOrWhiteSpace(request.FileName) || request.FileName.Length > 1024 ||
+        if (string.IsNullOrWhiteSpace(request.FileName) || request.FileName.Length > 1024 ||
             string.IsNullOrWhiteSpace(request.ContentType) || request.ContentType.Length > 100 ||
             request.Content is null)
         {
             return Result.Failure<MediaCompletedDto>(
-                Error.Validation("InvalidUploadInput", "Thông tin file hoặc đối tượng liên kết không hợp lệ."));
+                Error.Validation("InvalidUploadInput", "Thông tin file không hợp lệ."));
         }
 
-        if (!policy.IsSizeAllowed(request.SizeBytes))
+        if (!MediaFilePolicy.IsSizeAllowed(request.ContentType, request.SizeBytes))
         {
             return Result.Failure<MediaCompletedDto>(
                 Error.Validation("FileSizeExceeded", "Dung lượng tệp không hợp lệ hoặc vượt giới hạn cho phép."));
-        }
-
-        if (!policy.IsContentTypeAllowed(request.ContentType))
-        {
-            return Result.Failure<MediaCompletedDto>(
-                Error.Validation("UnsupportedContentType", "Định dạng tệp không được hỗ trợ cho mục đích này."));
         }
 
         if (request.Sha256Checksum is { Length: > 0 } checksum &&
@@ -101,7 +94,7 @@ public partial class MediaUploadService : IMediaUploadService
                 Error.Validation("InvalidChecksum", "Checksum SHA-256 phải gồm 64 ký tự hex."));
         }
 
-        // Chỉ giữ tối đa giới hạn của purpose trong bộ nhớ. Hash nội dung giúp phát hiện
+        // Chỉ giữ tối đa giới hạn của định dạng file trong bộ nhớ. Hash nội dung giúp phát hiện
         // cùng Idempotency-Key nhưng khác binary, kể cả khi tên và dung lượng giống nhau.
         await using var buffer = new MemoryStream((int)request.SizeBytes);
         byte[] chunk = ArrayPool<byte>.Shared.Rent(81920);
@@ -110,7 +103,7 @@ public partial class MediaUploadService : IMediaUploadService
             int read;
             while ((read = await request.Content.ReadAsync(chunk.AsMemory(), cancellationToken)) > 0)
             {
-                if (buffer.Length + read > policy.MaxSizeBytes)
+                if (buffer.Length + read > maximumSize.Value)
                 {
                     return Result.Failure<MediaCompletedDto>(
                         Error.Validation("FileSizeExceeded", "Dung lượng tệp vượt giới hạn cho phép."));
@@ -169,10 +162,6 @@ public partial class MediaUploadService : IMediaUploadService
             MediaAsset asset = new()
             {
                 Id = mediaId,
-                OwnerService = policy.OwnerService,
-                OwnerEntityType = policy.OwnerEntityType,
-                OwnerEntityId = request.OwnerEntityId.Trim(),
-                Purpose = policy.Purpose,
                 Status = MediaStatus.PendingUpload,
                 Visibility = MediaVisibility.Private,
                 OriginalFileName = FileNameSanitizer.Sanitize(request.FileName),
@@ -279,7 +268,6 @@ public partial class MediaUploadService : IMediaUploadService
     {
         string raw = JsonSerializer.Serialize(new object?[]
         {
-            request.Purpose?.Trim().ToLowerInvariant(), request.OwnerEntityId?.Trim(),
             request.FileName?.Trim(), request.ContentType?.Trim().ToLowerInvariant(),
             request.SizeBytes, request.Sha256Checksum?.Trim().ToLowerInvariant(), fileHash
         });

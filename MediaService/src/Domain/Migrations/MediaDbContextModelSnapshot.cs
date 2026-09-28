@@ -65,26 +65,6 @@ namespace MediaService.Domain.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
-                    b.Property<string>("OwnerEntityId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("OwnerEntityType")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("OwnerService")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("Purpose")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
                     b.Property<string>("RejectionReason")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
@@ -114,11 +94,7 @@ namespace MediaService.Domain.Migrations
 
                     b.HasIndex("CreatedByUserId");
 
-                    b.HasIndex("Purpose");
-
                     b.HasIndex("Status");
-
-                    b.HasIndex("OwnerService", "OwnerEntityType", "OwnerEntityId");
 
                     b.ToTable("media_assets", "media");
                 });

@@ -1,6 +1,9 @@
 using Dprental.MediaService.Application.IServices;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
-namespace Dprental.MediaService.Api.Background;
+namespace Dprental.MediaService.Application.Background;
 
 public sealed partial class MediaCleanupWorker(IServiceScopeFactory scopeFactory, ILogger<MediaCleanupWorker> logger)
     : BackgroundService

@@ -13,22 +13,6 @@ public class MediaAssetConfiguration : IEntityTypeConfiguration<MediaAsset>
 
         builder.HasKey(a => a.Id);
 
-        builder.Property(a => a.OwnerService)
-            .IsRequired()
-            .HasMaxLength(100);
-
-        builder.Property(a => a.OwnerEntityType)
-            .IsRequired()
-            .HasMaxLength(100);
-
-        builder.Property(a => a.OwnerEntityId)
-            .IsRequired()
-            .HasMaxLength(100);
-
-        builder.Property(a => a.Purpose)
-            .IsRequired()
-            .HasMaxLength(100);
-
         builder.Property(a => a.Status)
             .IsRequired()
             .HasConversion<string>()
@@ -75,8 +59,6 @@ public class MediaAssetConfiguration : IEntityTypeConfiguration<MediaAsset>
         builder.Property(a => a.Version)
             .IsConcurrencyToken();
 
-        builder.HasIndex(a => new { a.OwnerService, a.OwnerEntityType, a.OwnerEntityId });
-        builder.HasIndex(a => a.Purpose);
         builder.HasIndex(a => a.Status);
         builder.HasIndex(a => a.CreatedByUserId);
     }

@@ -14,15 +14,13 @@
 |---------|-----------------|------------------|--------------|-------------------------------------------------------------------------------|
 | 1       | mediaId         | UUID/ULID        | Có           | Định danh duy nhất của Media cần truy cập                                     |
 | 2       | action          | Chuỗi / Enum     | Có           | Hành động yêu cầu trên Media. MVP hỗ trợ read                                 |
-| 3       | ownerEntityType | Chuỗi            | Có           | Loại đối tượng nghiệp vụ đang tham chiếu Media, ví dụ Equipment, Organization |
-| 4       | ownerEntityId   | UUID/ULID        | Có           | Định danh đối tượng nghiệp vụ đang tham chiếu Media                           |
 
 Ngoài các trường trên, hệ thống tự xác định từ ngữ cảnh xác thực:
 
 | **STT** | **Thông tin**       | **Nguồn**              | **Mô tả**                                                                         |
 |---------|---------------------|------------------------|-----------------------------------------------------------------------------------|
 | 1       | Người dùng hiện tại | Authentication Context | Business Service sử dụng để kiểm tra quyền người dùng trên đối tượng nghiệp vụ    |
-| 2       | ownerService        | Service Identity       | MediaService xác định từ Business Service đã được xác thực; không nhận từ Browser |
+| 2       | Service identity    | Service token          | MediaService xác thực service và scope `media.read`                               |
 | 3       | Quyền nghiệp vụ     | Business Service       | Xác định người dùng có được xem/tải Media thuộc entity đang yêu cầu hay không     |
 
 ## 3.3. Đầu ra
@@ -103,7 +101,7 @@ thì không cấp quyền truy cập nội dung.
 
 - Business Service phải đối chiếu MediaId với entity nghiệp vụ trước khi yêu cầu quyền truy cập.
 
-- MediaService chỉ cấp quyền truy cập cho Media thuộc đúng OwnerService và đối tượng liên quan.
+- MediaService chỉ cấp URL Private cho service có token hợp lệ và scope `media.read`; Business Service đối chiếu mediaId với entity liên quan.
 
 - Media ở trạng thái PendingUpload không được cấp quyền xem hoặc tải.
 
@@ -133,7 +131,6 @@ thì không cấp quyền truy cập nội dung.
 
   - Media ở trạng thái Ready;
 
-  - MediaPurpose cho phép public;
 
   - Business Service đã xác định Media được công bố.
 
@@ -175,11 +172,7 @@ MediaService kiểm tra:
 
 - Media ở trạng thái Ready;
 
-- Media thuộc đúng Service;
-
-- Media thuộc đúng loại đối tượng;
-
-- Media thuộc đúng OwnerEntityId;
+- Service token có scope `media.read`;
 
 - Visibility phù hợp;
 
@@ -215,7 +208,7 @@ Hết thời gian:
 
 Media được đánh dấu Public chỉ khi:
 
-- MediaPurpose cho phép;
+- Business Service đã quyết định công bố;
 
 - Business Service quyết định Media được công bố;
 
@@ -435,7 +428,7 @@ Không yêu cầu MediaService thực hiện:
 
 - Media ở trạng thái Deleted hoặc Rejected không được cấp quyền truy cập mới.
 
-- Media Public chỉ được công bố khi MediaPurpose cho phép và Business Service đã quyết định publish.
+- Media Public chỉ được công bố khi Business Service đã quyết định publish.
 
 - Public Media không đồng nghĩa Object Storage phải được cấu hình public.
 
@@ -443,9 +436,9 @@ Không yêu cầu MediaService thực hiện:
 
 ## 3.8. Hợp đồng API MVP
 
-- `GET /api/v1/media/{mediaId}`: Business Service có service token scope `media.read` lấy metadata. MediaService chỉ trả media thuộc service đó; `Deleted` trả 404. `PendingUpload` và `Rejected` có status nhưng không giả định MIME/dung lượng chưa xác minh là dữ liệu thực tế. Endpoint này không trả URL file.
-- `POST /api/v1/media/{mediaId}/access`: Business Service có scope `media.read` gửi `{ "action": "read", "ownerEntityType": "Equipment", "ownerEntityId": "equipment-123", "download": false }`. Sau khi Business Service đã kiểm tra quyền người dùng và mediaId có trong entity, MediaService đối chiếu owner/status rồi trả `{ "mediaId": "...", "url": "...", "expiresAtUtc": "..." }`. `download: true` đặt Content-Disposition để trình duyệt tải với tên file gốc đã được làm sạch.
+- `GET /api/v1/media/{mediaId}`: Business Service có service token scope `media.read` lấy metadata. `Deleted` trả 404. `PendingUpload` và `Rejected` có status nhưng không giả định MIME/dung lượng chưa xác minh là dữ liệu thực tế. Endpoint này không trả URL file.
+- `POST /api/v1/media/{mediaId}/access`: Business Service có scope `media.read` gửi `{ "action": "read", "download": false }`. Sau khi Business Service đã kiểm tra quyền người dùng và mediaId có trong entity, MediaService kiểm tra status rồi trả `{ "mediaId": "...", "url": "...", "expiresAtUtc": "..." }`. `download: true` đặt Content-Disposition để trình duyệt tải với tên file gốc đã được làm sạch.
 - Response của `POST /api/v1/media/uploads` có `previewUrl` và `previewUrlExpiresAtUtc` để chính người upload xem file vừa lưu trước khi entity nghiệp vụ được ghi. URL này là GET ký ngắn hạn, không thay thế quyền đọc qua Business Service sau khi entity đã được lưu. Nếu ký URL lỗi sau khi upload thành công, hai trường preview là null.
-- `GET /api/v1/media/{mediaId}/content`: URL Public ổn định, không cần token. MediaService chỉ chuyển hướng (302) tới URL GET ký ngắn hạn nếu Media đang `Ready`, `Public` và purpose cho phép Public; `?download=true` yêu cầu tải xuống. Sau khi chuyển Private, request mới tới URL này trả 404. URL đã ký trước đó có thể còn hiệu lực đến khi hết hạn.
+- `GET /api/v1/media/{mediaId}/content`: URL Public ổn định, không cần token. MediaService chỉ chuyển hướng (302) tới URL GET ký ngắn hạn nếu Media đang `Ready`, `Public`; `?download=true` yêu cầu tải xuống. Sau khi chuyển Private, request mới tới URL này trả 404. URL đã ký trước đó có thể còn hiệu lực đến khi hết hạn.
 - URL đọc ký sẵn mặc định sống 300 giây, cấu hình bằng `ObjectStorage:ReadUrlExpirySeconds` trong khoảng 1–900 giây. Bucket MinIO vẫn Private. Business Service lưu `mediaId`, không lưu URL đọc; client xin URL mới khi hết hạn.
 - URL S3 ký sẵn là ngoại lệ kỹ thuật đã chọn cho MVP: nó có thể chứa Bucket, ObjectKey ngẫu nhiên và access-key ID, nhưng không chứa secret key. Không ghi URL này vào log, không lưu lâu dài hoặc dùng làm định danh nghiệp vụ. Để tránh lộ cả đường dẫn MinIO cần một cơ chế proxy/CDN khác trong giai đoạn sau.

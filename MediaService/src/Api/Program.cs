@@ -1,5 +1,5 @@
 using Dprental.MediaService.Api.Configuration;
-using Dprental.MediaService.Api.Background;
+using Dprental.MediaService.Application.Background;
 using Dprental.MediaService.Api.Health;
 using Dprental.MediaService.Api.Options;
 using Dprental.MediaService.Api.Security;

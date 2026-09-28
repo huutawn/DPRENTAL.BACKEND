@@ -7,39 +7,37 @@ namespace Dprental.MediaService.Api.Tests;
 public class PolicyAndSanitizerTests
 {
     [Theory]
-    [InlineData("equipment-image", true, 10 * 1024 * 1024)]
-    [InlineData("organization-logo", true, 10 * 1024 * 1024)]
-    [InlineData("equipment-document", true, 20 * 1024 * 1024)]
-    [InlineData("unknown-purpose", false, 0)]
+    [InlineData("image/jpeg", true, 10 * 1024 * 1024)]
+    [InlineData("image/png", true, 10 * 1024 * 1024)]
+    [InlineData("image/webp", true, 10 * 1024 * 1024)]
+    [InlineData("application/pdf", true, 20 * 1024 * 1024)]
+    [InlineData("application/unknown", false, 0)]
     [InlineData("", false, 0)]
     [InlineData(null, false, 0)]
-    public void MediaPurposePolicy_Lookup_ShouldReturnExpected(string? purpose, bool expectedValid, long expectedMaxSize)
+    public void MediaFilePolicy_Lookup_ShouldReturnExpected(string? contentType, bool expectedValid, long expectedMaxSize)
     {
-        var policy = MediaPurposePolicy.GetPolicy(purpose);
+        var maxSize = MediaFilePolicy.MaxSizeBytesFor(contentType);
         if (expectedValid)
         {
-            Assert.NotNull(policy);
-            Assert.Equal(expectedMaxSize, policy.MaxSizeBytes);
+            Assert.NotNull(maxSize);
+            Assert.Equal(expectedMaxSize, maxSize.Value);
         }
         else
         {
-            Assert.Null(policy);
+            Assert.Null(maxSize);
         }
     }
 
     [Theory]
-    [InlineData("equipment-image", "image/jpeg", true)]
-    [InlineData("equipment-image", "image/png", true)]
-    [InlineData("equipment-image", "image/webp", true)]
-    [InlineData("equipment-image", "application/pdf", false)]
-    [InlineData("equipment-image", "application/x-msdownload", false)]
-    [InlineData("equipment-document", "application/pdf", true)]
-    [InlineData("equipment-document", "image/jpeg", false)]
-    public void MediaPurposePolicy_ContentType_ShouldMatchSpec(string purpose, string contentType, bool expectedAllowed)
+    [InlineData("image/jpeg", 1, true)]
+    [InlineData("image/jpeg", 10 * 1024 * 1024, true)]
+    [InlineData("image/jpeg", 10 * 1024 * 1024 + 1, false)]
+    [InlineData("application/pdf", 20 * 1024 * 1024, true)]
+    [InlineData("application/pdf", 20 * 1024 * 1024 + 1, false)]
+    [InlineData("application/x-msdownload", 1, false)]
+    public void MediaFilePolicy_Size_ShouldMatchSpec(string contentType, long size, bool expectedAllowed)
     {
-        var policy = MediaPurposePolicy.GetPolicy(purpose);
-        Assert.NotNull(policy);
-        Assert.Equal(expectedAllowed, policy.IsContentTypeAllowed(contentType));
+        Assert.Equal(expectedAllowed, MediaFilePolicy.IsSizeAllowed(contentType, size));
     }
 
     [Fact]

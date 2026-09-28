@@ -10,26 +10,6 @@ public class MediaAsset
     public Guid Id { get; set; }
 
     /// <summary>
-    /// Service nghiệp vụ sở hữu (ví dụ: CatalogService, OrganizationService).
-    /// </summary>
-    public string OwnerService { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Loại đối tượng nghiệp vụ (ví dụ: Equipment, Organization, User).
-    /// </summary>
-    public string OwnerEntityType { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Định danh đối tượng nghiệp vụ (ví dụ: equipment-123).
-    /// </summary>
-    public string OwnerEntityId { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Mục đích sử dụng (ví dụ: equipment-image, organization-logo, equipment-document).
-    /// </summary>
-    public string Purpose { get; set; } = string.Empty;
-
-    /// <summary>
     /// Trạng thái vòng đời của media asset.
     /// </summary>
     public MediaStatus Status { get; set; } = MediaStatus.PendingUpload;

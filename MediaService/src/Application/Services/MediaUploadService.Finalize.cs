@@ -110,8 +110,7 @@ public partial class MediaUploadService
                 Error.Validation("ObjectNotFound", "Tệp chưa được tải lên hoặc tải lên chưa hoàn tất."));
         }
 
-        var policy = MediaPurposePolicy.GetPolicy(asset.Purpose);
-        if (policy == null || !policy.IsSizeAllowed(sourceMetadata.ContentLength))
+        if (!MediaFilePolicy.IsSizeAllowed(asset.DeclaredContentType, sourceMetadata.ContentLength))
         {
             const string reason = "Dung lượng tệp vượt quá giới hạn cho phép.";
             await MarkSessionAndAssetRejectedAsync(session, asset, reason, now, cancellationToken);
@@ -140,7 +139,7 @@ public partial class MediaUploadService
         try
         {
             var finalMetadata = await _objectStorageService.GetObjectMetadataAsync(permanentKey, cancellationToken);
-            if (finalMetadata == null || !policy.IsSizeAllowed(finalMetadata.ContentLength))
+            if (finalMetadata == null || !MediaFilePolicy.IsSizeAllowed(asset.DeclaredContentType, finalMetadata.ContentLength))
             {
                 const string reason = "Dung lượng tệp vượt quá giới hạn cho phép.";
                 await MarkSessionAndAssetRejectedAsync(session, asset, reason, now, cancellationToken, permanentKey);
@@ -157,7 +156,7 @@ public partial class MediaUploadService
 
             long actualLength = stream.Length;
 
-            if (!policy.IsSizeAllowed(actualLength))
+            if (!MediaFilePolicy.IsSizeAllowed(asset.DeclaredContentType, actualLength))
             {
                 string reason = "Dung lượng tệp vượt quá giới hạn cho phép.";
                 await MarkSessionAndAssetRejectedAsync(session, asset, reason, now, cancellationToken, permanentKey);
@@ -166,7 +165,7 @@ public partial class MediaUploadService
             }
 
             string? detectedContentType = await FileSignatureDetector.DetectContentTypeAsync(stream, cancellationToken);
-            if (detectedContentType == null || !policy.IsContentTypeAllowed(detectedContentType))
+            if (detectedContentType == null || MediaFilePolicy.MaxSizeBytesFor(detectedContentType) is null)
             {
                 string reason = "Định dạng tệp không được hỗ trợ.";
                 await MarkSessionAndAssetRejectedAsync(session, asset, reason, now, cancellationToken, permanentKey);

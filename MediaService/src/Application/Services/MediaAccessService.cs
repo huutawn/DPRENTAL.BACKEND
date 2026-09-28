@@ -50,13 +50,13 @@ public sealed class MediaAccessService : IMediaAccessService
     public async Task<Result<MediaVerificationDto>> VerifyMediaAsync(
         ServiceCaller caller, Guid mediaId, CancellationToken cancellationToken = default)
     {
-        var owned = await FindOwnedAssetAsync(caller, VerifyScope, mediaId, cancellationToken);
-        if (owned.IsFailure)
+        var found = await FindServiceAssetAsync(caller, VerifyScope, mediaId, cancellationToken);
+        if (found.IsFailure)
         {
-            return Result.Failure<MediaVerificationDto>(owned.Error);
+            return Result.Failure<MediaVerificationDto>(found.Error);
         }
 
-        MediaAsset asset = owned.Value;
+        MediaAsset asset = found.Value;
         if (asset.Status != MediaStatus.Ready)
         {
             return Result.Failure<MediaVerificationDto>(
@@ -64,8 +64,7 @@ public sealed class MediaAccessService : IMediaAccessService
         }
 
         return Result.Success(new MediaVerificationDto(
-            asset.Id, asset.Status.ToString(), asset.OwnerService,
-            asset.OwnerEntityType, asset.OwnerEntityId, asset.Purpose,
+            asset.Id, asset.Status.ToString(),
             asset.CreatedByUserId, asset.OriginalFileName,
             asset.ActualContentType ?? asset.DeclaredContentType,
             asset.ActualSizeBytes ?? asset.DeclaredSizeBytes, asset.CreatedAtUtc));
@@ -74,13 +73,13 @@ public sealed class MediaAccessService : IMediaAccessService
     public async Task<Result<MediaMetadataDto>> GetMetadataAsync(
         ServiceCaller caller, Guid mediaId, CancellationToken cancellationToken = default)
     {
-        var owned = await FindOwnedAssetAsync(caller, ReadScope, mediaId, cancellationToken);
-        if (owned.IsFailure)
+        var found = await FindServiceAssetAsync(caller, ReadScope, mediaId, cancellationToken);
+        if (found.IsFailure)
         {
-            return Result.Failure<MediaMetadataDto>(owned.Error);
+            return Result.Failure<MediaMetadataDto>(found.Error);
         }
 
-        MediaAsset asset = owned.Value;
+        MediaAsset asset = found.Value;
         if (asset.Status == MediaStatus.Deleted)
         {
             return Result.Failure<MediaMetadataDto>(MediaNotFound());
@@ -88,7 +87,7 @@ public sealed class MediaAccessService : IMediaAccessService
 
         return Result.Success(new MediaMetadataDto(
             asset.Id, asset.OriginalFileName, asset.ActualContentType,
-            asset.ActualSizeBytes, asset.Purpose, asset.Status.ToString(),
+            asset.ActualSizeBytes, asset.Status.ToString(),
             asset.Visibility.ToString(), asset.CreatedAtUtc));
     }
 
@@ -102,23 +101,13 @@ public sealed class MediaAccessService : IMediaAccessService
                 Error.Validation("InvalidAction", "MVP chỉ hỗ trợ thao tác read."));
         }
 
-        Error? ownerError = ValidateOwner(request.OwnerEntityType, request.OwnerEntityId);
-        if (ownerError is not null)
+        var found = await FindServiceAssetAsync(caller, ReadScope, mediaId, cancellationToken);
+        if (found.IsFailure)
         {
-            return Result.Failure<MediaReadUrlDto>(ownerError);
+            return Result.Failure<MediaReadUrlDto>(found.Error);
         }
 
-        var owned = await FindOwnedAssetAsync(caller, ReadScope, mediaId, cancellationToken);
-        if (owned.IsFailure)
-        {
-            return Result.Failure<MediaReadUrlDto>(owned.Error);
-        }
-
-        MediaAsset asset = owned.Value;
-        if (!MatchesOwner(asset, request.OwnerEntityType, request.OwnerEntityId))
-        {
-            return Result.Failure<MediaReadUrlDto>(MediaNotFound());
-        }
+        MediaAsset asset = found.Value;
 
         if (asset.Status != MediaStatus.Ready)
         {
@@ -163,8 +152,7 @@ public sealed class MediaAccessService : IMediaAccessService
 
         MediaAsset? asset = await _assets.GetByIdAsync(mediaId, cancellationToken);
         if (asset is null || asset.Status != MediaStatus.Ready ||
-            asset.Visibility != MediaVisibility.Public ||
-            MediaPurposePolicy.GetPolicy(asset.Purpose)?.AllowsPublic != true)
+            asset.Visibility != MediaVisibility.Public)
         {
             return Result.Failure<MediaReadUrlDto>(MediaNotFound());
         }
@@ -176,12 +164,6 @@ public sealed class MediaAccessService : IMediaAccessService
         ServiceCaller caller, Guid mediaId, ChangeMediaVisibilityRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        Error? ownerError = ValidateOwner(request.OwnerEntityType, request.OwnerEntityId);
-        if (ownerError is not null)
-        {
-            return Result.Failure<MediaVisibilityDto>(ownerError);
-        }
-
         MediaVisibility desired;
         if (string.Equals(request.Visibility, "public", StringComparison.OrdinalIgnoreCase))
         {
@@ -197,29 +179,18 @@ public sealed class MediaAccessService : IMediaAccessService
                 Error.Validation("InvalidVisibility", "Visibility phải là public hoặc private."));
         }
 
-        var owned = await FindOwnedAssetAsync(caller, PublishScope, mediaId, cancellationToken);
-        if (owned.IsFailure)
+        var found = await FindServiceAssetAsync(caller, PublishScope, mediaId, cancellationToken);
+        if (found.IsFailure)
         {
-            return Result.Failure<MediaVisibilityDto>(owned.Error);
+            return Result.Failure<MediaVisibilityDto>(found.Error);
         }
 
-        MediaAsset asset = owned.Value;
-        if (!MatchesOwner(asset, request.OwnerEntityType, request.OwnerEntityId))
-        {
-            return Result.Failure<MediaVisibilityDto>(MediaNotFound());
-        }
+        MediaAsset asset = found.Value;
 
         if (asset.Status != MediaStatus.Ready)
         {
             return Result.Failure<MediaVisibilityDto>(
                 Error.Conflict("MediaNotReady", "Media chưa sẵn sàng để thay đổi visibility."));
-        }
-
-        if (desired == MediaVisibility.Public &&
-            MediaPurposePolicy.GetPolicy(asset.Purpose)?.AllowsPublic != true)
-        {
-            return Result.Failure<MediaVisibilityDto>(
-                Error.Forbidden("PublicNotAllowed", "Purpose của Media không cho phép công khai."));
         }
 
         if (asset.Visibility == desired)
@@ -237,8 +208,6 @@ public sealed class MediaAccessService : IMediaAccessService
         {
             MediaAsset? current = await _assets.GetByIdUntrackedAsync(mediaId, cancellationToken);
             if (current is not null && current.Status == MediaStatus.Ready &&
-                string.Equals(current.OwnerService, caller.Name, StringComparison.Ordinal) &&
-                MatchesOwner(current, request.OwnerEntityType, request.OwnerEntityId) &&
                 current.Visibility == desired)
             {
                 return Result.Success(new MediaVisibilityDto(mediaId, desired.ToString()));
@@ -251,7 +220,7 @@ public sealed class MediaAccessService : IMediaAccessService
         return Result.Success(new MediaVisibilityDto(mediaId, desired.ToString()));
     }
 
-    private async Task<Result<MediaAsset>> FindOwnedAssetAsync(
+    private async Task<Result<MediaAsset>> FindServiceAssetAsync(
         ServiceCaller caller, string requiredScope, Guid mediaId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(caller);
@@ -273,7 +242,7 @@ public sealed class MediaAccessService : IMediaAccessService
         }
 
         MediaAsset? asset = await _assets.GetByIdAsync(mediaId, cancellationToken);
-        if (asset is null || !string.Equals(asset.OwnerService, caller.Name, StringComparison.Ordinal))
+        if (asset is null)
         {
             return Result.Failure<MediaAsset>(MediaNotFound());
         }
@@ -315,16 +284,6 @@ public sealed class MediaAccessService : IMediaAccessService
                 Error.Failure("StorageUnavailable", "Không thể truy cập tệp lúc này."));
         }
     }
-
-    private static bool MatchesOwner(MediaAsset asset, string ownerEntityType, string ownerEntityId) =>
-        string.Equals(asset.OwnerEntityType, ownerEntityType.Trim(), StringComparison.Ordinal) &&
-        string.Equals(asset.OwnerEntityId, ownerEntityId.Trim(), StringComparison.Ordinal);
-
-    private static Error? ValidateOwner(string? ownerEntityType, string? ownerEntityId) =>
-        string.IsNullOrWhiteSpace(ownerEntityType) || ownerEntityType.Trim().Length > 100 ||
-        string.IsNullOrWhiteSpace(ownerEntityId) || ownerEntityId.Trim().Length > 100
-            ? Error.Validation("InvalidOwner", "OwnerEntityType và ownerEntityId phải hợp lệ.")
-            : null;
 
     private static Error InvalidMediaId() =>
         Error.Validation("InvalidMediaId", "Mã media (mediaId) không hợp lệ.");

@@ -6,7 +6,7 @@ Là một người dùng có quyền quản lý dữ liệu nghiệp vụ, tôi 
 
 Là một người dùng có quyền quản lý dữ liệu nghiệp vụ, tôi muốn chuyển Media đã công khai về trạng thái riêng tư khi Media không còn được phép hiển thị công khai.
 
-Là một Business Service, tôi muốn kiểm soát việc thay đổi trạng thái private / public của Media dựa trên nghiệp vụ và purpose, để người dùng không thể tự ý công khai tài liệu riêng tư.
+Là một Business Service, tôi muốn kiểm soát việc thay đổi trạng thái private / public của Media dựa trên nghiệp vụ, để người dùng không thể tự ý công khai tài liệu riêng tư.
 
 ## 5.2. Đầu vào
 
@@ -14,25 +14,20 @@ Là một Business Service, tôi muốn kiểm soát việc thay đổi trạng 
 |---------|-----------------|------------------|--------------|--------------------------------------------------|
 | 1       | mediaId         | UUID/ULID        | Có           | Định danh Media cần thay đổi trạng thái hiển thị |
 | 2       | visibility      | Enum             | Có           | Trạng thái mong muốn: private hoặc public        |
-| 3       | ownerEntityType | Chuỗi            | Có           | Loại đối tượng nghiệp vụ đang sở hữu Media       |
-| 4       | ownerEntityId   | UUID/ULID        | Có           | Định danh đối tượng nghiệp vụ đang sở hữu Media  |
 
 **Hệ thống tự xác định:**
 
 | Thông tin           | Nguồn                  | Mô tả                                                     |
 |---------------------|------------------------|-----------------------------------------------------------|
 | Người dùng hiện tại | Authentication Context | Business Service dùng để kiểm tra quyền publish/unpublish |
-| ownerService        | Service Identity       | MediaService xác định từ service đang gọi                 |
-| purpose             | Media Metadata         | Dùng để xác định Media có được phép Public hay không      |
+| Service identity    | Service token          | MediaService xác thực service và scope `media.publish`   |
 | status              | Media Metadata         | Chỉ Media ở trạng thái ready mới được thay đổi visibility |
 
 **Ví dụ contract:**
 
 ```text
 {
-"visibility": "public",
-"ownerEntityType": "Equipment",
-"ownerEntityId": "equipment-123"
+"visibility": "public"
 }
 ```
 
@@ -72,16 +67,6 @@ Hệ thống:
 
 > “Chuyển tệp về riêng tư thành công.”
 
-Không được phép Public
-
-Nếu purpose của Media không cho phép công khai:
-
-- không thay đổi visibility;
-
-- hiển thị thông báo:
-
-> “Tệp này không được phép công khai.”
-
 Media không hợp lệ
 
 Nếu Media:
@@ -114,19 +99,9 @@ Việc thay đổi visibility phải được thực hiện thông qua Business 
 
 Browser không được tự quyết định Media được Public chỉ bằng việc gọi trực tiếp MediaService.
 
-MediaService phải xác định ownerService từ service identity.
+MediaService phải xác thực service identity và scope `media.publish`. Business Service phải xác nhận entity đang tham chiếu mediaId trước khi yêu cầu đổi visibility.
 
-Media phải thuộc đúng:
-
-- ownerService;
-
-- ownerEntityType;
-
-- ownerEntityId.
-
-Chỉ purpose được cấu hình cho phép Public mới có thể chuyển sang public.
-
-Media có purpose chỉ dành cho nội bộ/private phải bị từ chối khi yêu cầu chuyển Public.
+Business Service quyết định Media được công khai theo quyền người dùng và trạng thái entity. MediaService chỉ cho phép service token có scope `media.publish` thay đổi visibility của Media `Ready`.
 
 Chuyển private → public không được tạo mediaId mới.
 
@@ -200,32 +175,9 @@ MediaService không tự quyết định:
 
 > Equipment này đã đủ điều kiện publish chưa.
 
-### **c. Nguyên tắc purpose**
+### **c. Quyết định công khai**
 
-Không phải mọi Media đều được phép Public.
-
-Ví dụ có thể cho phép:
-
-user-avatar
-
-organization-logo
-
-equipment-image
-
-tùy chính sách nghiệp vụ.
-
-Ví dụ mặc định nên Private:
-
-```text
-business-license
-equipment-document
-qc-evidence
-delivery-evidence
-return-evidence
-incident-evidence
-```
-
-Danh sách chính thức phải được cấu hình tại MediaPurpose policy.
+Business Service quyết định file được công khai theo nghiệp vụ và quan hệ entity–media. MediaService không lưu purpose.
 
 ### **d. Nguyên tắc chuyển Private → Public**
 
@@ -235,11 +187,7 @@ Trước khi chuyển Public, hệ thống kiểm tra:
 
 - status = ready;
 
-- đúng owner;
-
-- đúng entity;
-
-- purpose cho phép Public;
+- Business Service đã kiểm tra quan hệ entity–media;
 
 - Business Service đã kiểm tra quyền.
 
@@ -352,7 +300,7 @@ không phải lỗi.
 | **STT** | **Tên**             | **Mô tả**                                 | **Control**   | **Giá trị mặc định** | **Bắt buộc**   | **Quy tắc**                                              |
 |---------|---------------------|-------------------------------------------|---------------|----------------------|----------------|----------------------------------------------------------|
 | 1       | Trạng thái hiển thị | Cho biết Media hiện là Public hay Private | Badge/Status  | private              | —              | Hiển thị theo trạng thái hiện tại                        |
-| 2       | Công khai           | Cho phép công khai Media                  | Toggle/Button | Tắt                  | —              | Chỉ hiển thị/kích hoạt khi nghiệp vụ và purpose cho phép |
+| 2       | Công khai           | Cho phép công khai Media                  | Toggle/Button | Tắt                  | —              | Chỉ hiển thị/kích hoạt khi nghiệp vụ cho phép |
 | 3       | Chuyển riêng tư     | Ngừng công khai Media                     | Toggle/Button | —                    | —              | Chỉ áp dụng với Media đang Public                        |
 | 4       | Xác nhận            | Xác nhận thay đổi                         | Popup/Button  | —                    | Theo nghiệp vụ | Có thể yêu cầu xác nhận trước khi thay đổi               |
 | 5       | Trạng thái Media    | Trạng thái xử lý của file                 | Status        | Tự động              | —              | Chỉ ready được thay đổi visibility                       |
@@ -367,9 +315,7 @@ Khi người dùng chọn **Công khai**:
 
 3.  Kiểm tra Media đang ready.
 
-4.  Kiểm tra purpose cho phép Public.
-
-5.  Nếu hợp lệ:
+4.  Nếu hợp lệ:
 
     - cập nhật visibility = public;
 
@@ -421,7 +367,6 @@ Equipment = Unpublished
 | 1       | Công khai thành công       | Công khai tệp thành công.                                    |
 | 2       | Chuyển riêng tư thành công | Chuyển tệp về riêng tư thành công.                           |
 | 3       | Media chưa sẵn sàng        | Tệp chưa sẵn sàng để thay đổi trạng thái hiển thị.           |
-| 4       | Purpose không cho Public   | Tệp này không được phép công khai.                           |
 | 5       | Không có quyền             | Bạn không có quyền thay đổi trạng thái hiển thị của tệp này. |
 | 6       | Media không tồn tại        | Không tìm thấy tệp.                                          |
 | 7       | Media đã xóa               | Tệp không còn khả dụng.                                      |
@@ -433,13 +378,11 @@ Equipment = Unpublished
 
 - Chỉ Media ở trạng thái ready được thay đổi visibility.
 
-- Chỉ purpose cho phép Public mới được chuyển sang public.
-
 - Business Service chịu trách nhiệm kiểm tra quyền publish/unpublish của người dùng.
 
-- Browser không được tự xác định ownerService.
+- Browser không được gọi trực tiếp API đổi visibility bằng user token.
 
-- Media phải thuộc đúng ownerService, ownerEntityType và ownerEntityId.
+- Business Service phải kiểm tra quan hệ entity–media trước khi đổi visibility.
 
 - Thay đổi visibility không tạo Media mới.
 
@@ -463,6 +406,6 @@ Equipment = Unpublished
 
 ## 5.8. Hợp đồng MVP
 
-Business Service có service token scope `media.publish` gọi `PUT /api/v1/media/{mediaId}/visibility` với `{ "visibility": "public", "ownerEntityType": "Equipment", "ownerEntityId": "equipment-123" }`; đổi về `private` dùng cùng endpoint. MediaService xác định ownerService từ token, kiểm tra entity/status/purpose và trả `{ "mediaId": "...", "visibility": "Public" }`. Cùng yêu cầu lặp lại là thành công.
+Business Service có service token scope `media.publish` gọi `PUT /api/v1/media/{mediaId}/visibility` với `{ "visibility": "public" }`; đổi về `private` dùng cùng endpoint. Business Service kiểm tra quan hệ entity–media trước khi gọi; MediaService kiểm tra status và scope và trả `{ "mediaId": "...", "visibility": "Public" }`. Cùng yêu cầu lặp lại là thành công.
 
-Trong ba purpose hiện có, `equipment-image` và `organization-logo` cho phép Public; `equipment-document` chỉ Private. Video và purpose của service nghiệp vụ khác chưa nằm trong MVP này.
+Business Service quyết định loại file nào có thể Public. MediaService chỉ hỗ trợ JPEG, PNG, WebP và PDF trong MVP; video chưa được hỗ trợ.
