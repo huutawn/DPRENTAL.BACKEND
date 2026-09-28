@@ -313,7 +313,8 @@ public sealed class UserServiceTests
         IRoleRepository? roleRepository = null,
         IPasswordHasher<User>? passwordHasher = null,
         TimeProvider? timeProvider = null,
-        string creationKey = ValidBootstrapKey)
+        string creationKey = ValidBootstrapKey
+        )
     {
         return new UserService(
             userRepository,
@@ -451,12 +452,20 @@ public sealed class UserServiceTests
         public Task<Session> CreateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> UpdateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task CreateSessionAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<AuthSessionPrincipal?> CreateAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, string? deviceName, string? ipAddress, CancellationToken cancellationToken = default)
+            => Task.FromResult<AuthSessionPrincipal?>(null);
+
+        public Task<AuthSessionPrincipal?> ConsumeGoogleLoginTicketAndCreateSessionAsync(string ticketHash, string refreshTokenHash, DateTime createdAtUtc, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<AuthSessionPrincipal?> RotateAsync(string currentRefreshTokenHash, string replacementRefreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
         public Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<Guid?> ConsumeGoogleLoginTicketAndCreateSessionAsync(string ticketHash, string refreshTokenHash, DateTime utcNow, DateTime sessionExpiresAtUtc, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<bool> RotateTokenAsync(Guid currentTokenId, Guid sessionId, Guid userId, string replacementHash, DateTime sessionExpiresAtUtc, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotSupportedException();

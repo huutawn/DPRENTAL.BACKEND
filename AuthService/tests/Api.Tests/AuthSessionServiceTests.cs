@@ -20,7 +20,7 @@ public sealed class AuthSessionServiceTests
         RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), ["member"]));
         AuthSessionService service = CreateService(repository, now);
 
-        Result<AuthTokenPair> result = await service.CreateSessionAsync(repository.Principal!.Id);
+        Result<AuthTokenPair> result = await service.CreateSessionAsync(repository.Principal!.UserId);
 
         Assert.True(result.IsSuccess);
         Assert.Equal("access-token", result.Value.AccessToken);
@@ -75,7 +75,7 @@ public sealed class AuthSessionServiceTests
         RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), []));
         AuthSessionService service = CreateService(repository, now);
 
-        Result<string> result = await service.CreateGoogleLoginTicketAsync(repository.Principal!.Id);
+        Result<string> result = await service.CreateGoogleLoginTicketAsync(repository.Principal!.UserId);
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(result.Value);
@@ -139,7 +139,7 @@ public sealed class AuthSessionServiceTests
         public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default)
         {
             if (Principal is null) return Task.FromResult<RefreshToken?>(null);
-            User user = new() { Id = Principal.Id, IsActive = true };
+            User user = new() { Id = Principal.UserId, IsActive = true };
             foreach (string roleName in Principal.Roles)
             {
                 user.UserRoles.Add(new UserRole { Role = new Role { Name = roleName } });
@@ -157,13 +157,13 @@ public sealed class AuthSessionServiceTests
             return Task.FromResult<RefreshToken?>(token);
         }
 
-        public Task<bool> RotateTokenAsync(
-            Guid currentTokenId, Guid sessionId, Guid userId, string replacementHash,
-            DateTime sessionExpiresAtUtc, DateTime utcNow, CancellationToken cancellationToken = default)
+        // ĐÃ SỬA: Đổi tên thành RotateAsync, rút gọn tham số và trả về Task<AuthSessionPrincipal?>
+        public Task<AuthSessionPrincipal?> RotateAsync(
+            string currentRefreshTokenHash, string replacementRefreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default)
         {
             RotateCalled = true;
-            ReplacementRefreshTokenHash = replacementHash;
-            return Task.FromResult(true);
+            ReplacementRefreshTokenHash = replacementRefreshTokenHash;
+            return Task.FromResult(Principal);
         }
 
         public Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
@@ -171,7 +171,7 @@ public sealed class AuthSessionServiceTests
             CreatedTicketHash = ticketHash;
             TicketCreatedAtUtc = utcNow;
             TicketExpiresAtUtc = expiresAtUtc;
-            return Task.FromResult(Principal?.Id == userId);
+            return Task.FromResult(Principal?.UserId == userId);
         }
 
         public Task<AuthSessionPrincipal?> ConsumeGoogleLoginTicketAndCreateSessionAsync(
@@ -191,7 +191,7 @@ public sealed class AuthSessionServiceTests
         }
 
         public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => Task.FromResult(Principal?.Id);
+        public Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => Task.FromResult(Principal?.UserId);
         public Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<Session>>([]);
         public Task<Guid?> GetSessionIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => Task.FromResult<Guid?>(null);
         public Task<bool> RevokeSessionForUserAsync(Guid userId, Guid sessionId, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
@@ -213,13 +213,13 @@ public sealed class AuthSessionServiceTests
     {
         public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
         {
-            if (principal is null || principal.Id != id) return Task.FromResult<User?>(null);
+            if (principal is null || principal.UserId != id) return Task.FromResult<User?>(null);
             return Task.FromResult<User?>(new User { Id = id, IsActive = true });
         }
 
         public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default)
         {
-            if (principal is null || principal.Id != id) return Task.FromResult<User?>(null);
+            if (principal is null || principal.UserId != id) return Task.FromResult<User?>(null);
             User user = new() { Id = id, IsActive = true };
             foreach (string role in principal.Roles)
             {
@@ -229,7 +229,7 @@ public sealed class AuthSessionServiceTests
         }
 
         public Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(principal is not null && principal.Id == userId);
+            Task.FromResult(principal is not null && principal.UserId == userId);
 
         public Task<IReadOnlyList<User>> GetAllAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<User> CreateAsync(User entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();

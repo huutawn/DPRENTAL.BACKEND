@@ -3,7 +3,6 @@ using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Exceptions;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Http;
@@ -337,16 +336,24 @@ public sealed class UserAccountServiceTests
         public List<Guid> RevokedUsers { get; } = [];
 
         public Task<AuthSessionPrincipal?> CreateAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, string? deviceName, string? ipAddress, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task<AuthSessionPrincipal?> ConsumeGoogleLoginTicketAndCreateSessionAsync(string ticketHash, string refreshTokenHash, DateTime createdAtUtc, DateTime expiresAtUtc, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<bool> RotateTokenAsync(Guid currentTokenId, Guid sessionId, Guid userId, string replacementHash, DateTime sessionExpiresAtUtc, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        // Đã thay thế RotateTokenAsync bằng RotateAsync chuẩn theo Interface mới
+        public Task<AuthSessionPrincipal?> RotateAsync(string currentRefreshTokenHash, string replacementRefreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default)
         {
             RevokedUsers.Add(userId);
             return Task.CompletedTask;
         }
+
         public Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Session?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<Session>> GetAllAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
@@ -377,7 +384,11 @@ public sealed class UserAccountServiceTests
 
         public Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
         public Task<IReadOnlyList<string>> GetScopedPermissionCodesAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
-        public Task<IReadOnlyList<string>> GetEffectivePermissionsAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<IReadOnlyList<string>> GetEffectivePermissionsAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default)
+        {
+            _ = this;
+            return Task.FromResult<IReadOnlyList<string>>([]);
+        }
     }
 
     private sealed class FakeOrgRepo : IOrganizationRepository

@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using UAParser;
 
+
 namespace Dprental.AuthService.Application.Services;
 
 /// <summary>
@@ -31,8 +32,10 @@ public sealed class AuthSessionService(
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(30);
     private static readonly TimeSpan GoogleLoginTicketLifetime = TimeSpan.FromSeconds(90);
 
+
     public async Task<Result<AuthTokenPair>> CreateSessionAsync(Guid userId, CancellationToken cancellationToken = default)
     {
+        _ = userRepository;
         if (!DtoValidator.TryValidateId(userId, nameof(userId), out Error? validationError))
         {
             return Result.Failure<AuthTokenPair>(validationError);
@@ -142,7 +145,7 @@ public sealed class AuthSessionService(
 
                 AuthTokenPair tokens = IssueTokenPair(principal, refreshToken);
 
-                await LogAuditAsync(principal.Id, principal.Id.ToString(), "Google_Exchange", "Success", cancellationToken);
+                await LogAuditAsync(principal.UserId, principal.UserId.ToString(), "Google_Exchange", "Success", cancellationToken);
                 return Result.Success(tokens);
             },
             logger,
@@ -180,7 +183,7 @@ public sealed class AuthSessionService(
 
                 AuthTokenPair tokens = IssueTokenPair(principal, replacementRefreshToken);
 
-                await LogAuditAsync(principal.Id, principal.Id.ToString(), "Refresh", "Success", cancellationToken);
+                await LogAuditAsync(principal.UserId, principal.UserId.ToString(), "Refresh", "Success", cancellationToken);
                 return Result.Success(tokens);
             },
             logger,
@@ -344,7 +347,7 @@ public sealed class AuthSessionService(
     private AuthTokenPair IssueTokenPair(AuthSessionPrincipal principal, string refreshToken)
     {
         IssuedAccessToken accessToken = accessTokenIssuer.Issue(new AccessTokenRequest(
-            principal.Id,
+            principal.UserId,
             principal.Roles,
             principal.Permissions,
             principal.OrganizationIds));

@@ -1,9 +1,8 @@
-using Dprental.AuthService.Domain.Data;
-using Dprental.AuthService.Domain.Access;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
 using Microsoft.EntityFrameworkCore;
+using Dprental.AuthService.Domain.Repositories;
 
 namespace Dprental.AuthService.Domain.Repositories;
 
@@ -325,13 +324,32 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         return user is null ? null : BuildPrincipal(user);
     }
 
-    private static AuthSessionPrincipal BuildPrincipal(User user) =>
-        new(
-            user.Id,
-            UserAccessResolver.Roles(user),
-            UserAccessResolver.Permissions(user),
-            UserAccessResolver.ActiveMemberships(user).Select(membership => membership.OrganizationId).ToArray()
-        );
+    private static AuthSessionPrincipal BuildPrincipal(User user)
+    {
+        string[] roles = user.UserRoles?
+            .Select(ur => ur.Role.Name)
+            .Where(name => !string.IsNullOrEmpty(name))
+            .Distinct()
+            .ToArray() ?? [];
+        var globalPermissions = user.UserRoles?
+            .SelectMany(ur => ur.Role.RolePermissions)
+            .Select(rp => rp.Permission.Code) ?? [];
+
+        var orgPermissions = user.OrganizationMemberships?
+            .SelectMany(m => m.Role.RolePermissions)
+            .Select(rp => rp.Permission.Code) ?? [];
+
+        string[] permissions = globalPermissions.Concat(orgPermissions)
+            .Where(name => !string.IsNullOrEmpty(name))
+            .Distinct()
+            .ToArray();
+        Guid[] orgIds = user.OrganizationMemberships?
+            .Select(m => m.OrganizationId)
+            .Distinct()
+            .ToArray() ?? [];
+
+        return new AuthSessionPrincipal(user.Id, roles, permissions, orgIds);
+    }
 
     private static bool IsUsable(Session session, RefreshToken refreshToken, DateTime utcNow) =>
         session.RevokedAtUtc is null &&
