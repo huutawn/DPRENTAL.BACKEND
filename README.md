@@ -293,28 +293,33 @@ Runtime lắng nghe cổng `8080`, chạy non-root user `$APP_UID` và tích h�
 
 ## CI/CD Gateway cho dev
 
-Workflow [gateway-dev.yml](.github/workflows/gateway-dev.yml) chạy khi tạo pull request hoặc push vào nhánh `gateway/develop-ci-cd`:
+Workflow [gateway-dev.yml](.github/workflows/gateway-dev.yml) chỉ chạy khi có push vào `gateway/develop-ci-cd`; nó không chạy cho pull request và không kiểm tra branch nền hoặc chạy test. Job publish build và đẩy Docker image lên GHCR một lần, sau đó job deploy chạy trên VPS. Kiểm tra build và test .NET vẫn có trong [pre-push hook](scripts/pre-push-check.sh) ở máy lập trình viên, nhưng hook này có thể bị bỏ qua và không thay thế CI.
 
-1. **Validate**:
-   - Kiểm tra commit hiện tại đã chứa `origin/gateway/develop` mới nhất.
-   - Khôi phục, biên dịch và chạy kiểm thử tự động `Gateway/Gateway.sln`.
-   - Với pull request, xây dựng thử nghiệm Docker runtime image.
+Mỗi push sẽ publish image GHCR bất biến bằng full Git SHA:
 
-2. **Release** (chỉ khi push vào `gateway/develop-ci-cd`):
-   - Xây dựng Docker runtime image một lần, sử dụng cache build của GitHub Actions, rồi đăng nhập GHCR và xuất bản image bất biến:
-     ```text
-     ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-gateway:<git-sha>
-     ```
-   - Truyền `GITHUB_TOKEN` của run qua SSH, đăng nhập GHCR bằng Docker config tạm trên VPS, rồi thực thi [deploy-gateway.sh](scripts/deploy-gateway.sh). Docker config tạm được xóa sau deploy.
-   - Cập nhật **chỉ duy nhất biến `GATEWAY_IMAGE`** trong `/opt/dprental/dev/release.env`, bảo toàn nguyên vẹn mọi image khác (`AUTH_SERVICE_IMAGE`, `AUTH_MIGRATOR_IMAGE`...).
-   - Chỉ pull image `gateway` và khởi động lại duy nhất container này với `--no-deps --force-recreate gateway`.
-   - Chờ Gateway đạt trạng thái healthy và thực hiện kiểm thử khói (smoke tests) cả nội bộ lẫn qua domain công khai.
+```text
+ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-gateway:<git-sha>
+```
 
-Cấu hình GitHub Environment `dev` cần các secrets sau:
+Thiết lập GitHub Environment variable `GHCR_IMAGE_NAMESPACE` bằng namespace GHCR viết thường (ví dụ `huutawn`). Workflow gắn OCI source metadata để package mới tự liên kết repository. Với package đã từng được push thủ công, vào package GHCR và cấp repository workflow quyền **Write** trong phần Actions access trước lần CI đầu tiên. Tạo GitHub Environment tên `dev` với các secrets sau:
 
 ```text
 DEV_VPS_HOST              # IP hoặc hostname VPS
-DEV_VPS_USER              # User deploy thuộc group docker
-DEV_VPS_SSH_PRIVATE_KEY   # Private key SSH riêng của user deploy
-DEV_VPS_PORT              # Tùy chọn, mặc định 22
+DEV_VPS_USER              # user deploy thuộc group docker
+DEV_VPS_SSH_PRIVATE_KEY   # private key riêng của user deploy
+DEV_VPS_KNOWN_HOSTS       # dòng host key theo định dạng known_hosts
+DEV_VPS_PORT              # tùy chọn, mặc định 22
 ```
+
+Workflow nạp deploy key vào `ssh-agent` qua stdin và kiểm tra host key đã lưu trong `DEV_VPS_KNOWN_HOSTS`. Nó truyền `GITHUB_TOKEN` cùng deploy script qua stdin của kết nối SSH, không đặt token trong câu lệnh SSH. Trên VPS, script đăng nhập GHCR bằng Docker config tạm rồi thực thi [deploy-gateway.sh](scripts/deploy-gateway.sh) từ commit đang phát hành. Docker credential tạm bị xóa ngay khi script kết thúc; user SSH của workflow cần quyền đọc `.env` và ghi `release.env`.
+
+Script cập nhật **chỉ duy nhất biến `GATEWAY_IMAGE`** trong `/opt/dprental/dev/release.env`, bảo toàn nguyên vẹn mọi image khác (`AUTH_SERVICE_IMAGE`, `AUTH_MIGRATOR_IMAGE`...). Nó pull duy nhất image `gateway`, khởi động lại container với `--no-deps --force-recreate gateway`, chờ Gateway đạt trạng thái healthy và thực hiện kiểm thử khói (smoke tests) cả nội bộ lẫn qua domain công khai.
+
+Ví dụ cấp quyền ghi `release.env` cho user GitHub Actions trên VPS (thay `deploy` bằng user thực tế):
+
+```bash
+sudo chown deploy:deploy /opt/dprental/dev/release.env
+sudo chmod 600 /opt/dprental/dev/release.env
+```
+
+User `deploy` phải thuộc group `docker`; quyền Docker tương đương quyền quản trị VPS nên deploy key chỉ dùng cho automation này. Khóa host SSH có thể lấy từ máy tin cậy bằng `ssh-keyscan -H <vps-host>` rồi lưu nguyên kết quả vào `DEV_VPS_KNOWN_HOSTS`. Nếu chỉ muốn triển khai sau khi merge PR, cấu hình branch protection/ruleset cho `gateway/develop-ci-cd` để yêu cầu PR và chặn push trực tiếp; event `push` tự nó không bảo đảm commit đến từ PR.

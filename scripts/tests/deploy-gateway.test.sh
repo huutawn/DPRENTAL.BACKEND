@@ -35,6 +35,7 @@ fake_bin="$temporary_directory/bin"
 docker_log="$temporary_directory/docker.log"
 curl_log="$temporary_directory/curl.log"
 docker_config_log="$temporary_directory/docker-config-path"
+deploy_log="$temporary_directory/deploy.log"
 release_sha='0123456789abcdef0123456789abcdef01234567'
 
 mkdir -p "$deploy_directory" "$fake_bin"
@@ -91,7 +92,7 @@ PATH="$fake_bin:$PATH" \
   GHCR_TOKEN=test-token \
   EXPECTED_GHCR_TOKEN=test-token \
   GATEWAY_DEPLOY_HEALTH_INTERVAL_SECONDS=0 \
-  "$deployer" "$release_sha" >/dev/null
+  bash -s -- "$release_sha" < "$deployer" > "$deploy_log"
 
 assert_contains "GATEWAY_IMAGE=ghcr.io/example/dprental-gateway:$release_sha" "$deploy_directory/release.env"
 assert_contains 'AUTH_SERVICE_IMAGE=ghcr.io/example/dprental-auth:previous' "$deploy_directory/release.env"
@@ -109,6 +110,7 @@ assert_not_contains 'recreate auth-service' "$docker_log"
 
 assert_contains 'exec -T gateway wget --quiet --tries=1 --spider http://127.0.0.1:8080/health/ready' "$docker_log"
 assert_contains 'https://dev-api.example.test/health/ready' "$curl_log"
+assert_contains "Gateway revision $release_sha đã healthy" "$deploy_log"
 
 PATH="$fake_bin:$PATH" \
   DOCKER_LOG="$docker_log" \
@@ -120,7 +122,7 @@ PATH="$fake_bin:$PATH" \
   GHCR_TOKEN=test-token \
   EXPECTED_GHCR_TOKEN=test-token \
   GATEWAY_DEPLOY_HEALTH_INTERVAL_SECONDS=0 \
-  "$deployer" >/dev/null
+  bash -s -- < "$deployer" >/dev/null
 
 if PATH="$fake_bin:$PATH" DPR_DEPLOY_DIRECTORY="$deploy_directory" GHCR_USERNAME=example "$deployer" "$release_sha" >/dev/null 2>&1; then
   fail 'Thiếu GHCR_TOKEN lại được chấp nhận.'
