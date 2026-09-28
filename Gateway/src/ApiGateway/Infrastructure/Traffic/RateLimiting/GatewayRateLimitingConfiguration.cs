@@ -5,11 +5,11 @@ using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Dprental.Gateway.Application.Traffic;
 using Dprental.Gateway.Domain.Security;
-using Dprental.Gateway.Domain.Traffic;
 using Dprental.Gateway.Errors;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Net.Http.Headers;
 
 namespace Dprental.Gateway.Infrastructure.Traffic.RateLimiting;
 
@@ -48,7 +48,7 @@ public static class GatewayRateLimitingConfiguration
             if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfter))
             {
                 int seconds = (int)Math.Ceiling(retryAfter.TotalSeconds);
-                context.HttpContext.Response.Headers[ResilienceConstants.RetryAfterHeader] =
+                context.HttpContext.Response.Headers[HeaderNames.RetryAfter] =
                     seconds.ToString(CultureInfo.InvariantCulture);
             }
 

@@ -3,7 +3,10 @@ using Dprental.Gateway.Application.Observability;
 using Dprental.Gateway.Domain.Observability;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
-using Yarp.ReverseProxy.Model;
+using System.Linq;
+using Ocelot.Configuration;
+using Ocelot.Errors;
+using Ocelot.Middleware;
 
 namespace Dprental.Gateway.Infrastructure.Observability;
 
@@ -64,17 +67,22 @@ public sealed class GatewayMetricsMiddleware
 
     private void RecordMetrics(HttpContext context, double durationSeconds)
     {
-        IReverseProxyFeature? proxyFeature = context.Features.Get<IReverseProxyFeature>();
-        string route = proxyFeature?.Route?.Config?.RouteId ?? context.Request.Path.Value ?? "/";
-        string upstream = proxyFeature?.Cluster?.Config?.ClusterId ?? "gateway";
+        DownstreamRoute? downstreamRoute = context.Items.DownstreamRoute();
+        string route = !string.IsNullOrWhiteSpace(downstreamRoute?.Key)
+            ? downstreamRoute.Key
+            : downstreamRoute?.UpstreamPathTemplate?.OriginalValue ?? context.Request.Path.Value ?? "/";
+        string upstream = !string.IsNullOrWhiteSpace(downstreamRoute?.ServiceName)
+            ? downstreamRoute.ServiceName
+            : (!string.IsNullOrWhiteSpace(downstreamRoute?.Key) ? downstreamRoute.Key : "gateway");
         string method = context.Request.Method;
         int statusCode = context.Response.StatusCode;
 
         // 1. Ghi nhận request và thời gian xử lý (kèm phân loại lỗi 4xx/5xx nếu có)
         metrics.RecordRequest(route, method, statusCode, durationSeconds, upstream);
 
-        // 2. Ghi nhận metric chuyên biệt cho Upstream Timeout (504)
-        if (statusCode == StatusCodes.Status504GatewayTimeout)
+        // 2. Ghi nhận metric chuyên biệt cho Upstream Timeout (504 hoặc Ocelot 503 RequestTimedOutError)
+        if (statusCode == StatusCodes.Status504GatewayTimeout ||
+            (statusCode == StatusCodes.Status503ServiceUnavailable && context.Items.Errors().Any(e => e.Code == OcelotErrorCode.RequestTimedOutError)))
         {
             metrics.RecordUpstreamTimeout(route, method, upstream);
         }

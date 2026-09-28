@@ -26,7 +26,7 @@ namespace Dprental.Gateway.Tests;
 /// 3. Timeout kích hoạt tăng metric upstream_timeout_total.
 /// 4. 429 kích hoạt tăng metric rate_limit_total.
 /// 5. /health/live hoạt động và trả về trạng thái Healthy.
-/// 6. /health/ready phản ánh tính sẵn sàng của JWKS và cấu hình Reverse Proxy.
+/// 6. /health/ready phản ánh tính sẵn sàng của JWKS và cấu hình Ocelot.
 /// 7. Tuyệt đối không rò rỉ token, password hay secret trong log.
 /// </summary>
 public sealed class GatewayObservabilityIntegrationTests
@@ -139,7 +139,7 @@ public sealed class GatewayObservabilityIntegrationTests
 
         using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/sessions");
 
-        Assert.Equal(HttpStatusCode.GatewayTimeout, response.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         listener.RecordObservableInstruments();
 
         Assert.True(timeoutCount >= 1, "Metric gateway_upstream_timeout_total phải được tăng khi xảy ra timeout.");
@@ -246,13 +246,23 @@ public sealed class GatewayObservabilityIntegrationTests
             ["Gateway:Authentication:Jwt:Issuer"] = Issuer,
             ["Gateway:Authentication:Jwt:Audience"] = Audience,
             ["Gateway:Authentication:Jwt:JwksUri"] = new Uri(upstreamAddress, ".well-known/jwks.json").AbsoluteUri,
-            ["ReverseProxy:Clusters:auth-service:Destinations:primary:Address"] = upstreamAddress.AbsoluteUri
+            ["Routes:0:DownstreamScheme"] = upstreamAddress.Scheme,
+            ["Routes:0:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
+            ["Routes:0:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Routes:1:DownstreamScheme"] = upstreamAddress.Scheme,
+            ["Routes:1:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
+            ["Routes:1:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Routes:2:DownstreamScheme"] = upstreamAddress.Scheme,
+            ["Routes:2:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
+            ["Routes:2:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Routes:3:DownstreamScheme"] = upstreamAddress.Scheme,
+            ["Routes:3:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
+            ["Routes:3:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
 
         if (timeoutSeconds.HasValue)
         {
-            overrides["Gateway:Traffic:Resilience:DefaultTimeoutSeconds"] = timeoutSeconds.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            overrides["ReverseProxy:Clusters:auth-service:HttpRequest:Timeout"] = $"00:00:{timeoutSeconds.Value:D2}";
+            overrides["GlobalConfiguration:Timeout"] = timeoutSeconds.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         if (anonymousPermitLimit.HasValue)

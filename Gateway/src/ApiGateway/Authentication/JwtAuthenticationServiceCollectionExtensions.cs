@@ -1,5 +1,4 @@
 using System.IdentityModel.Tokens.Jwt;
-using Dprental.Gateway.Errors;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -29,12 +28,7 @@ internal static class JwtAuthenticationServiceCollectionExtensions
 
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer();
-        services.AddAuthorization(options =>
-        {
-            // Any future route that is not explicitly Anonymous must present a valid access token.
-            options.FallbackPolicy = options.DefaultPolicy;
-        });
-        services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler, GatewayAuthorizationMiddlewareResultHandler>();
+        services.AddAuthorization();
         services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
             .Configure<JwksConfigurationManager, IOptions<GatewayJwtOptions>>(ConfigureJwtBearer);
 

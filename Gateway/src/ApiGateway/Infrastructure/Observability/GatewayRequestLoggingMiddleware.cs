@@ -5,7 +5,8 @@ using Dprental.Gateway.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Yarp.ReverseProxy.Model;
+using Ocelot.Configuration;
+using Ocelot.Middleware;
 
 namespace Dprental.Gateway.Infrastructure.Observability;
 
@@ -92,10 +93,14 @@ public sealed partial class GatewayRequestLoggingMiddleware
 
         string traceId = Activity.Current?.TraceId.ToString() ?? correlationId;
 
-        // 2. Trích xuất Route và Upstream Service từ YARP feature nếu có (an toàn với các route không qua proxy như /health)
-        IReverseProxyFeature? proxyFeature = context.Features.Get<IReverseProxyFeature>();
-        string route = proxyFeature?.Route?.Config?.RouteId ?? context.Request.Path.Value ?? "/";
-        string upstream = proxyFeature?.Cluster?.Config?.ClusterId ?? "gateway";
+        // 2. Trích xuất Route và Upstream Service từ Ocelot nếu có (an toàn với các route không qua proxy như /health)
+        DownstreamRoute? downstreamRoute = context.Items.DownstreamRoute();
+        string route = !string.IsNullOrWhiteSpace(downstreamRoute?.Key)
+            ? downstreamRoute.Key
+            : downstreamRoute?.UpstreamPathTemplate?.OriginalValue ?? context.Request.Path.Value ?? "/";
+        string upstream = !string.IsNullOrWhiteSpace(downstreamRoute?.ServiceName)
+            ? downstreamRoute.ServiceName
+            : (!string.IsNullOrWhiteSpace(downstreamRoute?.Key) ? downstreamRoute.Key : "gateway");
         string method = context.Request.Method;
         int statusCode = context.Response.StatusCode;
         string timestamp = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);

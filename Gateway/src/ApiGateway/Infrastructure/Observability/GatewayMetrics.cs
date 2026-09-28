@@ -49,7 +49,7 @@ public sealed class GatewayMetrics : IGatewayMetrics, IDisposable
         upstreamTimeoutCounter = meter.CreateCounter<long>(
             GatewayMetricNames.UpstreamTimeoutTotal,
             unit: "{request}",
-            description: "Tổng số request bị upstream timeout (504).");
+            description: "Tổng số request bị upstream timeout (Ocelot 503 hoặc Gateway 504).");
 
         rateLimitCounter = meter.CreateCounter<long>(
             GatewayMetricNames.RateLimitTotal,

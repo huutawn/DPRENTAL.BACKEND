@@ -26,8 +26,19 @@ services:
       - Gateway__Authentication__Jwt__Audience=${GATEWAY_JWT_AUDIENCE:-dprental-clients}
       - Gateway__Authentication__Jwt__JwksUri=${GATEWAY_JWKS_URI:-http://${AUTH_SERVICE_HOST:-auth-service}:${AUTH_SERVICE_PORT:-5000}/.well-known/jwks.json}
 
-      # Cấu hình Upstream URL cho YARP Reverse Proxy
-      - ReverseProxy__Clusters__auth-service__Destinations__primary__Address=${AUTH_SERVICE_UPSTREAM_URL:-http://${AUTH_SERVICE_HOST:-auth-service}:${AUTH_SERVICE_PORT:-5000}/}
+      # Cấu hình Upstream cho Ocelot Routes (Host, Port, Scheme)
+      - Routes__0__DownstreamScheme=${AUTH_SERVICE_SCHEME:-http}
+      - Routes__0__DownstreamHostAndPorts__0__Host=${AUTH_SERVICE_HOST:-auth-service}
+      - Routes__0__DownstreamHostAndPorts__0__Port=${AUTH_SERVICE_PORT:-5000}
+      - Routes__1__DownstreamScheme=${AUTH_SERVICE_SCHEME:-http}
+      - Routes__1__DownstreamHostAndPorts__0__Host=${AUTH_SERVICE_HOST:-auth-service}
+      - Routes__1__DownstreamHostAndPorts__0__Port=${AUTH_SERVICE_PORT:-5000}
+      - Routes__2__DownstreamScheme=${AUTH_SERVICE_SCHEME:-http}
+      - Routes__2__DownstreamHostAndPorts__0__Host=${AUTH_SERVICE_HOST:-auth-service}
+      - Routes__2__DownstreamHostAndPorts__0__Port=${AUTH_SERVICE_PORT:-5000}
+      - Routes__3__DownstreamScheme=${AUTH_SERVICE_SCHEME:-http}
+      - Routes__3__DownstreamHostAndPorts__0__Host=${AUTH_SERVICE_HOST:-auth-service}
+      - Routes__3__DownstreamHostAndPorts__0__Port=${AUTH_SERVICE_PORT:-5000}
 
       # Cấu hình Bảo mật CORS & Kích thước Payload
       - Gateway__Security__Cors__AllowedOrigins__0=${CORS_ALLOWED_ORIGIN_0:-http://localhost:3000}
@@ -35,7 +46,7 @@ services:
       - Gateway__Security__RequestSize__MaxRequestBodySizeBytes=${MAX_REQUEST_BODY_SIZE_BYTES:-10485760}
 
       # Cấu hình Điều phối lưu lượng & Phục hồi
-      - Gateway__Traffic__Resilience__DefaultTimeoutSeconds=${DEFAULT_TIMEOUT_SECONDS:-10}
+      - GlobalConfiguration__Timeout=${DEFAULT_TIMEOUT_SECONDS:-10}
       - Gateway__Traffic__RateLimiting__Anonymous__PermitLimit=${RATE_LIMIT_ANONYMOUS_PERMIT:-20}
       - Gateway__Traffic__RateLimiting__Authenticated__PermitLimit=${RATE_LIMIT_AUTHENTICATED_PERMIT:-100}
       - Gateway__Traffic__RateLimiting__Sensitive__PermitLimit=${RATE_LIMIT_SENSITIVE_PERMIT:-5}
