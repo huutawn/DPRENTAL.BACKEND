@@ -227,7 +227,7 @@ assert_contains 'up -d --no-deps --force-recreate media-service' "$docker_log"
 assert_contains 'inspect --format {{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}} media-service-container-123' "$docker_log"
 assert_contains 'exec -T media-service perl -MIO::Socket::INET -e $s=IO::Socket::INET->new("127.0.0.1:8080") or exit 1; print $s "GET /health/ready HTTP/1.0\r\n\r\n"; my $r=<$s>; exit($r =~ /200/ ? 0 : 1)' "$docker_log"
 assert_contains 'https://dev-api.example.test/health/ready' "$curl_log"
-assert_contains 'https://dev-api.example.test/api/v1/media/00000000-0000-0000-0000-000000000000/content' "$curl_log"
+assert_contains 'https://dev-api.example.test/api/v1/media/11111111-1111-1111-1111-111111111111/content' "$curl_log"
 assert_contains "MediaService revision $release_sha đã healthy" "$deploy_log"
 
 # Kiểm tra thứ tự: backup -> migration -> restart
@@ -348,8 +348,7 @@ if PATH="$fake_bin:$PATH" \
   bash -s -- "$release_sha" < "$deployer" > "$deploy_log" 2>&1; then
   fail 'Gateway media route không kết nối được nhưng script deploy không dừng.'
 fi
-assert_contains 'không thể kết nối route Media qua Gateway' "$deploy_log"
-
+assert_contains 'route Media qua Gateway không đạt phản hồi hợp lệ sau' "$deploy_log"
 setup_test_env
 if PATH="$fake_bin:$PATH" \
   DOCKER_LOG="$docker_log" \
@@ -364,7 +363,77 @@ if PATH="$fake_bin:$PATH" \
   bash -s -- "$release_sha" < "$deployer" > "$deploy_log" 2>&1; then
   fail 'Gateway media route trả 502 nhưng script deploy không dừng.'
 fi
-assert_contains 'route Media qua Gateway trả mã HTTP không mong đợi: 502' "$deploy_log"
+assert_contains 'route Media qua Gateway không đạt phản hồi hợp lệ sau' "$deploy_log"
+assert_contains 'mã HTTP cuối: 502' "$deploy_log"
+# 6b. Test Gateway route ban đầu trả 502 nhưng hồi phục sau retry (transient 502 recovery)
+setup_test_env
+retry_state_file="$temporary_directory/retry_state"
+rm -f "$retry_state_file"
+
+cat > "$fake_bin/curl" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "\$*" >> "$curl_log"
+case " \$* " in
+  *'/api/v1/media/'*'/content'*)
+    if [ ! -f "$retry_state_file" ]; then
+      touch "$retry_state_file"
+      printf '502'
+      exit 0
+    fi
+    printf '404'
+    exit 0
+    ;;
+  *'/health/ready'*)
+    exit 0
+    ;;
+esac
+EOF
+chmod +x "$fake_bin/curl"
+
+PATH="$fake_bin:$PATH" \
+  DOCKER_LOG="$docker_log" \
+  DOCKER_CONFIG_LOG="$docker_config_log" \
+  CURL_LOG="$curl_log" \
+  DPR_DEPLOY_DIRECTORY="$deploy_directory" \
+  GHCR_USERNAME=example \
+  GHCR_TOKEN=test-token \
+  EXPECTED_GHCR_TOKEN=test-token \
+  MEDIA_DEPLOY_HEALTH_INTERVAL_SECONDS=0 \
+  bash -s -- "$release_sha" < "$deployer" > "$deploy_log"
+
+assert_contains 'Đang chờ route Media qua Gateway sẵn sàng' "$deploy_log"
+assert_contains "MediaService revision $release_sha đã healthy" "$deploy_log"
+
+# Khôi phục curl giả lập mặc định
+cat > "$fake_bin/curl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$CURL_LOG"
+if [ "${FAIL_CURL:-}" = 1 ]; then
+  exit 1
+fi
+case " $* " in
+  *'/api/v1/media/'*'/content'*)
+    if [ "${FAIL_GATEWAY_MEDIA_ROUTE:-}" = 1 ]; then
+      exit 1
+    fi
+    if [ "${GATEWAY_MEDIA_HTTP_CODE:-}" != "" ]; then
+      printf '%s' "$GATEWAY_MEDIA_HTTP_CODE"
+      exit 0
+    fi
+    printf '404'
+    exit 0
+    ;;
+  *'/health/ready'*)
+    if [ "${FAIL_GATEWAY_HEALTH:-}" = 1 ]; then
+      exit 1
+    fi
+    exit 0
+    ;;
+esac
+EOF
+chmod +x "$fake_bin/curl"
 
 setup_test_env
 if PATH="$fake_bin:$PATH" \

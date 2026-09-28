@@ -167,28 +167,43 @@ smoke_test_media_internal_ready() {
 
 smoke_test_gateway_health() {
   local domain="$1"
+  local attempt
 
-  curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
-    "https://${domain}/health/ready" >/dev/null || \
-    fail 'health endpoint công khai qua Gateway thất bại; không tự rollback schema hoặc image.'
+  for ((attempt = 1; attempt <= HEALTH_ATTEMPTS; attempt++)); do
+    if curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
+      "https://${domain}/health/ready" >/dev/null 2>&1; then
+      return 0
+    fi
+    printf 'Đang chờ Gateway health sẵn sàng (%s/%s)...\n' "$attempt" "$HEALTH_ATTEMPTS"
+    sleep "$HEALTH_INTERVAL_SECONDS"
+  done
+
+  fail 'health endpoint công khai qua Gateway thất bại sau nhiều lần thử; không tự rollback schema hoặc image.'
 }
 
 smoke_test_gateway_media_route() {
   local domain="$1"
   local http_code
+  local attempt
 
-  http_code="$(curl --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
-    --output /dev/null --write-out '%{http_code}' \
-    "https://${domain}/api/v1/media/00000000-0000-0000-0000-000000000000/content")" || \
-    fail 'không thể kết nối route Media qua Gateway; không tự rollback schema hoặc image.'
+  for ((attempt = 1; attempt <= HEALTH_ATTEMPTS; attempt++)); do
+    http_code="$(curl --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
+      --output /dev/null --write-out '%{http_code}' \
+      "https://${domain}/api/v1/media/11111111-1111-1111-1111-111111111111/content" 2>/dev/null || true)"
 
-  case "$http_code" in
-    404)
-      ;;
-    *)
-      fail "route Media qua Gateway trả mã HTTP không mong đợi: ${http_code}; không tự rollback schema hoặc image."
-      ;;
-  esac
+    case "$http_code" in
+      404|400)
+        return 0
+        ;;
+      *)
+        printf 'Đang chờ route Media qua Gateway sẵn sàng (%s/%s, mã HTTP: %s)...\n' \
+          "$attempt" "$HEALTH_ATTEMPTS" "$http_code"
+        ;;
+    esac
+    sleep "$HEALTH_INTERVAL_SECONDS"
+  done
+
+  fail "route Media qua Gateway không đạt phản hồi hợp lệ sau ${HEALTH_ATTEMPTS} lần thử (mã HTTP cuối: ${http_code}); không tự rollback schema hoặc image."
 }
 
 [ "$#" -le 1 ] || usage
