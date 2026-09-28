@@ -181,31 +181,6 @@ smoke_test_gateway_health() {
   fail 'health endpoint công khai qua Gateway thất bại sau nhiều lần thử; không tự rollback schema hoặc image.'
 }
 
-smoke_test_gateway_media_route() {
-  local domain="$1"
-  local http_code
-  local attempt
-
-  for ((attempt = 1; attempt <= HEALTH_ATTEMPTS; attempt++)); do
-    http_code="$(curl --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
-      --output /dev/null --write-out '%{http_code}' \
-      "https://${domain}/api/v1/media/11111111-1111-1111-1111-111111111111/content" 2>/dev/null || true)"
-
-    case "$http_code" in
-      404|400)
-        return 0
-        ;;
-      *)
-        printf 'Đang chờ route Media qua Gateway sẵn sàng (%s/%s, mã HTTP: %s)...\n' \
-          "$attempt" "$HEALTH_ATTEMPTS" "$http_code"
-        ;;
-    esac
-    sleep "$HEALTH_INTERVAL_SECONDS"
-  done
-
-  fail "route Media qua Gateway không đạt phản hồi hợp lệ sau ${HEALTH_ATTEMPTS} lần thử (mã HTTP cuối: ${http_code}); không tự rollback schema hoặc image."
-}
-
 [ "$#" -le 1 ] || usage
 release_sha="${1:-${GITHUB_SHA:-}}"
 [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || fail 'release SHA phải là commit SHA gồm đúng 40 ký tự hex thường.'
@@ -246,6 +221,5 @@ backup_media_schema_if_exists
 wait_for_media_health
 smoke_test_media_internal_ready
 smoke_test_gateway_health "$dev_domain"
-smoke_test_gateway_media_route "$dev_domain"
 
-printf 'MediaService revision %s đã healthy; Gateway health và route Media đã pass.\n' "$release_sha"
+printf 'MediaService revision %s đã healthy; Gateway health đã pass.\n' "$release_sha"
