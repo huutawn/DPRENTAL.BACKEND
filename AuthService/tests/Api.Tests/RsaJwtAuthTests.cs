@@ -452,7 +452,9 @@ public sealed class RsaJwtAuthTests
             ["Auth:Jwt:Audience"] = options.Audience,
             ["Auth:Jwt:AccessTokenLifetimeMinutes"] = options.AccessTokenLifetimeMinutes.ToString(CultureInfo.InvariantCulture),
             ["Auth:Jwt:ActiveKeyId"] = options.ActiveKeyId,
-            ["Auth:AdminBootstrap:CreationKey"] = "test-bootstrap-creation-key"
+            ["Auth:AdminBootstrap:CreationKey"] = "test-bootstrap-creation-key",
+            ["MediaService:ApiKey"] = "test-media-key",
+            ["MediaService:PublicGatewayUrl"] = "http://gateway.example.test"
         };
 
         for (int index = 0; index < options.Keys.Count; index++)

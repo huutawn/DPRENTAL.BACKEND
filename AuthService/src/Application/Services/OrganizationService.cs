@@ -1,3 +1,4 @@
+using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
@@ -21,6 +22,7 @@ public sealed class OrganizationService(
     IOrganizationMembershipRepository membershipRepository,
     IRoleRepository roleRepository,
     ICorrelationIdProvider correlationIdProvider,
+    IMediaUrlResolver mediaUrlResolver,
     ILogger<OrganizationService> logger) : IOrganizationService
 {
     public async Task<Result<OrganizationResponse>> GetByIdAsync(
@@ -52,7 +54,21 @@ public sealed class OrganizationService(
                     return Result.Failure<OrganizationResponse>(AuthErrors.Organization.CrossOrganizationAccessDenied);
                 }
 
-                return Result.Success(org.ToResponse());
+                string? logoUrl = mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId);
+                string? licenseUrl = null;
+                DateTime? licenseExpires = null;
+                if (org.BusinessLicenseDocumentMediaId.HasValue)
+                {
+                    var accessResult = await mediaUrlResolver.ResolvePrivateAccessUrlAsync(org.BusinessLicenseDocumentMediaId.Value, cancellationToken);
+                    if (accessResult.IsFailure)
+                    {
+                        return Result.Failure<OrganizationResponse>(AuthErrors.Media.ServiceUnavailable);
+                    }
+                    licenseUrl = accessResult.Value.Url;
+                    licenseExpires = accessResult.Value.ExpiresAtUtc.UtcDateTime;
+                }
+
+                return Result.Success(org.ToResponse(logoUrl, licenseUrl, licenseExpires));
             },
             logger,
             correlationIdProvider,
@@ -93,7 +109,7 @@ public sealed class OrganizationService(
 
                 PagedResult<Organization> paged = await organizationRepository.GetAllAsync(request, status, cancellationToken);
 
-                var items = paged.Items.Select(org => org.ToSummaryResponse()).ToList();
+                var items = paged.Items.Select(org => org.ToSummaryResponse(mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId))).ToList();
                 return Result.Success(new PagedResult<OrganizationSummaryResponse>(items, paged.Page, paged.PageSize, paged.TotalCount));
             },
             logger,
