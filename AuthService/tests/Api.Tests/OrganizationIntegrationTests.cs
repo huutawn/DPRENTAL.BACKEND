@@ -1,3 +1,4 @@
+using Dprental.AuthService.Application.Clients;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -46,6 +47,8 @@ public sealed class OrganizationIntegrationTests
         using HttpClient ownerClient = CreateAuthenticatedClient(factory, ownerId, "customer");
         using HttpClient outsiderClient = CreateAuthenticatedClient(factory, outsiderId, "customer");
 
+        ((FakeMediaServiceClient)factory.Services.GetRequiredService<IMediaServiceClient>()).DefaultUserId = ownerId;
+
         // 1. Người dùng tự đăng ký tổ chức -> Pending, họ là Owner
         using HttpResponseMessage registerRes = await ownerClient.PostAsJsonAsync("/api/v1/auth/organizations/register", Profile("rent-express"));
         Assert.Equal(HttpStatusCode.Created, registerRes.StatusCode);
@@ -93,6 +96,8 @@ public sealed class OrganizationIntegrationTests
 
         using HttpClient adminOwnerClient = CreateAuthenticatedClient(factory, adminOwnerId, "admin");
         using HttpClient otherAdminClient = CreateAuthenticatedClient(factory, otherAdminId, "admin");
+
+        ((FakeMediaServiceClient)factory.Services.GetRequiredService<IMediaServiceClient>()).DefaultUserId = adminOwnerId;
 
         using HttpResponseMessage registerRes = await adminOwnerClient.PostAsJsonAsync("/api/v1/auth/organizations/register", Profile("platform-rental"));
         OrganizationRegisteredResponse? registered = await registerRes.Content.ReadFromJsonAsync<OrganizationRegisteredResponse>();
@@ -259,7 +264,7 @@ public sealed class OrganizationIntegrationTests
             Address: "12 Nguyen Hue",
             Province: "TP. Ho Chi Minh",
             Ward: "Phuong Sai Gon",
-            BusinessLicenseDocumentUrl: "https://files.example.com/license.pdf",
+            BusinessLicenseDocumentMediaId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
             Slug: slug);
 
     /// <summary>Dựng sẵn organization + Owner trong DB (thay cho POST /organizations đã bỏ).</summary>
@@ -362,12 +367,16 @@ public sealed class OrganizationIntegrationTests
 
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("MediaService:ApiKey", "test-media-key");
+            builder.UseSetting("MediaService:PublicGatewayUrl", "http://gateway.example.test");
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(settings));
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<DbContextOptions<AuthDbContext>>();
                 services.RemoveAll<IDbContextOptionsConfiguration<AuthDbContext>>();
                 services.AddDbContext<AuthDbContext>(options => options.UseInMemoryDatabase(inMemoryDatabaseName));
+                services.RemoveAll<IMediaServiceClient>();
+                services.AddSingleton<IMediaServiceClient>(new FakeMediaServiceClient { AutoVerify = true });
             });
         });
     }

@@ -73,16 +73,14 @@ public class Organization
     [MaxLength(500)]
     public string? Website { get; set; }
 
-    [MaxLength(500)]
-    public string? LogoUrl { get; set; }
+    public Guid? LogoMediaId { get; set; }
 
     [MaxLength(2000)]
     public string? Description { get; set; }
 
     // Hồ sơ xác minh & kết quả duyệt
 
-    [MaxLength(500)]
-    public string? BusinessLicenseDocumentUrl { get; set; }
+    public Guid? BusinessLicenseDocumentMediaId { get; set; }
 
     [MaxLength(500)]
     public string? RejectionReason { get; set; }

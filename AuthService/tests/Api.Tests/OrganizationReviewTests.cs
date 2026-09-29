@@ -251,7 +251,7 @@ public sealed class OrganizationReviewTests
             Address: "12 Nguyen Hue",
             Province: "TP. Ho Chi Minh",
             Ward: "Phuong Sai Gon",
-            BusinessLicenseDocumentUrl: "https://files.example.com/license.pdf");
+            BusinessLicenseDocumentMediaId: Guid.Parse("11111111-1111-1111-1111-111111111111"));
 
     private sealed class Fixture : IAsyncDisposable
     {
@@ -270,6 +270,7 @@ public sealed class OrganizationReviewTests
             new EfAuditLogRepository(Db),
             TimeProvider.System,
             FixedCorrelationIdProvider.Instance,
+            FakeMediaUrlResolver.Instance,
             NullLogger<OrganizationReviewService>.Instance);
 
         public OrganizationRegistrationService Registration => new(
@@ -280,6 +281,9 @@ public sealed class OrganizationReviewTests
             new EfAuditLogRepository(Db),
             TimeProvider.System,
             FixedCorrelationIdProvider.Instance,
+            new FakeMediaServiceClient { AutoVerify = true, DefaultUserId = OwnerId },
+            FakeMediaUrlResolver.Instance,
+            new FakeMediaOutboxService(),
             NullLogger<OrganizationRegistrationService>.Instance);
 
         public OrganizationService Organizations => new(
@@ -287,6 +291,7 @@ public sealed class OrganizationReviewTests
             new EfOrganizationMembershipRepository(Db),
             new EfRoleRepository(Db),
             FixedCorrelationIdProvider.Instance,
+            FakeMediaUrlResolver.Instance,
             NullLogger<OrganizationService>.Instance);
 
         public static async Task<Fixture> CreateAsync(OrganizationStatus status = OrganizationStatus.Pending)

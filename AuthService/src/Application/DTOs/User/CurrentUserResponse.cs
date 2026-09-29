@@ -14,6 +14,7 @@ public sealed record CurrentUserResponse(
     IReadOnlyCollection<UserOrganizationResponse> Organizations,
     DateTime CreatedAt,
     bool IsProfileCompleted,
+    Guid? AvatarMediaId = null,
     string? AvatarUrl = null,
     string? PhoneNumber = null,
     DateOnly? DateOfBirth = null,

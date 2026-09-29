@@ -119,3 +119,12 @@ public static class DtoValidator
         return true;
     }
 }
+
+/// <summary>Chấp nhận null cho field tùy chọn, nhưng không chấp nhận Guid.Empty.</summary>
+[AttributeUsage(AttributeTargets.Parameter | AttributeTargets.Property)]
+public sealed class NonEmptyGuidAttribute : ValidationAttribute
+{
+    public NonEmptyGuidAttribute() : base("MediaId không được là Guid rỗng.") { }
+
+    public override bool IsValid(object? value) => value is null || value is Guid id && id != Guid.Empty;
+}

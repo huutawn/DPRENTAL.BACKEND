@@ -1,3 +1,4 @@
+using Dprental.AuthService.Application.Clients;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -46,43 +47,31 @@ public sealed class RegistrationEndpointTests
 
         using HttpResponseMessage response = await client.PostAsJsonAsync(
             "/api/v1/auth/register",
-            new RegisterRequest("customer2@example.com", "Matkhau123!", "Customer", "https://cdn.example.com/a.png", "0901234567", new DateOnly(2000, 1, 1)));
+            new RegisterRequest("customer2@example.com", "Matkhau123!", "Customer", "0901234567", new DateOnly(2000, 1, 1)));
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
-    [Theory]
-    [InlineData("not-a-url")]
-    [InlineData("ftp:/broken")]
-    public async Task PostRegisterWithInvalidAvatarUrlReturnsBadRequest(string avatarUrl)
-    {
-        using WebApplicationFactory<Program> factory = CreateFactory();
-        using HttpClient client = factory.CreateClient();
-
-        using HttpResponseMessage response = await client.PostAsJsonAsync(
-            "/api/v1/auth/register",
-            new RegisterRequest("customer@example.com", "Matkhau123!", "Customer", avatarUrl));
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-    }
-
     [Fact]
-    public async Task PostRegisterWithEmptyAvatarUrlReturnsCreated()
+    public async Task PostRegisterIgnoresAvatarAndDoesNotSetAvatarMediaId()
     {
-        // AvatarUrl không bắt buộc — gửi "" phải được coi như bỏ trống, không phải lỗi format.
-        // [Url] gốc của .NET không tự bỏ qua chuỗi rỗng (khác RegularExpressionAttribute), nên dùng
-        // OptionalUrlAttribute để đồng nhất hành vi giữa các field optional.
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
 
         using HttpResponseMessage response = await client.PostAsync(
             "/api/v1/auth/register",
             new StringContent(
-                """{"email":"customer3@example.com","password":"Matkhau123!","fullName":"Customer","avatarUrl":""}""",
+                """{"email":"customer_avatar@example.com","password":"Matkhau123!","fullName":"Customer","avatarUrl":"https://example.com/avatar.png","avatarMediaId":"11111111-1111-1111-1111-111111111111"}""",
                 System.Text.Encoding.UTF8,
                 "application/json"));
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        User? createdUser = await db.Users.SingleOrDefaultAsync(u => u.Email == "customer_avatar@example.com");
+        Assert.NotNull(createdUser);
+        Assert.Null(createdUser.AvatarMediaId);
     }
 
     [Fact]
@@ -141,7 +130,7 @@ public sealed class RegistrationEndpointTests
             Address: "12 Nguyen Hue",
             Province: "TP. Ho Chi Minh",
             Ward: "Phuong Sai Gon",
-            BusinessLicenseDocumentUrl: "https://files.example.com/license.pdf");
+            BusinessLicenseDocumentMediaId: Guid.Parse("11111111-1111-1111-1111-111111111111"));
 
     private static async Task SeedOwnerRoleAsync(WebApplicationFactory<Program> factory)
     {
@@ -158,6 +147,7 @@ public sealed class RegistrationEndpointTests
         User user = new() { Id = Guid.NewGuid(), Email = email, FullName = "Owner", PasswordHash = "hash", IsActive = true, ProfileCompletedAtUtc = DateTime.UtcNow };
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
+        ((FakeMediaServiceClient)scope.ServiceProvider.GetRequiredService<IMediaServiceClient>()).DefaultUserId = user.Id;
         return user.Id;
     }
 
@@ -188,12 +178,16 @@ public sealed class RegistrationEndpointTests
 
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("MediaService:ApiKey", "test-media-key");
+            builder.UseSetting("MediaService:PublicGatewayUrl", "http://gateway.example.test");
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(settings));
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<DbContextOptions<AuthDbContext>>();
                 services.RemoveAll<IDbContextOptionsConfiguration<AuthDbContext>>();
                 services.AddDbContext<AuthDbContext>(options => options.UseInMemoryDatabase(inMemoryDatabaseName));
+                services.RemoveAll<IMediaServiceClient>();
+                services.AddSingleton<IMediaServiceClient>(new FakeMediaServiceClient { AutoVerify = true });
             });
         });
     }

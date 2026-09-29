@@ -8,7 +8,7 @@ namespace Dprental.AuthService.Application.Mapping;
 
 internal static class UserMappingExtensions
 {
-    internal static CurrentUserResponse ToCurrentUserResponse(this User user)
+    internal static CurrentUserResponse ToCurrentUserResponse(this User user, string? avatarUrl = null)
     {
         ArgumentNullException.ThrowIfNull(user);
 
@@ -30,7 +30,8 @@ internal static class UserMappingExtensions
             organizations,
             user.CreatedAt,
             user.IsProfileCompleted,
-            user.AvatarUrl,
+            user.AvatarMediaId,
+            avatarUrl,
             user.PhoneNumber,
             user.DateOfBirth,
             StringUtility.MaskCitizenId(user.CitizenId),

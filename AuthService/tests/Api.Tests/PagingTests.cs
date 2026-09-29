@@ -172,7 +172,7 @@ public sealed class PagingTests
         FakeUserRepo userRepo = new();
         FakeRoleRepo roleRepo = new();
 
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
 
         Result<PagedResult<OrganizationSummaryResponse>> result = await service.ListAsync(actorId, new PageRequest(Page: 0, PageSize: 20));
         Assert.True(result.IsFailure);
