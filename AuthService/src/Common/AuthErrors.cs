@@ -200,6 +200,21 @@ public static class AuthErrors
         public static readonly Error SessionNotFound =
             Error.NotFound(AuthErrorCode.Auth.SessionNotFound, "Phiên đăng nhập không tồn tại.");
 
+        public static readonly Error FirebaseNotConfigured =
+            Error.NotFound(AuthErrorCode.Auth.FirebaseNotConfigured, "Firebase Authentication chưa được cấu hình.");
+
+        public static readonly Error FirebaseTokenMissing =
+            Error.Validation(AuthErrorCode.Auth.FirebaseTokenMissing, "Firebase ID token là bắt buộc.");
+
+        public static readonly Error FirebaseTokenInvalid =
+            Error.Unauthorized(AuthErrorCode.Auth.FirebaseTokenInvalid, "Firebase ID token không hợp lệ hoặc đã hết hạn.");
+
+        public static readonly Error FirebaseEmailMissing =
+            Error.Validation(AuthErrorCode.Auth.FirebaseEmailMissing, "Firebase token không cung cấp email.");
+
+        public static readonly Error FirebaseEmailNotVerified =
+            Error.Forbidden(AuthErrorCode.Auth.FirebaseEmailNotVerified, "Email trong Firebase token chưa được xác minh.");
+
         public static readonly Error Uncategorized =
             Error.Failure(AuthErrorCode.Auth.Uncategorized, "Đã xảy ra lỗi hệ thống ngoài dự kiến.");
     }

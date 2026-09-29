@@ -87,6 +87,11 @@ public static class AuthErrorCode
         public const string MissingCookie = "Auth.MissingCookie";
         public const string InvalidRefreshToken = "Auth.InvalidRefreshToken";
         public const string SessionNotFound = "Auth.SessionNotFound";
+        public const string FirebaseNotConfigured = "Auth.FirebaseNotConfigured";
+        public const string FirebaseTokenMissing = "Auth.FirebaseTokenMissing";
+        public const string FirebaseTokenInvalid = "Auth.FirebaseTokenInvalid";
+        public const string FirebaseEmailMissing = "Auth.FirebaseEmailMissing";
+        public const string FirebaseEmailNotVerified = "Auth.FirebaseEmailNotVerified";
         public const string Uncategorized = "Auth.Uncategorized";
     }
 
