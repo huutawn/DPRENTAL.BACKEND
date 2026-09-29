@@ -175,13 +175,13 @@ internal sealed partial class FirebaseIdentityService : IFirebaseIdentityService
             case JsonElement { ValueKind: JsonValueKind.Object } json:
                 if (json.TryGetProperty(key, out JsonElement property))
                 {
-                    value = property;
+                    value = property.Clone();
                     return true;
                 }
 
                 return false;
             default:
-                return false;
+                return TryGetJsonObjectValue(source, key, out value);
         }
     }
 
@@ -196,8 +196,67 @@ internal sealed partial class FirebaseIdentityService : IFirebaseIdentityService
             IEnumerable<object> values => values
                 .Select(item => Convert.ToString(item, CultureInfo.InvariantCulture))
                 .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item)),
-            _ => null
+            _ => FirstStringFromJson(value)
         };
+
+    private static bool TryGetJsonObjectValue(object? source, string key, out object? value)
+    {
+        value = null;
+        string? json = Convert.ToString(source, CultureInfo.InvariantCulture);
+        if (string.IsNullOrWhiteSpace(json) || json.TrimStart()[0] != '{')
+        {
+            return false;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty(key, out JsonElement property))
+            {
+                return false;
+            }
+
+            value = property.Clone();
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static string? FirstStringFromJson(object? value)
+    {
+        string? json = Convert.ToString(value, CultureInfo.InvariantCulture);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        char first = json.TrimStart()[0];
+        if (first is not ('[' or '"' or '{'))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind switch
+            {
+                JsonValueKind.String => document.RootElement.GetString(),
+                JsonValueKind.Array => document.RootElement.EnumerateArray()
+                    .Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() : null)
+                    .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item)),
+                _ => null
+            };
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning,
         Message = "Firebase ID token rejected: {FirebaseErrorCode}")]
