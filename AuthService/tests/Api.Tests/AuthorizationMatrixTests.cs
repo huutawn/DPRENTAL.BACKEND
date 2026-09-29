@@ -118,7 +118,7 @@ public sealed class AuthorizationMatrixTests
     [Fact]
     public async Task SuperAdminHasFullAuthorizationAcrossPlatformAndGlobalRoles()
     {
-        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
         RoleAssignmentService roleService = new(_roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
 
         // 1. Can suspend/activate org
@@ -138,7 +138,7 @@ public sealed class AuthorizationMatrixTests
     [Fact]
     public async Task PlatformAdminCanManageOrganizationsButCannotAssignOrRevokeGlobalRoles()
     {
-        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
         RoleAssignmentService roleService = new(_roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
 
         // 1. Can suspend/activate org (has identity.organizations.suspend)
@@ -160,7 +160,7 @@ public sealed class AuthorizationMatrixTests
     [Fact]
     public async Task OwnerCannotRenameSuspendOrgOrAssignGlobalRoles()
     {
-        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
         RoleAssignmentService roleService = new(_roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
 
         // 1. CANNOT rename org — tên là thông tin pháp lý đã được Platform xác minh

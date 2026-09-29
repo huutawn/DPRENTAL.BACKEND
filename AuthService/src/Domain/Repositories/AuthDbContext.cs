@@ -24,6 +24,7 @@ public sealed class AuthDbContext : DbContext
     public DbSet<AuditLog> AuditLogs { get; set; }
 
     public DbSet<RecoveryToken> RecoveryTokens { get; set; }
+    public DbSet<MediaOutboxMessage> MediaOutboxMessages { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

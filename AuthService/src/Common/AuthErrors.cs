@@ -85,6 +85,9 @@ public static class AuthErrors
 
         public static readonly Error LegalInfoLocked =
             Error.Validation(AuthErrorCode.Organization.LegalInfoLocked, "Thông tin pháp lý đã được xác minh, không thể tự thay đổi. Vui lòng liên hệ quản trị viên.");
+
+        public static readonly Error ConcurrentModification =
+            Error.Conflict(AuthErrorCode.Organization.ConcurrentModification, "Hồ sơ tổ chức vừa thay đổi. Vui lòng tải lại và thử lại.");
     }
 
     public static class Role
@@ -150,6 +153,24 @@ public static class AuthErrors
 
         public static readonly Error InvalidFullName =
             Error.Validation(AuthErrorCode.Profile.InvalidFullName, "Họ và tên không được để trống hoặc chỉ chứa khoảng trắng (tối đa 100 ký tự).");
+    }
+
+    public static class Media
+    {
+        public static readonly Error NotFound =
+            Error.NotFound(AuthErrorCode.Media.NotFound, "Media không tồn tại.");
+
+        public static readonly Error NotReady =
+            Error.Conflict(AuthErrorCode.Media.NotReady, "Media chưa sẵn sàng để sử dụng.");
+
+        public static readonly Error InvalidType =
+            Error.Validation(AuthErrorCode.Media.InvalidType, "Định dạng file media không hợp lệ.");
+
+        public static readonly Error Forbidden =
+            Error.Forbidden(AuthErrorCode.Media.Forbidden, "Media không thuộc quyền sở hữu của người dùng.");
+
+        public static readonly Error ServiceUnavailable =
+            Error.Failure(AuthErrorCode.Media.ServiceUnavailable, "Dịch vụ media hiện không khả dụng.");
     }
 
 

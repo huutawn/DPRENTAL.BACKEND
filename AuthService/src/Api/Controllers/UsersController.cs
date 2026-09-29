@@ -254,17 +254,26 @@ public sealed class UsersController(
     /// <param name="cancellationToken">Token hủy request.</param>
     [HttpPut("me")]
     [Authorize]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<CurrentUserResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> UpdateCurrentUser([FromBody] UpdateUserProfileRequest request, CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(User.Identity?.Name, out Guid userId))
+        Guid userId;
+        if (User.GetJwtSub() is Guid subId)
+        {
+            userId = subId;
+        }
+        else if (Guid.TryParse(User.Identity?.Name, out Guid parsedId))
+        {
+            userId = parsedId;
+        }
+        else
         {
             return Unauthorized();
         }
 
-        Result result = await userService.UpdateUserProfileAsync(userId, request, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
+        Result<CurrentUserResponse> result = await userAccountService.UpdateUserProfileAsync(userId, request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 }

@@ -148,6 +148,8 @@ public sealed class MyOrganizationsEndpointTests
 
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("MediaService:ApiKey", "test-media-key");
+            builder.UseSetting("MediaService:PublicGatewayUrl", "http://gateway.example.test");
             builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
             builder.ConfigureAppConfiguration((_, configurationBuilder) =>
             {

@@ -1,3 +1,4 @@
+using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.Execution;
@@ -26,6 +27,9 @@ public sealed class UserAccountService(
     IAuditLogRepository auditLogRepository,
     ICorrelationIdProvider correlationIdProvider,
     TimeProvider timeProvider,
+    IMediaServiceClient mediaServiceClient,
+    IMediaUrlResolver mediaUrlResolver,
+    IMediaOutboxService mediaOutboxService,
     ILogger<UserAccountService> logger) : IUserAccountService
 {
     private const string GoogleProvider = "Google";
@@ -88,26 +92,47 @@ public sealed class UserAccountService(
                     user.FullName = fullName;
                 }
 
-                if (StringUtility.NullIfBlank(request.AvatarUrl) is string avatarUrl)
+                if (request.AvatarMediaId.HasValue)
                 {
-                    user.AvatarUrl = avatarUrl;
+                    var verifyResult = await mediaServiceClient.VerifyMediaAsync(request.AvatarMediaId.Value, cancellationToken);
+                    if (verifyResult.IsFailure)
+                    {
+                        return Result.Failure<CurrentUserResponse>(verifyResult.Error);
+                    }
+                    var validation = MediaVerificationRules.ValidateImage(verifyResult.Value, userId);
+                    if (validation.IsFailure)
+                    {
+                        return Result.Failure<CurrentUserResponse>(validation.Error);
+                    }
+                    user.AvatarMediaId = request.AvatarMediaId.Value;
+                    await mediaOutboxService.QueuePublicVisibilityAsync(request.AvatarMediaId.Value, cancellationToken);
                 }
 
-                await userRepository.UpdateAsync(user, cancellationToken);
+                if (!await userRepository.UpdateAsync(user, cancellationToken))
+                {
+                    return Result.Failure<CurrentUserResponse>(AuthErrors.User.NotFound);
+                }
                 await LogAuditAsync(user.Id, user.Id.ToString(), "Profile_Complete", "Success", cancellationToken);
 
                 User? reloaded = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
-                return Result.Success((reloaded ?? user).ToCurrentUserResponse());
+                return Result.Success((reloaded ?? user).ToCurrentUserResponse(mediaUrlResolver.ResolvePublicUrl((reloaded ?? user).AvatarMediaId)));
             },
             logger,
             correlationIdProvider,
             cancellationToken);
     }
 
-    public async Task<Result<CurrentUserResponse>> UpdateProfileAsync(
+    public Task<Result<CurrentUserResponse>> UpdateProfileAsync(
         Guid userId,
         UpdateProfileRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        UpdateProfileCoreAsync(userId, request, clearPhoneWhenNull: false, cancellationToken: cancellationToken);
+
+    private async Task<Result<CurrentUserResponse>> UpdateProfileCoreAsync(
+        Guid userId,
+        UpdateProfileRequest request,
+        bool clearPhoneWhenNull,
+        CancellationToken cancellationToken)
     {
         if (!DtoValidator.TryValidateId(userId, nameof(userId), out Error? idError))
         {
@@ -119,6 +144,11 @@ public sealed class UserAccountService(
             return Result.Failure<CurrentUserResponse>(AuthErrors.Profile.EmptyPatch);
         }
 
+        if (request.RemoveAvatar && request.AvatarMediaId.HasValue)
+        {
+            return Result.Failure<CurrentUserResponse>(Error.Validation("Validation.AvatarMediaId", "Không thể vừa chọn vừa xóa avatar."));
+        }
+
         string? trimmedFullName = request.FullName?.Trim();
         if (trimmedFullName is not null && trimmedFullName.Length == 0)
         {
@@ -128,7 +158,8 @@ public sealed class UserAccountService(
         bool hasAnyField = trimmedFullName is not null
             || request.PhoneNumber is not null
             || request.DateOfBirth.HasValue
-            || request.AvatarUrl is not null;
+            || request.AvatarMediaId.HasValue
+            || request.RemoveAvatar;
 
         if (!hasAnyField)
         {
@@ -161,9 +192,9 @@ public sealed class UserAccountService(
                     user.FullName = trimmedFullName;
                 }
 
-                if (request.PhoneNumber is not null)
+                if (request.PhoneNumber is not null || clearPhoneWhenNull)
                 {
-                    user.PhoneNumber = request.PhoneNumber.Trim();
+                    user.PhoneNumber = request.PhoneNumber?.Trim();
                 }
 
                 if (request.DateOfBirth.HasValue)
@@ -175,20 +206,63 @@ public sealed class UserAccountService(
                     user.DateOfBirth = request.DateOfBirth.Value;
                 }
 
-                if (request.AvatarUrl is not null)
+                if (request.RemoveAvatar)
                 {
-                    user.AvatarUrl = StringUtility.NullIfBlank(request.AvatarUrl);
+                    user.AvatarMediaId = null;
+                }
+                else if (request.AvatarMediaId.HasValue)
+                {
+                    // MediaId đã gắn sẵn được phép gửi lại khi cập nhật hồ sơ, kể cả file nhập từ dữ liệu cũ.
+                    if (user.AvatarMediaId != request.AvatarMediaId.Value)
+                    {
+                        var verifyResult = await mediaServiceClient.VerifyMediaAsync(request.AvatarMediaId.Value, cancellationToken);
+                        if (verifyResult.IsFailure)
+                        {
+                            return Result.Failure<CurrentUserResponse>(verifyResult.Error);
+                        }
+                        var validation = MediaVerificationRules.ValidateImage(verifyResult.Value, userId);
+                        if (validation.IsFailure)
+                        {
+                            return Result.Failure<CurrentUserResponse>(validation.Error);
+                        }
+                        user.AvatarMediaId = request.AvatarMediaId.Value;
+                        await mediaOutboxService.QueuePublicVisibilityAsync(request.AvatarMediaId.Value, cancellationToken);
+                    }
                 }
 
-                await userRepository.UpdateAsync(user, cancellationToken);
+                if (!await userRepository.UpdateAsync(user, cancellationToken))
+                {
+                    return Result.Failure<CurrentUserResponse>(AuthErrors.User.NotFound);
+                }
                 await LogAuditAsync(user.Id, user.Id.ToString(), "Profile_Update", "Success", cancellationToken);
 
                 User? reloaded = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
-                return Result.Success((reloaded ?? user).ToCurrentUserResponse());
+                return Result.Success((reloaded ?? user).ToCurrentUserResponse(mediaUrlResolver.ResolvePublicUrl((reloaded ?? user).AvatarMediaId)));
             },
             logger,
             correlationIdProvider,
-            cancellationToken);
+            cancellationToken: cancellationToken);
+    }
+
+    public async Task<Result<CurrentUserResponse>> UpdateUserProfileAsync(
+        Guid userId,
+        Dprental.AuthService.Domain.DTOs.User.UpdateUserProfileRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!DtoValidator.TryValidate(request, out Error? validationError))
+        {
+            return Result.Failure<CurrentUserResponse>(validationError);
+        }
+        return await UpdateProfileCoreAsync(
+            userId,
+            new UpdateProfileRequest(
+                request.FullName,
+                request.PhoneNumber,
+                null,
+                request.AvatarMediaId,
+                request.RemoveAvatar),
+            clearPhoneWhenNull: true,
+            cancellationToken: cancellationToken);
     }
 
     public async Task<Result<IReadOnlyList<ExternalLoginResponse>>> GetExternalLoginsAsync(

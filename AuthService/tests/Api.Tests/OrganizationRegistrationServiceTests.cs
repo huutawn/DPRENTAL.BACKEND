@@ -138,7 +138,7 @@ public sealed class OrganizationRegistrationServiceTests
             Address: "12 Nguyen Hue",
             Province: "TP. Ho Chi Minh",
             Ward: "Phuong Sai Gon",
-            BusinessLicenseDocumentUrl: "https://files.example.com/license.pdf",
+            BusinessLicenseDocumentMediaId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
             Slug: slug);
 
     private static async Task<User> CreateUserAsync(AuthDbContext dbContext, string email)
@@ -160,7 +160,10 @@ public sealed class OrganizationRegistrationServiceTests
         return dbContext;
     }
 
-    private static OrganizationRegistrationService CreateService(AuthDbContext dbContext) =>
+    private static OrganizationRegistrationService CreateService(
+        AuthDbContext dbContext,
+        FakeMediaServiceClient? mediaServiceClient = null,
+        FakeMediaOutboxService? mediaOutboxService = null) =>
         new(
             new EfOrganizationRepository(dbContext),
             new EfOrganizationMembershipRepository(dbContext),
@@ -169,5 +172,8 @@ public sealed class OrganizationRegistrationServiceTests
             new EfAuditLogRepository(dbContext),
             TimeProvider.System,
             FixedCorrelationIdProvider.Instance,
+            mediaServiceClient ?? new FakeMediaServiceClient { AutoVerify = true, DefaultUserId = dbContext.Users.SingleOrDefault()?.Id },
+            FakeMediaUrlResolver.Instance,
+            mediaOutboxService ?? new FakeMediaOutboxService(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationRegistrationService>.Instance);
 }

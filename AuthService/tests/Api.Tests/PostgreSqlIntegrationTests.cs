@@ -54,6 +54,41 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PostgreSql_MediaOutboxClaim_IsLeasedAndCanRecoverAfterWorkerStops()
+    {
+        Guid messageId = Guid.NewGuid();
+        await using (AuthDbContext setup = CreateDbContext())
+        {
+            await new EfMediaOutboxRepository(setup).AddAsync(new MediaOutboxMessage
+            {
+                Id = messageId,
+                MediaId = Guid.NewGuid(),
+                Visibility = "public",
+                Status = "Pending",
+                CreatedAtUtc = DateTime.UtcNow
+            });
+            await setup.SaveChangesAsync();
+        }
+
+        await using (AuthDbContext first = CreateDbContext())
+        await using (AuthDbContext second = CreateDbContext())
+        {
+            MediaOutboxMessage claimed = Assert.Single(await new EfMediaOutboxRepository(first).GetPendingMessagesAsync(20));
+            Assert.Equal(messageId, claimed.Id);
+            Assert.Equal("Processing", claimed.Status);
+            Assert.Empty(await new EfMediaOutboxRepository(second).GetPendingMessagesAsync(20));
+
+            claimed.NextRetryAtUtc = DateTime.UtcNow.AddSeconds(-1);
+            await first.SaveChangesAsync();
+            Assert.Equal(messageId, Assert.Single(await new EfMediaOutboxRepository(second).GetPendingMessagesAsync(20)).Id);
+        }
+
+        await using AuthDbContext cleanup = CreateDbContext();
+        cleanup.MediaOutboxMessages.Remove(await cleanup.MediaOutboxMessages.SingleAsync(m => m.Id == messageId));
+        await cleanup.SaveChangesAsync();
+    }
+
+    [Fact]
     public async Task PostgreSql_UniqueConstraints_MappedToConflictErrors()
     {
         await using var db = CreateDbContext();
@@ -67,7 +102,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
             Options.Create(new Application.Options.AdminBootstrapOptions { CreationKey = "bootstrap" }),
             TimeProvider.System, FixedCorrelationIdProvider.Instance,
             new EfAuditLogRepository(db), new EfAuthSessionRepository(db, TimeProvider.System),
-            new EfRecoveryTokenRepository(db), NullLogger<UserService>.Instance);
+            new EfRecoveryTokenRepository(db), FakeMediaUrlResolver.Instance, NullLogger<UserService>.Instance);
 
         string uniqueSuffix = Guid.NewGuid().ToString("N")[..8];
         string email = $"pg_unique_{uniqueSuffix}@example.com";
@@ -246,6 +281,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
             Options.Create(new Application.Options.AdminBootstrapOptions { CreationKey = "bootstrap" }),
             TimeProvider.System, FixedCorrelationIdProvider.Instance,
             new EfAuditLogRepository(db), sessionRepo, new EfRecoveryTokenRepository(db),
+            FakeMediaUrlResolver.Instance,
             NullLogger<UserService>.Instance);
 
         // Đổi mật khẩu
@@ -298,6 +334,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
             new EfAuditLogRepository(context),
             TimeProvider.System,
             FixedCorrelationIdProvider.Instance,
+            FakeMediaUrlResolver.Instance,
             NullLogger<OrganizationReviewService>.Instance);
 
         // Hai admin cùng mở hàng chờ và bấm cùng lúc: một người duyệt, một người từ chối.

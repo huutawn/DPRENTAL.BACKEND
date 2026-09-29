@@ -1,3 +1,4 @@
+using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security.Jwt;
 using Dprental.AuthService.Application.Services;
@@ -28,6 +29,11 @@ public static class ApplicationServiceCollectionExtensions
             .Bind(configuration.GetSection(AdminBootstrapOptions.SectionName))
             .ValidateOnStart();
 
+        services.AddSingleton<IValidateOptions<MediaServiceOptions>, MediaServiceOptionsValidator>();
+        services.AddOptions<MediaServiceOptions>()
+            .Bind(configuration.GetSection(MediaServiceOptions.SectionName))
+            .ValidateOnStart();
+
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<RsaJwtKeyRing>();
         services.AddSingleton<IAccessTokenIssuer, RsaAccessTokenIssuer>();
@@ -42,6 +48,8 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IOrganizationRegistrationService, OrganizationRegistrationService>();
         services.AddScoped<IOrganizationReviewService, OrganizationReviewService>();
         services.AddScoped<IUserAccountService, UserAccountService>();
+        services.AddScoped<IMediaUrlResolver, MediaUrlResolver>();
+        services.AddScoped<IMediaOutboxService, MediaOutboxService>();
 
         return services;
     }

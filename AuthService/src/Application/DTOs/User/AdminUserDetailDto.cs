@@ -5,6 +5,7 @@ public sealed record AdminUserDetailDto(
     string Email,
     string FullName,
     string? PhoneNumber,
+    Guid? AvatarMediaId,
     string? AvatarUrl,
     bool IsActive,
     DateTime CreatedAtUtc,

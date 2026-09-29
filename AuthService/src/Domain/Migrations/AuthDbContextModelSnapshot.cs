@@ -95,6 +95,50 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.ToTable("ExternalLogins", "auth");
                 });
 
+            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.MediaOutboxMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid>("MediaId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("NextRetryAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ProcessedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Visibility")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaId");
+
+                    b.HasIndex("Status", "NextRetryAtUtc");
+
+                    b.ToTable("MediaOutboxMessages", "auth");
+                });
+
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Organization", b =>
                 {
                     b.Property<Guid>("Id")
@@ -105,9 +149,8 @@ namespace Dprental.AuthService.Domain.Migrations
                         .HasMaxLength(250)
                         .HasColumnType("character varying(250)");
 
-                    b.Property<string>("BusinessLicenseDocumentUrl")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
+                    b.Property<Guid?>("BusinessLicenseDocumentMediaId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateOnly?>("BusinessLicenseIssuedDate")
                         .HasColumnType("date");
@@ -146,9 +189,8 @@ namespace Dprental.AuthService.Domain.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
-                    b.Property<string>("LogoUrl")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
+                    b.Property<Guid?>("LogoMediaId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -503,9 +545,8 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Property<int>("AccessFailedCount")
                         .HasColumnType("integer");
 
-                    b.Property<string>("AvatarUrl")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
+                    b.Property<Guid?>("AvatarMediaId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("CitizenId")
                         .HasMaxLength(12)

@@ -25,9 +25,12 @@ public sealed record OrganizationResponse(
     string? Province = null,
     string? Ward = null,
     string? Website = null,
+    Guid? LogoMediaId = null,
     string? LogoUrl = null,
     string? Description = null,
+    Guid? BusinessLicenseDocumentMediaId = null,
     string? BusinessLicenseDocumentUrl = null,
+    DateTime? BusinessLicenseDocumentUrlExpiresAtUtc = null,
     string? RejectionReason = null,
     DateTime? ReviewedAtUtc = null);
 
@@ -40,6 +43,7 @@ public sealed record OrganizationSummaryResponse(
     string Slug,
     OrganizationType Type,
     OrganizationStatus Status,
+    Guid? LogoMediaId,
     string? LogoUrl,
     string? Province,
     DateTime CreatedAtUtc);

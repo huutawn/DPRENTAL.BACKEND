@@ -6,7 +6,11 @@ namespace Dprental.AuthService.Application.Mapping;
 public static class OrganizationMappingExtensions
 {
     /// <summary>CCCD người đại diện không được trả ra ngoài.</summary>
-    public static OrganizationResponse ToResponse(this Organization organization)
+    public static OrganizationResponse ToResponse(
+        this Organization organization,
+        string? logoUrl = null,
+        string? businessLicenseDocumentUrl = null,
+        DateTime? businessLicenseDocumentUrlExpiresAtUtc = null)
     {
         ArgumentNullException.ThrowIfNull(organization);
         return new OrganizationResponse(
@@ -28,14 +32,19 @@ public static class OrganizationMappingExtensions
             organization.Province,
             organization.Ward,
             organization.Website,
-            organization.LogoUrl,
+            organization.LogoMediaId,
+            logoUrl,
             organization.Description,
-            organization.BusinessLicenseDocumentUrl,
+            organization.BusinessLicenseDocumentMediaId,
+            businessLicenseDocumentUrl,
+            businessLicenseDocumentUrlExpiresAtUtc,
             organization.RejectionReason,
             organization.ReviewedAtUtc);
     }
 
-    public static OrganizationSummaryResponse ToSummaryResponse(this Organization organization)
+    public static OrganizationSummaryResponse ToSummaryResponse(
+        this Organization organization,
+        string? logoUrl = null)
     {
         ArgumentNullException.ThrowIfNull(organization);
         return new OrganizationSummaryResponse(
@@ -44,7 +53,8 @@ public static class OrganizationMappingExtensions
             organization.Slug,
             organization.Type,
             organization.Status,
-            organization.LogoUrl,
+            organization.LogoMediaId,
+            logoUrl,
             organization.Province,
             organization.CreatedAtUtc);
     }

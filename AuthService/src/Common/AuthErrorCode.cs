@@ -31,6 +31,7 @@ public static class AuthErrorCode
         public const string NotPendingReview = "Organization.NotPendingReview";
         public const string SelfReviewNotAllowed = "Organization.SelfReviewNotAllowed";
         public const string LegalInfoLocked = "Organization.LegalInfoLocked";
+        public const string ConcurrentModification = "Organization.ConcurrentModification";
     }
 
     public static class Role
@@ -61,6 +62,15 @@ public static class AuthErrorCode
         public const string AlreadyCompleted = "Profile.AlreadyCompleted";
         public const string EmptyPatch = "Profile.EmptyPatch";
         public const string InvalidFullName = "Profile.InvalidFullName";
+    }
+
+    public static class Media
+    {
+        public const string NotFound = "Media.NotFound";
+        public const string NotReady = "Media.NotReady";
+        public const string InvalidType = "Media.InvalidType";
+        public const string Forbidden = "Media.Forbidden";
+        public const string ServiceUnavailable = "Media.ServiceUnavailable";
     }
 
 

@@ -1,3 +1,4 @@
+using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
@@ -22,6 +23,7 @@ public sealed class OrganizationReviewService(
     IAuditLogRepository auditLogRepository,
     TimeProvider timeProvider,
     ICorrelationIdProvider correlationIdProvider,
+    IMediaUrlResolver mediaUrlResolver,
     ILogger<OrganizationReviewService> logger) : IOrganizationReviewService
 {
     public Task<Result<OrganizationResponse>> ApproveAsync(Guid actorUserId, Guid organizationId, CancellationToken cancellationToken = default) =>
@@ -64,11 +66,42 @@ public sealed class OrganizationReviewService(
                     return Result.Failure<OrganizationResponse>(AuthErrors.Organization.PlatformAdminRequired);
                 }
 
+                Organization? before = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
+                if (before is null)
+                {
+                    return Result.Failure<OrganizationResponse>(AuthErrors.Organization.OrganizationNotFound);
+                }
+                if (await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken) is not null)
+                {
+                    return Result.Failure<OrganizationResponse>(AuthErrors.Organization.SelfReviewNotAllowed);
+                }
+                if (before.Status != OrganizationStatus.Pending)
+                {
+                    return Result.Failure<OrganizationResponse>(AuthErrors.Organization.NotPendingReview);
+                }
+
+                string? licenseUrl = null;
+                DateTime? licenseExpires = null;
+                if (before.BusinessLicenseDocumentMediaId.HasValue)
+                {
+                    var accessResult = await mediaUrlResolver.ResolvePrivateAccessUrlAsync(before.BusinessLicenseDocumentMediaId.Value, cancellationToken);
+                    if (accessResult.IsFailure)
+                    {
+                        return Result.Failure<OrganizationResponse>(accessResult.Error);
+                    }
+                    licenseUrl = accessResult.Value.Url;
+                    licenseExpires = accessResult.Value.ExpiresAtUtc.UtcDateTime;
+                }
+
                 await using IExecutionTransaction transaction = await organizationRepository.BeginTransactionAsync(cancellationToken);
                 Organization? org = await organizationRepository.GetByIdForUpdateAsync(organizationId, cancellationToken);
                 if (org is null)
                 {
                     return Result.Failure<OrganizationResponse>(AuthErrors.Organization.OrganizationNotFound);
+                }
+                if (org.BusinessLicenseDocumentMediaId != before.BusinessLicenseDocumentMediaId)
+                {
+                    return Result.Failure<OrganizationResponse>(AuthErrors.Organization.ConcurrentModification);
                 }
 
                 // Nguyên tắc bốn mắt: admin là thành viên (Owner) của tổ chức thì phải để admin khác duyệt.
@@ -101,7 +134,8 @@ public sealed class OrganizationReviewService(
                 }, cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
 
-                return Result.Success(org.ToResponse());
+                string? logoUrl = mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId);
+                return Result.Success(org.ToResponse(logoUrl, licenseUrl, licenseExpires));
             },
             logger,
             correlationIdProvider,
