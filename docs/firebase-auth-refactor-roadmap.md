@@ -213,9 +213,10 @@ Controller chi nen:
 Trang thai hien tai:
 
 - Da them endpoint `POST /api/v1/auth/firebase/login`.
-- Endpoint verify Firebase ID token, chi chap nhan `sign_in_provider = google.com`.
-- Endpoint tao/link local user qua `ExternalLoginService`.
-- Endpoint tao accessToken/refreshToken noi bo qua `AuthSessionService`.
+- Controller chi set `Cache-Control: no-store`, goi `IFirebaseLoginService`, va map loi/response.
+- `FirebaseLoginService` verify Firebase ID token, chi chap nhan `sign_in_provider = google.com`.
+- `FirebaseLoginService` tao/link local user qua `ExternalLoginService`.
+- `FirebaseLoginService` tao accessToken/refreshToken noi bo qua `AuthSessionService`.
 - Response tra JSON token pair cho Next BFF set HttpOnly cookie tren FE domain.
 
 ### Phase 6 - Deprecate Google OAuth Flow Cu

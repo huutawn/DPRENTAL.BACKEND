@@ -26,7 +26,7 @@ public sealed class AuthController(
     IUserService userService,
     IServiceIdentityService serviceIdentityService,
     IExternalLoginService externalLoginService,
-    IFirebaseIdentityService firebaseIdentityService,
+    IFirebaseLoginService firebaseLoginService,
     IOptions<JwtOptions> jwtOptions,
     IOptions<GoogleAuthOptions> googleOptions,
     IWebHostEnvironment environment) : ControllerBase
@@ -105,40 +105,10 @@ public sealed class AuthController(
     {
         Response.Headers.CacheControl = "no-store";
 
-        Result<FirebaseIdentity> firebaseResult = await firebaseIdentityService.VerifyIdTokenAsync(
+        Result<AuthTokenResponse> result = await firebaseLoginService.LoginAsync(
             request?.IdToken,
             cancellationToken);
-        if (firebaseResult.IsFailure)
-        {
-            return this.ToProblem(firebaseResult.Error);
-        }
-
-        FirebaseIdentity firebaseIdentity = firebaseResult.Value;
-        if (!string.Equals(firebaseIdentity.SignInProvider, "google.com", StringComparison.Ordinal))
-        {
-            return this.ToProblem(AuthErrors.Auth.FirebaseProviderUnsupported);
-        }
-
-        ExternalIdentity externalIdentity = new(
-            GoogleDefaults.AuthenticationScheme,
-            firebaseIdentity.ProviderSubject,
-            firebaseIdentity.Email,
-            firebaseIdentity.EmailVerified,
-            firebaseIdentity.DisplayName);
-
-        Result<Guid> signInResult = await externalLoginService.SignInAsync(externalIdentity, cancellationToken);
-        if (signInResult.IsFailure)
-        {
-            return this.ToProblem(signInResult.Error);
-        }
-
-        Result<AuthTokenPair> sessionResult = await authSessionService.CreateSessionAsync(signInResult.Value, cancellationToken);
-        if (sessionResult.IsFailure)
-        {
-            return this.ToProblem(sessionResult.Error);
-        }
-
-        return Ok(new AuthTokenResponse(sessionResult.Value.AccessToken, sessionResult.Value.RefreshToken));
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
     /// <summary>Làm mới phiên đăng nhập bằng refresh token trong cookie.</summary>
