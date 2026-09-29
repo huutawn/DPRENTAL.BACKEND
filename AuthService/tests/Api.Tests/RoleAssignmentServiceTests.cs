@@ -209,5 +209,15 @@ public sealed class RoleAssignmentServiceTests
             }
             return Task.FromResult(RevokeSucceeds);
         }
+        public Task<IReadOnlyList<Role>> GetAllAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<Role>>(Roles.Values.ToList());
+        }
+
+        public Task<int> CountByIdsAsync(IEnumerable<Guid> roleIds, CancellationToken cancellationToken = default)
+        {
+            int count = Roles.Keys.Count(id => roleIds.Contains(id));
+            return Task.FromResult(count);
+        }
     }
 }

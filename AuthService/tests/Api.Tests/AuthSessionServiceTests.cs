@@ -1,11 +1,12 @@
 using Dprental.AuthService.Application.IServices;
-using Dprental.AuthService.Domain.Repositories;
 using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
+using Dprental.AuthService.Domain.ValueObjects;
+using Microsoft.AspNetCore.Http;
 
 namespace Dprental.AuthService.Api.Tests;
 
@@ -78,27 +79,20 @@ public sealed class AuthSessionServiceTests
         public bool RotateCalled { get; private set; }
         public bool RevokeCalled { get; private set; }
 
-        public Task<Session?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+        public Task<Session?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<Session>> GetAllAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Session> CreateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> UpdateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        public Task<IReadOnlyList<Session>> GetAllAsync(CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<Session> CreateAsync(Session entity, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<bool> UpdateAsync(Session entity, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task CreateSessionAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
+        public Task<AuthSessionPrincipal?> CreateAsync(
+            Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc,
+            string? deviceName, string? ipAddress, CancellationToken cancellationToken = default)
         {
             CreatedRefreshTokenHash = refreshTokenHash;
             CreatedAtUtc = utcNow;
             ExpiresAtUtc = expiresAtUtc;
-            return Task.CompletedTask;
+            return Task.FromResult(Principal);
         }
 
         public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default)
@@ -122,18 +116,13 @@ public sealed class AuthSessionServiceTests
             return Task.FromResult<RefreshToken?>(token);
         }
 
-        public Task<bool> RotateTokenAsync(
-            Guid currentTokenId,
-            Guid sessionId,
-            Guid userId,
-            string replacementHash,
-            DateTime sessionExpiresAtUtc,
-            DateTime utcNow,
-            CancellationToken cancellationToken = default)
+        // ĐÃ SỬA: Đổi tên thành RotateAsync, rút gọn tham số và trả về Task<AuthSessionPrincipal?>
+        public Task<AuthSessionPrincipal?> RotateAsync(
+            string currentRefreshTokenHash, string replacementRefreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default)
         {
             RotateCalled = true;
-            ReplacementRefreshTokenHash = replacementHash;
-            return Task.FromResult(true);
+            ReplacementRefreshTokenHash = replacementRefreshTokenHash;
+            return Task.FromResult(Principal);
         }
 
         public Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default)
@@ -142,20 +131,11 @@ public sealed class AuthSessionServiceTests
             return Task.CompletedTask;
         }
 
-        public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
-
-        public Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Principal?.UserId);
-
-        public Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<Session>>([]);
-
-        public Task<Guid?> GetSessionIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) =>
-            Task.FromResult<Guid?>(null);
-
-        public Task<bool> RevokeSessionForUserAsync(Guid userId, Guid sessionId, DateTime utcNow, CancellationToken cancellationToken = default) =>
-            Task.FromResult(true);
+        public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => Task.FromResult(Principal?.UserId);
+        public Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<Session>>([]);
+        public Task<Guid?> GetSessionIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => Task.FromResult<Guid?>(null);
+        public Task<bool> RevokeSessionForUserAsync(Guid userId, Guid sessionId, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
     }
 
     private static AuthSessionService CreateService(RecordingAuthSessionRepository repository, DateTimeOffset now) =>
@@ -166,7 +146,9 @@ public sealed class AuthSessionServiceTests
             new FixedTimeProvider(now),
             new TestCorrelationIdProvider(),
             new TestAuditLogRepository(),
-            NullLogger<AuthSessionService>.Instance);
+            NullLogger<AuthSessionService>.Instance,
+            new FakeHttpContextAccessor()
+        );
 
     private sealed class FakeUserRepo(AuthSessionPrincipal? principal) : IUserRepository
     {
@@ -198,9 +180,20 @@ public sealed class AuthSessionServiceTests
         public Task<bool> EmailExistsAsync(string normalizedEmail, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> CitizenIdExistsAsync(string citizenId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        // Đã thêm tham số string? type
+        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, string? type, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        // Bổ sung hàm GetByIdWithRolesAsync còn thiếu
+        public Task<User?> GetByIdWithRolesAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task<bool> ChangePasswordAndRevokeSessionsAsync(Guid userId, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> ResetPasswordWithTokenAsync(Guid userId, string tokenHash, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
+    }
+
+    private sealed class FakeHttpContextAccessor : IHttpContextAccessor
+    {
+        public HttpContext? HttpContext { get; set; } = new DefaultHttpContext();
     }
 
     private sealed class TestCorrelationIdProvider : ICorrelationIdProvider
@@ -211,6 +204,7 @@ public sealed class AuthSessionServiceTests
     private sealed class TestAuditLogRepository : IAuditLogRepository
     {
         public Task AddAsync(AuditLog auditLog, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<AuditLog>> GetRecentLogsAsync(int count, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private sealed class FakeAccessTokenIssuer : IAccessTokenIssuer

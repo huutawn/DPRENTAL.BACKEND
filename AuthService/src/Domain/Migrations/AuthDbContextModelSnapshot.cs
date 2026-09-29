@@ -517,8 +517,14 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("DeviceName")
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("ExpiresAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("IpAddress")
+                        .HasColumnType("text");
 
                     b.Property<string>("ReplacedByToken")
                         .HasColumnType("text");

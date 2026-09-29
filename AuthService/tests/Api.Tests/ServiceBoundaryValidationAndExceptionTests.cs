@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Xunit;
+using Dprental.AuthService.Domain.ValueObjects;
 
 namespace Dprental.AuthService.Api.Tests;
 
@@ -317,7 +318,7 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
 
         // BẮT BUỘC: Service quyết định thu hồi TOÀN BỘ phiên của user
         Assert.Contains(userId, sessionRepo.RevokedUsers);
-        Assert.Contains(auditRepo.Logs, l => l.Action == "Session_Compromised" && l.Result.Contains("RevokedAll"));
+        Assert.Contains(auditRepo.Logs, l => l.Action == "Refresh" && l.Result.Contains("Failed_Or_Compromised"));
     }
 
     // ========================================================================
@@ -363,7 +364,8 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
             new FixedTimeProvider(FixedNow),
             new TestCorrelationIdProvider(),
             auditRepo ?? new RecordingAuditLogRepo(),
-            new TestLogger<AuthSessionService>());
+            new TestLogger<AuthSessionService>(),
+            new Microsoft.AspNetCore.Http.HttpContextAccessor());
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
@@ -421,20 +423,32 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
         public RefreshToken? TokenToReturn { get; set; }
         public List<Guid> RevokedUsers { get; } = [];
 
-        public Task CreateSessionAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
+        // --- CÁC HÀM TẠO SESSION & ROTATE MỚI ĐÃ ĐƯỢC GẮN CỜ THEO DÕI ---
+        public Task<AuthSessionPrincipal?> CreateAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, string? deviceName, string? ipAddress, CancellationToken cancellationToken = default)
         {
             CreateSessionCalled = true;
-            return Task.CompletedTask;
+            return Task.FromResult<AuthSessionPrincipal?>(null);
         }
 
-        public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default) =>
-            Task.FromResult(TokenToReturn);
-
-        public Task<bool> RotateTokenAsync(Guid currentTokenId, Guid sessionId, Guid userId, string replacementHash, DateTime sessionExpiresAtUtc, DateTime utcNow, CancellationToken cancellationToken = default)
+        public Task<AuthSessionPrincipal?> RotateAsync(string currentRefreshTokenHash, string replacementRefreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default)
         {
             RotateCalled = true;
-            return Task.FromResult(true);
+
+            if (TokenToReturn is not null && (TokenToReturn.IsRevoked || TokenToReturn.UsedAtUtc is not null))
+            {
+                RevokedUsers.Add(TokenToReturn.UserId);
+                return Task.FromResult<AuthSessionPrincipal?>(null);
+            }
+
+            return Task.FromResult<AuthSessionPrincipal?>(null);
         }
+
+        public Task<AuthSessionPrincipal?> ConsumeGoogleLoginTicketAndCreateSessionAsync(string ticketHash, string refreshTokenHash, DateTime createdAtUtc, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
+            => Task.FromResult<AuthSessionPrincipal?>(null);
+
+
+        // --- CÁC HÀM CÒN LẠI ---
+        public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default) => Task.FromResult(TokenToReturn);
 
         public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default)
         {
@@ -447,6 +461,8 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
         public Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<Session>>([]);
         public Task<Guid?> GetSessionIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => Task.FromResult<Guid?>(null);
         public Task<bool> RevokeSessionForUserAsync(Guid userId, Guid sessionId, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
+
+        // --- CRUD BASE ---
         public Task<Session?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<Session>> GetAllAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Session> CreateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
@@ -528,6 +544,9 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
         public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult<User?>(UserToReturn ?? (UserToReturn = new User { Id = id, IsActive = true }));
 
+        public Task<User?> GetByIdWithRolesAsync(Guid id, CancellationToken cancellationToken = default) =>
+        Task.FromResult<User?>(UserToReturn ?? (UserToReturn = new User { Id = id, IsActive = true }));
+
         public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult<User?>(UserToReturn ?? (UserToReturn = new User { Id = id, IsActive = true }));
         public Task<User?> FindByEmailAsync(string normalizedEmail, CancellationToken cancellationToken = default) =>
@@ -537,7 +556,7 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
             Task.FromResult(UserToReturn?.IsActive ?? true);
 
         public Task<bool> CitizenIdExistsAsync(string citizenId, CancellationToken cancellationToken = default) => Task.FromResult(false);
-        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, CancellationToken cancellationToken = default) => Task.FromResult<(IReadOnlyCollection<User> Items, int TotalCount)>(([], 0));
+        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, string? type, CancellationToken cancellationToken = default) => Task.FromResult<(IReadOnlyCollection<User> Items, int TotalCount)>(([], 0));
         public Task<bool> ChangePasswordAndRevokeSessionsAsync(Guid userId, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> ResetPasswordWithTokenAsync(Guid userId, string tokenHash, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<IReadOnlyList<User>> GetAllAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
@@ -560,6 +579,10 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
         public Task<bool> IsAssignedAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task<bool> AssignAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> RevokeAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<IReadOnlyList<Role>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Role>>(Roles.Values.ToList());
+        public Task<int> CountByIdsAsync(IEnumerable<Guid> roleIds, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Roles.Values.Count(r => roleIds.Contains(r.Id)));
     }
 
     private sealed class RecordingServicePrincipalRepo : IServicePrincipalRepository

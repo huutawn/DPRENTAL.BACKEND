@@ -70,4 +70,17 @@ public sealed class EfRoleRepository(AuthDbContext dbContext) : IRoleRepository
             .ExecuteDeleteAsync(cancellationToken);
         return deleted > 0;
     }
+
+    public async Task<int> CountByIdsAsync(IEnumerable<Guid> roleIds, CancellationToken cancellationToken = default)
+    {
+        return await dbContext.Roles
+            .Where(r => roleIds.Contains(r.Id))
+            .CountAsync(cancellationToken);
+    }
+    public async Task<IReadOnlyList<Role>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        return await dbContext.Roles
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+    }
 }

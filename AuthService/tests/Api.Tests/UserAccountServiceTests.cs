@@ -7,9 +7,11 @@ using Dprental.AuthService.Domain.Entities;
 
 
 using Xunit;
+using Dprental.AuthService.Domain.ValueObjects;
 
 namespace Dprental.AuthService.Api.Tests;
 
+/// <summary>Kiểm tra use case tài khoản người dùng mà không phụ thuộc DB thật.</summary>
 public sealed class UserAccountServiceTests
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 9, 23, 10, 0, 0, TimeSpan.Zero);
@@ -18,13 +20,7 @@ public sealed class UserAccountServiceTests
     public async Task CompleteProfileAsyncHappyPathSucceedsAndAudits()
     {
         Guid userId = Guid.NewGuid();
-        User user = new()
-        {
-            Id = userId,
-            Email = "user@example.com",
-            FullName = "Original Name",
-            IsActive = true
-        };
+        User user = new() { Id = userId, Email = "user@example.com", FullName = "Original Name", IsActive = true };
 
         FakeUserRepository userRepo = new() { User = user };
         TestAuditLogRepository auditRepo = new();
@@ -61,23 +57,10 @@ public sealed class UserAccountServiceTests
     public async Task CompleteProfileAsyncAlreadyCompletedReturnsConflict()
     {
         Guid userId = Guid.NewGuid();
-        User user = new()
-        {
-            Id = userId,
-            Email = "user@example.com",
-            FullName = "Name",
-            CitizenId = "079203001234",
-            ProfileCompletedAtUtc = DateTime.UtcNow,
-            IsActive = true
-        };
-
+        User user = new() { Id = userId, Email = "user@example.com", FullName = "Name", CitizenId = "079203001234", ProfileCompletedAtUtc = DateTime.UtcNow, IsActive = true };
         FakeUserRepository userRepo = new() { User = user };
         UserAccountService service = CreateService(userRepo);
-
-        CompleteProfileRequest request = new(
-            CitizenId: "079203001234",
-            PhoneNumber: "0901234567",
-            DateOfBirth: new DateOnly(2000, 1, 1));
+        CompleteProfileRequest request = new(CitizenId: "079203001234", PhoneNumber: "0901234567", DateOfBirth: new DateOnly(2000, 1, 1));
 
         Result<CurrentUserResponse> result = await service.CompleteProfileAsync(userId, request);
 
@@ -93,12 +76,7 @@ public sealed class UserAccountServiceTests
         FakeUserRepository userRepo = new() { User = user };
         UserAccountService service = CreateService(userRepo);
 
-        // FixedNow is 2026-09-23, so DOB in 2010 is 16 years old
-        CompleteProfileRequest request = new(
-            CitizenId: "079203001234",
-            PhoneNumber: "0901234567",
-            DateOfBirth: new DateOnly(2010, 1, 1));
-
+        CompleteProfileRequest request = new(CitizenId: "079203001234", PhoneNumber: "0901234567", DateOfBirth: new DateOnly(2010, 1, 1));
         Result<CurrentUserResponse> result = await service.CompleteProfileAsync(userId, request);
 
         Assert.True(result.IsFailure);
@@ -113,11 +91,7 @@ public sealed class UserAccountServiceTests
         FakeUserRepository userRepo = new() { User = user, ExistingCitizenId = "079203001234" };
         UserAccountService service = CreateService(userRepo);
 
-        CompleteProfileRequest request = new(
-            CitizenId: "079203001234",
-            PhoneNumber: "0901234567",
-            DateOfBirth: new DateOnly(2000, 1, 1));
-
+        CompleteProfileRequest request = new(CitizenId: "079203001234", PhoneNumber: "0901234567", DateOfBirth: new DateOnly(2000, 1, 1));
         Result<CurrentUserResponse> result = await service.CompleteProfileAsync(userId, request);
 
         Assert.True(result.IsFailure);
@@ -132,11 +106,7 @@ public sealed class UserAccountServiceTests
         FakeUserRepository userRepo = new() { User = user, ThrowDuplicateCitizenIdOnUpdate = true };
         UserAccountService service = CreateService(userRepo);
 
-        CompleteProfileRequest request = new(
-            CitizenId: "079203001234",
-            PhoneNumber: "0901234567",
-            DateOfBirth: new DateOnly(2000, 1, 1));
-
+        CompleteProfileRequest request = new(CitizenId: "079203001234", PhoneNumber: "0901234567", DateOfBirth: new DateOnly(2000, 1, 1));
         Result<CurrentUserResponse> result = await service.CompleteProfileAsync(userId, request);
 
         Assert.True(result.IsFailure);
@@ -148,12 +118,9 @@ public sealed class UserAccountServiceTests
     {
         Guid userId = Guid.NewGuid();
         User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
-        FakeUserRepository userRepo = new() { User = user };
-        UserAccountService service = CreateService(userRepo);
+        UserAccountService service = CreateService(new FakeUserRepository { User = user });
 
-        UpdateProfileRequest request = new();
-
-        Result<CurrentUserResponse> result = await service.UpdateProfileAsync(userId, request);
+        Result<CurrentUserResponse> result = await service.UpdateProfileAsync(userId, new UpdateProfileRequest());
 
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.Profile.EmptyPatch, result.Error);
@@ -164,12 +131,9 @@ public sealed class UserAccountServiceTests
     {
         Guid userId = Guid.NewGuid();
         User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
-        FakeUserRepository userRepo = new() { User = user };
-        UserAccountService service = CreateService(userRepo);
+        UserAccountService service = CreateService(new FakeUserRepository { User = user });
 
-        UpdateProfileRequest request = new(FullName: "   ");
-
-        Result<CurrentUserResponse> result = await service.UpdateProfileAsync(userId, request);
+        Result<CurrentUserResponse> result = await service.UpdateProfileAsync(userId, new UpdateProfileRequest(FullName: "   "));
 
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.Profile.InvalidFullName, result.Error);
@@ -205,19 +169,10 @@ public sealed class UserAccountServiceTests
     {
         Guid userId = Guid.NewGuid();
         User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
-        FakeUserRepository userRepo = new() { User = user };
         FakeExternalLoginRepository loginRepo = new();
-        loginRepo.Logins.Add(new ExternalLogin
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            Provider = "Google",
-            Email = "user@example.com",
-            CreatedAtUtc = FixedNow.UtcDateTime
-        });
+        loginRepo.Logins.Add(new ExternalLogin { Id = Guid.NewGuid(), UserId = userId, Provider = "Google", Email = "user@example.com", CreatedAtUtc = FixedNow.UtcDateTime });
 
-        UserAccountService service = CreateService(userRepo, externalLoginRepository: loginRepo);
-
+        UserAccountService service = CreateService(new FakeUserRepository { User = user }, externalLoginRepository: loginRepo);
         Result<IReadOnlyList<ExternalLoginResponse>> result = await service.GetExternalLoginsAsync(userId);
 
         Assert.True(result.IsSuccess);
@@ -332,8 +287,7 @@ public sealed class UserAccountServiceTests
     {
         Guid userId = Guid.NewGuid();
         User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
-        FakeUserRepository userRepo = new() { User = user };
-        UserAccountService service = CreateService(userRepo);
+        UserAccountService service = CreateService(new FakeUserRepository { User = user });
 
         Result result = await service.UnlinkExternalLoginAsync(userId, "Facebook");
 
@@ -346,19 +300,10 @@ public sealed class UserAccountServiceTests
     {
         Guid userId = Guid.NewGuid();
         User user = new() { Id = userId, Email = "google@example.com", IsActive = true, HasPassword = false };
-        FakeUserRepository userRepo = new() { User = user };
         FakeExternalLoginRepository loginRepo = new();
-        loginRepo.Logins.Add(new ExternalLogin
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            Provider = "Google",
-            ProviderSubject = "sub-123",
-            Email = "google@example.com"
-        });
+        loginRepo.Logins.Add(new ExternalLogin { Id = Guid.NewGuid(), UserId = userId, Provider = "Google", ProviderSubject = "sub-123", Email = "google@example.com" });
 
-        UserAccountService service = CreateService(userRepo, externalLoginRepository: loginRepo);
-
+        UserAccountService service = CreateService(new FakeUserRepository { User = user }, externalLoginRepository: loginRepo);
         Result result = await service.UnlinkExternalLoginAsync(userId, "Google");
 
         Assert.True(result.IsFailure);
@@ -370,20 +315,11 @@ public sealed class UserAccountServiceTests
     {
         Guid userId = Guid.NewGuid();
         User user = new() { Id = userId, Email = "user@example.com", IsActive = true, HasPassword = true };
-        FakeUserRepository userRepo = new() { User = user };
         FakeExternalLoginRepository loginRepo = new();
-        loginRepo.Logins.Add(new ExternalLogin
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            Provider = "Google",
-            ProviderSubject = "sub-123",
-            Email = "user@example.com"
-        });
+        loginRepo.Logins.Add(new ExternalLogin { Id = Guid.NewGuid(), UserId = userId, Provider = "Google", ProviderSubject = "sub-123", Email = "user@example.com" });
         TestAuditLogRepository auditRepo = new();
 
-        UserAccountService service = CreateService(userRepo, auditLogRepository: auditRepo, externalLoginRepository: loginRepo);
-
+        UserAccountService service = CreateService(new FakeUserRepository { User = user }, auditLogRepository: auditRepo, externalLoginRepository: loginRepo);
         Result result = await service.UnlinkExternalLoginAsync(userId, "Google");
 
         Assert.True(result.IsSuccess);
@@ -399,22 +335,10 @@ public sealed class UserAccountServiceTests
         Guid userId = Guid.NewGuid();
         Guid orgId = Guid.NewGuid();
         User user = new() { Id = userId, Email = "owner@example.com", IsActive = true };
-        FakeUserRepository userRepo = new() { User = user };
-        FakeOrganizationMembershipRepository memRepo = new()
-        {
-            ActiveOwnersCount = 1
-        };
-        memRepo.Memberships.Add(new OrganizationMembership
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            OrganizationId = orgId,
-            Status = MembershipStatus.Active,
-            Role = new Role { Id = Guid.NewGuid(), Name = "Owner" }
-        });
+        FakeOrganizationMembershipRepository memRepo = new() { ActiveOwnersCount = 1 };
+        memRepo.Memberships.Add(new OrganizationMembership { Id = Guid.NewGuid(), UserId = userId, OrganizationId = orgId, Status = MembershipStatus.Active, Role = new Role { Id = Guid.NewGuid(), Name = "Owner" } });
 
-        UserAccountService service = CreateService(userRepo, organizationMembershipRepository: memRepo);
-
+        UserAccountService service = CreateService(new FakeUserRepository { User = user }, organizationMembershipRepository: memRepo);
         Result result = await service.DeactivateAsync(userId);
 
         Assert.True(result.IsFailure);
@@ -427,15 +351,10 @@ public sealed class UserAccountServiceTests
     {
         Guid userId = Guid.NewGuid();
         User user = new() { Id = userId, Email = "member@example.com", IsActive = true };
-        FakeUserRepository userRepo = new() { User = user };
         FakeAuthSessionRepository sessionRepo = new();
         TestAuditLogRepository auditRepo = new();
 
-        UserAccountService service = CreateService(
-            userRepo,
-            auditLogRepository: auditRepo,
-            authSessionRepository: sessionRepo);
-
+        UserAccountService service = CreateService(new FakeUserRepository { User = user }, auditLogRepository: auditRepo, authSessionRepository: sessionRepo);
         Result result = await service.DeactivateAsync(userId);
 
         Assert.True(result.IsSuccess);
@@ -487,15 +406,8 @@ public sealed class UserAccountServiceTests
     internal sealed class TestAuditLogRepository : IAuditLogRepository
     {
         public List<AuditLog> Logs { get; } = [];
-
-        public Task AddAsync(AuditLog log, CancellationToken cancellationToken = default)
-        {
-            Logs.Add(log);
-            return Task.CompletedTask;
-        }
-
-        public Task<IReadOnlyList<AuditLog>> GetRecentLogsAsync(int count, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+        public Task AddAsync(AuditLog log, CancellationToken cancellationToken = default) { Logs.Add(log); return Task.CompletedTask; }
+        public Task<IReadOnlyList<AuditLog>> GetRecentLogsAsync(int count, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     internal sealed class FakeUserRepository : IUserRepository
@@ -504,21 +416,13 @@ public sealed class UserAccountServiceTests
         public string? ExistingCitizenId { get; set; }
         public bool ThrowDuplicateCitizenIdOnUpdate { get; set; }
 
-        public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult(User is not null && User.Id == id ? User : null);
-
-        public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult(User is not null && User.Id == id ? User : null);
-
-        public Task<bool> CitizenIdExistsAsync(string citizenId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(citizenId == ExistingCitizenId);
+        public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(User is not null && User.Id == id ? User : null);
+        public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(User is not null && User.Id == id ? User : null);
+        public Task<bool> CitizenIdExistsAsync(string citizenId, CancellationToken cancellationToken = default) => Task.FromResult(citizenId == ExistingCitizenId);
 
         public Task<bool> UpdateAsync(User entity, CancellationToken cancellationToken = default)
         {
-            if (ThrowDuplicateCitizenIdOnUpdate)
-            {
-                throw new StorageConstraintViolationException(StorageConstraintViolationType.Unique, StorageConstraints.UserCitizenId);
-            }
+            if (ThrowDuplicateCitizenIdOnUpdate) throw new StorageConstraintViolationException(StorageConstraintViolationType.Unique, StorageConstraints.UserCitizenId);
             User = entity;
             return Task.FromResult(true);
         }
@@ -540,11 +444,14 @@ public sealed class UserAccountServiceTests
 
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
-        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, CancellationToken cancellationToken = default) =>
-    throw new NotSupportedException();
+
+        // Đã thêm string? type vào hàm này để khớp với Interface mới
+        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, string? type, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task<bool> ChangePasswordAndRevokeSessionsAsync(Guid userId, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> ResetPasswordWithTokenAsync(Guid userId, string tokenHash, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(User is not null && User.Id == userId ? User.IsActive : true);
+        public Task<User?> GetByIdWithRolesAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(User is not null && User.Id == id ? User : null);
     }
 
     internal sealed class FakeExternalLoginRepository : IExternalLoginRepository
@@ -608,17 +515,15 @@ public sealed class UserAccountServiceTests
     {
         public List<Guid> RevokedUsers { get; } = [];
 
-        public Task CreateSessionAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
+        public Task<AuthSessionPrincipal?> CreateAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, string? deviceName, string? ipAddress, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public Task<bool> RotateTokenAsync(Guid currentTokenId, Guid sessionId, Guid userId, string replacementHash, DateTime sessionExpiresAtUtc, DateTime utcNow, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+        // Đã thay thế RotateTokenAsync bằng RotateAsync chuẩn theo Interface mới
+        public Task<AuthSessionPrincipal?> RotateAsync(string currentRefreshTokenHash, string replacementRefreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        public Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
+        public Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default)
         {
@@ -626,32 +531,15 @@ public sealed class UserAccountServiceTests
             return Task.CompletedTask;
         }
 
-        public Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<Session?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<IReadOnlyList<Session>> GetAllAsync(CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<Session> CreateAsync(Session entity, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<bool> UpdateAsync(Session entity, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<Guid?> GetSessionIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<bool> RevokeSessionForUserAsync(Guid userId, Guid sessionId, DateTime utcNow, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+        public Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Session?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<Session>> GetAllAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Session> CreateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> UpdateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Guid?> GetSessionIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> RevokeSessionForUserAsync(Guid userId, Guid sessionId, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     internal sealed class FakeOrganizationMembershipRepository : IOrganizationMembershipRepository
@@ -665,12 +553,18 @@ public sealed class UserAccountServiceTests
         public Task<int> CountActiveOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
             Task.FromResult(ActiveOwnersCount);
 
-        public Task<IReadOnlyList<OrganizationMembership>> GetMembershipsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<OrganizationMembership>>(Memberships.Where(m => m.UserId == userId).ToList());
-        public Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<string>>([]);
-        public Task<IReadOnlyList<string>> GetScopedPermissionCodesAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<IReadOnlyList<OrganizationMembership>> GetMembershipsForUserAsync(
+            Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<OrganizationMembership>>(
+            Memberships.Where(m => m.UserId == userId).ToList());
+
+        public Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<IReadOnlyList<string>> GetScopedPermissionCodesAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<IReadOnlyList<string>> GetEffectivePermissionsAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default)
+        {
+            _ = this;
+            return Task.FromResult<IReadOnlyList<string>>([]);
+        }
     }
     internal sealed class FakeOrgRepo : IOrganizationRepository
     {

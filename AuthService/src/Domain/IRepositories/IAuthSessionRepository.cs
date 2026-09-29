@@ -1,21 +1,24 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using Dprental.AuthService.Domain.Entities;
-
+using Dprental.AuthService.Domain.ValueObjects;
 namespace Dprental.AuthService.Domain.IRepositories;
 
-/// <summary>
-/// Repository quản lý session và refresh token: chỉ đọc, ghi, cập nhật có điều kiện và transaction.
-/// Không chứa quyết định nghiệp vụ (reuse detection, status checks, permission merging).
-/// </summary>
+
+
+/// <summary>Repository duy nhất quản lý session và refresh token.</summary>
 public interface IAuthSessionRepository : IRepo<Session, Guid>
 {
-    Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
-
-    /// <summary>Tạo Session và RefreshToken mới cho user.</summary>
-    Task CreateSessionAsync(
+    /// <summary>Tạo session mới cùng refresh token đầu tiên nếu user đang hoạt động.</summary>
+    Task<AuthSessionPrincipal?> CreateAsync(
         Guid userId,
         string refreshTokenHash,
         DateTime utcNow,
         DateTime expiresAtUtc,
+        string? deviceName,
+        string? ipAddress,
         CancellationToken cancellationToken = default);
 
     /// <summary>Lấy thông tin RefreshToken kèm Session và User để Service kiểm tra trạng thái và phát hiện reuse.</summary>
@@ -24,35 +27,40 @@ public interface IAuthSessionRepository : IRepo<Session, Guid>
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Xoay vòng refresh token bằng cập nhật có điều kiện (conditional update) và thêm token mới trong transaction.
-    /// Trả về false nếu token đã bị dùng hoặc thu hồi trước đó (race condition).
+    /// Xoay refresh token một cách nguyên tử. Nếu phát hiện token đã dùng lại,
+    /// Repository sẽ thu hồi session trước khi trả kết quả.
     /// </summary>
-    Task<bool> RotateTokenAsync(
-        Guid currentTokenId,
-        Guid sessionId,
-        Guid userId,
-        string replacementHash,
-        DateTime sessionExpiresAtUtc,
+    Task<AuthSessionPrincipal?> RotateAsync(
+        string currentRefreshTokenHash,
+        string replacementRefreshTokenHash,
         DateTime utcNow,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Thu hồi session được xác định bởi hash refresh token.</summary>
     Task RevokeByRefreshTokenHashAsync(
         string refreshTokenHash,
         DateTime utcNow,
+        CancellationToken cancellationToken = default);
+
+    Task RevokeAllSessionsForUserAsync(
+        Guid userId,
         CancellationToken cancellationToken = default);
 
     Task<Guid?> GetUserIdByTokenHashAsync(
         string tokenHash,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Lấy tối đa 50 session gần nhất của người dùng.</summary>
     Task<IReadOnlyList<Session>> GetSessionsForUserAsync(
         Guid userId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Lấy SessionId tương ứng với tokenHash của refresh token.</summary>
     Task<Guid?> GetSessionIdByTokenHashAsync(
         string tokenHash,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Thu hồi một session cụ thể của user cùng các refresh token con chưa thu hồi.</summary>
     Task<bool> RevokeSessionForUserAsync(
         Guid userId,
         Guid sessionId,
