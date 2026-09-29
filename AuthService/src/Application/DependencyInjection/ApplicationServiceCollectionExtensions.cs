@@ -5,7 +5,6 @@ using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Application.Options;
 using Dprental.AuthService.Application.Validators;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -43,6 +42,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IRoleAssignmentService, RoleAssignmentService>();
         services.AddScoped<IServiceIdentityService, ServiceIdentityService>();
         services.AddScoped<IExternalLoginService, ExternalLoginService>();
+        services.AddScoped<IFirebaseLoginService, FirebaseLoginService>();
         services.AddScoped<IOrganizationService, OrganizationService>();
         services.AddScoped<IOrganizationRegistrationService, OrganizationRegistrationService>();
         services.AddScoped<IOrganizationReviewService, OrganizationReviewService>();

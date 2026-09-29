@@ -1,16 +1,17 @@
 using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.User;
+using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Mapping;
 using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Domain.Repositories;
 using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
 using Microsoft.Extensions.Logging;
 using Dprental.AuthService.Common.Utils;
-using Dprental.AuthService.Application.Rules;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -18,6 +19,7 @@ namespace Dprental.AuthService.Application.Services;
 public sealed class UserAccountService(
     IUserRepository userRepository,
     IExternalLoginRepository externalLoginRepository,
+    IFirebaseIdentityService firebaseIdentityService,
     IAuthSessionRepository authSessionRepository,
     IOrganizationMembershipRepository organizationMembershipRepository,
     IOrganizationRepository organizationRepository,
@@ -29,6 +31,9 @@ public sealed class UserAccountService(
     IMediaOutboxService mediaOutboxService,
     ILogger<UserAccountService> logger) : IUserAccountService
 {
+    private const string GoogleProvider = "Google";
+    private const string FirebaseGoogleSignInProvider = "google.com";
+
     public async Task<Result<CurrentUserResponse>> CompleteProfileAsync(
         Guid userId,
         CompleteProfileRequest request,
@@ -295,6 +300,91 @@ public sealed class UserAccountService(
             cancellationToken);
     }
 
+    public async Task<Result> LinkExternalLoginAsync(
+        Guid userId,
+        string provider,
+        string? idToken,
+        CancellationToken cancellationToken = default)
+    {
+        if (!DtoValidator.TryValidateId(userId, nameof(userId), out Error? idError))
+        {
+            return Result.Failure(idError);
+        }
+
+        if (string.IsNullOrWhiteSpace(provider) || !string.Equals(provider, GoogleProvider, StringComparison.OrdinalIgnoreCase))
+        {
+            return Result.Failure(AuthErrors.Auth.FirebaseProviderUnsupported);
+        }
+
+        Result<FirebaseIdentity> firebaseResult = await firebaseIdentityService.VerifyIdTokenAsync(idToken, cancellationToken);
+        if (firebaseResult.IsFailure)
+        {
+            return Result.Failure(firebaseResult.Error);
+        }
+
+        FirebaseIdentity firebaseIdentity = firebaseResult.Value;
+        if (!string.Equals(firebaseIdentity.SignInProvider, FirebaseGoogleSignInProvider, StringComparison.Ordinal))
+        {
+            return Result.Failure(AuthErrors.Auth.FirebaseProviderUnsupported);
+        }
+
+        return await ApplicationExecutor.ExecuteAsync(
+            "LinkExternalLogin",
+            async () =>
+            {
+                User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+                if (user is null)
+                {
+                    return Result.Failure(AuthErrors.User.NotFound);
+                }
+
+                if (!user.IsActive)
+                {
+                    return Result.Failure(AuthErrors.Auth.InactiveAccount);
+                }
+
+                ExternalLogin? existingBySubject = await externalLoginRepository.FindAsync(
+                    GoogleProvider,
+                    firebaseIdentity.ProviderSubject,
+                    cancellationToken);
+                if (existingBySubject is not null)
+                {
+                    return Result.Failure(AuthErrors.ExternalLogin.AlreadyLinked);
+                }
+
+                IReadOnlyList<ExternalLogin> existingLogins = await externalLoginRepository.GetByUserAsync(userId, cancellationToken);
+                if (existingLogins.Any(login => string.Equals(login.Provider, GoogleProvider, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return Result.Failure(AuthErrors.ExternalLogin.AlreadyLinked);
+                }
+
+                ExternalLogin login = new()
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = userId,
+                    Provider = GoogleProvider,
+                    ProviderSubject = firebaseIdentity.ProviderSubject,
+                    Email = firebaseIdentity.Email,
+                    CreatedAtUtc = timeProvider.GetUtcNow().UtcDateTime
+                };
+
+                try
+                {
+                    await externalLoginRepository.AddAsync(login, cancellationToken);
+                }
+                catch (StorageConstraintViolationException)
+                {
+                    return Result.Failure(AuthErrors.ExternalLogin.AlreadyLinked);
+                }
+
+                await LogAuditAsync(user.Id, user.Id.ToString(), "ExternalLogin_Link", "Success", cancellationToken);
+                return Result.Success();
+            },
+            logger,
+            correlationIdProvider,
+            cancellationToken);
+    }
+
     public async Task<Result> UnlinkExternalLoginAsync(
         Guid userId,
         string provider,
@@ -305,7 +395,7 @@ public sealed class UserAccountService(
             return Result.Failure(idError);
         }
 
-        if (string.IsNullOrWhiteSpace(provider) || !string.Equals(provider, "Google", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(provider) || !string.Equals(provider, GoogleProvider, StringComparison.OrdinalIgnoreCase))
         {
             return Result.Failure(AuthErrors.ExternalLogin.NotLinked);
         }

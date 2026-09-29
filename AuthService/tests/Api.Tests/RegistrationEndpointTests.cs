@@ -10,7 +10,6 @@ using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Common.Enums;
-using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;

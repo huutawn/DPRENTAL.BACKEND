@@ -11,7 +11,6 @@ using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -24,7 +23,6 @@ namespace Dprental.AuthService.Api.Tests;
 /// Kiểm thử tích hợp với PostgreSQL thật:
 /// - Unique constraint vi phạm ở mức DB -> được ánh xạ thành 409 Conflict.
 /// - Refresh token dùng lại đồng thời -> một request thành công, request kia phát hiện reuse và thu hồi TOÀN BỘ phiên của user.
-/// - Ticket dùng 1 lần (Google login ticket) đồng thời -> đúng 1 request thành công.
 /// - Giao dịch đổi mật khẩu -> nguyên tử, cập nhật mật khẩu và thu hồi toàn bộ session.
 /// - Hai admin cùng duyệt/từ chối một organization -> khóa row, chỉ quyết định đầu tiên được ghi, người sau nhận NotPendingReview.
 /// </summary>
@@ -242,120 +240,6 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         var retryOld = await sessionService.RefreshAsync(refreshToken);
         Assert.True(retryOld.IsFailure);
         Assert.Equal(AuthErrors.Auth.InvalidRefreshToken, retryOld.Error);
-    }
-
-    [Fact]
-    public async Task PostgreSql_OneTimeGoogleTicket_Concurrency()
-    {
-        await using var db = CreateDbContext();
-
-        var sessionRepo = new EfAuthSessionRepository(db, TimeProvider.System);
-        var userRepo = new EfUserRepository(db);
-
-        Guid userId = Guid.NewGuid();
-        db.Users.Add(new User
-        {
-            Id = userId,
-            Email = $"ticket_race_{Guid.NewGuid():N}@example.com",
-            FullName = "Ticket Race",
-            PasswordHash = "hash",
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow
-        });
-        await db.SaveChangesAsync();
-
-        var issuer = new DummyAccessTokenIssuer();
-        var sessionService = new AuthSessionService(
-            sessionRepo, userRepo, issuer, TimeProvider.System,
-            FixedCorrelationIdProvider.Instance,
-            new EfAuditLogRepository(db), NullLogger<AuthSessionService>.Instance);
-
-        var ticketResult = await sessionService.CreateGoogleLoginTicketAsync(userId);
-        Assert.True(ticketResult.IsSuccess);
-        string ticket = ticketResult.Value;
-
-        // ĐUA CONCURRENCY: 2 request cùng exchange 1 ticket ngắn hạn
-        Task<Result<AuthTokenPair>> task1 = Task.Run(async () =>
-        {
-            await using var db1 = CreateDbContext();
-            var s1 = new AuthSessionService(
-                new EfAuthSessionRepository(db1, TimeProvider.System),
-                new EfUserRepository(db1), issuer, TimeProvider.System,
-                FixedCorrelationIdProvider.Instance,
-                new EfAuditLogRepository(db1), NullLogger<AuthSessionService>.Instance);
-            return await s1.ExchangeGoogleLoginTicketAsync(ticket);
-        });
-
-        Task<Result<AuthTokenPair>> task2 = Task.Run(async () =>
-        {
-            await using var db2 = CreateDbContext();
-            var s2 = new AuthSessionService(
-                new EfAuthSessionRepository(db2, TimeProvider.System),
-                new EfUserRepository(db2), issuer, TimeProvider.System,
-                FixedCorrelationIdProvider.Instance,
-                new EfAuditLogRepository(db2), NullLogger<AuthSessionService>.Instance);
-            return await s2.ExchangeGoogleLoginTicketAsync(ticket);
-        });
-
-        Result<AuthTokenPair>[] results = await Task.WhenAll(task1, task2);
-
-        // ĐÚNG 1 request được thành công, request kia phải thất bại vì ticket dùng 1 lần
-        int successCount = results.Count(r => r.IsSuccess);
-        int failureCount = results.Count(r => r.IsFailure);
-
-        Assert.Equal(1, successCount);
-        Assert.Equal(1, failureCount);
-    }
-
-    [Fact]
-    public async Task PostgreSql_GoogleTicket_ForInactiveUser_DoesNotCreateSession()
-    {
-        Guid userId = Guid.NewGuid();
-        await using (var db = CreateDbContext())
-        {
-            db.Users.Add(new User
-            {
-                Id = userId,
-                Email = $"inactive_ticket_{Guid.NewGuid():N}@example.com",
-                FullName = "Inactive Ticket",
-                PasswordHash = "hash",
-                IsActive = true,
-                CreatedAt = DateTime.UtcNow
-            });
-            await db.SaveChangesAsync();
-        }
-
-        string ticket;
-        await using (var db = CreateDbContext())
-        {
-            var service = new AuthSessionService(
-                new EfAuthSessionRepository(db, TimeProvider.System),
-                new EfUserRepository(db), new DummyAccessTokenIssuer(), TimeProvider.System,
-                FixedCorrelationIdProvider.Instance,
-                new EfAuditLogRepository(db), NullLogger<AuthSessionService>.Instance);
-            var result = await service.CreateGoogleLoginTicketAsync(userId);
-            Assert.True(result.IsSuccess);
-            ticket = result.Value;
-        }
-
-        await using (var db = CreateDbContext())
-        {
-            await db.Users.Where(user => user.Id == userId)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(user => user.IsActive, false));
-        }
-
-        await using (var db = CreateDbContext())
-        {
-            var service = new AuthSessionService(
-                new EfAuthSessionRepository(db, TimeProvider.System),
-                new EfUserRepository(db), new DummyAccessTokenIssuer(), TimeProvider.System,
-                FixedCorrelationIdProvider.Instance,
-                new EfAuditLogRepository(db), NullLogger<AuthSessionService>.Instance);
-            var result = await service.ExchangeGoogleLoginTicketAsync(ticket);
-            Assert.True(result.IsFailure);
-            Assert.Equal("Auth.InvalidGoogleLoginTicket", result.Error.Code);
-            Assert.False(await db.Sessions.AnyAsync(session => session.UserId == userId && session.RevokedAtUtc == null));
-        }
     }
 
     [Fact]

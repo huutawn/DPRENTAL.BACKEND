@@ -1,7 +1,7 @@
 using Dprental.AuthService.Application.DTOs.Media;
 using Dprental.AuthService.Common;
 
-namespace Dprental.AuthService.Application.Rules;
+namespace Dprental.AuthService.Application.Validation;
 
 /// <summary>Quy tắc kiểm tra tính hợp lệ của file Media trước khi liên kết với hồ sơ người dùng hoặc tổ chức.</summary>
 public static class MediaVerificationRules

@@ -1,6 +1,6 @@
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Application.DTOs.Auth;
 
 namespace Dprental.AuthService.Application.IServices;
 
@@ -8,12 +8,6 @@ namespace Dprental.AuthService.Application.IServices;
 public interface IAuthSessionService
 {
     Task<Result<AuthTokenPair>> CreateSessionAsync(Guid userId, CancellationToken cancellationToken = default);
-
-    /// <summary>Tạo ticket Google một lần dùng để Next BFF exchange token pair.</summary>
-    Task<Result<string>> CreateGoogleLoginTicketAsync(Guid userId, CancellationToken cancellationToken = default);
-
-    /// <summary>Đổi ticket Google một lần lấy cặp access/refresh token.</summary>
-    Task<Result<AuthTokenPair>> ExchangeGoogleLoginTicketAsync(string ticket, CancellationToken cancellationToken = default);
 
     Task<Result<AuthTokenPair>> RefreshAsync(string refreshToken, CancellationToken cancellationToken = default);
 

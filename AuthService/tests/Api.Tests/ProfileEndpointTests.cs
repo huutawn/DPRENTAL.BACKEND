@@ -10,7 +10,7 @@ using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Common.Enums;
-using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Application.DTOs.Auth;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -168,7 +168,8 @@ public sealed class ProfileEndpointTests
     {
         string inMemoryDatabaseName = Guid.NewGuid().ToString("N");
         using RSA rsa = RSA.Create(2048);
-        string privateKey = Convert.ToBase64String(rsa.ExportPkcs8PrivateKey());
+        string publicKey = rsa.ExportRSAPublicKeyPem();
+        string privateKey = rsa.ExportRSAPrivateKeyPem();
 
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
@@ -179,11 +180,14 @@ public sealed class ProfileEndpointTests
             {
                 configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["Jwt:Issuer"] = "dprental-auth-test",
-                    ["Jwt:Audience"] = "dprental-api-test",
-                    ["Jwt:PrivateKeyPem"] = privateKey,
-                    ["Jwt:KeyId"] = "test-key-id",
-                    ["Jwt:AccessTokenLifetimeMinutes"] = "15"
+                    ["Auth:Jwt:Issuer"] = "https://auth.example.test",
+                    ["Auth:Jwt:Audience"] = "dprental-clients",
+                    ["Auth:Jwt:AccessTokenLifetimeMinutes"] = "15",
+                    ["Auth:Jwt:ActiveKeyId"] = "current",
+                    ["Auth:Jwt:Keys:0:KeyId"] = "current",
+                    ["Auth:Jwt:Keys:0:PublicKeyPem"] = publicKey,
+                    ["Auth:Jwt:Keys:0:PrivateKeyPem"] = privateKey,
+                    ["Auth:AdminBootstrap:CreationKey"] = "test-bootstrap-creation-key"
                 });
             });
 

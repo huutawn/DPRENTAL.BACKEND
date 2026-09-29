@@ -7,7 +7,6 @@ using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Common.Enums;
 
 
-using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Application.Validators;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
@@ -456,8 +455,6 @@ public sealed class UserServiceTests
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task CreateSessionAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<Guid?> ConsumeGoogleLoginTicketAndCreateSessionAsync(string ticketHash, string refreshTokenHash, DateTime utcNow, DateTime sessionExpiresAtUtc, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> RotateTokenAsync(Guid currentTokenId, Guid sessionId, Guid userId, string replacementHash, DateTime sessionExpiresAtUtc, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
