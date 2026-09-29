@@ -2,7 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using Dprental.AuthService.Domain.Repositories;
 using Dprental.AuthService.Common;
 
-namespace Dprental.AuthService.Application.Execution;
+namespace Dprental.AuthService.Api.Exceptions;
 
 /// <summary>
 /// Ánh xạ chính xác các vi phạm ràng buộc unique DB sang expected error tương ứng.
@@ -10,6 +10,7 @@ namespace Dprental.AuthService.Application.Execution;
 /// </summary>
 public static class StorageConstraintMapping
 {
+    /// <summary>Thử ánh xạ StorageConstraintViolationException thành Error nghiệp vụ tương ứng.</summary>
     public static bool TryMap(StorageConstraintViolationException exception, [NotNullWhen(true)] out Error? expectedError)
     {
         ArgumentNullException.ThrowIfNull(exception);

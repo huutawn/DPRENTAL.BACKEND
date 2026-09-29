@@ -108,10 +108,7 @@ public sealed class UserAccountServiceTests
         UserAccountService service = CreateService(userRepo);
 
         CompleteProfileRequest request = new(CitizenId: "079203001234", PhoneNumber: "0901234567", DateOfBirth: new DateOnly(2000, 1, 1));
-        Result<CurrentUserResponse> result = await service.CompleteProfileAsync(userId, request);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(AuthErrors.User.CitizenIdAlreadyExists, result.Error);
+        await Assert.ThrowsAsync<StorageConstraintViolationException>(() => service.CompleteProfileAsync(userId, request));
     }
 
     [Fact]
@@ -459,8 +456,7 @@ public sealed class UserAccountServiceTests
             new FixedTimeProvider(FixedNow),
             mediaClient,
             FakeMediaUrlResolver.Instance,
-            mediaOutboxService ?? new FakeMediaOutboxService(),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<UserAccountService>.Instance);
+            mediaOutboxService ?? new FakeMediaOutboxService());
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider

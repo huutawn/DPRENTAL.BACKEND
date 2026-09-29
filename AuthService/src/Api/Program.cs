@@ -1,4 +1,5 @@
 using Dprental.AuthService.Api.Background;
+using Dprental.AuthService.Api.Exceptions;
 using Dprental.AuthService.Api.Clients;
 using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.Options;
@@ -59,6 +60,7 @@ builder.Services.AddValidatorsFromAssemblyContaining<GetUsersRequestValidator>()
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICorrelationIdProvider, CorrelationIdProvider>();
 builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {

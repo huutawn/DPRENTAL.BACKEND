@@ -13,6 +13,10 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Xunit;
 using Dprental.AuthService.Domain.ValueObjects;
+using Dprental.AuthService.Api.Exceptions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Dprental.AuthService.Api.Tests;
 
@@ -142,9 +146,7 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
     {
         ServiceIdentityService service = new(
             new RecordingServicePrincipalRepo(),
-            new RecordingTokenIssuer(),
-            new TestCorrelationIdProvider(),
-            new TestLogger<ServiceIdentityService>());
+            new RecordingTokenIssuer());
 
         ServiceTokenRequest request = new("", "secret", "aud", "scope");
         Result<ServiceTokenResponse> result = await service.IssueTokenAsync(request);
@@ -162,12 +164,12 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
     {
         StorageConstraintViolationException exception = new(StorageConstraintViolationType.Unique, StorageConstraints.UserRolePrimaryKey);
 
-        Assert.True(Application.Execution.StorageConstraintMapping.TryMap(exception, out Error? error));
+        Assert.True(StorageConstraintMapping.TryMap(exception, out Error? error));
         Assert.Equal(AuthErrors.Role.AlreadyAssigned, error);
     }
 
     [Fact]
-    public async Task UserService_RegisterAsync_DuplicateEmailConstraint_ReturnsConflict()
+    public async Task UserService_RegisterAsync_DuplicateEmailConstraint_DoesNotSwallowAndThrows()
     {
         RecordingUserRepo userRepo = new()
         {
@@ -182,52 +184,32 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
             Password: "Password123!",
             FullName: "Test User");
 
-        Result<AccountCreatedResponse> result = await service.RegisterAsync(request);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(AuthErrors.User.EmailAlreadyExists, result.Error);
-        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        var ex = await Assert.ThrowsAsync<StorageConstraintViolationException>(() => service.RegisterAsync(request));
+        Assert.Equal(StorageConstraints.UserEmail, ex.ConstraintName);
     }
 
     // ========================================================================
-    // 3. EXCEPTION NGOÀI DỰ KIẾN: LOG 1 LẦN KHÔNG CHỨA SECRET, TRẢ AUTH.UNCATEGORIZED (500)
+    // 3. EXCEPTION NGOÀI DỰ KIẾN: SERVICE NÉM LÊN, GLOBAL EXCEPTION HANDLER LOG VÀ TRẢ 500
     // ========================================================================
 
     [Fact]
-    public async Task UserService_RegisterAsync_UnknownDbException_ReturnsUncategorizedAndLogsWithoutSecret()
+    public async Task UserService_RegisterAsync_UnknownDbException_DoesNotSwallowAndThrows()
     {
-        TestLogger<UserService> logger = new();
         RecordingUserRepo userRepo = new()
         {
             ThrowOnCreateWithRole = new InvalidOperationException("PostgreSQL connection pool exhausted")
         };
-        UserService service = CreateUserService(userRepo, logger: logger);
+        UserService service = CreateUserService(userRepo);
 
         const string sensitivePassword = "SuperSecretPassword123!";
         RegisterRequest request = new("user@example.com", sensitivePassword, "User Name");
 
-        Result<AccountCreatedResponse> result = await service.RegisterAsync(request);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(AuthErrors.Auth.Uncategorized, result.Error);
-        Assert.Equal(ErrorType.Failure, result.Error.Type);
-
-        // Xác nhận đã ghi log đúng 1 lần
-        Assert.Single(logger.Logs);
-        TestLogEntry log = logger.Logs[0];
-        Assert.Equal(LogLevel.Error, log.Level);
-        Assert.Contains("Register", log.Message);
-        Assert.Contains("test-correlation-id", log.Message);
-
-        // Xác nhận log KHÔNG chứa mật khẩu hoặc dữ liệu nhạy cảm
-        Assert.DoesNotContain(sensitivePassword, log.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain(sensitivePassword, log.Exception?.ToString() ?? string.Empty, StringComparison.Ordinal);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.RegisterAsync(request));
     }
 
     [Fact]
-    public async Task UserService_AuthenticateAsync_UnrecognizedConstraint_ReturnsUncategorized()
+    public async Task UserService_AuthenticateAsync_UnrecognizedConstraint_DoesNotSwallowAndThrows()
     {
-        TestLogger<UserService> logger = new();
         RecordingUserRepo userRepo = new()
         {
             UserToReturn = new User
@@ -241,16 +223,106 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
                 StorageConstraintViolationType.Other,
                 "UNKNOWN_SYSTEM_CONSTRAINT_123")
         };
-        UserService service = CreateUserService(userRepo, logger: logger);
+        UserService service = CreateUserService(userRepo);
 
-        Result<Guid> result = await service.AuthenticateAsync(new LoginRequest("user@example.com", "CorrectPass123!"));
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(AuthErrors.Auth.Uncategorized, result.Error);
-        Assert.Single(logger.Logs);
-        Assert.Contains("UNKNOWN_SYSTEM_CONSTRAINT_123", logger.Logs[0].Message);
+        await Assert.ThrowsAsync<StorageConstraintViolationException>(
+            () => service.AuthenticateAsync(new LoginRequest("user@example.com", "CorrectPass123!")));
     }
 
+    [Fact]
+    public async Task GlobalExceptionHandler_KnownUniqueConstraint_Returns409ProblemDetails()
+    {
+        TestLogger<GlobalExceptionHandler> logger = new();
+        TestCorrelationIdProvider corrProvider = new();
+        FakeProblemDetailsService problemDetailsService = new();
+        GlobalExceptionHandler handler = new(problemDetailsService, logger);
+
+        DefaultHttpContext httpContext = new();
+        ServiceCollection services = new();
+        services.AddSingleton<ICorrelationIdProvider>(corrProvider);
+        httpContext.RequestServices = services.BuildServiceProvider();
+        StorageConstraintViolationException exception = new(StorageConstraintViolationType.Unique, StorageConstraints.UserEmail);
+
+        bool handled = await handler.TryHandleAsync(httpContext, exception, CancellationToken.None);
+
+        Assert.True(handled);
+        Assert.Equal(StatusCodes.Status409Conflict, httpContext.Response.StatusCode);
+        Assert.NotNull(problemDetailsService.LastWritten);
+        Assert.Equal(StatusCodes.Status409Conflict, problemDetailsService.LastWritten.Status);
+        Assert.Equal(AuthErrors.User.EmailAlreadyExists.Code, problemDetailsService.LastWritten.Title);
+        Assert.Equal(AuthErrors.User.EmailAlreadyExists.Message, problemDetailsService.LastWritten.Detail);
+    }
+
+    [Fact]
+    public async Task GlobalExceptionHandler_UnrecognizedConstraint_LogsOnceWithCorrelationIdAndReturns500WithoutSecret()
+    {
+        TestLogger<GlobalExceptionHandler> logger = new();
+        TestCorrelationIdProvider corrProvider = new();
+        FakeProblemDetailsService problemDetailsService = new();
+        GlobalExceptionHandler handler = new(problemDetailsService, logger);
+
+        const string sensitivePassword = "SuperSecretPassword123!";
+        DefaultHttpContext httpContext = new();
+        ServiceCollection services = new();
+        services.AddSingleton<ICorrelationIdProvider>(corrProvider);
+        httpContext.RequestServices = services.BuildServiceProvider();
+        httpContext.Request.Path = "/api/v1/auth/login";
+
+        StorageConstraintViolationException exception = new(
+            StorageConstraintViolationType.Other,
+            "UNKNOWN_SYSTEM_CONSTRAINT_123",
+            $"Failure with secret {sensitivePassword}");
+
+        bool handled = await handler.TryHandleAsync(httpContext, exception, CancellationToken.None);
+
+        Assert.True(handled);
+        Assert.Equal(StatusCodes.Status500InternalServerError, httpContext.Response.StatusCode);
+        Assert.NotNull(problemDetailsService.LastWritten);
+        Assert.Equal(StatusCodes.Status500InternalServerError, problemDetailsService.LastWritten.Status);
+        Assert.Equal(AuthErrors.Auth.Uncategorized.Code, problemDetailsService.LastWritten.Title);
+        Assert.Equal(AuthErrors.Auth.Uncategorized.Message, problemDetailsService.LastWritten.Detail);
+
+        Assert.DoesNotContain(sensitivePassword, problemDetailsService.LastWritten.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("UNKNOWN_SYSTEM_CONSTRAINT_123", problemDetailsService.LastWritten.Detail, StringComparison.Ordinal);
+
+        Assert.Single(logger.Logs);
+        TestLogEntry log = logger.Logs[0];
+        Assert.Equal(LogLevel.Error, log.Level);
+        Assert.Contains("test-correlation-id", log.Message);
+        Assert.Contains("UNKNOWN_SYSTEM_CONSTRAINT_123", log.Message);
+        Assert.DoesNotContain(sensitivePassword, log.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GlobalExceptionHandler_UnexpectedException_LogsOnceWithCorrelationIdAndReturns500()
+    {
+        TestLogger<GlobalExceptionHandler> logger = new();
+        TestCorrelationIdProvider corrProvider = new();
+        FakeProblemDetailsService problemDetailsService = new();
+        GlobalExceptionHandler handler = new(problemDetailsService, logger);
+
+        DefaultHttpContext httpContext = new();
+        ServiceCollection services = new();
+        services.AddSingleton<ICorrelationIdProvider>(corrProvider);
+        httpContext.RequestServices = services.BuildServiceProvider();
+        httpContext.Request.Path = "/api/v1/auth/register";
+
+        InvalidOperationException exception = new("PostgreSQL connection pool exhausted");
+
+        bool handled = await handler.TryHandleAsync(httpContext, exception, CancellationToken.None);
+
+        Assert.True(handled);
+        Assert.Equal(StatusCodes.Status500InternalServerError, httpContext.Response.StatusCode);
+        Assert.NotNull(problemDetailsService.LastWritten);
+        Assert.Equal(AuthErrors.Auth.Uncategorized.Code, problemDetailsService.LastWritten.Title);
+        Assert.Equal(AuthErrors.Auth.Uncategorized.Message, problemDetailsService.LastWritten.Detail);
+
+        Assert.Single(logger.Logs);
+        TestLogEntry log = logger.Logs[0];
+        Assert.Equal(LogLevel.Error, log.Level);
+        Assert.Contains("test-correlation-id", log.Message);
+        Assert.Contains(nameof(InvalidOperationException), log.Message);
+    }
     // ========================================================================
     // 4. YÊU CẦU HỦY QUA CANCELLATIONTOKEN: PHẢI ĐƯỢC RETHROW
     // ========================================================================
@@ -327,8 +399,7 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
 
     private static UserService CreateUserService(
         RecordingUserRepo userRepo,
-        RecordingRoleRepo? roleRepo = null,
-        TestLogger<UserService>? logger = null)
+        RecordingRoleRepo? roleRepo = null)
     {
         roleRepo ??= new RecordingRoleRepo();
         roleRepo.Roles["Customer"] = new Role { Id = Guid.NewGuid(), Name = "Customer", Scope = RoleScope.Global };
@@ -343,8 +414,7 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
             new RecordingAuditLogRepo(),
             new RecordingSessionRepo(),
             new RecordingRecoveryTokenRepo(),
-            FakeMediaUrlResolver.Instance,
-            logger ?? new TestLogger<UserService>());
+            FakeMediaUrlResolver.Instance);
     }
 
     private static AuthSessionService CreateAuthSessionService(
@@ -364,7 +434,6 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
             new FixedTimeProvider(FixedNow),
             new TestCorrelationIdProvider(),
             auditRepo ?? new RecordingAuditLogRepo(),
-            new TestLogger<AuthSessionService>(),
             new Microsoft.AspNetCore.Http.HttpContextAccessor());
     }
 
@@ -585,5 +654,22 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
     {
         public Task<ServicePrincipal?> GetByClientIdAsync(string clientId, CancellationToken cancellationToken = default) => Task.FromResult<ServicePrincipal?>(null);
         public Task<bool> HasScopeAsync(Guid servicePrincipalId, string scope, string audience, CancellationToken cancellationToken = default) => Task.FromResult(true);
+    }
+
+    private sealed class FakeProblemDetailsService : IProblemDetailsService
+    {
+        public ProblemDetails? LastWritten { get; private set; }
+
+        public ValueTask<bool> TryWriteAsync(ProblemDetailsContext context)
+        {
+            LastWritten = context.ProblemDetails;
+            return ValueTask.FromResult(true);
+        }
+
+        public ValueTask WriteAsync(ProblemDetailsContext context)
+        {
+            LastWritten = context.ProblemDetails;
+            return ValueTask.CompletedTask;
+        }
     }
 }

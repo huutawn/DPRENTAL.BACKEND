@@ -29,4 +29,3 @@ public interface IUserRepository : IRepo<User, Guid>
     Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<User?> GetByIdWithRolesAsync(Guid id, CancellationToken cancellationToken = default);
 }
-    

@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using Dprental.AuthService.Domain.Repositories;
-using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Common;
@@ -8,7 +7,6 @@ using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Extensions.Logging;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -21,9 +19,7 @@ public sealed class ExternalLoginService(
     IUserRepository userRepository,
     IRoleRepository roleRepository,
     IPasswordHasher<User> passwordHasher,
-    TimeProvider timeProvider,
-    ICorrelationIdProvider correlationIdProvider,
-    ILogger<ExternalLoginService> logger) : IExternalLoginService
+    TimeProvider timeProvider) : IExternalLoginService
 {
     private const int FullNameMaxLength = 100;
 
@@ -36,44 +32,36 @@ public sealed class ExternalLoginService(
             return Result.Failure<Guid>(Error.Validation("Validation.Identity", "Thông tin danh tính bên ngoài không hợp lệ."));
         }
 
-        return await ApplicationExecutor.ExecuteAsync(
-            "ExternalLoginSignIn",
-            async () =>
-            {
-                // Đã liên kết trước đó: tra theo subject, không theo email, nên vẫn đúng khi user đổi email ở nhà cung cấp.
-                ExternalLogin? existing = await externalLoginRepository.FindAsync(identity.Provider, identity.Subject, cancellationToken);
-                if (existing is not null)
-                {
-                    return existing.User.IsActive
-                        ? Result.Success(existing.UserId)
-                        : Result.Failure<Guid>(AuthErrors.ExternalLogin.AccountDisabled);
-                }
+        // Đã liên kết trước đó: tra theo subject, không theo email, nên vẫn đúng khi user đổi email ở nhà cung cấp.
+        ExternalLogin? existing = await externalLoginRepository.FindAsync(identity.Provider, identity.Subject, cancellationToken);
+        if (existing is not null)
+        {
+            return existing.User.IsActive
+                ? Result.Success(existing.UserId)
+                : Result.Failure<Guid>(AuthErrors.ExternalLogin.AccountDisabled);
+        }
 
-                if (string.IsNullOrWhiteSpace(identity.Email))
-                {
-                    return Result.Failure<Guid>(AuthErrors.ExternalLogin.MissingEmail);
-                }
+        if (string.IsNullOrWhiteSpace(identity.Email))
+        {
+            return Result.Failure<Guid>(AuthErrors.ExternalLogin.MissingEmail);
+        }
 
-                // Email chưa xác minh không đủ tin cậy để gắn vào tài khoản có sẵn: kẻ xấu có thể đăng ký email của người khác.
-                if (!identity.EmailVerified)
-                {
-                    return Result.Failure<Guid>(AuthErrors.ExternalLogin.EmailNotVerified);
-                }
+        // Email chưa xác minh không đủ tin cậy để gắn vào tài khoản có sẵn: kẻ xấu có thể đăng ký email của người khác.
+        if (!identity.EmailVerified)
+        {
+            return Result.Failure<Guid>(AuthErrors.ExternalLogin.EmailNotVerified);
+        }
 
-                string email = UserService.NormalizeEmail(identity.Email);
-                DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
+        string email = UserService.NormalizeEmail(identity.Email);
+        DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
 
-                User? user = await userRepository.FindByEmailAsync(email, cancellationToken);
-                if (user is not null)
-                {
-                    return await LinkToExistingUserAsync(user, identity, email, utcNow, cancellationToken);
-                }
+        User? user = await userRepository.FindByEmailAsync(email, cancellationToken);
+        if (user is not null)
+        {
+            return await LinkToExistingUserAsync(user, identity, email, utcNow, cancellationToken);
+        }
 
-                return await CreateUserAsync(identity, email, utcNow, cancellationToken);
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
+        return await CreateUserAsync(identity, email, utcNow, cancellationToken);
     }
 
     private async Task<Result<Guid>> LinkToExistingUserAsync(
@@ -93,7 +81,9 @@ public sealed class ExternalLoginService(
             await externalLoginRepository.AddAsync(NewLogin(user.Id, identity, email, utcNow), cancellationToken);
             return Result.Success(user.Id);
         }
-        catch (StorageConstraintViolationException)
+        catch (StorageConstraintViolationException ex) when (
+            ex.ViolationType == StorageConstraintViolationType.Unique &&
+            (ex.ConstraintName is StorageConstraints.ExternalLoginProviderSubject or StorageConstraints.ExternalLoginUserProvider))
         {
             // Hoặc request khác vừa liên kết cùng tài khoản (thì dùng lại), hoặc user này đã gắn một tài khoản khác.
             ExternalLogin? raced = await externalLoginRepository.FindAsync(identity.Provider, identity.Subject, cancellationToken);
@@ -139,7 +129,9 @@ public sealed class ExternalLoginService(
 
             return Result.Success(user.Id);
         }
-        catch (StorageConstraintViolationException)
+        catch (StorageConstraintViolationException ex) when (
+            ex.ViolationType == StorageConstraintViolationType.Unique &&
+            (ex.ConstraintName is StorageConstraints.ExternalLoginProviderSubject or StorageConstraints.ExternalLoginUserProvider or StorageConstraints.UserEmail))
         {
             // Request khác vừa tạo xong cùng tài khoản: đọc lại thay vì báo lỗi cho người dùng.
             ExternalLogin? raced = await externalLoginRepository.FindAsync(identity.Provider, identity.Subject, cancellationToken);
@@ -160,7 +152,7 @@ public sealed class ExternalLoginService(
             Provider = identity.Provider,
             ProviderSubject = identity.Subject,
             Email = email,
-            CreatedAtUtc = utcNow
+            CreatedAtUtc = utcNow,
         };
 
     private static string BuildFullName(string? fullName, string email)

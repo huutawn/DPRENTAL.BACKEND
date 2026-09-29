@@ -9,6 +9,7 @@ using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Utils;
 using Dprental.AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Domain.Repositories;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
@@ -212,8 +213,7 @@ public sealed class ApiBoundaryResponseTests
     [Fact]
     public async Task JwtMiddleware_ActiveUserCheck_InfrastructureFailure_Returns500Not401()
     {
-        // Khi UserService.ValidateActiveUserAsync trả về Auth.Uncategorized (lỗi hạ tầng),
-        // JWT middleware PHẢI trả về HTTP 500 ProblemDetails, KHÔNG ĐƯỢC trả nhầm thành 401 Unauthorized
+        // Lỗi hạ tầng từ kiểm tra tài khoản phải đi qua global exception handler và trả 500.
         using WebApplicationFactory<Program> factory = CreateFactory(services =>
         {
             services.RemoveAll<IUserService>();
@@ -251,6 +251,60 @@ public sealed class ApiBoundaryResponseTests
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var problem = await response.Content.ReadFromJsonAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
         Assert.Equal(AuthErrorCode.User.EmailAlreadyExists, problem?.Title);
+    }
+
+    [Fact]
+    public async Task Register_KnownUniqueConstraintThrownByService_Returns409ProblemDetails()
+    {
+        StorageConstraintViolationException failure = new(
+            StorageConstraintViolationType.Unique,
+            StorageConstraints.UserEmail);
+        using WebApplicationFactory<Program> factory = CreateFactory(services =>
+        {
+            services.RemoveAll<IUserService>();
+            services.AddScoped<IUserService>(_ => new InfrastructureFailingUserService(failure));
+        });
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/v1/auth/register",
+            new RegisterRequest("new@example.com", "Password123!", "New User"));
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        var problem = await response.Content.ReadFromJsonAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+        Assert.Equal(AuthErrors.User.EmailAlreadyExists.Code, problem?.Title);
+        Assert.Equal(AuthErrors.User.EmailAlreadyExists.Message, problem?.Detail);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Register_UnhandledException_ReturnsSanitized500ProblemDetails(bool unknownConstraint)
+    {
+        const string secret = "SensitivePassword123!";
+        Exception failure = unknownConstraint
+            ? new StorageConstraintViolationException(StorageConstraintViolationType.Other, "UNKNOWN_CONSTRAINT", secret)
+            : new InvalidOperationException(secret);
+        using WebApplicationFactory<Program> factory = CreateFactory(services =>
+        {
+            services.RemoveAll<IUserService>();
+            services.AddScoped<IUserService>(_ => new InfrastructureFailingUserService(failure));
+        }, environmentName: "Production");
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/v1/auth/register",
+            new RegisterRequest("new@example.com", "Password123!", "New User"));
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        string body = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(secret, body, StringComparison.Ordinal);
+        Assert.DoesNotContain("UNKNOWN_CONSTRAINT", body, StringComparison.Ordinal);
+        var problem = await response.Content.ReadFromJsonAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+        Assert.Equal(AuthErrors.Auth.Uncategorized.Code, problem?.Title);
+        Assert.Equal(AuthErrors.Auth.Uncategorized.Message, problem?.Detail);
     }
 
     // ========================================================================
@@ -334,13 +388,12 @@ public sealed class ApiBoundaryResponseTests
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    private sealed class InfrastructureFailingUserService : IUserService
+    private sealed class InfrastructureFailingUserService(Exception? registerFailure = null) : IUserService
     {
         public Task<Result> ValidateActiveUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Failure(AuthErrors.Auth.Uncategorized));
-
+            throw new InvalidOperationException("PostgreSQL connection pool exhausted");
         public Task<Result<CurrentUserResponse>> GetCurrentUserProfileAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<Result<AccountCreatedResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Result<AccountCreatedResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default) => throw registerFailure ?? new NotSupportedException();
         public Task<Result<AccountCreatedResponse>> RegisterAdminAsync(RegisterAdminRequest request, string? creationKey, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<AdminUserDetailDto>> GetUserByIdAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> SuspendUserAsync(Guid targetUserId, Guid adminId, CancellationToken cancellationToken = default) => throw new NotSupportedException();

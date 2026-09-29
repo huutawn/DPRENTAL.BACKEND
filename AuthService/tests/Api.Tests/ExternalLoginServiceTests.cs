@@ -141,6 +141,21 @@ public sealed class ExternalLoginServiceTests
     }
 
     [Fact]
+    public async Task SignInAsyncNonUniqueConstraintWithKnownNamePropagates()
+    {
+        User existing = CreateUser("len@example.com");
+        FakeExternalLogins logins = new()
+        {
+            RejectAdd = true,
+            AddViolationType = StorageConstraintViolationType.Other
+        };
+        ExternalLoginService service = CreateService(logins, new FakeUsers { Existing = existing });
+
+        await Assert.ThrowsAsync<StorageConstraintViolationException>(
+            () => service.SignInAsync(CreateIdentity("google-sub-1", email: "len@example.com")));
+    }
+
+    [Fact]
     public async Task SignInAsyncUserAlreadyLinkedToAnotherGoogleAccountReturnsConflict()
     {
         User existing = CreateUser("len@example.com");
@@ -254,9 +269,7 @@ public sealed class ExternalLoginServiceTests
             users,
             roles ?? CreateRolesWithCustomerSeeded(),
             new PasswordHasher<User>(),
-            new FixedTimeProvider(Now),
-            new TestCorrelationIdProvider(),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<ExternalLoginService>.Instance);
+            new FixedTimeProvider(Now));
 
     private sealed class TestCorrelationIdProvider : ICorrelationIdProvider
     {
@@ -302,6 +315,7 @@ public sealed class ExternalLoginServiceTests
         public List<ExternalLogin> Links { get; } = [];
         public List<ExternalLogin> Added { get; } = [];
         public bool RejectAdd { get; init; }
+        public StorageConstraintViolationType AddViolationType { get; init; } = StorageConstraintViolationType.Unique;
         public bool RaceHappened { get; set; }
         public ExternalLogin? LinkVisibleAfterRace { get; init; }
 
@@ -321,7 +335,7 @@ public sealed class ExternalLoginServiceTests
             if (RejectAdd)
             {
                 RaceHappened = true;
-                throw new StorageConstraintViolationException(StorageConstraintViolationType.Unique, StorageConstraints.ExternalLoginProviderSubject);
+                throw new StorageConstraintViolationException(AddViolationType, StorageConstraints.ExternalLoginProviderSubject);
             }
 
             Added.Add(login);

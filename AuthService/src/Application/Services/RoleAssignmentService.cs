@@ -1,12 +1,10 @@
-    using Dprental.AuthService.Application.DTOs.Auth;
-using Dprental.AuthService.Application.Execution;
+using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
-using Microsoft.Extensions.Logging;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -15,9 +13,7 @@ namespace Dprental.AuthService.Application.Services;
 /// nếu cho đổi ở đây thì có thể hạ Owner duy nhất và để tổ chức không còn ai quản lý.
 /// </summary>
 public sealed class RoleAssignmentService(
-    IRoleRepository roleRepository,
-    ICorrelationIdProvider correlationIdProvider,
-    ILogger<RoleAssignmentService> logger) : IRoleAssignmentService
+    IRoleRepository roleRepository) : IRoleAssignmentService
 {
     public async Task<Result> AssignAsync(Guid actorUserId, AssignRoleRequest request, CancellationToken cancellationToken = default)
     {
@@ -41,27 +37,19 @@ public sealed class RoleAssignmentService(
             return Result.Failure(roleError);
         }
 
-        return await ApplicationExecutor.ExecuteAsync(
-            "AssignRole",
-            async () =>
-            {
-                Result guard = await GuardAsync(actorUserId, request, isAssign: true, cancellationToken);
-                if (guard.IsFailure)
-                {
-                    return guard;
-                }
+        Result guard = await GuardAsync(actorUserId, request, isAssign: true, cancellationToken);
+        if (guard.IsFailure)
+        {
+            return guard;
+        }
 
-                if (await roleRepository.IsAssignedAsync(request.TargetUserId, request.RoleId, cancellationToken))
-                {
-                    return Result.Failure(AuthErrors.Role.AlreadyAssigned);
-                }
+        if (await roleRepository.IsAssignedAsync(request.TargetUserId, request.RoleId, cancellationToken))
+        {
+            return Result.Failure(AuthErrors.Role.AlreadyAssigned);
+        }
 
-                bool assigned = await roleRepository.AssignAsync(request.TargetUserId, request.RoleId, cancellationToken);
-                return assigned ? Result.Success() : Result.Failure(AuthErrors.Role.AssignmentFailed);
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
+        bool assigned = await roleRepository.AssignAsync(request.TargetUserId, request.RoleId, cancellationToken);
+        return assigned ? Result.Success() : Result.Failure(AuthErrors.Role.AssignmentFailed);
     }
 
     public async Task<Result> RevokeAsync(Guid actorUserId, AssignRoleRequest request, CancellationToken cancellationToken = default)
@@ -86,27 +74,19 @@ public sealed class RoleAssignmentService(
             return Result.Failure(roleError);
         }
 
-        return await ApplicationExecutor.ExecuteAsync(
-            "RevokeRole",
-            async () =>
-            {
-                Result guard = await GuardAsync(actorUserId, request, isAssign: false, cancellationToken);
-                if (guard.IsFailure)
-                {
-                    return guard;
-                }
+        Result guard = await GuardAsync(actorUserId, request, isAssign: false, cancellationToken);
+        if (guard.IsFailure)
+        {
+            return guard;
+        }
 
-                if (!await roleRepository.IsAssignedAsync(request.TargetUserId, request.RoleId, cancellationToken))
-                {
-                    return Result.Failure(AuthErrors.Role.NotAssigned);
-                }
+        if (!await roleRepository.IsAssignedAsync(request.TargetUserId, request.RoleId, cancellationToken))
+        {
+            return Result.Failure(AuthErrors.Role.NotAssigned);
+        }
 
-                bool revoked = await roleRepository.RevokeAsync(request.TargetUserId, request.RoleId, cancellationToken);
-                return revoked ? Result.Success() : Result.Failure(AuthErrors.Role.NotAssigned);
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
+        bool revoked = await roleRepository.RevokeAsync(request.TargetUserId, request.RoleId, cancellationToken);
+        return revoked ? Result.Success() : Result.Failure(AuthErrors.Role.NotAssigned);
     }
 
 

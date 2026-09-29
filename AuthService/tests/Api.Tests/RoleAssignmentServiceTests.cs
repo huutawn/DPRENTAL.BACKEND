@@ -22,7 +22,7 @@ public sealed class RoleAssignmentServiceTests
         roleRepo.RolePermissions[orgRoleId] = ["perm.one"];
         roleRepo.UserPermissions[actorUserId] = ["perm.one"];
 
-        RoleAssignmentService service = new(roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
+        RoleAssignmentService service = new(roleRepo);
 
         Result result = await service.AssignAsync(actorUserId, new AssignRoleRequest(targetUserId, orgRoleId));
 
@@ -43,7 +43,7 @@ public sealed class RoleAssignmentServiceTests
         roleRepo.RolePermissions[orgRoleId] = ["perm.one"];
         roleRepo.UserPermissions[actorUserId] = ["perm.one"];
 
-        RoleAssignmentService service = new(roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
+        RoleAssignmentService service = new(roleRepo);
 
         Result result = await service.RevokeAsync(actorUserId, new AssignRoleRequest(targetUserId, orgRoleId));
 
@@ -64,7 +64,7 @@ public sealed class RoleAssignmentServiceTests
         roleRepo.RolePermissions[globalRoleId] = ["perm.one"];
         roleRepo.UserPermissions[actorUserId] = ["perm.one", PermissionCode.IdentityRolesAssignGlobal];
 
-        RoleAssignmentService service = new(roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
+        RoleAssignmentService service = new(roleRepo);
 
         Result result = await service.AssignAsync(actorUserId, new AssignRoleRequest(targetUserId, globalRoleId));
 
@@ -98,7 +98,7 @@ public sealed class RoleAssignmentServiceTests
             PermissionCode.IdentityRolesRevokeOrganization
         ];
 
-        RoleAssignmentService service = new(roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
+        RoleAssignmentService service = new(roleRepo);
 
         Result result = await service.AssignAsync(platformAdminUserId, new AssignRoleRequest(targetUserId, globalRoleId));
 
@@ -119,7 +119,7 @@ public sealed class RoleAssignmentServiceTests
         roles.UserPermissions[actorId] = [PermissionCode.IdentityRolesRevokeGlobal];
         roles.Assigned.Add((targetId, roleId));
 
-        RoleAssignmentService service = new(roles, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
+        RoleAssignmentService service = new(roles);
         Result result = await service.RevokeAsync(actorId, new AssignRoleRequest(targetId, roleId));
 
         Assert.Equal(AuthErrors.Role.NotAssigned, result.Error);
@@ -138,7 +138,7 @@ public sealed class RoleAssignmentServiceTests
         roleRepo.UserPermissions[platformAdminUserId] = [PermissionCode.IdentityUsersRead];
         roleRepo.Assigned.Add((targetUserId, globalRoleId));
 
-        RoleAssignmentService service = new(roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
+        RoleAssignmentService service = new(roleRepo);
 
         Result result = await service.RevokeAsync(platformAdminUserId, new AssignRoleRequest(targetUserId, globalRoleId));
 
@@ -161,7 +161,7 @@ public sealed class RoleAssignmentServiceTests
         roleRepo.UserPermissions[superAdminUserId] = [PermissionCode.IdentityUsersRead, PermissionCode.IdentityRolesRevokeGlobal];
         roleRepo.Assigned.Add((targetUserId, globalRoleId));
 
-        RoleAssignmentService service = new(roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
+        RoleAssignmentService service = new(roleRepo);
 
         Result result = await service.RevokeAsync(superAdminUserId, new AssignRoleRequest(targetUserId, globalRoleId));
 
