@@ -337,6 +337,6 @@ Chức năng xem metadata không tự động cấp quyền truy cập binary.
 
 ## 2.8. Hợp đồng API MVP
 
-Business Service có service token scope `media.read` gọi `GET /api/v1/media/{mediaId}` sau khi đã kiểm tra người dùng có quyền trên entity và mediaId được entity tham chiếu. MediaService xác thực service token và scope; Media đã `Deleted` trả 404. Response gồm `mediaId`, `originalFileName`, `contentType`, `sizeBytes`, `status`, `visibility`, `createdAtUtc`. Với Media chưa xác minh, `contentType` và `sizeBytes` là null, không lấy giá trị client tự khai báo làm số liệu thực tế.
+Business Service có service API key scope `media.read` gọi `GET /api/v1/media/{mediaId}` qua Gateway sau khi đã kiểm tra người dùng có quyền trên entity và mediaId được entity tham chiếu. MediaService xác thực danh tính service và scope; Media đã `Deleted` trả 404. Response gồm `mediaId`, `originalFileName`, `contentType`, `sizeBytes`, `status`, `visibility`, `createdAtUtc`. Với Media chưa xác minh, `contentType` và `sizeBytes` là null, không lấy giá trị client tự khai báo làm số liệu thực tế.
 
 Endpoint metadata không trả URL đọc, Bucket hay ObjectKey. Business Service xin URL đọc qua chức năng truy cập trong tài liệu 03 khi người dùng thực sự cần xem hoặc tải tệp.

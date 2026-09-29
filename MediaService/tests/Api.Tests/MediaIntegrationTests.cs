@@ -35,8 +35,73 @@ public class MediaIntegrationTests
         var form = new MultipartFormDataContent();
         var file = new ByteArrayContent(bytes);
         file.Headers.ContentType = new MediaTypeHeaderValue(contentType);
-        form.Add(file, "file", fileName);
+        form.Add(file, "files", fileName);
         return form;
+    }
+
+    [Fact]
+    public async Task MultipartUpload_MultipleFilesReturnIndependentResultsAndReplaySuccessfulFiles()
+    {
+        using var factory = new MediaServiceTestFactory();
+        using var client = factory.CreateClient();
+        MediaServiceTestFactory.SetUserToken(client, $"user-{Guid.NewGuid():N}");
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
+
+        using var form = Form(ValidJpeg(), fileName: "valid.jpg");
+        var invalid = new ByteArrayContent([0x00, 0x01, 0x02]);
+        invalid.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
+        form.Add(invalid, "files", "invalid.jpg");
+        using var response = await client.PostAsync("/api/v1/media/uploads", form);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        UploadFileResultDto[] items = (await response.Content.ReadFromJsonAsync<UploadFileResultDto[]>())!;
+        Assert.Equal(2, items.Length);
+        Assert.Equal(0, items[0].Index);
+        Assert.Equal("Ready", items[0].Media?.Status);
+        Assert.Null(items[0].Error);
+        Assert.Equal(1, items[1].Index);
+        Assert.Null(items[1].Media);
+        Assert.NotNull(items[1].Error);
+
+        using var sameBatch = Form(ValidJpeg(), fileName: "valid.jpg");
+        var sameInvalid = new ByteArrayContent([0x00, 0x01, 0x02]);
+        sameInvalid.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
+        sameBatch.Add(sameInvalid, "files", "invalid.jpg");
+        using var sameResponse = await client.PostAsync("/api/v1/media/uploads", sameBatch);
+        var sameItems = (await sameResponse.Content.ReadFromJsonAsync<UploadFileResultDto[]>())!;
+        Assert.Equal(items[0].Media?.MediaId, sameItems[0].Media?.MediaId);
+        Assert.NotNull(sameItems[1].Error);
+
+        using var replay = Form(ValidJpeg(), fileName: "valid.jpg");
+        using var replayResponse = await client.PostAsync("/api/v1/media/uploads", replay);
+        Assert.Equal(HttpStatusCode.OK, replayResponse.StatusCode);
+        var replayed = Assert.Single((await replayResponse.Content.ReadFromJsonAsync<UploadFileResultDto[]>())!);
+        Assert.Equal("IdempotencyConflict", replayed.Error?.Code);
+    }
+
+    [Fact]
+    public async Task MultipartUpload_ChecksumFailureDoesNotDiscardOtherReadyFile()
+    {
+        using var factory = new MediaServiceTestFactory();
+        using var client = factory.CreateClient();
+        MediaServiceTestFactory.SetUserToken(client, $"user-{Guid.NewGuid():N}");
+        byte[] jpeg = ValidJpeg();
+        using var form = Form(jpeg, fileName: "matching.jpg");
+        var second = new ByteArrayContent(jpeg);
+        second.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
+        form.Add(second, "files", "mismatch.jpg");
+        form.Add(new StringContent(Convert.ToHexString(SHA256.HashData(jpeg))), "sha256Checksums");
+        form.Add(new StringContent(new string('0', 64)), "sha256Checksums");
+
+        using var response = await client.PostAsync("/api/v1/media/uploads", form);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var items = (await response.Content.ReadFromJsonAsync<UploadFileResultDto[]>())!;
+        Assert.Equal(2, items.Length);
+        Assert.Equal("Ready", items[0].Media?.Status);
+        Assert.Null(items[0].Error);
+        Assert.Null(items[1].Media);
+        Assert.Equal("ChecksumMismatch", items[1].Error?.Code);
     }
 
     [Fact]
@@ -50,12 +115,12 @@ public class MediaIntegrationTests
 
         using var upload = await userClient.PostAsync("/api/v1/media/uploads", form);
         Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
-        var media = await upload.Content.ReadFromJsonAsync<MediaCompletedDto>();
+        var media = Assert.Single((await upload.Content.ReadFromJsonAsync<UploadFileResultDto[]>())!).Media;
         Assert.NotNull(media);
         Assert.Equal("application/pdf", media.ContentType);
 
         using var serviceClient = factory.CreateClient();
-        MediaServiceTestFactory.SetServiceToken(serviceClient, "media.publish");
+        MediaServiceTestFactory.SetApiKey(serviceClient);
         using var publish = await serviceClient.PutAsJsonAsync($"/api/v1/media/{media.MediaId}/visibility",
             new ChangeMediaVisibilityRequest("public"));
         Assert.Equal(HttpStatusCode.OK, publish.StatusCode);
@@ -83,7 +148,7 @@ public class MediaIntegrationTests
         using var uploadForm = Form(jpeg);
         var uploadResponse = await userClient.PostAsync("/api/v1/media/uploads", uploadForm);
         Assert.Equal(HttpStatusCode.OK, uploadResponse.StatusCode);
-        var uploaded = await uploadResponse.Content.ReadFromJsonAsync<MediaCompletedDto>();
+        var uploaded = Assert.Single((await uploadResponse.Content.ReadFromJsonAsync<UploadFileResultDto[]>())!).Media;
         Assert.NotNull(uploaded);
         Assert.Equal("Ready", uploaded.Status);
         Assert.Equal("excavator.jpg", uploaded.OriginalFileName);
@@ -102,12 +167,12 @@ public class MediaIntegrationTests
         using var replayForm = Form(jpeg);
         var replayResponse = await userClient.PostAsync("/api/v1/media/uploads", replayForm);
         Assert.Equal(HttpStatusCode.OK, replayResponse.StatusCode);
-        var replayed = await replayResponse.Content.ReadFromJsonAsync<MediaCompletedDto>();
+        var replayed = Assert.Single((await replayResponse.Content.ReadFromJsonAsync<UploadFileResultDto[]>())!).Media;
         Assert.Equal(uploaded.MediaId, replayed?.MediaId);
         Assert.False(string.IsNullOrWhiteSpace(replayed?.PreviewUrl));
 
         using var serviceClient = factory.CreateClient();
-        MediaServiceTestFactory.SetServiceToken(serviceClient, "media.verify", "media.read", "media.publish");
+        MediaServiceTestFactory.SetApiKey(serviceClient);
         var verifyResponse = await serviceClient.GetAsync($"/api/v1/media/{uploaded.MediaId}/verify");
         Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
         var verified = await verifyResponse.Content.ReadFromJsonAsync<MediaVerificationDto>();
@@ -168,18 +233,22 @@ public class MediaIntegrationTests
     {
         using var factory = new MediaServiceTestFactory();
         using var client = factory.CreateClient();
-        MediaServiceTestFactory.SetUserToken(client, $"user-{Guid.NewGuid():N}");
+        string userId = $"user-{Guid.NewGuid():N}";
+        MediaServiceTestFactory.SetUserToken(client, userId);
         string key = Guid.NewGuid().ToString("N");
         client.DefaultRequestHeaders.Add("Idempotency-Key", key);
         using var form = Form([0x00, 0x01, 0x02, 0x03]);
 
         var response = await client.PostAsync("/api/v1/media/uploads", form);
 
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var item = Assert.Single((await response.Content.ReadFromJsonAsync<UploadFileResultDto[]>())!);
+        Assert.Null(item.Media);
+        Assert.NotNull(item.Error);
         using IServiceScope scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MediaDbContext>();
         var session = await db.MediaUploadSessions.Include(s => s.MediaAsset)
-            .SingleAsync(s => s.IdempotencyKey == key);
+            .SingleAsync(s => s.CallerIdentity == userId);
         Assert.Equal(UploadSessionStatus.Rejected, session.Status);
         Assert.Equal(MediaStatus.Rejected, session.MediaAsset?.Status);
         Assert.True(await db.MediaCleanupItems.AnyAsync(item => item.StorageKey == session.TemporaryStorageKey));
@@ -204,17 +273,16 @@ public class MediaIntegrationTests
         var results = await Task.WhenAll(
             firstClient.PostAsync("/api/v1/media/uploads", firstForm),
             secondClient.PostAsync("/api/v1/media/uploads", secondForm));
-        Assert.All(results, result => Assert.Contains(result.StatusCode,
-            new[] { HttpStatusCode.OK, HttpStatusCode.Conflict }));
+        Assert.All(results, result => Assert.Equal(HttpStatusCode.OK, result.StatusCode));
 
         using var replayForm = Form(ValidJpeg());
         var replayResponse = await firstClient.PostAsync("/api/v1/media/uploads", replayForm);
         Assert.Equal(HttpStatusCode.OK, replayResponse.StatusCode);
-        var replayed = await replayResponse.Content.ReadFromJsonAsync<MediaCompletedDto>();
+        var replayed = Assert.Single((await replayResponse.Content.ReadFromJsonAsync<UploadFileResultDto[]>())!).Media;
         Assert.NotNull(replayed);
         using IServiceScope scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MediaDbContext>();
-        Assert.Equal(1, await db.MediaUploadSessions.CountAsync(s => s.CallerIdentity == userId && s.IdempotencyKey == key));
+        Assert.Equal(1, await db.MediaUploadSessions.CountAsync(s => s.CallerIdentity == userId));
         Assert.Equal(1, await db.MediaAssets.CountAsync(a => a.Id == replayed.MediaId));
     }
 

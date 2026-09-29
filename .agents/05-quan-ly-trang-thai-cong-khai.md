@@ -20,7 +20,7 @@ Là một Business Service, tôi muốn kiểm soát việc thay đổi trạng 
 | Thông tin           | Nguồn                  | Mô tả                                                     |
 |---------------------|------------------------|-----------------------------------------------------------|
 | Người dùng hiện tại | Authentication Context | Business Service dùng để kiểm tra quyền publish/unpublish |
-| Service identity    | Service token          | MediaService xác thực service và scope `media.publish`   |
+| Service identity    | service API key qua Gateway | MediaService xác thực service và scope `media.publish` |
 | status              | Media Metadata         | Chỉ Media ở trạng thái ready mới được thay đổi visibility |
 
 **Ví dụ contract:**
@@ -101,7 +101,7 @@ Browser không được tự quyết định Media được Public chỉ bằng 
 
 MediaService phải xác thực service identity và scope `media.publish`. Business Service phải xác nhận entity đang tham chiếu mediaId trước khi yêu cầu đổi visibility.
 
-Business Service quyết định Media được công khai theo quyền người dùng và trạng thái entity. MediaService chỉ cho phép service token có scope `media.publish` thay đổi visibility của Media `Ready`.
+Business Service quyết định Media được công khai theo quyền người dùng và trạng thái entity. MediaService chỉ cho phép service có service API key scope `media.publish` thay đổi visibility của Media `Ready`.
 
 Chuyển private → public không được tạo mediaId mới.
 
@@ -406,6 +406,6 @@ Equipment = Unpublished
 
 ## 5.8. Hợp đồng MVP
 
-Business Service có service token scope `media.publish` gọi `PUT /api/v1/media/{mediaId}/visibility` với `{ "visibility": "public" }`; đổi về `private` dùng cùng endpoint. Business Service kiểm tra quan hệ entity–media trước khi gọi; MediaService kiểm tra status và scope và trả `{ "mediaId": "...", "visibility": "Public" }`. Cùng yêu cầu lặp lại là thành công.
+Business Service có service API key scope `media.publish` gọi `PUT /api/v1/media/{mediaId}/visibility` qua Gateway với `{ "visibility": "public" }`; đổi về `private` dùng cùng endpoint. Business Service kiểm tra quan hệ entity–media trước khi gọi; MediaService kiểm tra status và scope và trả `{ "mediaId": "...", "visibility": "Public" }`. Cùng yêu cầu lặp lại là thành công.
 
 Business Service quyết định loại file nào có thể Public. MediaService chỉ hỗ trợ JPEG, PNG, WebP và PDF trong MVP; video chưa được hỗ trợ.

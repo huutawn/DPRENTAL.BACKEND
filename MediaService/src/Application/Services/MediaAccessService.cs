@@ -17,9 +17,6 @@ public sealed class MediaAccessService : IMediaAccessService
         LoggerMessage.Define<Guid, string>(LogLevel.Warning, new EventId(1, "ReadUrlFailure"),
             "Failed to create read URL for media {MediaId}: {ErrorType}");
 
-    public const string VerifyScope = "media.verify";
-    public const string ReadScope = "media.read";
-    public const string PublishScope = "media.publish";
 
     private readonly IMediaAssetRepository _assets;
     private readonly IObjectStorageService _storage;
@@ -48,9 +45,9 @@ public sealed class MediaAccessService : IMediaAccessService
     }
 
     public async Task<Result<MediaVerificationDto>> VerifyMediaAsync(
-        ServiceCaller caller, Guid mediaId, CancellationToken cancellationToken = default)
+        Guid mediaId, CancellationToken cancellationToken = default)
     {
-        var found = await FindServiceAssetAsync(caller, VerifyScope, mediaId, cancellationToken);
+        var found = await FindAssetAsync(mediaId, cancellationToken);
         if (found.IsFailure)
         {
             return Result.Failure<MediaVerificationDto>(found.Error);
@@ -71,9 +68,9 @@ public sealed class MediaAccessService : IMediaAccessService
     }
 
     public async Task<Result<MediaMetadataDto>> GetMetadataAsync(
-        ServiceCaller caller, Guid mediaId, CancellationToken cancellationToken = default)
+        Guid mediaId, CancellationToken cancellationToken = default)
     {
-        var found = await FindServiceAssetAsync(caller, ReadScope, mediaId, cancellationToken);
+        var found = await FindAssetAsync(mediaId, cancellationToken);
         if (found.IsFailure)
         {
             return Result.Failure<MediaMetadataDto>(found.Error);
@@ -92,7 +89,7 @@ public sealed class MediaAccessService : IMediaAccessService
     }
 
     public async Task<Result<MediaReadUrlDto>> CreatePrivateReadUrlAsync(
-        ServiceCaller caller, Guid mediaId, MediaAccessRequest request, CancellationToken cancellationToken = default)
+        Guid mediaId, MediaAccessRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!string.Equals(request.Action, "read", StringComparison.OrdinalIgnoreCase))
@@ -101,7 +98,7 @@ public sealed class MediaAccessService : IMediaAccessService
                 Error.Validation("InvalidAction", "MVP chỉ hỗ trợ thao tác read."));
         }
 
-        var found = await FindServiceAssetAsync(caller, ReadScope, mediaId, cancellationToken);
+        var found = await FindAssetAsync(mediaId, cancellationToken);
         if (found.IsFailure)
         {
             return Result.Failure<MediaReadUrlDto>(found.Error);
@@ -161,7 +158,7 @@ public sealed class MediaAccessService : IMediaAccessService
     }
 
     public async Task<Result<MediaVisibilityDto>> SetVisibilityAsync(
-        ServiceCaller caller, Guid mediaId, ChangeMediaVisibilityRequest request, CancellationToken cancellationToken = default)
+        Guid mediaId, ChangeMediaVisibilityRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         MediaVisibility desired;
@@ -179,7 +176,7 @@ public sealed class MediaAccessService : IMediaAccessService
                 Error.Validation("InvalidVisibility", "Visibility phải là public hoặc private."));
         }
 
-        var found = await FindServiceAssetAsync(caller, PublishScope, mediaId, cancellationToken);
+        var found = await FindAssetAsync(mediaId, cancellationToken);
         if (found.IsFailure)
         {
             return Result.Failure<MediaVisibilityDto>(found.Error);
@@ -220,22 +217,8 @@ public sealed class MediaAccessService : IMediaAccessService
         return Result.Success(new MediaVisibilityDto(mediaId, desired.ToString()));
     }
 
-    private async Task<Result<MediaAsset>> FindServiceAssetAsync(
-        ServiceCaller caller, string requiredScope, Guid mediaId, CancellationToken cancellationToken)
+    private async Task<Result<MediaAsset>> FindAssetAsync(Guid mediaId, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(caller);
-        if (!Guid.TryParse(caller.Id, out Guid serviceId) || serviceId == Guid.Empty)
-        {
-            return Result.Failure<MediaAsset>(
-                Error.Unauthorized("UnauthorizedService", "Yêu cầu phải được xác thực từ một service hợp lệ."));
-        }
-
-        if (!caller.HasScope(requiredScope))
-        {
-            return Result.Failure<MediaAsset>(
-                Error.Forbidden("MissingServiceScope", "Service không có quyền thực hiện thao tác này."));
-        }
-
         if (mediaId == Guid.Empty)
         {
             return Result.Failure<MediaAsset>(InvalidMediaId());

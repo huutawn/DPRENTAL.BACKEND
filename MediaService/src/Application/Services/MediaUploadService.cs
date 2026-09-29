@@ -47,6 +47,36 @@ public partial class MediaUploadService : IMediaUploadService
             ?? throw new ArgumentNullException(nameof(settings)));
     }
 
+    public async Task<Result<IReadOnlyList<UploadFileResultDto>>> UploadManyAsync(
+        string authenticatedUserId,
+        string? idempotencyKey,
+        IReadOnlyList<UploadMediaRequest> files,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(authenticatedUserId))
+            return Result.Failure<IReadOnlyList<UploadFileResultDto>>(
+                Error.Unauthorized("UnauthorizedUser", "Yêu cầu phải được xác thực từ một người dùng hợp lệ."));
+        if (files is null || files.Count is < 1 or > UploadMediaRequest.MaximumBatchSize ||
+            idempotencyKey?.Trim().Length > 200 || files.Any(file => file is null))
+            return Result.Failure<IReadOnlyList<UploadFileResultDto>>(
+                Error.Validation("InvalidUploadBatch", "Danh sách file hoặc Idempotency-Key không hợp lệ."));
+
+        var results = new List<UploadFileResultDto>(files.Count);
+        for (int index = 0; index < files.Count; index++)
+        {
+            UploadMediaRequest file = files[index] with { BatchSize = files.Count };
+            string? fileKey = string.IsNullOrWhiteSpace(idempotencyKey)
+                ? null
+                : $"batch:{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{idempotencyKey.Trim()}:{index}")))}";
+            Result<MediaCompletedDto> result = await UploadAsync(
+                authenticatedUserId, fileKey, file, cancellationToken);
+            results.Add(new UploadFileResultDto(index, file.FileName,
+                result.IsSuccess ? result.Value : null,
+                result.IsFailure ? new UploadFileErrorDto(result.Error.Code, result.Error.Message) : null));
+        }
+        return Result.Success<IReadOnlyList<UploadFileResultDto>>(results);
+    }
+
     public async Task<Result<MediaCompletedDto>> UploadAsync(
         string authenticatedUserId,
         string? idempotencyKey,
@@ -73,7 +103,8 @@ public partial class MediaUploadService : IMediaUploadService
                 Error.Validation("UnsupportedContentType", "Định dạng tệp không được hỗ trợ."));
         }
 
-        if (string.IsNullOrWhiteSpace(request.FileName) || request.FileName.Length > 1024 ||
+        if (request.BatchSize is < 1 or > UploadMediaRequest.MaximumBatchSize ||
+            string.IsNullOrWhiteSpace(request.FileName) || request.FileName.Length > 1024 ||
             string.IsNullOrWhiteSpace(request.ContentType) || request.ContentType.Length > 100 ||
             request.Content is null)
         {
@@ -269,7 +300,8 @@ public partial class MediaUploadService : IMediaUploadService
         string raw = JsonSerializer.Serialize(new object?[]
         {
             request.FileName?.Trim(), request.ContentType?.Trim().ToLowerInvariant(),
-            request.SizeBytes, request.Sha256Checksum?.Trim().ToLowerInvariant(), fileHash
+            request.SizeBytes, request.Sha256Checksum?.Trim().ToLowerInvariant(), fileHash,
+            request.BatchSize
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw))).ToLowerInvariant();
     }

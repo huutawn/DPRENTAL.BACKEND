@@ -13,13 +13,12 @@ namespace Dprental.MediaService.Api.Controllers;
 /// Tất cả endpoint đều sử dụng tiền tố chuẩn hóa: /api/v1/media.
 /// </summary>
 [ApiController]
-[Authorize]
 [Route("api/v1/media")]
 public class MediaController : ControllerBase
 {
-    private static readonly Action<ILogger, Guid, string?, string, Exception?> LogPrivateGrant =
-        LoggerMessage.Define<Guid, string?, string>(LogLevel.Information, new EventId(1, "PrivateMediaRead"),
-            "Media read grant: {MediaId} {ServiceId} {Result}");
+    private static readonly Action<ILogger, Guid, string, Exception?> LogPrivateGrant =
+        LoggerMessage.Define<Guid, string>(LogLevel.Information, new EventId(1, "PrivateMediaRead"),
+            "Media read grant: {MediaId} {Result}");
     private static readonly Action<ILogger, Guid, string, Exception?> LogPublicGrant =
         LoggerMessage.Define<Guid, string>(LogLevel.Information, new EventId(2, "PublicMediaRead"),
             "Public media read grant: {MediaId} {Result}");
@@ -42,48 +41,61 @@ public class MediaController : ControllerBase
     }
 
     /// <summary>
-    /// Client gửi file trong một multipart request và nhận MediaId khi file đã Ready.
+    /// Client gửi danh sách file trong một multipart request và nhận kết quả cho từng file.
     /// </summary>
     [HttpPost("uploads")]
+    [Authorize]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(25 * 1024 * 1024)]
     [RequestFormLimits(MultipartBodyLengthLimit = 25 * 1024 * 1024)]
-    [ProducesResponseType<MediaCompletedDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<IReadOnlyList<UploadFileResultDto>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Upload(
         [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
         [FromForm] UploadMediaForm form,
         CancellationToken cancellationToken)
     {
-        if (form?.File is null)
+        if (form?.Files is null || form.Files.Count == 0)
         {
             return Problem(statusCode: StatusCodes.Status400BadRequest, title: "MissingFile", detail: "Cần chọn file để tải lên.");
         }
+        if (form.Files.Count > UploadMediaRequest.MaximumBatchSize || form.Files.Any(file => file is null) ||
+            form.Sha256Checksums is { Count: > 0 } && form.Sha256Checksums.Count != form.Files.Count)
+            return Problem(statusCode: StatusCodes.Status400BadRequest, title: "InvalidUploadBatch",
+                detail: "Danh sách file hoặc checksum không hợp lệ.");
 
-        await using Stream content = form.File.OpenReadStream();
-        var result = await _uploadService.UploadAsync(
-            _userContext.UserId ?? string.Empty,
-            idempotencyKey,
-            new UploadMediaRequest(
-                form.File.FileName,
-                form.File.ContentType,
-                form.File.Length,
-                content,
-                form.Sha256Checksum),
-            cancellationToken);
+        var streams = new List<Stream>(form.Files.Count);
+        try
+        {
+            var requests = new List<UploadMediaRequest>(form.Files.Count);
+            for (int index = 0; index < form.Files.Count; index++)
+            {
+                IFormFile file = form.Files[index];
+                Stream stream = file.OpenReadStream();
+                streams.Add(stream);
+                requests.Add(new UploadMediaRequest(file.FileName, file.ContentType, file.Length, stream,
+                    form.Sha256Checksums is { Count: > 0 } ? form.Sha256Checksums[index] : null));
+            }
 
-        Response.Headers.CacheControl = "no-store";
-        return ToActionResult(result, StatusCodes.Status200OK);
+            Result<IReadOnlyList<UploadFileResultDto>> result = await _uploadService.UploadManyAsync(
+                _userContext.UserId ?? string.Empty, idempotencyKey, requests, cancellationToken);
+            Response.Headers.CacheControl = "no-store";
+            return ToActionResult(result, StatusCodes.Status200OK);
+        }
+        finally
+        {
+            foreach (Stream stream in streams)
+                await stream.DisposeAsync();
+        }
     }
 
     /// <summary>
     /// API nội bộ để Business Service kiểm tra MediaId đang Ready và người upload trước khi lưu tham chiếu.
-    /// Yêu cầu Service token đã xác thực.
+    /// Yêu cầu service API key qua Gateway; AuthService phát token ngắn hạn để MediaService xác thực.
     /// </summary>
     [HttpGet("{mediaId:guid}/verify")]
+    [RequireApiKey]
     [ProducesResponseType<MediaVerificationDto>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -92,33 +104,36 @@ public class MediaController : ControllerBase
         [FromRoute] Guid mediaId,
         CancellationToken cancellationToken)
     {
-        var result = await _accessService.VerifyMediaAsync(
-            CurrentService(),
-            mediaId,
-            cancellationToken);
-
+        var result = await _accessService.VerifyMediaAsync(mediaId, cancellationToken);
         return ToActionResult(result, StatusCodes.Status200OK);
     }
 
-    /// <summary>Metadata cho service có scope media.read; không cấp quyền đọc binary.</summary>
+    /// <summary>Metadata cho service có quyền service media scope read hoặc toàn cục */*; không cấp quyền đọc binary.</summary>
     [HttpGet("{mediaId:guid}")]
+    [RequireApiKey]
     [ProducesResponseType<MediaMetadataDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetMetadata(Guid mediaId, CancellationToken cancellationToken)
     {
-        var result = await _accessService.GetMetadataAsync(CurrentService(), mediaId, cancellationToken);
+        var result = await _accessService.GetMetadataAsync(mediaId, cancellationToken);
         return ToActionResult(result, StatusCodes.Status200OK);
     }
 
-    /// <summary>Business Service đã kiểm tra quyền người dùng mới yêu cầu URL đọc Private.</summary>
+    /// <summary>Business Service đã kiểm tra quyền người dùng mới yêu cầu URL đọc Private (yêu cầu service media scope read hoặc */*).</summary>
     [HttpPost("{mediaId:guid}/access")]
+    [RequireApiKey]
     [ProducesResponseType<MediaReadUrlDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> CreatePrivateAccess(
         Guid mediaId, [FromBody] MediaAccessRequest request, CancellationToken cancellationToken)
     {
-        var result = await _accessService.CreatePrivateReadUrlAsync(CurrentService(), mediaId, request, cancellationToken);
+        var result = await _accessService.CreatePrivateReadUrlAsync(mediaId, request, cancellationToken);
         Response.Headers.CacheControl = "no-store";
-        LogPrivateGrant(_logger, mediaId, _userContext.ServiceId,
-            result.IsSuccess ? "granted" : result.Error.Code, null);
+        LogPrivateGrant(_logger, mediaId, result.IsSuccess ? "granted" : result.Error.Code, null);
         return ToActionResult(result, StatusCodes.Status200OK);
     }
 
@@ -138,18 +153,20 @@ public class MediaController : ControllerBase
             : ToActionResult(result, StatusCodes.Status302Found);
     }
 
-    /// <summary>Business Service đồng bộ Public/Private theo trạng thái entity nghiệp vụ.</summary>
+    /// <summary>Business Service đồng bộ Public/Private theo trạng thái entity nghiệp vụ (yêu cầu service media scope publish hoặc */*).</summary>
     [HttpPut("{mediaId:guid}/visibility")]
+    [RequireApiKey]
     [ProducesResponseType<MediaVisibilityDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> SetVisibility(
         Guid mediaId, [FromBody] ChangeMediaVisibilityRequest request, CancellationToken cancellationToken)
     {
-        var result = await _accessService.SetVisibilityAsync(CurrentService(), mediaId, request, cancellationToken);
+        var result = await _accessService.SetVisibilityAsync(mediaId, request, cancellationToken);
         return ToActionResult(result, StatusCodes.Status200OK);
     }
 
-    private ServiceCaller CurrentService() =>
-        new(_userContext.ServiceId, _userContext.ServiceScopes);
 
     private ObjectResult ToActionResult<T>(Result<T> result, int successStatusCode)
     {
@@ -181,6 +198,6 @@ public class MediaController : ControllerBase
 /// <summary>Transport multipart của upload; metadata file được đọc từ IFormFile.</summary>
 public sealed class UploadMediaForm
 {
-    public IFormFile? File { get; set; }
-    public string? Sha256Checksum { get; set; }
+    public List<IFormFile> Files { get; set; } = [];
+    public List<string>? Sha256Checksums { get; set; }
 }

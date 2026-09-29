@@ -89,6 +89,13 @@ builder.Services.AddOptions<MediaAccessSettings>()
 
 // 4. Security & CORS
 builder.Services.AddMediaAuthentication(builder.Configuration);
+builder.Services.AddSingleton<IApiKeyValidator>(sp =>
+{
+    var configuration = sp.GetRequiredService<IConfiguration>();
+    var key = configuration.GetConfiguredApiKey();
+    return new ApiKeyValidator(key ?? string.Empty);
+});
+
 
 var storageOptions = builder.Configuration.GetSection(ObjectStorageOptions.SectionName).Get<ObjectStorageOptions>();
 builder.Services.AddCors(cors =>
@@ -119,6 +126,7 @@ builder.Services.AddProblemDetails();
 builder.Services.AddSwaggerGen(options =>
 {
     options.InferSecuritySchemes();
+    options.OperationFilter<ApiKeyOperationFilter>();
 
     var apiXml = Path.Combine(AppContext.BaseDirectory, $"{typeof(Program).Assembly.GetName().Name}.xml");
     if (File.Exists(apiXml))
