@@ -40,7 +40,7 @@ public sealed class ProfileEndpointTests
             FullName: "Complete Name",
             AvatarMediaId: Guid.Parse("11111111-1111-1111-1111-111111111111"));
 
-        using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/users/me", request);
+        using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/users/profile", request);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -58,7 +58,7 @@ public sealed class ProfileEndpointTests
         Assert.Equal("********1234", getDoc.RootElement.GetProperty("maskedCitizenId").GetString());
 
         // Calling POST /users/me again should return 409 Conflict
-        using HttpResponseMessage secondResponse = await client.PostAsJsonAsync("/api/v1/auth/users/me", request);
+        using HttpResponseMessage secondResponse = await client.PostAsJsonAsync("/api/v1/auth/users/profile", request);
         Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
         using JsonDocument secondDoc = JsonDocument.Parse(await secondResponse.Content.ReadAsStringAsync());
         Assert.Equal("Profile.AlreadyCompleted", secondDoc.RootElement.GetProperty("title").GetString());
@@ -105,7 +105,7 @@ public sealed class ProfileEndpointTests
             FullName: "Patched Name",
             RemoveAvatar: true);
 
-        using HttpResponseMessage response = await client.PatchAsJsonAsync("/api/v1/auth/users/me", request);
+        using HttpResponseMessage response = await client.PatchAsJsonAsync("/api/v1/auth/users/profile", request);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());

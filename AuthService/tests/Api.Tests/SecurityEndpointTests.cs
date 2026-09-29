@@ -38,7 +38,7 @@ public sealed class SecurityEndpointTests
             OldPassword: "OldP@ssw0rd123",
             NewPassword: "NewP@ssw0rd456");
 
-        using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/users/me/change-password", request);
+        using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/users/change-password", request);
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
         // Verify Set-Cookie header contains expired cookies
@@ -59,7 +59,7 @@ public sealed class SecurityEndpointTests
             OldPassword: "WrongPassword999",
             NewPassword: "NewP@ssw0rd456");
 
-        using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/users/me/change-password", request);
+        using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/users/change-password", request);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
@@ -75,7 +75,7 @@ public sealed class SecurityEndpointTests
         using HttpClient client = CreateAuthenticatedClient(factory, userId);
         client.DefaultRequestHeaders.Add("Cookie", $"{AuthCookies.RefreshTokenCookieName}={rawRefreshToken}");
 
-        using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/users/me/sessions");
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/users/sessions");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -97,7 +97,7 @@ public sealed class SecurityEndpointTests
 
         using HttpClient client = CreateAuthenticatedClient(factory, userId);
 
-        using HttpResponseMessage response = await client.DeleteAsync($"/api/v1/auth/users/me/sessions/{sessionId}");
+        using HttpResponseMessage response = await client.DeleteAsync($"/api/v1/auth/users/sessions/{sessionId}");
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
         // Verify session is revoked in DB
@@ -118,7 +118,7 @@ public sealed class SecurityEndpointTests
 
         using HttpClient client = CreateAuthenticatedClient(factory, userId);
 
-        using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/users/me/external-logins");
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/users/external-logins");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -138,7 +138,7 @@ public sealed class SecurityEndpointTests
 
         using HttpClient client = CreateAuthenticatedClient(factory, userId);
 
-        using HttpResponseMessage response = await client.DeleteAsync("/api/v1/auth/users/me/external-logins/Google");
+        using HttpResponseMessage response = await client.DeleteAsync("/api/v1/auth/users/external-logins/Google");
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -155,7 +155,7 @@ public sealed class SecurityEndpointTests
 
         using HttpClient client = CreateAuthenticatedClient(factory, userId);
 
-        using HttpResponseMessage response = await client.DeleteAsync("/api/v1/auth/users/me/external-logins/Google");
+        using HttpResponseMessage response = await client.DeleteAsync("/api/v1/auth/users/external-logins/Google");
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
         // Verify link is deleted
@@ -176,7 +176,7 @@ public sealed class SecurityEndpointTests
 
         using HttpClient client = CreateAuthenticatedClient(factory, userId);
 
-        using HttpResponseMessage response = await client.DeleteAsync("/api/v1/auth/users/me");
+        using HttpResponseMessage response = await client.DeleteAsync("/api/v1/auth/users/deactivate");
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -192,7 +192,7 @@ public sealed class SecurityEndpointTests
 
         using HttpClient client = CreateAuthenticatedClient(factory, userId);
 
-        using HttpResponseMessage response = await client.DeleteAsync("/api/v1/auth/users/me");
+        using HttpResponseMessage response = await client.DeleteAsync("/api/v1/auth/users/deactivate");
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
         // Verify Set-Cookie header contains expired cookies

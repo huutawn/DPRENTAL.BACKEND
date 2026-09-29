@@ -175,7 +175,7 @@ public sealed class AuthController(
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
-    /// <summary>Yêu cầu đặt lại mật khẩu. Development: khóa admin hợp lệ trong X-Admin-Creation-Key trả token để thử nghiệm.</summary>
+    /// <summary>Yêu cầu đặt lại mật khẩu qua mã OTP gửi về email.</summary>
     [HttpPost("forgot-password")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -192,38 +192,58 @@ public sealed class AuthController(
             return this.ToProblem(result.Error);
         }
 
-        if (result.Value is string token)
+        if (result.Value is string otp)
         {
             Response.Headers.CacheControl = "no-store";
-            return Ok(new { Message = "Yêu cầu khôi phục mật khẩu đã được xử lý.", Token = token });
+            return Ok(new { Message = "Mã OTP khôi phục mật khẩu đã được gửi.", Otp = otp, Token = otp });
         }
 
-        return Ok(new { Message = "Yêu cầu khôi phục mật khẩu đã được xử lý." });
+        return Ok(new { Message = "Mã OTP khôi phục mật khẩu đã được gửi." });
     }
 
-    /// <summary>Xác thực link từ email, gắn token vào Cookie và chuyển hướng về Frontend.</summary>
-    [HttpGet("verify-reset-link")]
-    public IActionResult VerifyResetLink([FromQuery] string token)
+    /// <summary>Xác thực mã OTP khôi phục mật khẩu, gắn token vào HttpOnly Cookie để tiến hành đổi mật khẩu.</summary>
+    [HttpPost("verify-reset-otp")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> VerifyResetOtp(
+        [FromBody] VerifyResetOtpRequest request,
+        CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(token))
+        Result<string> result = await userService.VerifyResetOtpAsync(request, cancellationToken);
+        if (result.IsFailure)
         {
-            return BadRequest(new { Message = "Link khôi phục không hợp lệ hoặc đã hỏng." });
+            return this.ToProblem(result.Error);
         }
 
-        // Tạo HttpOnly Cookie chứa token
+        string resetToken = result.Value;
+
         CookieOptions cookieOptions = new()
         {
             HttpOnly = true,
-            Secure = true, // Đảm bảo Cookie chỉ gửi qua HTTPS
-            SameSite = SameSiteMode.Strict, // Chống tấn công CSRF
-            Expires = DateTimeOffset.UtcNow.AddMinutes(30) // Khớp với TTL của Token trong DB
+            Secure = true,
+            SameSite = SameSiteMode.Strict,
+            Expires = DateTimeOffset.UtcNow.AddMinutes(15)
         };
 
-        Response.Cookies.Append("ResetPasswordToken", token, cookieOptions);
+        Response.Cookies.Append("ResetPasswordToken", resetToken, cookieOptions);
 
-        // Chuyển hướng user về trang giao diện frontend để họ nhập mật khẩu mới.
-        // CẦN THAY ĐỔI: Sửa URL dưới đây thành địa chỉ thật của Frontend team bạn
-        return Redirect("https://localhost:3000/auth/create-new-password");
+        return Ok(new { Message = "Xác thực mã OTP thành công.", ResetToken = resetToken });
+    }
+
+    /// <summary>Hỗ trợ xác thực mã OTP qua GET query parameter.</summary>
+    [HttpGet("verify-reset-otp")]
+    public async Task<IActionResult> VerifyResetOtpFromQuery(
+        [FromQuery] string? otp,
+        [FromQuery] string? email,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(otp))
+        {
+            return BadRequest(new { Message = "Mã OTP là bắt buộc." });
+        }
+
+        return await VerifyResetOtp(new VerifyResetOtpRequest(otp, email), cancellationToken);
     }
 
     /// <summary>Đặt lại mật khẩu bằng token hợp lệ và thu hồi toàn bộ phiên cũ.</summary>

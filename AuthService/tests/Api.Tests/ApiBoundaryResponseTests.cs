@@ -76,6 +76,57 @@ public sealed class ApiBoundaryResponseTests
         Assert.NotNull((await db.RecoveryTokens.SingleAsync(t => t.UserId == userId)).UsedAtUtc);
     }
 
+    [Fact]
+    public async Task ForgotPassword_And_VerifyResetOtp_Flow_Succeeds()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory(environmentName: "Development");
+        Guid userId = await SeedUserAsync(factory, "otpuser@example.com", "OldPassword123!", isActive: true);
+        using HttpClient client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Admin-Creation-Key", BootstrapKey);
+
+        using HttpResponseMessage forgotResponse = await client.PostAsJsonAsync(
+            "/api/v1/auth/forgot-password", new RequestPasswordResetRequest("otpuser@example.com"));
+        Assert.Equal(HttpStatusCode.OK, forgotResponse.StatusCode);
+
+        using JsonDocument body = JsonDocument.Parse(await forgotResponse.Content.ReadAsStringAsync());
+        string otp = body.RootElement.GetProperty("otp").GetString()!;
+        Assert.Equal(6, otp.Length);
+
+        // Xác thực mã OTP qua POST /verify-reset-otp
+        using HttpResponseMessage verifyResponse = await client.PostAsJsonAsync(
+            "/api/v1/auth/verify-reset-otp", new VerifyResetOtpRequest(otp, "otpuser@example.com"));
+        Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
+
+        IEnumerable<string> setCookies = verifyResponse.Headers.GetValues("Set-Cookie");
+        Assert.Contains(setCookies, c => c.StartsWith("ResetPasswordToken=", StringComparison.OrdinalIgnoreCase));
+        string resetCookie = setCookies.First(c => c.StartsWith("ResetPasswordToken=", StringComparison.OrdinalIgnoreCase)).Split(';')[0];
+
+        // Gọi reset-password với cookie vừa nhận
+        using HttpRequestMessage reset = new(HttpMethod.Post, "/api/v1/auth/reset-password")
+        {
+            Content = JsonContent.Create(new ResetPasswordRequest("NewBrandPassword123!", "NewBrandPassword123!"))
+        };
+        reset.Headers.Add("Cookie", resetCookie);
+        using HttpResponseMessage resetResponse = await client.SendAsync(reset);
+        Assert.Equal(HttpStatusCode.OK, resetResponse.StatusCode);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        Assert.NotNull((await db.RecoveryTokens.SingleAsync(t => t.UserId == userId)).UsedAtUtc);
+    }
+
+    [Fact]
+    public async Task VerifyResetOtp_InvalidOtp_Returns401Unauthorized()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory(environmentName: "Development");
+        await SeedUserAsync(factory, "otpuser2@example.com", "OldPassword123!", isActive: true);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage verifyResponse = await client.PostAsJsonAsync(
+            "/api/v1/auth/verify-reset-otp", new VerifyResetOtpRequest("000000", "otpuser2@example.com"));
+        Assert.Equal(HttpStatusCode.Unauthorized, verifyResponse.StatusCode);
+    }
+
     [Theory]
     [InlineData("Development", null, "reset@example.com")]
     [InlineData("Development", "wrong-key", "reset@example.com")]
@@ -400,6 +451,7 @@ public sealed class ApiBoundaryResponseTests
         public Task<Result> ActivateUserAsync(Guid targetUserId, Guid adminId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<Guid>> AuthenticateAsync(LoginRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<string?>> RequestPasswordResetAsync(RequestPasswordResetRequest request, string? testKey, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Result<string>> VerifyResetOtpAsync(VerifyResetOtpRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> ResetPasswordAsync(string token, ResetPasswordRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> ChangePasswordAsync(Guid userId, ChangePasswordRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 

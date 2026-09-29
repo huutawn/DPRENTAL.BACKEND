@@ -213,22 +213,69 @@ public sealed class UserService(
             return Result.Success<string?>(null);
         }
 
-        string rawToken = RefreshTokenUtility.Create();
+        string otp = RandomNumberGenerator.GetInt32(100000, 1000000).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         RecoveryToken recoveryToken = new()
         {
             Id = Guid.NewGuid(),
             UserId = user.Id,
-            TokenHash = RefreshTokenUtility.ComputeHash(rawToken),
+            TokenHash = RefreshTokenUtility.ComputeHash(otp),
             Purpose = "ResetPassword",
             CreatedAtUtc = timeProvider.GetUtcNow().UtcDateTime,
-            ExpiresAtUtc = timeProvider.GetUtcNow().UtcDateTime.AddMinutes(30)
+            ExpiresAtUtc = timeProvider.GetUtcNow().UtcDateTime.AddMinutes(15)
         };
 
         await recoveryTokenRepository.AddAsync(recoveryToken, cancellationToken);
         await LogAuditAsync(user.Id, user.Id.ToString(), "Password_ResetRequest", "Success", corrId, cancellationToken);
 
-        return Result.Success<string?>(IsAdminCreationKeyValid(testKey) ? rawToken : null);
+        return Result.Success<string?>(IsAdminCreationKeyValid(testKey) ? otp : null);
+    }
+
+    public async Task<Result<string>> VerifyResetOtpAsync(VerifyResetOtpRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!DtoValidator.TryValidate(request, out Error? validationError))
+        {
+            return Result.Failure<string>(validationError);
+        }
+
+        string corrId = correlationIdProvider.GetCorrelationId();
+        string cleanOtp = request.Otp.Trim();
+        string otpHash = RefreshTokenUtility.ComputeHash(cleanOtp);
+
+        RecoveryToken? recoveryToken = await recoveryTokenRepository.FindByHashAsync(otpHash, cancellationToken);
+        if (recoveryToken is null ||
+            recoveryToken.Purpose != "ResetPassword" ||
+            recoveryToken.UsedAtUtc is not null)
+        {
+            await LogAuditAsync(null, request.Email ?? "Unknown", "Password_VerifyOtp", "Failed_InvalidOrReusedOtp", corrId, cancellationToken);
+            return Result.Failure<string>(Error.Unauthorized("Auth.InvalidOtp", "Mã OTP không hợp lệ hoặc đã được sử dụng."));
+        }
+
+        if (recoveryToken.ExpiresAtUtc <= timeProvider.GetUtcNow().UtcDateTime)
+        {
+            await LogAuditAsync(recoveryToken.UserId, recoveryToken.UserId.ToString(), "Password_VerifyOtp", "Failed_OtpExpired", corrId, cancellationToken);
+            return Result.Failure<string>(Error.Unauthorized("Auth.OtpExpired", "Mã OTP đã hết hạn."));
+        }
+
+        User? user = await userRepository.GetByIdAsync(recoveryToken.UserId, cancellationToken);
+        if (user is null || !user.IsActive)
+        {
+            await LogAuditAsync(recoveryToken.UserId, recoveryToken.UserId.ToString(), "Password_VerifyOtp", "Failed_UserNotFoundOrInactive", corrId, cancellationToken);
+            return Result.Failure<string>(Error.Unauthorized("Auth.InvalidOtp", "Mã OTP không hợp lệ hoặc tài khoản không tồn tại."));
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Email))
+        {
+            string normalizedEmail = NormalizeEmail(request.Email);
+            if (!string.Equals(user.Email, normalizedEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                await LogAuditAsync(user.Id, user.Id.ToString(), "Password_VerifyOtp", "Failed_EmailMismatch", corrId, cancellationToken);
+                return Result.Failure<string>(Error.Unauthorized("Auth.InvalidOtp", "Mã OTP không khớp với email yêu cầu."));
+            }
+        }
+
+        await LogAuditAsync(user.Id, user.Id.ToString(), "Password_VerifyOtp", "Success", corrId, cancellationToken);
+        return Result.Success(cleanOtp);
     }
 
     public async Task<Result> ResetPasswordAsync(string token, ResetPasswordRequest request, CancellationToken cancellationToken = default)
