@@ -30,12 +30,13 @@ public sealed class UserAccountServiceTests
         TestAuditLogRepository auditRepo = new();
         UserAccountService service = CreateService(userRepo, auditLogRepository: auditRepo);
 
+        Guid mediaId = Guid.Parse("11111111-1111-1111-1111-111111111111");
         CompleteProfileRequest request = new(
             CitizenId: "079203001234",
             PhoneNumber: "0901234567",
             DateOfBirth: new DateOnly(2000, 1, 1),
             FullName: "Updated Name",
-            AvatarUrl: "https://example.com/avatar.png");
+            AvatarMediaId: mediaId);
 
         Result<CurrentUserResponse> result = await service.CompleteProfileAsync(userId, request);
 
@@ -44,7 +45,8 @@ public sealed class UserAccountServiceTests
         Assert.Equal("********1234", result.Value.MaskedCitizenId);
         Assert.Equal("0901234567", result.Value.PhoneNumber);
         Assert.Equal("Updated Name", result.Value.FullName);
-        Assert.Equal("https://example.com/avatar.png", result.Value.AvatarUrl);
+        Assert.Equal(mediaId, result.Value.AvatarMediaId);
+        Assert.Equal("http://localhost:5050/api/v1/media/11111111-1111-1111-1111-111111111111/content", result.Value.AvatarUrl);
         Assert.Equal(new DateOnly(2000, 1, 1), result.Value.DateOfBirth);
         Assert.NotNull(user.ProfileCompletedAtUtc);
 
@@ -174,26 +176,28 @@ public sealed class UserAccountServiceTests
     }
 
     [Fact]
-    public async Task UpdateProfileAsyncEmptyAvatarUrlClearsAvatar()
+    public async Task UpdateProfileAsyncWithRemoveAvatarClearsAvatar()
     {
         Guid userId = Guid.NewGuid();
+        Guid oldMediaId = Guid.NewGuid();
         User user = new()
         {
             Id = userId,
             Email = "user@example.com",
-            AvatarUrl = "https://example.com/old-avatar.png",
+            AvatarMediaId = oldMediaId,
             IsActive = true
         };
         FakeUserRepository userRepo = new() { User = user };
         UserAccountService service = CreateService(userRepo);
 
-        UpdateProfileRequest request = new(AvatarUrl: "");
+        UpdateProfileRequest request = new(RemoveAvatar: true);
 
         Result<CurrentUserResponse> result = await service.UpdateProfileAsync(userId, request);
 
         Assert.True(result.IsSuccess);
+        Assert.Null(result.Value.AvatarMediaId);
         Assert.Null(result.Value.AvatarUrl);
-        Assert.Null(user.AvatarUrl);
+        Assert.Null(user.AvatarMediaId);
     }
 
     [Fact]
@@ -341,14 +345,17 @@ public sealed class UserAccountServiceTests
         Assert.Equal(userId.ToString(), audit.Target);
     }
 
-    private static UserAccountService CreateService(
+    internal static UserAccountService CreateService(
         FakeUserRepository userRepo,
         IAuditLogRepository? auditLogRepository = null,
         FakeExternalLoginRepository? externalLoginRepository = null,
         FakeAuthSessionRepository? authSessionRepository = null,
         FakeOrganizationMembershipRepository? organizationMembershipRepository = null,
-        IOrganizationRepository? organizationRepository = null)
+        IOrganizationRepository? organizationRepository = null,
+        FakeMediaServiceClient? mediaServiceClient = null,
+        FakeMediaOutboxService? mediaOutboxService = null)
     {
+        var mediaClient = mediaServiceClient ?? new FakeMediaServiceClient { AutoVerify = true, DefaultUserId = userRepo.User?.Id };
         return new UserAccountService(
             userRepo,
             externalLoginRepository ?? new FakeExternalLoginRepository(),
@@ -358,6 +365,9 @@ public sealed class UserAccountServiceTests
             auditLogRepository ?? new TestAuditLogRepository(),
             new TestCorrelationIdProvider(),
             new FixedTimeProvider(FixedNow),
+            mediaClient,
+            FakeMediaUrlResolver.Instance,
+            mediaOutboxService ?? new FakeMediaOutboxService(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<UserAccountService>.Instance);
     }
 
@@ -366,12 +376,12 @@ public sealed class UserAccountServiceTests
         public override DateTimeOffset GetUtcNow() => utcNow;
     }
 
-    private sealed class TestCorrelationIdProvider : ICorrelationIdProvider
+    internal sealed class TestCorrelationIdProvider : ICorrelationIdProvider
     {
         public string GetCorrelationId() => "test-corr-id";
     }
 
-    private sealed class TestAuditLogRepository : IAuditLogRepository
+    internal sealed class TestAuditLogRepository : IAuditLogRepository
     {
         public List<AuditLog> Logs { get; } = [];
 
@@ -385,7 +395,7 @@ public sealed class UserAccountServiceTests
             throw new NotSupportedException();
     }
 
-    private sealed class FakeUserRepository : IUserRepository
+    internal sealed class FakeUserRepository : IUserRepository
     {
         public User? User { get; set; }
         public string? ExistingCitizenId { get; set; }
@@ -434,7 +444,7 @@ public sealed class UserAccountServiceTests
         public Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(User is not null && User.Id == userId ? User.IsActive : true);
     }
 
-    private sealed class FakeExternalLoginRepository : IExternalLoginRepository
+    internal sealed class FakeExternalLoginRepository : IExternalLoginRepository
     {
         public List<ExternalLogin> Logins { get; } = [];
 
@@ -454,7 +464,7 @@ public sealed class UserAccountServiceTests
         }
     }
 
-    private sealed class FakeAuthSessionRepository : IAuthSessionRepository
+    internal sealed class FakeAuthSessionRepository : IAuthSessionRepository
     {
         public List<Guid> RevokedUsers { get; } = [];
 
@@ -510,7 +520,7 @@ public sealed class UserAccountServiceTests
             throw new NotSupportedException();
     }
 
-    private sealed class FakeOrganizationMembershipRepository : IOrganizationMembershipRepository
+    internal sealed class FakeOrganizationMembershipRepository : IOrganizationMembershipRepository
     {
         public List<OrganizationMembership> Memberships { get; } = [];
         public int ActiveOwnersCount { get; set; } = 1;
@@ -528,7 +538,7 @@ public sealed class UserAccountServiceTests
         public Task<IReadOnlyList<string>> GetScopedPermissionCodesAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<string>>([]);
     }
-    private sealed class FakeOrgRepo : IOrganizationRepository
+    internal sealed class FakeOrgRepo : IOrganizationRepository
     {
         public Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task<Organization?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<Organization?>(null);

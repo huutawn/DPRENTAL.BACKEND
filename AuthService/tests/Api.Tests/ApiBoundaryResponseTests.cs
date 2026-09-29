@@ -290,6 +290,8 @@ public sealed class ApiBoundaryResponseTests
         string privateKey = rsa.ExportRSAPrivateKeyPem();
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("MediaService:ApiKey", "test-media-key");
+            builder.UseSetting("MediaService:PublicGatewayUrl", "http://gateway.example.test");
             builder.UseEnvironment(environmentName);
             builder.ConfigureAppConfiguration((_, config) =>
             {
@@ -373,7 +375,6 @@ public sealed class ApiBoundaryResponseTests
         public Task<Result<CurrentUserResponse>> GetCurrentUserProfileAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<AccountCreatedResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<AccountCreatedResponse>> RegisterAdminAsync(RegisterAdminRequest request, string? creationKey, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<Result> UpdateUserProfileAsync(Guid userId, UpdateUserProfileRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<AdminUserDetailDto>> GetUserByIdAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> SuspendUserAsync(Guid targetUserId, Guid adminId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> ActivateUserAsync(Guid targetUserId, Guid adminId, CancellationToken cancellationToken = default) => throw new NotSupportedException();

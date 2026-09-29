@@ -31,6 +31,16 @@ PostgreSQL lắng nghe ở `localhost:5433`; Valkey (Redis-compatible) ở `loca
 
 Trước khi chạy API, cấp connection string, RSA JWT key ring bằng User Secrets hoặc secret manager theo [hướng dẫn local](docs/README.md#chạy-api-cục-bộ). Không đặt password hoặc signing key vào `appsettings*.json`.
 
+## MediaId và dữ liệu URL cũ
+
+AuthService lưu `AvatarMediaId`, `LogoMediaId` và `BusinessLicenseDocumentMediaId`; GET trả thêm URL để hiển thị. Avatar/logo dùng URL public qua Gateway. Giấy phép giữ private và GET chi tiết tổ chức chỉ cấp URL ký ngắn hạn sau khi kiểm tra quyền. Đăng ký tài khoản không nhận avatar; người dùng upload sau khi đăng nhập. PATCH/PUT hồ sơ dùng `removeAvatar: true` để xóa avatar.
+
+Thiết lập `MediaService__InternalBaseUrl`, `MediaService__PublicGatewayUrl` và `MediaService__ApiKey` trước khi chạy AuthService. API key phải trùng key của MediaService; URL public phải là địa chỉ Gateway mà trình duyệt truy cập được. Trong production không dùng `localhost` cho URL public hoặc URL lưu trữ ký bởi MediaService. Giá trị cấu hình được kiểm tra lúc khởi động.
+
+Migration `AddMediaIdAndOutbox` chỉ **thêm** cột UUID và outbox, giữ cột URL cũ để di trú. Trước cutover, khóa các thao tác ghi URL cũ, nhập file lịch sử vào MediaService, kiểm tra Ready, loại file, uploader và visibility, rồi lập manifest gồm `recordType`, `recordId`, `legacyUrl`, `status: "Mapped"`, `mediaId`, `fileType`, `sizeBytes`, `visibility`. Chạy `DRY_RUN=true scripts/backfill-media-manifest.sh manifest.json` để kiểm tra manifest; sau đó chạy script không có `DRY_RUN` từ thư mục Compose chứa service `postgres` để ánh xạ UUID trong một transaction. Script đối chiếu **toàn bộ** URL còn trong DB, từ chối bản ghi thiếu hoặc URL đã thay đổi. Xác nhận các URL mới đọc được rồi mới triển khai API mới. Cột URL cũ chỉ được bỏ bằng migration contract sau khi mọi instance cũ đã dừng và dữ liệu đã đối chiếu.
+
+Outbox retry tối đa 5 lần; bản ghi `Failed` cần được điều tra rồi phát lại có kiểm soát bằng cách đặt `Status='Pending'`, `RetryCount=0` và `NextRetryAtUtc=NULL` theo `Id` trong bảng `auth.MediaOutboxMessages`. Một tác vụ `Processing` bị ngắt sẽ được worker nhận lại khi lease hết hạn. Ảnh đã gỡ khỏi hồ sơ vẫn public vì MediaService chưa có thông tin tham chiếu từ các service khác.
+
 ## Quản lý version NuGet tập trung
 
 AuthService sử dụng Central Package Management (CPM) để quản lý toàn bộ version thư viện tại file `Directory.Packages.props` ở thư mục gốc. Tùy chọn `CentralPackageVersionOverrideEnabled` được đặt thành `false` nhằm ngăn từng project tự ghi đè version chung.

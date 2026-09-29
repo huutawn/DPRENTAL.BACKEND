@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Dprental.AuthService.Application.DTOs.Auth;
+using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Common.Enums;
 
 namespace Dprental.AuthService.Application.DTOs.Organization;
@@ -21,7 +22,7 @@ public sealed record OrganizationProfileRequest(
     [Required, StringLength(250)] string Address,
     [Required, StringLength(100)] string Province,
     [Required, StringLength(100)] string Ward,
-    [Required, Url, StringLength(500)] string BusinessLicenseDocumentUrl,
+    [NonEmptyGuid] Guid BusinessLicenseDocumentMediaId,
     [StringLength(100)] string? Slug = null,
     [StringLength(50)] string? BusinessLicenseNumber = null,
     DateOnly? BusinessLicenseIssuedDate = null,
@@ -29,7 +30,7 @@ public sealed record OrganizationProfileRequest(
     DateOnly? EstablishedDate = null,
     [RegularExpression(RegistrationPatterns.CitizenId, ErrorMessage = "Số CCCD phải gồm đúng 12 chữ số.")] string? LegalRepresentativeCitizenId = null,
     [OptionalUrl, StringLength(500)] string? Website = null,
-    [OptionalUrl, StringLength(500)] string? LogoUrl = null,
+    [NonEmptyGuid] Guid? LogoMediaId = null,
     [StringLength(2000)] string? Description = null);
 
 /// <summary>
@@ -46,14 +47,14 @@ public sealed record UpdateOrganizationProfileRequest(
     [Required, StringLength(250)] string Address,
     [Required, StringLength(100)] string Province,
     [Required, StringLength(100)] string Ward,
-    [Required, Url, StringLength(500)] string BusinessLicenseDocumentUrl,
+    [NonEmptyGuid] Guid BusinessLicenseDocumentMediaId,
     [StringLength(50)] string? BusinessLicenseNumber = null,
     DateOnly? BusinessLicenseIssuedDate = null,
     [StringLength(200)] string? BusinessLicenseIssuedPlace = null,
     DateOnly? EstablishedDate = null,
     [RegularExpression(RegistrationPatterns.CitizenId, ErrorMessage = "Số CCCD phải gồm đúng 12 chữ số.")] string? LegalRepresentativeCitizenId = null,
     [OptionalUrl, StringLength(500)] string? Website = null,
-    [OptionalUrl, StringLength(500)] string? LogoUrl = null,
+    [NonEmptyGuid] Guid? LogoMediaId = null,
     [StringLength(2000)] string? Description = null);
 
 /// <summary>Admin đổi tên, tạm khóa hoặc mở lại organization (PATCH /{id}). Trường null = không đổi.</summary>

@@ -1,3 +1,4 @@
+using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
@@ -21,6 +22,9 @@ public sealed class OrganizationRegistrationService(
     IAuditLogRepository auditLogRepository,
     TimeProvider timeProvider,
     ICorrelationIdProvider correlationIdProvider,
+    IMediaServiceClient mediaServiceClient,
+    IMediaUrlResolver mediaUrlResolver,
+    IMediaOutboxService mediaOutboxService,
     ILogger<OrganizationRegistrationService> logger) : IOrganizationRegistrationService
 {
     private static readonly Guid SeededOwnerRoleId = new("a1010000-0000-0000-0000-000000000001");
@@ -85,6 +89,31 @@ public sealed class OrganizationRegistrationService(
                 {
                     return Result.Failure<OrganizationRegisteredResponse>(AuthErrors.Organization.RoleNotFound);
                 }
+                if (request.LogoMediaId.HasValue)
+                {
+                    var logoVerify = await mediaServiceClient.VerifyMediaAsync(request.LogoMediaId.Value, cancellationToken);
+                    if (logoVerify.IsFailure)
+                    {
+                        return Result.Failure<OrganizationRegisteredResponse>(logoVerify.Error);
+                    }
+                    var logoValidation = MediaVerificationRules.ValidateImage(logoVerify.Value, actorUserId);
+                    if (logoValidation.IsFailure)
+                    {
+                        return Result.Failure<OrganizationRegisteredResponse>(logoValidation.Error);
+                    }
+                }
+
+                var docVerify = await mediaServiceClient.VerifyMediaAsync(request.BusinessLicenseDocumentMediaId, cancellationToken);
+                if (docVerify.IsFailure)
+                {
+                    return Result.Failure<OrganizationRegisteredResponse>(docVerify.Error);
+                }
+                var docValidation = MediaVerificationRules.ValidateDocument(docVerify.Value, actorUserId);
+                if (docValidation.IsFailure)
+                {
+                    return Result.Failure<OrganizationRegisteredResponse>(docValidation.Error);
+                }
+
 
                 DateTime now = timeProvider.GetUtcNow().UtcDateTime;
                 Organization organization = new()
@@ -109,9 +138,9 @@ public sealed class OrganizationRegistrationService(
                     Province = request.Province.Trim(),
                     Ward = request.Ward.Trim(),
                     Website = StringUtility.NullIfBlank(request.Website),
-                    LogoUrl = StringUtility.NullIfBlank(request.LogoUrl),
+                    LogoMediaId = request.LogoMediaId,
                     Description = StringUtility.NullIfBlank(request.Description),
-                    BusinessLicenseDocumentUrl = request.BusinessLicenseDocumentUrl.Trim()
+                    BusinessLicenseDocumentMediaId = request.BusinessLicenseDocumentMediaId
                 };
 
                 // Membership Owner Active ngay, nhưng org Pending nên chưa đóng góp permission/organization context vào JWT.
@@ -125,6 +154,10 @@ public sealed class OrganizationRegistrationService(
                     JoinedAtUtc = now
                 };
 
+                if (request.LogoMediaId.HasValue)
+                {
+                    await mediaOutboxService.QueuePublicVisibilityAsync(request.LogoMediaId.Value, cancellationToken);
+                }
                 await organizationRepository.CreateAsync(organization, ownerMembership, cancellationToken);
 
                 return Result.Success(new OrganizationRegisteredResponse(actor.Id, organization.Id, organization.Slug, organization.Status));
@@ -168,11 +201,57 @@ public sealed class OrganizationRegistrationService(
                     return Result.Failure<OrganizationResponse>(AuthErrors.Organization.Forbidden);
                 }
 
+                Organization? before = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
+                if (before is null)
+                {
+                    return Result.Failure<OrganizationResponse>(AuthErrors.Organization.OrganizationNotFound);
+                }
+
+                // Remote verification must finish before opening the row-lock transaction.
+                if (request.LogoMediaId.HasValue && request.LogoMediaId != before.LogoMediaId)
+                {
+                    var logoVerify = await mediaServiceClient.VerifyMediaAsync(request.LogoMediaId.Value, cancellationToken);
+                    if (logoVerify.IsFailure)
+                    {
+                        return Result.Failure<OrganizationResponse>(logoVerify.Error);
+                    }
+                    var logoValidation = MediaVerificationRules.ValidateImage(logoVerify.Value, actorUserId);
+                    if (logoValidation.IsFailure)
+                    {
+                        return Result.Failure<OrganizationResponse>(logoValidation.Error);
+                    }
+                }
+
+                if (request.BusinessLicenseDocumentMediaId != before.BusinessLicenseDocumentMediaId)
+                {
+                    var docVerify = await mediaServiceClient.VerifyMediaAsync(request.BusinessLicenseDocumentMediaId, cancellationToken);
+                    if (docVerify.IsFailure)
+                    {
+                        return Result.Failure<OrganizationResponse>(docVerify.Error);
+                    }
+                    var docValidation = MediaVerificationRules.ValidateDocument(docVerify.Value, actorUserId);
+                    if (docValidation.IsFailure)
+                    {
+                        return Result.Failure<OrganizationResponse>(docValidation.Error);
+                    }
+                }
+
+                var accessResult = await mediaUrlResolver.ResolvePrivateAccessUrlAsync(request.BusinessLicenseDocumentMediaId, cancellationToken);
+                if (accessResult.IsFailure)
+                {
+                    return Result.Failure<OrganizationResponse>(accessResult.Error);
+                }
+
                 await using IExecutionTransaction transaction = await organizationRepository.BeginTransactionAsync(cancellationToken);
                 Organization? org = await organizationRepository.GetByIdForUpdateAsync(organizationId, cancellationToken);
                 if (org is null)
                 {
                     return Result.Failure<OrganizationResponse>(AuthErrors.Organization.OrganizationNotFound);
+                }
+                if (org.LogoMediaId != before.LogoMediaId ||
+                    org.BusinessLicenseDocumentMediaId != before.BusinessLicenseDocumentMediaId)
+                {
+                    return Result.Failure<OrganizationResponse>(AuthErrors.Organization.ConcurrentModification);
                 }
 
                 if (org.Status == OrganizationStatus.Suspended)
@@ -192,6 +271,7 @@ public sealed class OrganizationRegistrationService(
                     return Result.Failure<OrganizationResponse>(AuthErrors.Organization.TaxCodeAlreadyExists);
                 }
 
+                Guid? oldLogoId = org.LogoMediaId;
                 requested.ApplyTo(org);
                 org.ContactEmail = UserService.NormalizeEmail(request.ContactEmail);
                 org.ContactPhone = request.ContactPhone.Trim();
@@ -199,8 +279,13 @@ public sealed class OrganizationRegistrationService(
                 org.Province = request.Province.Trim();
                 org.Ward = request.Ward.Trim();
                 org.Website = StringUtility.NullIfBlank(request.Website);
-                org.LogoUrl = StringUtility.NullIfBlank(request.LogoUrl);
+                org.LogoMediaId = request.LogoMediaId;
                 org.Description = StringUtility.NullIfBlank(request.Description);
+
+                if (request.LogoMediaId.HasValue && request.LogoMediaId != oldLogoId)
+                {
+                    await mediaOutboxService.QueuePublicVisibilityAsync(request.LogoMediaId.Value, cancellationToken);
+                }
 
                 bool resubmitted = org.Status == OrganizationStatus.Rejected;
                 if (resubmitted)
@@ -225,7 +310,8 @@ public sealed class OrganizationRegistrationService(
                 }, cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
 
-                return Result.Success(org.ToResponse());
+                string? logoUrl = mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId);
+                return Result.Success(org.ToResponse(logoUrl, accessResult.Value.Url, accessResult.Value.ExpiresAtUtc.UtcDateTime));
             },
             logger,
             correlationIdProvider,
@@ -242,7 +328,7 @@ public sealed class OrganizationRegistrationService(
         DateOnly? BusinessLicenseIssuedDate,
         string? BusinessLicenseIssuedPlace,
         DateOnly? EstablishedDate,
-        string? BusinessLicenseDocumentUrl)
+        Guid BusinessLicenseDocumentMediaId)
     {
         public static LegalInfo From(UpdateOrganizationProfileRequest request, string? ownerCitizenId) =>
             new(
@@ -254,7 +340,7 @@ public sealed class OrganizationRegistrationService(
                 request.BusinessLicenseIssuedDate,
                 StringUtility.NullIfBlank(request.BusinessLicenseIssuedPlace),
                 request.EstablishedDate,
-                request.BusinessLicenseDocumentUrl.Trim());
+                request.BusinessLicenseDocumentMediaId);
 
         public static LegalInfo From(Organization org) =>
             new(
@@ -266,7 +352,7 @@ public sealed class OrganizationRegistrationService(
                 org.BusinessLicenseIssuedDate,
                 org.BusinessLicenseIssuedPlace,
                 org.EstablishedDate,
-                org.BusinessLicenseDocumentUrl);
+                org.BusinessLicenseDocumentMediaId ?? Guid.Empty);
 
         public void ApplyTo(Organization org)
         {
@@ -278,7 +364,7 @@ public sealed class OrganizationRegistrationService(
             org.BusinessLicenseIssuedDate = BusinessLicenseIssuedDate;
             org.BusinessLicenseIssuedPlace = BusinessLicenseIssuedPlace;
             org.EstablishedDate = EstablishedDate;
-            org.BusinessLicenseDocumentUrl = BusinessLicenseDocumentUrl;
+            org.BusinessLicenseDocumentMediaId = BusinessLicenseDocumentMediaId;
         }
     }
 

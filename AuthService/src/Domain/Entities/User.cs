@@ -28,8 +28,7 @@ public class User
     [MaxLength(12)]
     public string? CitizenId { get; set; }
 
-    [MaxLength(500)]
-    public string? AvatarUrl { get; set; }
+    public Guid? AvatarMediaId { get; set; }
 
     [MaxLength(15)]
     public string? PhoneNumber { get; set; }

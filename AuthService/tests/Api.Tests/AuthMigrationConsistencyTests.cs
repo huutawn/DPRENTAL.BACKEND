@@ -20,7 +20,7 @@ public sealed class AuthMigrationConsistencyTests
     }
 
     [Fact]
-    public async Task MigrateOnNewDatabaseAppliesAll24MigrationsAndSubsequentMigrateIsIdempotent()
+    public async Task MigrateOnNewDatabaseAppliesAll25MigrationsAndSubsequentMigrateIsIdempotent()
     {
         string connStr = "Host=localhost;Port=5435;Database=authservice_fresh_migrate;Username=postgres;Password=postgres;Include Error Detail=true";
         DbContextOptions<AuthDbContext> options = new DbContextOptionsBuilder<AuthDbContext>()
@@ -31,12 +31,21 @@ public sealed class AuthMigrationConsistencyTests
         await ctx.Database.EnsureDeletedAsync();
 
         IEnumerable<string> pendingBefore = await ctx.Database.GetPendingMigrationsAsync();
-        Assert.Equal(24, pendingBefore.Count());
+        Assert.Equal(25, pendingBefore.Count());
 
         await ctx.Database.MigrateAsync();
 
+        // Expand migration keeps URL data available for the offline import and reconciliation.
+        int legacyColumns = await ctx.Database.SqlQueryRaw<int>("""
+            SELECT COUNT(*)::integer AS "Value" FROM information_schema.columns
+            WHERE table_schema = 'auth' AND
+              ((table_name = 'Users' AND column_name = 'AvatarUrl') OR
+               (table_name = 'Organizations' AND column_name IN ('LogoUrl', 'BusinessLicenseDocumentUrl')))
+            """).SingleAsync();
+        Assert.Equal(3, legacyColumns);
+
         IEnumerable<string> applied = await ctx.Database.GetAppliedMigrationsAsync();
-        Assert.Equal(24, applied.Count());
+        Assert.Equal(25, applied.Count());
 
         IEnumerable<string> pendingAfter = await ctx.Database.GetPendingMigrationsAsync();
         Assert.Empty(pendingAfter);
@@ -45,7 +54,7 @@ public sealed class AuthMigrationConsistencyTests
         await ctx.Database.MigrateAsync();
 
         IEnumerable<string> appliedAfterReapply = await ctx.Database.GetAppliedMigrationsAsync();
-        Assert.Equal(24, appliedAfterReapply.Count());
+        Assert.Equal(25, appliedAfterReapply.Count());
 
         await ctx.Database.EnsureDeletedAsync();
     }

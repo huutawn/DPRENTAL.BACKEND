@@ -318,6 +318,8 @@ public sealed class GoogleLoginEndpointTests
 
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("MediaService:ApiKey", "test-media-key");
+            builder.UseSetting("MediaService:PublicGatewayUrl", "http://gateway.example.test");
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(settings));
             // Forwarded-header registration reads host configuration during Program startup.
             builder.UseSetting("Auth:ForwardedHeaders:Enabled", "true");

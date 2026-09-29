@@ -1,3 +1,8 @@
+using Dprental.AuthService.Api.Background;
+using Dprental.AuthService.Api.Clients;
+using Dprental.AuthService.Application.Clients;
+using Dprental.AuthService.Application.Options;
+using Microsoft.Extensions.Options;
 using AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Api.Endpoints;
 using Dprental.AuthService.Api.Observability;
@@ -20,6 +25,24 @@ builder.Services.AddAuthDomainRepositories(builder.Configuration.GetConnectionSt
 builder.Services.AddJwtBearerSecurity();
 builder.Services.AddAuthForwardedHeaders(builder.Configuration);
 builder.Services.AddGoogleLogin(builder.Configuration);
+builder.Services.AddHttpClient<IMediaServiceClient, MediaServiceClient>((sp, client) =>
+{
+    var options = sp.GetRequiredService<IOptions<MediaServiceOptions>>().Value;
+    if (!string.IsNullOrWhiteSpace(options.InternalBaseUrl) &&
+        Uri.TryCreate(options.InternalBaseUrl, UriKind.Absolute, out Uri? baseUri))
+    {
+        client.BaseAddress = new Uri(options.InternalBaseUrl.TrimEnd('/') + "/");
+    }
+    if (!string.IsNullOrWhiteSpace(options.ApiKey))
+    {
+        client.DefaultRequestHeaders.Add("X-Api-Key", options.ApiKey);
+    }
+    if (options.TimeoutSeconds > 0)
+    {
+        client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+    }
+});
+builder.Services.AddHostedService<MediaOutboxWorker>();
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
