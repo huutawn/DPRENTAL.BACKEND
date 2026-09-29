@@ -195,68 +195,80 @@ Telemetry__Otlp__TracesEndpoint=https://otel-collector.internal/v1/traces
 
 Sampler là `ParentBased(TraceIdRatioBased)`: trace đã lấy mẫu từ Gateway luôn tiếp tục được lấy mẫu tại AuthService, còn request không có parent dùng tỷ lệ của service. Chỉ metadata HTTP tiêu chuẩn được instrumentation ghi nhận; không thêm token, authorization header, body, claim hoặc PEM key vào trace attributes.
 
-## Đăng nhập bằng Google
+## Đăng nhập Google bằng Firebase
 
-Đăng nhập Google dùng OAuth 2.0 authorization code kèm PKCE, do backend xử lý. Sau khi Google xác nhận danh tính, AuthService tạo ticket opaque dùng một lần trong 90 giây rồi chuyển browser về Next BFF. Next BFF gọi exchange ở server, nhận JWT/refresh token và tự set cookie `HttpOnly` trên domain frontend để SSR đọc được.
-
-```text
-GET /api/v1/auth/google/login?returnUrl=<url>     # chuyển trình duyệt sang Google
-GET /signin-google                                 # Google gọi về, do thư viện xử lý
-GET /api/v1/auth/google/callback?returnUrl=<url>   # tạo ticket, chuyển về callback BFF cùng origin
-POST /api/v1/auth/google/exchange                  # Next BFF đổi { ticket } lấy token pair
-```
-
-Redirect thành công dùng callback đã chọn trong `BffCallbackUrls` với `?ticket=<opaque>&returnUrl=<url>`; token không có mặt trong URL. Lỗi chuyển về cùng callback với `error=<mã lỗi>` (ví dụ `ExternalLogin.EmailNotVerified`). `returnUrl` phải thuộc `Auth:Google:AllowedReturnUrls` và AuthService chọn callback có cùng origin; nếu không endpoint trả `400`. Exchange thiếu ticket trả `400`; ticket sai, hết hạn hoặc đã dùng trả `401` cùng một lỗi chung.
-
-Cấu hình (chưa có `ClientId` và `ClientSecret` thì tính năng tắt và cả hai endpoint trả `404`):
+Đăng nhập Google hiện dùng Firebase Authentication làm identity provider. Frontend xử lý popup/redirect Google bằng Firebase Web SDK, lấy Firebase ID token rồi gửi token đó qua Next BFF. AuthService chỉ verify Firebase ID token, đồng bộ user nội bộ và phát access token/refresh token của hệ thống.
 
 ```text
-Auth:Google:ClientId                  # có thể để trong appsettings, không phải bí mật
-Auth:Google:ClientSecret              # chỉ cấp qua User Secrets hoặc biến môi trường
-Auth:Google:AllowedReturnUrls:0       # frontend origin, ví dụ http://localhost:3000
-Auth:Google:BffCallbackUrls:0         # callback BFF của origin trên, ví dụ http://localhost:3000/api/auth/google/callback
+POST /api/v1/auth/firebase/login
+Content-Type: application/json
+
+{
+  "idToken": "<firebase-id-token>"
+}
 ```
 
-Khi Google được bật, mỗi origin trong `AllowedReturnUrls` phải có đúng một callback HTTP(S) cùng origin trong `BffCallbackUrls`; cấu hình sai làm service fail ngay khi khởi động.
+Response thành công là token pair dạng JSON để Next BFF tự set cookie `HttpOnly` trên domain frontend:
 
-Trên Google Cloud Console tạo OAuth client loại **Web application**. `Authorized redirect URIs` phải là callback của Google middleware, không phải endpoint controller `google/callback`:
+```json
+{
+  "accessToken": "...",
+  "refreshToken": "..."
+}
+```
+
+AuthService không set cookie cho endpoint Firebase login. Các endpoint Google OAuth cũ đã bị gỡ:
 
 ```text
-https://dev-api.lazyops.cloud/signin-google
-http://localhost:64837/signin-google
+GET /api/v1/auth/google/login
+GET /api/v1/auth/google/callback
+POST /api/v1/auth/google/exchange
+GET /signin-google
 ```
 
-`Authorized JavaScript origins` không cần thiết cho luồng này vì browser chỉ được chuyển hướng tới endpoint backend; frontend không gọi Google Identity Services trực tiếp.
-
-`returnUrl` là URL frontend nhận browser sau khi đăng nhập. Giá trị cấu hình chỉ so sánh theo origin, do đó không thêm path:
+Cấu hình backend:
 
 ```text
-https://dev-app.lazyops.cloud
-http://localhost:3000
+Auth:Firebase:Enabled=true
+Auth:Firebase:ProjectId=<firebase-project-id>
+Auth:Firebase:CredentialsJson=<service-account-json>
+# hoặc:
+Auth:Firebase:CredentialsPath=/run/secrets/firebase-service-account.json
 ```
 
-Cấp secret local:
-
-```bash
-dotnet user-secrets set "Auth:Google:ClientId" "<client-id>" --project AuthService/src/Api/AuthService.Api.csproj
-dotnet user-secrets set "Auth:Google:ClientSecret" "<client-secret>" --project AuthService/src/Api/AuthService.Api.csproj
-```
-
-Production truyền các biến môi trường sau vào AuthService; không đưa `ClientSecret` vào source control:
+Production truyền bằng environment variables, ví dụ:
 
 ```text
-Auth__Google__ClientId=<google-oauth-client-id>
-Auth__Google__ClientSecret=<google-oauth-client-secret>
-Auth__Google__AllowedReturnUrls__0=https://dev-app.lazyops.cloud
-# Chỉ thêm khi môi trường này cần hỗ trợ frontend local đồng thời:
-Auth__Google__AllowedReturnUrls__1=http://localhost:3000
-Auth__Google__BffCallbackUrls__0=https://dev-app.lazyops.cloud/api/auth/google/callback
-Auth__Google__BffCallbackUrls__1=http://localhost:3000/api/auth/google/callback
+Auth__Firebase__Enabled=true
+Auth__Firebase__ProjectId=<firebase-project-id>
+Auth__Firebase__CredentialsJson=<service-account-json>
 ```
 
-`WebApplication.CreateBuilder` tự nạp environment variables sau `appsettings*.json`, nên các biến trên vẫn inject được vào artifact đã build/publish. `.env` hiện chỉ là input cho Docker Compose tạo Postgres/Valkey, không tự đi vào `dotnet run` hay image AuthService; không thêm cấu hình Google vào `.env` trừ khi Docker Compose được mở rộng để truyền chúng vào service AuthService. Local development nên cấp `ClientId`/`ClientSecret` bằng User Secrets; `appsettings.json` đã có cặp localhost không nhạy cảm.
+Nếu `Auth:Firebase:Enabled=true` thì phải có `ProjectId` và một trong hai giá trị `CredentialsJson` hoặc `CredentialsPath`; thiếu config làm service fail ngay khi khởi động. Firebase service account là secret, không commit vào source control.
 
-Không có biến cấu hình redirect URI: Google handler tạo URI từ request host và callback path `/signin-google`. Khi TLS kết thúc ở reverse proxy, proxy phải chuyển `X-Forwarded-Proto: https` và application phải xử lý forwarded headers trước authentication; nếu không handler có thể gửi `http://dev-api.lazyops.cloud/signin-google` cho Google và bị từ chối do không khớp redirect URI.
+Quy tắc AuthService áp dụng khi nhận Firebase ID token:
+
+1. Token phải hợp lệ với Firebase project đã cấu hình.
+2. Token phải có email và email đã verified.
+3. `firebase.sign_in_provider` phải là `google.com`.
+4. Provider subject ưu tiên `firebase.identities["google.com"][0]`, fallback về Firebase UID.
+
+Người dùng đã đăng nhập có thể quản lý liên kết Google:
+
+```text
+GET /api/v1/auth/users/me/external-logins
+
+POST /api/v1/auth/users/me/external-logins/Google/link
+Content-Type: application/json
+
+{
+  "idToken": "<firebase-id-token>"
+}
+
+DELETE /api/v1/auth/users/me/external-logins/Google
+```
+
+`POST .../link` dùng khi user đang đăng nhập bằng email/password và bấm liên kết Google. FE lấy Firebase ID token rồi gửi lên AuthService; AuthService verify token và gắn provider `Google` vào user hiện tại. Nếu user đã có Google link, hoặc Google account đó đã thuộc user khác, API trả `409 ExternalLogin.AlreadyLinked`. `DELETE .../Google` chỉ cho gỡ khi tài khoản còn credential khác, ví dụ đã có mật khẩu.
 
 Với topology `Caddy -> Gateway -> AuthService`, Gateway ghi đè `X-Forwarded-Proto` và `X-Forwarded-Host` bằng public origin mà Caddy đã xác thực. AuthService chỉ được tin hai header này từ Docker network nội bộ chứa Gateway, vì vậy môi trường deploy cần thêm:
 
@@ -276,4 +288,4 @@ Quy tắc liên kết tài khoản, theo thứ tự:
 3. Chưa liên kết, email đã xác minh và trùng user có sẵn thì thêm liên kết vào user đó.
 4. Không có user nào dùng email đó thì tạo user mới với mật khẩu ngẫu nhiên (chỉ đăng nhập được qua Google) và không có role nào.
 
-Bảng `auth.ExternalLogins` được tạo bởi migration `AddExternalLogins`; áp dụng bằng `dotnet ef database update` như phần Refresh token và session.
+Bảng `auth.ExternalLogins` được tạo bởi migration `AddExternalLogins`; áp dụng bằng `dotnet ef database update` như phần Refresh token và session. Migration `RemoveGoogleLoginTickets` gỡ bảng ticket cũ vì flow Firebase không dùng ticket nội bộ nữa.

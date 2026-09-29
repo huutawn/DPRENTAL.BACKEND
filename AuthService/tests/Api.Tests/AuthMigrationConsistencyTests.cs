@@ -20,7 +20,7 @@ public sealed class AuthMigrationConsistencyTests
     }
 
     [Fact]
-    public async Task MigrateOnNewDatabaseAppliesAll25MigrationsAndSubsequentMigrateIsIdempotent()
+    public async Task MigrateOnNewDatabaseAppliesAll26MigrationsAndSubsequentMigrateIsIdempotent()
     {
         string connStr = "Host=localhost;Port=5435;Database=authservice_fresh_migrate;Username=postgres;Password=postgres;Include Error Detail=true";
         DbContextOptions<AuthDbContext> options = new DbContextOptionsBuilder<AuthDbContext>()

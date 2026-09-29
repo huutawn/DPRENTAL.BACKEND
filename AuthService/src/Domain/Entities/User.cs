@@ -56,7 +56,4 @@ public class User
     public ICollection<Session> Sessions { get; set; } = new List<Session>();
     public ICollection<OrganizationMembership> OrganizationMemberships { get; set; } = new List<OrganizationMembership>();
     public ICollection<ExternalLogin> ExternalLogins { get; set; } = new List<ExternalLogin>();
-
-    /// <summary>Các ticket ngắn hạn đã cấp sau khi đăng nhập Google.</summary>
-    public ICollection<GoogleLoginTicket> GoogleLoginTickets { get; set; } = new List<GoogleLoginTicket>();
 }

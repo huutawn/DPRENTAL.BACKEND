@@ -95,41 +95,6 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.ToTable("ExternalLogins", "auth");
                 });
 
-            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.GoogleLoginTicket", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("ExpiresAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("TicketHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<DateTime?>("UsedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ExpiresAtUtc");
-
-                    b.HasIndex("TicketHash")
-                        .IsUnique();
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("GoogleLoginTickets", "auth");
-                });
-
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.MediaOutboxMessage", b =>
                 {
                     b.Property<Guid>("Id")
@@ -665,17 +630,6 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.GoogleLoginTicket", b =>
-                {
-                    b.HasOne("Dprental.AuthService.Domain.Entities.User", "User")
-                        .WithMany("GoogleLoginTickets")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.OrganizationMembership", b =>
                 {
                     b.HasOne("Dprental.AuthService.Domain.Entities.Organization", "Organization")
@@ -823,8 +777,6 @@ namespace Dprental.AuthService.Domain.Migrations
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.User", b =>
                 {
                     b.Navigation("ExternalLogins");
-
-                    b.Navigation("GoogleLoginTickets");
 
                     b.Navigation("OrganizationMemberships");
 

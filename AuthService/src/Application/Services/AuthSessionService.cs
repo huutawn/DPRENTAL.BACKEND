@@ -31,7 +31,6 @@ public sealed class AuthSessionService(
     IHttpContextAccessor httpContextAccessor) : IAuthSessionService
 {
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(30);
-    private static readonly TimeSpan GoogleLoginTicketLifetime = TimeSpan.FromSeconds(90);
 
 
     public async Task<Result<AuthTokenPair>> CreateSessionAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -78,75 +77,6 @@ public sealed class AuthSessionService(
                 AuthTokenPair tokens = IssueTokenPair(principal, refreshToken);
 
                 await LogAuditAsync(userId, userId.ToString(), "Login", "Success", cancellationToken);
-                return Result.Success(tokens);
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
-    }
-
-    public async Task<Result<string>> CreateGoogleLoginTicketAsync(Guid userId, CancellationToken cancellationToken = default)
-    {
-        if (!DtoValidator.TryValidateId(userId, nameof(userId), out Error? validationError))
-        {
-            return Result.Failure<string>(validationError);
-        }
-
-        return await ApplicationExecutor.ExecuteAsync(
-            "CreateGoogleLoginTicket",
-            async () =>
-            {
-                DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
-                string ticket = RefreshTokenUtility.Create();
-
-                bool created = await sessionRepository.CreateGoogleLoginTicketAsync(
-                    userId,
-                    RefreshTokenUtility.ComputeHash(ticket),
-                    utcNow,
-                    utcNow.Add(GoogleLoginTicketLifetime),
-                    cancellationToken);
-
-                if (!created)
-                {
-                    return Result.Failure<string>(AuthErrors.Auth.InactiveAccount);
-                }
-
-                return Result.Success(ticket);
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
-    }
-
-    public async Task<Result<AuthTokenPair>> ExchangeGoogleLoginTicketAsync(string ticket, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(ticket))
-        {
-            return Result.Failure<AuthTokenPair>(Error.Unauthorized("Auth.InvalidGoogleLoginTicket", "Ticket không hợp lệ, đã hết hạn hoặc đã được sử dụng."));
-        }
-
-        return await ApplicationExecutor.ExecuteAsync(
-            "ExchangeGoogleLoginTicket",
-            async () =>
-            {
-                DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
-                string refreshToken = RefreshTokenUtility.Create();
-
-                AuthSessionPrincipal? principal = await sessionRepository.ConsumeGoogleLoginTicketAndCreateSessionAsync(
-                    RefreshTokenUtility.ComputeHash(ticket),
-                    RefreshTokenUtility.ComputeHash(refreshToken),
-                    utcNow,
-                    utcNow.Add(SessionLifetime),
-                    cancellationToken);
-
-                if (principal is null)
-                {
-                    return Result.Failure<AuthTokenPair>(Error.Unauthorized("Auth.InvalidGoogleLoginTicket", "Ticket không hợp lệ, đã hết hạn hoặc đã được sử dụng."));
-                }
-
-                AuthTokenPair tokens = IssueTokenPair(principal, refreshToken);
-
-                await LogAuditAsync(principal.UserId, principal.UserId.ToString(), "Google_Exchange", "Success", cancellationToken);
                 return Result.Success(tokens);
             },
             logger,
