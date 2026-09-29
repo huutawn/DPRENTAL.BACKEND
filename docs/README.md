@@ -253,6 +253,23 @@ Quy tắc AuthService áp dụng khi nhận Firebase ID token:
 3. `firebase.sign_in_provider` phải là `google.com`.
 4. Provider subject ưu tiên `firebase.identities["google.com"][0]`, fallback về Firebase UID.
 
+Người dùng đã đăng nhập có thể quản lý liên kết Google:
+
+```text
+GET /api/v1/auth/users/me/external-logins
+
+POST /api/v1/auth/users/me/external-logins/Google/link
+Content-Type: application/json
+
+{
+  "idToken": "<firebase-id-token>"
+}
+
+DELETE /api/v1/auth/users/me/external-logins/Google
+```
+
+`POST .../link` dùng khi user đang đăng nhập bằng email/password và bấm liên kết Google. FE lấy Firebase ID token rồi gửi lên AuthService; AuthService verify token và gắn provider `Google` vào user hiện tại. Nếu user đã có Google link, hoặc Google account đó đã thuộc user khác, API trả `409 ExternalLogin.AlreadyLinked`. `DELETE .../Google` chỉ cho gỡ khi tài khoản còn credential khác, ví dụ đã có mật khẩu.
+
 Với topology `Caddy -> Gateway -> AuthService`, Gateway ghi đè `X-Forwarded-Proto` và `X-Forwarded-Host` bằng public origin mà Caddy đã xác thực. AuthService chỉ được tin hai header này từ Docker network nội bộ chứa Gateway, vì vậy môi trường deploy cần thêm:
 
 ```text

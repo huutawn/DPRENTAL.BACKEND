@@ -170,6 +170,28 @@ public sealed class UsersController(
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
+    /// <summary>Liên kết tài khoản đăng nhập bên ngoài (Google,...) vào tài khoản hiện tại.</summary>
+    [HttpPost("me/external-logins/{provider}/link")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> LinkExternalLogin(
+        [FromRoute] string provider,
+        [FromBody] LinkExternalLoginRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (User.GetJwtSub() is not Guid userId)
+        {
+            return Unauthorized();
+        }
+
+        Result result = await userAccountService.LinkExternalLoginAsync(userId, provider, request.IdToken, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
+    }
+
     /// <summary>Hủy liên kết tài khoản đăng nhập bên ngoài (Google,...).</summary>
     [HttpDelete("me/external-logins/{provider}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

@@ -1,6 +1,7 @@
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
+using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
 
@@ -223,6 +224,107 @@ public sealed class UserAccountServiceTests
     }
 
     [Fact]
+    public async Task LinkExternalLoginAsyncWithGoogleTokenAddsLoginAndLogsAudit()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", IsActive = true, HasPassword = true };
+        FakeUserRepository userRepo = new() { User = user };
+        FakeExternalLoginRepository loginRepo = new();
+        TestAuditLogRepository auditRepo = new();
+        FakeFirebaseIdentityService firebase = new();
+        UserAccountService service = CreateService(
+            userRepo,
+            auditLogRepository: auditRepo,
+            externalLoginRepository: loginRepo,
+            firebaseIdentityService: firebase);
+
+        Result result = await service.LinkExternalLoginAsync(userId, "Google", "firebase-token");
+
+        Assert.True(result.IsSuccess);
+        ExternalLogin login = Assert.Single(loginRepo.Logins);
+        Assert.Equal(userId, login.UserId);
+        Assert.Equal("Google", login.Provider);
+        Assert.Equal("google-subject", login.ProviderSubject);
+        Assert.Equal("google@example.com", login.Email);
+        Assert.Equal("firebase-token", firebase.LastIdToken);
+        AuditLog audit = Assert.Single(auditRepo.Logs);
+        Assert.Equal("ExternalLogin_Link", audit.Action);
+        Assert.Equal(userId.ToString(), audit.Target);
+    }
+
+    [Fact]
+    public async Task LinkExternalLoginAsyncWhenUserAlreadyHasProviderReturnsAlreadyLinked()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
+        FakeUserRepository userRepo = new() { User = user };
+        FakeExternalLoginRepository loginRepo = new();
+        loginRepo.Logins.Add(new ExternalLogin
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Provider = "Google",
+            ProviderSubject = "old-subject",
+            Email = "old@example.com"
+        });
+        UserAccountService service = CreateService(userRepo, externalLoginRepository: loginRepo);
+
+        Result result = await service.LinkExternalLoginAsync(userId, "Google", "firebase-token");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.ExternalLogin.AlreadyLinked, result.Error);
+    }
+
+    [Fact]
+    public async Task LinkExternalLoginAsyncWhenGoogleAccountBelongsToAnotherUserReturnsAlreadyLinked()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid otherUserId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
+        FakeUserRepository userRepo = new() { User = user };
+        FakeExternalLoginRepository loginRepo = new();
+        loginRepo.Logins.Add(new ExternalLogin
+        {
+            Id = Guid.NewGuid(),
+            UserId = otherUserId,
+            Provider = "Google",
+            ProviderSubject = "google-subject",
+            Email = "google@example.com"
+        });
+        UserAccountService service = CreateService(userRepo, externalLoginRepository: loginRepo);
+
+        Result result = await service.LinkExternalLoginAsync(userId, "Google", "firebase-token");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.ExternalLogin.AlreadyLinked, result.Error);
+    }
+
+    [Fact]
+    public async Task LinkExternalLoginAsyncWithNonGoogleFirebaseTokenReturnsUnsupportedProvider()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
+        FakeUserRepository userRepo = new() { User = user };
+        FakeFirebaseIdentityService firebase = new()
+        {
+            VerificationResult = Result.Success(new FirebaseIdentity(
+                "firebase-uid",
+                "password-subject",
+                "password",
+                "user@example.com",
+                true,
+                "User",
+                null))
+        };
+        UserAccountService service = CreateService(userRepo, firebaseIdentityService: firebase);
+
+        Result result = await service.LinkExternalLoginAsync(userId, "Google", "firebase-token");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Auth.FirebaseProviderUnsupported, result.Error);
+    }
+
+    [Fact]
     public async Task UnlinkExternalLoginAsyncUnknownProviderReturnsNotLinked()
     {
         Guid userId = Guid.NewGuid();
@@ -345,6 +447,7 @@ public sealed class UserAccountServiceTests
         FakeUserRepository userRepo,
         IAuditLogRepository? auditLogRepository = null,
         FakeExternalLoginRepository? externalLoginRepository = null,
+        IFirebaseIdentityService? firebaseIdentityService = null,
         FakeAuthSessionRepository? authSessionRepository = null,
         FakeOrganizationMembershipRepository? organizationMembershipRepository = null,
         IOrganizationRepository? organizationRepository = null)
@@ -352,6 +455,7 @@ public sealed class UserAccountServiceTests
         return new UserAccountService(
             userRepo,
             externalLoginRepository ?? new FakeExternalLoginRepository(),
+            firebaseIdentityService ?? new FakeFirebaseIdentityService(),
             authSessionRepository ?? new FakeAuthSessionRepository(),
             organizationMembershipRepository ?? new FakeOrganizationMembershipRepository(),
             organizationRepository ?? new FakeOrgRepo(),
@@ -439,10 +543,27 @@ public sealed class UserAccountServiceTests
         public List<ExternalLogin> Logins { get; } = [];
 
         public Task<ExternalLogin?> FindAsync(string provider, string providerSubject, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            Task.FromResult(Logins.FirstOrDefault(l =>
+                string.Equals(l.Provider, provider, StringComparison.Ordinal) &&
+                string.Equals(l.ProviderSubject, providerSubject, StringComparison.Ordinal)));
 
-        public Task AddAsync(ExternalLogin login, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+        public Task AddAsync(ExternalLogin login, CancellationToken cancellationToken = default)
+        {
+            if (Logins.Any(l =>
+                    string.Equals(l.Provider, login.Provider, StringComparison.Ordinal) &&
+                    string.Equals(l.ProviderSubject, login.ProviderSubject, StringComparison.Ordinal)) ||
+                Logins.Any(l =>
+                    l.UserId == login.UserId &&
+                    string.Equals(l.Provider, login.Provider, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new StorageConstraintViolationException(
+                    StorageConstraintViolationType.Unique,
+                    StorageConstraints.ExternalLoginProviderSubject);
+            }
+
+            Logins.Add(login);
+            return Task.CompletedTask;
+        }
 
         public Task<IReadOnlyList<ExternalLogin>> GetByUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<ExternalLogin>>(Logins.Where(l => l.UserId == userId).ToList());
@@ -451,6 +572,26 @@ public sealed class UserAccountServiceTests
         {
             int removed = Logins.RemoveAll(l => l.UserId == userId && l.Provider == provider);
             return Task.FromResult(removed > 0);
+        }
+    }
+
+    private sealed class FakeFirebaseIdentityService : IFirebaseIdentityService
+    {
+        public string? LastIdToken { get; private set; }
+
+        public Result<FirebaseIdentity> VerificationResult { get; set; } = Result.Success(new FirebaseIdentity(
+            "firebase-uid",
+            "google-subject",
+            "google.com",
+            "google@example.com",
+            true,
+            "Google User",
+            null));
+
+        public Task<Result<FirebaseIdentity>> VerifyIdTokenAsync(string? idToken, CancellationToken cancellationToken = default)
+        {
+            LastIdToken = idToken;
+            return Task.FromResult(VerificationResult);
         }
     }
 
