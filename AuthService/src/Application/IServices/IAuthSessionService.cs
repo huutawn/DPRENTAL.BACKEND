@@ -1,6 +1,6 @@
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Common;
-using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Application.DTOs.Auth;
 
 namespace Dprental.AuthService.Application.IServices;
 

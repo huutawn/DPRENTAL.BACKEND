@@ -5,7 +5,7 @@ using System.Text.Json;
 using Dprental.AuthService.Application.IServices;
 
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Application.DTOs.Auth;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;

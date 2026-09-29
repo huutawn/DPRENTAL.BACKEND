@@ -7,8 +7,7 @@ using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Utils;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Models;
-using Microsoft.AspNetCore.Http;
+using Dprental.AuthService.Application.DTOs.Auth;
 using Microsoft.Extensions.Logging;
 using UAParser;
 

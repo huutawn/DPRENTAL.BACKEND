@@ -5,7 +5,7 @@ using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.AspNetCore.Identity;
 using Dprental.AuthService.Common.Utils;
 
-namespace Dprental.AuthService.Application.Rules;
+namespace Dprental.AuthService.Application.Validation;
 
 /// <summary>Quy tắc dựng tài khoản customer, dùng chung cho đăng ký cá nhân và tài khoản Owner khi đăng ký tổ chức.</summary>
 internal static class CustomerAccountRules

@@ -1,10 +1,8 @@
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Services;
-using Dprental.AuthService.Domain.IRepositories;
-using Dprental.AuthService.Domain.Models;
-using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Common;
-using Microsoft.AspNetCore.Http;
+using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Application.DTOs.Auth;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 

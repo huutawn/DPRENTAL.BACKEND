@@ -1,4 +1,4 @@
-using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Application.Options;
 
 namespace Dprental.AuthService.Api.Security;
 
