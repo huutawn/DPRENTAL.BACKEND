@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Security.Claims;
@@ -418,7 +419,7 @@ public sealed class GatewaySecurityIntegrationTests
     }
 
     [Fact]
-    public async Task MediaRouteConvertsCookieToBearerWithoutForwardingCookies()
+    public async Task MediaUploadConvertsCookieToBearerWithoutForwardingCookies()
     {
         using RSA signingKey = RSA.Create(2048);
         await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
@@ -426,7 +427,7 @@ public sealed class GatewaySecurityIntegrationTests
         using HttpClient client = factory.CreateClient();
         string token = CreateToken(signingKey, "key-1", Issuer, Audience, Guid.NewGuid().ToString("D"));
 
-        using HttpRequestMessage request = new(HttpMethod.Get, $"/api/v1/media/{Guid.NewGuid():D}");
+        using HttpRequestMessage request = new(HttpMethod.Post, "/api/v1/media/uploads");
         request.Headers.Add("Cookie", $"accessToken={token}; refreshToken=private-session");
         using HttpResponseMessage response = await client.SendAsync(request);
 
@@ -436,7 +437,7 @@ public sealed class GatewaySecurityIntegrationTests
     }
 
     [Fact]
-    public async Task ExplicitBearerTakesPrecedenceOverStaleCookie()
+    public async Task MediaUploadExplicitBearerTakesPrecedenceOverStaleCookie()
     {
         using RSA signingKey = RSA.Create(2048);
         await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
@@ -444,7 +445,7 @@ public sealed class GatewaySecurityIntegrationTests
         using HttpClient client = factory.CreateClient();
         string token = CreateToken(signingKey, "key-1", Issuer, Audience, Guid.NewGuid().ToString("D"));
 
-        using HttpRequestMessage request = new(HttpMethod.Get, $"/api/v1/media/{Guid.NewGuid():D}");
+        using HttpRequestMessage request = new(HttpMethod.Post, "/api/v1/media/uploads");
         request.Headers.Authorization = new("Bearer", token);
         request.Headers.Add("Cookie", "accessToken=invalid-cookie; refreshToken=private-session");
         using HttpResponseMessage response = await client.SendAsync(request);
@@ -452,6 +453,50 @@ public sealed class GatewaySecurityIntegrationTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal($"Bearer {token}", upstream.LastRequest.Headers["Authorization"]);
         Assert.False(upstream.LastRequest.Headers.ContainsKey("Cookie"));
+    }
+
+    [Theory]
+    [InlineData("/api/v1/media/{0}/verify", "GET")]
+    [InlineData("/api/v1/media/{0}", "GET")]
+    [InlineData("/api/v1/media/{0}/access", "POST")]
+    [InlineData("/api/v1/media/{0}/visibility", "PUT")]
+    public async Task InternalMediaRoutePassesWithoutBearerAndForwardsApiKey(string routeTemplate, string method)
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        Guid mediaId = Guid.NewGuid();
+        string path = string.Format(System.Globalization.CultureInfo.InvariantCulture, routeTemplate, mediaId);
+        using HttpRequestMessage request = new(new HttpMethod(method), path);
+        request.Headers.Add("X-Api-Key", "sak_test-secret");
+        request.Headers.Add("Cookie", "accessToken=stale-user-token");
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("sak_test-secret", upstream.LastRequest.Headers["X-Api-Key"]);
+        Assert.False(upstream.LastRequest.Headers.ContainsKey("Authorization"));
+        Assert.False(upstream.LastRequest.Headers.ContainsKey("Cookie"));
+        Assert.False(upstream.LastRequest.Headers.ContainsKey(GatewayHeaderConstants.UserId));
+    }
+
+    [Fact]
+    public async Task NonInternalRouteStripsApiKey()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
+        string token = CreateToken(signingKey, "key-1", Issuer, Audience, "user-123");
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Post, "/api/v1/media/uploads");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Headers.Add("X-Api-Key", "stray-key");
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(upstream.LastRequest.Headers.ContainsKey("X-Api-Key"));
     }
 
     [Fact]
@@ -631,7 +676,8 @@ public sealed class GatewaySecurityIntegrationTests
         string audience,
         string userId,
         string? partyId = null,
-        IEnumerable<string>? roles = null)
+        IEnumerable<string>? roles = null,
+        bool service = false)
     {
         RsaSecurityKey key = new(signingKey)
         {
@@ -640,6 +686,13 @@ public sealed class GatewaySecurityIntegrationTests
         };
 
         List<Claim> claims = [new Claim(JwtRegisteredClaimNames.Sub, userId)];
+
+        if (service)
+        {
+            claims.Add(new Claim("u", "svc"));
+            claims.Add(new Claim("s", "media.verify"));
+            claims.Add(new Claim("amr", "api_key"));
+        }
 
         if (!string.IsNullOrWhiteSpace(partyId))
         {
@@ -706,6 +759,10 @@ public sealed class GatewaySecurityIntegrationTests
 
         internal string? CookieToSet { get; set; }
 
+        internal string? ExchangeToken { get; set; }
+
+        internal string? LastExchangeKey { get; private set; }
+
         internal Dictionary<string, string> ResponseHeaders { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         internal CapturedRequest LastRequest { get; private set; } = new();
@@ -768,6 +825,17 @@ public sealed class GatewaySecurityIntegrationTests
                 Path = request.Url?.AbsolutePath,
                 Headers = capturedHeaders
             };
+
+            if (request.Url?.AbsolutePath == "/api/v1/auth/api-key/exchange")
+            {
+                LastExchangeKey = request.Headers["X-Api-Key"];
+                await WriteResponseAsync(context.Response, JsonSerializer.Serialize(new
+                {
+                    accessToken = ExchangeToken,
+                    expiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(1)
+                }), "application/json");
+                return;
+            }
 
             if (!string.IsNullOrWhiteSpace(CookieToSet))
             {

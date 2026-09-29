@@ -89,13 +89,12 @@ Từ thư mục gốc `DPRENTAL/` (nơi có `compose.yaml`), cần có ba checko
 ```bash
 cp .env.example .env
 # Đặt giá trị riêng cho POSTGRES_PASSWORD, AUTH_ADMIN_BOOTSTRAP_CREATION_KEY,
-# MEDIA_POSTGRES_PASSWORD, MEDIA_MINIO_ROOT_PASSWORD và MEDIA_SERVICE_CLIENT_SECRET.
+# MEDIA_POSTGRES_PASSWORD và MEDIA_MINIO_ROOT_PASSWORD.
 docker compose up --build -d
 docker compose ps
-./MediaService/scripts/bootstrap-local-media-principal.sh
 ```
 
-Stack tự build Gateway, AuthService và MediaService; khởi động PostgreSQL riêng cho từng service, MinIO private, Valkey và Kafka; tạo RSA key pair local và chạy migration trước khi nhận traffic. Script bootstrap chỉ tạo `CatalogService` local với ba scope Media trong database AuthService.
+Stack tự build Gateway, AuthService và MediaService; khởi động PostgreSQL riêng cho từng service, MinIO private, Valkey và Kafka; tạo RSA key pair local và chạy migration trước khi nhận traffic. Service principal và service API key được cấp qua API quản trị AuthService.
 
 Gateway là điểm vào công khai tại `http://localhost:5050`:
 
@@ -104,9 +103,11 @@ Gateway là điểm vào công khai tại `http://localhost:5050`:
 - `GET /health/ready` (hoặc `/_health/ready`): yêu cầu JWKS và cấu hình proxy sẵn sàng.
 - `POST /api/v1/auth/register`: được proxy nguyên đường dẫn tới AuthService.
 
-Trong Swagger UI, chọn **AuthService**, gọi `/api/v1/auth/register` để tạo user local, rồi `/api/v1/auth/login`. Browser lưu cookie HttpOnly `accessToken` do AuthService đặt trên cùng Gateway origin. Sau đó chuyển menu sang **MediaService** và gọi `POST /api/v1/media/uploads` với `file`; không cần tạo entity hoặc nhập Bearer cho upload. Gateway xác thực cookie, chuyển thành Bearer và MediaService xác thực lại JWT bằng JWKS. Cookie không được chuyển tới MediaService.
+Trong Swagger UI, chọn **AuthService**, gọi `/api/v1/auth/register` để tạo user local, rồi `/api/v1/auth/login`. Browser lưu cookie HttpOnly `accessToken` do AuthService đặt trên cùng Gateway origin. Sau đó chuyển menu sang **MediaService** và gọi `POST /api/v1/media/uploads` với 1–10 phần `files`; không cần tạo entity hoặc nhập Bearer cho upload. Gateway xác thực cookie, chuyển thành Bearer và MediaService xác thực lại JWT bằng JWKS. Cookie không được chuyển tới MediaService.
 
-Để thử API nội bộ, chọn **AuthService** và gọi `/api/v1/auth/service-token` với `clientId=local-catalog-service`, `clientSecret=MEDIA_SERVICE_CLIENT_SECRET` trong `.env`, `audience=dprental-clients` và lần lượt một scope `media.verify`, `media.read` hoặc `media.publish`. Chuyển sang **MediaService**, dùng Bearer được trả về trong nút **Authorize** cho `/verify`, `/access` hoặc `/visibility`. Bearer tường minh được ưu tiên hơn cookie user đang có. Chuyển ảnh sang public bằng `PUT /api/v1/media/{mediaId}/visibility`, sau đó mở `/api/v1/media/{mediaId}/content` không cần token; chuyển về private thì đường dẫn này trả 404.
+API key là credential dùng chung cho các API nội bộ, dùng header `X-Api-Key` (sử dụng cùng giá trị bí mật với `Auth:AdminBootstrap:CreationKey`). Gateway cho bốn route nội bộ của MediaService (`verify`, metadata, `access`, `visibility`) đi qua mà không yêu cầu Bearer token, chuyển tiếp `X-Api-Key` tới MediaService và loại bỏ header này khỏi các route khác. MediaService tự kiểm tra key trực tiếp, nên gọi thẳng trong mạng nội bộ không bỏ qua xác thực.
+
+Để thử API nội bộ, gửi request kèm header `X-Api-Key: <creation-key>` tới Gateway trên một trong bốn route nội bộ (ví dụ: `GET /api/v1/media/{mediaId}/verify`). Request không cần Bearer token và không cần tạo service principal ở AuthService. Upload file (`POST /api/v1/media/uploads`) vẫn tiếp tục yêu cầu user JWT hợp lệ.
 
 AuthService, MediaService và PostgreSQL Media chỉ mở trong Docker network. Các port local của hạ tầng gồm PostgreSQL Auth `55432`, MinIO `9002` (console `9003`), Valkey `56379` và Kafka `29092`; chúng chỉ bind vào loopback. Dừng stack bằng `docker compose down`; named volumes được giữ lại.
 ## Gateway error response

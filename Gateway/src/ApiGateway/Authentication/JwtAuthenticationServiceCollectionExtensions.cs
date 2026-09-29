@@ -1,4 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -48,6 +50,15 @@ internal static class JwtAuthenticationServiceCollectionExtensions
         {
             OnMessageReceived = context =>
             {
+                var routePolicy = context.HttpContext.RequestServices.GetService<ApiKeyRoutePolicy>();
+                if (routePolicy?.RequiresApiKey(context.Request) == true)
+                {
+                    var identity = new ClaimsIdentity([new Claim("u", "svc")], "Bearer");
+                    context.Principal = new ClaimsPrincipal(identity);
+                    context.Success();
+                    return Task.CompletedTask;
+                }
+
                 if (string.IsNullOrWhiteSpace(context.Request.Headers.Authorization) &&
                     string.IsNullOrWhiteSpace(context.Token) &&
                     context.Request.Cookies.TryGetValue("accessToken", out string? accessToken) &&
