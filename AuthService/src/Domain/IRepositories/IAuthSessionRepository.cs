@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Domain.ValueObjects;
 namespace Dprental.AuthService.Domain.IRepositories;
+
+
 
 /// <summary>Repository duy nhất quản lý session và refresh token.</summary>
 public interface IAuthSessionRepository : IRepo<Session, Guid>

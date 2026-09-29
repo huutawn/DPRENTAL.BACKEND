@@ -10,6 +10,8 @@ using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Microsoft.Extensions.Logging;
 using UAParser;
+using Microsoft.AspNetCore.Http;
+using Dprental.AuthService.Domain.ValueObjects;
 
 
 namespace Dprental.AuthService.Application.Services;

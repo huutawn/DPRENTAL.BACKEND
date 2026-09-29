@@ -5,6 +5,8 @@ using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
+using Dprental.AuthService.Domain.ValueObjects;
+using Microsoft.AspNetCore.Http;
 
 namespace Dprental.AuthService.Api.Tests;
 

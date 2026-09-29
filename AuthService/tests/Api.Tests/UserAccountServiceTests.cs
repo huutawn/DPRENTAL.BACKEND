@@ -6,6 +6,7 @@ using Dprental.AuthService.Domain.Entities;
 
 
 using Xunit;
+using Dprental.AuthService.Domain.ValueObjects;
 
 namespace Dprental.AuthService.Api.Tests;
 

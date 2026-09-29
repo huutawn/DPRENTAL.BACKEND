@@ -1,17 +1,6 @@
 namespace Dprental.AuthService.Application.DTOs.Auth;
 
-/// <summary>Minimal authenticated principal data used by the Auth session flow.</summary>
-/// <param name="IsProfileCompleted">Null cho principal không phải user (vd service token) — không phát claim <c>pc</c> khi null.</param>
-public sealed record AuthSessionPrincipal(
-    Guid UserId,
-    IReadOnlyCollection<string> Roles,
-    IReadOnlyCollection<string>? Permissions = null,
-    IReadOnlyCollection<Guid>? OrganizationIds = null,
-    bool? IsProfileCompleted = null)
-{
-    public IReadOnlyCollection<string> Permissions { get; init; } = Permissions ?? [];
-    public IReadOnlyCollection<Guid> OrganizationIds { get; init; } = OrganizationIds ?? [];
-}
+
 
 /// <summary>Claims required to issue an access token.</summary>
 /// <param name="IsProfileCompleted">

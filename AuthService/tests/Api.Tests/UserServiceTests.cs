@@ -11,6 +11,7 @@ using Dprental.AuthService.Application.Validators;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Xunit;
+using Dprental.AuthService.Domain.ValueObjects;
 
 namespace Dprental.AuthService.Api.Tests;
 

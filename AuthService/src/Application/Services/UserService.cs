@@ -1,6 +1,18 @@
-using AuthService.Application.DTOs.Auth;
-using AuthService.Application.DTOs.User;
-using AuthService.Domain.DTOs.User;
+// 1. Thư viện hệ thống cơ bản
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Security.Cryptography;
+using System.Diagnostics.CodeAnalysis;
+
+using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Domain.ValueObjects;
+using Dprental.AuthService.Domain.DTOs.User;
+using Dprental.AuthService.Domain.Entities;
+
 using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.User;
@@ -8,17 +20,18 @@ using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Mapping;
 using Dprental.AuthService.Application.Options;
-using Dprental.AuthService.Application.Rules;
-using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Application.Validation;
+using Dprental.AuthService.Application.Security;
+
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Common.Utils;
-using Dprental.AuthService.Domain.DTOs.User;
-using Dprental.AuthService.Domain.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using AuthService.Domain.DTOs.User;
+using AuthService.Application.DTOs.User;
+using AuthService.Application.DTOs.Auth;
 
 namespace Dprental.AuthService.Application.Services;
 

@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Xunit;
+using Dprental.AuthService.Domain.ValueObjects;
 
 namespace Dprental.AuthService.Api.Tests;
 
