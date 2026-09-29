@@ -153,10 +153,12 @@ public sealed class UserAccountService(
         {
             return Result.Failure<CurrentUserResponse>(AuthErrors.Profile.InvalidFullName);
         }
+        string? trimmedCitizenId = StringUtility.NullIfBlank(request.CitizenId);
 
         bool hasAnyField = trimmedFullName is not null
             || request.PhoneNumber is not null
             || request.DateOfBirth.HasValue
+            || trimmedCitizenId is not null
             || request.AvatarMediaId.HasValue
             || request.RemoveAvatar;
 
@@ -205,6 +207,22 @@ public sealed class UserAccountService(
                     user.DateOfBirth = request.DateOfBirth.Value;
                 }
 
+                if (trimmedCitizenId is not null && !string.Equals(user.CitizenId, trimmedCitizenId, StringComparison.Ordinal))
+                {
+                    if (await userRepository.CitizenIdExistsAsync(trimmedCitizenId, cancellationToken))
+                    {
+                        return Result.Failure<CurrentUserResponse>(AuthErrors.User.CitizenIdAlreadyExists);
+                    }
+                    user.CitizenId = trimmedCitizenId;
+                }
+
+                if (user.ProfileCompletedAtUtc is null
+                    && !string.IsNullOrWhiteSpace(user.CitizenId)
+                    && !string.IsNullOrWhiteSpace(user.PhoneNumber)
+                    && user.DateOfBirth.HasValue)
+                {
+                    user.ProfileCompletedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
+                }
                 if (request.RemoveAvatar)
                 {
                     user.AvatarMediaId = null;
@@ -257,9 +275,10 @@ public sealed class UserAccountService(
             new UpdateProfileRequest(
                 request.FullName,
                 request.PhoneNumber,
-                null,
+                request.DateOfBirth,
                 request.AvatarMediaId,
-                request.RemoveAvatar),
+                request.RemoveAvatar,
+                request.CitizenId),
             clearPhoneWhenNull: true,
             cancellationToken: cancellationToken);
     }

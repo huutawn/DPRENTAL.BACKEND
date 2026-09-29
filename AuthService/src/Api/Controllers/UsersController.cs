@@ -65,6 +65,7 @@ public sealed class UsersController(
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<CurrentUserResponse>> UpdateProfile(
         [FromBody] UpdateProfileRequest request,
         CancellationToken cancellationToken)
@@ -249,7 +250,7 @@ public sealed class UsersController(
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
-    /// <summary>Cập nhật hồ sơ (tên, số điện thoại, avatar) của người dùng hiện tại.</summary>
+    /// <summary>Cập nhật hồ sơ (tên, số điện thoại, ngày sinh, CCCD, avatar) của người dùng hiện tại.</summary>
     /// <param name="request">Thông tin hồ sơ cần cập nhật.</param>
     /// <param name="cancellationToken">Token hủy request.</param>
     [HttpPut("me")]
@@ -257,6 +258,7 @@ public sealed class UsersController(
     [ProducesResponseType<CurrentUserResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> UpdateCurrentUser([FromBody] UpdateUserProfileRequest request, CancellationToken cancellationToken)
     {
         Guid userId;

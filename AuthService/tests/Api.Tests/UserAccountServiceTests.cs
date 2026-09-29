@@ -4,6 +4,7 @@ using Dprental.AuthService.Common;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Domain.DTOs.User;
 
 
 using Xunit;
@@ -162,6 +163,75 @@ public sealed class UserAccountServiceTests
         Assert.Null(result.Value.AvatarMediaId);
         Assert.Null(result.Value.AvatarUrl);
         Assert.Null(user.AvatarMediaId);
+    }
+
+    [Fact]
+    public async Task UpdateProfileAsyncWithCitizenIdUpdatesCitizenIdAndCompletesProfile()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            PhoneNumber = "0901234567",
+            DateOfBirth = new DateOnly(1995, 1, 1),
+            ProfileCompletedAtUtc = null,
+            IsActive = true
+        };
+        FakeUserRepository userRepo = new() { User = user };
+        UserAccountService service = CreateService(userRepo);
+
+        UpdateProfileRequest request = new(CitizenId: "079203001234");
+        Result<CurrentUserResponse> result = await service.UpdateProfileAsync(userId, request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("079203001234", user.CitizenId);
+        Assert.NotNull(user.ProfileCompletedAtUtc);
+    }
+
+    [Fact]
+    public async Task UpdateProfileAsyncDuplicateCitizenIdReturnsCitizenIdAlreadyExists()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
+        FakeUserRepository userRepo = new() { User = user, ExistingCitizenId = "079203001234" };
+        UserAccountService service = CreateService(userRepo);
+
+        UpdateProfileRequest request = new(CitizenId: "079203001234");
+        Result<CurrentUserResponse> result = await service.UpdateProfileAsync(userId, request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.User.CitizenIdAlreadyExists, result.Error);
+    }
+
+    [Fact]
+    public async Task UpdateUserProfileAsyncWithAllFieldsUpdatesUser()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            FullName = "Old Name",
+            IsActive = true
+        };
+        FakeUserRepository userRepo = new() { User = user };
+        UserAccountService service = CreateService(userRepo);
+
+        UpdateUserProfileRequest request = new(
+            FullName: "New Full Name",
+            PhoneNumber: "0909999999",
+            DateOfBirth: new DateOnly(1990, 5, 20),
+            CitizenId: "079203009999");
+
+        Result<CurrentUserResponse> result = await service.UpdateUserProfileAsync(userId, request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("New Full Name", user.FullName);
+        Assert.Equal("0909999999", user.PhoneNumber);
+        Assert.Equal(new DateOnly(1990, 5, 20), user.DateOfBirth);
+        Assert.Equal("079203009999", user.CitizenId);
+        Assert.NotNull(user.ProfileCompletedAtUtc);
     }
 
     [Fact]

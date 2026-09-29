@@ -7,6 +7,8 @@ namespace Dprental.AuthService.Domain.DTOs.User;
 public sealed record UpdateUserProfileRequest(
     [Required, StringLength(100, MinimumLength = 1)] string FullName,
     [RegularExpression(RegistrationPatterns.PhoneNumber, ErrorMessage = "Số điện thoại không hợp lệ.")] string? PhoneNumber = null,
+    DateOnly? DateOfBirth = null,
+    [RegularExpression(RegistrationPatterns.CitizenId, ErrorMessage = "Số CCCD phải gồm đúng 12 chữ số.")] string? CitizenId = null,
     [NonEmptyGuid] Guid? AvatarMediaId = null,
     bool RemoveAvatar = false
 );

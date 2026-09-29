@@ -9,5 +9,7 @@ public sealed record AdminUserDetailDto(
     string? AvatarUrl,
     bool IsActive,
     DateTime CreatedAtUtc,
-    IEnumerable<string> GlobalRoles
+    IEnumerable<string> GlobalRoles,
+    DateOnly? DateOfBirth = null,
+    string? CitizenId = null
 );

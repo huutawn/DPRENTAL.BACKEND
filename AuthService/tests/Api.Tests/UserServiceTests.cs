@@ -4,6 +4,8 @@ using Dprental.AuthService.Common;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
+using AuthService.Application.DTOs.User;
+using Dprental.AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Common.Enums;
 
 
@@ -307,6 +309,300 @@ public sealed class UserServiceTests
         Assert.Equal(ErrorType.NotFound, result.Error.Type);
     }
 
+    [Fact]
+    public async Task UpdateUserAsyncWithAllUpdatableFieldsSuccessfullyUpdatesUser()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid oldRoleId = Guid.NewGuid();
+        Guid newRoleId = Guid.NewGuid();
+        Guid avatarId = Guid.NewGuid();
+
+        User user = new()
+        {
+            Id = userId,
+            Email = "old@example.com",
+            FullName = "Old Name",
+            PhoneNumber = "0900000000",
+            DateOfBirth = new DateOnly(1990, 1, 1),
+            CitizenId = "079200000000",
+            AvatarMediaId = null,
+            IsActive = true,
+            ProfileCompletedAtUtc = null
+        };
+        user.UserRoles.Add(new UserRole { UserId = userId, RoleId = oldRoleId });
+
+        FakeRoleRepository roleRepo = new();
+        roleRepo.Roles["adm"] = new Role { Id = newRoleId, Name = "adm" };
+
+        RecordingUserRepository userRepo = new()
+        {
+            ProfileUser = user
+        };
+
+        UserService service = CreateService(userRepo, roleRepo);
+
+        UpdateUserRequest request = new()
+        {
+            FullName = "New Full Name",
+            Email = "new@example.com",
+            PhoneNumber = "0901234567",
+            DateOfBirth = new DateOnly(1995, 6, 15),
+            CitizenId = "079203001234",
+            AvatarMediaId = avatarId,
+            IsActive = true,
+            RoleIds = [newRoleId]
+        };
+
+        Result result = await service.UpdateUserAsync(userId, request);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal("New Full Name", user.FullName);
+        Assert.Equal("new@example.com", user.Email);
+        Assert.Equal("0901234567", user.PhoneNumber);
+        Assert.Equal(new DateOnly(1995, 6, 15), user.DateOfBirth);
+        Assert.Equal("079203001234", user.CitizenId);
+        Assert.Equal(avatarId, user.AvatarMediaId);
+        Assert.True(user.IsActive);
+        Assert.NotNull(user.ProfileCompletedAtUtc);
+        Assert.Single(user.UserRoles);
+        Assert.Equal(newRoleId, user.UserRoles.First().RoleId);
+        Assert.Contains(user, userRepo.UpdatedUsers);
+    }
+
+    [Fact]
+    public async Task UpdateUserAsyncDuplicateEmailReturnsEmailAlreadyExists()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "current@example.com",
+            FullName = "User",
+            IsActive = true
+        };
+
+        RecordingUserRepository userRepo = new()
+        {
+            ProfileUser = user,
+            ExistingEmail = "taken@example.com"
+        };
+
+        UserService service = CreateService(userRepo);
+
+        UpdateUserRequest request = new()
+        {
+            FullName = "User",
+            Email = "taken@example.com"
+        };
+
+        Result result = await service.UpdateUserAsync(userId, request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.User.EmailAlreadyExists, result.Error);
+    }
+
+    [Fact]
+    public async Task UpdateUserAsyncDuplicateCitizenIdReturnsCitizenIdAlreadyExists()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            FullName = "User",
+            CitizenId = "079200000000",
+            IsActive = true
+        };
+
+        RecordingUserRepository userRepo = new()
+        {
+            ProfileUser = user,
+            ExistingCitizenId = "079203009999"
+        };
+
+        UserService service = CreateService(userRepo);
+
+        UpdateUserRequest request = new()
+        {
+            FullName = "User",
+            CitizenId = "079203009999"
+        };
+
+        Result result = await service.UpdateUserAsync(userId, request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.User.CitizenIdAlreadyExists, result.Error);
+    }
+
+    [Fact]
+    public async Task UpdateUserAsyncUnderageDateOfBirthReturnsUnderage()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            FullName = "User",
+            IsActive = true
+        };
+
+        RecordingUserRepository userRepo = new() { ProfileUser = user };
+        FixedTimeProvider timeProvider = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        UserService service = CreateService(userRepo, timeProvider: timeProvider);
+
+        UpdateUserRequest request = new()
+        {
+            FullName = "User",
+            DateOfBirth = new DateOnly(2015, 1, 1) // 11 years old
+        };
+
+        Result result = await service.UpdateUserAsync(userId, request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.User.Underage, result.Error);
+    }
+
+    [Fact]
+    public async Task UpdateUserAsyncEmptyRoleIdsReturnsRolesRequired()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            FullName = "User",
+            IsActive = true
+        };
+
+        RecordingUserRepository userRepo = new() { ProfileUser = user };
+        UserService service = CreateService(userRepo);
+
+        UpdateUserRequest request = new()
+        {
+            FullName = "User",
+            RoleIds = []
+        };
+
+        Result result = await service.UpdateUserAsync(userId, request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("User.RolesRequired", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task UpdateUserAsyncNullRoleIdsPreservesExistingRoles()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid existingRoleId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            FullName = "User",
+            IsActive = true
+        };
+        user.UserRoles.Add(new UserRole { UserId = userId, RoleId = existingRoleId });
+
+        RecordingUserRepository userRepo = new() { ProfileUser = user };
+        UserService service = CreateService(userRepo);
+
+        UpdateUserRequest request = new()
+        {
+            FullName = "Updated Name",
+            RoleIds = null
+        };
+
+        Result result = await service.UpdateUserAsync(userId, request);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal("Updated Name", user.FullName);
+        Assert.Single(user.UserRoles);
+        Assert.Equal(existingRoleId, user.UserRoles.First().RoleId);
+    }
+
+    [Fact]
+    public async Task UpdateUserAsyncDeactivatingUserRevokesAllSessions()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            FullName = "User",
+            IsActive = true
+        };
+
+        RecordingUserRepository userRepo = new() { ProfileUser = user };
+        FakeAuthSessionRepo sessionRepo = new();
+        UserService service = CreateService(userRepo, authSessionRepository: sessionRepo);
+
+        UpdateUserRequest request = new()
+        {
+            FullName = "User",
+            IsActive = false
+        };
+
+        Result result = await service.UpdateUserAsync(userId, request);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.False(user.IsActive);
+        Assert.Contains(userId, sessionRepo.RevokedUserSessions);
+    }
+
+    [Fact]
+    public async Task UpdateUserAsyncRemoveAvatarClearsAvatarMediaId()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            FullName = "User",
+            AvatarMediaId = Guid.NewGuid(),
+            IsActive = true
+        };
+
+        RecordingUserRepository userRepo = new() { ProfileUser = user };
+        UserService service = CreateService(userRepo);
+
+        UpdateUserRequest request = new()
+        {
+            FullName = "User",
+            RemoveAvatar = true
+        };
+
+        Result result = await service.UpdateUserAsync(userId, request);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Null(user.AvatarMediaId);
+    }
+
+    [Fact]
+    public async Task GetUserByIdAsyncReturnsDateOfBirthAndCitizenId()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            FullName = "User",
+            PhoneNumber = "0901234567",
+            DateOfBirth = new DateOnly(1995, 3, 20),
+            CitizenId = "079203001234",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        RecordingUserRepository userRepo = new() { ProfileUser = user };
+        UserService service = CreateService(userRepo);
+
+        Result<AdminUserDetailDto> result = await service.GetUserByIdAsync(userId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(new DateOnly(1995, 3, 20), result.Value.DateOfBirth);
+        Assert.Equal("079203001234", result.Value.CitizenId);
+    }
+
     // ========================================================================
     // HÀM TIỆN ÍCH TẠO SERVICE ĐỂ DÙNG CHUNG TRONG CÁC TEST CASE
     // ========================================================================
@@ -315,7 +611,8 @@ public sealed class UserServiceTests
         IRoleRepository? roleRepository = null,
         IPasswordHasher<User>? passwordHasher = null,
         TimeProvider? timeProvider = null,
-        string creationKey = ValidBootstrapKey
+        string creationKey = ValidBootstrapKey,
+        IAuthSessionRepository? authSessionRepository = null
         )
     {
         return new UserService(
@@ -326,7 +623,7 @@ public sealed class UserServiceTests
             timeProvider ?? TimeProvider.System,
             new FakeCorrelationIdProvider(),
             new FakeAuditLogRepo(),
-            new FakeAuthSessionRepo(),
+            authSessionRepository ?? new FakeAuthSessionRepo(),
             new FakeRecoveryTokenRepo(),
             FakeMediaUrlResolver.Instance,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<UserService>.Instance
@@ -432,9 +729,12 @@ public sealed class UserServiceTests
         public Task<IReadOnlyList<User>> GetAllAsync(CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("UserService.RegisterAsync does not use generic CRUD reads.");
 
-        public Task<bool> UpdateAsync(User entity, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("UserService.RegisterAsync does not update users.");
-
+        public List<User> UpdatedUsers { get; } = [];
+        public Task<bool> UpdateAsync(User entity, CancellationToken cancellationToken = default)
+        {
+            UpdatedUsers.Add(entity);
+            return Task.FromResult(true);
+        }
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("UserService.RegisterAsync does not delete users.");
         public Task<bool> ChangePasswordAndRevokeSessionsAsync(Guid userId, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
@@ -461,8 +761,12 @@ public sealed class UserServiceTests
         public Task<Session> CreateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> UpdateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-
-        public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public List<Guid> RevokedUserSessions { get; } = [];
+        public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default)
+        {
+            RevokedUserSessions.Add(userId);
+            return Task.CompletedTask;
+        }
         public Task<AuthSessionPrincipal?> CreateAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, string? deviceName, string? ipAddress, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<AuthSessionPrincipal?> RotateAsync(string currentRefreshTokenHash, string replacementRefreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default) => throw new NotSupportedException();

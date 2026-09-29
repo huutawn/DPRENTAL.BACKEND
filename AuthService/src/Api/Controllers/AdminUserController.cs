@@ -101,6 +101,7 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> UpdateUser(
         Guid id,
         [FromBody] UpdateUserRequest request,
