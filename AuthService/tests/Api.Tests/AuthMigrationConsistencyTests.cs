@@ -20,7 +20,7 @@ public sealed class AuthMigrationConsistencyTests
     }
 
     [Fact]
-    public async Task MigrateOnNewDatabaseAppliesAll26MigrationsAndSubsequentMigrateIsIdempotent()
+    public async Task MigrateOnNewDatabaseAppliesAllMigrationsAndSubsequentMigrateIsIdempotent()
     {
         string connStr = "Host=localhost;Port=5435;Database=authservice_fresh_migrate;Username=postgres;Password=postgres;Include Error Detail=true";
         DbContextOptions<AuthDbContext> options = new DbContextOptionsBuilder<AuthDbContext>()
@@ -30,8 +30,9 @@ public sealed class AuthMigrationConsistencyTests
         await using AuthDbContext ctx = new(options);
         await ctx.Database.EnsureDeletedAsync();
 
+        int migrationCount = ctx.Database.GetMigrations().Count();
         IEnumerable<string> pendingBefore = await ctx.Database.GetPendingMigrationsAsync();
-        Assert.Equal(26, pendingBefore.Count());
+        Assert.Equal(migrationCount, pendingBefore.Count());
 
         await ctx.Database.MigrateAsync();
 
@@ -45,7 +46,7 @@ public sealed class AuthMigrationConsistencyTests
         Assert.Equal(3, legacyColumns);
 
         IEnumerable<string> applied = await ctx.Database.GetAppliedMigrationsAsync();
-        Assert.Equal(26, applied.Count());
+        Assert.Equal(migrationCount, applied.Count());
 
         IEnumerable<string> pendingAfter = await ctx.Database.GetPendingMigrationsAsync();
         Assert.Empty(pendingAfter);
@@ -54,7 +55,7 @@ public sealed class AuthMigrationConsistencyTests
         await ctx.Database.MigrateAsync();
 
         IEnumerable<string> appliedAfterReapply = await ctx.Database.GetAppliedMigrationsAsync();
-        Assert.Equal(26, appliedAfterReapply.Count());
+        Assert.Equal(migrationCount, appliedAfterReapply.Count());
 
         await ctx.Database.EnsureDeletedAsync();
     }
