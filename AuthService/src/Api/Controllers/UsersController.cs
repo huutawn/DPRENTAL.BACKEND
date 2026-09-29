@@ -41,7 +41,6 @@ public sealed class UsersController(
 
     /// <summary>Hoàn thiện thông tin định danh cá nhân lần đầu (CCCD, SĐT, ngày sinh).</summary>
     [HttpPost("profile")]
-    [HttpPost("complete-profile")]
     [ProducesResponseType<CurrentUserResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -215,8 +214,6 @@ public sealed class UsersController(
 
     /// <summary>Tự vô hiệu hóa tài khoản cá nhân (xóa mềm) và đăng xuất khỏi toàn bộ thiết bị.</summary>
     [HttpDelete("deactivate")]
-    [HttpPost("deactivate")]
-    [HttpDelete]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
