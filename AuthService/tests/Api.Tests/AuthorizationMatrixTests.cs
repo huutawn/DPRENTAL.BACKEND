@@ -288,5 +288,16 @@ public sealed class AuthorizationMatrixTests
             Assigned.Remove((userId, roleId));
             return Task.FromResult(true);
         }
+        public Task<IReadOnlyList<Role>> GetAllAsync(CancellationToken cancellationToken = default)
+        {
+            // Trả về tất cả các value trong Dictionary Roles
+            return Task.FromResult<IReadOnlyList<Role>>(Roles.Values.ToList());
+        }
+        public Task<int> CountByIdsAsync(IEnumerable<Guid> roleIds, CancellationToken cancellationToken = default)
+        {
+            // Đếm số lượng key trong Dictionary khớp với danh sách ID truyền vào
+            int count = Roles.Keys.Count(id => roleIds.Contains(id));
+            return Task.FromResult(count);
+        }
     }
 }

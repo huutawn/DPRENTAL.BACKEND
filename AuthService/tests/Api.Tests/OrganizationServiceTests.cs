@@ -269,6 +269,16 @@ public sealed class OrganizationServiceTests
         public Task<bool> IsAssignedAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task<bool> AssignAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> RevokeAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) => Task.FromResult(true);
+
+        public Task<IReadOnlyList<Role>> GetAllAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<Role>>(Roles.Values.ToList());
+        }
+        public Task<int> CountByIdsAsync(IEnumerable<Guid> roleIds, CancellationToken cancellationToken = default)
+        {
+            int count = Roles.Keys.Count(id => roleIds.Contains(id));
+            return Task.FromResult(count);
+        }
     }
 
 }

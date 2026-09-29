@@ -444,5 +444,9 @@ public sealed class ExternalLoginServiceTests
 
         public Task<bool> RevokeAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("ExternalLoginService does not revoke roles.");
+        public Task<IReadOnlyList<Role>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("ExternalLoginService does not get all roles.");
+        public Task<int> CountByIdsAsync(IEnumerable<Guid> roleIds, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("ExternalLoginService does not count roles by id.");
     }
 }

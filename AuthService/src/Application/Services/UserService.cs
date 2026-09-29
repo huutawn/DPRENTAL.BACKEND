@@ -24,6 +24,7 @@ using Dprental.AuthService.Application.Rules;
 using System.Text;
 using System.Security.Cryptography;
 using System.Diagnostics.CodeAnalysis;
+using AuthService.Application.DTOs.Auth;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -532,36 +533,57 @@ public sealed class UserService(
             "CreateUser",
             async () =>
             {
-                // Kiểm tra email tồn tại
-                bool emailExists = await userRepository.EmailExistsAsync(request.Email.ToUpperInvariant(), cancellationToken);
+                if (!DtoValidator.TryValidate(request, out Error? validationError))
+                {
+                    return Result.Failure<Guid>(validationError);
+                }
+
+                if (request.RoleIds is null || request.RoleIds.Count == 0)
+                {
+                    return Result.Failure<Guid>(new Error(
+                        "User.RolesRequired",
+                        "Vui lòng chỉ định ít nhất một quyền (Role) cho người dùng mới.",
+                        ErrorType.Validation));
+                }
+
+                List<Guid> distinctRoleIds = request.RoleIds.Distinct().ToList();
+
+                int existingRolesCount = await roleRepository.CountByIdsAsync(distinctRoleIds, cancellationToken);
+                if (existingRolesCount != distinctRoleIds.Count)
+                {
+                    return Result.Failure<Guid>(new Error(
+                        "User.InvalidRoles",
+                        "Một hoặc nhiều quyền (Role) được cung cấp không tồn tại trong hệ thống.",
+                        ErrorType.Validation));
+                }
+
+                string normalizedEmail = request.Email.Trim().ToUpperInvariant();
+                bool emailExists = await userRepository.EmailExistsAsync(normalizedEmail, cancellationToken);
                 if (emailExists)
                 {
-                    return Result.Failure<Guid>(new Error("User.EmailExists", "Email này đã được sử dụng.", ErrorType.Conflict));
+                    return Result.Failure<Guid>(new Error(
+                        "User.EmailExists",
+                        "Email này đã được sử dụng.",
+                        ErrorType.Conflict));
                 }
 
                 var newUser = new User
                 {
                     Id = Guid.NewGuid(),
-                    Email = request.Email,
-                    FullName = request.FullName,
+                    Email = request.Email.Trim(),
+                    FullName = request.FullName.Trim(),
                     IsActive = true,
-                    CreatedAt = timeProvider.GetUtcNow().UtcDateTime, // Đồng bộ dùng timeProvider của dự án
+                    CreatedAt = timeProvider.GetUtcNow().UtcDateTime,
                     HasPassword = true
                 };
 
-                // Hash mật khẩu
                 newUser.PasswordHash = passwordHasher.HashPassword(newUser, request.Password);
 
-                // Gắn Roles cho User mới
-                if (request.RoleIds != null && request.RoleIds.Count != 0)
+                foreach (Guid roleId in distinctRoleIds)
                 {
-                    foreach (var roleId in request.RoleIds)
-                    {
-                        newUser.UserRoles.Add(new UserRole { RoleId = roleId, UserId = newUser.Id });
-                    }
+                    newUser.UserRoles.Add(new UserRole { RoleId = roleId, UserId = newUser.Id });
                 }
 
-                // Gọi CreateAsync
                 await userRepository.CreateAsync(newUser, cancellationToken);
 
                 return Result.Success(newUser.Id);
@@ -571,37 +593,68 @@ public sealed class UserService(
             cancellationToken);
     }
 
+    public async Task<Result<IReadOnlyList<RoleDto>>> GetAllRolesAsync(CancellationToken cancellationToken = default)
+    {
+        var roles = await roleRepository.GetAllAsync(cancellationToken);
+
+        var roleDtos = roles.Select(r => new RoleDto(r.Id, r.Name, r.Description)).ToList();
+
+        return Result.Success<IReadOnlyList<RoleDto>>(roleDtos);
+    }
+
     public async Task<Result> UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken cancellationToken = default)
     {
         return await ApplicationExecutor.ExecuteAsync(
             "UpdateUser",
             async () =>
             {
+                // 1. Chặn mảng Role rỗng hoặc null ngay từ đầu
+                if (request.RoleIds is null || request.RoleIds.Count == 0)
+                {
+                    return Result.Failure(new Error(
+                        "User.RolesRequired",
+                        "Vui lòng chỉ định ít nhất một quyền (Role) cho người dùng.",
+                        ErrorType.Validation));
+                }
+
+                // Lọc các ID trùng lặp (nếu có)
+                List<Guid> distinctRoleIds = request.RoleIds.Distinct().ToList();
+
+                // 2. Chặn Role ID ảo không tồn tại trong Database
+                int existingRolesCount = await roleRepository.CountByIdsAsync(distinctRoleIds, cancellationToken);
+                if (existingRolesCount != distinctRoleIds.Count)
+                {
+                    return Result.Failure(new Error(
+                        "User.InvalidRoles",
+                        "Một hoặc nhiều quyền (Role) được cung cấp không tồn tại trong hệ thống.",
+                        ErrorType.Validation));
+                }
+
+                // 3. Lấy thông tin user
                 var user = await userRepository.GetByIdWithRolesAsync(id, cancellationToken);
                 if (user is null)
                 {
                     return Result.Failure(new Error("User.NotFound", "Không tìm thấy người dùng.", ErrorType.NotFound));
                 }
 
-                // Cập nhật thông tin cơ bản
-                user.FullName = request.FullName;
+                // 4. Cập nhật thông tin cơ bản
+                user.FullName = request.FullName.Trim();
 
-                // Cập nhật Roles
-                if (request.RoleIds != null)
+                // 5. Cập nhật Roles (đã chắc chắn distinctRoleIds hợp lệ)
+                var currentRoleIds = user.UserRoles.Select(ur => ur.RoleId).ToList();
+
+                // Xóa những Role cũ không có trong danh sách mới
+                var rolesToRemove = user.UserRoles.Where(ur => !distinctRoleIds.Contains(ur.RoleId)).ToList();
+                foreach (var role in rolesToRemove)
                 {
-                    var currentRoleIds = user.UserRoles.Select(ur => ur.RoleId).ToList();
+                    user.UserRoles.Remove(role);
+                }
 
-                    var rolesToRemove = user.UserRoles.Where(ur => !request.RoleIds.Contains(ur.RoleId)).ToList();
-                    foreach (var role in rolesToRemove)
-                    {
-                        user.UserRoles.Remove(role);
-                    }
-
-                    var rolesToAdd = request.RoleIds.Where(rId => !currentRoleIds.Contains(rId)).ToList();
-                    foreach (var roleId in rolesToAdd)
-                    {
-                        user.UserRoles.Add(new UserRole { RoleId = roleId, UserId = user.Id });
-                    }
+                // Thêm những Role mới chưa có trong danh sách cũ
+                var rolesToAdd = distinctRoleIds.Where(rId => !currentRoleIds.Contains(rId)).ToList();
+                foreach (var roleId in rolesToAdd)
+                {
+                    user.UserRoles.Add(new UserRole { RoleId = roleId, UserId = user.Id });
                 }
 
                 await userRepository.UpdateAsync(user, cancellationToken);

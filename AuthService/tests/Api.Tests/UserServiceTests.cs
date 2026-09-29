@@ -368,6 +368,10 @@ public sealed class UserServiceTests
 
         public Task<bool> RevokeAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) =>
             Task.FromResult(true);
+        public Task<IReadOnlyList<Role>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Role>>(Roles.Values.ToList());
+        public Task<int> CountByIdsAsync(IEnumerable<Guid> roleIds, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Roles.Values.Count(r => roleIds.Contains(r.Id)));
     }
 
     private sealed class RecordingUserRepository : IUserRepository

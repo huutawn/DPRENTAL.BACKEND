@@ -1,4 +1,5 @@
-﻿using AuthService.Application.DTOs.User;
+﻿using AuthService.Application.DTOs.Auth;
+using AuthService.Application.DTOs.User;
 using AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Api.Filters;
 using Dprental.AuthService.Application.IServices;
@@ -107,5 +108,23 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
     {
         var result = await userService.UpdateUserAsync(id, request, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
+    }
+
+    /// <summary>
+    /// Lấy danh sách tất cả các quyền (Roles) trong hệ thống để admin gán cho User.
+    /// </summary>
+    [HttpGet("~/admin/roles")] // Đẩy ra URL: GET /admin/roles
+    [Authorize(Roles = "adm")] // CHỐT CỨNG: Bắt buộc Role trong token phải là "adm"
+    [ProducesResponseType(typeof(IReadOnlyList<RoleDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetRoles(CancellationToken cancellationToken)
+    {
+        var result = await userService.GetAllRolesAsync(cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
     }
 }

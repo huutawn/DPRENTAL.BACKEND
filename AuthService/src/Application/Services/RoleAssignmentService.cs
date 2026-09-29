@@ -1,4 +1,4 @@
-using Dprental.AuthService.Application.DTOs.Auth;
+    using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Domain.IRepositories;
@@ -108,6 +108,7 @@ public sealed class RoleAssignmentService(
             correlationIdProvider,
             cancellationToken);
     }
+
 
     private async Task<Result> GuardAsync(Guid actorUserId, AssignRoleRequest request, bool isAssign, CancellationToken cancellationToken)
     {

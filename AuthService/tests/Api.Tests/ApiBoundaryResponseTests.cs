@@ -1,9 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Net;
-using System.Net.Http.Json;
-using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text.Json;
+using AuthService.Application.DTOs.Auth;
 using AuthService.Application.DTOs.User;
 using AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Api.Security;
@@ -26,6 +21,12 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Net;
+using System.Net.Http.Json;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Xunit;
 
 namespace Dprental.AuthService.Api.Tests;
@@ -384,11 +385,15 @@ public sealed class ApiBoundaryResponseTests
         public Task<Result> ResetPasswordAsync(string token, ResetPasswordRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> ChangePasswordAsync(Guid userId, ChangePasswordRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        // Đã cập nhật thành GetUsersRequest
         public Task<Result<PagedResult<AdminUserListItemDto>>> GetUsersPagedAsync(GetUsersRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        // Đã bổ sung 2 hàm mới
         public Task<Result<Guid>> CreateUserAsync(CreateUserRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<Result<IReadOnlyList<RoleDto>>> GetAllRolesAsync(CancellationToken cancellationToken = default)
+        {
+            // Trả về một list rỗng để test có thể compile và pass
+            return Task.FromResult(Result.Success<IReadOnlyList<RoleDto>>([]));
+        }
     }
 }

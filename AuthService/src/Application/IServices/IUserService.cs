@@ -1,3 +1,4 @@
+using AuthService.Application.DTOs.Auth;
 using AuthService.Application.DTOs.User;
 using AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Application.DTOs;
@@ -26,5 +27,6 @@ public interface IUserService
     Task<Result> UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>Kiểm tra user tồn tại và đang active (dùng cho JWT Kill Switch).</summary>
-    Task<Result> ValidateActiveUserAsync(Guid userId, CancellationToken cancellationToken = default);    
+    Task<Result> ValidateActiveUserAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<Result<IReadOnlyList<RoleDto>>> GetAllRolesAsync(CancellationToken cancellationToken = default);
 }
