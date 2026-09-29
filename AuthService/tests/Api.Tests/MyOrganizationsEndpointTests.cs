@@ -35,7 +35,7 @@ public sealed class MyOrganizationsEndpointTests
 
         using HttpClient client = CreateAuthenticatedClient(factory, userId);
 
-        using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/users/me/organizations");
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/users/organizations");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());

@@ -132,7 +132,7 @@ public sealed class OrganizationReviewTests
     {
         await using Fixture f = await Fixture.CreateAsync();
 
-        // User thường (kể cả Owner) xem tổ chức của mình qua GET /users/me/organizations.
+        // User thường (kể cả Owner) xem tổ chức của mình qua GET /users/organizations.
         Result<PagedResult<OrganizationSummaryResponse>> result = await f.Organizations.ListAsync(f.OwnerId, new PageRequest(), status);
 
         Assert.True(result.IsFailure);

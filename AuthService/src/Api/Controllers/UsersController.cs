@@ -40,7 +40,8 @@ public sealed class UsersController(
     }
 
     /// <summary>Hoàn thiện thông tin định danh cá nhân lần đầu (CCCD, SĐT, ngày sinh).</summary>
-    [HttpPost("me")]
+    [HttpPost("profile")]
+    [HttpPost("complete-profile")]
     [ProducesResponseType<CurrentUserResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -60,7 +61,7 @@ public sealed class UsersController(
     }
 
     /// <summary>Cập nhật thông tin hồ sơ cá nhân sau khi đã hoàn thiện.</summary>
-    [HttpPatch("me")]
+    [HttpPatch("profile")]
     [ProducesResponseType<CurrentUserResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -80,7 +81,7 @@ public sealed class UsersController(
     }
 
     /// <summary>Đổi mật khẩu tài khoản người dùng và hủy toàn bộ phiên đăng nhập cũ.</summary>
-    [HttpPost("me/change-password")]
+    [HttpPost("change-password")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -105,7 +106,7 @@ public sealed class UsersController(
     }
 
     /// <summary>Lấy danh sách các phiên đăng nhập đang hoạt động của người dùng.</summary>
-    [HttpGet("me/sessions")]
+    [HttpGet("sessions")]
     [ProducesResponseType<IReadOnlyList<SessionResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<IReadOnlyList<SessionResponse>>> GetSessions(CancellationToken cancellationToken)
@@ -125,7 +126,7 @@ public sealed class UsersController(
     }
 
     /// <summary>Thu hồi một phiên đăng nhập cụ thể của người dùng.</summary>
-    [HttpDelete("me/sessions/{sessionId:guid}")]
+    [HttpDelete("sessions/{sessionId:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -157,7 +158,7 @@ public sealed class UsersController(
     }
 
     /// <summary>Lấy danh sách các tài khoản đăng nhập bên ngoài (Google,...) đã liên kết.</summary>
-    [HttpGet("me/external-logins")]
+    [HttpGet("external-logins")]
     [ProducesResponseType<IReadOnlyList<ExternalLoginResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<IReadOnlyList<ExternalLoginResponse>>> GetExternalLogins(CancellationToken cancellationToken)
@@ -172,7 +173,7 @@ public sealed class UsersController(
     }
 
     /// <summary>Liên kết tài khoản đăng nhập bên ngoài (Google,...) vào tài khoản hiện tại.</summary>
-    [HttpPost("me/external-logins/{provider}/link")]
+    [HttpPost("external-logins/{provider}/link")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -194,7 +195,7 @@ public sealed class UsersController(
     }
 
     /// <summary>Hủy liên kết tài khoản đăng nhập bên ngoài (Google,...).</summary>
-    [HttpDelete("me/external-logins/{provider}")]
+    [HttpDelete("external-logins/{provider}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -213,7 +214,9 @@ public sealed class UsersController(
     }
 
     /// <summary>Tự vô hiệu hóa tài khoản cá nhân (xóa mềm) và đăng xuất khỏi toàn bộ thiết bị.</summary>
-    [HttpDelete("me")]
+    [HttpDelete("deactivate")]
+    [HttpPost("deactivate")]
+    [HttpDelete]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
@@ -236,7 +239,7 @@ public sealed class UsersController(
     }
 
     /// <summary>Lấy danh sách các organization mà người dùng hiện tại đang tham gia (Active).</summary>
-    [HttpGet("me/organizations")]
+    [HttpGet("organizations")]
     [ProducesResponseType<IReadOnlyList<MyOrganizationResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<IReadOnlyList<MyOrganizationResponse>>> GetMyOrganizations(CancellationToken cancellationToken)
@@ -253,7 +256,7 @@ public sealed class UsersController(
     /// <summary>Cập nhật hồ sơ (tên, số điện thoại, ngày sinh, CCCD, avatar) của người dùng hiện tại.</summary>
     /// <param name="request">Thông tin hồ sơ cần cập nhật.</param>
     /// <param name="cancellationToken">Token hủy request.</param>
-    [HttpPut("me")]
+    [HttpPut("profile")]
     [Authorize]
     [ProducesResponseType<CurrentUserResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
