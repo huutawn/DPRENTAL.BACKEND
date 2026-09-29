@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using FirebaseAdmin;
 using FirebaseAdmin.Auth;
 using Google.Apis.Auth.OAuth2;
@@ -72,6 +73,8 @@ internal sealed partial class FirebaseIdentityService : IFirebaseIdentityService
 
         return Result.Success(new FirebaseIdentity(
             token.Uid,
+            ResolveProviderSubject(token),
+            ResolveSignInProvider(token),
             email.Trim(),
             true,
             ClaimAsString(token, "name"),
@@ -120,6 +123,81 @@ internal sealed partial class FirebaseIdentityService : IFirebaseIdentityService
             _ => bool.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), out bool parsed) && parsed
         };
     }
+
+    private static string ResolveProviderSubject(FirebaseToken token) =>
+        TryGetFirebaseIdentity(token, "google.com") ?? token.Uid;
+
+    private static string? ResolveSignInProvider(FirebaseToken token)
+    {
+        if (!TryGetFirebaseClaim(token, "sign_in_provider", out object? provider))
+        {
+            return null;
+        }
+
+        return Convert.ToString(provider, CultureInfo.InvariantCulture);
+    }
+
+    private static string? TryGetFirebaseIdentity(FirebaseToken token, string provider)
+    {
+        if (!TryGetFirebaseClaim(token, "identities", out object? identities))
+        {
+            return null;
+        }
+
+        if (!TryGetObjectValue(identities, provider, out object? providerValue))
+        {
+            return null;
+        }
+
+        return FirstString(providerValue);
+    }
+
+    private static bool TryGetFirebaseClaim(FirebaseToken token, string key, out object? value)
+    {
+        value = null;
+        if (!token.Claims.TryGetValue("firebase", out object? firebase))
+        {
+            return false;
+        }
+
+        return TryGetObjectValue(firebase, key, out value);
+    }
+
+    private static bool TryGetObjectValue(object? source, string key, out object? value)
+    {
+        value = null;
+        switch (source)
+        {
+            case IReadOnlyDictionary<string, object> readOnlyDictionary:
+                return readOnlyDictionary.TryGetValue(key, out value);
+            case IDictionary<string, object> dictionary:
+                return dictionary.TryGetValue(key, out value);
+            case JsonElement { ValueKind: JsonValueKind.Object } json:
+                if (json.TryGetProperty(key, out JsonElement property))
+                {
+                    value = property;
+                    return true;
+                }
+
+                return false;
+            default:
+                return false;
+        }
+    }
+
+    private static string? FirstString(object? value) =>
+        value switch
+        {
+            string text when !string.IsNullOrWhiteSpace(text) => text.Trim(),
+            JsonElement { ValueKind: JsonValueKind.String } json => json.GetString(),
+            JsonElement { ValueKind: JsonValueKind.Array } json => json.EnumerateArray()
+                .Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() : null)
+                .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item)),
+            IEnumerable<object> values => values
+                .Select(item => Convert.ToString(item, CultureInfo.InvariantCulture))
+                .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item)),
+            _ => null
+        };
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning,
         Message = "Firebase ID token rejected: {FirebaseErrorCode}")]

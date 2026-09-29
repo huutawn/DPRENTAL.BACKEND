@@ -103,6 +103,8 @@ Tra ve model noi bo:
 ```csharp
 FirebaseIdentity(
     string Uid,
+    string ProviderSubject,
+    string? SignInProvider,
     string Email,
     bool EmailVerified,
     string? DisplayName,
@@ -136,8 +138,8 @@ Sau khi verify token thanh cong:
 1. Tim `ExternalLogin` theo:
 
 ```text
-Provider = Firebase
-ProviderSubject = Firebase UID
+Provider = Google
+ProviderSubject = Firebase claim firebase.identities["google.com"][0], fallback Firebase UID
 ```
 
 2. Neu da co link:
@@ -151,19 +153,19 @@ ProviderSubject = Firebase UID
 - Tim user theo email normalized.
 - Neu user ton tai:
   - Neu inactive thi reject.
-  - Link Firebase UID vao user do.
+- Link Google provider subject vao user do.
 - Neu user chua ton tai:
   - Tao user moi.
   - FullName lay tu `displayName`, fallback email.
   - Email lay tu Firebase verified email.
   - HasPassword = false.
   - Gan role default `customer`.
-  - Tao ExternalLogin provider `Firebase`.
+  - Tao ExternalLogin provider `Google`.
 
 4. Chong duplicate/race condition:
 
 - Unique index tren provider + subject van can duoc ton trong.
-- Neu race khi add external login, reload lai external login theo UID.
+- Neu race khi add external login, reload lai external login theo provider subject.
 - Khong tao duplicate user theo cung email.
 
 ### Phase 4 - Tao Session/Token Noi Bo
@@ -208,7 +210,13 @@ Controller chi nen:
 - Set Cache-Control: no-store.
 - Tra token pair.
 
-Khong xu ly logic Firebase/link user truc tiep trong controller.
+Trang thai hien tai:
+
+- Da them endpoint `POST /api/v1/auth/firebase/login`.
+- Endpoint verify Firebase ID token, chi chap nhan `sign_in_provider = google.com`.
+- Endpoint tao/link local user qua `ExternalLoginService`.
+- Endpoint tao accessToken/refreshToken noi bo qua `AuthSessionService`.
+- Response tra JSON token pair cho Next BFF set HttpOnly cookie tren FE domain.
 
 ### Phase 6 - Deprecate Google OAuth Flow Cu
 

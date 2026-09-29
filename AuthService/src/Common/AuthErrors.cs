@@ -215,6 +215,9 @@ public static class AuthErrors
         public static readonly Error FirebaseEmailNotVerified =
             Error.Forbidden(AuthErrorCode.Auth.FirebaseEmailNotVerified, "Email trong Firebase token chưa được xác minh.");
 
+        public static readonly Error FirebaseProviderUnsupported =
+            Error.Forbidden(AuthErrorCode.Auth.FirebaseProviderUnsupported, "Firebase token không phải từ Google sign-in provider.");
+
         public static readonly Error Uncategorized =
             Error.Failure(AuthErrorCode.Auth.Uncategorized, "Đã xảy ra lỗi hệ thống ngoài dự kiến.");
     }

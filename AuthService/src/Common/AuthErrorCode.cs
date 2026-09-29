@@ -92,6 +92,7 @@ public static class AuthErrorCode
         public const string FirebaseTokenInvalid = "Auth.FirebaseTokenInvalid";
         public const string FirebaseEmailMissing = "Auth.FirebaseEmailMissing";
         public const string FirebaseEmailNotVerified = "Auth.FirebaseEmailNotVerified";
+        public const string FirebaseProviderUnsupported = "Auth.FirebaseProviderUnsupported";
         public const string Uncategorized = "Auth.Uncategorized";
     }
 

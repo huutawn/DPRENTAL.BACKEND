@@ -26,6 +26,7 @@ public sealed class AuthController(
     IUserService userService,
     IServiceIdentityService serviceIdentityService,
     IExternalLoginService externalLoginService,
+    IFirebaseIdentityService firebaseIdentityService,
     IOptions<JwtOptions> jwtOptions,
     IOptions<GoogleAuthOptions> googleOptions,
     IWebHostEnvironment environment) : ControllerBase
@@ -90,6 +91,56 @@ public sealed class AuthController(
 
         return Ok(new { Message = "Đăng nhập thành công.", UserId = authResult.Value });
     }
+
+    /// <summary>Đăng nhập Google bằng Firebase ID token do Next BFF gửi lên.</summary>
+    [HttpPost("firebase/login")]
+    [ProducesResponseType<AuthTokenResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AuthTokenResponse>> FirebaseLogin(
+        [FromBody] FirebaseLoginRequest? request,
+        CancellationToken cancellationToken)
+    {
+        Response.Headers.CacheControl = "no-store";
+
+        Result<FirebaseIdentity> firebaseResult = await firebaseIdentityService.VerifyIdTokenAsync(
+            request?.IdToken,
+            cancellationToken);
+        if (firebaseResult.IsFailure)
+        {
+            return this.ToProblem(firebaseResult.Error);
+        }
+
+        FirebaseIdentity firebaseIdentity = firebaseResult.Value;
+        if (!string.Equals(firebaseIdentity.SignInProvider, "google.com", StringComparison.Ordinal))
+        {
+            return this.ToProblem(AuthErrors.Auth.FirebaseProviderUnsupported);
+        }
+
+        ExternalIdentity externalIdentity = new(
+            GoogleDefaults.AuthenticationScheme,
+            firebaseIdentity.ProviderSubject,
+            firebaseIdentity.Email,
+            firebaseIdentity.EmailVerified,
+            firebaseIdentity.DisplayName);
+
+        Result<Guid> signInResult = await externalLoginService.SignInAsync(externalIdentity, cancellationToken);
+        if (signInResult.IsFailure)
+        {
+            return this.ToProblem(signInResult.Error);
+        }
+
+        Result<AuthTokenPair> sessionResult = await authSessionService.CreateSessionAsync(signInResult.Value, cancellationToken);
+        if (sessionResult.IsFailure)
+        {
+            return this.ToProblem(sessionResult.Error);
+        }
+
+        return Ok(new AuthTokenResponse(sessionResult.Value.AccessToken, sessionResult.Value.RefreshToken));
+    }
+
     /// <summary>Làm mới phiên đăng nhập bằng refresh token trong cookie.</summary>
     [HttpPost("refresh")]
     [ProducesResponseType(StatusCodes.Status200OK)]
