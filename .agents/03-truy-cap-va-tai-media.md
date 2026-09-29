@@ -20,7 +20,7 @@ Ngoài các trường trên, hệ thống tự xác định từ ngữ cảnh x�
 | **STT** | **Thông tin**       | **Nguồn**              | **Mô tả**                                                                         |
 |---------|---------------------|------------------------|-----------------------------------------------------------------------------------|
 | 1       | Người dùng hiện tại | Authentication Context | Business Service sử dụng để kiểm tra quyền người dùng trên đối tượng nghiệp vụ    |
-| 2       | Service identity    | Service token          | MediaService xác thực service và scope `media.read`                               |
+| 2       | Service identity    | service API key qua Gateway | MediaService xác thực service và scope `media.read`                            |
 | 3       | Quyền nghiệp vụ     | Business Service       | Xác định người dùng có được xem/tải Media thuộc entity đang yêu cầu hay không     |
 
 ## 3.3. Đầu ra
@@ -101,7 +101,7 @@ thì không cấp quyền truy cập nội dung.
 
 - Business Service phải đối chiếu MediaId với entity nghiệp vụ trước khi yêu cầu quyền truy cập.
 
-- MediaService chỉ cấp URL Private cho service có token hợp lệ và scope `media.read`; Business Service đối chiếu mediaId với entity liên quan.
+- MediaService chỉ cấp URL Private cho service có service API key hợp lệ và scope `media.read`; Business Service đối chiếu mediaId với entity liên quan.
 
 - Media ở trạng thái PendingUpload không được cấp quyền xem hoặc tải.
 
@@ -172,7 +172,7 @@ MediaService kiểm tra:
 
 - Media ở trạng thái Ready;
 
-- Service token có scope `media.read`;
+- service API key có scope `media.read`;
 
 - Visibility phù hợp;
 
@@ -436,7 +436,7 @@ Không yêu cầu MediaService thực hiện:
 
 ## 3.8. Hợp đồng API MVP
 
-- `GET /api/v1/media/{mediaId}`: Business Service có service token scope `media.read` lấy metadata. `Deleted` trả 404. `PendingUpload` và `Rejected` có status nhưng không giả định MIME/dung lượng chưa xác minh là dữ liệu thực tế. Endpoint này không trả URL file.
+- `GET /api/v1/media/{mediaId}`: Business Service có service API key scope `media.read` lấy metadata qua Gateway. `Deleted` trả 404. `PendingUpload` và `Rejected` có status nhưng không giả định MIME/dung lượng chưa xác minh là dữ liệu thực tế. Endpoint này không trả URL file.
 - `POST /api/v1/media/{mediaId}/access`: Business Service có scope `media.read` gửi `{ "action": "read", "download": false }`. Sau khi Business Service đã kiểm tra quyền người dùng và mediaId có trong entity, MediaService kiểm tra status rồi trả `{ "mediaId": "...", "url": "...", "expiresAtUtc": "..." }`. `download: true` đặt Content-Disposition để trình duyệt tải với tên file gốc đã được làm sạch.
 - Response của `POST /api/v1/media/uploads` có `previewUrl` và `previewUrlExpiresAtUtc` để chính người upload xem file vừa lưu trước khi entity nghiệp vụ được ghi. URL này là GET ký ngắn hạn, không thay thế quyền đọc qua Business Service sau khi entity đã được lưu. Nếu ký URL lỗi sau khi upload thành công, hai trường preview là null.
 - `GET /api/v1/media/{mediaId}/content`: URL Public ổn định, không cần token. MediaService chỉ chuyển hướng (302) tới URL GET ký ngắn hạn nếu Media đang `Ready`, `Public`; `?download=true` yêu cầu tải xuống. Sau khi chuyển Private, request mới tới URL này trả 404. URL đã ký trước đó có thể còn hiệu lực đến khi hết hạn.

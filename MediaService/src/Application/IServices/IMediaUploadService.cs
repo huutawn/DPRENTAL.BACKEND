@@ -8,6 +8,12 @@ namespace Dprental.MediaService.Application.IServices;
 /// </summary>
 public interface IMediaUploadService
 {
+    Task<Result<IReadOnlyList<UploadFileResultDto>>> UploadManyAsync(
+        string authenticatedUserId,
+        string? idempotencyKey,
+        IReadOnlyList<UploadMediaRequest> files,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Upload file trong một request; phiên nội bộ chỉ phục vụ idempotency và dọn dẹp.
     /// </summary>

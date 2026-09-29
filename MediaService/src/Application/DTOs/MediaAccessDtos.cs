@@ -1,9 +1,5 @@
 namespace Dprental.MediaService.Application.DTOs;
 
-public sealed record ServiceCaller(string? Id, IReadOnlySet<string> Scopes)
-{
-    public bool HasScope(string scope) => Scopes?.Contains(scope) == true;
-}
 
 public sealed record MediaMetadataDto(
     Guid MediaId,

@@ -17,7 +17,8 @@ public class ConfigurationValidationTests
                 ["ObjectStorage:Endpoint"] = "http://127.0.0.1:9000",
                 ["ObjectStorage:Bucket"] = "dprental-media",
                 ["ObjectStorage:AccessKey"] = "access",
-                ["ObjectStorage:SecretKey"] = "secret"
+                ["ObjectStorage:SecretKey"] = "secret",
+                ["ApiKey"] = "valid-api-key"
             })
             .Build();
 
@@ -46,6 +47,28 @@ public class ConfigurationValidationTests
         var ex = Assert.Throws<InvalidOperationException>(() => config.ValidateRequiredConfiguration());
         Assert.Contains("ConnectionStrings:Postgres", ex.Message, StringComparison.Ordinal);
     }
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ValidateRequiredConfiguration_WhenApiKeyMissingOrEmpty_ShouldThrowInvalidOperationException(string? apiKeyValue)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:Postgres"] = "Host=localhost;Database=media;Username=user;Password=pass",
+                ["ObjectStorage:Endpoint"] = "http://127.0.0.1:9000",
+                ["ObjectStorage:Bucket"] = "dprental-media",
+                ["ObjectStorage:AccessKey"] = "access",
+                ["ObjectStorage:SecretKey"] = "secret",
+                ["ApiKey"] = apiKeyValue
+            })
+            .Build();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => config.ValidateRequiredConfiguration());
+        Assert.Contains("ApiKey", ex.Message, StringComparison.Ordinal);
+    }
+
 
     [Theory]
     [InlineData("ObjectStorage:Endpoint")]
@@ -60,7 +83,8 @@ public class ConfigurationValidationTests
             ["ObjectStorage:Endpoint"] = "http://127.0.0.1:9000",
             ["ObjectStorage:Bucket"] = "dprental-media",
             ["ObjectStorage:AccessKey"] = "access",
-            ["ObjectStorage:SecretKey"] = "secret"
+            ["ObjectStorage:SecretKey"] = "secret",
+            ["ApiKey"] = "valid-api-key"
         };
         values.Remove(keyToOmit);
 

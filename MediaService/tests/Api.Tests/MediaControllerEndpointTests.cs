@@ -30,6 +30,18 @@ public class MediaControllerEndpointTests
         Assert.DoesNotContain("purpose", multipart.GetRawText(), StringComparison.OrdinalIgnoreCase);
         Assert.False(document.RootElement.GetProperty("paths")
             .TryGetProperty("/api/v1/media/uploads/{uploadId}/complete", out _));
+        foreach ((string path, string method) in new[]
+        {
+            ("/api/v1/media/{mediaId}/verify", "get"),
+            ("/api/v1/media/{mediaId}", "get"),
+            ("/api/v1/media/{mediaId}/access", "post"),
+            ("/api/v1/media/{mediaId}/visibility", "put")
+        })
+        {
+            JsonElement operation = document.RootElement.GetProperty("paths").GetProperty(path).GetProperty(method);
+            Assert.Contains(operation.GetProperty("parameters").EnumerateArray(), parameter =>
+                parameter.GetProperty("name").GetString() == "X-Api-Key");
+        }
     }
 
     private static MultipartFormDataContent UploadForm(byte[] bytes)
@@ -37,7 +49,7 @@ public class MediaControllerEndpointTests
         var form = new MultipartFormDataContent();
         var file = new ByteArrayContent(bytes);
         file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
-        form.Add(file, "file", "machine.jpg");
+        form.Add(file, "files", "machine.jpg");
         return form;
     }
 
@@ -67,11 +79,11 @@ public class MediaControllerEndpointTests
     }
 
     [Fact]
-    public async Task Upload_WhenServiceTokenUsed_ShouldReturn401()
+    public async Task Upload_WhenApiKeyOnlyUsed_ShouldReturn401()
     {
         using var factory = new MediaServiceTestFactory();
         using var client = factory.CreateClient();
-        MediaServiceTestFactory.SetServiceToken(client);
+        MediaServiceTestFactory.SetApiKey(client);
 
         using var form = UploadForm([0xFF, 0xD8, 0xFF]);
         var response = await client.PostAsync("/api/v1/media/uploads", form);
@@ -105,19 +117,57 @@ public class MediaControllerEndpointTests
     }
 
     [Fact]
+    public async Task Upload_WhenChecksumCountDoesNotMatchFileCount_ShouldReturn400()
+    {
+        using var factory = new MediaServiceTestFactory();
+        using var client = factory.CreateClient();
+        MediaServiceTestFactory.SetUserToken(client, "user-123");
+        using var form = UploadForm([0xFF, 0xD8, 0xFF]);
+        var second = new ByteArrayContent([0xFF, 0xD8, 0xFF]);
+        second.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+        form.Add(second, "files", "second.jpg");
+        form.Add(new StringContent(new string('0', 64)), "sha256Checksums");
+
+        using var response = await client.PostAsync("/api/v1/media/uploads", form);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Upload_WhenMoreThanTenFiles_ShouldReturn400()
+    {
+        using var factory = new MediaServiceTestFactory();
+        using var client = factory.CreateClient();
+        MediaServiceTestFactory.SetUserToken(client, "user-123");
+        using var form = new MultipartFormDataContent();
+        for (int index = 0; index < 11; index++)
+        {
+            var file = new ByteArrayContent([0xFF, 0xD8, 0xFF]);
+            file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+            form.Add(file, "files", $"file-{index}.jpg");
+        }
+
+        using var response = await client.PostAsync("/api/v1/media/uploads", form);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Upload_WhenValid_ShouldReturnReadyMedia()
     {
         var uploadService = Substitute.For<IMediaUploadService>();
         var dto = new MediaCompletedDto(Guid.NewGuid(), "Ready", "machine.jpg", "image/jpeg", 3,
             "https://storage.test/preview", DateTimeOffset.UtcNow.AddMinutes(5));
 
-        uploadService.UploadAsync(
+        uploadService.UploadManyAsync(
             "user-123",
             "key-123",
-            Arg.Is<UploadMediaRequest>(request => request.FileName == "machine.jpg" &&
-                request.ContentType == "image/jpeg" && request.SizeBytes == 3),
+            Arg.Is<IReadOnlyList<UploadMediaRequest>>(requests => requests.Count == 1 &&
+                requests[0].FileName == "machine.jpg" && requests[0].ContentType == "image/jpeg" &&
+                requests[0].SizeBytes == 3),
             Arg.Any<CancellationToken>())
-            .Returns(Result.Success(dto));
+            .Returns(Result.Success<IReadOnlyList<UploadFileResultDto>>(
+                [new UploadFileResultDto(0, "machine.jpg", dto, null)]));
 
         using var factory = new MediaServiceTestFactory { MediaUploadServiceOverride = uploadService };
         using var client = factory.CreateClient();
@@ -129,11 +179,12 @@ public class MediaControllerEndpointTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
-        var body = await response.Content.ReadFromJsonAsync<MediaCompletedDto>();
+        var body = await response.Content.ReadFromJsonAsync<UploadFileResultDto[]>();
         Assert.NotNull(body);
-        Assert.Equal(dto.MediaId, body.MediaId);
-        Assert.Equal("Ready", body.Status);
-        Assert.Equal(dto.PreviewUrl, body.PreviewUrl);
+        Assert.Single(body);
+        Assert.Equal(dto.MediaId, body[0].Media?.MediaId);
+        Assert.Equal("Ready", body[0].Media?.Status);
+        Assert.Equal(dto.PreviewUrl, body[0].Media?.PreviewUrl);
     }
 
     [Fact]
@@ -147,78 +198,93 @@ public class MediaControllerEndpointTests
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Fact]
-    public async Task VerifyMedia_WhenNoServiceAuth_ShouldReturn401()
+    [Theory]
+    [InlineData("/api/v1/media/{0}/verify", "GET")]
+    [InlineData("/api/v1/media/{0}", "GET")]
+    [InlineData("/api/v1/media/{0}/access", "POST")]
+    [InlineData("/api/v1/media/{0}/visibility", "PUT")]
+    public async Task InternalEndpoints_WhenApiKeyMissingOrWrong_ShouldReturn401(string routeTemplate, string method)
     {
         using var factory = new MediaServiceTestFactory();
         using var client = factory.CreateClient();
+        Guid mediaId = Guid.NewGuid();
+        string path = string.Format(System.Globalization.CultureInfo.InvariantCulture, routeTemplate, mediaId);
 
-        var response = await client.GetAsync($"/api/v1/media/{Guid.NewGuid()}/verify");
+        // 1. Không có header X-Api-Key -> 401
+        var missingKeyResponse = await SendInternalRequest(client, method, path);
+        Assert.Equal(HttpStatusCode.Unauthorized, missingKeyResponse.StatusCode);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        // 2. Sai X-Api-Key -> 401
+        using var wrongKeyClient = factory.CreateClient();
+        wrongKeyClient.DefaultRequestHeaders.Add("X-Api-Key", "wrong-api-key");
+        var wrongKeyResponse = await SendInternalRequest(wrongKeyClient, method, path);
+        Assert.Equal(HttpStatusCode.Unauthorized, wrongKeyResponse.StatusCode);
+
+        // 3. User JWT không thay thế được key -> 401
+        using var userJwtClient = factory.CreateClient();
+        MediaServiceTestFactory.SetUserToken(userJwtClient, "user-123");
+        var userJwtResponse = await SendInternalRequest(userJwtClient, method, path);
+        Assert.Equal(HttpStatusCode.Unauthorized, userJwtResponse.StatusCode);
+
+        // 4. User JWT kèm sai key -> 401
+        userJwtClient.DefaultRequestHeaders.Add("X-Api-Key", "wrong-api-key");
+        var userJwtWrongKeyResponse = await SendInternalRequest(userJwtClient, method, path);
+        Assert.Equal(HttpStatusCode.Unauthorized, userJwtWrongKeyResponse.StatusCode);
     }
 
     [Fact]
-    public async Task VerifyMedia_WhenServiceAuthenticated_ShouldReturn200()
+    public async Task InternalEndpoints_WhenValidApiKey_ShouldSucceed()
     {
         var mediaId = Guid.NewGuid();
         var accessService = Substitute.For<IMediaAccessService>();
-        var dto = new MediaVerificationDto(
-            mediaId,
-            "Ready",
-            "user-123",
-            "machine.jpg",
-            "image/jpeg",
-            5000,
-            DateTimeOffset.UtcNow);
-
-        accessService.VerifyMediaAsync(
-                Arg.Is<ServiceCaller>(caller => caller.Id == "11111111-1111-1111-1111-111111111111" && caller.HasScope("media.verify")),
-                mediaId, Arg.Any<CancellationToken>())
-            .Returns(Result.Success(dto));
+        accessService.VerifyMediaAsync(mediaId, Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new MediaVerificationDto(
+                mediaId, "Ready", "user-123", "machine.jpg", "image/jpeg", 5000, DateTimeOffset.UtcNow)));
+        accessService.GetMetadataAsync(mediaId, Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new MediaMetadataDto(
+                mediaId, "machine.jpg", "image/jpeg", 5000, "Ready", "Private", DateTimeOffset.UtcNow)));
+        accessService.CreatePrivateReadUrlAsync(mediaId, Arg.Any<MediaAccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new MediaReadUrlDto(mediaId, "https://storage.test/read", DateTimeOffset.UtcNow.AddMinutes(5))));
+        accessService.SetVisibilityAsync(mediaId, Arg.Any<ChangeMediaVisibilityRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new MediaVisibilityDto(mediaId, "Public")));
 
         using var factory = new MediaServiceTestFactory { MediaAccessServiceOverride = accessService };
         using var client = factory.CreateClient();
-        MediaServiceTestFactory.SetServiceToken(client);
+        MediaServiceTestFactory.SetApiKey(client);
 
-        var response = await client.GetAsync($"/api/v1/media/{mediaId}/verify");
+        var verifyResp = await client.GetAsync($"/api/v1/media/{mediaId}/verify");
+        Assert.Equal(HttpStatusCode.OK, verifyResp.StatusCode);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<MediaVerificationDto>();
-        Assert.NotNull(body);
-        Assert.Equal(mediaId, body.MediaId);
-        Assert.Equal("Ready", body.Status);
-        Assert.Equal("user-123", body.UploadedByUserId);
+        var metaResp = await client.GetAsync($"/api/v1/media/{mediaId}");
+        Assert.Equal(HttpStatusCode.OK, metaResp.StatusCode);
+
+        var accessResp = await client.PostAsJsonAsync($"/api/v1/media/{mediaId}/access", new MediaAccessRequest("read"));
+        Assert.Equal(HttpStatusCode.OK, accessResp.StatusCode);
+
+        var visResp = await client.PutAsJsonAsync($"/api/v1/media/{mediaId}/visibility", new ChangeMediaVisibilityRequest("public"));
+        Assert.Equal(HttpStatusCode.OK, visResp.StatusCode);
     }
 
     [Fact]
-    public async Task InternalReadAndVisibility_RejectMissingAuthOrScope()
+    public async Task Upload_RequiresUserJwt_EvenIfApiKeyPresent()
     {
         using var factory = new MediaServiceTestFactory();
-        using var anonymous = factory.CreateClient();
-        Guid mediaId = Guid.NewGuid();
-        var readRequest = new MediaAccessRequest("read");
-        var visibilityRequest = new ChangeMediaVisibilityRequest("public");
+        using var client = factory.CreateClient();
+        MediaServiceTestFactory.SetApiKey(client);
 
-        Assert.Equal(HttpStatusCode.Unauthorized,
-            (await anonymous.GetAsync($"/api/v1/media/{mediaId}")).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized,
-            (await anonymous.PostAsJsonAsync($"/api/v1/media/{mediaId}/access", readRequest)).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized,
-            (await anonymous.PutAsJsonAsync($"/api/v1/media/{mediaId}/visibility", visibilityRequest)).StatusCode);
+        using var form = new MultipartFormDataContent();
+        var response = await client.PostAsync("/api/v1/media/uploads", form);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
 
-        using var verifyOnly = factory.CreateClient();
-        MediaServiceTestFactory.SetServiceToken(verifyOnly, "media.verify");
-        Assert.Equal(HttpStatusCode.Forbidden,
-            (await verifyOnly.GetAsync($"/api/v1/media/{mediaId}")).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden,
-            (await verifyOnly.PostAsJsonAsync($"/api/v1/media/{mediaId}/access", readRequest)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden,
-            (await verifyOnly.PutAsJsonAsync($"/api/v1/media/{mediaId}/visibility", visibilityRequest)).StatusCode);
-
-        using var user = factory.CreateClient();
-        MediaServiceTestFactory.SetUserToken(user, "user-1");
-        Assert.Equal(HttpStatusCode.Unauthorized,
-            (await user.GetAsync($"/api/v1/media/{mediaId}")).StatusCode);
+    private static async Task<HttpResponseMessage> SendInternalRequest(HttpClient client, string method, string path)
+    {
+        return method switch
+        {
+            "GET" => await client.GetAsync(path),
+            "POST" => await client.PostAsJsonAsync(path, new MediaAccessRequest("read")),
+            "PUT" => await client.PutAsJsonAsync(path, new ChangeMediaVisibilityRequest("public")),
+            _ => throw new NotSupportedException(method)
+        };
     }
 }

@@ -30,11 +30,12 @@ MediaService sử dụng 2 nhóm cấu hình bắt buộc:
    - `ObjectStorage:AllowedOrigins` *(tùy chọn)*: Các origin được phép gọi MediaService qua CORS.
    - `ObjectStorage:ReadUrlExpirySeconds` *(tùy chọn)*: Thời hạn URL đọc ký sẵn, mặc định 300 giây.
    - `Jwt:Issuer`, `Jwt:Audience`, `Jwt:JwksUri`: Thông tin xác thực JWT RS256 từ AuthService. Không có khóa ký JWT mặc định trong MediaService.
-   - `Jwt:ServicePrincipals`: Ánh xạ `sub` (GUID service principal) sang tên service sở hữu; token service cần scope `media.verify`.
+   - `ApiKey`: Khóa API key dùng chung cho 4 API nội bộ (`verify`, metadata, `access`, `visibility`), chia sẻ cùng secret với `Auth:AdminBootstrap:CreationKey`.
 ### Cơ chế Startup Validation
 Khi dịch vụ khởi động, extension `ValidateRequiredConfiguration()` và `ObjectStorageOptionsValidator` (thông qua `ValidateOnStart()`) sẽ được kích hoạt:
 - Nếu thiếu hoặc để trống `ConnectionStrings:Postgres`: Ứng dụng lập tức dừng và ném ngoại lệ `InvalidOperationException` thông báo rõ ràng: `"Thiếu cấu hình bắt buộc: ConnectionStrings:Postgres."`
 - Nếu thiếu hoặc để trống bất kỳ trường nào trong `ObjectStorage` (`Endpoint`, `Bucket`, `AccessKey`, `SecretKey`): Ứng dụng lập tức dừng và ném ngoại lệ thông báo chi tiết danh sách các trường bị thiếu.
+- Nếu thiếu hoặc để trống `ApiKey` (hoặc `Authentication:ApiKey`): Ứng dụng lập tức dừng và ném ngoại lệ thông báo `"Thiếu cấu hình bắt buộc: ApiKey (hoặc Authentication:ApiKey)."`.
 
 ### Nguyên tắc bảo mật Secret
 - `.env`: Chỉ dùng để truyền biến môi trường vào các container trong `docker-compose.yml`. File này đã được thêm vào `.gitignore` và tuyệt đối không commit lên Git.
@@ -140,30 +141,14 @@ Kết quả mong đợi: `HTTP/1.1 200 OK` kèm nội dung `Healthy`.
 Tất cả các endpoint nghiệp vụ media đều sử dụng tiền tố chuẩn hóa `/api/v1/media`:
 
 ### 6.1. Tải file trực tiếp (`POST /api/v1/media/uploads`)
-- **Xác thực**: Yêu cầu User Access Token (Bearer) hợp lệ; header tự khai báo danh tính không được tin cậy.
-- **Header tùy chọn**: `Idempotency-Key` để gửi lại cùng request mà không tạo media khác.
-- **Body**: `multipart/form-data` gồm `file` (binary), `purpose`, `ownerEntityId`; `sha256Checksum` là tùy chọn. Tên, MIME và kích thước lấy từ phần `file`, không cần khai báo riêng.
-- **Quy tắc policy ban đầu**:
-  - `equipment-image` & `organization-logo`: nhận `image/jpeg`, `image/png`, `image/webp`, tối đa 10 MiB.
-  - `equipment-document`: nhận `application/pdf`, tối đa 20 MiB.
-  - Purpose khác: bị từ chối cho đến khi được cấu hình.
-  - `ownerService` và `ownerEntityType` được xác định từ cấu hình purpose, không nhận từ client.
-- **Kết quả**: HTTP 200 OK sau khi MediaService lưu file vào MinIO, xác minh và chuyển media sang `Ready`:
-```json
-{
-  "mediaId": "uuid",
-  "status": "Ready",
-  "originalFileName": "may-xuc.jpg",
-  "contentType": "image/jpeg",
-  "sizeBytes": 1250340,
-  "previewUrl": "https://storage.example/signed-read-url",
-  "previewUrlExpiresAtUtc": "2026-09-27T10:05:00Z"
-}
-```
-MediaService tự xác minh file signature, MIME và checksum nếu có. File không hợp lệ bị từ chối; object tạm được dọn qua worker. `previewUrl` chỉ dành cho người upload, hết hạn sau `ObjectStorage:ReadUrlExpirySeconds`; nếu ký URL lỗi sau khi file đã lưu, hai trường preview là null và `mediaId` vẫn sử dụng được. Retry cùng `Idempotency-Key` và cùng file trả cùng `mediaId` cùng một URL preview mới. Client không cần gọi MinIO hoặc endpoint `/complete`.
+- **Xác thực**: Yêu cầu User Access Token hợp lệ; service API key không thay thế user JWT cho upload hiện tại.
+- **Header tùy chọn**: `Idempotency-Key` để gửi lại cùng danh sách file.
+- **Body**: `multipart/form-data` gồm 1–10 phần `files` (binary). Có thể gửi cùng số phần `sha256Checksums` theo đúng thứ tự. Tổng request tối đa 25 MiB; mỗi ảnh tối đa 10 MiB và PDF tối đa 20 MiB. Tên, MIME và kích thước lấy từ từng file.
+- **Kết quả**: HTTP 200 là mảng theo thứ tự đầu vào. Mỗi phần tử có `index`, `fileName`, `media` chứa `mediaId` và metadata khi thành công, hoặc `error` có `code` và `message` khi thất bại. Một file lỗi không chặn các file khác. `previewUrl` có thể null nếu ký URL lỗi sau khi media đã `Ready`.
+- **Idempotency**: Key được gắn với vị trí file và số file trong batch. Gửi lại cùng danh sách trả cùng `mediaId` cho file đã thành công; đổi file, thứ tự hoặc số lượng trả lỗi theo vị trí bị ảnh hưởng. File đã bị từ chối cần key mới.
 
 ### 6.2. Xác minh MediaId nội bộ (`GET /api/v1/media/{mediaId}/verify`)
-- **Xác thực**: Yêu cầu Service Token AuthService (`u=svc`, scope `media.verify`), có `sub` nằm trong `Jwt:ServicePrincipals`. MediaService chỉ trả Media Ready thuộc service đó.
+- **Xác thực**: Business Service gửi `X-Api-Key` có quyền service `media` scope `verify` (hoặc quyền toàn cục `*/*`) qua Gateway. Gateway đổi key lấy JWT 60 giây; MediaService yêu cầu `u=svc`, `amr=api_key` và claim `grants` mang quyền phù hợp.
 - **Mục đích**: Cho phép Business Service kiểm tra trạng thái Media trước khi lưu tham chiếu vào entity nghiệp vụ.
 - **Kết quả**: HTTP 200 OK
 ```json

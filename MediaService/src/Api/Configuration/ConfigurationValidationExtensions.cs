@@ -6,6 +6,24 @@ namespace Dprental.MediaService.Api.Configuration;
 public static class ConfigurationValidationExtensions
 {
     /// <summary>
+    /// Lấy giá trị API key dùng chung cho dịch vụ nội bộ từ cấu hình.
+    /// </summary>
+    public static string? GetConfiguredApiKey(this IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        string? key = configuration["ApiKey"];
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            key = configuration["Authentication:ApiKey"];
+        }
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            key = configuration["Security:ApiKey"];
+        }
+        return string.IsNullOrWhiteSpace(key) ? null : key.Trim();
+    }
+
+    /// <summary>
     /// Kiểm tra các cấu hình bắt buộc. Ném ra InvalidOperationException nếu thiếu bất kỳ cấu hình nào.
     /// </summary>
     /// <param name="configuration">Cấu hình ứng dụng.</param>
@@ -45,6 +63,11 @@ public static class ConfigurationValidationExtensions
         {
             throw new InvalidOperationException(
                 $"Thiếu cấu hình ObjectStorage bắt buộc: {string.Join(", ", missingStorageKeys)}.");
+        }
+
+        if (string.IsNullOrWhiteSpace(configuration.GetConfiguredApiKey()))
+        {
+            throw new InvalidOperationException("Thiếu cấu hình bắt buộc: ApiKey (hoặc Authentication:ApiKey).");
         }
     }
 }
