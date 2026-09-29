@@ -1,28 +1,31 @@
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.AspNetCore.Identity;
+using AuthService.Application.DTOs.Auth;
+using AuthService.Application.DTOs.User;
+using AuthService.Domain.DTOs.User;
+using Dprental.AuthService.Api.Security;
+using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.User;
+using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Common;
+using Dprental.AuthService.Common.Utils;
 using Dprental.AuthService.Domain.DTOs.User;
+using Dprental.AuthService.Domain.Entities;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
-using Dprental.AuthService.Api.Security;
-using Dprental.AuthService.Application.DTOs.Auth;
-using Dprental.AuthService.Application.IServices;
-using Dprental.AuthService.Common;
-using Dprental.AuthService.Common.Utils;
-using Dprental.AuthService.Domain.Entities;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.TestHost;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.IdentityModel.Tokens;
 using Xunit;
 
 namespace Dprental.AuthService.Api.Tests;
@@ -346,6 +349,16 @@ public sealed class ApiBoundaryResponseTests
         public Task<Result<string?>> RequestPasswordResetAsync(RequestPasswordResetRequest request, string? testKey, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> ResetPasswordAsync(string token, ResetPasswordRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> ChangePasswordAsync(Guid userId, ChangePasswordRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<Result<PagedResult<AdminUserListItemDto>>> GetUsersPagedAsync(PageRequest pageRequest, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<Result<PagedResult<AdminUserListItemDto>>> GetUsersPagedAsync(GetUsersRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<Result<Guid>> CreateUserAsync(CreateUserRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Result> UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<Result<IReadOnlyList<RoleDto>>> GetAllRolesAsync(CancellationToken cancellationToken = default)
+        {
+            // Trả về một list rỗng để test có thể compile và pass
+            return Task.FromResult(Result.Success<IReadOnlyList<RoleDto>>([]));
+        }
     }
 }

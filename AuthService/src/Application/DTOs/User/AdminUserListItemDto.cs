@@ -5,5 +5,6 @@ public sealed record AdminUserListItemDto(
     string Email,
     string FullName,
     bool IsActive,
-    DateTime CreatedAtUtc
+    DateTime CreatedAtUtc,
+    List<string> Roles
 );

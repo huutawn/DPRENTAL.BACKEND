@@ -157,7 +157,7 @@ public sealed class PagingTests
         Assert.Equal(second.Id, Assert.Single((await organizations.GetAllAsync(new PageRequest(Search: "two"), OrganizationStatus.Pending)).Items).Id);
 
         EfUserRepository users = new(db);
-        var (userItems, userCount) = await users.GetUsersPagedAsync(1, 1, "ali");
+        var (userItems, userCount) = await users.GetUsersPagedAsync(1, 1, "ali", null);
         Assert.Equal(2, userCount);
         Assert.Single(userItems);
         Assert.Equal(0, (await users.GetUsersPagedAsync(0, 10, "missing")).TotalCount);
@@ -228,12 +228,15 @@ public sealed class PagingTests
         public Task<bool> UpdateAsync(User user, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<User?>(null);
-        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, CancellationToken cancellationToken = default)
-        => Task.FromResult<(IReadOnlyCollection<User> Items, int TotalCount)>((Array.Empty<User>(), 0));
+        public Task<User?> GetByIdWithRolesAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<User?>(null);
+
+        // Chỉ giữ lại duy nhất hàm GetUsersPagedAsync với đầy đủ tham số (bao gồm string? type)
+        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, string? type, CancellationToken cancellationToken = default)
+            => Task.FromResult<(IReadOnlyCollection<User> Items, int TotalCount)>((Array.Empty<User>(), 0));
+
         public Task<bool> ChangePasswordAndRevokeSessionsAsync(Guid userId, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> ResetPasswordWithTokenAsync(Guid userId, string tokenHash, string newPasswordHash, DateTime utcNow, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(true);
-
     }
     private sealed class FakeRoleRepo : IRoleRepository
     {
@@ -245,5 +248,7 @@ public sealed class PagingTests
         public Task<bool> IsAssignedAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task<bool> AssignAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<bool> RevokeAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<IReadOnlyList<Role>> GetAllAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<Role>>([]);
+        public Task<int> CountByIdsAsync(IEnumerable<Guid> roleIds, CancellationToken cancellationToken = default) => Task.FromResult(0);
     }
 }

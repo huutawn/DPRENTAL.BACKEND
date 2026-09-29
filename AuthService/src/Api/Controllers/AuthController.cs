@@ -126,6 +126,25 @@ public sealed class AuthController(
         return Ok(new { Message = "Làm mới token thành công" });
     }
 
+    /// <summary>Lấy danh sách các phiên đăng nhập (thiết bị) đang hoạt động của người dùng.</summary>
+    [Authorize]
+    [HttpGet("sessions")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetSessions(CancellationToken cancellationToken)
+    {
+        if (User.GetJwtSub() is Guid userId)
+        {
+            // Trích xuất RefreshToken từ Cookie để service xác định đâu là phiên hiện tại (This Device)
+            Request.Cookies.TryGetValue("refreshToken", out string? currentRefreshToken);
+
+            var sessions = await authSessionService.GetSessionsAsync(userId, currentRefreshToken, cancellationToken);
+            return Ok(sessions);
+        }
+
+        return Unauthorized();
+    }
+
     /// <summary>Đăng xuất, thu hồi refresh token hiện tại và xóa cookie phiên.</summary>
     [HttpPost("logout")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

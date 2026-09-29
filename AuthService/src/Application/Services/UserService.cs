@@ -1,24 +1,37 @@
-using Dprental.AuthService.Application.Clients;
-using System.Diagnostics.CodeAnalysis;
-using System.Security.Cryptography;
+// 1. Thư viện hệ thống cơ bản
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Security.Cryptography;
+using System.Diagnostics.CodeAnalysis;
+
+using Dprental.AuthService.Domain.IRepositories;
+using Dprental.AuthService.Domain.ValueObjects;
+using Dprental.AuthService.Domain.DTOs.User;
+using Dprental.AuthService.Domain.Entities;
+
+using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Mapping;
 using Dprental.AuthService.Application.Options;
-using Dprental.AuthService.Domain.IRepositories;
-using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Application.Validation;
+using Dprental.AuthService.Application.Security;
+
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Common.Utils;
-using Dprental.AuthService.Domain.DTOs.User;
-using Dprental.AuthService.Domain.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using AuthService.Domain.DTOs.User;
+using AuthService.Application.DTOs.User;
+using AuthService.Application.DTOs.Auth;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -442,13 +455,15 @@ public sealed class UserService(
             cancellationToken);
     }
 
-    public async Task<Result<PagedResult<AdminUserListItemDto>>> GetUsersPagedAsync(PageRequest pageRequest, CancellationToken cancellationToken = default)
+    public async Task<Result<PagedResult<AdminUserListItemDto>>> GetUsersPagedAsync(GetUsersRequest request, CancellationToken cancellationToken = default)
     {
-        if (pageRequest is null)
+        if (request is null)
         {
             return Result.Failure<PagedResult<AdminUserListItemDto>>(AuthErrors.Paging.InvalidPage);
         }
 
+        // Tái sử dụng PageRequest để chạy logic Validate() có sẵn của bạn
+        var pageRequest = new PageRequest(request.Page, request.PageSize, request.Search);
         Result validation = pageRequest.Validate();
         if (validation.IsFailure)
         {
@@ -459,19 +474,168 @@ public sealed class UserService(
             "GetUsersPaged",
             async () =>
             {
-                int skip = (pageRequest.Page - 1) * pageRequest.PageSize;
+                int skip = (request.Page - 1) * request.PageSize;
 
-                var (users, totalCount) = await userRepository.GetUsersPagedAsync(skip, pageRequest.PageSize, pageRequest.GetSearchTerm(), cancellationToken);
-                int totalPages = (int)Math.Ceiling(totalCount / (double)pageRequest.PageSize);
+                // Bổ sung tham số request.Type vào hàm của Repository
+                var (users, totalCount) = await userRepository.GetUsersPagedAsync(
+                    skip,
+                    request.PageSize,
+                    pageRequest.GetSearchTerm(),
+                    request.Type, // <-- Đẩy filter Type xuống Repository
+                    cancellationToken);
 
+                int totalPages = (int)Math.Ceiling(totalCount / (double)request.PageSize);
+
+                // Cập nhật mapping: Thêm tham số danh sách Role vào cuối constructor
                 var items = users.Select(u => new AdminUserListItemDto(
                     u.Id,
                     u.Email,
                     u.FullName,
                     u.IsActive,
-                    u.CreatedAt)).ToList();
+                    u.CreatedAt,
+                    u.UserRoles?.Select(ur => ur.Role.Name).ToList() ?? [] // <-- Trích xuất danh sách Role
+                )).ToList();
 
-                return Result.Success(new PagedResult<AdminUserListItemDto>(items, pageRequest.Page, pageRequest.PageSize, totalCount, totalPages));
+                return Result.Success(new PagedResult<AdminUserListItemDto>(items, request.Page, request.PageSize, totalCount, totalPages));
+            },
+            logger,
+            correlationIdProvider,
+            cancellationToken);
+    }
+
+    public async Task<Result<Guid>> CreateUserAsync(CreateUserRequest request, CancellationToken cancellationToken = default)
+    {
+        return await ApplicationExecutor.ExecuteAsync(
+            "CreateUser",
+            async () =>
+            {
+                if (!DtoValidator.TryValidate(request, out Error? validationError))
+                {
+                    return Result.Failure<Guid>(validationError);
+                }
+
+                if (request.RoleIds is null || request.RoleIds.Count == 0)
+                {
+                    return Result.Failure<Guid>(new Error(
+                        "User.RolesRequired",
+                        "Vui lòng chỉ định ít nhất một quyền (Role) cho người dùng mới.",
+                        ErrorType.Validation));
+                }
+
+                List<Guid> distinctRoleIds = request.RoleIds.Distinct().ToList();
+
+                int existingRolesCount = await roleRepository.CountByIdsAsync(distinctRoleIds, cancellationToken);
+                if (existingRolesCount != distinctRoleIds.Count)
+                {
+                    return Result.Failure<Guid>(new Error(
+                        "User.InvalidRoles",
+                        "Một hoặc nhiều quyền (Role) được cung cấp không tồn tại trong hệ thống.",
+                        ErrorType.Validation));
+                }
+
+                string normalizedEmail = request.Email.Trim().ToUpperInvariant();
+                bool emailExists = await userRepository.EmailExistsAsync(normalizedEmail, cancellationToken);
+                if (emailExists)
+                {
+                    return Result.Failure<Guid>(new Error(
+                        "User.EmailExists",
+                        "Email này đã được sử dụng.",
+                        ErrorType.Conflict));
+                }
+
+                var newUser = new User
+                {
+                    Id = Guid.NewGuid(),
+                    Email = request.Email.Trim(),
+                    FullName = request.FullName.Trim(),
+                    IsActive = true,
+                    CreatedAt = timeProvider.GetUtcNow().UtcDateTime,
+                    HasPassword = true
+                };
+
+                newUser.PasswordHash = passwordHasher.HashPassword(newUser, request.Password);
+
+                foreach (Guid roleId in distinctRoleIds)
+                {
+                    newUser.UserRoles.Add(new UserRole { RoleId = roleId, UserId = newUser.Id });
+                }
+
+                await userRepository.CreateAsync(newUser, cancellationToken);
+
+                return Result.Success(newUser.Id);
+            },
+            logger,
+            correlationIdProvider,
+            cancellationToken);
+    }
+
+    public async Task<Result<IReadOnlyList<RoleDto>>> GetAllRolesAsync(CancellationToken cancellationToken = default)
+    {
+        var roles = await roleRepository.GetAllAsync(cancellationToken);
+
+        var roleDtos = roles.Select(r => new RoleDto(r.Id, r.Name, r.Description)).ToList();
+
+        return Result.Success<IReadOnlyList<RoleDto>>(roleDtos);
+    }
+
+    public async Task<Result> UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken cancellationToken = default)
+    {
+        return await ApplicationExecutor.ExecuteAsync(
+            "UpdateUser",
+            async () =>
+            {
+                // 1. Chặn mảng Role rỗng hoặc null ngay từ đầu
+                if (request.RoleIds is null || request.RoleIds.Count == 0)
+                {
+                    return Result.Failure(new Error(
+                        "User.RolesRequired",
+                        "Vui lòng chỉ định ít nhất một quyền (Role) cho người dùng.",
+                        ErrorType.Validation));
+                }
+
+                // Lọc các ID trùng lặp (nếu có)
+                List<Guid> distinctRoleIds = request.RoleIds.Distinct().ToList();
+
+                // 2. Chặn Role ID ảo không tồn tại trong Database
+                int existingRolesCount = await roleRepository.CountByIdsAsync(distinctRoleIds, cancellationToken);
+                if (existingRolesCount != distinctRoleIds.Count)
+                {
+                    return Result.Failure(new Error(
+                        "User.InvalidRoles",
+                        "Một hoặc nhiều quyền (Role) được cung cấp không tồn tại trong hệ thống.",
+                        ErrorType.Validation));
+                }
+
+                // 3. Lấy thông tin user
+                var user = await userRepository.GetByIdWithRolesAsync(id, cancellationToken);
+                if (user is null)
+                {
+                    return Result.Failure(new Error("User.NotFound", "Không tìm thấy người dùng.", ErrorType.NotFound));
+                }
+
+                // 4. Cập nhật thông tin cơ bản
+                user.FullName = request.FullName.Trim();
+
+                // 5. Cập nhật Roles (đã chắc chắn distinctRoleIds hợp lệ)
+                var currentRoleIds = user.UserRoles.Select(ur => ur.RoleId).ToList();
+
+                // Xóa những Role cũ không có trong danh sách mới
+                var rolesToRemove = user.UserRoles.Where(ur => !distinctRoleIds.Contains(ur.RoleId)).ToList();
+                foreach (var role in rolesToRemove)
+                {
+                    user.UserRoles.Remove(role);
+                }
+
+                // Thêm những Role mới chưa có trong danh sách cũ
+                var rolesToAdd = distinctRoleIds.Where(rId => !currentRoleIds.Contains(rId)).ToList();
+                foreach (var roleId in rolesToAdd)
+                {
+                    user.UserRoles.Add(new UserRole { RoleId = roleId, UserId = user.Id });
+                }
+
+                await userRepository.UpdateAsync(user, cancellationToken);
+
+                return Result.Success();
             },
             logger,
             correlationIdProvider,

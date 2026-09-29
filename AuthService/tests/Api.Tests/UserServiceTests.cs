@@ -11,6 +11,7 @@ using Dprental.AuthService.Application.Validators;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Xunit;
+using Dprental.AuthService.Domain.ValueObjects;
 
 namespace Dprental.AuthService.Api.Tests;
 
@@ -314,7 +315,8 @@ public sealed class UserServiceTests
         IRoleRepository? roleRepository = null,
         IPasswordHasher<User>? passwordHasher = null,
         TimeProvider? timeProvider = null,
-        string creationKey = ValidBootstrapKey)
+        string creationKey = ValidBootstrapKey
+        )
     {
         return new UserService(
             userRepository,
@@ -369,6 +371,10 @@ public sealed class UserServiceTests
 
         public Task<bool> RevokeAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default) =>
             Task.FromResult(true);
+        public Task<IReadOnlyList<Role>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Role>>(Roles.Values.ToList());
+        public Task<int> CountByIdsAsync(IEnumerable<Guid> roleIds, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Roles.Values.Count(r => roleIds.Contains(r.Id)));
     }
 
     private sealed class RecordingUserRepository : IUserRepository
@@ -386,7 +392,9 @@ public sealed class UserServiceTests
 
         public Task<User?> GetByIdWithAccessAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(ProfileUser is not null && ProfileUser.Id == id ? ProfileUser : null);
-        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, CancellationToken cancellationToken = default)
+        public Task<User?> GetByIdWithRolesAsync(Guid id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(ProfileUser is not null && ProfileUser.Id == id ? ProfileUser : null);
+        public Task<(IReadOnlyCollection<User> Items, int TotalCount)> GetUsersPagedAsync(int skip, int take, string? search, string? type, CancellationToken cancellationToken = default)
         {
             IReadOnlyCollection<User> emptyList = Array.Empty<User>();
             return Task.FromResult((emptyList, 0));
@@ -453,10 +461,10 @@ public sealed class UserServiceTests
         public Task<Session> CreateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> UpdateAsync(Session entity, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task CreateSessionAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<bool> RotateTokenAsync(Guid currentTokenId, Guid sessionId, Guid userId, string replacementHash, DateTime sessionExpiresAtUtc, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Guid?> GetUserIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) => throw new NotSupportedException();

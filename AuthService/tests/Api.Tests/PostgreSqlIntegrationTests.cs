@@ -193,7 +193,8 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         var sessionService = new AuthSessionService(
             sessionRepo, userRepo, issuer, TimeProvider.System,
             FixedCorrelationIdProvider.Instance,
-            new EfAuditLogRepository(db), NullLogger<AuthSessionService>.Instance);
+            new EfAuditLogRepository(db), NullLogger<AuthSessionService>.Instance,
+            new Microsoft.AspNetCore.Http.HttpContextAccessor());
 
         // Tạo session ban đầu
         var sessionResult = await sessionService.CreateSessionAsync(userId);
@@ -209,7 +210,8 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
             var users1 = new EfUserRepository(db1);
             var s1 = new AuthSessionService(repo1, users1, issuer, TimeProvider.System,
                 FixedCorrelationIdProvider.Instance,
-                new EfAuditLogRepository(db1), NullLogger<AuthSessionService>.Instance);
+                new EfAuditLogRepository(db1), NullLogger<AuthSessionService>.Instance,
+                new Microsoft.AspNetCore.Http.HttpContextAccessor());
             return await s1.RefreshAsync(refreshToken);
         });
 
@@ -220,7 +222,8 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
             var users2 = new EfUserRepository(db2);
             var s2 = new AuthSessionService(repo2, users2, issuer, TimeProvider.System,
                 FixedCorrelationIdProvider.Instance,
-                new EfAuditLogRepository(db2), NullLogger<AuthSessionService>.Instance);
+                new EfAuditLogRepository(db2), NullLogger<AuthSessionService>.Instance,
+                new Microsoft.AspNetCore.Http.HttpContextAccessor());
             return await s2.RefreshAsync(refreshToken);
         });
 
@@ -268,7 +271,8 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         var sessionService = new AuthSessionService(
             sessionRepo, userRepo, new DummyAccessTokenIssuer(), TimeProvider.System,
             FixedCorrelationIdProvider.Instance,
-            new EfAuditLogRepository(db), NullLogger<AuthSessionService>.Instance);
+            new EfAuditLogRepository(db), NullLogger<AuthSessionService>.Instance,
+            new Microsoft.AspNetCore.Http.HttpContextAccessor());
 
         // Tạo 2 session cho user
         var s1 = await sessionService.CreateSessionAsync(userId);
