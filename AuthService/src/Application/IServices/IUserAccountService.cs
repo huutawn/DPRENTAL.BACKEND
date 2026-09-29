@@ -18,6 +18,9 @@ public interface IUserAccountService
     /// <summary>Lấy danh sách các liên kết đăng nhập bên ngoài của người dùng.</summary>
     Task<Result<IReadOnlyList<ExternalLoginResponse>>> GetExternalLoginsAsync(Guid userId, CancellationToken cancellationToken = default);
 
+    /// <summary>Liên kết đăng nhập bên ngoài (Google,...) vào tài khoản hiện tại.</summary>
+    Task<Result> LinkExternalLoginAsync(Guid userId, string provider, string? idToken, CancellationToken cancellationToken = default);
+
     /// <summary>Huỷ liên kết đăng nhập bên ngoài (Google,...) nếu tài khoản còn phương thức đăng nhập khác.</summary>
     Task<Result> UnlinkExternalLoginAsync(Guid userId, string provider, CancellationToken cancellationToken = default);
 

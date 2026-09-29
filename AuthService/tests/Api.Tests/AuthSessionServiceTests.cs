@@ -67,41 +67,6 @@ public sealed class AuthSessionServiceTests
         Assert.False(repository.RevokeCalled);
     }
 
-    [Fact]
-    public async Task CreateGoogleLoginTicketAsyncPersistsOnlyHashWithNinetySecondLifetime()
-    {
-        DateTimeOffset now = new(2026, 9, 21, 7, 30, 0, TimeSpan.Zero);
-        RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), []));
-        AuthSessionService service = CreateService(repository, now);
-
-        Result<string> result = await service.CreateGoogleLoginTicketAsync(repository.Principal!.UserId);
-
-        Assert.True(result.IsSuccess);
-        Assert.NotNull(result.Value);
-        Assert.NotEqual(result.Value, repository.CreatedTicketHash);
-        Assert.Equal(64, repository.CreatedTicketHash!.Length);
-        Assert.Equal(now.UtcDateTime, repository.TicketCreatedAtUtc);
-        Assert.Equal(now.AddSeconds(90).UtcDateTime, repository.TicketExpiresAtUtc);
-    }
-
-    [Fact]
-    public async Task ExchangeGoogleLoginTicketAsyncCreatesSessionAndIssuesTokenPair()
-    {
-        DateTimeOffset now = new(2026, 9, 21, 7, 30, 0, TimeSpan.Zero);
-        RecordingAuthSessionRepository repository = new(new AuthSessionPrincipal(Guid.NewGuid(), ["member"]));
-        AuthSessionService service = CreateService(repository, now);
-
-        Result<AuthTokenPair> result = await service.ExchangeGoogleLoginTicketAsync("google-ticket");
-
-        Assert.True(result.IsSuccess);
-        Assert.Equal("access-token", result.Value.AccessToken);
-        Assert.NotEqual(result.Value.RefreshToken, repository.ExchangedRefreshTokenHash);
-        Assert.Equal(64, repository.ExchangedTicketHash!.Length);
-        Assert.Equal(64, repository.ExchangedRefreshTokenHash!.Length);
-        Assert.Equal(now.UtcDateTime, repository.ExchangeAtUtc);
-        Assert.Equal(now.AddDays(30).UtcDateTime, repository.ExchangeSessionExpiresAtUtc);
-    }
-
     /// <summary>Repository ghi nhận tham số để test luật application mà không mô phỏng EF Core.</summary>
     private sealed class RecordingAuthSessionRepository(AuthSessionPrincipal? principal) : IAuthSessionRepository
     {
@@ -112,13 +77,6 @@ public sealed class AuthSessionServiceTests
         public string? ReplacementRefreshTokenHash { get; private set; }
         public bool RotateCalled { get; private set; }
         public bool RevokeCalled { get; private set; }
-        public string? CreatedTicketHash { get; private set; }
-        public DateTime TicketCreatedAtUtc { get; private set; }
-        public DateTime TicketExpiresAtUtc { get; private set; }
-        public string? ExchangedTicketHash { get; private set; }
-        public string? ExchangedRefreshTokenHash { get; private set; }
-        public DateTime ExchangeAtUtc { get; private set; }
-        public DateTime ExchangeSessionExpiresAtUtc { get; private set; }
 
         public Task<Session?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
@@ -176,28 +134,6 @@ public sealed class AuthSessionServiceTests
             RotateCalled = true;
             ReplacementRefreshTokenHash = replacementHash;
             return Task.FromResult(true);
-        }
-
-        public Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
-        {
-            CreatedTicketHash = ticketHash;
-            TicketCreatedAtUtc = utcNow;
-            TicketExpiresAtUtc = expiresAtUtc;
-            return Task.FromResult(Principal?.UserId == userId);
-        }
-
-        public Task<Guid?> ConsumeGoogleLoginTicketAndCreateSessionAsync(
-            string ticketHash,
-            string refreshTokenHash,
-            DateTime utcNow,
-            DateTime sessionExpiresAtUtc,
-            CancellationToken cancellationToken = default)
-        {
-            ExchangedTicketHash = ticketHash;
-            ExchangedRefreshTokenHash = refreshTokenHash;
-            ExchangeAtUtc = utcNow;
-            ExchangeSessionExpiresAtUtc = sessionExpiresAtUtc;
-            return Task.FromResult(Principal?.UserId);
         }
 
         public Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken = default)

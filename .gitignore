@@ -33,6 +33,7 @@ appsettings.Local.json
 appsettings.*.Local.json
 .local-secrets/
 secrets.json
+docs/*firebase-adminsdk*.json
 *.pem
 *.key
 *.pfx
