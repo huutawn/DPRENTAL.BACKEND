@@ -3,7 +3,7 @@ using Dprental.AuthService.Domain.Repositories;
 using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Application.DTOs.Auth;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 

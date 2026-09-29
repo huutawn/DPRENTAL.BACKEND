@@ -9,7 +9,7 @@ using System.Text.Json;
 using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.DependencyInjection;
 using Dprental.AuthService.Application.Security.Jwt;
-using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Common.Utils;
 using Dprental.AuthService.Application.Validators;
 using Dprental.AuthService.Application.IServices;

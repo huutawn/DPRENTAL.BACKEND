@@ -5,7 +5,6 @@ using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Application.Options;
 using Dprental.AuthService.Application.Validators;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

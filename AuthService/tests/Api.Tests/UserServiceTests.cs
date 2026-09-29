@@ -7,7 +7,6 @@ using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Common.Enums;
 
 
-using Dprental.AuthService.Domain.Models;
 using Dprental.AuthService.Application.Validators;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;

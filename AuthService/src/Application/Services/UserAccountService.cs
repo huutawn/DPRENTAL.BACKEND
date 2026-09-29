@@ -12,7 +12,6 @@ using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
 using Microsoft.Extensions.Logging;
 using Dprental.AuthService.Common.Utils;
-using Dprental.AuthService.Application.Rules;
 
 namespace Dprental.AuthService.Application.Services;
 

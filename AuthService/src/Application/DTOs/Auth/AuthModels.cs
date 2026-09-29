@@ -1,4 +1,4 @@
-namespace Dprental.AuthService.Domain.Models;
+namespace Dprental.AuthService.Application.DTOs.Auth;
 
 /// <summary>Minimal authenticated principal data used by the Auth session flow.</summary>
 /// <param name="IsProfileCompleted">Null cho principal không phải user (vd service token) — không phát claim <c>pc</c> khi null.</param>

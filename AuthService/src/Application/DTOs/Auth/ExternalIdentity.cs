@@ -1,4 +1,4 @@
-namespace Dprental.AuthService.Domain.Models;
+namespace Dprental.AuthService.Application.DTOs.Auth;
 
 /// <summary>Danh tính do nhà cung cấp bên ngoài (Google) xác nhận sau khi user đăng nhập ở đó.</summary>
 /// <param name="Provider">Tên nhà cung cấp, ví dụ <c>Google</c>.</param>

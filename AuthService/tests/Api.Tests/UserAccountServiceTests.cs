@@ -6,7 +6,6 @@ using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
 
 
-using Dprental.AuthService.Domain.Models;
 using Xunit;
 
 namespace Dprental.AuthService.Api.Tests;
