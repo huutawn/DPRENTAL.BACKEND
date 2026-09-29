@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Dprental.Gateway.Application.Security;
+using Dprental.Gateway.Authentication;
 using Dprental.Gateway.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
@@ -19,6 +20,7 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
     private readonly IIdentityExtractor identityExtractor;
     private readonly IIdentityContextAccessor identityContextAccessor;
     private readonly IOptions<GatewaySecurityOptions> securityOptions;
+    private readonly ApiKeyRoutePolicy routePolicy;
 
     /// <summary>
     /// Khởi tạo DelegatingHandler với các dịch vụ bảo mật và truy xuất ngữ cảnh HTTP.
@@ -27,12 +29,14 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
         IHttpContextAccessor httpContextAccessor,
         IIdentityExtractor identityExtractor,
         IIdentityContextAccessor identityContextAccessor,
-        IOptions<GatewaySecurityOptions> securityOptions)
+        IOptions<GatewaySecurityOptions> securityOptions,
+        ApiKeyRoutePolicy routePolicy)
     {
         this.httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         this.identityExtractor = identityExtractor ?? throw new ArgumentNullException(nameof(identityExtractor));
         this.identityContextAccessor = identityContextAccessor ?? throw new ArgumentNullException(nameof(identityContextAccessor));
         this.securityOptions = securityOptions ?? throw new ArgumentNullException(nameof(securityOptions));
+        this.routePolicy = routePolicy ?? throw new ArgumentNullException(nameof(routePolicy));
     }
 
     /// <inheritdoc />
@@ -44,7 +48,8 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
             var headers = request.Headers;
 
             // MediaService receives only the authenticated bearer token, never browser session cookies.
-            if (httpContext.Request.Path.StartsWithSegments("/api/v1/media") ||
+            bool isMediaRequest = httpContext.Request.Path.StartsWithSegments("/api/v1/media");
+            if (isMediaRequest ||
                 httpContext.Request.Path.StartsWithSegments("/media/swagger"))
             {
                 headers.Remove("Cookie");
@@ -54,6 +59,15 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
             foreach (string untrustedHeader in GatewayHeaderConstants.UntrustedClientHeaders)
             {
                 headers.Remove(untrustedHeader);
+            }
+            headers.Remove("X-Api-Key");
+            if (routePolicy.RequiresApiKey(httpContext.Request))
+            {
+                headers.Remove("Authorization");
+                if (httpContext.Request.Headers.TryGetValue("X-Api-Key", out var apiKeys))
+                {
+                    headers.TryAddWithoutValidation("X-Api-Key", apiKeys.ToArray());
+                }
             }
 
             // Gateway đã chấp nhận forwarded metadata chỉ từ trusted proxy đã cấu hình.
@@ -86,8 +100,9 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
             }
 
             // 4. Trusted Identity Forwarding:
-            // Chỉ trích xuất và chuyển tiếp danh tính khi JWT đã được xác thực thành công qua middleware authentication
-            if (httpContext.User?.Identity is not null && httpContext.User.Identity.IsAuthenticated)
+            // Chỉ chuyển tiếp danh tính người dùng; service principal không được giả thành X-User-Id.
+            if (httpContext.User?.Identity is not null && httpContext.User.Identity.IsAuthenticated &&
+                !httpContext.User.HasClaim("u", "svc"))
             {
                 IdentityContext identity = identityExtractor.Extract(httpContext.User, httpContext);
                 if (identity.IsAuthenticated && !string.IsNullOrWhiteSpace(identity.UserId))

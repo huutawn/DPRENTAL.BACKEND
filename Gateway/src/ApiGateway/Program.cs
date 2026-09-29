@@ -14,12 +14,14 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddGatewayDistributedTracing(builder.Configuration);
 builder.Services.AddGatewayObservability(builder.Configuration);
 builder.Services.AddGatewayJwtAuthentication(builder.Configuration);
+builder.Services.AddSingleton<ApiKeyRoutePolicy>();
 builder.Services.AddGatewaySecurity(builder.Configuration);
 builder.Services.AddGatewayTrafficControl(builder.Configuration);
 builder.Services.AddGatewayOcelot(builder.Configuration);
 builder.Services.AddGatewayHealthChecks();
 
 var app = builder.Build();
+_ = app.Services.GetRequiredService<ApiKeyRoutePolicy>();
 OcelotServiceCollectionExtensions.ValidateOcelotConfiguration(app.Configuration);
 
 // Cấu hình chuỗi Middleware Pipeline cho Gateway
