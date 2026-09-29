@@ -443,10 +443,6 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
             return Task.FromResult<AuthSessionPrincipal?>(null);
         }
 
-        public Task<AuthSessionPrincipal?> ConsumeGoogleLoginTicketAndCreateSessionAsync(string ticketHash, string refreshTokenHash, DateTime createdAtUtc, DateTime expiresAtUtc, CancellationToken cancellationToken = default)
-            => Task.FromResult<AuthSessionPrincipal?>(null);
-
-
         // --- CÁC HÀM CÒN LẠI ---
         public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default) => Task.FromResult(TokenToReturn);
 

@@ -206,15 +206,6 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         return BuildPrincipal(currentToken.Session.User);
     }
 
-    public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default)
-    {
-        return dbContext.RefreshTokens
-            .AsNoTracking()
-            .Include(t => t.Session)
-                .ThenInclude(s => s.User)
-            .SingleOrDefaultAsync(t => t.TokenHash == tokenHash, cancellationToken);
-    }
-
     public async Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken)
     {
         Guid? sessionId = await dbContext.RefreshTokens
