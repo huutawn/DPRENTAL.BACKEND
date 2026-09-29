@@ -2,7 +2,7 @@ using System.Net;
 using Dprental.Gateway.Application.Security;
 using Dprental.Gateway.Authentication;
 using Dprental.Gateway.Domain.Security;
-using Dprental.Gateway.Infrastructure.Security.DelegatingHandlers;
+using Dprental.Gateway.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
@@ -115,7 +115,7 @@ public sealed class ApiKeyForwardingTests
 
     private sealed class TestIdentityExtractor : IIdentityExtractor
     {
-        public IdentityContext Extract(System.Security.Claims.ClaimsPrincipal? principal, HttpContext httpContext) =>
+        public IdentityContext Extract(System.Security.Claims.ClaimsPrincipal? principal, string? correlationId) =>
             IdentityContext.Anonymous;
     }
 

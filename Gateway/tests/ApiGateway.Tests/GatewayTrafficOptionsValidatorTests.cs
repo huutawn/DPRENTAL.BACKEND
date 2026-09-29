@@ -1,4 +1,4 @@
-using Dprental.Gateway.Application.Traffic;
+using Dprental.Gateway.Traffic;
 using Microsoft.Extensions.Options;
 using Xunit;
 

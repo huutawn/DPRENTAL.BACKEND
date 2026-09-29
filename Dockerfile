@@ -6,14 +6,16 @@ WORKDIR /src
 
 # Sao chép solution và các file định nghĩa project để cache layer restore dependencies
 COPY Gateway/Gateway.sln Gateway/Directory.Build.props Gateway/
-COPY Gateway/src/ApiGateway/ApiGateway.csproj Gateway/src/ApiGateway/
+COPY Gateway/src/Gateway.Domain/Gateway.Domain.csproj Gateway/src/Gateway.Domain/
+COPY Gateway/src/Gateway.Application/Gateway.Application.csproj Gateway/src/Gateway.Application/
+COPY Gateway/src/Gateway.Api/Gateway.Api.csproj Gateway/src/Gateway.Api/
 COPY Gateway/tests/ApiGateway.Tests/ApiGateway.Tests.csproj Gateway/tests/ApiGateway.Tests/
 
 RUN dotnet restore Gateway/Gateway.sln
 
 # Sao chép toàn bộ mã nguồn và thực hiện build release
 COPY Gateway/ Gateway/
-WORKDIR /src/Gateway/src/ApiGateway
+WORKDIR /src/Gateway/src/Gateway.Api
 RUN dotnet publish -c Release -o /app/publish --no-restore
 
 # ==========================================
@@ -40,4 +42,4 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=6 \
 
 
 # Khởi chạy ứng dụng API Gateway
-ENTRYPOINT ["dotnet", "ApiGateway.dll"]
+ENTRYPOINT ["dotnet", "Gateway.Api.dll"]

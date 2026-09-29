@@ -7,29 +7,19 @@ API Gateway .NET 10 cho DPRENTAL. Gateway chỉ là reverse proxy và security b
 Gateway được tổ chức theo kiến trúc Clean Architecture rõ ràng:
 
 ```text
-Gateway/src/ApiGateway/
-  Domain/
-    Security/        # Hằng số header (GatewayHeaderConstants), IdentityContext, IIdentityContextAccessor
-    Traffic/         # Tên chính sách điều phối (TrafficPolicyNames)
-    Observability/   # Tên metric chuẩn hóa (GatewayMetricNames), IGatewayMetrics
-  Application/
-    Security/        # Cấu hình GatewaySecurityOptions, Validator, IHeaderSanitizer, IIdentityExtractor
-    Traffic/         # Cấu hình GatewayTrafficOptions, Validator
-    Observability/   # Cấu hình GatewayObservabilityOptions, Validator
-  Infrastructure/
-    Security/
-      Middlewares/   # HeaderSanitization, GatewayCors, RequestSizeProtection, SecurityHeaders
-      DelegatingHandlers/ # TrustedIdentityDelegatingHandler, GatewayCorsDelegatingHandler cho Ocelot
-      ForwardedHeaders/ # Cấu hình mạng tin cậy CIDR và KnownProxies
-    Traffic/
-      RateLimiting/  # GatewayRateLimitingConfiguration phân vùng Anonymous, Authenticated, Sensitive
-    Observability/   # GatewayRequestLoggingMiddleware, GatewayMetrics, GatewayMetricsMiddleware
-  Security/          # Extension methods đăng ký DI và Middleware Pipeline Bảo mật
-  Traffic/           # Extension methods đăng ký DI và Middleware Pipeline Điều phối lưu lượng
-  Observability/     # DistributedTracing, RequestLogging, Metrics DI & Middleware
-  Authentication/    # JWT RS256 và JWKS của AuthService
-  Health/            # Health checks (JwksReadinessHealthCheck, GatewayConfigurationHealthCheck)
-  Proxy/             # Ocelot composition và configuration validation
+Gateway/src/
+  Gateway.Domain/
+    Security/          # IdentityContext độc lập HTTP và hạ tầng
+  Gateway.Application/
+    Security/          # IIdentityExtractor, IdentityExtractor (ClaimsPrincipal + correlationId), IIdentityContextAccessor
+  Gateway.Api/
+    Authentication/    # JWT RS256 và JWKS của AuthService, ApiKeyRoutePolicy
+    Errors/            # GatewayError, GatewayExceptionMiddleware, Error response writer
+    Health/            # Health checks (JwksReadinessHealthCheck, GatewayConfigurationHealthCheck)
+    Observability/     # DistributedTracing, RequestLogging, Metrics (GatewayMetrics, GatewayMetricNames), TelemetryOptions
+    Proxy/             # Ocelot composition và configuration validation
+    Security/          # Security middlewares, DelegatingHandlers, HeaderSanitizer, GatewayHeaderConstants, GatewaySecurityOptions
+    Traffic/           # Rate limiting configuration, GatewayTrafficOptions
 Gateway/tests/ApiGateway.Tests/
 ```
 Gateway nhận JWT được AuthService ký và chỉ tải public key từ JWKS. Không đặt private key, token, hoặc password vào `appsettings*.json`.
@@ -49,10 +39,10 @@ dotnet test Gateway/Gateway.sln
 Khởi động AuthService tại `http://localhost:64837` (cổng HTTP chuẩn theo `launchSettings.json` của AuthService), sau đó khởi động Gateway với môi trường `Development`:
 
 ```bash
-ASPNETCORE_ENVIRONMENT=Development dotnet run --project Gateway/src/ApiGateway --urls "http://127.0.0.1:5050"
+ASPNETCORE_ENVIRONMENT=Development dotnet run --project Gateway/src/Gateway.Api --urls "http://127.0.0.1:5050"
 ```
 
-Hoặc dùng Visual Studio / Rider / VS Code với profile `ApiGateway` đã cấu hình sẵn cổng `http://localhost:5050`.
+Hoặc dùng Visual Studio / Rider / VS Code với profile `Gateway.Api` đã cấu hình sẵn cổng `http://localhost:5050`.
 ### Build & Chạy thử bằng Docker
 
 Build Docker image multi-stage .NET 10:

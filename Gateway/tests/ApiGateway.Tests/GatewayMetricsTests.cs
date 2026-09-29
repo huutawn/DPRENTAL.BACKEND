@@ -1,6 +1,5 @@
 using System.Diagnostics.Metrics;
-using Dprental.Gateway.Domain.Observability;
-using Dprental.Gateway.Infrastructure.Observability;
+using Dprental.Gateway.Observability;
 using Xunit;
 
 namespace Dprental.Gateway.Tests;

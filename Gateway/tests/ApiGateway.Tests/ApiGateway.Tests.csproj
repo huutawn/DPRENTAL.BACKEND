@@ -13,6 +13,8 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/ApiGateway/ApiGateway.csproj" />
+    <ProjectReference Include="../../src/Gateway.Api/Gateway.Api.csproj" />
+    <ProjectReference Include="../../src/Gateway.Application/Gateway.Application.csproj" />
+    <ProjectReference Include="../../src/Gateway.Domain/Gateway.Domain.csproj" />
   </ItemGroup>
 </Project>

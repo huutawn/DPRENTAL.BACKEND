@@ -1,4 +1,4 @@
-using Dprental.Gateway.Application.Observability;
+using Dprental.Gateway.Observability;
 using Microsoft.Extensions.Options;
 using Xunit;
 

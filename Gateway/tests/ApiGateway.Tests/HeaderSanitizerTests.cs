@@ -1,5 +1,4 @@
-using Dprental.Gateway.Application.Security;
-using Dprental.Gateway.Domain.Security;
+using Dprental.Gateway.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
