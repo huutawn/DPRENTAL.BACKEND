@@ -101,6 +101,7 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> UpdateUser(
         Guid id,
         [FromBody] UpdateUserRequest request,
@@ -113,7 +114,7 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
     /// <summary>
     /// Lấy danh sách tất cả các quyền (Roles) trong hệ thống để admin gán cho User.
     /// </summary>
-    [HttpGet("~/admin/roles")] // Đẩy ra URL: GET /admin/roles
+    [HttpGet("roles")] // Đẩy ra URL: GET /admin/roles
     [Authorize(Roles = "adm")] // CHỐT CỨNG: Bắt buộc Role trong token phải là "adm"
     [ProducesResponseType(typeof(IReadOnlyList<RoleDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetRoles(CancellationToken cancellationToken)

@@ -18,4 +18,5 @@ public sealed record UpdateProfileRequest(
     [RegularExpression(RegistrationPatterns.PhoneNumber, ErrorMessage = "Số điện thoại không hợp lệ.")] string? PhoneNumber = null,
     DateOnly? DateOfBirth = null,
     [NonEmptyGuid] Guid? AvatarMediaId = null,
-    bool RemoveAvatar = false);
+    bool RemoveAvatar = false,
+    [RegularExpression(RegistrationPatterns.CitizenId, ErrorMessage = "Số CCCD phải gồm đúng 12 chữ số.")] string? CitizenId = null);

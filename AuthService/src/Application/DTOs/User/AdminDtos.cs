@@ -20,8 +20,15 @@ public class CreateAdminRequest
 public class UpdateAdminRequest
 {
     public string FullName { get; set; } = string.Empty;
+    public string? Email { get; set; }
+    public string? PhoneNumber { get; set; }
+    public DateOnly? DateOfBirth { get; set; }
+    public string? CitizenId { get; set; }
+    public Guid? AvatarMediaId { get; set; }
+    public bool RemoveAvatar { get; set; }
+    public bool? IsActive { get; set; }
     public string? Type { get; set; }
-    public List<Guid> RoleIds { get; set; } = [];
+    public List<Guid>? RoleIds { get; set; }
 }
 
 public class UserResponse
