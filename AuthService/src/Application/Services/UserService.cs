@@ -1,13 +1,14 @@
+using AuthService.Application.DTOs.Auth;
+using AuthService.Application.DTOs.User;
+using AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Application.Clients;
-using System.Diagnostics.CodeAnalysis;
-using System.Security.Cryptography;
-using System.Text;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Mapping;
 using Dprental.AuthService.Application.Options;
+using Dprental.AuthService.Application.Rules;
 using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Common;
@@ -17,15 +18,17 @@ using Dprental.AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Models;
-using Dprental.AuthService.Domain.Repositories;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Dprental.AuthService.Application.Rules;
-using System.Text;
-using System.Security.Cryptography;
+using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using AuthService.Application.DTOs.Auth;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -78,8 +81,6 @@ public sealed class UserService(
             correlationIdProvider,
             cancellationToken);
     }
-
-
 
     public async Task<Result<AccountCreatedResponse>> RegisterAdminAsync(
         RegisterAdminRequest request,

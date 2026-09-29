@@ -157,6 +157,8 @@ public sealed class UserAccountServiceTests
 
         UpdateProfileRequest request = new(RemoveAvatar: true);
 
+        Result<CurrentUserResponse> result = await service.UpdateProfileAsync(userId, request);
+
         Assert.True(result.IsSuccess);
         Assert.Null(result.Value.AvatarMediaId);
         Assert.Null(result.Value.AvatarUrl);
