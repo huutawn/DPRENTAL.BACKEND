@@ -42,7 +42,6 @@ public static class StorageConstraints
     public const string MembershipUserOrganization = "IX_OrganizationMemberships_UserId_OrganizationId";
     public const string ExternalLoginProviderSubject = "IX_ExternalLogins_Provider_ProviderSubject";
     public const string ExternalLoginUserProvider = "IX_ExternalLogins_UserId_Provider";
-    public const string GoogleLoginTicketHash = "IX_GoogleLoginTickets_TicketHash";
     public const string RefreshTokenHash = "IX_RefreshTokens_TokenHash";
     public const string RecoveryTokenHash = "IX_RecoveryTokens_TokenHash";
     public const string RoleName = "IX_Roles_Name";

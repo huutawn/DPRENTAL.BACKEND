@@ -32,7 +32,6 @@ namespace Dprental.AuthService.Api.Tests;
 /// Test API boundary:
 /// - HTTP statuses: 400/401/403/404/409/500.
 /// - Đăng nhập không tiết lộ email tồn tại (trả 401 cho mọi trường hợp sai tài khoản).
-/// - Google callback: lỗi Uncategorized trả 500 thay vì đưa mã lỗi vào redirect URL.
 /// - Cookie phiên: login đặt cookie, logout xóa cookie.
 /// - JWT middleware: kiểm tra user active, lỗi hạ tầng trả 500 không nhầm thành 401.
 /// </summary>
@@ -209,30 +208,6 @@ public sealed class ApiBoundaryResponseTests
     }
 
     [Fact]
-    public async Task GoogleCallback_WhenUncategorizedError_ReturnsHttp500InsteadOfRedirect()
-    {
-        // Khi externalLoginService trả Auth.Uncategorized (vd sự cố hệ thống),
-        // GoogleCallback BẮT BUỘC trả HTTP 500 thay vì đưa mã lỗi vào redirect URL
-        using WebApplicationFactory<Program> factory = CreateFactory(services =>
-        {
-            services.RemoveAll<IExternalLoginService>();
-            services.AddScoped<IExternalLoginService, FailingExternalLoginService>();
-        });
-
-        using HttpClient client = factory.CreateClient(new WebApplicationFactoryClientOptions
-        {
-            AllowAutoRedirect = false
-        });
-
-        // Set auth cookie giả lập Google external scheme authenticate result
-        HttpResponseMessage response = await client.GetAsync("/api/v1/auth/google/callback?returnUrl=http://localhost:3000");
-
-        // Không cấu hình authenticate scheme thì handler trả về RedirectToBff(WithError(...))
-        // Hãy kiểm tra kịch bản khi service trả Auth.Uncategorized trực tiếp:
-        Assert.True(response.StatusCode is HttpStatusCode.InternalServerError or HttpStatusCode.Redirect);
-    }
-
-    [Fact]
     public async Task JwtMiddleware_ActiveUserCheck_InfrastructureFailure_Returns500Not401()
     {
         // Khi UserService.ValidateActiveUserAsync trả về Auth.Uncategorized (lỗi hạ tầng),
@@ -295,10 +270,6 @@ public sealed class ApiBoundaryResponseTests
             {
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["Auth:Google:ClientId"] = "test-google-client-id",
-                    ["Auth:Google:ClientSecret"] = "test-google-client-secret",
-                    ["Auth:Google:AllowedReturnUrls:0"] = "http://localhost:3000",
-                    ["Auth:Google:BffCallbackUrls:0"] = "http://localhost:3000/api/auth/google/callback",
                     ["Auth:AdminBootstrap:CreationKey"] = BootstrapKey,
                     ["Auth:Jwt:ActiveKeyId"] = "key-2026-01",
                     ["Auth:Jwt:Keys:0:KeyId"] = "key-2026-01",
@@ -357,12 +328,6 @@ public sealed class ApiBoundaryResponseTests
             signingCredentials: new SigningCredentials(key, SecurityAlgorithms.RsaSha256));
 
         return new JwtSecurityTokenHandler().WriteToken(token);
-    }
-
-    private sealed class FailingExternalLoginService : IExternalLoginService
-    {
-        public Task<Result<Guid>> SignInAsync(ExternalIdentity identity, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Failure<Guid>(AuthErrors.Auth.Uncategorized));
     }
 
     private sealed class InfrastructureFailingUserService : IUserService

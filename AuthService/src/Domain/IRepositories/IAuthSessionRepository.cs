@@ -18,25 +18,6 @@ public interface IAuthSessionRepository : IRepo<Session, Guid>
         DateTime expiresAtUtc,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Tạo ticket Google ngắn hạn cho user.</summary>
-    Task<bool> CreateGoogleLoginTicketAsync(
-        Guid userId,
-        string ticketHash,
-        DateTime utcNow,
-        DateTime expiresAtUtc,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Tiêu thụ ticket Google (dùng 1 lần) và tạo session/refresh token trong cùng một transaction.
-    /// Trả về UserId nếu tiêu thụ thành công, hoặc null nếu ticket không hợp lệ / đã được dùng.
-    /// </summary>
-    Task<Guid?> ConsumeGoogleLoginTicketAndCreateSessionAsync(
-        string ticketHash,
-        string refreshTokenHash,
-        DateTime utcNow,
-        DateTime sessionExpiresAtUtc,
-        CancellationToken cancellationToken = default);
-
     /// <summary>Lấy thông tin RefreshToken kèm Session và User để Service kiểm tra trạng thái và phát hiện reuse.</summary>
     Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(
         string tokenHash,

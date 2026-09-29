@@ -21,7 +21,6 @@ public sealed class AuthDbContext : DbContext
     public DbSet<Organization> Organizations { get; set; }
     public DbSet<OrganizationMembership> OrganizationMemberships { get; set; }
     public DbSet<ExternalLogin> ExternalLogins { get; set; }
-    public DbSet<GoogleLoginTicket> GoogleLoginTickets { get; set; }
     public DbSet<AuditLog> AuditLogs { get; set; }
 
     public DbSet<RecoveryToken> RecoveryTokens { get; set; }

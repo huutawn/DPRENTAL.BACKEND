@@ -461,12 +461,6 @@ public sealed class UserAccountServiceTests
         public Task CreateSessionAsync(Guid userId, string refreshTokenHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
-        public Task<bool> CreateGoogleLoginTicketAsync(Guid userId, string ticketHash, DateTime utcNow, DateTime expiresAtUtc, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
-        public Task<Guid?> ConsumeGoogleLoginTicketAndCreateSessionAsync(string ticketHash, string refreshTokenHash, DateTime utcNow, DateTime sessionExpiresAtUtc, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
         public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(string tokenHash, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 

@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using Dprental.AuthService.Api.Filters;
 using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.IServices;
@@ -7,11 +6,8 @@ using Dprental.AuthService.Application.Options;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Domain.Models;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
 
 
@@ -25,10 +21,8 @@ public sealed class AuthController(
     IAuthSessionService authSessionService,
     IUserService userService,
     IServiceIdentityService serviceIdentityService,
-    IExternalLoginService externalLoginService,
     IFirebaseLoginService firebaseLoginService,
     IOptions<JwtOptions> jwtOptions,
-    IOptions<GoogleAuthOptions> googleOptions,
     IWebHostEnvironment environment) : ControllerBase
 {
     /// <summary>Tạo tài khoản người dùng mới.</summary>
@@ -162,158 +156,6 @@ public sealed class AuthController(
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
-    /// <summary>Đổi ticket Google dùng một lần thành cặp access và refresh token cho Next BFF.</summary>
-    [HttpPost("google/exchange")]
-    [ProducesResponseType<AuthTokenResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<AuthTokenResponse>> ExchangeGoogleLoginTicket(
-        [FromBody] GoogleLoginTicketExchangeRequest? request,
-        CancellationToken cancellationToken)
-    {
-        Response.Headers.CacheControl = "no-store";
-        if (!googleOptions.Value.IsConfigured)
-        {
-            return NotFound();
-        }
-        if (string.IsNullOrWhiteSpace(request?.Ticket))
-        {
-            return Problem(
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "Auth.MissingGoogleLoginTicket",
-                detail: "Ticket là bắt buộc.");
-        }
-
-        Result<AuthTokenPair> tokensResult = await authSessionService.ExchangeGoogleLoginTicketAsync(request.Ticket, cancellationToken);
-        if (tokensResult.IsFailure)
-        {
-            return this.ToProblem(tokensResult.Error);
-        }
-
-        return Ok(new AuthTokenResponse(tokensResult.Value.AccessToken, tokensResult.Value.RefreshToken));
-    }
-
-    /// <summary>Bắt đầu đăng nhập Google sau khi kiểm tra return URL an toàn.</summary>
-    [HttpGet("google/login")]
-    [ProducesResponseType(StatusCodes.Status302Found)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public IActionResult GoogleLogin([FromQuery] string? returnUrl)
-    {
-        GoogleAuthOptions google = googleOptions.Value;
-        if (!google.IsConfigured)
-        {
-            return NotFound();
-        }
-
-        string target = returnUrl ?? (google.AllowedReturnUrls.Count > 0 ? google.AllowedReturnUrls[0] : "/");
-        if (!ReturnUrlValidator.IsAllowed(target, google.AllowedReturnUrls))
-        {
-            return InvalidReturnUrl();
-        }
-        if (!GoogleBffCallbackResolver.TryResolve(target, google, out _))
-        {
-            return InvalidReturnUrl();
-        }
-
-        // Sau khi handler Google xử lý xong /signin-google, trình duyệt được chuyển tiếp tới GoogleCallback.
-        AuthenticationProperties properties = new()
-        {
-            RedirectUri = Url.Action(nameof(GoogleCallback), new { returnUrl = target })
-        };
-
-        return Challenge(properties, GoogleDefaults.AuthenticationScheme);
-    }
-
-    /// <summary>Xử lý callback Google, liên kết danh tính và chuyển ticket đăng nhập về frontend.</summary>
-    [HttpGet("google/callback")]
-    [ProducesResponseType(StatusCodes.Status302Found)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GoogleCallback([FromQuery] string? returnUrl, CancellationToken cancellationToken)
-    {
-        GoogleAuthOptions google = googleOptions.Value;
-        if (!google.IsConfigured)
-        {
-            return NotFound();
-        }
-
-        if (!ReturnUrlValidator.IsAllowed(returnUrl, google.AllowedReturnUrls))
-        {
-            return InvalidReturnUrl();
-        }
-        if (!GoogleBffCallbackResolver.TryResolve(returnUrl, google, out string bffCallbackUrl))
-        {
-            return InvalidReturnUrl();
-        }
-
-        // Cookie tạm chỉ dùng một lần: đọc xong là xóa ngay dù kết quả thế nào.
-        AuthenticateResult external = await HttpContext.AuthenticateAsync(GoogleAuthenticationExtensions.ExternalScheme);
-        await HttpContext.SignOutAsync(GoogleAuthenticationExtensions.ExternalScheme);
-
-        ClaimsPrincipal? principal = external.Principal;
-        string? subject = principal?.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!external.Succeeded || principal is null || string.IsNullOrWhiteSpace(subject))
-        {
-            return RedirectToBff(WithError(bffCallbackUrl, returnUrl, "Auth.ExternalFailed"));
-        }
-
-        ExternalIdentity identity = new(
-            GoogleDefaults.AuthenticationScheme,
-            subject,
-            principal.FindFirstValue(ClaimTypes.Email),
-            string.Equals(principal.FindFirstValue(GoogleClaims.EmailVerified), bool.TrueString, StringComparison.OrdinalIgnoreCase),
-            principal.FindFirstValue(ClaimTypes.Name));
-
-        Result<Guid> result = await externalLoginService.SignInAsync(identity, cancellationToken);
-        if (result.IsFailure)
-        {
-            if (result.Error.Code == AuthErrorCode.Auth.Uncategorized)
-            {
-                return this.ToProblem(result.Error);
-            }
-            return RedirectToBff(WithError(bffCallbackUrl, returnUrl, result.Error.Code));
-        }
-
-        Result<string> ticketResult = await authSessionService.CreateGoogleLoginTicketAsync(result.Value, cancellationToken);
-        if (ticketResult.IsFailure)
-        {
-            if (ticketResult.Error.Code == AuthErrorCode.Auth.Uncategorized)
-            {
-                return this.ToProblem(ticketResult.Error);
-            }
-            return RedirectToBff(WithError(bffCallbackUrl, returnUrl, ticketResult.Error.Code));
-        }
-
-        return RedirectToBff(WithTicket(bffCallbackUrl, returnUrl, ticketResult.Value));
-    }
-    private ObjectResult InvalidReturnUrl() => Problem(
-        statusCode: StatusCodes.Status400BadRequest,
-        title: "Auth.InvalidReturnUrl",
-        detail: "returnUrl không nằm trong danh sách được phép.");
-
-    /// <summary>Gắn mã lỗi vào query của returnUrl; lúc này user đang ở trên trình duyệt nên chuyển hướng thay vì trả JSON.</summary>
-    private static string WithError(string callbackUrl, string returnUrl, string errorCode) =>
-        QueryHelpers.AddQueryString(callbackUrl, new Dictionary<string, string?>
-        {
-            ["error"] = errorCode,
-            ["returnUrl"] = returnUrl
-        });
-
-    private static string WithTicket(string callbackUrl, string returnUrl, string ticket) =>
-        QueryHelpers.AddQueryString(callbackUrl, new Dictionary<string, string?>
-        {
-            ["ticket"] = ticket,
-            ["returnUrl"] = returnUrl
-        });
-
-    private RedirectResult RedirectToBff(string destination)
-    {
-        Response.Headers.CacheControl = "no-store";
-        Response.Headers["Referrer-Policy"] = "no-referrer";
-        return Redirect(destination);
-    }
     /// <summary>Yêu cầu đặt lại mật khẩu. Development: khóa admin hợp lệ trong X-Admin-Creation-Key trả token để thử nghiệm.</summary>
     [HttpPost("forgot-password")]
     [ProducesResponseType(StatusCodes.Status200OK)]

@@ -219,9 +219,9 @@ Trang thai hien tai:
 - `FirebaseLoginService` tao accessToken/refreshToken noi bo qua `AuthSessionService`.
 - Response tra JSON token pair cho Next BFF set HttpOnly cookie tren FE domain.
 
-### Phase 6 - Deprecate Google OAuth Flow Cu
+### Phase 6 - Remove Google OAuth Flow Cu
 
-Danh dau deprecated cac endpoint cu:
+Endpoint cu da duoc remove khoi AuthService runtime:
 
 ```http
 GET /api/v1/auth/google/login
@@ -229,15 +229,23 @@ GET /api/v1/auth/google/callback
 POST /api/v1/auth/google/exchange
 ```
 
-Chua xoa ngay trong phase dau.
+Trang thai hien tai:
 
-Sau khi FE migrate va test on dinh moi can xoa:
+- Da xoa dang ky `AddGoogleLogin`.
+- Da xoa package `Microsoft.AspNetCore.Authentication.Google`.
+- Da xoa `GoogleAuthOptions`.
+- Da xoa `GoogleAuthenticationExtensions`.
+- Da xoa `GoogleBffCallbackResolver`.
+- Da xoa DTO exchange ticket cu.
+- Da xoa flow `CreateGoogleLoginTicketAsync` / `ExchangeGoogleLoginTicketAsync`.
+- Da xoa runtime entity/model `GoogleLoginTicket`.
+- Da them migration `RemoveGoogleLoginTickets` de drop bang `auth.GoogleLoginTickets`.
+- Da cap nhat test cu khong con compile theo Google OAuth endpoint/ticket.
 
-- GoogleAuthOptions.
-- GoogleAuthenticationExtensions.
-- Google callback resolver.
-- Google login ticket flow.
-- Bang GoogleLoginTickets neu khong con dung.
+Ghi chu:
+
+- Migration history cu van con nhac `GoogleLoginTickets` vi do la lich su DB, khong phai runtime flow.
+- FE/Next BFF chi con dung `POST /api/v1/auth/firebase/login`.
 
 ## Frontend Roadmap
 

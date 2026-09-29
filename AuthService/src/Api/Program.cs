@@ -19,7 +19,6 @@ builder.Services.AddAuthApplication(builder.Configuration);
 builder.Services.AddAuthDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
 builder.Services.AddJwtBearerSecurity();
 builder.Services.AddAuthForwardedHeaders(builder.Configuration);
-builder.Services.AddGoogleLogin(builder.Configuration);
 builder.Services.AddFirebaseAuthentication(builder.Configuration);
 builder.Services.AddCors(options =>
 {
