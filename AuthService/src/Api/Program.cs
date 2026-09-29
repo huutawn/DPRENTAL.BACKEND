@@ -20,6 +20,7 @@ builder.Services.AddAuthDomainRepositories(builder.Configuration.GetConnectionSt
 builder.Services.AddJwtBearerSecurity();
 builder.Services.AddAuthForwardedHeaders(builder.Configuration);
 builder.Services.AddGoogleLogin(builder.Configuration);
+builder.Services.AddFirebaseAuthentication(builder.Configuration);
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
