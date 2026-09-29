@@ -214,9 +214,7 @@ public sealed class MediaMigrationAcceptanceTests
             orgRepo,
             memRepo,
             roleRepo,
-            FixedCorrelationIdProvider.Instance,
-            urlResolver,
-            NullLogger<OrganizationService>.Instance);
+            urlResolver);
 
         // 1. Outsider gets 403 CrossOrganizationAccessDenied
         var outsiderResult = await service.GetByIdAsync(outsiderId, orgId);

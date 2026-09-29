@@ -7,7 +7,7 @@ public interface IRoleRepository
 {
     Task<bool> RoleExistsAsync(Guid roleId, CancellationToken cancellationToken = default);
     Task<Role?> GetByIdAsync(Guid roleId, CancellationToken cancellationToken = default);
-    Task<int> CountByIdsAsync(IEnumerable<Guid> roleIds, CancellationToken cancellationToken = default);    
+    Task<int> CountByIdsAsync(IEnumerable<Guid> roleIds, CancellationToken cancellationToken = default);
     Task<Role?> GetByNameAsync(string name, CancellationToken cancellationToken = default);
 
     /// <summary>Mã các permission mà role này mang — dùng để kiểm tra actor có đủ quyền trước khi gán/thu hồi.</summary>

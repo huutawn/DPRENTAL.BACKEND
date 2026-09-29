@@ -146,7 +146,6 @@ public sealed class AuthSessionServiceTests
             new FixedTimeProvider(now),
             new TestCorrelationIdProvider(),
             new TestAuditLogRepository(),
-            NullLogger<AuthSessionService>.Instance,
             new FakeHttpContextAccessor()
         );
 

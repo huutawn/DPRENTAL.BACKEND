@@ -1,7 +1,6 @@
 using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Application.DTOs.Auth;
-using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Mapping;
 using Dprental.AuthService.Domain.IRepositories;
@@ -10,7 +9,6 @@ using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
-using Microsoft.Extensions.Logging;
 using Dprental.AuthService.Common.Utils;
 
 namespace Dprental.AuthService.Application.Services;
@@ -28,8 +26,7 @@ public sealed class UserAccountService(
     TimeProvider timeProvider,
     IMediaServiceClient mediaServiceClient,
     IMediaUrlResolver mediaUrlResolver,
-    IMediaOutboxService mediaOutboxService,
-    ILogger<UserAccountService> logger) : IUserAccountService
+    IMediaOutboxService mediaOutboxService) : IUserAccountService
 {
     private const string GoogleProvider = "Google";
     private const string FirebaseGoogleSignInProvider = "google.com";
@@ -49,76 +46,68 @@ public sealed class UserAccountService(
             return Result.Failure<CurrentUserResponse>(validationError);
         }
 
-        return await ApplicationExecutor.ExecuteAsync(
-            "CompleteProfile",
-            async () =>
+        User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return Result.Failure<CurrentUserResponse>(AuthErrors.User.NotFound);
+        }
+
+        if (!user.IsActive)
+        {
+            return Result.Failure<CurrentUserResponse>(AuthErrors.Auth.InactiveAccount);
+        }
+
+        if (user.IsProfileCompleted)
+        {
+            return Result.Failure<CurrentUserResponse>(AuthErrors.Profile.AlreadyCompleted);
+        }
+
+        DateOnly dob = request.DateOfBirth!.Value;
+        if (CustomerAccountRules.IsUnderage(dob, timeProvider.GetUtcNow()))
+        {
+            return Result.Failure<CurrentUserResponse>(AuthErrors.User.Underage);
+        }
+
+        string citizenId = request.CitizenId.Trim();
+        if (await userRepository.CitizenIdExistsAsync(citizenId, cancellationToken))
+        {
+            return Result.Failure<CurrentUserResponse>(AuthErrors.User.CitizenIdAlreadyExists);
+        }
+
+        user.CitizenId = citizenId;
+        user.PhoneNumber = request.PhoneNumber.Trim();
+        user.DateOfBirth = dob;
+        user.ProfileCompletedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
+
+        if (StringUtility.NullIfBlank(request.FullName) is string fullName)
+        {
+            user.FullName = fullName;
+        }
+
+        if (request.AvatarMediaId.HasValue)
+        {
+            var verifyResult = await mediaServiceClient.VerifyMediaAsync(request.AvatarMediaId.Value, cancellationToken);
+            if (verifyResult.IsFailure)
             {
-                User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
-                if (user is null)
-                {
-                    return Result.Failure<CurrentUserResponse>(AuthErrors.User.NotFound);
-                }
+                return Result.Failure<CurrentUserResponse>(verifyResult.Error);
+            }
+            var validation = MediaVerificationRules.ValidateImage(verifyResult.Value, userId);
+            if (validation.IsFailure)
+            {
+                return Result.Failure<CurrentUserResponse>(validation.Error);
+            }
+            user.AvatarMediaId = request.AvatarMediaId.Value;
+            await mediaOutboxService.QueuePublicVisibilityAsync(request.AvatarMediaId.Value, cancellationToken);
+        }
 
-                if (!user.IsActive)
-                {
-                    return Result.Failure<CurrentUserResponse>(AuthErrors.Auth.InactiveAccount);
-                }
+        if (!await userRepository.UpdateAsync(user, cancellationToken))
+        {
+            return Result.Failure<CurrentUserResponse>(AuthErrors.User.NotFound);
+        }
+        await LogAuditAsync(user.Id, user.Id.ToString(), "Profile_Complete", "Success", cancellationToken);
 
-                if (user.IsProfileCompleted)
-                {
-                    return Result.Failure<CurrentUserResponse>(AuthErrors.Profile.AlreadyCompleted);
-                }
-
-                DateOnly dob = request.DateOfBirth!.Value;
-                if (CustomerAccountRules.IsUnderage(dob, timeProvider.GetUtcNow()))
-                {
-                    return Result.Failure<CurrentUserResponse>(AuthErrors.User.Underage);
-                }
-
-                string citizenId = request.CitizenId.Trim();
-                if (await userRepository.CitizenIdExistsAsync(citizenId, cancellationToken))
-                {
-                    return Result.Failure<CurrentUserResponse>(AuthErrors.User.CitizenIdAlreadyExists);
-                }
-
-                user.CitizenId = citizenId;
-                user.PhoneNumber = request.PhoneNumber.Trim();
-                user.DateOfBirth = dob;
-                user.ProfileCompletedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
-
-                if (StringUtility.NullIfBlank(request.FullName) is string fullName)
-                {
-                    user.FullName = fullName;
-                }
-
-                if (request.AvatarMediaId.HasValue)
-                {
-                    var verifyResult = await mediaServiceClient.VerifyMediaAsync(request.AvatarMediaId.Value, cancellationToken);
-                    if (verifyResult.IsFailure)
-                    {
-                        return Result.Failure<CurrentUserResponse>(verifyResult.Error);
-                    }
-                    var validation = MediaVerificationRules.ValidateImage(verifyResult.Value, userId);
-                    if (validation.IsFailure)
-                    {
-                        return Result.Failure<CurrentUserResponse>(validation.Error);
-                    }
-                    user.AvatarMediaId = request.AvatarMediaId.Value;
-                    await mediaOutboxService.QueuePublicVisibilityAsync(request.AvatarMediaId.Value, cancellationToken);
-                }
-
-                if (!await userRepository.UpdateAsync(user, cancellationToken))
-                {
-                    return Result.Failure<CurrentUserResponse>(AuthErrors.User.NotFound);
-                }
-                await LogAuditAsync(user.Id, user.Id.ToString(), "Profile_Complete", "Success", cancellationToken);
-
-                User? reloaded = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
-                return Result.Success((reloaded ?? user).ToCurrentUserResponse(mediaUrlResolver.ResolvePublicUrl((reloaded ?? user).AvatarMediaId)));
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
+        User? reloaded = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
+        return Result.Success((reloaded ?? user).ToCurrentUserResponse(mediaUrlResolver.ResolvePublicUrl((reloaded ?? user).AvatarMediaId)));
     }
 
     public Task<Result<CurrentUserResponse>> UpdateProfileAsync(
@@ -172,93 +161,84 @@ public sealed class UserAccountService(
             return Result.Failure<CurrentUserResponse>(validationError);
         }
 
-        return await ApplicationExecutor.ExecuteAsync(
-            "UpdateProfile",
-            async () =>
+        User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return Result.Failure<CurrentUserResponse>(AuthErrors.User.NotFound);
+        }
+
+        if (!user.IsActive)
+        {
+            return Result.Failure<CurrentUserResponse>(AuthErrors.Auth.InactiveAccount);
+        }
+
+        if (trimmedFullName is not null)
+        {
+            user.FullName = trimmedFullName;
+        }
+
+        if (request.PhoneNumber is not null || clearPhoneWhenNull)
+        {
+            user.PhoneNumber = request.PhoneNumber?.Trim();
+        }
+
+        if (request.DateOfBirth.HasValue)
+        {
+            if (CustomerAccountRules.IsUnderage(request.DateOfBirth.Value, timeProvider.GetUtcNow()))
             {
-                User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
-                if (user is null)
-                {
-                    return Result.Failure<CurrentUserResponse>(AuthErrors.User.NotFound);
-                }
+                return Result.Failure<CurrentUserResponse>(AuthErrors.User.Underage);
+            }
+            user.DateOfBirth = request.DateOfBirth.Value;
+        }
 
-                if (!user.IsActive)
-                {
-                    return Result.Failure<CurrentUserResponse>(AuthErrors.Auth.InactiveAccount);
-                }
+        if (trimmedCitizenId is not null && !string.Equals(user.CitizenId, trimmedCitizenId, StringComparison.Ordinal))
+        {
+            if (await userRepository.CitizenIdExistsAsync(trimmedCitizenId, cancellationToken))
+            {
+                return Result.Failure<CurrentUserResponse>(AuthErrors.User.CitizenIdAlreadyExists);
+            }
+            user.CitizenId = trimmedCitizenId;
+        }
 
+        if (user.ProfileCompletedAtUtc is null
+            && !string.IsNullOrWhiteSpace(user.CitizenId)
+            && !string.IsNullOrWhiteSpace(user.PhoneNumber)
+            && user.DateOfBirth.HasValue)
+        {
+            user.ProfileCompletedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
+        }
+        if (request.RemoveAvatar)
+        {
+            user.AvatarMediaId = null;
+        }
+        else if (request.AvatarMediaId.HasValue)
+        {
+            // MediaId đã gắn sẵn được phép gửi lại khi cập nhật hồ sơ, kể cả file nhập từ dữ liệu cũ.
+            if (user.AvatarMediaId != request.AvatarMediaId.Value)
+            {
+                var verifyResult = await mediaServiceClient.VerifyMediaAsync(request.AvatarMediaId.Value, cancellationToken);
+                if (verifyResult.IsFailure)
+                {
+                    return Result.Failure<CurrentUserResponse>(verifyResult.Error);
+                }
+                var validation = MediaVerificationRules.ValidateImage(verifyResult.Value, userId);
+                if (validation.IsFailure)
+                {
+                    return Result.Failure<CurrentUserResponse>(validation.Error);
+                }
+                user.AvatarMediaId = request.AvatarMediaId.Value;
+                await mediaOutboxService.QueuePublicVisibilityAsync(request.AvatarMediaId.Value, cancellationToken);
+            }
+        }
 
-                if (trimmedFullName is not null)
-                {
-                    user.FullName = trimmedFullName;
-                }
+        if (!await userRepository.UpdateAsync(user, cancellationToken))
+        {
+            return Result.Failure<CurrentUserResponse>(AuthErrors.User.NotFound);
+        }
+        await LogAuditAsync(user.Id, user.Id.ToString(), "Profile_Update", "Success", cancellationToken);
 
-                if (request.PhoneNumber is not null || clearPhoneWhenNull)
-                {
-                    user.PhoneNumber = request.PhoneNumber?.Trim();
-                }
-
-                if (request.DateOfBirth.HasValue)
-                {
-                    if (CustomerAccountRules.IsUnderage(request.DateOfBirth.Value, timeProvider.GetUtcNow()))
-                    {
-                        return Result.Failure<CurrentUserResponse>(AuthErrors.User.Underage);
-                    }
-                    user.DateOfBirth = request.DateOfBirth.Value;
-                }
-
-                if (trimmedCitizenId is not null && !string.Equals(user.CitizenId, trimmedCitizenId, StringComparison.Ordinal))
-                {
-                    if (await userRepository.CitizenIdExistsAsync(trimmedCitizenId, cancellationToken))
-                    {
-                        return Result.Failure<CurrentUserResponse>(AuthErrors.User.CitizenIdAlreadyExists);
-                    }
-                    user.CitizenId = trimmedCitizenId;
-                }
-
-                if (user.ProfileCompletedAtUtc is null
-                    && !string.IsNullOrWhiteSpace(user.CitizenId)
-                    && !string.IsNullOrWhiteSpace(user.PhoneNumber)
-                    && user.DateOfBirth.HasValue)
-                {
-                    user.ProfileCompletedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
-                }
-                if (request.RemoveAvatar)
-                {
-                    user.AvatarMediaId = null;
-                }
-                else if (request.AvatarMediaId.HasValue)
-                {
-                    // MediaId đã gắn sẵn được phép gửi lại khi cập nhật hồ sơ, kể cả file nhập từ dữ liệu cũ.
-                    if (user.AvatarMediaId != request.AvatarMediaId.Value)
-                    {
-                        var verifyResult = await mediaServiceClient.VerifyMediaAsync(request.AvatarMediaId.Value, cancellationToken);
-                        if (verifyResult.IsFailure)
-                        {
-                            return Result.Failure<CurrentUserResponse>(verifyResult.Error);
-                        }
-                        var validation = MediaVerificationRules.ValidateImage(verifyResult.Value, userId);
-                        if (validation.IsFailure)
-                        {
-                            return Result.Failure<CurrentUserResponse>(validation.Error);
-                        }
-                        user.AvatarMediaId = request.AvatarMediaId.Value;
-                        await mediaOutboxService.QueuePublicVisibilityAsync(request.AvatarMediaId.Value, cancellationToken);
-                    }
-                }
-
-                if (!await userRepository.UpdateAsync(user, cancellationToken))
-                {
-                    return Result.Failure<CurrentUserResponse>(AuthErrors.User.NotFound);
-                }
-                await LogAuditAsync(user.Id, user.Id.ToString(), "Profile_Update", "Success", cancellationToken);
-
-                User? reloaded = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
-                return Result.Success((reloaded ?? user).ToCurrentUserResponse(mediaUrlResolver.ResolvePublicUrl((reloaded ?? user).AvatarMediaId)));
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken: cancellationToken);
+        User? reloaded = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
+        return Result.Success((reloaded ?? user).ToCurrentUserResponse(mediaUrlResolver.ResolvePublicUrl((reloaded ?? user).AvatarMediaId)));
     }
 
     public async Task<Result<CurrentUserResponse>> UpdateUserProfileAsync(
@@ -292,31 +272,23 @@ public sealed class UserAccountService(
             return Result.Failure<IReadOnlyList<ExternalLoginResponse>>(idError);
         }
 
-        return await ApplicationExecutor.ExecuteAsync(
-            "GetExternalLogins",
-            async () =>
-            {
-                User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
-                if (user is null)
-                {
-                    return Result.Failure<IReadOnlyList<ExternalLoginResponse>>(AuthErrors.User.NotFound);
-                }
+        User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return Result.Failure<IReadOnlyList<ExternalLoginResponse>>(AuthErrors.User.NotFound);
+        }
 
-                if (!user.IsActive)
-                {
-                    return Result.Failure<IReadOnlyList<ExternalLoginResponse>>(AuthErrors.Auth.InactiveAccount);
-                }
+        if (!user.IsActive)
+        {
+            return Result.Failure<IReadOnlyList<ExternalLoginResponse>>(AuthErrors.Auth.InactiveAccount);
+        }
 
-                IReadOnlyList<ExternalLogin> logins = await externalLoginRepository.GetByUserAsync(userId, cancellationToken);
-                var responses = logins
-                    .Select(login => new ExternalLoginResponse(login.Provider, login.Email, login.CreatedAtUtc))
-                    .ToList();
+        IReadOnlyList<ExternalLogin> logins = await externalLoginRepository.GetByUserAsync(userId, cancellationToken);
+        var responses = logins
+            .Select(login => new ExternalLoginResponse(login.Provider, login.Email, login.CreatedAtUtc))
+            .ToList();
 
-                return Result.Success<IReadOnlyList<ExternalLoginResponse>>(responses);
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
+        return Result.Success<IReadOnlyList<ExternalLoginResponse>>(responses);
     }
 
     public async Task<Result> LinkExternalLoginAsync(
@@ -347,61 +319,55 @@ public sealed class UserAccountService(
             return Result.Failure(AuthErrors.Auth.FirebaseProviderUnsupported);
         }
 
-        return await ApplicationExecutor.ExecuteAsync(
-            "LinkExternalLogin",
-            async () =>
-            {
-                User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
-                if (user is null)
-                {
-                    return Result.Failure(AuthErrors.User.NotFound);
-                }
+        User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return Result.Failure(AuthErrors.User.NotFound);
+        }
 
-                if (!user.IsActive)
-                {
-                    return Result.Failure(AuthErrors.Auth.InactiveAccount);
-                }
+        if (!user.IsActive)
+        {
+            return Result.Failure(AuthErrors.Auth.InactiveAccount);
+        }
 
-                ExternalLogin? existingBySubject = await externalLoginRepository.FindAsync(
-                    GoogleProvider,
-                    firebaseIdentity.ProviderSubject,
-                    cancellationToken);
-                if (existingBySubject is not null)
-                {
-                    return Result.Failure(AuthErrors.ExternalLogin.AlreadyLinked);
-                }
-
-                IReadOnlyList<ExternalLogin> existingLogins = await externalLoginRepository.GetByUserAsync(userId, cancellationToken);
-                if (existingLogins.Any(login => string.Equals(login.Provider, GoogleProvider, StringComparison.OrdinalIgnoreCase)))
-                {
-                    return Result.Failure(AuthErrors.ExternalLogin.AlreadyLinked);
-                }
-
-                ExternalLogin login = new()
-                {
-                    Id = Guid.NewGuid(),
-                    UserId = userId,
-                    Provider = GoogleProvider,
-                    ProviderSubject = firebaseIdentity.ProviderSubject,
-                    Email = firebaseIdentity.Email,
-                    CreatedAtUtc = timeProvider.GetUtcNow().UtcDateTime
-                };
-
-                try
-                {
-                    await externalLoginRepository.AddAsync(login, cancellationToken);
-                }
-                catch (StorageConstraintViolationException)
-                {
-                    return Result.Failure(AuthErrors.ExternalLogin.AlreadyLinked);
-                }
-
-                await LogAuditAsync(user.Id, user.Id.ToString(), "ExternalLogin_Link", "Success", cancellationToken);
-                return Result.Success();
-            },
-            logger,
-            correlationIdProvider,
+        ExternalLogin? existingBySubject = await externalLoginRepository.FindAsync(
+            GoogleProvider,
+            firebaseIdentity.ProviderSubject,
             cancellationToken);
+        if (existingBySubject is not null)
+        {
+            return Result.Failure(AuthErrors.ExternalLogin.AlreadyLinked);
+        }
+
+        IReadOnlyList<ExternalLogin> existingLogins = await externalLoginRepository.GetByUserAsync(userId, cancellationToken);
+        if (existingLogins.Any(login => string.Equals(login.Provider, GoogleProvider, StringComparison.OrdinalIgnoreCase)))
+        {
+            return Result.Failure(AuthErrors.ExternalLogin.AlreadyLinked);
+        }
+
+        ExternalLogin login = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Provider = GoogleProvider,
+            ProviderSubject = firebaseIdentity.ProviderSubject,
+            Email = firebaseIdentity.Email,
+            CreatedAtUtc = timeProvider.GetUtcNow().UtcDateTime
+        };
+
+        try
+        {
+            await externalLoginRepository.AddAsync(login, cancellationToken);
+        }
+        catch (StorageConstraintViolationException ex) when (
+            ex.ViolationType == StorageConstraintViolationType.Unique &&
+            (ex.ConstraintName is StorageConstraints.ExternalLoginProviderSubject or StorageConstraints.ExternalLoginUserProvider))
+        {
+            return Result.Failure(AuthErrors.ExternalLogin.AlreadyLinked);
+        }
+
+        await LogAuditAsync(user.Id, user.Id.ToString(), "ExternalLogin_Link", "Success", cancellationToken);
+        return Result.Success();
     }
 
     public async Task<Result> UnlinkExternalLoginAsync(
@@ -419,41 +385,33 @@ public sealed class UserAccountService(
             return Result.Failure(AuthErrors.ExternalLogin.NotLinked);
         }
 
-        return await ApplicationExecutor.ExecuteAsync(
-            "UnlinkExternalLogin",
-            async () =>
-            {
-                User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
-                if (user is null)
-                {
-                    return Result.Failure(AuthErrors.User.NotFound);
-                }
+        User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return Result.Failure(AuthErrors.User.NotFound);
+        }
 
-                if (!user.IsActive)
-                {
-                    return Result.Failure(AuthErrors.Auth.InactiveAccount);
-                }
+        if (!user.IsActive)
+        {
+            return Result.Failure(AuthErrors.Auth.InactiveAccount);
+        }
 
-                IReadOnlyList<ExternalLogin> logins = await externalLoginRepository.GetByUserAsync(userId, cancellationToken);
-                ExternalLogin? targetLogin = logins.FirstOrDefault(l => string.Equals(l.Provider, provider, StringComparison.OrdinalIgnoreCase));
-                if (targetLogin is null)
-                {
-                    return Result.Failure(AuthErrors.ExternalLogin.NotLinked);
-                }
+        IReadOnlyList<ExternalLogin> logins = await externalLoginRepository.GetByUserAsync(userId, cancellationToken);
+        ExternalLogin? targetLogin = logins.FirstOrDefault(l => string.Equals(l.Provider, provider, StringComparison.OrdinalIgnoreCase));
+        if (targetLogin is null)
+        {
+            return Result.Failure(AuthErrors.ExternalLogin.NotLinked);
+        }
 
-                bool hasOtherCredentials = user.HasPassword || logins.Count > 1;
-                if (!hasOtherCredentials)
-                {
-                    return Result.Failure(AuthErrors.ExternalLogin.CannotUnlinkLastCredential);
-                }
+        bool hasOtherCredentials = user.HasPassword || logins.Count > 1;
+        if (!hasOtherCredentials)
+        {
+            return Result.Failure(AuthErrors.ExternalLogin.CannotUnlinkLastCredential);
+        }
 
-                await externalLoginRepository.DeleteAsync(userId, provider, cancellationToken);
-                await LogAuditAsync(user.Id, user.Id.ToString(), "ExternalLogin_Unlink", "Success", cancellationToken);
-                return Result.Success();
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
+        await externalLoginRepository.DeleteAsync(userId, provider, cancellationToken);
+        await LogAuditAsync(user.Id, user.Id.ToString(), "ExternalLogin_Unlink", "Success", cancellationToken);
+        return Result.Success();
     }
 
     public async Task<Result> DeactivateAsync(
@@ -465,75 +423,67 @@ public sealed class UserAccountService(
             return Result.Failure(idError);
         }
 
-        return await ApplicationExecutor.ExecuteAsync(
-            "DeactivateAccount",
-            async () =>
+        User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return Result.Failure(AuthErrors.User.NotFound);
+        }
+
+        if (!user.IsActive)
+        {
+            return Result.Failure(AuthErrors.Auth.InactiveAccount);
+        }
+
+        IReadOnlyList<OrganizationMembership> memberships = await organizationMembershipRepository.GetMembershipsForUserAsync(userId, cancellationToken);
+
+        // Khóa các organization liên quan theo thứ tự cố định trước khi Service kiểm tra Owner cuối cùng
+        List<Guid> ownerOrgIds = memberships
+            .Where(m => m.Status == MembershipStatus.Active &&
+                m.Role is not null &&
+                string.Equals(m.Role.Name, "Owner", StringComparison.OrdinalIgnoreCase))
+            .Select(m => m.OrganizationId)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToList();
+        IExecutionTransaction? ownerTransaction = null;
+        if (ownerOrgIds.Count > 0)
+        {
+            ownerTransaction = await organizationRepository.BeginTransactionAsync(cancellationToken);
+        }
+
+        try
+        {
+            if (ownerOrgIds.Count > 0)
             {
-                User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
-                if (user is null)
-                {
-                    return Result.Failure(AuthErrors.User.NotFound);
-                }
+                await organizationRepository.LockOrganizationsAsync(ownerOrgIds, cancellationToken);
 
-                if (!user.IsActive)
+                foreach (Guid orgId in ownerOrgIds)
                 {
-                    return Result.Failure(AuthErrors.Auth.InactiveAccount);
-                }
-
-                IReadOnlyList<OrganizationMembership> memberships = await organizationMembershipRepository.GetMembershipsForUserAsync(userId, cancellationToken);
-
-                // Khóa các organization liên quan theo thứ tự cố định trước khi Service kiểm tra Owner cuối cùng
-                List<Guid> ownerOrgIds = memberships
-                    .Where(m => m.Status == MembershipStatus.Active &&
-                        m.Role is not null &&
-                        string.Equals(m.Role.Name, "Owner", StringComparison.OrdinalIgnoreCase))
-                    .Select(m => m.OrganizationId)
-                    .Distinct()
-                    .OrderBy(id => id)
-                    .ToList();
-                IExecutionTransaction? ownerTransaction = null;
-                if (ownerOrgIds.Count > 0)
-                {
-                    ownerTransaction = await organizationRepository.BeginTransactionAsync(cancellationToken);
-                }
-
-                try
-                {
-                    if (ownerOrgIds.Count > 0)
+                    int activeOwners = await organizationMembershipRepository.CountActiveOwnersAsync(orgId, cancellationToken);
+                    if (activeOwners <= 1)
                     {
-                        await organizationRepository.LockOrganizationsAsync(ownerOrgIds, cancellationToken);
-
-                        foreach (Guid orgId in ownerOrgIds)
-                        {
-                            int activeOwners = await organizationMembershipRepository.CountActiveOwnersAsync(orgId, cancellationToken);
-                            if (activeOwners <= 1)
-                            {
-                                return Result.Failure(AuthErrors.User.LastOwnerOrganization);
-                            }
-                        }
-                    }
-
-                    user.IsActive = false;
-                    await userRepository.UpdateAsync(user, cancellationToken);
-                    await authSessionRepository.RevokeAllSessionsForUserAsync(userId, cancellationToken);
-                    if (ownerTransaction is not null)
-                    {
-                        await ownerTransaction.CommitAsync(cancellationToken);
-                    }
-                    await LogAuditAsync(user.Id, user.Id.ToString(), "Account_Deactivate", "Success", cancellationToken);
-                    return Result.Success();
-                }
-                finally
-                {
-                    if (ownerTransaction is not null)
-                    {
-                        await ownerTransaction.DisposeAsync();
+                        return Result.Failure(AuthErrors.User.LastOwnerOrganization);
                     }
                 }
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
+            }
+
+            user.IsActive = false;
+            await userRepository.UpdateAsync(user, cancellationToken);
+            await authSessionRepository.RevokeAllSessionsForUserAsync(userId, cancellationToken);
+            if (ownerTransaction is not null)
+            {
+                await ownerTransaction.CommitAsync(cancellationToken);
+            }
+            await LogAuditAsync(user.Id, user.Id.ToString(), "Account_Deactivate", "Success", cancellationToken);
+            return Result.Success();
+        }
+        finally
+        {
+            if (ownerTransaction is not null)
+            {
+                await ownerTransaction.DisposeAsync();
+            }
+        }
     }
 
     private Task LogAuditAsync(Guid? actorId, string target, string action, string result, CancellationToken cancellationToken) =>

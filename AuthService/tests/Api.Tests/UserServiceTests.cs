@@ -135,11 +135,8 @@ public sealed class UserServiceTests
         RecordingUserRepository repository = new() { RejectCreate = true };
         UserService service = CreateService(repository);
 
-        Result<AccountCreatedResponse> result = await service.RegisterAsync(
-            new RegisterRequest("tan.len@example.com", "Matkhau123!", "Huynh Tan Len"));
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(AuthErrors.User.EmailAlreadyExists, result.Error);
+        await Assert.ThrowsAsync<StorageConstraintViolationException>(() => service.RegisterAsync(
+            new RegisterRequest("tan.len@example.com", "Matkhau123!", "Huynh Tan Len")));
     }
 
     [Theory]
@@ -625,8 +622,7 @@ public sealed class UserServiceTests
             new FakeAuditLogRepo(),
             authSessionRepository ?? new FakeAuthSessionRepo(),
             new FakeRecoveryTokenRepo(),
-            FakeMediaUrlResolver.Instance,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<UserService>.Instance
+            FakeMediaUrlResolver.Instance
         );
     }
 

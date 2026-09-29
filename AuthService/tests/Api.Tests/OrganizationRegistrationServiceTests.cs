@@ -174,6 +174,5 @@ public sealed class OrganizationRegistrationServiceTests
             FixedCorrelationIdProvider.Instance,
             mediaServiceClient ?? new FakeMediaServiceClient { AutoVerify = true, DefaultUserId = dbContext.Users.SingleOrDefault()?.Id },
             FakeMediaUrlResolver.Instance,
-            mediaOutboxService ?? new FakeMediaOutboxService(),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationRegistrationService>.Instance);
+            mediaOutboxService ?? new FakeMediaOutboxService());
 }

@@ -88,11 +88,6 @@ internal static class JwtBearerServiceCollectionExtensions
     var result = await userService.ValidateActiveUserAsync(userId, context.HttpContext.RequestAborted);
     if (result.IsFailure)
     {
-        if (result.Error.Code == AuthErrorCode.Auth.Uncategorized)
-        {
-            throw new InvalidOperationException(result.Error.Message);
-        }
-
         context.Fail("Tài khoản không tồn tại hoặc đã bị khóa.");
     }
 },

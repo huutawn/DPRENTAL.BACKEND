@@ -23,7 +23,7 @@ public sealed class OrganizationServiceTests
         FakeMembershipRepository memRepo = new();
         FakeUserRepository userRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
 
         Guid orgId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Inactive", Slug = "inactive", Status = OrganizationStatus.Suspended };
@@ -45,7 +45,7 @@ public sealed class OrganizationServiceTests
         FakeMembershipRepository memRepo = new();
         FakeUserRepository userRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
 
         Guid orgId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
@@ -65,7 +65,7 @@ public sealed class OrganizationServiceTests
         FakeMembershipRepository memRepo = new();
         FakeUserRepository userRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
 
         Guid orgId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
@@ -88,7 +88,7 @@ public sealed class OrganizationServiceTests
         FakeMembershipRepository memRepo = new();
         FakeUserRepository userRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
 
         Guid userId = Guid.NewGuid();
         Guid activeOrgId = Guid.NewGuid();

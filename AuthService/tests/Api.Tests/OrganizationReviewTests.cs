@@ -270,8 +270,7 @@ public sealed class OrganizationReviewTests
             new EfAuditLogRepository(Db),
             TimeProvider.System,
             FixedCorrelationIdProvider.Instance,
-            FakeMediaUrlResolver.Instance,
-            NullLogger<OrganizationReviewService>.Instance);
+            FakeMediaUrlResolver.Instance);
 
         public OrganizationRegistrationService Registration => new(
             new EfOrganizationRepository(Db),
@@ -283,16 +282,13 @@ public sealed class OrganizationReviewTests
             FixedCorrelationIdProvider.Instance,
             new FakeMediaServiceClient { AutoVerify = true, DefaultUserId = OwnerId },
             FakeMediaUrlResolver.Instance,
-            new FakeMediaOutboxService(),
-            NullLogger<OrganizationRegistrationService>.Instance);
+            new FakeMediaOutboxService());
 
         public OrganizationService Organizations => new(
             new EfOrganizationRepository(Db),
             new EfOrganizationMembershipRepository(Db),
             new EfRoleRepository(Db),
-            FixedCorrelationIdProvider.Instance,
-            FakeMediaUrlResolver.Instance,
-            NullLogger<OrganizationService>.Instance);
+            FakeMediaUrlResolver.Instance);
 
         public static async Task<Fixture> CreateAsync(OrganizationStatus status = OrganizationStatus.Pending)
         {

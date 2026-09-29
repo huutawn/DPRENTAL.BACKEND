@@ -118,8 +118,8 @@ public sealed class AuthorizationMatrixTests
     [Fact]
     public async Task SuperAdminHasFullAuthorizationAcrossPlatformAndGlobalRoles()
     {
-        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
-        RoleAssignmentService roleService = new(_roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
+        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FakeMediaUrlResolver.Instance);
+        RoleAssignmentService roleService = new(_roleRepo);
 
         // 1. Can suspend/activate org
         Result suspendRes = await orgService.UpdateAsync(SuperAdminUserId, OrganizationId, new UpdateOrganizationRequest(IsActive: false));
@@ -138,8 +138,8 @@ public sealed class AuthorizationMatrixTests
     [Fact]
     public async Task PlatformAdminCanManageOrganizationsButCannotAssignOrRevokeGlobalRoles()
     {
-        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
-        RoleAssignmentService roleService = new(_roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
+        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FakeMediaUrlResolver.Instance);
+        RoleAssignmentService roleService = new(_roleRepo);
 
         // 1. Can suspend/activate org (has identity.organizations.suspend)
         Result suspendRes = await orgService.UpdateAsync(PlatformAdminUserId, OrganizationId, new UpdateOrganizationRequest(IsActive: false));
@@ -160,8 +160,8 @@ public sealed class AuthorizationMatrixTests
     [Fact]
     public async Task OwnerCannotRenameSuspendOrgOrAssignGlobalRoles()
     {
-        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
-        RoleAssignmentService roleService = new(_roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
+        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FakeMediaUrlResolver.Instance);
+        RoleAssignmentService roleService = new(_roleRepo);
 
         // 1. CANNOT rename org — tên là thông tin pháp lý đã được Platform xác minh
         Result nameRes = await orgService.UpdateAsync(OwnerUserId, OrganizationId, new UpdateOrganizationRequest(Name: "Renamed Org"));
@@ -184,7 +184,7 @@ public sealed class AuthorizationMatrixTests
     public async Task OrganizationScopedRoleCannotBeAssignedEvenBySuperAdmin()
     {
         // MVP chỉ có Owner: đổi role trong organization qua /roles có thể hạ Owner duy nhất.
-        RoleAssignmentService roleService = new(_roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<RoleAssignmentService>.Instance);
+        RoleAssignmentService roleService = new(_roleRepo);
 
         Result result = await roleService.AssignAsync(SuperAdminUserId, new AssignRoleRequest(OwnerUserId, OrgMemberRoleId));
 

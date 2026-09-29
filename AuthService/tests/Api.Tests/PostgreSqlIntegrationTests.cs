@@ -1,7 +1,7 @@
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Application.DTOs.User;
-using Dprental.AuthService.Application.Execution;
+using Dprental.AuthService.Api.Exceptions;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.Repositories;
@@ -101,7 +101,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
             Options.Create(new Application.Options.AdminBootstrapOptions { CreationKey = "bootstrap" }),
             TimeProvider.System, FixedCorrelationIdProvider.Instance,
             new EfAuditLogRepository(db), new EfAuthSessionRepository(db, TimeProvider.System),
-            new EfRecoveryTokenRepository(db), FakeMediaUrlResolver.Instance, NullLogger<UserService>.Instance);
+            new EfRecoveryTokenRepository(db), FakeMediaUrlResolver.Instance);
 
         string uniqueSuffix = Guid.NewGuid().ToString("N")[..8];
         string email = $"pg_unique_{uniqueSuffix}@example.com";
@@ -193,7 +193,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         var sessionService = new AuthSessionService(
             sessionRepo, userRepo, issuer, TimeProvider.System,
             FixedCorrelationIdProvider.Instance,
-            new EfAuditLogRepository(db), NullLogger<AuthSessionService>.Instance,
+            new EfAuditLogRepository(db),
             new Microsoft.AspNetCore.Http.HttpContextAccessor());
 
         // Tạo session ban đầu
@@ -210,7 +210,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
             var users1 = new EfUserRepository(db1);
             var s1 = new AuthSessionService(repo1, users1, issuer, TimeProvider.System,
                 FixedCorrelationIdProvider.Instance,
-                new EfAuditLogRepository(db1), NullLogger<AuthSessionService>.Instance,
+                new EfAuditLogRepository(db1),
                 new Microsoft.AspNetCore.Http.HttpContextAccessor());
             return await s1.RefreshAsync(refreshToken);
         });
@@ -222,7 +222,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
             var users2 = new EfUserRepository(db2);
             var s2 = new AuthSessionService(repo2, users2, issuer, TimeProvider.System,
                 FixedCorrelationIdProvider.Instance,
-                new EfAuditLogRepository(db2), NullLogger<AuthSessionService>.Instance,
+                new EfAuditLogRepository(db2),
                 new Microsoft.AspNetCore.Http.HttpContextAccessor());
             return await s2.RefreshAsync(refreshToken);
         });
@@ -271,7 +271,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         var sessionService = new AuthSessionService(
             sessionRepo, userRepo, new DummyAccessTokenIssuer(), TimeProvider.System,
             FixedCorrelationIdProvider.Instance,
-            new EfAuditLogRepository(db), NullLogger<AuthSessionService>.Instance,
+            new EfAuditLogRepository(db),
             new Microsoft.AspNetCore.Http.HttpContextAccessor());
 
         // Tạo 2 session cho user
@@ -284,8 +284,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
             Options.Create(new Application.Options.AdminBootstrapOptions { CreationKey = "bootstrap" }),
             TimeProvider.System, FixedCorrelationIdProvider.Instance,
             new EfAuditLogRepository(db), sessionRepo, new EfRecoveryTokenRepository(db),
-            FakeMediaUrlResolver.Instance,
-            NullLogger<UserService>.Instance);
+            FakeMediaUrlResolver.Instance);
 
         // Đổi mật khẩu
         var changeResult = await userService.ChangePasswordAsync(userId, new ChangePasswordRequest("OldPassword123!", "NewPassword123!"));
@@ -337,8 +336,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
             new EfAuditLogRepository(context),
             TimeProvider.System,
             FixedCorrelationIdProvider.Instance,
-            FakeMediaUrlResolver.Instance,
-            NullLogger<OrganizationReviewService>.Instance);
+            FakeMediaUrlResolver.Instance);
 
         // Hai admin cùng mở hàng chờ và bấm cùng lúc: một người duyệt, một người từ chối.
         Task<Result<OrganizationResponse>> approve = Task.Run(async () =>

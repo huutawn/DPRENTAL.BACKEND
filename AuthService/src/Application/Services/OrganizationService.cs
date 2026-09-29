@@ -1,6 +1,5 @@
 using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.Organization;
-using Dprental.AuthService.Application.Execution;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Mapping;
 using Dprental.AuthService.Domain.IRepositories;
@@ -9,7 +8,6 @@ using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
-using Microsoft.Extensions.Logging;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -21,9 +19,7 @@ public sealed class OrganizationService(
     IOrganizationRepository organizationRepository,
     IOrganizationMembershipRepository membershipRepository,
     IRoleRepository roleRepository,
-    ICorrelationIdProvider correlationIdProvider,
-    IMediaUrlResolver mediaUrlResolver,
-    ILogger<OrganizationService> logger) : IOrganizationService
+    IMediaUrlResolver mediaUrlResolver) : IOrganizationService
 {
     public async Task<Result<OrganizationResponse>> GetByIdAsync(
         Guid actorUserId,
@@ -36,43 +32,35 @@ public sealed class OrganizationService(
             return Result.Failure<OrganizationResponse>(AuthErrors.Organization.OrganizationNotFound);
         }
 
-        return await ApplicationExecutor.ExecuteAsync(
-            "GetOrganizationById",
-            async () =>
+        Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
+        if (org is null)
+        {
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.OrganizationNotFound);
+        }
+
+        // Hai đối tượng được xem, mỗi bên một điều kiện. Người khác nhận cùng một lỗi dù tổ chức
+        // đang ở trạng thái nào, để không lộ tổ chức đang chờ duyệt hay bị khoá.
+        if (!await CanPlatformReadAsync(actorUserId, cancellationToken) &&
+            !await IsActiveOwnerAsync(organizationId, actorUserId, cancellationToken))
+        {
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.CrossOrganizationAccessDenied);
+        }
+
+        string? logoUrl = mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId);
+        string? licenseUrl = null;
+        DateTime? licenseExpires = null;
+        if (org.BusinessLicenseDocumentMediaId.HasValue)
+        {
+            var accessResult = await mediaUrlResolver.ResolvePrivateAccessUrlAsync(org.BusinessLicenseDocumentMediaId.Value, cancellationToken);
+            if (accessResult.IsFailure)
             {
-                Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
-                if (org is null)
-                {
-                    return Result.Failure<OrganizationResponse>(AuthErrors.Organization.OrganizationNotFound);
-                }
+                return Result.Failure<OrganizationResponse>(AuthErrors.Media.ServiceUnavailable);
+            }
+            licenseUrl = accessResult.Value.Url;
+            licenseExpires = accessResult.Value.ExpiresAtUtc.UtcDateTime;
+        }
 
-                // Hai đối tượng được xem, mỗi bên một điều kiện. Người khác nhận cùng một lỗi dù tổ chức
-                // đang ở trạng thái nào, để không lộ tổ chức đang chờ duyệt hay bị khoá.
-                if (!await CanPlatformReadAsync(actorUserId, cancellationToken) &&
-                    !await IsActiveOwnerAsync(organizationId, actorUserId, cancellationToken))
-                {
-                    return Result.Failure<OrganizationResponse>(AuthErrors.Organization.CrossOrganizationAccessDenied);
-                }
-
-                string? logoUrl = mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId);
-                string? licenseUrl = null;
-                DateTime? licenseExpires = null;
-                if (org.BusinessLicenseDocumentMediaId.HasValue)
-                {
-                    var accessResult = await mediaUrlResolver.ResolvePrivateAccessUrlAsync(org.BusinessLicenseDocumentMediaId.Value, cancellationToken);
-                    if (accessResult.IsFailure)
-                    {
-                        return Result.Failure<OrganizationResponse>(AuthErrors.Media.ServiceUnavailable);
-                    }
-                    licenseUrl = accessResult.Value.Url;
-                    licenseExpires = accessResult.Value.ExpiresAtUtc.UtcDateTime;
-                }
-
-                return Result.Success(org.ToResponse(logoUrl, licenseUrl, licenseExpires));
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
+        return Result.Success(org.ToResponse(logoUrl, licenseUrl, licenseExpires));
     }
 
     public async Task<Result<PagedResult<OrganizationSummaryResponse>>> ListAsync(
@@ -97,24 +85,16 @@ public sealed class OrganizationService(
             return Result.Failure<PagedResult<OrganizationSummaryResponse>>(AuthErrors.Organization.UserNotFound);
         }
 
-        return await ApplicationExecutor.ExecuteAsync(
-            "ListOrganizations",
-            async () =>
-            {
-                // User thường xem tổ chức của mình qua GET /users/me/organizations.
-                if (!await CanPlatformReadAsync(actorUserId, cancellationToken))
-                {
-                    return Result.Failure<PagedResult<OrganizationSummaryResponse>>(AuthErrors.Organization.PlatformAdminRequired);
-                }
+        // User thường xem tổ chức của mình qua GET /users/me/organizations.
+        if (!await CanPlatformReadAsync(actorUserId, cancellationToken))
+        {
+            return Result.Failure<PagedResult<OrganizationSummaryResponse>>(AuthErrors.Organization.PlatformAdminRequired);
+        }
 
-                PagedResult<Organization> paged = await organizationRepository.GetAllAsync(request, status, cancellationToken);
+        PagedResult<Organization> paged = await organizationRepository.GetAllAsync(request, status, cancellationToken);
 
-                var items = paged.Items.Select(org => org.ToSummaryResponse(mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId))).ToList();
-                return Result.Success(new PagedResult<OrganizationSummaryResponse>(items, paged.Page, paged.PageSize, paged.TotalCount));
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
+        var items = paged.Items.Select(org => org.ToSummaryResponse(mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId))).ToList();
+        return Result.Success(new PagedResult<OrganizationSummaryResponse>(items, paged.Page, paged.PageSize, paged.TotalCount));
     }
 
     public async Task<Result> UpdateAsync(
@@ -140,92 +120,84 @@ public sealed class OrganizationService(
             return Result.Failure(AuthErrors.Organization.InvalidName);
         }
 
-        return await ApplicationExecutor.ExecuteAsync(
-            "UpdateOrganization",
-            async () =>
+        Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
+        if (org is null)
+        {
+            return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
+        }
+
+        IReadOnlyList<string> globalPerms = await GetGlobalPermissionsAsync(actorUserId, cancellationToken);
+        bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
+
+        if (request.IsActive.HasValue && !canManageSuspended)
+        {
+            return Result.Failure(AuthErrors.Organization.PlatformAdminRequired);
+        }
+
+        if (org.Status != OrganizationStatus.Active && !canManageSuspended)
+        {
+            return Result.Failure(InactiveError(org));
+        }
+
+        bool isPlatformEditor = globalPerms.Contains(PermissionCode.IdentityOrganizationsUpdate, StringComparer.Ordinal);
+        if (!isPlatformEditor)
+        {
+            OrganizationMembership? actorMembership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
+            if (actorMembership is null || actorMembership.Status != MembershipStatus.Active)
             {
-                Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
-                if (org is null)
-                {
-                    return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
-                }
+                return Result.Failure(AuthErrors.Organization.CrossOrganizationAccessDenied);
+            }
 
-                IReadOnlyList<string> globalPerms = await GetGlobalPermissionsAsync(actorUserId, cancellationToken);
-                bool canManageSuspended = globalPerms.Contains(PermissionCode.IdentityOrganizationsSuspend, StringComparer.Ordinal);
+            IReadOnlyList<string> actorEffectivePerms = await GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
+            if (!actorEffectivePerms.Contains(PermissionCode.IdentityOrganizationsUpdate, StringComparer.Ordinal))
+            {
+                return Result.Failure(AuthErrors.Organization.Forbidden);
+            }
+        }
 
-                if (request.IsActive.HasValue && !canManageSuspended)
-                {
-                    return Result.Failure(AuthErrors.Organization.PlatformAdminRequired);
-                }
+        bool nameChanged = trimmedName is not null && !string.Equals(trimmedName, org.Name, StringComparison.Ordinal);
+        bool activeChanged = request.IsActive.HasValue && request.IsActive.Value != (org.Status == OrganizationStatus.Active);
 
-                if (org.Status != OrganizationStatus.Active && !canManageSuspended)
-                {
-                    return Result.Failure(InactiveError(org));
-                }
+        // Tên là thông tin pháp lý Platform đã xác minh khi duyệt — Owner không tự đổi, giống PUT /profile.
+        if (nameChanged && !isPlatformEditor)
+        {
+            return Result.Failure(AuthErrors.Organization.LegalInfoLocked);
+        }
 
-                bool isPlatformEditor = globalPerms.Contains(PermissionCode.IdentityOrganizationsUpdate, StringComparer.Ordinal);
-                if (!isPlatformEditor)
-                {
-                    OrganizationMembership? actorMembership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
-                    if (actorMembership is null || actorMembership.Status != MembershipStatus.Active)
-                    {
-                        return Result.Failure(AuthErrors.Organization.CrossOrganizationAccessDenied);
-                    }
+        if (!nameChanged && !activeChanged)
+        {
+            return Result.Failure(AuthErrors.Organization.NoOpPatch);
+        }
 
-                    IReadOnlyList<string> actorEffectivePerms = await GetEffectivePermissionsAsync(actorUserId, organizationId, cancellationToken);
-                    if (!actorEffectivePerms.Contains(PermissionCode.IdentityOrganizationsUpdate, StringComparer.Ordinal))
-                    {
-                        return Result.Failure(AuthErrors.Organization.Forbidden);
-                    }
-                }
+        OrganizationStatus? newStatus = null;
+        if (activeChanged)
+        {
+            // Pending -> Active chỉ đi qua PATCH /approve để luôn ghi lại người duyệt.
+            newStatus = (request.IsActive!.Value, org.Status) switch
+            {
+                (true, OrganizationStatus.Suspended) => OrganizationStatus.Active,
+                (false, OrganizationStatus.Active) => OrganizationStatus.Suspended,
+                _ => null
+            };
 
-                bool nameChanged = trimmedName is not null && !string.Equals(trimmedName, org.Name, StringComparison.Ordinal);
-                bool activeChanged = request.IsActive.HasValue && request.IsActive.Value != (org.Status == OrganizationStatus.Active);
+            if (newStatus is null)
+            {
+                return Result.Failure(AuthErrors.Organization.InvalidStateTransition);
+            }
+        }
 
-                // Tên là thông tin pháp lý Platform đã xác minh khi duyệt — Owner không tự đổi, giống PUT /profile.
-                if (nameChanged && !isPlatformEditor)
-                {
-                    return Result.Failure(AuthErrors.Organization.LegalInfoLocked);
-                }
+        if (nameChanged)
+        {
+            org.Name = trimmedName!;
+        }
 
-                if (!nameChanged && !activeChanged)
-                {
-                    return Result.Failure(AuthErrors.Organization.NoOpPatch);
-                }
+        if (newStatus.HasValue)
+        {
+            org.Status = newStatus.Value;
+        }
 
-                OrganizationStatus? newStatus = null;
-                if (activeChanged)
-                {
-                    // Pending -> Active chỉ đi qua PATCH /approve để luôn ghi lại người duyệt.
-                    newStatus = (request.IsActive!.Value, org.Status) switch
-                    {
-                        (true, OrganizationStatus.Suspended) => OrganizationStatus.Active,
-                        (false, OrganizationStatus.Active) => OrganizationStatus.Suspended,
-                        _ => null
-                    };
-
-                    if (newStatus is null)
-                    {
-                        return Result.Failure(AuthErrors.Organization.InvalidStateTransition);
-                    }
-                }
-
-                if (nameChanged)
-                {
-                    org.Name = trimmedName!;
-                }
-
-                if (newStatus.HasValue)
-                {
-                    org.Status = newStatus.Value;
-                }
-
-                await organizationRepository.UpdateAsync(org, cancellationToken);
-                return Result.Success();
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
+        await organizationRepository.UpdateAsync(org, cancellationToken);
+        return Result.Success();
     }
 
     public async Task<Result<IReadOnlyList<MyOrganizationResponse>>> GetMyOrganizationsAsync(
@@ -237,33 +209,25 @@ public sealed class OrganizationService(
             return Result.Failure<IReadOnlyList<MyOrganizationResponse>>(AuthErrors.User.NotFound);
         }
 
-        return await ApplicationExecutor.ExecuteAsync(
-            "GetMyOrganizations",
-            async () =>
-            {
-                IReadOnlyList<OrganizationMembership> memberships = await membershipRepository.GetMembershipsForUserAsync(userId, cancellationToken);
+        IReadOnlyList<OrganizationMembership> memberships = await membershipRepository.GetMembershipsForUserAsync(userId, cancellationToken);
 
-                IReadOnlyList<MyOrganizationResponse> result = memberships
-                    .Where(m => m.Status == MembershipStatus.Active)
-                    .OrderBy(m => m.JoinedAtUtc)
-                    .ThenBy(m => m.Id)
-                    .Select(m => new MyOrganizationResponse(
-                        m.Id,
-                        m.OrganizationId,
-                        m.Organization?.Name ?? string.Empty,
-                        m.Organization?.Slug ?? string.Empty,
-                        m.Organization?.Type ?? OrganizationType.Supplier,
-                        m.Organization?.Status ?? OrganizationStatus.Active,
-                        m.Role?.Name ?? string.Empty,
-                        m.Status,
-                        m.JoinedAtUtc))
-                    .ToList();
+        IReadOnlyList<MyOrganizationResponse> result = memberships
+            .Where(m => m.Status == MembershipStatus.Active)
+            .OrderBy(m => m.JoinedAtUtc)
+            .ThenBy(m => m.Id)
+            .Select(m => new MyOrganizationResponse(
+                m.Id,
+                m.OrganizationId,
+                m.Organization?.Name ?? string.Empty,
+                m.Organization?.Slug ?? string.Empty,
+                m.Organization?.Type ?? OrganizationType.Supplier,
+                m.Organization?.Status ?? OrganizationStatus.Active,
+                m.Role?.Name ?? string.Empty,
+                m.Status,
+                m.JoinedAtUtc))
+            .ToList();
 
-                return Result.Success(result);
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
+        return Result.Success(result);
     }
 
     /// <summary>Platform (admin, ops) xem được mọi tổ chức ở mọi trạng thái.</summary>

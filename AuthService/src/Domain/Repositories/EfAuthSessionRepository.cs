@@ -30,7 +30,7 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
     public async Task RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
-            
+
         List<Session> sessions = await dbContext.Sessions
             .Where(session => session.UserId == userId && session.RevokedAtUtc == null)
             .ToListAsync(cancellationToken);
@@ -136,7 +136,7 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         DateTime utcNow,
         CancellationToken cancellationToken)
     {
-        
+
         RefreshToken? currentToken = await dbContext.RefreshTokens
             .AsNoTracking()
             .Include(token => token.Session)
@@ -333,8 +333,17 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         return true;
     }
 
-    private Task<int> RevokeSessionAsync(Guid sessionId, DateTime utcNow, CancellationToken cancellationToken) =>
-        dbContext.Sessions
-            .Where(session => session.Id == sessionId && session.RevokedAtUtc == null)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(session => session.RevokedAtUtc, utcNow), cancellationToken);
+    private async Task<int> RevokeSessionAsync(Guid sessionId, DateTime utcNow, CancellationToken cancellationToken)
+    {
+        Session? session = await dbContext.Sessions
+            .FirstOrDefaultAsync(item => item.Id == sessionId && item.RevokedAtUtc == null, cancellationToken);
+        if (session is null)
+        {
+            return 0;
+        }
+
+        session.RevokedAtUtc = utcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return 1;
+    }
 }

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Dprental.AuthService.Common;
 
 using Dprental.AuthService.Application.DTOs.Auth;
@@ -21,6 +22,23 @@ public sealed class AdminBootstrapEndpointTests
 {
     private const string ConfiguredBootstrapKey = "test-admin-bootstrap-secret-key-12345";
     private static readonly Guid AdminRoleId = new("fba7cef9-3ad7-49f5-8c2b-f9364945fcc4");
+
+    [Fact]
+    public async Task AdminCreationIsHiddenFromSwaggerButEndpointRemainsAvailable()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage swaggerResponse = await client.GetAsync("/swagger/v1/swagger.json");
+        Assert.Equal(HttpStatusCode.OK, swaggerResponse.StatusCode);
+        using JsonDocument swagger = JsonDocument.Parse(await swaggerResponse.Content.ReadAsStringAsync());
+        Assert.False(swagger.RootElement.GetProperty("paths").TryGetProperty("/api/v1/auth/admins", out _));
+
+        using HttpResponseMessage endpointResponse = await client.PostAsJsonAsync(
+            "/api/v1/auth/admins",
+            new RegisterAdminRequest("admin@example.com", "Password123!", "Admin"));
+        Assert.Equal(HttpStatusCode.Unauthorized, endpointResponse.StatusCode);
+    }
 
     [Fact]
     public async Task PostAdminMissingKeyHeaderReturnsUnauthorized401()

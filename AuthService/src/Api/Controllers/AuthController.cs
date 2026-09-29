@@ -42,6 +42,7 @@ public sealed class AuthController(
 
     /// <summary>Tạo tài khoản quản trị bằng khóa khởi tạo bảo mật.</summary>
     [HttpPost("admins")]
+    [ApiExplorerSettings(IgnoreApi = true)]
     [ProducesResponseType<AccountCreatedResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
