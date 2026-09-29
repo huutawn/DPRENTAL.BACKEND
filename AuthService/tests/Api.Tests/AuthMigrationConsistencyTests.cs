@@ -31,7 +31,7 @@ public sealed class AuthMigrationConsistencyTests
         await ctx.Database.EnsureDeletedAsync();
 
         IEnumerable<string> pendingBefore = await ctx.Database.GetPendingMigrationsAsync();
-        Assert.Equal(25, pendingBefore.Count());
+        Assert.Equal(26, pendingBefore.Count());
 
         await ctx.Database.MigrateAsync();
 
@@ -45,7 +45,7 @@ public sealed class AuthMigrationConsistencyTests
         Assert.Equal(3, legacyColumns);
 
         IEnumerable<string> applied = await ctx.Database.GetAppliedMigrationsAsync();
-        Assert.Equal(25, applied.Count());
+        Assert.Equal(26, applied.Count());
 
         IEnumerable<string> pendingAfter = await ctx.Database.GetPendingMigrationsAsync();
         Assert.Empty(pendingAfter);
@@ -54,7 +54,7 @@ public sealed class AuthMigrationConsistencyTests
         await ctx.Database.MigrateAsync();
 
         IEnumerable<string> appliedAfterReapply = await ctx.Database.GetAppliedMigrationsAsync();
-        Assert.Equal(25, appliedAfterReapply.Count());
+        Assert.Equal(26, appliedAfterReapply.Count());
 
         await ctx.Database.EnsureDeletedAsync();
     }
