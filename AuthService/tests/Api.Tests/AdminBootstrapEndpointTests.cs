@@ -5,7 +5,6 @@ using Dprental.AuthService.Common;
 
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;

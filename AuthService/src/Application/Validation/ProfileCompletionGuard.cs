@@ -1,7 +1,7 @@
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.Entities;
 
-namespace Dprental.AuthService.Application.Rules;
+namespace Dprental.AuthService.Application.Validation;
 
 /// <summary>Kiểm tra điều kiện hoàn thiện hồ sơ định danh trước khi thực hiện các nghiệp vụ yêu cầu định danh.</summary>
 internal static class ProfileCompletionGuard

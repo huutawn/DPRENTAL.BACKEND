@@ -4,7 +4,7 @@ using Dprental.AuthService.Application.DTOs.Media;
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Application.Options;
-using Dprental.AuthService.Application.Rules;
+using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Application.Validators;
 using Dprental.AuthService.Common;

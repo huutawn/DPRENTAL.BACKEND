@@ -8,7 +8,6 @@ using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Utils;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Models;
 using Microsoft.Extensions.Logging;
 
 namespace Dprental.AuthService.Application.Services;

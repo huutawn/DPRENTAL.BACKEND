@@ -1,4 +1,4 @@
-using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Application.DTOs.Auth;
 
 namespace Dprental.AuthService.Application.IServices;
 

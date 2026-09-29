@@ -6,7 +6,6 @@ using Dprental.AuthService.Application.Mapping;
 using Dprental.AuthService.Application.Options;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Application.DTOs.Auth;
-using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authorization;
