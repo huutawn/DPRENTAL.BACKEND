@@ -1,4 +1,4 @@
-using Dprental.AuthService.Domain.Models;
+using Dprental.AuthService.Application.Options;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;

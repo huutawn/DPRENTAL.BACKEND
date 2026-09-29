@@ -11,7 +11,6 @@ using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Domain.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;

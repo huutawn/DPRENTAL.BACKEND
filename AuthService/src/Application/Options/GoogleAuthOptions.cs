@@ -1,4 +1,4 @@
-namespace Dprental.AuthService.Domain.Models;
+namespace Dprental.AuthService.Application.Options;
 
 /// <summary>Cấu hình đăng nhập Google (OAuth 2.0 / OpenID Connect) lấy từ section <c>Auth:Google</c>.</summary>
 public sealed class GoogleAuthOptions
