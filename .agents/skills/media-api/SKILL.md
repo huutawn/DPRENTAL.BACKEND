@@ -5,7 +5,7 @@ description: Change MediaService HTTP routes, client contracts, middleware, or A
 
 # MediaService API work
 
-Read the repository `AGENTS.md` and the numbered product document for the affected capability. Inspect the existing route, request and response types, its Application call, authorization setup, error mapping, and endpoint tests before editing.
+Read the repository `AGENTS.md` and relevant documentation for the affected capability. Inspect the existing route, request and response types, its Application call, authorization setup, error mapping, and endpoint tests before editing.
 
 ## Boundary
 
@@ -17,4 +17,4 @@ Read the repository `AGENTS.md` and the numbered product document for the affect
 
 ## Finish the change
 
-Test the observable status, body, and authorization behavior for success, malformed input, denied access, and dependency failure where relevant. Check that no new route duplicates an existing use case and that the published contract and product document agree.
+Test the observable status, body, and authorization behavior for success, malformed input, denied access, and dependency failure where relevant. Check that no new route duplicates an existing use case and that the published contract and documentation agree.

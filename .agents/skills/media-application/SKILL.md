@@ -5,7 +5,7 @@ description: Implement MediaService use cases, validation, authorization, state 
 
 # MediaService Application work
 
-Read `AGENTS.md` and the relevant numbered product document. Trace each caller and the Domain contracts used by the current use case before editing. Keep one use-case path for each behavior.
+Read `AGENTS.md` and relevant documentation. Trace each caller and the Domain contracts used by the current use case before editing. Keep one use-case path for each behavior.
 
 ## Use-case workflow
 

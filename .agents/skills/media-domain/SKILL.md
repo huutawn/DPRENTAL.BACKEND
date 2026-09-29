@@ -5,7 +5,7 @@ description: Change MediaService data models, repository or object-storage adapt
 
 # MediaService Domain and infrastructure work
 
-Read `AGENTS.md`, the affected product document, existing Domain contracts and adapters, and their Application callers. Keep persistence and MinIO code in the existing Domain project; do not introduce a fifth production project.
+Read `AGENTS.md`, relevant documentation, existing Domain contracts and adapters, and their Application callers. Keep persistence and MinIO code in the existing Domain project; do not introduce a fifth production project.
 
 ## Storage boundary
 
