@@ -49,13 +49,13 @@ public sealed class UserServiceTests
         UserService service = CreateService(repository);
 
         Result<AccountCreatedResponse> result = await service.RegisterAsync(
-            new RegisterRequest("a@example.com", "Matkhau123!", "A", "https://cdn.example.com/a.png", "0901234567", new DateOnly(2000, 1, 1)));
+            new RegisterRequest("a@example.com", "Matkhau123!", "A", "0901234567", new DateOnly(2000, 1, 1)));
 
         Assert.True(result.IsSuccess);
         User created = Assert.Single(repository.CreatedUsers);
         // Đăng ký không thu thập CCCD — chỉ được set sau, qua đăng ký tổ chức hoặc hoàn thiện hồ sơ để thuê cá nhân.
         Assert.Null(created.CitizenId);
-        Assert.Equal("https://cdn.example.com/a.png", created.AvatarUrl);
+        Assert.Null(created.AvatarMediaId);
         Assert.Equal("0901234567", created.PhoneNumber);
         Assert.Equal(new DateOnly(2000, 1, 1), created.DateOfBirth);
     }
@@ -81,14 +81,16 @@ public sealed class UserServiceTests
         // CitizenId được set trực tiếp trên entity — mô phỏng trạng thái sau khi user đã hoàn thiện hồ sơ
         // hoặc đăng ký tổ chức (đăng ký customer không thu thập CCCD).
         Guid userId = Guid.NewGuid();
-        User user = new() { Id = userId, Email = "a@example.com", FullName = "A", CitizenId = "079203001234", AvatarUrl = "https://cdn.example.com/a.png", IsActive = true };
+        Guid avatarId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "a@example.com", FullName = "A", CitizenId = "079203001234", AvatarMediaId = avatarId, IsActive = true };
         UserService service = CreateService(new RecordingUserRepository { ProfileUser = user });
 
         Result<CurrentUserResponse> result = await service.GetCurrentUserProfileAsync(userId);
 
         Assert.True(result.IsSuccess);
         Assert.Equal("********1234", result.Value.MaskedCitizenId);
-        Assert.Equal("https://cdn.example.com/a.png", result.Value.AvatarUrl);
+        Assert.Equal(avatarId, result.Value.AvatarMediaId);
+        Assert.Equal($"http://localhost:5050/api/v1/media/{avatarId:D}/content", result.Value.AvatarUrl);
     }
 
     [Fact]
@@ -326,6 +328,7 @@ public sealed class UserServiceTests
             new FakeAuditLogRepo(),
             new FakeAuthSessionRepo(),
             new FakeRecoveryTokenRepo(),
+            FakeMediaUrlResolver.Instance,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<UserService>.Instance
         );
     }

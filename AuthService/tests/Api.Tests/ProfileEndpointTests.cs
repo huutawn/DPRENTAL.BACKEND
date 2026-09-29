@@ -1,3 +1,4 @@
+using Dprental.AuthService.Application.Clients;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -37,7 +38,7 @@ public sealed class ProfileEndpointTests
             PhoneNumber: "0901234567",
             DateOfBirth: new DateOnly(2000, 1, 1),
             FullName: "Complete Name",
-            AvatarUrl: "https://example.com/pic.png");
+            AvatarMediaId: Guid.Parse("11111111-1111-1111-1111-111111111111"));
 
         using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/users/me", request);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -82,7 +83,7 @@ public sealed class ProfileEndpointTests
             Address: "123 Street",
             Province: "HCM",
             Ward: "Ben Nghe",
-            BusinessLicenseDocumentUrl: "https://example.com/license.pdf");
+            BusinessLicenseDocumentMediaId: Guid.Parse("22222222-2222-2222-2222-222222222222"));
 
         using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/organizations/register", request);
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -92,22 +93,24 @@ public sealed class ProfileEndpointTests
     }
 
     [Fact]
-    public async Task UpdateProfileUpdatesFieldsAndEmptyAvatarClearsAvatar()
+    public async Task UpdateProfileUpdatesFieldsAndRemoveAvatarClearsAvatar()
     {
         Guid userId = Guid.NewGuid();
+        Guid oldMediaId = Guid.NewGuid();
         using WebApplicationFactory<Program> factory = CreateFactory();
-        await SeedUserAsync(factory, userId, isCompleted: true, avatarUrl: "https://example.com/old.png");
+        await SeedUserAsync(factory, userId, isCompleted: true, avatarMediaId: oldMediaId);
         using HttpClient client = CreateAuthenticatedClient(factory, userId);
 
         UpdateProfileRequest request = new(
             FullName: "Patched Name",
-            AvatarUrl: "");
+            RemoveAvatar: true);
 
         using HttpResponseMessage response = await client.PatchAsJsonAsync("/api/v1/auth/users/me", request);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("Patched Name", document.RootElement.GetProperty("fullName").GetString());
+        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("avatarMediaId").ValueKind);
         Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("avatarUrl").ValueKind);
     }
 
@@ -124,7 +127,7 @@ public sealed class ProfileEndpointTests
         WebApplicationFactory<Program> factory,
         Guid userId,
         bool isCompleted,
-        string? avatarUrl = null)
+        Guid? avatarMediaId = null)
     {
         using IServiceScope scope = factory.Services.CreateScope();
         AuthDbContext dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
@@ -136,7 +139,7 @@ public sealed class ProfileEndpointTests
             FullName = "Seed User",
             PasswordHash = "hash",
             CreatedAt = DateTime.UtcNow,
-            AvatarUrl = avatarUrl,
+            AvatarMediaId = avatarMediaId,
             IsActive = true,
             ProfileCompletedAtUtc = isCompleted ? DateTime.UtcNow : null,
             CitizenId = isCompleted ? "079203009999" : null,
@@ -146,6 +149,7 @@ public sealed class ProfileEndpointTests
 
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
+        ((FakeMediaServiceClient)scope.ServiceProvider.GetRequiredService<IMediaServiceClient>()).DefaultUserId = userId;
     }
 
     private static async Task SeedOwnerRoleAsync(WebApplicationFactory<Program> factory)
@@ -168,6 +172,8 @@ public sealed class ProfileEndpointTests
 
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("MediaService:ApiKey", "test-media-key");
+            builder.UseSetting("MediaService:PublicGatewayUrl", "http://gateway.example.test");
             builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
             builder.ConfigureAppConfiguration((_, configurationBuilder) =>
             {
@@ -186,6 +192,8 @@ public sealed class ProfileEndpointTests
                 services.RemoveAll<DbContextOptions<AuthDbContext>>();
                 services.RemoveAll<IDbContextOptionsConfiguration<AuthDbContext>>();
                 services.AddDbContext<AuthDbContext>(options => options.UseInMemoryDatabase(inMemoryDatabaseName));
+                services.RemoveAll<IMediaServiceClient>();
+                services.AddSingleton<IMediaServiceClient>(new FakeMediaServiceClient { AutoVerify = true });
             });
         });
     }

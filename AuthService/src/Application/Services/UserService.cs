@@ -1,6 +1,7 @@
-using AuthService.Application.DTOs.User;
-using AuthService.Domain.DTOs.User;
-using Dprental.AuthService.Application.DTOs;
+using Dprental.AuthService.Application.Clients;
+using System.Diagnostics.CodeAnalysis;
+using System.Security.Cryptography;
+using System.Text;
 using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Application.Execution;
@@ -38,6 +39,7 @@ public sealed class UserService(
     IAuditLogRepository auditLogRepository,
     IAuthSessionRepository authSessionRepository,
     IRecoveryTokenRepository recoveryTokenRepository,
+    IMediaUrlResolver mediaUrlResolver,
     ILogger<UserService> logger) : IUserService
 {
     public async Task<Result<AccountCreatedResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
@@ -403,46 +405,14 @@ public sealed class UserService(
                     return Result.Failure<CurrentUserResponse>(AuthErrors.User.NotFound);
                 }
 
-                return Result.Success(user.ToCurrentUserResponse());
+                string? avatarUrl = mediaUrlResolver.ResolvePublicUrl(user.AvatarMediaId);
+                return Result.Success(user.ToCurrentUserResponse(avatarUrl));
             },
             logger,
             correlationIdProvider,
             cancellationToken);
     }
 
-    public async Task<Result> UpdateUserProfileAsync(Guid userId, UpdateUserProfileRequest request, CancellationToken cancellationToken = default)
-    {
-        if (!DtoValidator.TryValidateId(userId, nameof(userId), out Error? userError))
-        {
-            return Result.Failure(userError);
-        }
-
-        if (!DtoValidator.TryValidate(request, out Error? validationError))
-        {
-            return Result.Failure(validationError);
-        }
-
-        return await ApplicationExecutor.ExecuteAsync(
-            "UpdateUserProfile",
-            async () =>
-            {
-                User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
-                if (user is null)
-                {
-                    return Result.Failure(AuthErrors.User.NotFound);
-                }
-
-                user.FullName = request.FullName.Trim();
-                user.PhoneNumber = request.PhoneNumber?.Trim();
-                user.AvatarUrl = request.AvatarUrl?.Trim();
-
-                await userRepository.UpdateAsync(user, cancellationToken);
-                return Result.Success();
-            },
-            logger,
-            correlationIdProvider,
-            cancellationToken);
-    }
 
     public async Task<Result<AdminUserDetailDto>> GetUserByIdAsync(Guid userId, CancellationToken cancellationToken = default)
     {
@@ -461,12 +431,14 @@ public sealed class UserService(
                     return Result.Failure<AdminUserDetailDto>(AuthErrors.User.NotFound);
                 }
 
+                string? avatarUrl = mediaUrlResolver.ResolvePublicUrl(user.AvatarMediaId);
                 var detailDto = new AdminUserDetailDto(
                     user.Id,
                     user.Email,
                     user.FullName,
                     user.PhoneNumber,
-                    user.AvatarUrl,
+                    user.AvatarMediaId,
+                    avatarUrl,
                     user.IsActive,
                     user.CreatedAt,
                     UserAccessResolver.Roles(user)

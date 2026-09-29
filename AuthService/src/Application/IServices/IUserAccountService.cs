@@ -12,6 +12,9 @@ public interface IUserAccountService
     /// <summary>Cập nhật thông tin hồ sơ cá nhân sau khi đã hoàn thiện.</summary>
     Task<Result<CurrentUserResponse>> UpdateProfileAsync(Guid userId, UpdateProfileRequest request, CancellationToken cancellationToken = default);
 
+    /// <summary>Cập nhật hồ sơ người dùng hiện tại qua endpoint PUT /me.</summary>
+    Task<Result<CurrentUserResponse>> UpdateUserProfileAsync(Guid userId, Dprental.AuthService.Domain.DTOs.User.UpdateUserProfileRequest request, CancellationToken cancellationToken = default);
+
     /// <summary>Lấy danh sách các liên kết đăng nhập bên ngoài của người dùng.</summary>
     Task<Result<IReadOnlyList<ExternalLoginResponse>>> GetExternalLoginsAsync(Guid userId, CancellationToken cancellationToken = default);
 

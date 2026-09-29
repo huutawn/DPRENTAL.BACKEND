@@ -23,7 +23,7 @@ public sealed class OrganizationServiceTests
         FakeMembershipRepository memRepo = new();
         FakeUserRepository userRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
 
         Guid orgId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Inactive", Slug = "inactive", Status = OrganizationStatus.Suspended };
@@ -45,7 +45,7 @@ public sealed class OrganizationServiceTests
         FakeMembershipRepository memRepo = new();
         FakeUserRepository userRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
 
         Guid orgId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
@@ -65,7 +65,7 @@ public sealed class OrganizationServiceTests
         FakeMembershipRepository memRepo = new();
         FakeUserRepository userRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
 
         Guid orgId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
@@ -88,7 +88,7 @@ public sealed class OrganizationServiceTests
         FakeMembershipRepository memRepo = new();
         FakeUserRepository userRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
+        OrganizationService service = new(orgRepo, memRepo, roleRepo, FixedCorrelationIdProvider.Instance, FakeMediaUrlResolver.Instance, Microsoft.Extensions.Logging.Abstractions.NullLogger<OrganizationService>.Instance);
 
         Guid userId = Guid.NewGuid();
         Guid activeOrgId = Guid.NewGuid();
@@ -140,7 +140,7 @@ public sealed class OrganizationServiceTests
         PermissionCode.IdentityRolesRead
 ];
 
-    private sealed class FakeOrganizationRepository : IOrganizationRepository
+    internal sealed class FakeOrganizationRepository : IOrganizationRepository
     {
         public Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default) =>
             Task.FromResult(false);
@@ -193,7 +193,7 @@ public sealed class OrganizationServiceTests
         public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) => Task.FromResult(IExecutionTransaction.None);
     }
 
-    private sealed class FakeMembershipRepository : IOrganizationMembershipRepository
+    internal sealed class FakeMembershipRepository : IOrganizationMembershipRepository
     {
         public List<OrganizationMembership> Memberships { get; } = [];
         public Dictionary<Guid, IReadOnlyList<string>> GlobalPermissions { get; } = [];
@@ -246,7 +246,7 @@ public sealed class OrganizationServiceTests
         public Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult(Users.TryGetValue(userId, out var u) && u.IsActive);
     }
 
-    private sealed class FakeRoleRepository : IRoleRepository
+    internal sealed class FakeRoleRepository : IRoleRepository
     {
         public Dictionary<Guid, Role> Roles { get; } = [];
         public Dictionary<Guid, IReadOnlyList<string>> RolePermissions { get; } = [];

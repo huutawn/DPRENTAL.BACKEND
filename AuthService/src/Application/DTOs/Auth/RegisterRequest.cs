@@ -11,7 +11,6 @@ public sealed record RegisterRequest(
     [Required, EmailAddress, StringLength(254)] string Email,
     [Required, StringLength(128, MinimumLength = 8)] string Password,
     [Required, StringLength(100)] string FullName,
-    [OptionalUrl, StringLength(500)] string? AvatarUrl = null,
     [RegularExpression(RegistrationPatterns.PhoneNumber, ErrorMessage = "Số điện thoại không hợp lệ.")] string? PhoneNumber = null,
     DateOnly? DateOfBirth = null);
 

@@ -343,6 +343,7 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
             new RecordingAuditLogRepo(),
             new RecordingSessionRepo(),
             new RecordingRecoveryTokenRepo(),
+            FakeMediaUrlResolver.Instance,
             logger ?? new TestLogger<UserService>());
     }
 

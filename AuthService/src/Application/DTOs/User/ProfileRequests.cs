@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Dprental.AuthService.Application.DTOs.Auth;
+using Dprental.AuthService.Application.Validation;
 
 namespace Dprental.AuthService.Application.DTOs.User;
 
@@ -9,11 +10,12 @@ public sealed record CompleteProfileRequest(
     [Required, RegularExpression(RegistrationPatterns.PhoneNumber, ErrorMessage = "Số điện thoại không hợp lệ.")] string PhoneNumber,
     [Required] DateOnly? DateOfBirth,
     [StringLength(100, MinimumLength = 1)] string? FullName = null,
-    [OptionalUrl, StringLength(500)] string? AvatarUrl = null);
+    [NonEmptyGuid] Guid? AvatarMediaId = null);
 
 /// <summary>Yêu cầu cập nhật hồ sơ cá nhân sau khi đã hoàn thiện.</summary>
 public sealed record UpdateProfileRequest(
     [StringLength(100, MinimumLength = 1)] string? FullName = null,
     [RegularExpression(RegistrationPatterns.PhoneNumber, ErrorMessage = "Số điện thoại không hợp lệ.")] string? PhoneNumber = null,
     DateOnly? DateOfBirth = null,
-    [OptionalUrl, StringLength(500)] string? AvatarUrl = null);
+    [NonEmptyGuid] Guid? AvatarMediaId = null,
+    bool RemoveAvatar = false);
