@@ -1,4 +1,4 @@
-using Dprental.Gateway.Application.Security;
+using Dprental.Gateway.Security;
 using Microsoft.Extensions.Options;
 using Xunit;
 

@@ -13,6 +13,6 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/ApiGateway/ApiGateway.csproj" />
+    <ProjectReference Include="../../ocelot/ocelot.csproj" />
   </ItemGroup>
 </Project>

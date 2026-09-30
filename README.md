@@ -2,35 +2,19 @@
 
 API Gateway .NET 10 cho DPRENTAL. Gateway chỉ là reverse proxy và security boundary bổ sung; không chứa nghiệp vụ hoặc tham chiếu project tới service khác.
 
-## Cấu trúc Clean Architecture
+## Cấu trúc Project
 
-Gateway được tổ chức theo kiến trúc Clean Architecture rõ ràng:
+Gateway được tổ chức thành project chạy Ocelot và project kiểm thử riêng biệt:
 
 ```text
-Gateway/src/ApiGateway/
-  Domain/
-    Security/        # Hằng số header (GatewayHeaderConstants), IdentityContext, IIdentityContextAccessor
-    Traffic/         # Tên chính sách điều phối (TrafficPolicyNames)
-    Observability/   # Tên metric chuẩn hóa (GatewayMetricNames), IGatewayMetrics
-  Application/
-    Security/        # Cấu hình GatewaySecurityOptions, Validator, IHeaderSanitizer, IIdentityExtractor
-    Traffic/         # Cấu hình GatewayTrafficOptions, Validator
-    Observability/   # Cấu hình GatewayObservabilityOptions, Validator
-  Infrastructure/
-    Security/
-      Middlewares/   # HeaderSanitization, GatewayCors, RequestSizeProtection, SecurityHeaders
-      DelegatingHandlers/ # TrustedIdentityDelegatingHandler, GatewayCorsDelegatingHandler cho Ocelot
-      ForwardedHeaders/ # Cấu hình mạng tin cậy CIDR và KnownProxies
-    Traffic/
-      RateLimiting/  # GatewayRateLimitingConfiguration phân vùng Anonymous, Authenticated, Sensitive
-    Observability/   # GatewayRequestLoggingMiddleware, GatewayMetrics, GatewayMetricsMiddleware
-  Security/          # Extension methods đăng ký DI và Middleware Pipeline Bảo mật
-  Traffic/           # Extension methods đăng ký DI và Middleware Pipeline Điều phối lưu lượng
-  Observability/     # DistributedTracing, RequestLogging, Metrics DI & Middleware
-  Authentication/    # JWT RS256 và JWKS của AuthService
-  Health/            # Health checks (JwksReadinessHealthCheck, GatewayConfigurationHealthCheck)
-  Proxy/             # Ocelot composition và configuration validation
-Gateway/tests/ApiGateway.Tests/
+Gateway/
+  ocelot/
+    Authentication/    # JWT RS256 và JWKS của AuthService, ApiKeyRoutePolicy
+    Errors/            # GatewayError, GatewayExceptionMiddleware, Error response writer
+    Health/            # Health checks (JwksReadinessHealthCheck, GatewayConfigurationHealthCheck)
+    Proxy/             # Ocelot composition và configuration validation
+    Security/          # IdentityContext, IdentityExtractor, Security middlewares, DelegatingHandlers, HeaderSanitizer, GatewayHeaderConstants, GatewaySecurityOptions
+  tests/ApiGateway.Tests/
 ```
 Gateway nhận JWT được AuthService ký và chỉ tải public key từ JWKS. Không đặt private key, token, hoặc password vào `appsettings*.json`.
 
@@ -38,7 +22,7 @@ Gateway nhận JWT được AuthService ký và chỉ tải public key từ JWKS
 
 ### Chạy automated test suite
 
-Chạy toàn bộ bộ kiểm thử tự động (unit tests và integration tests bao gồm JWT, CORS, Rate Limit, Timeout):
+Chạy toàn bộ bộ kiểm thử tự động (unit tests và integration tests bao gồm JWT, CORS, Timeout):
 
 ```bash
 dotnet test Gateway/Gateway.sln
@@ -49,10 +33,10 @@ dotnet test Gateway/Gateway.sln
 Khởi động AuthService tại `http://localhost:64837` (cổng HTTP chuẩn theo `launchSettings.json` của AuthService), sau đó khởi động Gateway với môi trường `Development`:
 
 ```bash
-ASPNETCORE_ENVIRONMENT=Development dotnet run --project Gateway/src/ApiGateway --urls "http://127.0.0.1:5050"
+ASPNETCORE_ENVIRONMENT=Development dotnet run --project Gateway/ocelot --urls "http://127.0.0.1:5050"
 ```
 
-Hoặc dùng Visual Studio / Rider / VS Code với profile `ApiGateway` đã cấu hình sẵn cổng `http://localhost:5050`.
+Hoặc dùng Visual Studio / Rider / VS Code với profile `Gateway.Api` đã cấu hình sẵn cổng `http://localhost:5050`.
 ### Build & Chạy thử bằng Docker
 
 Build Docker image multi-stage .NET 10:
@@ -110,9 +94,10 @@ API key là credential dùng chung cho các API nội bộ, dùng header `X-Api-
 Để thử API nội bộ, gửi request kèm header `X-Api-Key: <creation-key>` tới Gateway trên một trong bốn route nội bộ (ví dụ: `GET /api/v1/media/{mediaId}/verify`). Request không cần Bearer token và không cần tạo service principal ở AuthService. Upload file (`POST /api/v1/media/uploads`) vẫn tiếp tục yêu cầu user JWT hợp lệ.
 
 AuthService, MediaService và PostgreSQL Media chỉ mở trong Docker network. Các port local của hạ tầng gồm PostgreSQL Auth `55432`, MinIO `9002` (console `9003`), Valkey `56379` và Kafka `29092`; chúng chỉ bind vào loopback. Dừng stack bằng `docker compose down`; named volumes được giữ lại.
+
 ## Gateway error response
 
-Các middleware do Gateway sở hữu (CORS, giới hạn payload, rate limit và lỗi nội bộ) trả payload JSON:
+Các middleware do Gateway sở hữu (CORS, giới hạn payload và lỗi nội bộ) trả payload JSON:
 
 ```json
 {
@@ -128,21 +113,9 @@ Danh mục mã lỗi canonical chuẩn hóa của Gateway:
 | :--- | :--- | :--- |
 | `403 Forbidden` | `Gateway.Security.CorsOriginDenied` | Nguồn gốc (Origin) của request không nằm trong whitelist CORS. |
 | `413 Payload Too Large` | `Gateway.Request.PayloadTooLarge` | Kích thước request body vượt quá ngưỡng cho phép (MaxRequestBodySize). |
-| `429 Too Many Requests` | `Gateway.Traffic.RateLimitExceeded` | Vượt quá số lượng request cho phép trong khung thời gian (Rate Limit). |
 | `500 Internal Error` | `Gateway.UnexpectedFailure` | Lỗi không mong đợi phát sinh trong nội bộ Gateway. |
 
 Ocelot xử lý xác thực và lỗi proxy theo phản hồi riêng: route được bảo vệ trả `401` khi thiếu hoặc sai JWT; lỗi kết nối upstream trả `502`; timeout upstream trả `503` trên Ocelot 25.0. Những phản hồi này không dùng payload JSON ở trên. Phản hồi và lỗi nghiệp vụ từ service đích được chuyển tiếp nguyên trạng.
-## Theo dõi trace phân tán
-
-Gateway dùng W3C `traceparent` và OpenTelemetry để giữ cùng một trace khi Ocelot chuyển request tới service đích. Root trace được sample 100% ở Development và 10% ở các môi trường khác; quyết định sample từ caller luôn được giữ nguyên.
-
-Để export trace qua OTLP HTTP/protobuf, cấu hình đầy đủ signal endpoint trong environment (không ghi token collector vào source control):
-
-```text
-Telemetry__Otlp__TracesEndpoint=https://otel-collector.internal/v1/traces
-```
-
-Gateway không thêm JWT, authorization header, request/response body, claim, hay correlation ID vào trace attributes. Endpoint `/_health/*` không tạo trace.
 
 Trong production, cấu hình bằng environment variables, ví dụ:
 
@@ -154,6 +127,7 @@ Routes__0__DownstreamHostAndPorts__0__Host
 Routes__0__DownstreamHostAndPorts__0__Port
 GlobalConfiguration__Timeout
 ```
+
 ## Gateway Security & Request Protection (DPR-78)
 
 Gateway đóng vai trò là ranh giới bảo mật vững chắc trước khi request chạm tới các downstream services:
@@ -182,9 +156,9 @@ Gateway đóng vai trò là ranh giới bảo mật vững chắc trước khi r
      - `Content-Security-Policy: default-src 'self'; frame-ancestors 'none';`
      - `Strict-Transport-Security` (khi request là HTTPS).
 
-## Gateway Resilience & Traffic Control
+## Timeout và lỗi kết nối downstream
 
-Gateway cung cấp cơ chế điều phối lưu lượng và phục hồi mạng tin cậy:
+Gateway dùng timeout của Ocelot để giới hạn thời gian chờ downstream:
 
 1. **Upstream Timeout (503 Service Unavailable trên Ocelot 25.0)**:
    - Ocelot dùng `GlobalConfiguration:Timeout` (giây; mặc định cấu hình của Gateway là 10). Docker Compose ánh xạ `DEFAULT_TIMEOUT_SECONDS` vào khóa này; Development đặt 15 giây.
@@ -193,67 +167,22 @@ Gateway cung cấp cơ chế điều phối lưu lượng và phục hồi mạn
 2. **Connection Failure (502 Bad Gateway)**:
    - Khi downstream service từ chối kết nối hoặc gặp lỗi mạng, Ocelot trả `502`.
 
-3. **Rate Limiting (429 Too Many Requests)**:
-   - Hỗ trợ 3 phân tầng kiểm soát tần suất truy cập:
-     - **Anonymous**: Phân vùng theo Client IP (mặc định: 20 req/phút).
-     - **Authenticated**: Phân vùng theo `UserId` từ token JWT (mặc định: 100 req/phút).
-     - **Sensitive**: Áp dụng cho các endpoint nhạy cảm như login, auth sessions (mặc định: 5 req/phút).
-   - Khi vượt ngưỡng, Gateway trả về HTTP `429 Too Many Requests` (`Gateway.Traffic.RateLimitExceeded`) kèm tiêu đề `Retry-After`.
-   - Gateway chỉ bảo vệ hạ tầng và tài nguyên mạng, **không chứa business quota** (các quy tắc nghiệp vụ như "Supplier chỉ được đăng 20 máy/ngày" thuộc về Domain Service).
-
-4. **Client Cancellation**:
+3. **Client Cancellation**:
    - Khi client chủ động ngắt kết nối (`RequestAborted`), tín hiệu hủy được chuyển tiếp xuống downstream service để giải phóng tài nguyên.
 
-5. **Không tự động retry**:
+4. **Không tự động retry**:
    - Gateway không cấu hình retry cho Ocelot; request `POST` bị timeout không được gửi lại. Kiểm thử tích hợp đếm số lần upstream nhận request.
 
 Cấu hình mẫu trong production qua biến môi trường:
+
 ```text
 Gateway__Security__Cors__AllowedOrigins__0=https://app.dprental.vn
 Gateway__Security__ForwardedHeaders__KnownNetworks__0=10.0.0.0/8
 Gateway__Security__RequestSize__MaxRequestBodySizeBytes=10485760
 GlobalConfiguration__Timeout=10
-Gateway__Traffic__RateLimiting__Anonymous__PermitLimit=20
-Gateway__Traffic__RateLimiting__Authenticated__PermitLimit=100
-Gateway__Traffic__RateLimiting__Sensitive__PermitLimit=5
 ```
 
-## Observability & Operational Readiness
-
-### 1. Ghi log có cấu trúc (Structured Logging)
-
-Mỗi request đi qua Gateway đều xuất một bản ghi structured log chứa đầy đủ ngữ cảnh để tra cứu (tracing/correlation) mà **tuyệt đối không làm lộ dữ liệu nhạy cảm**:
-
-* **Thuộc tính bắt buộc được ghi nhận**:
-  - `Timestamp`: Thời gian UTC chuẩn ISO 8601.
-  - `CorrelationId`: Mã tương quan từ `X-Correlation-ID` (đồng bộ giữa Gateway và downstream).
-  - `TraceId`: W3C TraceId tương thích chuẩn OpenTelemetry.
-  - `Route`: Mã định danh route hoặc pattern đường dẫn Ocelot.
-  - `Method`: Phương thức HTTP (GET, POST, PUT, DELETE,...).
-  - `StatusCode`: Mã trạng thái phản hồi HTTP.
-  - `DurationMs`: Thời gian xử lý request tính bằng mili-giây.
-  - `Upstream`: Tên dịch vụ downstream đích (ServiceName / Route Key) hoặc `gateway`.
-* **Ranh giới bảo mật (Zero Leakage)**:
-  - Tuyệt đối **không ghi log** `Authorization` header, Bearer token, JWT, refresh token, mật khẩu, API key hay nội dung nhạy cảm của request body.
-
-### 2. Thu thập chỉ số đo lường (Metrics)
-
-Hệ thống sử dụng `System.Diagnostics.Metrics.Meter` với tên chuẩn `Dprental.Gateway`, tích hợp trực tiếp với OpenTelemetry:
-
-| Tên Metric | Kiểu Instrument | Mô tả |
-| :--- | :--- | :--- |
-| `gateway_request_total` | Counter (`long`) | Tổng số lượng request đi qua Gateway. |
-| `gateway_request_duration_seconds` | Histogram (`double`) | Phân phối thời gian xử lý request qua Gateway. |
-| `gateway_4xx_total` | Counter (`long`) | Tổng số lượng phản hồi lỗi client 4xx. |
-| `gateway_5xx_total` | Counter (`long`) | Tổng số lượng phản hồi lỗi server 5xx. |
-| `gateway_upstream_timeout_total` | Counter (`long`) | Tổng số request bị upstream timeout (503 do Ocelot báo timeout, hoặc 504). |
-| `gateway_rate_limit_total` | Counter (`long`) | Tổng số request bị từ chối do vượt rate limit (429). |
-
-* **Quy tắc gán nhãn (Labels/Dimensions)**:
-  - Nhãn cho phép (Low-cardinality): `route`, `method`, `status`, `upstream`.
-  - **Tuyệt đối cấm sử dụng**: `userId`, `email`, `orderId` hoặc bất kỳ dữ liệu định danh người dùng (PII) làm label để tránh bùng nổ cardinality và rò rỉ dữ liệu riêng tư.
-
-### 3. Kiểm tra sức khỏe & Tính sẵn sàng (Health Checks)
+## Kiểm tra sức khỏe
 
 Gateway cung cấp các probe giám sát riêng biệt theo chuẩn Kubernetes / Container:
 

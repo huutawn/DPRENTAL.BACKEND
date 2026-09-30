@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
@@ -132,28 +131,6 @@ public sealed class GatewayIntegrationTests
     }
 
     [Fact]
-    public async Task AuthRoutePropagatesW3CTraceContextToUpstream()
-    {
-        using RSA signingKey = RSA.Create(2048);
-        await using LoopbackAuthService upstream = new(CreateJwks(signingKey, "key-1"));
-        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
-        using HttpClient client = factory.CreateClient();
-        const string inboundTraceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
-        using HttpRequestMessage request = new(HttpMethod.Get, "/api/v1/auth/sessions");
-        request.Headers.TryAddWithoutValidation("traceparent", inboundTraceParent);
-
-        using HttpResponseMessage response = await client.SendAsync(request);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.True(ActivityContext.TryParse(inboundTraceParent, null, out ActivityContext inboundContext));
-        Assert.True(ActivityContext.TryParse(upstream.LastRequest.TraceParent, null, out ActivityContext upstreamContext));
-        // HttpClient tạo span con mới nhưng vẫn giữ TraceId gốc để collector ghép Gateway và downstream vào một trace.
-        Assert.Equal(inboundContext.TraceId, upstreamContext.TraceId);
-        Assert.NotEqual(inboundContext.SpanId, upstreamContext.SpanId);
-        Assert.True(upstreamContext.TraceFlags.HasFlag(ActivityTraceFlags.Recorded));
-    }
-
-    [Fact]
     public async Task ProtectedRouteRejectsInvalidTokensAndForwardsValidBearerToken()
     {
         using RSA signingKey = RSA.Create(2048);
@@ -204,6 +181,19 @@ public sealed class GatewayIntegrationTests
         Assert.Equal(HttpStatusCode.OK, liveness.StatusCode);
         Assert.Equal(HttpStatusCode.OK, readiness.StatusCode);
         Assert.True(upstream.JwksRequestCount > 0);
+    }
+
+    [Fact]
+    public async Task ReadinessFailsWhenJwksIsUnavailable()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory(new Uri("http://127.0.0.1:1/"));
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage liveness = await client.GetAsync("/_health/live");
+        using HttpResponseMessage readiness = await client.GetAsync("/_health/ready");
+
+        Assert.Equal(HttpStatusCode.OK, liveness.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, readiness.StatusCode);
     }
 
     [Fact]
@@ -346,7 +336,7 @@ public sealed class GatewayIntegrationTests
 
         internal int JwksRequestCount { get; private set; }
 
-        internal ReceivedRequest LastRequest { get; private set; } = new(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+        internal ReceivedRequest LastRequest { get; private set; } = new(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
 
         public async ValueTask DisposeAsync()
         {
@@ -397,7 +387,6 @@ public sealed class GatewayIntegrationTests
                 request.Url?.Query ?? string.Empty,
                 request.Headers["Authorization"] ?? string.Empty,
                 request.Headers["X-Correlation-ID"] ?? string.Empty,
-                request.Headers["traceparent"] ?? string.Empty,
                 request.Headers["X-Forwarded-Proto"] ?? string.Empty,
                 request.Headers["X-Forwarded-Host"] ?? string.Empty);
             await WriteResponseAsync(context.Response, "{\"proxied\":true}", "application/json");
@@ -426,7 +415,6 @@ public sealed class GatewayIntegrationTests
         string Query,
         string Authorization,
         string CorrelationId,
-        string TraceParent,
         string ForwardedProto,
         string ForwardedHost);
 }

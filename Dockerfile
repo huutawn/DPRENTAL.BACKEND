@@ -4,15 +4,15 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Sao chép cấu hình build và project ApiGateway để cache layer restore dependencies
+# Sao chép file định nghĩa project để cache layer restore dependencies
 COPY Gateway/Directory.Build.props Gateway/
-COPY Gateway/src/ApiGateway/ApiGateway.csproj Gateway/src/ApiGateway/
+COPY Gateway/ocelot/ocelot.csproj Gateway/ocelot/
 
-RUN dotnet restore Gateway/src/ApiGateway/ApiGateway.csproj
+RUN dotnet restore Gateway/ocelot/ocelot.csproj
 
-# Sao chép mã nguồn ApiGateway và thực hiện publish release
-COPY Gateway/src/ApiGateway/ Gateway/src/ApiGateway/
-WORKDIR /src/Gateway/src/ApiGateway
+# Sao chép toàn bộ mã nguồn và thực hiện build release
+COPY Gateway/ocelot/ Gateway/ocelot/
+WORKDIR /src/Gateway/ocelot
 RUN dotnet publish -c Release -o /app/publish --no-restore
 
 # ==========================================
@@ -39,4 +39,4 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=6 \
 
 
 # Khởi chạy ứng dụng API Gateway
-ENTRYPOINT ["dotnet", "ApiGateway.dll"]
+ENTRYPOINT ["dotnet", "Gateway.Api.dll"]
