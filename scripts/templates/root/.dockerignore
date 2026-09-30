@@ -1,0 +1,15 @@
+.git/
+.githooks/
+.local-secrets/
+**/bin/
+**/obj/
+**/TestResults/
+**/.vs/
+**/.idea/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12

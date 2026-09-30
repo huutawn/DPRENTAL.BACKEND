@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "__SERVICE_NAME__.Api": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:__HTTPS_PORT__;http://localhost:__HTTP_PORT__"
+    }
+  }
+}

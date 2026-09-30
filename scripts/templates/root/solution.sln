@@ -1,0 +1,75 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "__SERVICE_NAME__", "__SERVICE_NAME__", "{__GUID_FOLDER_SVC__}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{__GUID_FOLDER_SRC__}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Common", "Common", "{__GUID_FOLDER_COMMON__}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "__SERVICE_NAME__.Common", "__SERVICE_NAME__\src\Common\__SERVICE_NAME__.Common.csproj", "{__GUID_PRJ_COMMON__}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Domain", "Domain", "{__GUID_FOLDER_DOMAIN__}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "__SERVICE_NAME__.Domain", "__SERVICE_NAME__\src\Domain\__SERVICE_NAME__.Domain.csproj", "{__GUID_PRJ_DOMAIN__}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Application", "Application", "{__GUID_FOLDER_APPLICATION__}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "__SERVICE_NAME__.Application", "__SERVICE_NAME__\src\Application\__SERVICE_NAME__.Application.csproj", "{__GUID_PRJ_APPLICATION__}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Api", "Api", "{__GUID_FOLDER_API__}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "__SERVICE_NAME__.Api", "__SERVICE_NAME__\src\Api\__SERVICE_NAME__.Api.csproj", "{__GUID_PRJ_API__}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{__GUID_FOLDER_TESTS__}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Api.Tests", "Api.Tests", "{__GUID_FOLDER_APITESTS__}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "__SERVICE_NAME__.Api.Tests", "__SERVICE_NAME__\tests\Api.Tests\__SERVICE_NAME__.Api.Tests.csproj", "{__GUID_PRJ_TESTS__}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{__GUID_PRJ_COMMON__}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{__GUID_PRJ_COMMON__}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{__GUID_PRJ_COMMON__}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{__GUID_PRJ_COMMON__}.Release|Any CPU.Build.0 = Release|Any CPU
+		{__GUID_PRJ_DOMAIN__}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{__GUID_PRJ_DOMAIN__}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{__GUID_PRJ_DOMAIN__}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{__GUID_PRJ_DOMAIN__}.Release|Any CPU.Build.0 = Release|Any CPU
+		{__GUID_PRJ_APPLICATION__}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{__GUID_PRJ_APPLICATION__}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{__GUID_PRJ_APPLICATION__}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{__GUID_PRJ_APPLICATION__}.Release|Any CPU.Build.0 = Release|Any CPU
+		{__GUID_PRJ_API__}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{__GUID_PRJ_API__}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{__GUID_PRJ_API__}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{__GUID_PRJ_API__}.Release|Any CPU.Build.0 = Release|Any CPU
+		{__GUID_PRJ_TESTS__}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{__GUID_PRJ_TESTS__}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{__GUID_PRJ_TESTS__}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{__GUID_PRJ_TESTS__}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{__GUID_FOLDER_SRC__} = {__GUID_FOLDER_SVC__}
+		{__GUID_FOLDER_COMMON__} = {__GUID_FOLDER_SRC__}
+		{__GUID_PRJ_COMMON__} = {__GUID_FOLDER_COMMON__}
+		{__GUID_FOLDER_DOMAIN__} = {__GUID_FOLDER_SRC__}
+		{__GUID_PRJ_DOMAIN__} = {__GUID_FOLDER_DOMAIN__}
+		{__GUID_FOLDER_APPLICATION__} = {__GUID_FOLDER_SRC__}
+		{__GUID_PRJ_APPLICATION__} = {__GUID_FOLDER_APPLICATION__}
+		{__GUID_FOLDER_API__} = {__GUID_FOLDER_SRC__}
+		{__GUID_PRJ_API__} = {__GUID_FOLDER_API__}
+		{__GUID_FOLDER_TESTS__} = {__GUID_FOLDER_SVC__}
+		{__GUID_FOLDER_APITESTS__} = {__GUID_FOLDER_TESTS__}
+		{__GUID_PRJ_TESTS__} = {__GUID_FOLDER_APITESTS__}
+	EndGlobalSection
+EndGlobal
