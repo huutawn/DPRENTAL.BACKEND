@@ -39,9 +39,22 @@ public sealed class CurrentUserEndpointTests
     {
         using WebApplicationFactory<Program> factory = CreateFactory();
         await SeedAsync(factory);
+        Guid sessionId = Guid.NewGuid();
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            db.Sessions.Add(new Session
+            {
+                Id = sessionId,
+                UserId = UserId,
+                CreatedAtUtc = DateTime.UtcNow,
+                ExpiresAtUtc = DateTime.UtcNow.AddDays(7)
+            });
+            await db.SaveChangesAsync();
+        }
         using HttpClient client = factory.CreateClient();
         IAccessTokenIssuer issuer = factory.Services.GetRequiredService<IAccessTokenIssuer>();
-        IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(UserId, ["Admin"]));
+        IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(UserId, ["Admin"], SessionId: sessionId));
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Value);
 
         using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/users/me");

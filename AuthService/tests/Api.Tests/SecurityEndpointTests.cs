@@ -212,12 +212,25 @@ public sealed class SecurityEndpointTests
     {
         HttpClient client = factory.CreateClient();
         using IServiceScope scope = factory.Services.CreateScope();
+        AuthDbContext dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        Session session = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            CreatedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(7),
+            RevokedAtUtc = null
+        };
+        dbContext.Sessions.Add(session);
+        dbContext.SaveChanges();
+
         IAccessTokenIssuer issuer = scope.ServiceProvider.GetRequiredService<IAccessTokenIssuer>();
         IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(
             userId,
             Roles: ["Customer"],
             Permissions: [],
-            OrganizationIds: []));
+            OrganizationIds: [],
+            SessionId: session.Id));
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Value);
         return client;

@@ -28,4 +28,24 @@ internal static class ClaimsPrincipalExtensions
         string? sub = user.FindFirstValue(JwtRegisteredClaimNames.Sub);
         return Guid.TryParse(sub, out Guid userId) && userId != Guid.Empty ? userId : null;
     }
+
+    /// <summary>
+    /// Id session từ claim <c>sid</c>, hay <c>null</c> nếu chưa xác thực, thiếu/sai định dạng claim,
+    /// hoặc token thuộc về một service (<c>token_use = svc</c>) chứ không phải user thật.
+    /// </summary>
+    internal static Guid? GetJwtSessionId(this ClaimsPrincipal user)
+    {
+        if (user == null || user.Identity?.IsAuthenticated != true)
+        {
+            return null;
+        }
+
+        if (user.HasClaim(JwtClaimCatalog.Claims.TokenUse, JwtClaimCatalog.TokenUses.Service))
+        {
+            return null;
+        }
+
+        string? sid = user.FindFirstValue(JwtClaimCatalog.Claims.SessionId);
+        return Guid.TryParse(sid, out Guid sessionId) && sessionId != Guid.Empty ? sessionId : null;
+    }
 }

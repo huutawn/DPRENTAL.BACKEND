@@ -160,6 +160,7 @@ public sealed class AuthSessionService(
     public async Task<Result<IReadOnlyList<SessionResponse>>> GetSessionsAsync(
         Guid userId,
         string? currentRefreshToken,
+        Guid? currentSessionId = null,
         CancellationToken cancellationToken = default)
     {
         if (!DtoValidator.TryValidateId(userId, nameof(userId), out Error? validationError))
@@ -167,8 +168,7 @@ public sealed class AuthSessionService(
             return Result.Failure<IReadOnlyList<SessionResponse>>(validationError);
         }
 
-        Guid? currentSessionId = null;
-        if (!string.IsNullOrWhiteSpace(currentRefreshToken))
+        if (!currentSessionId.HasValue && !string.IsNullOrWhiteSpace(currentRefreshToken))
         {
             currentSessionId = await sessionRepository.GetSessionIdByTokenHashAsync(
                 RefreshTokenUtility.ComputeHash(currentRefreshToken),
@@ -230,7 +230,9 @@ public sealed class AuthSessionService(
             principal.UserId,
             principal.Roles,
             principal.Permissions,
-            principal.OrganizationIds));
+            principal.OrganizationIds,
+            IsProfileCompleted: principal.IsProfileCompleted,
+            SessionId: principal.SessionId));
         return new AuthTokenPair(accessToken.Value, refreshToken);
     }
 }

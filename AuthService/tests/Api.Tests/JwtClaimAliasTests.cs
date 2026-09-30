@@ -188,13 +188,26 @@ public sealed class JwtClaimAliasTests
         }
 
         using HttpClient client = factory.CreateClient();
+        Guid sessionId = Guid.NewGuid();
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            db.Sessions.Add(new Session
+            {
+                Id = sessionId,
+                UserId = actorAdminId,
+                CreatedAtUtc = DateTime.UtcNow,
+                ExpiresAtUtc = DateTime.UtcNow.AddDays(7)
+            });
+            await db.SaveChangesAsync();
+        }
 
         // 1. Request with token issued via RsaAccessTokenIssuer (contains "p" = "id.r.ag")
         IssuedAccessToken validToken = issuer.Issue(new AccessTokenRequest(
             SubjectId: actorAdminId,
             Roles: [SystemRoleCode.Admin],
-            Permissions: [PermissionCode.IdentityRolesAssignGlobal]));
-
+            Permissions: [PermissionCode.IdentityRolesAssignGlobal],
+            SessionId: sessionId));
         HttpRequestMessage validReq = new(HttpMethod.Post, "/api/v1/auth/roles/assign")
         {
             Content = JsonContent.Create(new AssignRoleRequest(targetUserId, globalRoleId))
@@ -209,7 +222,7 @@ public sealed class JwtClaimAliasTests
         IOptions<JwtOptions> factoryJwtOptions = factory.Services.GetRequiredService<IOptions<JwtOptions>>();
         string legacyToken = CreateCustomToken(
             actorAdminId,
-            [new Claim("role", "admin"), new Claim("perm", "roles.assign")],
+            [new Claim("role", "admin"), new Claim("perm", "roles.assign"), new Claim(JwtClaimCatalog.Claims.SessionId, sessionId.ToString("D"))],
             factoryJwtOptions.Value,
             factoryKeyRing);
 

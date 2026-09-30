@@ -325,9 +325,24 @@ public sealed class OrganizationIntegrationTests
         }
 
         using HttpClient admin = factory.CreateClient();
-        IAccessTokenIssuer issuer = factory.Services.GetRequiredService<IAccessTokenIssuer>();
-        IssuedAccessToken adminToken = issuer.Issue(new AccessTokenRequest(adminId, ["admin"], [Permissions.Users.Read]));
-        admin.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken.Value);
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            Session session = new()
+            {
+                Id = Guid.NewGuid(),
+                UserId = adminId,
+                CreatedAtUtc = DateTime.UtcNow,
+                ExpiresAtUtc = DateTime.UtcNow.AddDays(7),
+                RevokedAtUtc = null
+            };
+            db.Sessions.Add(session);
+            await db.SaveChangesAsync();
+
+            IAccessTokenIssuer issuer = scope.ServiceProvider.GetRequiredService<IAccessTokenIssuer>();
+            IssuedAccessToken adminToken = issuer.Issue(new AccessTokenRequest(adminId, ["admin"], [Permissions.Users.Read], SessionId: session.Id));
+            admin.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken.Value);
+        }
         using HttpResponseMessage usersResponse = await admin.GetAsync("/api/v1/auth/admin/users?search=TARGET&Page=1&PageSize=1");
         Assert.Equal(HttpStatusCode.OK, usersResponse.StatusCode);
         PagedResult<AdminUserListItemDto>? users = await usersResponse.Content.ReadFromJsonAsync<PagedResult<AdminUserListItemDto>>();
@@ -455,8 +470,21 @@ public sealed class OrganizationIntegrationTests
         params string[] roles)
     {
         HttpClient client = factory.CreateClient();
-        IAccessTokenIssuer issuer = factory.Services.GetRequiredService<IAccessTokenIssuer>();
-        IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(userId, roles));
+        using IServiceScope scope = factory.Services.CreateScope();
+        AuthDbContext dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        Session session = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            CreatedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(7),
+            RevokedAtUtc = null
+        };
+        dbContext.Sessions.Add(session);
+        dbContext.SaveChanges();
+
+        IAccessTokenIssuer issuer = scope.ServiceProvider.GetRequiredService<IAccessTokenIssuer>();
+        IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(userId, roles, SessionId: session.Id));
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Value);
         return client;
     }

@@ -12,7 +12,8 @@ public sealed record AuthSessionPrincipal(
     IReadOnlyCollection<string> Roles,
     IReadOnlyCollection<string>? Permissions = null,
     IReadOnlyCollection<Guid>? OrganizationIds = null,
-    bool? IsProfileCompleted = null)
+    bool? IsProfileCompleted = null,
+    Guid? SessionId = null)
 {
     public IReadOnlyCollection<string> Permissions { get; init; } = Permissions ?? [];
     public IReadOnlyCollection<Guid> OrganizationIds { get; init; } = OrganizationIds ?? [];

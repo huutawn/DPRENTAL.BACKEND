@@ -22,6 +22,9 @@ public static class JwtClaimCatalog
 
         /// <summary>Rút gọn từ "profile_completed" — chỉ có ở user token, service token không mang claim này.</summary>
         public const string ProfileCompleted = "pc";
+
+        /// <summary>Rút gọn từ "session_id" theo RFC 8693/OIDC chuẩn ("sid").</summary>
+        public const string SessionId = "sid";
     }
 
     public static class TokenUses
@@ -37,7 +40,7 @@ public static class JwtClaimCatalog
         public const string Member = "mem";
         public const string Customer = "cus";
 
-        private static readonly Dictionary<string, string> CanonicalToAlias = new(StringComparer.Ordinal)
+        private static readonly Dictionary<string, string> CanonicalToAlias = new(StringComparer.OrdinalIgnoreCase)
         {
             [SystemRoleCode.Admin] = Admin,
             [SystemRoleCode.AdminPlatform] = AdminPlatform,

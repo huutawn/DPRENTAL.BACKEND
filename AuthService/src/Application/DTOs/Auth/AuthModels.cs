@@ -16,7 +16,8 @@ public sealed record AccessTokenRequest(
     string? Audience = null,
     string? TokenUse = null,
     IReadOnlyCollection<string>? Scopes = null,
-    bool? IsProfileCompleted = null);
+    bool? IsProfileCompleted = null,
+    Guid? SessionId = null);
 
 /// <summary>A signed access token and its expiry.</summary>
 public sealed record IssuedAccessToken(string Value, DateTimeOffset ExpiresAtUtc);

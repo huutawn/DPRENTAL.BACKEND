@@ -15,8 +15,8 @@ public interface IAuthSessionService
 
     Task<Result> RevokeAllSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
 
-    /// <summary>Lấy danh sách các phiên đăng nhập của người dùng, đánh dấu phiên hiện tại theo refreshToken.</summary>
-    Task<Result<IReadOnlyList<SessionResponse>>> GetSessionsAsync(Guid userId, string? currentRefreshToken, CancellationToken cancellationToken = default);
+    /// <summary>Lấy danh sách các phiên đăng nhập của người dùng, đánh dấu phiên hiện tại theo refreshToken hoặc sessionId.</summary>
+    Task<Result<IReadOnlyList<SessionResponse>>> GetSessionsAsync(Guid userId, string? currentRefreshToken, Guid? currentSessionId = null, CancellationToken cancellationToken = default);
 
     /// <summary>Thu hồi một phiên đăng nhập cụ thể của người dùng.</summary>
     Task<Result> RevokeSessionAsync(Guid userId, Guid sessionId, CancellationToken cancellationToken = default);

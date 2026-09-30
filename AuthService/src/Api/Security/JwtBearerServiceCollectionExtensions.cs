@@ -4,6 +4,8 @@ using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Application.Options;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
+using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Domain.IRepositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
@@ -73,24 +75,55 @@ internal static class JwtBearerServiceCollectionExtensions
             // Chặn ngay sau khi chữ ký/thời hạn token hợp lệ, nhưng trước khi vào Controller:
             // kiểm tra user còn tồn tại và đang active (áp dụng Kill Switch cho mọi request).
             OnTokenValidated = async context =>
-{
-    string? userIdClaim = context.Principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+            {
+                // 1. Service token: bỏ qua quy tắc session người dùng, chỉ kiểm tra sub hợp lệ
+                if (context.Principal?.HasClaim(JwtClaimCatalog.Claims.TokenUse, JwtClaimCatalog.TokenUses.Service) == true)
+                {
+                    string? serviceSub = context.Principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+                    if (string.IsNullOrWhiteSpace(serviceSub) || !Guid.TryParse(serviceSub, out Guid serviceId) || serviceId == Guid.Empty)
+                    {
+                        context.Fail("Token thiếu hoặc chứa thông tin định danh service không hợp lệ.");
+                    }
+                    return;
+                }
 
-    if (string.IsNullOrWhiteSpace(userIdClaim) || !Guid.TryParse(userIdClaim, out Guid userId))
-    {
-        context.Fail("Token thiếu hoặc chứa thông tin định danh người dùng không hợp lệ.");
-        return;
-    }
+                // 2. User token: kiểm tra sub
+                string? userIdClaim = context.Principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+                if (string.IsNullOrWhiteSpace(userIdClaim) || !Guid.TryParse(userIdClaim, out Guid userId) || userId == Guid.Empty)
+                {
+                    context.Fail("Token thiếu hoặc chứa thông tin định danh người dùng không hợp lệ.");
+                    return;
+                }
 
-    var userService = context.HttpContext.RequestServices
-        .GetRequiredService<IUserService>();
+                // 3. User token: từ chối ngay access token không có session ID
+                string? sessionIdClaim = context.Principal?.FindFirst(JwtClaimCatalog.Claims.SessionId)?.Value;
+                if (string.IsNullOrWhiteSpace(sessionIdClaim) || !Guid.TryParse(sessionIdClaim, out Guid sessionId) || sessionId == Guid.Empty)
+                {
+                    context.Fail("Token thiếu hoặc chứa thông tin phiên đăng nhập không hợp lệ.");
+                    return;
+                }
 
-    var result = await userService.ValidateActiveUserAsync(userId, context.HttpContext.RequestAborted);
-    if (result.IsFailure)
-    {
-        context.Fail("Tài khoản không tồn tại hoặc đã bị khóa.");
-    }
-},
+                // 4. Kiểm tra user còn tồn tại và đang active (Kill Switch)
+                var userService = context.HttpContext.RequestServices.GetRequiredService<IUserService>();
+                var userResult = await userService.ValidateActiveUserAsync(userId, context.HttpContext.RequestAborted);
+                if (userResult.IsFailure)
+                {
+                    context.Fail("Tài khoản không tồn tại hoặc đã bị khóa.");
+                    return;
+                }
+
+                // 5. Kiểm tra phiên đăng nhập còn hiệu lực trong AuthService
+                var sessionRepository = context.HttpContext.RequestServices.GetRequiredService<IAuthSessionRepository>();
+                var timeProvider = context.HttpContext.RequestServices.GetRequiredService<TimeProvider>();
+                Session? session = await sessionRepository.GetByIdAsync(sessionId, context.HttpContext.RequestAborted);
+                DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
+
+                if (session is null || session.UserId != userId || session.RevokedAtUtc is not null || session.ExpiresAtUtc <= utcNow)
+                {
+                    context.Fail("Phiên đăng nhập không tồn tại, đã hết hạn hoặc đã bị thu hồi.");
+                    return;
+                }
+            },
 
             // Tùy chỉnh response body cho đúng format ProblemDetails hiện tại của hệ thống.
             OnChallenge = async context =>

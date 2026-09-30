@@ -116,7 +116,7 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         dbContext.RefreshTokens.Add(refreshToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return principal;
+        return principal with { SessionId = session.Id };
     }
 
     public Task<RefreshToken?> GetRefreshTokenWithSessionAndUserAsync(
@@ -203,7 +203,7 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        return BuildPrincipal(currentToken.Session.User);
+        return BuildPrincipal(currentToken.Session.User, currentToken.SessionId);
     }
 
     public async Task RevokeByRefreshTokenHashAsync(string refreshTokenHash, DateTime utcNow, CancellationToken cancellationToken)
@@ -240,7 +240,7 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         return user is null ? null : BuildPrincipal(user);
     }
 
-    private static AuthSessionPrincipal BuildPrincipal(User user)
+    private static AuthSessionPrincipal BuildPrincipal(User user, Guid? sessionId = null)
     {
         string[] roles = user.UserRoles?
             .Select(ur => ur.Role.Name)
@@ -264,7 +264,7 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
             .Distinct()
             .ToArray() ?? [];
 
-        return new AuthSessionPrincipal(user.Id, roles, permissions, orgIds);
+        return new AuthSessionPrincipal(user.Id, roles, permissions, orgIds, SessionId: sessionId);
     }
 
     private static bool IsUsable(Session session, RefreshToken refreshToken, DateTime utcNow) =>
@@ -295,14 +295,16 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
         return tokenRecord?.UserId;
     }
 
-    public async Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
-        await dbContext.Sessions
+    public async Task<IReadOnlyList<Session>> GetSessionsForUserAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        DateTime utcNow = timeProvider.GetUtcNow().UtcDateTime;
+        return await dbContext.Sessions
             .AsNoTracking()
-            .Where(s => s.UserId == userId)
+            .Where(s => s.UserId == userId && s.RevokedAtUtc == null && s.ExpiresAtUtc > utcNow)
             .OrderByDescending(s => s.CreatedAtUtc)
             .Take(50)
             .ToListAsync(cancellationToken);
-
+    }
     public Task<Guid?> GetSessionIdByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default) =>
         dbContext.RefreshTokens
             .AsNoTracking()

@@ -117,8 +117,21 @@ public sealed class ProfileEndpointTests
     private static HttpClient CreateAuthenticatedClient(WebApplicationFactory<Program> factory, Guid userId)
     {
         HttpClient client = factory.CreateClient();
+        using IServiceScope scope = factory.Services.CreateScope();
+        AuthDbContext dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        Session session = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            CreatedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(7),
+            RevokedAtUtc = null
+        };
+        dbContext.Sessions.Add(session);
+        dbContext.SaveChanges();
+
         IAccessTokenIssuer issuer = factory.Services.GetRequiredService<IAccessTokenIssuer>();
-        IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(userId));
+        IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(userId, SessionId: session.Id));
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Value);
         return client;
     }

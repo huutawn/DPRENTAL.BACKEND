@@ -43,7 +43,9 @@ public sealed class UserService(
     IAuditLogRepository auditLogRepository,
     IAuthSessionRepository authSessionRepository,
     IRecoveryTokenRepository recoveryTokenRepository,
-    IMediaUrlResolver mediaUrlResolver) : IUserService
+    IMediaUrlResolver mediaUrlResolver,
+    IOrganizationMembershipRepository? organizationMembershipRepository = null,
+    IOrganizationRepository? organizationRepository = null) : IUserService
 {
     public async Task<Result<AccountCreatedResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {
@@ -390,7 +392,7 @@ public sealed class UserService(
         }
 
         User? user = await userRepository.GetByIdWithAccessAsync(userId, cancellationToken);
-        if (user is null)
+        if (user is null || !user.IsActive)
         {
             return Result.Failure<CurrentUserResponse>(AuthErrors.User.NotFound);
         }
@@ -471,7 +473,7 @@ public sealed class UserService(
         return Result.Success(new PagedResult<AdminUserListItemDto>(items, request.Page, request.PageSize, totalCount, totalPages));
     }
 
-    public async Task<Result<Guid>> CreateUserAsync(CreateUserRequest request, CancellationToken cancellationToken = default)
+    public async Task<Result<Guid>> CreateUserAsync(CreateUserRequest request, Guid? adminId = null, CancellationToken cancellationToken = default)
     {
         if (!DtoValidator.TryValidate(request, out Error? validationError))
         {
@@ -487,14 +489,43 @@ public sealed class UserService(
         }
 
         List<Guid> distinctRoleIds = request.RoleIds.Distinct().ToList();
+        List<Role> rolesToAssign = new();
 
-        int existingRolesCount = await roleRepository.CountByIdsAsync(distinctRoleIds, cancellationToken);
-        if (existingRolesCount != distinctRoleIds.Count)
+        foreach (Guid roleId in distinctRoleIds)
         {
-            return Result.Failure<Guid>(new Error(
-                "User.InvalidRoles",
-                "Một hoặc nhiều quyền (Role) được cung cấp không tồn tại trong hệ thống.",
-                ErrorType.Validation));
+            Role? role = await roleRepository.GetByIdAsync(roleId, cancellationToken);
+            if (role is null)
+            {
+                return Result.Failure<Guid>(new Error(
+                    "User.InvalidRoles",
+                    "Một hoặc nhiều quyền (Role) được cung cấp không tồn tại trong hệ thống.",
+                    ErrorType.Validation));
+            }
+
+            if (role.Scope != RoleScope.Global)
+            {
+                return Result.Failure<Guid>(AuthErrors.Role.InvalidScope);
+            }
+
+            rolesToAssign.Add(role);
+        }
+
+        if (adminId.HasValue)
+        {
+            IReadOnlyList<string> adminPermissions = await roleRepository.GetUserPermissionCodesAsync(adminId.Value, cancellationToken);
+            if (!adminPermissions.Contains(PermissionCode.IdentityRolesAssignGlobal, StringComparer.Ordinal))
+            {
+                return Result.Failure<Guid>(AuthErrors.Role.InsufficientPermission);
+            }
+
+            foreach (Role role in rolesToAssign)
+            {
+                IReadOnlyList<string> rolePermissions = await roleRepository.GetPermissionCodesAsync(role.Id, cancellationToken);
+                if (rolePermissions.Except(adminPermissions, StringComparer.Ordinal).Any())
+                {
+                    return Result.Failure<Guid>(AuthErrors.Role.InsufficientPermission);
+                }
+            }
         }
 
         string normalizedEmail = request.Email.Trim().ToUpperInvariant();
@@ -529,16 +560,36 @@ public sealed class UserService(
         return Result.Success(newUser.Id);
     }
 
-    public async Task<Result<IReadOnlyList<RoleDto>>> GetAllRolesAsync(CancellationToken cancellationToken = default)
+    public async Task<Result<IReadOnlyList<RoleDto>>> GetAllRolesAsync(Guid? adminId = null, CancellationToken cancellationToken = default)
     {
         var roles = await roleRepository.GetAllAsync(cancellationToken);
+        var globalRoles = roles.Where(r => r.Scope == RoleScope.Global).ToList();
 
-        var roleDtos = roles.Select(r => new RoleDto(r.Id, r.Name, r.Description)).ToList();
+        if (adminId.HasValue)
+        {
+            var adminPermissions = await roleRepository.GetUserPermissionCodesAsync(adminId.Value, cancellationToken);
+            if (!adminPermissions.Contains(PermissionCode.IdentityRolesAssignGlobal, StringComparer.Ordinal))
+            {
+                return Result.Success<IReadOnlyList<RoleDto>>([]);
+            }
 
+            var assignableRoles = new List<Role>();
+            foreach (var role in globalRoles)
+            {
+                var rolePermissions = await roleRepository.GetPermissionCodesAsync(role.Id, cancellationToken);
+                if (!rolePermissions.Except(adminPermissions, StringComparer.Ordinal).Any())
+                {
+                    assignableRoles.Add(role);
+                }
+            }
+            globalRoles = assignableRoles;
+        }
+
+        var roleDtos = globalRoles.Select(r => new RoleDto(r.Id, r.Name, r.Description)).ToList();
         return Result.Success<IReadOnlyList<RoleDto>>(roleDtos);
     }
 
-    public async Task<Result> UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken cancellationToken = default)
+    public async Task<Result> UpdateUserAsync(Guid id, UpdateUserRequest request, Guid? adminId = null, CancellationToken cancellationToken = default)
     {
         if (!DtoValidator.TryValidateId(id, nameof(id), out Error? idError))
         {
@@ -562,6 +613,7 @@ public sealed class UserService(
 
         // 1. Kiểm tra Roles nếu được truyền lên
         List<Guid>? distinctRoleIds = null;
+        List<Role>? rolesToAssign = null;
         if (request.RoleIds is not null)
         {
             if (request.RoleIds.Count == 0)
@@ -572,16 +624,52 @@ public sealed class UserService(
                     ErrorType.Validation));
             }
 
-            distinctRoleIds = request.RoleIds.Distinct().ToList();
-            int existingRolesCount = await roleRepository.CountByIdsAsync(distinctRoleIds, cancellationToken);
-            if (existingRolesCount != distinctRoleIds.Count)
+            if (adminId.HasValue && adminId.Value == id)
             {
-                return Result.Failure(new Error(
-                    "User.InvalidRoles",
-                    "Một hoặc nhiều quyền (Role) được cung cấp không tồn tại trong hệ thống.",
-                    ErrorType.Validation));
+                return Result.Failure(AuthErrors.Role.CannotSelfAssign);
+            }
+
+            distinctRoleIds = request.RoleIds.Distinct().ToList();
+            rolesToAssign = new List<Role>();
+            foreach (Guid roleId in distinctRoleIds)
+            {
+                Role? role = await roleRepository.GetByIdAsync(roleId, cancellationToken);
+                if (role is null)
+                {
+                    return Result.Failure(new Error(
+                        "User.InvalidRoles",
+                        "Một hoặc nhiều quyền (Role) được cung cấp không tồn tại trong hệ thống.",
+                        ErrorType.Validation));
+                }
+
+                if (role.Scope != RoleScope.Global)
+                {
+                    return Result.Failure(AuthErrors.Role.InvalidScope);
+                }
+
+                rolesToAssign.Add(role);
+            }
+
+            if (adminId.HasValue)
+            {
+                IReadOnlyList<string> adminPermissions = await roleRepository.GetUserPermissionCodesAsync(adminId.Value, cancellationToken);
+                if (!adminPermissions.Contains(PermissionCode.IdentityRolesAssignGlobal, StringComparer.Ordinal))
+                {
+                    return Result.Failure(AuthErrors.Role.InsufficientPermission);
+                }
+
+                foreach (Role role in rolesToAssign)
+                {
+                    IReadOnlyList<string> rolePermissions = await roleRepository.GetPermissionCodesAsync(role.Id, cancellationToken);
+                    if (rolePermissions.Except(adminPermissions, StringComparer.Ordinal).Any())
+                    {
+                        return Result.Failure(AuthErrors.Role.InsufficientPermission);
+                    }
+                }
             }
         }
+
+        // Đã gộp vào phần đầu UpdateUserAsync
 
         // 2. Lấy thông tin user
         var user = await userRepository.GetByIdWithRolesAsync(id, cancellationToken);
@@ -658,6 +746,12 @@ public sealed class UserService(
         {
             if (user.IsActive && !request.IsActive.Value)
             {
+                Result ownerCheck = await EnsureNotLastOwnerAsync(user.Id, cancellationToken);
+                if (ownerCheck.IsFailure)
+                {
+                    return ownerCheck;
+                }
+
                 user.IsActive = false;
                 await authSessionRepository.RevokeAllSessionsForUserAsync(user.Id, cancellationToken);
             }
@@ -681,6 +775,12 @@ public sealed class UserService(
             foreach (var roleId in rolesToAdd)
             {
                 user.UserRoles.Add(new UserRole { RoleId = roleId, UserId = user.Id });
+            }
+
+            bool rolesChanged = rolesToRemove.Count > 0 || rolesToAdd.Count > 0;
+            if (rolesChanged)
+            {
+                await authSessionRepository.RevokeAllSessionsForUserAsync(user.Id, cancellationToken);
             }
         }
 
@@ -725,6 +825,13 @@ public sealed class UserService(
         if (!user.IsActive)
         {
             return Result.Success();
+        }
+
+        Result ownerCheck = await EnsureNotLastOwnerAsync(targetUserId, cancellationToken);
+        if (ownerCheck.IsFailure)
+        {
+            await LogAuditAsync(adminId, targetUserId.ToString(), "Account_Suspend", "Failed_LastOwner", corrId, cancellationToken);
+            return ownerCheck;
         }
 
         user.IsActive = false;
@@ -811,4 +918,57 @@ public sealed class UserService(
             CorrelationId = corrId,
             Timestamp = timeProvider.GetUtcNow()
         }, cancellationToken);
+
+    private async Task<Result> EnsureNotLastOwnerAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        if (organizationMembershipRepository is null)
+        {
+            return Result.Success();
+        }
+        IReadOnlyList<OrganizationMembership> memberships = await organizationMembershipRepository.GetMembershipsForUserAsync(userId, cancellationToken);
+        List<Guid> ownerOrgIds = memberships
+            .Where(m => m.Status == MembershipStatus.Active &&
+                m.Role is not null &&
+                string.Equals(m.Role.Name, "Owner", StringComparison.OrdinalIgnoreCase))
+            .Select(m => m.OrganizationId)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToList();
+
+        if (ownerOrgIds.Count == 0)
+        {
+            return Result.Success();
+        }
+
+        IExecutionTransaction? ownerTransaction = null;
+        if (organizationRepository is not null)
+        {
+            ownerTransaction = await organizationRepository.BeginTransactionAsync(cancellationToken);
+        }
+        try
+        {
+            if (organizationRepository is not null)
+            {
+                await organizationRepository.LockOrganizationsAsync(ownerOrgIds, cancellationToken);
+            }
+
+            foreach (Guid orgId in ownerOrgIds)
+            {
+                int activeOwners = await organizationMembershipRepository.CountActiveOwnersAsync(orgId, cancellationToken);
+                if (activeOwners <= 1)
+                {
+                    return Result.Failure(AuthErrors.User.LastOwnerOrganization);
+                }
+            }
+
+            return Result.Success();
+        }
+        finally
+        {
+            if (ownerTransaction is not null)
+            {
+                await ownerTransaction.DisposeAsync();
+            }
+        }
+    }
 }

@@ -178,11 +178,20 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
         // 2. Lọc theo role
         if (!string.IsNullOrWhiteSpace(type))
         {
-            var roleName = EscapeLike(type.Trim());
-            query = query.Where(u => u.UserRoles.Any(ur =>
-                EF.Functions.ILike(ur.Role.Name, roleName)));
+            var roleName = type.Trim();
+            if (dbContext.Database.IsNpgsql())
+            {
+                var rolePattern = EscapeLike(roleName);
+                query = query.Where(u => u.UserRoles.Any(ur =>
+                    EF.Functions.ILike(ur.Role.Name, rolePattern)));
+            }
+            else
+            {
+                query = query.Where(u => u.UserRoles.Any(ur =>
+                    (ur.Role != null && string.Equals(ur.Role.Name, roleName, StringComparison.OrdinalIgnoreCase)) ||
+                    (ur.Role == null && dbContext.Roles.Any(r => r.Id == ur.RoleId && string.Equals(r.Name, roleName, StringComparison.OrdinalIgnoreCase)))));
+            }
         }
-
         var totalCount = await query.CountAsync(cancellationToken);
 
         var users = await query
@@ -224,7 +233,7 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
                 .ThenInclude(membership => membership.Role)
                     .ThenInclude(role => role.RolePermissions)
                         .ThenInclude(rolePermission => rolePermission.Permission)
-            .SingleOrDefaultAsync(user => user.Id == id && user.IsActive, cancellationToken);
+            .SingleOrDefaultAsync(user => user.Id == id, cancellationToken);
 
     public async Task<bool> ChangePasswordAndRevokeSessionsAsync(
         Guid userId,

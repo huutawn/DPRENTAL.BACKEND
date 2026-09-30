@@ -23,10 +23,10 @@ public interface IUserService
     Task<Result> ResetPasswordAsync(string token, ResetPasswordRequest request, CancellationToken cancellationToken = default);
     Task<Result> ChangePasswordAsync(Guid userId, ChangePasswordRequest request, CancellationToken cancellationToken = default);
     Task<Result<PagedResult<AdminUserListItemDto>>> GetUsersPagedAsync(GetUsersRequest request, CancellationToken cancellationToken = default);
-    Task<Result<Guid>> CreateUserAsync(CreateUserRequest request, CancellationToken cancellationToken = default);
-    Task<Result> UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken cancellationToken = default);
+    Task<Result<Guid>> CreateUserAsync(CreateUserRequest request, Guid? adminId = null, CancellationToken cancellationToken = default);
+    Task<Result> UpdateUserAsync(Guid id, UpdateUserRequest request, Guid? adminId = null, CancellationToken cancellationToken = default);
 
     /// <summary>Kiểm tra user tồn tại và đang active (dùng cho JWT Kill Switch).</summary>
     Task<Result> ValidateActiveUserAsync(Guid userId, CancellationToken cancellationToken = default);
-    Task<Result<IReadOnlyList<RoleDto>>> GetAllRolesAsync(CancellationToken cancellationToken = default);
+    Task<Result<IReadOnlyList<RoleDto>>> GetAllRolesAsync(Guid? adminId = null, CancellationToken cancellationToken = default);
 }

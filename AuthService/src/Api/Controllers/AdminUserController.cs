@@ -8,6 +8,7 @@ using Dprental.AuthService.Common;
 using Dprental.AuthService.Domain.DTOs.User;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Dprental.AuthService.Api.Security;
 using System.ComponentModel.DataAnnotations;
 
 namespace Dprental.AuthService.Api.Controllers;
@@ -53,25 +54,29 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
     [HttpPost("{id:guid}/suspend")]
     [Authorize(Policy = Permissions.Users.Manage)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> SuspendUser(Guid id, CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(User.Identity?.Name, out Guid adminId)) return Unauthorized();
+        if (User.GetJwtSub() is not Guid adminId) return Unauthorized();
 
         var result = await userService.SuspendUserAsync(id, adminId, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
-
     /// <summary>Kích hoạt lại một người dùng đã bị khóa.</summary>
     /// <param name="id">Id của người dùng cần kích hoạt.</param>
     /// <param name="cancellationToken">Token hủy request.</param>
     [HttpPost("{id:guid}/activate")]
     [Authorize(Policy = Permissions.Users.Manage)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ActivateUser(Guid id, CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(User.Identity?.Name, out Guid adminId)) return Unauthorized();
+        if (User.GetJwtSub() is not Guid adminId) return Unauthorized();
 
         var result = await userService.ActivateUserAsync(id, adminId, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
@@ -84,11 +89,16 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
     [Authorize(Policy = Permissions.Users.Manage)] // Tùy chỉnh Policy nếu bạn có quyền riêng cho Create
     [ProducesResponseType<Guid>(StatusCodes.Status200OK)] // Trả về Id của user mới tạo
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> CreateUser(
         [FromBody] CreateUserRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await userService.CreateUserAsync(request, cancellationToken);
+        if (User.GetJwtSub() is not Guid adminId) return Unauthorized();
+
+        var result = await userService.CreateUserAsync(request, adminId, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
@@ -100,6 +110,8 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
     [Authorize(Policy = Permissions.Users.Manage)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> UpdateUser(
@@ -107,7 +119,9 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
         [FromBody] UpdateUserRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await userService.UpdateUserAsync(id, request, cancellationToken);
+        if (User.GetJwtSub() is not Guid adminId) return Unauthorized();
+
+        var result = await userService.UpdateUserAsync(id, request, adminId, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
 
@@ -119,7 +133,8 @@ public sealed class AdminUsersController(IUserService userService) : ControllerB
     [ProducesResponseType(typeof(IReadOnlyList<RoleDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetRoles(CancellationToken cancellationToken)
     {
-        var result = await userService.GetAllRolesAsync(cancellationToken);
+        Guid? adminId = User.GetJwtSub();
+        var result = await userService.GetAllRolesAsync(adminId, cancellationToken);
 
         if (result.IsFailure)
         {
