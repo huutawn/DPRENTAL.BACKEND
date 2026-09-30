@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "CatalogService.Api": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:57297;http://localhost:47297"
+    }
+  }
+}
