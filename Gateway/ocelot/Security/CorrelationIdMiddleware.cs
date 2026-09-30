@@ -1,4 +1,4 @@
-namespace Dprental.Gateway.Observability;
+namespace Dprental.Gateway.Security;
 
 /// <summary>Cung cấp mã định danh tương quan (Correlation ID) an toàn cho caller, logs và các downstream services.</summary>
 internal sealed class CorrelationIdMiddleware(RequestDelegate next, ILogger<CorrelationIdMiddleware> logger)

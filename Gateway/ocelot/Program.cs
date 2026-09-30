@@ -1,22 +1,17 @@
 using Dprental.Gateway.Authentication;
 using Dprental.Gateway.Errors;
 using Dprental.Gateway.Health;
-using Dprental.Gateway.Observability;
 using Dprental.Gateway.Proxy;
 using Dprental.Gateway.Security;
-using Dprental.Gateway.Traffic;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Ocelot.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Đăng ký các dịch vụ hệ thống và bảo mật
-builder.Services.AddGatewayDistributedTracing(builder.Configuration);
-builder.Services.AddGatewayObservability(builder.Configuration);
 builder.Services.AddGatewayJwtAuthentication(builder.Configuration);
 builder.Services.AddSingleton<ApiKeyRoutePolicy>();
 builder.Services.AddGatewaySecurity(builder.Configuration);
-builder.Services.AddGatewayTrafficControl(builder.Configuration);
 builder.Services.AddGatewayOcelot(builder.Configuration);
 builder.Services.AddGatewayHealthChecks();
 
@@ -26,12 +21,9 @@ OcelotServiceCollectionExtensions.ValidateOcelotConfiguration(app.Configuration)
 
 // Cấu hình chuỗi Middleware Pipeline cho Gateway
 app.UseMiddleware<CorrelationIdMiddleware>();
-app.UseGatewayRequestLogging();
-app.UseGatewayMetrics();
 app.UseMiddleware<GatewayExceptionMiddleware>();
 app.UseGatewaySecurity();
 app.UseAuthentication();
-app.UseGatewayTrafficControl();
 
 if (app.Environment.IsDevelopment())
 {

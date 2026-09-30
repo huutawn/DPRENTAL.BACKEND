@@ -3,9 +3,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using Dprental.Gateway.Application.Security;
 using Dprental.Gateway.Authentication;
-using Dprental.Gateway.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 
@@ -18,8 +16,7 @@ namespace Dprental.Gateway.Security;
 public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
 {
     private readonly IHttpContextAccessor httpContextAccessor;
-    private readonly IIdentityExtractor identityExtractor;
-    private readonly IIdentityContextAccessor identityContextAccessor;
+    private readonly IdentityExtractor identityExtractor;
     private readonly IOptions<GatewaySecurityOptions> securityOptions;
     private readonly ApiKeyRoutePolicy routePolicy;
 
@@ -28,14 +25,12 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
     /// </summary>
     public TrustedIdentityDelegatingHandler(
         IHttpContextAccessor httpContextAccessor,
-        IIdentityExtractor identityExtractor,
-        IIdentityContextAccessor identityContextAccessor,
+        IdentityExtractor identityExtractor,
         IOptions<GatewaySecurityOptions> securityOptions,
         ApiKeyRoutePolicy routePolicy)
     {
         this.httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         this.identityExtractor = identityExtractor ?? throw new ArgumentNullException(nameof(identityExtractor));
-        this.identityContextAccessor = identityContextAccessor ?? throw new ArgumentNullException(nameof(identityContextAccessor));
         this.securityOptions = securityOptions ?? throw new ArgumentNullException(nameof(securityOptions));
         this.routePolicy = routePolicy ?? throw new ArgumentNullException(nameof(routePolicy));
     }
@@ -105,7 +100,7 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
             if (httpContext.User?.Identity is not null && httpContext.User.Identity.IsAuthenticated &&
                 !httpContext.User.HasClaim("u", "svc"))
             {
-                IdentityContext identity = identityExtractor.Extract(httpContext.User, correlationId);
+                IdentityContext identity = identityExtractor.Extract(httpContext.User);
                 if (identity.IsAuthenticated && !string.IsNullOrWhiteSpace(identity.UserId))
                 {
                     // Chuyển tiếp UserId thật trích xuất từ claim "sub" của JWT
@@ -129,8 +124,6 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
                         }
                     }
 
-                    // Cập nhật vào accessor để có thể truy xuất trong nội bộ Gateway nếu cần
-                    identityContextAccessor.SetCurrent(identity);
                 }
 
                 // Chuyển đổi Cookie token sang Authorization Bearer cho downstream nếu client chỉ gửi Cookie

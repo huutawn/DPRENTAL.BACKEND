@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <ItemGroup>
-    <ProjectReference Include="../Gateway.Domain/Gateway.Domain.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.19.2" />
-  </ItemGroup>
-</Project>

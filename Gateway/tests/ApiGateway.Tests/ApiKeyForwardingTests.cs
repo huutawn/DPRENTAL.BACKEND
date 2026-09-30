@@ -1,7 +1,5 @@
 using System.Net;
-using Dprental.Gateway.Application.Security;
 using Dprental.Gateway.Authentication;
-using Dprental.Gateway.Domain.Security;
 using Dprental.Gateway.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
@@ -64,13 +62,12 @@ public sealed class ApiKeyForwardingTests
         context.Request.Headers["X-Api-Key"] = "test-key-123";
 
         var contextAccessor = new HttpContextAccessor { HttpContext = context };
-        var extractor = new TestIdentityExtractor();
-        var identityAccessor = new TestIdentityContextAccessor();
+        var extractor = new IdentityExtractor();
         var options = Options.Create(new GatewaySecurityOptions());
         var policy = Policy();
 
         var captureHandler = new CaptureHandler();
-        var handler = new TrustedIdentityDelegatingHandler(contextAccessor, extractor, identityAccessor, options, policy)
+        var handler = new TrustedIdentityDelegatingHandler(contextAccessor, extractor, options, policy)
         {
             InnerHandler = captureHandler
         };
@@ -111,17 +108,5 @@ public sealed class ApiKeyForwardingTests
             LastRequest = request;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
         }
-    }
-
-    private sealed class TestIdentityExtractor : IIdentityExtractor
-    {
-        public IdentityContext Extract(System.Security.Claims.ClaimsPrincipal? principal, string? correlationId) =>
-            IdentityContext.Anonymous;
-    }
-
-    private sealed class TestIdentityContextAccessor : IIdentityContextAccessor
-    {
-        public IdentityContext Current { get; private set; } = IdentityContext.Anonymous;
-        public void SetCurrent(IdentityContext context) => Current = context;
     }
 }

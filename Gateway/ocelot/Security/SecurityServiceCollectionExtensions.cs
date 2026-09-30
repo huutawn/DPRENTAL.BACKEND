@@ -1,4 +1,4 @@
-using Dprental.Gateway.Application.Security;
+
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,8 +35,7 @@ public static class SecurityServiceCollectionExtensions
 
         // 3. Đăng ký các thành phần nghiệp vụ làm sạch và trích xuất danh tính
         services.AddSingleton<HeaderSanitizer>();
-        services.AddSingleton<IIdentityExtractor, IdentityExtractor>();
-        services.AddSingleton<IIdentityContextAccessor, IdentityContextAccessor>();
+        services.AddSingleton<IdentityExtractor>();
 
         // 4. Cấu hình ForwardedHeadersOptions của ASP.NET Core
         services.AddOptions<ForwardedHeadersOptions>()

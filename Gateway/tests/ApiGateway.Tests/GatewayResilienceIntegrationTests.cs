@@ -1,34 +1,19 @@
 using System.Diagnostics;
-using System.IdentityModel.Tokens.Jwt;
 using System.Net;
-using System.Net.Http.Json;
 using System.Net.Sockets;
-using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Dprental.Gateway.Security;
-using Dprental.Gateway.Errors;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.Net.Http.Headers;
 using Xunit;
 
 namespace Dprental.Gateway.Tests;
 
-/// <summary>
-/// Bộ kiểm thử tích hợp cho tính năng Khả năng phục hồi (Resilience) và Điều phối lưu lượng (Traffic Control):
-/// 1. Upstream timeout -> Ocelot 25.0 trả 503 trong timeout budget.
-/// 2. Upstream unavailable -> trả lỗi chuẩn (502/503), không crash.
-/// 3. Vượt rate limit -> 429 kèm Retry-After.
-/// 4. Request dưới limit -> hoạt động bình thường (200).
-/// 5. Phân tầng Rate Limit (Anonymous, Authenticated, Sensitive).
-/// 6. Client cancel request -> downstream request được cancel khi có thể.
-/// 7. Gateway không tự ý retry lệnh nghiệp vụ không an toàn (POST, PATCH).
-/// </summary>
-public sealed class GatewayTrafficIntegrationTests
+/// <summary>Checks proxy timeout, cancellation, and retry behavior.</summary>
+public sealed class GatewayResilienceIntegrationTests
 {
     private const string Issuer = "https://auth.example.test";
     private const string Audience = "dprental-clients";
@@ -55,126 +40,6 @@ public sealed class GatewayTrafficIntegrationTests
 
         // Đảm bảo thời gian phản hồi nằm trong phạm vi ngân sách timeout (~1-2s thay vì chờ 4s)
         Assert.True(stopwatch.ElapsedMilliseconds < 3500, $"Thời gian xử lý ({stopwatch.ElapsedMilliseconds}ms) vượt quá ngân sách.");
-    }
-
-    [Fact]
-    public async Task UpstreamUnavailableReturnsCanonicalErrorWithoutCrash()
-    {
-        // Tiêu chí 2: Upstream unavailable -> trả lỗi chuẩn (502 Bad Gateway), không crash tiến trình.
-        // Trỏ tới cổng không có dịch vụ lắng nghe
-        Uri unreachableAddress = new("http://127.0.0.1:1/");
-        using WebApplicationFactory<Program> factory = CreateFactory(unreachableAddress);
-        using HttpClient client = factory.CreateClient();
-
-        using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/sessions");
-
-        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task ExceedingAnonymousRateLimitReturns429TooManyRequests()
-    {
-        // Tiêu chí 3 & 4: Vượt rate limit -> 429. Request dưới limit -> 200 OK.
-        using RSA signingKey = RSA.Create(2048);
-        await using LoopbackResilienceService upstream = new(CreateJwks(signingKey, "key-1"));
-
-        // Cấu hình Anonymous Rate Limit là 2 request / 60 giây
-        using WebApplicationFactory<Program> factory = CreateFactory(
-            upstream.BaseAddress,
-            anonymousPermitLimit: 2);
-        using HttpClient client = factory.CreateClient();
-
-        // Request 1: Dưới limit -> 200 OK
-        using HttpResponseMessage response1 = await client.PostAsync(
-            "/api/v1/auth/public-endpoint",
-            new StringContent("{}", Encoding.UTF8, "application/json"));
-        Assert.Equal(HttpStatusCode.OK, response1.StatusCode);
-
-        // Request 2: Đạt limit -> 200 OK
-        using HttpResponseMessage response2 = await client.PostAsync(
-            "/api/v1/auth/public-endpoint",
-            new StringContent("{}", Encoding.UTF8, "application/json"));
-        Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
-
-        // Request 3: Vượt limit -> 429 Too Many Requests
-        using HttpResponseMessage response3 = await client.PostAsync(
-            "/api/v1/auth/public-endpoint",
-            new StringContent("{}", Encoding.UTF8, "application/json"));
-
-        Assert.Equal(HttpStatusCode.TooManyRequests, response3.StatusCode);
-        GatewayErrorResponse? error = await response3.Content.ReadFromJsonAsync<GatewayErrorResponse>();
-        Assert.NotNull(error);
-        Assert.Equal(GatewayError.RateLimitExceeded.Code, error.Code);
-        Assert.True(response3.Headers.Contains(HeaderNames.RetryAfter));
-    }
-
-    [Fact]
-    public async Task SensitiveRoutesEnforceStrictRateLimitPolicy()
-    {
-        // Phân tầng Sensitive Routes (ví dụ /api/v1/auth/sessions): Giới hạn nghiêm ngặt hơn
-        using RSA signingKey = RSA.Create(2048);
-        await using LoopbackResilienceService upstream = new(CreateJwks(signingKey, "key-1"));
-
-        // Cấu hình Sensitive Rate Limit là 1 request / 60 giây
-        using WebApplicationFactory<Program> factory = CreateFactory(
-            upstream.BaseAddress,
-            sensitivePermitLimit: 1);
-        using HttpClient client = factory.CreateClient();
-
-        // Request 1 tới sensitive endpoint -> 200 OK
-        using HttpResponseMessage response1 = await client.PostAsync(
-            "/api/v1/auth/sessions",
-            new StringContent("{\"email\":\"user@test.com\"}", Encoding.UTF8, "application/json"));
-        Assert.Equal(HttpStatusCode.OK, response1.StatusCode);
-
-        // Request 2 tới sensitive endpoint -> 429 Too Many Requests
-        using HttpResponseMessage response2 = await client.PostAsync(
-            "/api/v1/auth/sessions",
-            new StringContent("{\"email\":\"user@test.com\"}", Encoding.UTF8, "application/json"));
-        Assert.Equal(HttpStatusCode.TooManyRequests, response2.StatusCode);
-    }
-
-    [Fact]
-    public async Task AuthenticatedUserBenefitsFromHigherRateLimitTier()
-    {
-        // Phân tầng Authenticated User: Phân vùng theo UserId và có hạn mức cao hơn Anonymous
-        using RSA signingKey = RSA.Create(2048);
-        await using LoopbackResilienceService upstream = new(CreateJwks(signingKey, "key-1"));
-
-        // Anonymous = 1, Authenticated = 3
-        using WebApplicationFactory<Program> factory = CreateFactory(
-            upstream.BaseAddress,
-            includeProtectedRoute: true,
-            anonymousPermitLimit: 1,
-            authenticatedPermitLimit: 3);
-        using HttpClient client = factory.CreateClient();
-
-        string userId = Guid.NewGuid().ToString("D");
-        string validToken = CreateToken(signingKey, "key-1", Issuer, Audience, userId);
-
-        // Request 1 với token hợp lệ -> 200 OK
-        using HttpRequestMessage req1 = new(HttpMethod.Get, "/protected/orders");
-        req1.Headers.Authorization = new("Bearer", validToken);
-        using HttpResponseMessage res1 = await client.SendAsync(req1);
-        Assert.Equal(HttpStatusCode.OK, res1.StatusCode);
-
-        // Request 2 với cùng token -> 200 OK (vượt quá Anonymous limit 1 nhưng dưới Authenticated limit 3)
-        using HttpRequestMessage req2 = new(HttpMethod.Get, "/protected/orders");
-        req2.Headers.Authorization = new("Bearer", validToken);
-        using HttpResponseMessage res2 = await client.SendAsync(req2);
-        Assert.Equal(HttpStatusCode.OK, res2.StatusCode);
-
-        // Request 3 với cùng token -> 200 OK
-        using HttpRequestMessage req3 = new(HttpMethod.Get, "/protected/orders");
-        req3.Headers.Authorization = new("Bearer", validToken);
-        using HttpResponseMessage res3 = await client.SendAsync(req3);
-        Assert.Equal(HttpStatusCode.OK, res3.StatusCode);
-
-        // Request 4 với cùng token -> 429 Too Many Requests (đã dùng hết hạn mức 3)
-        using HttpRequestMessage req4 = new(HttpMethod.Get, "/protected/orders");
-        req4.Headers.Authorization = new("Bearer", validToken);
-        using HttpResponseMessage res4 = await client.SendAsync(req4);
-        Assert.Equal(HttpStatusCode.TooManyRequests, res4.StatusCode);
     }
 
     [Fact]
@@ -228,11 +93,7 @@ public sealed class GatewayTrafficIntegrationTests
 
     private static WebApplicationFactory<Program> CreateFactory(
         Uri upstreamAddress,
-        bool includeProtectedRoute = false,
-        int? timeoutSeconds = null,
-        int? anonymousPermitLimit = null,
-        int? authenticatedPermitLimit = null,
-        int? sensitivePermitLimit = null)
+        int? timeoutSeconds = null)
     {
         Dictionary<string, string?> overrides = new(StringComparer.Ordinal)
         {
@@ -258,55 +119,8 @@ public sealed class GatewayTrafficIntegrationTests
             overrides["GlobalConfiguration:Timeout"] = timeoutSeconds.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        if (anonymousPermitLimit.HasValue)
-        {
-            overrides["Gateway:Traffic:RateLimiting:Anonymous:PermitLimit"] = anonymousPermitLimit.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            overrides["Gateway:Traffic:RateLimiting:Anonymous:WindowSeconds"] = "60";
-        }
-
-        if (authenticatedPermitLimit.HasValue)
-        {
-            overrides["Gateway:Traffic:RateLimiting:Authenticated:PermitLimit"] = authenticatedPermitLimit.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            overrides["Gateway:Traffic:RateLimiting:Authenticated:WindowSeconds"] = "60";
-        }
-
-        if (sensitivePermitLimit.HasValue)
-        {
-            overrides["Gateway:Traffic:RateLimiting:Sensitive:PermitLimit"] = sensitivePermitLimit.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            overrides["Gateway:Traffic:RateLimiting:Sensitive:WindowSeconds"] = "60";
-        }
-
-        if (includeProtectedRoute)
-        {
-            overrides["Routes:8:Key"] = "protected-service";
-            overrides["Routes:8:UpstreamPathTemplate"] = "/protected/{everything}";
-            overrides["Routes:8:DownstreamPathTemplate"] = "/protected/{everything}";
-            overrides["Routes:8:DownstreamScheme"] = upstreamAddress.Scheme;
-            overrides["Routes:8:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
-            overrides["Routes:8:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        }
-
         return new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder => builder.ConfigureAppConfiguration((_, configurationBuilder) => configurationBuilder.AddInMemoryCollection(overrides)));
-    }
-
-    private static string CreateToken(RSA signingKey, string keyId, string issuer, string audience, string userId)
-    {
-        RsaSecurityKey key = new(signingKey)
-        {
-            KeyId = keyId,
-            CryptoProviderFactory = new CryptoProviderFactory { CacheSignatureProviders = false }
-        };
-
-        JwtSecurityToken token = new(
-            issuer,
-            audience,
-            [new Claim(JwtRegisteredClaimNames.Sub, userId)],
-            DateTime.UtcNow.AddMinutes(-1),
-            DateTime.UtcNow.AddMinutes(5),
-            new SigningCredentials(key, SecurityAlgorithms.RsaSha256));
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
     private static string CreateJwks(RSA rsa, string keyId)

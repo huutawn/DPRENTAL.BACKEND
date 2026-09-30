@@ -2,11 +2,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Gateway.Api", "src/Gateway.Api/Gateway.Api.csproj", "{BD6D2DA7-C79F-40FA-B791-A5D08782A001}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Gateway.Application", "src/Gateway.Application/Gateway.Application.csproj", "{BD6D2DA7-C79F-40FA-B791-A5D08782A004}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Gateway.Domain", "src/Gateway.Domain/Gateway.Domain.csproj", "{BD6D2DA7-C79F-40FA-B791-A5D08782A003}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ocelot", "ocelot/ocelot.csproj", "{BD6D2DA7-C79F-40FA-B791-A5D08782A001}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApiGateway.Tests", "tests/ApiGateway.Tests/ApiGateway.Tests.csproj", "{BD6D2DA7-C79F-40FA-B791-A5D08782A002}"
 EndProject
@@ -20,14 +16,6 @@ Global
 		{BD6D2DA7-C79F-40FA-B791-A5D08782A001}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{BD6D2DA7-C79F-40FA-B791-A5D08782A001}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{BD6D2DA7-C79F-40FA-B791-A5D08782A001}.Release|Any CPU.Build.0 = Release|Any CPU
-		{BD6D2DA7-C79F-40FA-B791-A5D08782A004}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{BD6D2DA7-C79F-40FA-B791-A5D08782A004}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{BD6D2DA7-C79F-40FA-B791-A5D08782A004}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{BD6D2DA7-C79F-40FA-B791-A5D08782A004}.Release|Any CPU.Build.0 = Release|Any CPU
-		{BD6D2DA7-C79F-40FA-B791-A5D08782A003}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{BD6D2DA7-C79F-40FA-B791-A5D08782A003}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{BD6D2DA7-C79F-40FA-B791-A5D08782A003}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{BD6D2DA7-C79F-40FA-B791-A5D08782A003}.Release|Any CPU.Build.0 = Release|Any CPU
 		{BD6D2DA7-C79F-40FA-B791-A5D08782A002}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{BD6D2DA7-C79F-40FA-B791-A5D08782A002}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{BD6D2DA7-C79F-40FA-B791-A5D08782A002}.Release|Any CPU.ActiveCfg = Release|Any CPU

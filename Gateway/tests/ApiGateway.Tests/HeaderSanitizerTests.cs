@@ -14,32 +14,6 @@ public sealed class HeaderSanitizerTests
     private readonly HeaderSanitizer sanitizer = new(NullLogger<HeaderSanitizer>.Instance);
 
     [Fact]
-    public void ContainsUntrustedHeadersReturnsTrueWhenUntrustedHeadersPresent()
-    {
-        HeaderDictionary headers = new()
-        {
-            [GatewayHeaderConstants.UserId] = "spoofed-user",
-            ["Authorization"] = "Bearer token",
-            ["Content-Type"] = "application/json"
-        };
-
-        Assert.True(sanitizer.ContainsUntrustedHeaders(headers));
-    }
-
-    [Fact]
-    public void ContainsUntrustedHeadersReturnsFalseWhenOnlyLegitimateHeadersPresent()
-    {
-        HeaderDictionary headers = new()
-        {
-            ["Authorization"] = "Bearer token",
-            ["Content-Type"] = "application/json",
-            ["Accept"] = "application/json"
-        };
-
-        Assert.False(sanitizer.ContainsUntrustedHeaders(headers));
-    }
-
-    [Fact]
     public void SanitizeInboundHeadersRemovesAllUntrustedHeadersAndRetainsLegitimateHeaders()
     {
         HeaderDictionary headers = new()
@@ -54,12 +28,7 @@ public sealed class HeaderSanitizerTests
             ["Content-Type"] = "application/json"
         };
 
-        IReadOnlyList<string> removed = sanitizer.SanitizeInboundHeaders(headers);
-
-        Assert.Contains(GatewayHeaderConstants.UserId, removed);
-        Assert.Contains(GatewayHeaderConstants.PartyId, removed);
-        Assert.Contains(GatewayHeaderConstants.Role, removed);
-        Assert.Contains(GatewayHeaderConstants.ServiceName, removed);
+        sanitizer.SanitizeInboundHeaders(headers);
 
         // Header nhạy cảm bị loại bỏ khỏi headers
         Assert.False(headers.ContainsKey(GatewayHeaderConstants.UserId));

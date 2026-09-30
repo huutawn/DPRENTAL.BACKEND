@@ -25,27 +25,9 @@ public sealed class HeaderSanitizer
     }
 
     /// <summary>
-    /// Kiểm tra xem request có chứa bất kỳ tiêu đề không đáng tin cậy nào từ client hay không.
-    /// </summary>
-    public bool ContainsUntrustedHeaders(IHeaderDictionary headers)
-    {
-        ArgumentNullException.ThrowIfNull(headers);
-
-        foreach (string untrustedHeader in GatewayHeaderConstants.UntrustedClientHeaders)
-        {
-            if (headers.ContainsKey(untrustedHeader))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// Loại bỏ hoàn toàn các tiêu đề nhạy cảm từ Headers collection của request.
     /// </summary>
-    public IReadOnlyList<string> SanitizeInboundHeaders(IHeaderDictionary headers)
+    public void SanitizeInboundHeaders(IHeaderDictionary headers)
     {
         ArgumentNullException.ThrowIfNull(headers);
 
@@ -64,6 +46,5 @@ public sealed class HeaderSanitizer
             LogUntrustedHeadersRemoved(logger, string.Join(", ", removedHeaders), null);
         }
 
-        return removedHeaders;
     }
 }

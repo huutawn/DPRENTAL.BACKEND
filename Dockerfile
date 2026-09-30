@@ -4,18 +4,15 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Sao chép solution và các file định nghĩa project để cache layer restore dependencies
-COPY Gateway/Gateway.sln Gateway/Directory.Build.props Gateway/
-COPY Gateway/src/Gateway.Domain/Gateway.Domain.csproj Gateway/src/Gateway.Domain/
-COPY Gateway/src/Gateway.Application/Gateway.Application.csproj Gateway/src/Gateway.Application/
-COPY Gateway/src/Gateway.Api/Gateway.Api.csproj Gateway/src/Gateway.Api/
-COPY Gateway/tests/ApiGateway.Tests/ApiGateway.Tests.csproj Gateway/tests/ApiGateway.Tests/
+# Sao chép file định nghĩa project để cache layer restore dependencies
+COPY Gateway/Directory.Build.props Gateway/
+COPY Gateway/ocelot/ocelot.csproj Gateway/ocelot/
 
-RUN dotnet restore Gateway/Gateway.sln
+RUN dotnet restore Gateway/ocelot/ocelot.csproj
 
 # Sao chép toàn bộ mã nguồn và thực hiện build release
-COPY Gateway/ Gateway/
-WORKDIR /src/Gateway/src/Gateway.Api
+COPY Gateway/ocelot/ Gateway/ocelot/
+WORKDIR /src/Gateway/ocelot
 RUN dotnet publish -c Release -o /app/publish --no-restore
 
 # ==========================================
