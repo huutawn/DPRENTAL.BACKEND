@@ -10,7 +10,8 @@ public sealed record CompleteProfileRequest(
     [Required, RegularExpression(RegistrationPatterns.PhoneNumber, ErrorMessage = "Số điện thoại không hợp lệ.")] string PhoneNumber,
     [Required] DateOnly? DateOfBirth,
     [StringLength(100, MinimumLength = 1)] string? FullName = null,
-    [NonEmptyGuid] Guid? AvatarMediaId = null);
+    [NonEmptyGuid] Guid? AvatarMediaId = null,
+    [OptionalUrl, StringLength(500)] string? AvatarUrl = null);
 
 /// <summary>Yêu cầu cập nhật hồ sơ cá nhân sau khi đã hoàn thiện.</summary>
 public sealed record UpdateProfileRequest(
@@ -19,4 +20,5 @@ public sealed record UpdateProfileRequest(
     DateOnly? DateOfBirth = null,
     [NonEmptyGuid] Guid? AvatarMediaId = null,
     bool RemoveAvatar = false,
-    [RegularExpression(RegistrationPatterns.CitizenId, ErrorMessage = "Số CCCD phải gồm đúng 12 chữ số.")] string? CitizenId = null);
+    [RegularExpression(RegistrationPatterns.CitizenId, ErrorMessage = "Số CCCD phải gồm đúng 12 chữ số.")] string? CitizenId = null,
+    [OptionalUrl, StringLength(500)] string? AvatarUrl = null);

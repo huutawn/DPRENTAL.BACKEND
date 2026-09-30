@@ -39,6 +39,26 @@ public sealed class UsersController(
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
+    /// <summary>
+    /// Xem CCCD đầy đủ của chính mình (vd khi bấm "Hiện số CCCD"). GET /me chỉ trả số đã che;
+    /// endpoint này chỉ gọi khi người dùng chủ động xem, response không được cache.
+    /// </summary>
+    [HttpGet("me/citizen-id")]
+    [ProducesResponseType<CitizenIdResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<CitizenIdResponse>> GetCitizenId(CancellationToken cancellationToken)
+    {
+        if (User.GetJwtSub() is not Guid userId)
+        {
+            return Unauthorized();
+        }
+
+        Response.Headers.CacheControl = "no-store";
+        Result<CitizenIdResponse> result = await userAccountService.GetCitizenIdAsync(userId, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
     /// <summary>Hoàn thiện thông tin định danh cá nhân lần đầu (CCCD, SĐT, ngày sinh).</summary>
     [HttpPost("profile")]
     [ProducesResponseType<CurrentUserResponse>(StatusCodes.Status201Created)]

@@ -84,6 +84,11 @@ public sealed class UserAccountService(
             user.FullName = fullName;
         }
 
+        if (request.AvatarMediaId.HasValue && !string.IsNullOrWhiteSpace(request.AvatarUrl))
+        {
+            return Result.Failure<CurrentUserResponse>(AuthErrors.Avatar.ConflictingFields);
+        }
+
         if (request.AvatarMediaId.HasValue)
         {
             var verifyResult = await mediaServiceClient.VerifyMediaAsync(request.AvatarMediaId.Value, cancellationToken);
@@ -131,6 +136,11 @@ public sealed class UserAccountService(
         {
             return Result.Failure<CurrentUserResponse>(AuthErrors.Profile.EmptyPatch);
         }
+        if (request.AvatarMediaId.HasValue && !string.IsNullOrWhiteSpace(request.AvatarUrl))
+        {
+            return Result.Failure<CurrentUserResponse>(AuthErrors.Avatar.ConflictingFields);
+        }
+
 
         if (request.RemoveAvatar && request.AvatarMediaId.HasValue)
         {
@@ -149,6 +159,7 @@ public sealed class UserAccountService(
             || request.DateOfBirth.HasValue
             || trimmedCitizenId is not null
             || request.AvatarMediaId.HasValue
+            || !string.IsNullOrWhiteSpace(request.AvatarUrl)
             || request.RemoveAvatar;
 
         if (!hasAnyField)
@@ -258,7 +269,8 @@ public sealed class UserAccountService(
                 request.DateOfBirth,
                 request.AvatarMediaId,
                 request.RemoveAvatar,
-                request.CitizenId),
+                request.CitizenId,
+                request.AvatarUrl),
             clearPhoneWhenNull: true,
             cancellationToken: cancellationToken);
     }
@@ -289,6 +301,33 @@ public sealed class UserAccountService(
             .ToList();
 
         return Result.Success<IReadOnlyList<ExternalLoginResponse>>(responses);
+    }
+
+    public async Task<Result<CitizenIdResponse>> GetCitizenIdAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        if (!DtoValidator.TryValidateId(userId, nameof(userId), out Error? idError))
+        {
+            return Result.Failure<CitizenIdResponse>(idError);
+        }
+
+        User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return Result.Failure<CitizenIdResponse>(AuthErrors.User.NotFound);
+        }
+
+        if (!user.IsActive)
+        {
+            return Result.Failure<CitizenIdResponse>(AuthErrors.Auth.InactiveAccount);
+        }
+
+        // Chỉ ghi nhận việc xem khi thật sự có CCCD; không bao giờ ghi số CCCD vào log.
+        if (user.CitizenId is not null)
+        {
+            await LogAuditAsync(user.Id, user.Id.ToString(), "Profile_ViewCitizenId", "Success", cancellationToken);
+        }
+
+        return Result.Success(new CitizenIdResponse(user.CitizenId));
     }
 
     public async Task<Result> LinkExternalLoginAsync(

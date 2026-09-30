@@ -172,6 +172,104 @@ public sealed class MediaMigrationAcceptanceTests
     }
 
     [Fact]
+    public async Task CompleteProfile_SendingBothAvatarFields_ReturnsBadRequest()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            FullName = "User",
+            IsActive = true
+        };
+
+        UserAccountServiceTests.FakeUserRepository userRepo = new() { User = user };
+        FakeMediaServiceClient mediaClient = new();
+        FakeMediaOutboxService outboxService = new();
+
+        UserAccountService service = UserAccountServiceTests.CreateService(
+            userRepo,
+            mediaServiceClient: mediaClient,
+            mediaOutboxService: outboxService);
+
+        CompleteProfileRequest request = new(
+            CitizenId: "079203001234",
+            PhoneNumber: "0901234567",
+            DateOfBirth: new DateOnly(2000, 1, 1),
+            FullName: "Test User",
+            AvatarMediaId: Guid.NewGuid(),
+            AvatarUrl: "https://example.com/pic.png");
+
+        Result<CurrentUserResponse> result = await service.CompleteProfileAsync(userId, request);
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Avatar.ConflictingFields, result.Error);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+    }
+
+    [Fact]
+    public async Task UpdateProfile_SendingBothAvatarFields_ReturnsBadRequest()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            FullName = "User",
+            IsActive = true
+        };
+
+        UserAccountServiceTests.FakeUserRepository userRepo = new() { User = user };
+        FakeMediaServiceClient mediaClient = new();
+        FakeMediaOutboxService outboxService = new();
+
+        UserAccountService service = UserAccountServiceTests.CreateService(
+            userRepo,
+            mediaServiceClient: mediaClient,
+            mediaOutboxService: outboxService);
+
+        UpdateProfileRequest request = new(
+            AvatarMediaId: Guid.NewGuid(),
+            AvatarUrl: "https://example.com/pic.png");
+
+        Result<CurrentUserResponse> result = await service.UpdateProfileAsync(userId, request);
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Avatar.ConflictingFields, result.Error);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+    }
+
+    [Fact]
+    public async Task UpdateUserProfile_SendingBothAvatarFields_ReturnsBadRequest()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            FullName = "User",
+            IsActive = true
+        };
+
+        UserAccountServiceTests.FakeUserRepository userRepo = new() { User = user };
+        FakeMediaServiceClient mediaClient = new();
+        FakeMediaOutboxService outboxService = new();
+
+        UserAccountService service = UserAccountServiceTests.CreateService(
+            userRepo,
+            mediaServiceClient: mediaClient,
+            mediaOutboxService: outboxService);
+
+        UpdateUserProfileRequest request = new(
+            FullName: "Updated User",
+            AvatarMediaId: Guid.NewGuid(),
+            AvatarUrl: "https://example.com/pic.png");
+
+        Result<CurrentUserResponse> result = await service.UpdateUserProfileAsync(userId, request);
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Avatar.ConflictingFields, result.Error);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+    }
+
+    [Fact]
     public async Task Organization_GetById_PermissionCheck_And_LicenseExpiration()
     {
         Guid ownerId = Guid.NewGuid();

@@ -171,6 +171,15 @@ public static class AuthErrors
 
         public static readonly Error ServiceUnavailable =
             Error.Failure(AuthErrorCode.Media.ServiceUnavailable, "Dịch vụ media hiện không khả dụng.");
+
+        public static readonly Error ConflictingFields =
+            Error.Validation(AuthErrorCode.Media.ConflictingFields, "Không thể gửi đồng thời avatarMediaId và avatarUrl.");
+    }
+
+    public static class Avatar
+    {
+        public static readonly Error ConflictingFields =
+            Error.Validation(AuthErrorCode.Avatar.ConflictingFields, "Không thể gửi đồng thời avatarMediaId và avatarUrl.");
     }
 
 

@@ -71,6 +71,12 @@ public static class AuthErrorCode
         public const string InvalidType = "Media.InvalidType";
         public const string Forbidden = "Media.Forbidden";
         public const string ServiceUnavailable = "Media.ServiceUnavailable";
+        public const string ConflictingFields = "Media.ConflictingFields";
+    }
+
+    public static class Avatar
+    {
+        public const string ConflictingFields = "Avatar.ConflictingFields";
     }
 
 
