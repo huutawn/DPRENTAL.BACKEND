@@ -115,8 +115,9 @@ public sealed class UsersController(
             return Unauthorized();
         }
 
+        Guid? currentSessionId = User.GetJwtSessionId();
         Request.Cookies.TryGetValue(AuthCookies.RefreshTokenCookieName, out string? currentRefreshToken);
-        Result<IReadOnlyList<SessionResponse>> sessionsResult = await authSessionService.GetSessionsAsync(userId, currentRefreshToken, cancellationToken);
+        Result<IReadOnlyList<SessionResponse>> sessionsResult = await authSessionService.GetSessionsAsync(userId, currentRefreshToken, currentSessionId, cancellationToken);
         if (sessionsResult.IsFailure)
         {
             return this.ToProblem(sessionsResult.Error);
@@ -138,9 +139,10 @@ public sealed class UsersController(
             return Unauthorized();
         }
 
+        Guid? jwtSessionId = User.GetJwtSessionId();
         Request.Cookies.TryGetValue(AuthCookies.RefreshTokenCookieName, out string? currentRefreshToken);
         Result<Guid> currentSessionIdResult = await authSessionService.GetCurrentSessionIdAsync(currentRefreshToken, cancellationToken);
-        Guid? currentSessionId = currentSessionIdResult.IsSuccess ? currentSessionIdResult.Value : null;
+        Guid? cookieSessionId = currentSessionIdResult.IsSuccess ? currentSessionIdResult.Value : null;
 
         Result result = await authSessionService.RevokeSessionAsync(userId, sessionId, cancellationToken);
         if (result.IsFailure)
@@ -148,7 +150,9 @@ public sealed class UsersController(
             return this.ToProblem(result.Error);
         }
 
-        if (currentSessionId.HasValue && currentSessionId.Value == sessionId)
+        bool isCurrentSession = (jwtSessionId.HasValue && jwtSessionId.Value == sessionId) ||
+                                (cookieSessionId.HasValue && cookieSessionId.Value == sessionId);
+        if (isCurrentSession)
         {
             AuthCookies.Clear(Response, Request, environment);
         }

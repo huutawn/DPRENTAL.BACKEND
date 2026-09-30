@@ -127,25 +127,6 @@ public sealed class AuthController(
         return Ok(new { Message = "Làm mới token thành công" });
     }
 
-    /// <summary>Lấy danh sách các phiên đăng nhập (thiết bị) đang hoạt động của người dùng.</summary>
-    [Authorize]
-    [HttpGet("sessions")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> GetSessions(CancellationToken cancellationToken)
-    {
-        if (User.GetJwtSub() is Guid userId)
-        {
-            // Trích xuất RefreshToken từ Cookie để service xác định đâu là phiên hiện tại (This Device)
-            Request.Cookies.TryGetValue("refreshToken", out string? currentRefreshToken);
-
-            var sessions = await authSessionService.GetSessionsAsync(userId, currentRefreshToken, cancellationToken);
-            return Ok(sessions);
-        }
-
-        return Unauthorized();
-    }
-
     /// <summary>Đăng xuất, thu hồi refresh token hiện tại và xóa cookie phiên.</summary>
     [HttpPost("logout")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -271,28 +252,6 @@ public sealed class AuthController(
         return Ok(new { Message = "Đã đặt lại mật khẩu và hủy toàn bộ phiên cũ." });
     }
 
-    /// <summary>Thu hồi một phiên đăng nhập cụ thể của người dùng (Đăng xuất khỏi thiết bị khác).</summary>
-    [Authorize]
-    [HttpPost("revoke-session")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> RevokeDeviceSession([FromBody] RevokeDeviceSessionRequest request, CancellationToken cancellationToken)
-    {
-        if (User.GetJwtSub() is Guid userId)
-        {
-            // Gọi hàm đã có sẵn ở dưới cùng của Service
-            var result = await authSessionService.RevokeSessionAsync(userId, request.SessionId, cancellationToken);
-
-            if (result.IsFailure)
-            {
-                return this.ToProblem(result.Error);
-            }
-
-            return NoContent();
-        }
-
-        return Unauthorized();
-    }
 
     private ObjectResult NotImplementedYet() => Problem(
         statusCode: StatusCodes.Status501NotImplemented,

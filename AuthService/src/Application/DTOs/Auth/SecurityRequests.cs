@@ -23,6 +23,3 @@ public sealed record RequestPasswordResetRequest(
 public sealed record VerifyResetOtpRequest(
     [Required(ErrorMessage = "Mã OTP là bắt buộc."), StringLength(10, MinimumLength = 6, ErrorMessage = "Mã OTP phải từ 6 đến 10 ký tự.")] string Otp,
     [EmailAddress, StringLength(254)] string? Email = null);
-/// <summary>Yêu cầu thu hồi một phiên đăng nhập cụ thể.</summary>
-public sealed record RevokeDeviceSessionRequest(
-    [Required(ErrorMessage = "SessionId là bắt buộc.")] Guid SessionId);

@@ -33,6 +33,9 @@ public sealed class RsaAccessTokenIssuer(
     /// <summary>Tên claim hồ sơ đã hoàn thiện rút gọn thành "pc".</summary>
     private const string ProfileCompletedClaimType = JwtClaimCatalog.Claims.ProfileCompleted;
 
+    /// <summary>Tên claim session ID rút gọn thành "sid".</summary>
+    private const string SessionIdClaimType = JwtClaimCatalog.Claims.SessionId;
+
     /// <summary>Tạo access token RS256 với các standard claim và alias đã chuẩn hóa.</summary>
     public IssuedAccessToken Issue(AccessTokenRequest request)
     {
@@ -87,6 +90,11 @@ public sealed class RsaAccessTokenIssuer(
                 ProfileCompletedClaimType,
                 request.IsProfileCompleted.Value ? "true" : "false",
                 ClaimValueTypes.Boolean));
+        }
+
+        if (request.SessionId.HasValue && request.SessionId.Value != Guid.Empty)
+        {
+            claims.Add(new Claim(SessionIdClaimType, request.SessionId.Value.ToString("D")));
         }
 
         SigningCredentials signingCredentials = new(keyRing.ActiveSigningKey, SecurityAlgorithms.RsaSha256);

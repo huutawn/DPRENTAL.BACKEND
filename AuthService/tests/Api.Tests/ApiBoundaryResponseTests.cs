@@ -272,8 +272,21 @@ public sealed class ApiBoundaryResponseTests
         });
 
         Guid userId = Guid.NewGuid();
+        Guid sessionId = Guid.NewGuid();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            db.Sessions.Add(new Session
+            {
+                Id = sessionId,
+                UserId = userId,
+                CreatedAtUtc = DateTime.UtcNow,
+                ExpiresAtUtc = DateTime.UtcNow.AddDays(7)
+            });
+            await db.SaveChangesAsync();
+        }
         IAccessTokenIssuer issuer = factory.Services.GetRequiredService<IAccessTokenIssuer>();
-        IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(userId, ["Admin"]));
+        IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(userId, ["Admin"], SessionId: sessionId));
 
         using HttpClient client = factory.CreateClient();
         HttpRequestMessage request = new(HttpMethod.Get, "/api/v1/auth/users/me");
@@ -457,10 +470,10 @@ public sealed class ApiBoundaryResponseTests
 
         public Task<Result<PagedResult<AdminUserListItemDto>>> GetUsersPagedAsync(GetUsersRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        public Task<Result<Guid>> CreateUserAsync(CreateUserRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<Result> UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Result<Guid>> CreateUserAsync(CreateUserRequest request, Guid? adminId = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Result> UpdateUserAsync(Guid id, UpdateUserRequest request, Guid? adminId = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        public Task<Result<IReadOnlyList<RoleDto>>> GetAllRolesAsync(CancellationToken cancellationToken = default)
+        public Task<Result<IReadOnlyList<RoleDto>>> GetAllRolesAsync(Guid? adminId = null, CancellationToken cancellationToken = default)
         {
             // Trả về một list rỗng để test có thể compile và pass
             return Task.FromResult(Result.Success<IReadOnlyList<RoleDto>>([]));
