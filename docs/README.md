@@ -144,7 +144,8 @@ Tất cả các endpoint nghiệp vụ media đều sử dụng tiền tố chu�
 - **Xác thực**: Yêu cầu User Access Token hợp lệ; service API key không thay thế user JWT cho upload hiện tại.
 - **Header tùy chọn**: `Idempotency-Key` để gửi lại cùng danh sách file.
 - **Body**: `multipart/form-data` gồm 1–10 phần `files` (binary). Có thể gửi cùng số phần `sha256Checksums` theo đúng thứ tự. Tổng request tối đa 25 MiB; mỗi ảnh tối đa 10 MiB và PDF tối đa 20 MiB. Tên, MIME và kích thước lấy từ từng file.
-- **Kết quả**: HTTP 200 là mảng theo thứ tự đầu vào. Mỗi phần tử có `index`, `fileName`, `media` chứa `mediaId` và metadata khi thành công, hoặc `error` có `code` và `message` khi thất bại. Một file lỗi không chặn các file khác. `previewUrl` có thể null nếu ký URL lỗi sau khi media đã `Ready`.
+- **Kết quả**: HTTP 200 là mảng theo thứ tự đầu vào. Mỗi phần tử có `index`, `fileName`, `media` chứa `mediaId` và metadata khi thành công, hoặc `error` có `code` và `message` khi thất bại. Một file lỗi không chặn các file khác. `previewUrl` trả về là URL MinIO ký tạm thời, chỉ dùng để hiển thị preview trên UI ngay sau upload; client và các service **tuyệt đối không** lưu trữ `previewUrl` này làm URL hiển thị lâu dài.
+- **Quyền riêng tư mặc định**: Bucket MinIO luôn ở chế độ `private` và mọi file sau khi tải lên mặc định có `visibility` là `Private`.
 - **Idempotency**: Key được gắn với vị trí file và số file trong batch. Gửi lại cùng danh sách trả cùng `mediaId` cho file đã thành công; đổi file, thứ tự hoặc số lượng trả lỗi theo vị trí bị ảnh hưởng. File đã bị từ chối cần key mới.
 
 ### 6.2. Xác minh MediaId nội bộ (`GET /api/v1/media/{mediaId}/verify`)
@@ -166,6 +167,16 @@ Tất cả các endpoint nghiệp vụ media đều sử dụng tiền tố chu�
   "createdAtUtc": "2026-09-25T10:00:00Z"
 }
 ```
+
+### 6.3. Công bố hiển thị Media (`PUT /api/v1/media/{mediaId}/visibility`)
+- **Xác thực**: Yêu cầu header `X-Api-Key` khớp với cấu hình `ApiKey`.
+- **Body**: `{ "visibility": "public" }` hoặc `{ "visibility": "private" }`.
+- **Mục đích**: Cho phép Business Service (như AuthService, CatalogService) cập nhật trạng thái hiển thị của Media sau khi entity nghiệp vụ liên kết thành công.
+
+### 6.4. Truy cập nội dung Public ổn định (`GET /api/v1/media/{mediaId}/content`)
+- **Xác thực**: Cho phép truy cập ẩn danh (`AllowAnonymous`), không yêu cầu token hay API key.
+- **Hành vi**: MediaService kiểm tra file tồn tại, ở trạng thái `Ready` và có `visibility` là `Public`. Nếu hợp lệ, dịch vụ chuyển hướng HTTP 302 sang URL MinIO ký ngắn hạn (mặc định 300 giây). Nếu file không tồn tại, chưa `Ready` hoặc đang `Private`, trả về `404 Not Found`.
+- **Quy định lưu trữ URL**: Client và Business Service **phải lưu URL `/api/v1/media/{mediaId}/content`** (hoặc URL qua Gateway public) làm URL hiển thị lâu dài (ví dụ: `AvatarUrl`), không được lưu `previewUrl` hoặc URL MinIO sau chuyển hướng.
 
 ## 7. Hướng dẫn thiết lập tài khoản MinIO giới hạn quyền cho Môi trường Triển khai
 
