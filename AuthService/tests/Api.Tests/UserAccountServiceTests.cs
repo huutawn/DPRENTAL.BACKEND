@@ -432,6 +432,51 @@ public sealed class UserAccountServiceTests
         Assert.Equal(userId.ToString(), audit.Target);
     }
 
+    [Fact]
+    public async Task GetCitizenIdAsyncReturnsFullCitizenIdAndAuditsWithoutLeakingIt()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", CitizenId = "079203001234", IsActive = true };
+        TestAuditLogRepository auditRepo = new();
+        UserAccountService service = CreateService(new FakeUserRepository { User = user }, auditLogRepository: auditRepo);
+
+        Result<CitizenIdResponse> result = await service.GetCitizenIdAsync(userId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("079203001234", result.Value.CitizenId);
+        AuditLog audit = Assert.Single(auditRepo.Logs);
+        Assert.Equal("Profile_ViewCitizenId", audit.Action);
+        Assert.DoesNotContain("079203001234", $"{audit.Target} {audit.Result}", StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetCitizenIdAsyncReturnsNullWithoutAuditWhenNotProvided()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", IsActive = true };
+        TestAuditLogRepository auditRepo = new();
+        UserAccountService service = CreateService(new FakeUserRepository { User = user }, auditLogRepository: auditRepo);
+
+        Result<CitizenIdResponse> result = await service.GetCitizenIdAsync(userId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.Value.CitizenId);
+        Assert.Empty(auditRepo.Logs);
+    }
+
+    [Fact]
+    public async Task GetCitizenIdAsyncRejectsInactiveUser()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, Email = "user@example.com", CitizenId = "079203001234", IsActive = false };
+        UserAccountService service = CreateService(new FakeUserRepository { User = user });
+
+        Result<CitizenIdResponse> result = await service.GetCitizenIdAsync(userId);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Auth.InactiveAccount, result.Error);
+    }
+
     internal static UserAccountService CreateService(
         FakeUserRepository userRepo,
         IAuditLogRepository? auditLogRepository = null,

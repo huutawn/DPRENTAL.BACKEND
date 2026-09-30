@@ -114,6 +114,36 @@ public sealed class ProfileEndpointTests
         Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("avatarUrl").ValueKind);
     }
 
+    [Fact]
+    public async Task GetOwnCitizenIdReturnsFullNumberNotCachedWhileMeStaysMasked()
+    {
+        Guid userId = Guid.NewGuid();
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedUserAsync(factory, userId, isCompleted: true);
+        using HttpClient client = CreateAuthenticatedClient(factory, userId);
+
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/users/me/citizen-id");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.CacheControl?.NoStore);
+        CitizenIdResponse? body = await response.Content.ReadFromJsonAsync<CitizenIdResponse>();
+        Assert.Equal("079203009999", body?.CitizenId);
+
+        using HttpResponseMessage me = await client.GetAsync("/api/v1/auth/users/me");
+        using JsonDocument document = JsonDocument.Parse(await me.Content.ReadAsStringAsync());
+        Assert.Equal("********9999", document.RootElement.GetProperty("maskedCitizenId").GetString());
+    }
+
+    [Fact]
+    public async Task GetOwnCitizenIdRequiresAuthentication()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/users/me/citizen-id");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
     private static HttpClient CreateAuthenticatedClient(WebApplicationFactory<Program> factory, Guid userId)
     {
         HttpClient client = factory.CreateClient();

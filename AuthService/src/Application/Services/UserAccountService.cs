@@ -303,6 +303,33 @@ public sealed class UserAccountService(
         return Result.Success<IReadOnlyList<ExternalLoginResponse>>(responses);
     }
 
+    public async Task<Result<CitizenIdResponse>> GetCitizenIdAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        if (!DtoValidator.TryValidateId(userId, nameof(userId), out Error? idError))
+        {
+            return Result.Failure<CitizenIdResponse>(idError);
+        }
+
+        User? user = await userRepository.GetByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return Result.Failure<CitizenIdResponse>(AuthErrors.User.NotFound);
+        }
+
+        if (!user.IsActive)
+        {
+            return Result.Failure<CitizenIdResponse>(AuthErrors.Auth.InactiveAccount);
+        }
+
+        // Chỉ ghi nhận việc xem khi thật sự có CCCD; không bao giờ ghi số CCCD vào log.
+        if (user.CitizenId is not null)
+        {
+            await LogAuditAsync(user.Id, user.Id.ToString(), "Profile_ViewCitizenId", "Success", cancellationToken);
+        }
+
+        return Result.Success(new CitizenIdResponse(user.CitizenId));
+    }
+
     public async Task<Result> LinkExternalLoginAsync(
         Guid userId,
         string provider,
