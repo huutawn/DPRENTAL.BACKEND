@@ -193,3 +193,63 @@ Gateway cung cấp các probe giám sát riêng biệt theo chuẩn Kubernetes /
     1. Đã tải và nạp thành công khóa công khai JWKS từ AuthService (`auth-jwks`).
     2. Cấu hình các tuyến đường của Ocelot đã được nạp (`proxy-config`).
   - Trả về `503 Service Unavailable` nếu các phụ thuộc cốt lõi chưa khả dụng.
+
+## Kiểm tra trước khi push
+
+Để tránh push commit chưa đồng bộ với nhánh nền `gateway/develop` hoặc làm gãy build/test, bật Git hook cho local clone:
+
+```bash
+# Linux / macOS
+./scripts/setup-git-hooks.sh
+
+# Windows PowerShell
+.\scripts\setup-git-hooks.ps1
+```
+
+Hook sẽ tự động chạy [pre-push-check.sh](scripts/pre-push-check.sh):
+1. Fetch `origin/gateway/develop` và kiểm tra commit hiện tại đã chứa nhánh nền này (`git merge-base --is-ancestor`).
+2. Build `Gateway/Gateway.sln` ở cấu hình `Release`.
+3. Chạy test `Gateway/Gateway.sln`.
+
+## Docker artifact
+
+Dockerfile ở repository root xây dựng runtime image tối giản cho Gateway:
+
+```bash
+docker build --target runtime -t ghcr.io/<org>/dprental-gateway:<git-sha> .
+```
+
+Runtime lắng nghe cổng `8080`, chạy non-root user `$APP_UID` và tích hợp sẵn `HEALTHCHECK` tự động thăm dò endpoint `/health/ready`.
+
+## CI/CD Gateway cho dev
+
+Workflow [gateway-dev.yml](.github/workflows/gateway-dev.yml) chỉ chạy khi có push vào `gateway/develop-ci-cd`; nó không chạy cho pull request và không kiểm tra branch nền hoặc chạy test. Job publish build và đẩy Docker image lên GHCR một lần, sau đó job deploy chạy trên VPS. Kiểm tra build và test .NET vẫn có trong [pre-push hook](scripts/pre-push-check.sh) ở máy lập trình viên, nhưng hook này có thể bị bỏ qua và không thay thế CI.
+
+Mỗi push sẽ publish image GHCR bất biến bằng full Git SHA:
+
+```text
+ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-gateway:<git-sha>
+```
+
+Thiết lập GitHub Environment variable `GHCR_IMAGE_NAMESPACE` bằng namespace GHCR viết thường (ví dụ `huutawn`). Workflow gắn OCI source metadata để package mới tự liên kết repository. Với package đã từng được push thủ công, vào package GHCR và cấp repository workflow quyền **Write** trong phần Actions access trước lần CI đầu tiên. Tạo GitHub Environment tên `dev` với các secrets sau:
+
+```text
+DEV_VPS_HOST              # IP hoặc hostname VPS
+DEV_VPS_USER              # user deploy thuộc group docker
+DEV_VPS_SSH_PRIVATE_KEY   # private key riêng của user deploy
+DEV_VPS_KNOWN_HOSTS       # dòng host key theo định dạng known_hosts
+DEV_VPS_PORT              # tùy chọn, mặc định 22
+```
+
+Workflow nạp deploy key vào `ssh-agent` qua stdin và kiểm tra host key đã lưu trong `DEV_VPS_KNOWN_HOSTS`. Nó truyền `GITHUB_TOKEN` cùng deploy script qua stdin của kết nối SSH, không đặt token trong câu lệnh SSH. Trên VPS, script đăng nhập GHCR bằng Docker config tạm rồi thực thi [deploy-gateway.sh](scripts/deploy-gateway.sh) từ commit đang phát hành. Docker credential tạm bị xóa ngay khi script kết thúc; user SSH của workflow cần quyền đọc `.env` và ghi `release.env`.
+
+Script cập nhật **chỉ duy nhất biến `GATEWAY_IMAGE`** trong `/opt/dprental/dev/release.env`, bảo toàn nguyên vẹn mọi image khác (`AUTH_SERVICE_IMAGE`, `AUTH_MIGRATOR_IMAGE`...). Nó pull duy nhất image `gateway`, khởi động lại container với `--no-deps --force-recreate gateway`, chờ Gateway đạt trạng thái healthy và thực hiện kiểm thử khói (smoke tests) cả nội bộ lẫn qua domain công khai.
+
+Ví dụ cấp quyền ghi `release.env` cho user GitHub Actions trên VPS (thay `deploy` bằng user thực tế):
+
+```bash
+sudo chown deploy:deploy /opt/dprental/dev/release.env
+sudo chmod 600 /opt/dprental/dev/release.env
+```
+
+User `deploy` phải thuộc group `docker`; quyền Docker tương đương quyền quản trị VPS nên deploy key chỉ dùng cho automation này. Khóa host SSH có thể lấy từ máy tin cậy bằng `ssh-keyscan -H <vps-host>` rồi lưu nguyên kết quả vào `DEV_VPS_KNOWN_HOSTS`. Nếu chỉ muốn triển khai sau khi merge PR, cấu hình branch protection/ruleset cho `gateway/develop-ci-cd` để yêu cầu PR và chặn push trực tiếp; event `push` tự nó không bảo đảm commit đến từ PR.
