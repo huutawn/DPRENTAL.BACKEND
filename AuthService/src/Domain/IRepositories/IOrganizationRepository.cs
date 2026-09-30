@@ -8,8 +8,10 @@ public interface IOrganizationRepository
 {
     Task<Organization?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>Find the approved organization (Active or Suspended) that owns this slug.</summary>
     Task<Organization?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default);
 
+    /// <summary>Check whether an approved organization (Active or Suspended) owns this slug.</summary>
     Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -30,6 +32,7 @@ public interface IOrganizationRepository
     /// </summary>
     Task<Organization> CreateAsync(Organization organization, OrganizationMembership initialMembership, CancellationToken cancellationToken = default);
 
+    /// <summary>Check whether an approved organization (Active or Suspended) owns this tax code.</summary>
     Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default);
 
     Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default);

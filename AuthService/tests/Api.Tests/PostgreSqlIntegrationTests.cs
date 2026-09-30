@@ -52,6 +52,58 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         return new AuthDbContext(options);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PostgreSql_UnapprovedIdentifiersCanRepeatButConcurrentApprovalCannot(bool duplicateSlug)
+    {
+        string suffix = Guid.NewGuid().ToString("N");
+        Guid firstId = Guid.NewGuid();
+        Guid secondId = Guid.NewGuid();
+        await using (var setup = CreateDbContext())
+        {
+            setup.Organizations.AddRange(new Organization
+            {
+                Id = firstId,
+                Name = "First",
+                Slug = $"first-{suffix}",
+                TaxCode = suffix[..14],
+                Status = OrganizationStatus.Pending
+            }, new Organization
+            {
+                Id = secondId,
+                Name = "Second",
+                Slug = duplicateSlug ? $"first-{suffix}" : $"second-{suffix}",
+                TaxCode = duplicateSlug ? null : suffix[..14],
+                Status = OrganizationStatus.Rejected
+            });
+            await setup.SaveChangesAsync();
+        }
+
+        async Task<bool> ActivateAsync(Guid id)
+        {
+            await using var db = CreateDbContext();
+            var repository = new EfOrganizationRepository(db);
+            Organization org = (await repository.GetByIdAsync(id))!;
+            org.Status = OrganizationStatus.Active;
+            try
+            {
+                return await repository.UpdateAsync(org);
+            }
+            catch (StorageConstraintViolationException exception)
+            {
+                Assert.Equal(duplicateSlug ? StorageConstraints.OrganizationSlug : StorageConstraints.OrganizationTaxCode, exception.ConstraintName);
+                return false;
+            }
+        }
+
+        bool[] results = await Task.WhenAll(ActivateAsync(firstId), ActivateAsync(secondId));
+        Assert.Single(results, success => success);
+        Assert.Single(results, success => !success);
+        await using var verify = CreateDbContext();
+        Assert.Equal(1, await verify.Organizations.CountAsync(o => (o.Id == firstId || o.Id == secondId) && o.Status == OrganizationStatus.Active));
+    }
+
     [Fact]
     public async Task PostgreSql_MediaOutboxClaim_IsLeasedAndCanRecoverAfterWorkerStops()
     {
@@ -136,9 +188,11 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         Role? ownerRole = await db.Roles.FirstOrDefaultAsync(r => r.Name == SystemRoleCode.Owner);
         Assert.NotNull(ownerRole);
         Organization first = NewOrganization("Acme", slug);
+        first.Status = OrganizationStatus.Active;
         await orgRepo.CreateAsync(first, NewOwnerMembership(first.Id, reg1.Value.AccountId, ownerRole.Id));
 
         Organization second = NewOrganization("Acme Two", slug);
+        second.Status = OrganizationStatus.Active;
         StorageConstraintViolationException slugViolation = await Assert.ThrowsAsync<StorageConstraintViolationException>(
             () => orgRepo.CreateAsync(second, NewOwnerMembership(second.Id, reg1.Value.AccountId, ownerRole.Id)));
         Assert.Equal(StorageConstraints.OrganizationSlug, slugViolation.ConstraintName);

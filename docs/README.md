@@ -289,3 +289,7 @@ Quy tắc liên kết tài khoản, theo thứ tự:
 4. Không có user nào dùng email đó thì tạo user mới với mật khẩu ngẫu nhiên (chỉ đăng nhập được qua Google) và không có role nào.
 
 Bảng `auth.ExternalLogins` được tạo bởi migration `AddExternalLogins`; áp dụng bằng `dotnet ef database update` như phần Refresh token và session. Migration `RemoveGoogleLoginTickets` gỡ bảng ticket cũ vì flow Firebase không dùng ticket nội bộ nữa.
+
+### Organization identifier uniqueness
+
+Organization registration checks slug and tax code against approved organizations (Active or Suspended). Pending and Rejected applications may share identifiers. Approval checks both identifiers again; filtered unique indexes enforce this rule for concurrent approvals. Apply the `AllowUnapprovedOrganizationIdentifiers` migration before deploying this behavior. Rolling back requires resolving duplicate identifiers among Pending/Rejected organizations before restoring the global unique indexes.

@@ -16,6 +16,31 @@ public sealed class OrganizationReviewTests
     private static readonly Guid OwnerRoleId = new("a1010000-0000-0000-0000-000000000001");
     private static readonly Guid PlatformRoleId = Guid.NewGuid();
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ApprovalRejectsIdentifiersOfApprovedOrganization(bool duplicateSlug)
+    {
+        await using Fixture f = await Fixture.CreateAsync();
+        Organization pending = await f.ReloadOrgAsync();
+        f.Db.Organizations.Add(new Organization
+        {
+            Id = Guid.NewGuid(),
+            Name = "Approved",
+            Slug = duplicateSlug ? pending.Slug : "other-approved",
+            TaxCode = duplicateSlug ? "0399999999" : pending.TaxCode,
+            Status = OrganizationStatus.Active
+        });
+        await f.Db.SaveChangesAsync();
+
+        var result = await f.Review.ApproveAsync(f.AdminId, f.OrgId);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(duplicateSlug ? AuthErrors.Organization.SlugAlreadyExists : AuthErrors.Organization.TaxCodeAlreadyExists, result.Error);
+        Assert.Equal(OrganizationStatus.Pending, (await f.ReloadOrgAsync()).Status);
+        Assert.Empty(f.Db.AuditLogs);
+    }
+
     [Fact]
     public async Task ApprovePendingOrganizationActivatesAndRecordsReviewer()
     {

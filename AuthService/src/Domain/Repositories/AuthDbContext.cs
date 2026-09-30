@@ -29,5 +29,9 @@ public sealed class AuthDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        // Approved organizations retain their identifiers even while suspended.
+        modelBuilder.Entity<Organization>().HasIndex(o => o.Slug).IsUnique().HasFilter("\"Status\" IN (1, 3)");
+        modelBuilder.Entity<Organization>().HasIndex(o => o.TaxCode).IsUnique().HasFilter("\"Status\" IN (1, 3)");
     }
 }

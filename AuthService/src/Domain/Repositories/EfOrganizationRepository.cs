@@ -17,12 +17,12 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
     public Task<Organization?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default) =>
         dbContext.Organizations
             .AsNoTracking()
-            .SingleOrDefaultAsync(org => org.Slug == slug, cancellationToken);
+            .SingleOrDefaultAsync(org => org.Slug == slug && (org.Status == OrganizationStatus.Active || org.Status == OrganizationStatus.Suspended), cancellationToken);
 
     public Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default) =>
         dbContext.Organizations
             .AsNoTracking()
-            .AnyAsync(org => org.Slug == slug, cancellationToken);
+            .AnyAsync(org => org.Slug == slug && (org.Status == OrganizationStatus.Active || org.Status == OrganizationStatus.Suspended), cancellationToken);
 
     public async Task<PagedResult<Organization>> GetAllAsync(
         PageRequest request,
@@ -113,7 +113,7 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
     public Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default) =>
         dbContext.Organizations
             .AsNoTracking()
-            .AnyAsync(org => org.TaxCode == taxCode, cancellationToken);
+            .AnyAsync(org => org.TaxCode == taxCode && (org.Status == OrganizationStatus.Active || org.Status == OrganizationStatus.Suspended), cancellationToken);
 
     public async Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default)
     {
