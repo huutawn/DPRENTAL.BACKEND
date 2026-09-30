@@ -237,12 +237,14 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Slug")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"Status\" IN (1, 3)");
 
                     b.HasIndex("Status");
 
                     b.HasIndex("TaxCode")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"Status\" IN (1, 3)");
 
                     b.ToTable("Organizations", "auth");
                 });

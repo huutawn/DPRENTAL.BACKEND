@@ -68,6 +68,23 @@ public sealed class OrganizationRegistrationServiceTests
         Assert.Empty(dbContext.Organizations);
     }
 
+    [Theory]
+    [InlineData(OrganizationStatus.Pending)]
+    [InlineData(OrganizationStatus.Rejected)]
+    public async Task RegisterAllowsIdentifiersOfUnapprovedOrganization(OrganizationStatus status)
+    {
+        await using AuthDbContext dbContext = await CreateDbContextAsync();
+        User owner = await CreateUserAsync(dbContext, "owner@example.com");
+        dbContext.Organizations.Add(new Organization { Id = Guid.NewGuid(), Name = "Existing", Slug = "existing", TaxCode = "0312345678", Status = status });
+        await dbContext.SaveChangesAsync();
+
+        var result = await CreateService(dbContext).RegisterForExistingUserAsync(owner.Id, CreateProfile(slug: "existing"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("existing", result.Value.Slug);
+        Assert.Equal(2, await dbContext.Organizations.CountAsync());
+    }
+
     [Fact]
     public async Task RegisterRejectsDuplicateTaxCode()
     {

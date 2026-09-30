@@ -108,6 +108,18 @@ public sealed class OrganizationReviewService(
             return Result.Failure<OrganizationResponse>(AuthErrors.Organization.NotPendingReview);
         }
 
+        if (decision == OrganizationStatus.Active)
+        {
+            if (await organizationRepository.SlugExistsAsync(org.Slug, cancellationToken))
+            {
+                return Result.Failure<OrganizationResponse>(AuthErrors.Organization.SlugAlreadyExists);
+            }
+            if (org.TaxCode is not null && await organizationRepository.TaxCodeExistsAsync(org.TaxCode, cancellationToken))
+            {
+                return Result.Failure<OrganizationResponse>(AuthErrors.Organization.TaxCodeAlreadyExists);
+            }
+        }
+
         DateTimeOffset now = timeProvider.GetUtcNow();
         org.Status = decision;
         org.RejectionReason = rejectionReason;
