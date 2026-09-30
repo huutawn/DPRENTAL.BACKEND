@@ -1,6 +1,6 @@
 # MediaService engineering rules
 
-These instructions apply to implementation, refactoring, debugging, and review in this repository. The six numbered documents in `.agents/` describe product behavior. Read the documents relevant to a change before designing it; do not silently invent a conflicting contract. Keep the relevant document, code, and tests consistent in the same PR.
+These instructions apply to implementation, refactoring, debugging, and review in this repository. Inspect the existing behavior and tests before designing a change; do not silently invent a conflicting contract. Keep documentation, code, and tests consistent in the same PR.
 
 ## Fixed solution architecture
 
@@ -26,7 +26,7 @@ Domain models and contracts must stay free of HTTP, SQL, and MinIO types even th
 
 ## Change ownership and collaboration
 
-- Before changing behavior, inspect the current implementation, its callers, dependencies, tests, and the relevant numbered product document. Use `codebase-memory-mcp` graph tools when available (`search_graph`, `trace_path`, `get_code_snippet`); if unavailable or incomplete, use targeted `rg` and file reads. Do not infer ownership from filenames alone.
+- Before changing behavior, inspect the current implementation, its callers, dependencies, tests, and relevant documentation. Use `codebase-memory-mcp` graph tools when available (`search_graph`, `trace_path`, `get_code_snippet`); if unavailable or incomplete, use targeted `rg` and file reads. Do not infer ownership from filenames alone.
 - State the capability and files owned by each contributor before parallel work. Coordinate changes to shared files such as `Program.cs`, project files, package versions, migrations, and common contracts. Do not overwrite or revert another contributor's edits; re-read shared files before applying your change.
 - Keep each PR tied to one coherent responsibility. A cross-layer PR is appropriate when one use case requires it, but unrelated features, cleanup, and infrastructure changes belong in separate PRs. Integrate all affected layers and callers for the chosen responsibility in that PR.
 - Modify or replace an existing implementation before adding another. Remove obsolete code, adapters, configuration, tests, and documentation after replacement. Temporary coexistence requires a documented reason, owner, removal condition, and tests. Avoid `V2`, `New`, and `Legacy` names used to hide parallel paths.
@@ -35,7 +35,7 @@ Domain models and contracts must stay free of HTTP, SQL, and MinIO types even th
 ## Use-case and boundary rules
 
 - Application is the authoritative place for semantic input validation, permission checks, ownership checks, media state rules, idempotency decisions, and orchestration. Validate every entry to a use case, including calls that do not originate from HTTP. Api may reject malformed HTTP and map Application outcomes to HTTP; it must not repeat business rules.
-- Treat the six product documents as behavior specifications. For upload, metadata, access, replacement, visibility, and deletion, implement only the behavior the current task requests. Resolve a material contradiction with the requester before changing the contract.
+- For upload, metadata, access, replacement, visibility, and deletion, implement only the behavior the current task requests. Resolve a material contradiction with the requester before changing the contract.
 - Application decides when a transaction is needed; Domain implements persistence and storage operations. Never hold a database transaction open across a slow MinIO or other remote call. Make retryable operations idempotent or detect duplicates; specify cancellation, timeout, and concurrency behavior.
 - Domain repositories express media intent and enforce storage integrity. They do not decide who may view, publish, replace, or delete media. Do not let another service mutate MediaService tables or objects through an undocumented path.
 - Propagate `CancellationToken` through database, object-storage, and other blocking operations. Dispose connections, streams, responses, and clients correctly. Return contextual errors without exposing credentials or sensitive payloads.
