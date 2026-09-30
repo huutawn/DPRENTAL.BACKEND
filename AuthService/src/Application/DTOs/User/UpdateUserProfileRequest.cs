@@ -10,5 +10,6 @@ public sealed record UpdateUserProfileRequest(
     DateOnly? DateOfBirth = null,
     [RegularExpression(RegistrationPatterns.CitizenId, ErrorMessage = "Số CCCD phải gồm đúng 12 chữ số.")] string? CitizenId = null,
     [NonEmptyGuid] Guid? AvatarMediaId = null,
-    bool RemoveAvatar = false
+    bool RemoveAvatar = false,
+    [OptionalUrl, StringLength(500)] string? AvatarUrl = null
 );

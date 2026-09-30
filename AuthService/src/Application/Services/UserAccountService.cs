@@ -84,6 +84,11 @@ public sealed class UserAccountService(
             user.FullName = fullName;
         }
 
+        if (request.AvatarMediaId.HasValue && !string.IsNullOrWhiteSpace(request.AvatarUrl))
+        {
+            return Result.Failure<CurrentUserResponse>(AuthErrors.Avatar.ConflictingFields);
+        }
+
         if (request.AvatarMediaId.HasValue)
         {
             var verifyResult = await mediaServiceClient.VerifyMediaAsync(request.AvatarMediaId.Value, cancellationToken);
@@ -131,6 +136,11 @@ public sealed class UserAccountService(
         {
             return Result.Failure<CurrentUserResponse>(AuthErrors.Profile.EmptyPatch);
         }
+        if (request.AvatarMediaId.HasValue && !string.IsNullOrWhiteSpace(request.AvatarUrl))
+        {
+            return Result.Failure<CurrentUserResponse>(AuthErrors.Avatar.ConflictingFields);
+        }
+
 
         if (request.RemoveAvatar && request.AvatarMediaId.HasValue)
         {
@@ -149,6 +159,7 @@ public sealed class UserAccountService(
             || request.DateOfBirth.HasValue
             || trimmedCitizenId is not null
             || request.AvatarMediaId.HasValue
+            || !string.IsNullOrWhiteSpace(request.AvatarUrl)
             || request.RemoveAvatar;
 
         if (!hasAnyField)
@@ -258,7 +269,8 @@ public sealed class UserAccountService(
                 request.DateOfBirth,
                 request.AvatarMediaId,
                 request.RemoveAvatar,
-                request.CitizenId),
+                request.CitizenId,
+                request.AvatarUrl),
             clearPhoneWhenNull: true,
             cancellationToken: cancellationToken);
     }
