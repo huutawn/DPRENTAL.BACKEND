@@ -5,16 +5,8 @@ namespace Dprental.InventoryService.Domain.IRepositories;
 /// <summary>
 /// Hợp đồng repository quản lý các báo cáo sự cố hư hỏng thiết bị (DamageReport).
 /// </summary>
-public interface IDamageReportRepository
+public interface IDamageReportRepository : IRepo<DamageReport, Guid>
 {
-    /// <summary>
-    /// Lấy báo cáo hư hỏng theo ID.
-    /// </summary>
-    /// <param name="id">Định danh bản ghi báo cáo.</param>
-    /// <param name="cancellationToken">Token hủy thao tác.</param>
-    /// <returns>Đối tượng DamageReport nếu tìm thấy, ngược lại null.</returns>
-    Task<DamageReport?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
-
     /// <summary>
     /// Lấy danh sách toàn bộ báo cáo hư hỏng thuộc về một lượt đặt lịch cụ thể.
     /// </summary>

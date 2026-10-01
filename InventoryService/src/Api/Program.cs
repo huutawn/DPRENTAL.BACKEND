@@ -1,4 +1,5 @@
 using System.IO;
+using Dprental.InventoryService.Api.Exceptions;
 using Dprental.InventoryService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -14,7 +15,9 @@ builder.Services.AddHealthChecks()
         tags: ["ready"]);
 
 builder.Services.AddControllers();
-builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = context =>
+    context.ProblemDetails.Extensions["traceId"] = context.HttpContext.TraceIdentifier);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {

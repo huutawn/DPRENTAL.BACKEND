@@ -5,16 +5,8 @@ namespace Dprental.InventoryService.Domain.IRepositories;
 /// <summary>
 /// Hợp đồng repository quản lý các khoảng thời gian chặn lịch của thiết bị (CalendarBlock).
 /// </summary>
-public interface ICalendarBlockRepository
+public interface ICalendarBlockRepository : IRepo<CalendarBlock, Guid>
 {
-    /// <summary>
-    /// Lấy thông tin khoảng chặn lịch theo ID.
-    /// </summary>
-    /// <param name="id">Định danh bản ghi chặn lịch.</param>
-    /// <param name="cancellationToken">Token hủy thao tác.</param>
-    /// <returns>Đối tượng CalendarBlock nếu tìm thấy, ngược lại null.</returns>
-    Task<CalendarBlock?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
-
     /// <summary>
     /// Lấy danh sách các khoảng chặn lịch bị trùng lặp với khoảng thời gian truy vấn trên thiết bị.
     /// </summary>

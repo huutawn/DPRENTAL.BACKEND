@@ -5,16 +5,8 @@ namespace Dprental.InventoryService.Domain.IRepositories;
 /// <summary>
 /// Hợp đồng repository quản lý các thông báo vận hành của tổ chức (Notification).
 /// </summary>
-public interface INotificationRepository
+public interface INotificationRepository : IRepo<Notification, Guid>
 {
-    /// <summary>
-    /// Lấy thông báo theo ID.
-    /// </summary>
-    /// <param name="id">Định danh thông báo.</param>
-    /// <param name="cancellationToken">Token hủy thao tác.</param>
-    /// <returns>Đối tượng Notification nếu tìm thấy, ngược lại null.</returns>
-    Task<Notification?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
-
     /// <summary>
     /// Tìm thông báo theo khóa chống trùng lặp (DeduplicationKey) trong phạm vi tổ chức.
     /// </summary>

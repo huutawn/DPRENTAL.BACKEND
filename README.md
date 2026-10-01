@@ -54,3 +54,15 @@ dotnet test InventoryService.sln
 ## Git hook
 
 Sau khi khởi tạo Git trong thư mục service, chạy `./scripts/setup-git-hooks.sh` (hoặc bản `.ps1` trên PowerShell). Hook kiểm tra branch nền `origin/inventory/develop`, rồi build và test trước khi push.
+
+## Hợp đồng dùng chung và xử lý lỗi
+
+Thiết kế tham chiếu AuthService, với một implementation cho mỗi hành vi:
+
+- `Common/Result.cs`: Result và Result<T> cho lỗi dự kiến; giữ API và invariant hiện tại. Truy cập Value của failure ném InvalidOperationException.
+- `Common/Error.cs`: Error/ErrorType được tách khỏi Result; giữ nguyên mã enum và factory hiện tại.
+- `Domain/IRepositories/IRepo.cs`: hợp đồng đọc theo ID được dùng bởi năm repository. Không cung cấp GetAll hoặc CRUD tự lưu: Inventory ghi qua IInventoryWriteTransaction để giữ advisory lock, idempotency và atomic commit. GetById không kiểm tra quyền; use case theo tổ chức phải dùng GetByIdForOrganizationAsync.
+- `Api/Filters/ExpectedErrorFilterExtensions.cs`: controller gọi `this.ToProblem(result.Error)` khi Result thất bại. Validation → 400, Unauthorized → 401, Forbidden → 403, NotFound → 404, Conflict → 409, Expired → 410, Unprocessable → 422, Failure → 500. Error.None bị từ chối.
+- `Api/Exceptions/GlobalExceptionHandler.cs`: exception ngoài dự kiến trả 500 ProblemDetails với mã Inventory.Unexpected và traceId; log loại exception cùng traceId, không log message/payload. Hủy request được trả về middleware để xử lý theo lifecycle của kết nối. Không suy đoán lỗi database bất kỳ là conflict; lỗi nghiệp vụ đã nhận diện tiếp tục thuộc transaction/use case.
+
+ProblemDetails cũng được cấu hình traceId cho lỗi tại API boundary. Các primitive trong Common không phụ thuộc ASP.NET; HTTP mapping và exception handling chỉ nằm tại Api. Chưa tách package dùng chung giữa các service hoặc thêm paging khi chưa có use case Application cần chúng.

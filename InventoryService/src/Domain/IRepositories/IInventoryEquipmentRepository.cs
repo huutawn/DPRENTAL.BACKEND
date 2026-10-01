@@ -5,16 +5,8 @@ namespace Dprental.InventoryService.Domain.IRepositories;
 /// <summary>
 /// Hợp đồng repository quản lý vòng đời và truy xuất thông tin thiết bị trong kho (InventoryEquipment).
 /// </summary>
-public interface IInventoryEquipmentRepository
+public interface IInventoryEquipmentRepository : IRepo<InventoryEquipment, Guid>
 {
-    /// <summary>
-    /// Lấy thông tin thiết bị theo Equipment ID.
-    /// </summary>
-    /// <param name="id">Định danh duy nhất của thiết bị.</param>
-    /// <param name="cancellationToken">Token hủy thao tác.</param>
-    /// <returns>Đối tượng thiết bị nếu tìm thấy, ngược lại null.</returns>
-    Task<InventoryEquipment?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
-
     /// <summary>
     /// Lấy thông tin thiết bị theo ID và giới hạn trong phạm vi tổ chức sở hữu (tenant isolation).
     /// </summary>

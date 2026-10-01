@@ -6,16 +6,8 @@ namespace Dprental.InventoryService.Domain.IRepositories;
 /// Hợp đồng repository quản lý aggregate Reservation và các chuyển đổi trạng thái liên quan.
 /// Không trả về IQueryable hay DbContext types để bảo vệ tính đóng gói của domain model.
 /// </summary>
-public interface IReservationRepository
+public interface IReservationRepository : IRepo<Reservation, Guid>
 {
-    /// <summary>
-    /// Tìm kiếm lượt đặt lịch theo ID bao gồm toàn bộ transitions và damage reports.
-    /// </summary>
-    /// <param name="id">Định danh lượt đặt lịch.</param>
-    /// <param name="cancellationToken">Token hủy thao tác.</param>
-    /// <returns>Đối tượng Reservation nếu tìm thấy, ngược lại null.</returns>
-    Task<Reservation?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
-
     /// <summary>
     /// Tìm kiếm lượt đặt lịch theo ID và giới hạn trong phạm vi tổ chức sở hữu thiết bị.
     /// </summary>
