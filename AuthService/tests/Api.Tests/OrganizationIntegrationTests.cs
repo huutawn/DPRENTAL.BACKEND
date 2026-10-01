@@ -253,6 +253,72 @@ public sealed class OrganizationIntegrationTests
         Assert.Equal(HttpStatusCode.BadRequest, rejectRes.StatusCode);
     }
 
+    [Fact]
+    public async Task MineEndpointReturns204BeforeRegistrationAnd200WithStatusAfter()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedDatabaseAsync(factory);
+
+        Guid ownerId = Guid.NewGuid();
+        await CreateUserAsync(factory, ownerId, "owner@example.com", "Owner", CustomerRoleId);
+        using HttpClient anonymous = factory.CreateClient();
+        using HttpClient ownerClient = CreateAuthenticatedClient(factory, ownerId, "customer");
+        const string mineUrl = "/api/v1/auth/organizations/mine";
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(mineUrl)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await ownerClient.GetAsync(mineUrl)).StatusCode);
+
+        Guid orgId = await SeedOrganizationAsync(factory, ownerId, "my-waiting-org", OrganizationStatus.Pending);
+
+        using HttpResponseMessage response = await ownerClient.GetAsync(mineUrl);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        OrganizationResponse? mine = await response.Content.ReadFromJsonAsync<OrganizationResponse>();
+        Assert.Equal(orgId, mine?.Id);
+        Assert.Equal(OrganizationStatus.Pending, mine?.Status);
+        Assert.NotNull(mine?.CanRemindAtUtc);
+    }
+
+    [Fact]
+    public async Task RemindEndpointRejectsEarlyRemindersAndAcceptsOverdueOnes()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedDatabaseAsync(factory);
+
+        Guid ownerId = Guid.NewGuid();
+        Guid outsiderId = Guid.NewGuid();
+        await CreateUserAsync(factory, ownerId, "owner@example.com", "Owner", CustomerRoleId);
+        await CreateUserAsync(factory, outsiderId, "outsider@example.com", "Outsider", CustomerRoleId);
+        Guid orgId = await SeedOrganizationAsync(factory, ownerId, "waiting-org", OrganizationStatus.Pending);
+        string remindUrl = $"/api/v1/auth/organizations/{orgId}/remind";
+
+        using HttpClient anonymous = factory.CreateClient();
+        using HttpClient ownerClient = CreateAuthenticatedClient(factory, ownerId, "customer");
+        using HttpClient outsiderClient = CreateAuthenticatedClient(factory, outsiderId, "customer");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsync(remindUrl, null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await outsiderClient.PostAsync(remindUrl, null)).StatusCode);
+
+        // Vừa nộp xong, còn trong hạn duyệt -> chưa được nhắc.
+        using HttpResponseMessage early = await ownerClient.PostAsync(remindUrl, null);
+        Assert.Equal(HttpStatusCode.Conflict, early.StatusCode);
+        using JsonDocument earlyBody = JsonDocument.Parse(await early.Content.ReadAsStringAsync());
+        Assert.Equal("Organization.ReviewReminderTooEarly", earlyBody.RootElement.GetProperty("title").GetString());
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            Organization org = await db.Organizations.SingleAsync(o => o.Id == orgId);
+            org.CreatedAtUtc = DateTime.UtcNow.AddHours(-49);
+            await db.SaveChangesAsync();
+        }
+
+        using HttpResponseMessage overdue = await ownerClient.PostAsync(remindUrl, null);
+        Assert.Equal(HttpStatusCode.OK, overdue.StatusCode);
+        OrganizationResponse? reminded = await overdue.Content.ReadFromJsonAsync<OrganizationResponse>();
+        Assert.NotNull(reminded?.LastRemindedAtUtc);
+        Assert.True(reminded.CanRemindAtUtc > DateTime.UtcNow);
+    }
+
     private static OrganizationProfileRequest Profile(string slug) =>
         new(
             Name: "Rent Express",

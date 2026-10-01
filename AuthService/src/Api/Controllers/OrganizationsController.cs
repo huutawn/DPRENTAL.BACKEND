@@ -45,6 +45,30 @@ public sealed class OrganizationsController(
         return StatusCode(StatusCodes.Status201Created, result.Value);
     }
 
+    /// <summary>
+    /// Tổ chức của chính người gọi, dùng để kiểm tra trạng thái hồ sơ mỗi lần vào trang: 200 kèm hồ sơ
+    /// (xem <c>status</c>) nếu đã đăng ký, 204 nếu chưa. Không kèm URL xem giấy phép — lấy qua GET /{id} khi cần.
+    /// </summary>
+    [HttpGet("mine")]
+    [ProducesResponseType<OrganizationResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetMine(CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        Result<OrganizationResponse?> result = await organizationService.GetMineAsync(userId, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return result.Value is null ? NoContent() : Ok(result.Value);
+    }
+
     /// <summary>Lấy thông tin một organization khi người gọi có quyền truy cập.</summary>
     [HttpGet("{id:guid}")]
     [ProducesResponseType<OrganizationResponse>(StatusCodes.Status200OK)]
@@ -142,6 +166,27 @@ public sealed class OrganizationsController(
         }
 
         Result<OrganizationResponse> result = await organizationRegistrationService.UpdateProfileAsync(userId, id, request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>
+    /// Owner nhắc Platform duyệt hồ sơ đang chờ đã quá hạn (xem <c>canRemindAtUtc</c> trong chi tiết organization).
+    /// Hồ sơ được đưa lên đầu hàng chờ; nhắc quá sớm hoặc hồ sơ không còn chờ duyệt trả 409.
+    /// </summary>
+    [HttpPost("{id:guid}/remind")]
+    [ProducesResponseType<OrganizationResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RemindReview(Guid id, CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        Result<OrganizationResponse> result = await organizationRegistrationService.RemindReviewAsync(userId, id, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
