@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Dprental.CatalogService.Domain.IRepositories;
 
 namespace Dprental.CatalogService.Domain.Repositories;
 
@@ -23,6 +24,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
             npgsqlOptions => npgsqlOptions.MigrationsHistoryTable(
                 CatalogServiceDbContext.MigrationsHistoryTableName,
                 CatalogServiceDbContext.SchemaName)));
+        services.AddScoped<IEquipmentQueryRepository, CatalogRepository>();
 
         return services;
     }

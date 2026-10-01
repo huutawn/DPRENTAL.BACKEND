@@ -9,10 +9,10 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace Dprental.CatalogService.Domain.Migrations
+namespace CatalogService.Domain.Migrations
 {
     [DbContext(typeof(CatalogServiceDbContext))]
-    [Migration("20261001030116_InitialCatalogSchema")]
+    [Migration("20261001065210_InitialCatalogSchema")]
     partial class InitialCatalogSchema
     {
         /// <inheritdoc />
@@ -20,7 +20,6 @@ namespace Dprental.CatalogService.Domain.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasDefaultSchema("catalog")
                 .HasAnnotation("ProductVersion", "10.0.12")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
