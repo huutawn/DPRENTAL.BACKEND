@@ -99,6 +99,7 @@ public static class AuthErrorCode
     public static class Auth
     {
         public const string InvalidCredentials = "Auth.InvalidCredentials";
+        public const string PasswordContainsPersonalInfo = "Auth.PasswordContainsPersonalInfo";
         public const string InactiveAccount = "Auth.InactiveAccount";
         public const string MissingCookie = "Auth.MissingCookie";
         public const string InvalidRefreshToken = "Auth.InvalidRefreshToken";

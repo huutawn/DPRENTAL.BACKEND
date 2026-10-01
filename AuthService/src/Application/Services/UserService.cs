@@ -94,6 +94,11 @@ public sealed class UserService(
         }
 
         string email = NormalizeEmail(request.Email);
+        if (PasswordPolicy.CheckPersonalInfo(request.Password, email, request.FullName) is Error passwordError)
+        {
+            return Result.Failure<AccountCreatedResponse>(passwordError);
+        }
+
         if (await userRepository.EmailExistsAsync(email, cancellationToken))
         {
             return Result.Failure<AccountCreatedResponse>(AuthErrors.User.EmailAlreadyExists);
@@ -317,6 +322,11 @@ public sealed class UserService(
             return Result.Failure(Error.Unauthorized("Auth.ResetFailed", "Mã không hợp lệ hoặc tài khoản không tồn tại."));
         }
 
+        if (PasswordPolicy.CheckPersonalInfo(request.NewPassword, user.Email, user.FullName) is Error passwordError)
+        {
+            return Result.Failure(passwordError);
+        }
+
         string newPasswordHash = passwordHasher.HashPassword(user, request.NewPassword);
 
         // Transaction nguyên tử: tiêu thụ token (conditional update) + cập nhật mật khẩu + thu hồi mọi session
@@ -369,6 +379,11 @@ public sealed class UserService(
         {
             await LogAuditAsync(user.Id, user.Id.ToString(), "Password_Change", "Failed_InvalidOldPassword", corrId, cancellationToken);
             return Result.Failure(Error.Unauthorized("Auth.InvalidPassword", "Mật khẩu hiện tại không chính xác."));
+        }
+
+        if (PasswordPolicy.CheckPersonalInfo(request.NewPassword, user.Email, user.FullName) is Error passwordError)
+        {
+            return Result.Failure(passwordError);
         }
 
         string newPasswordHash = passwordHasher.HashPassword(user, request.NewPassword);
@@ -478,6 +493,11 @@ public sealed class UserService(
         if (!DtoValidator.TryValidate(request, out Error? validationError))
         {
             return Result.Failure<Guid>(validationError);
+        }
+
+        if (PasswordPolicy.CheckPersonalInfo(request.Password, request.Email, request.FullName) is Error passwordError)
+        {
+            return Result.Failure<Guid>(passwordError);
         }
 
         if (request.RoleIds is null || request.RoleIds.Count == 0)
