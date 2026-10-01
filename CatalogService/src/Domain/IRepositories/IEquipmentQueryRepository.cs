@@ -1,5 +1,4 @@
 ﻿using Dprental.CatalogService.Domain.ValueObjects;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Dprental.CatalogService.Domain.IRepositories;
 
@@ -12,7 +11,7 @@ public interface IEquipmentQueryRepository
         );
     /// <summary>Trả null nếu không tồn tại hoặc không Published (Draft/Hidden không lộ ra khi đoán id).</summary>
     Task<EquipmentDetail?> GetPublishedByIdAsync(
-        Guid Id,
+        Guid id,
         CancellationToken cancellationToken = default
         );
 }

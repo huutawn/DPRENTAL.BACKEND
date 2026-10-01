@@ -8,7 +8,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace Dprental.CatalogService.Domain.Migrations
+namespace CatalogService.Domain.Migrations
 {
     [DbContext(typeof(CatalogServiceDbContext))]
     partial class CatalogServiceDbContextModelSnapshot : ModelSnapshot
@@ -17,7 +17,6 @@ namespace Dprental.CatalogService.Domain.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasDefaultSchema("catalog")
                 .HasAnnotation("ProductVersion", "10.0.12")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 

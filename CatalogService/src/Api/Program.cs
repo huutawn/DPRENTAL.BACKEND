@@ -1,4 +1,5 @@
 using System.IO;
+using Dprental.CatalogService.Application.DependencyInjection;
 using Dprental.CatalogService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddCatalogServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddCatalogServiceApplication(builder.Configuration);
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<CatalogServiceDbContext>(

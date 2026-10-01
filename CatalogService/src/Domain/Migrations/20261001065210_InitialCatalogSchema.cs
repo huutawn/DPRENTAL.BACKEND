@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace Dprental.CatalogService.Domain.Migrations
+namespace CatalogService.Domain.Migrations
 {
     /// <inheritdoc />
     public partial class InitialCatalogSchema : Migration
