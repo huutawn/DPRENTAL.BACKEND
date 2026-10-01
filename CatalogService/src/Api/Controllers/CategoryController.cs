@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Dprental.CatalogService.Api.Controllers;
 
 [ApiController]
-[Route("api/v1/catalog/categories")]
+[Route("categories")]
 [Authorize(Roles = "Admin")]
 public class CategoryController : ControllerBase
 {
