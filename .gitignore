@@ -1,0 +1,49 @@
+# Build, test, and publish output
+[Bb]in/
+[Oo]bj/
+[Tt]est[Rr]esults/
+[Cc]overage/
+artifacts/
+publish/
+*.trx
+*.coverage
+*.coveragexml
+
+# IDE and user-specific files
+.vs/
+.idea/
+*.sln.iml
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+appsettings.*.Local.json
+.local-secrets/
+secrets.json
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Runtime logs and local database files
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# Postman config
+.postman/
+postman/
