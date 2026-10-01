@@ -147,16 +147,16 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<string>("Consumer")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("consumer");
-
                     b.Property<string>("Error")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)")
                         .HasColumnName("error");
+
+                    b.Property<string>("Handler")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("handler");
 
                     b.Property<DateTimeOffset?>("LockLeaseExpiresAt")
                         .HasColumnType("timestamp with time zone")
@@ -167,6 +167,10 @@ namespace InventoryService.Domain.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("message_id");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at");
 
                     b.Property<DateTimeOffset?>("ProcessedAt")
                         .HasColumnType("timestamp with time zone")
@@ -186,12 +190,15 @@ namespace InventoryService.Domain.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Consumer", "MessageId")
+                    b.HasIndex("Handler", "MessageId")
                         .IsUnique()
-                        .HasDatabaseName("ix_inbox_messages_consumer_message");
+                        .HasDatabaseName("ix_inbox_messages_handler_message");
 
                     b.HasIndex("ProcessedAt", "LockLeaseExpiresAt")
                         .HasDatabaseName("ix_inbox_messages_processed_lease");
+
+                    b.HasIndex("Status", "NextAttemptAt")
+                        .HasDatabaseName("ix_inbox_messages_status_next_attempt");
 
                     b.ToTable("inbox_messages", "inventory");
                 });
@@ -323,36 +330,19 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<string>("AggregateId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("aggregate_id");
-
-                    b.Property<string>("AggregateType")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("aggregate_type");
-
-                    b.Property<string>("CorrelationId")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("correlation_id");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<string>("EventType")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("event_type");
+                    b.Property<string>("Headers")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("headers");
 
-                    b.Property<int>("EventVersion")
-                        .HasColumnType("integer")
-                        .HasColumnName("event_version");
+                    b.Property<string>("KafkaKey")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)")
+                        .HasColumnName("kafka_key");
 
                     b.Property<string>("LastError")
                         .HasMaxLength(2000)
@@ -363,23 +353,40 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("lock_lease_expires_at");
 
+                    b.Property<Guid?>("LockLeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lock_lease_token");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at");
+
                     b.Property<string>("Payload")
                         .IsRequired()
                         .HasColumnType("jsonb")
                         .HasColumnName("payload");
 
-                    b.Property<DateTimeOffset?>("ProcessedAt")
+                    b.Property<DateTimeOffset?>("PublishedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("processed_at");
+                        .HasColumnName("published_at");
 
                     b.Property<int>("RetryCount")
                         .HasColumnType("integer")
                         .HasColumnName("retry_count");
 
+                    b.Property<string>("Topic")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)")
+                        .HasColumnName("topic");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("ProcessedAt", "RetryCount", "LockLeaseExpiresAt")
-                        .HasDatabaseName("ix_outbox_messages_pending_retry");
+                    b.HasIndex("KafkaKey", "PublishedAt", "CreatedAt")
+                        .HasDatabaseName("ix_outbox_messages_key_ordering");
+
+                    b.HasIndex("PublishedAt", "NextAttemptAt", "LockLeaseExpiresAt", "RetryCount", "CreatedAt")
+                        .HasDatabaseName("ix_outbox_messages_pending_claim");
 
                     b.ToTable("outbox_messages", "inventory");
                 });
@@ -666,14 +673,20 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("CurrentStep")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("current_step");
+
                     b.Property<string>("Data")
                         .IsRequired()
                         .HasColumnType("jsonb")
                         .HasColumnName("data");
 
-                    b.Property<DateTimeOffset?>("NextProcessAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("next_process_at");
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
 
                     b.Property<string>("SagaType")
                         .IsRequired()
@@ -681,11 +694,34 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("saga_type");
 
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
+                    b.Property<int>("State")
+                        .HasColumnType("integer")
                         .HasColumnName("state");
+
+                    b.Property<DateTimeOffset?>("TimeoutDeadline")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("timeout_deadline");
+
+                    b.Property<Guid?>("TimeoutId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("timeout_id");
+
+                    b.Property<string>("TimeoutLastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("timeout_last_error");
+
+                    b.Property<DateTimeOffset?>("TimeoutLeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("timeout_lease_expires_at");
+
+                    b.Property<Guid?>("TimeoutLeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("timeout_lease_token");
+
+                    b.Property<int>("TimeoutRetryCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("timeout_retry_count");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -699,12 +735,12 @@ namespace InventoryService.Domain.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("NextProcessAt", "State")
-                        .HasDatabaseName("ix_saga_instances_next_process_state");
-
-                    b.HasIndex("SagaType", "CorrelationId")
+                    b.HasIndex("SagaType", "OrganizationId", "CorrelationId")
                         .IsUnique()
-                        .HasDatabaseName("ix_saga_instances_type_correlation");
+                        .HasDatabaseName("ix_saga_instances_type_org_correlation");
+
+                    b.HasIndex("TimeoutDeadline", "State", "TimeoutLeaseExpiresAt")
+                        .HasDatabaseName("ix_saga_instances_timeout_state");
 
                     b.ToTable("saga_instances", "inventory");
                 });

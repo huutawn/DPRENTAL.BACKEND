@@ -279,35 +279,42 @@ public sealed class InventoryServiceDbContext : DbContext
         modelBuilder.Entity<OutboxMessage>(b =>
         {
             // Index phục vụ background worker quét các thông điệp pending / retry
-            b.HasIndex(o => new { o.ProcessedAt, o.RetryCount, o.LockLeaseExpiresAt })
-                .HasDatabaseName("ix_outbox_messages_pending_retry");
+            b.HasIndex(o => new { o.PublishedAt, o.NextAttemptAt, o.LockLeaseExpiresAt, o.RetryCount, o.CreatedAt })
+                .HasDatabaseName("ix_outbox_messages_pending_claim");
+
+            // Index phục vụ kiểm tra strict per-key ordering (không publish vượt bản ghi pending trước đó cùng key)
+            b.HasIndex(o => new { o.KafkaKey, o.PublishedAt, o.CreatedAt })
+                .HasDatabaseName("ix_outbox_messages_key_ordering");
         });
 
         // 8. Cấu hình thực thể InboxMessage
         modelBuilder.Entity<InboxMessage>(b =>
         {
-            // Unique index chống trùng lặp theo Consumer và MessageId
-            b.HasIndex(i => new { i.Consumer, i.MessageId })
+            // Unique index chống trùng lặp theo Handler và MessageId
+            b.HasIndex(i => new { i.Handler, i.MessageId })
                 .IsUnique()
-                .HasDatabaseName("ix_inbox_messages_consumer_message");
+                .HasDatabaseName("ix_inbox_messages_handler_message");
 
             // Index quét thông điệp theo tiến độ và hạn lease
             b.HasIndex(i => new { i.ProcessedAt, i.LockLeaseExpiresAt })
                 .HasDatabaseName("ix_inbox_messages_processed_lease");
+
+            // Index quét các thông điệp cần retry
+            b.HasIndex(i => new { i.Status, i.NextAttemptAt })
+                .HasDatabaseName("ix_inbox_messages_status_next_attempt");
         });
 
         // 9. Cấu hình thực thể SagaInstance
         modelBuilder.Entity<SagaInstance>(b =>
         {
-
-            // Unique index theo SagaType và CorrelationId
-            b.HasIndex(s => new { s.SagaType, s.CorrelationId })
+            // Unique index theo SagaType, OrganizationId và CorrelationId
+            b.HasIndex(s => new { s.SagaType, s.OrganizationId, s.CorrelationId })
                 .IsUnique()
-                .HasDatabaseName("ix_saga_instances_type_correlation");
+                .HasDatabaseName("ix_saga_instances_type_org_correlation");
 
-            // Index tìm kiếm phiên saga cần xử lý bước tiếp theo
-            b.HasIndex(s => new { s.NextProcessAt, s.State })
-                .HasDatabaseName("ix_saga_instances_next_process_state");
+            // Index quét các saga đến hạn xử lý timeout
+            b.HasIndex(s => new { s.TimeoutDeadline, s.State, s.TimeoutLeaseExpiresAt })
+                .HasDatabaseName("ix_saga_instances_timeout_state");
         });
     }
 }

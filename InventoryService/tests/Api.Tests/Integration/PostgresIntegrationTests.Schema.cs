@@ -30,7 +30,7 @@ public sealed partial class PostgresIntegrationTests
         var tableCount = await context.Database.SqlQueryRaw<long>(
             "SELECT count(*)::bigint AS \"Value\" FROM information_schema.tables WHERE table_schema = 'inventory'").SingleAsync();
         Assert.Equal(9L, tableCount);
-        Assert.Equal(2, (await context.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.Equal(3, (await context.Database.GetAppliedMigrationsAsync()).Count());
 
         // Kiểm tra sequence ReservationNumberSequence đã tồn tại
         var currentSequenceVal = await context.Database

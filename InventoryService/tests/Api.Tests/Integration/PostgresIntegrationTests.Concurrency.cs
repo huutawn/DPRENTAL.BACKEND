@@ -178,7 +178,7 @@ public sealed partial class PostgresIntegrationTests
             var res = Reservation.CreateManual(resId, equipmentId, period, "User", "0900000000", DateTimeOffset.UtcNow).Value;
             ctx.Reservations.Add(res);
 
-            var outbox = OutboxMessage.Create(outboxId, "ReservationCreated", "Reservation", resId.ToString(), "{}", DateTimeOffset.UtcNow);
+            var outbox = OutboxMessage.Create(outboxId, "inventory.reservation.events.v1", $"{equipmentId}:{resId}", "{}", DateTimeOffset.UtcNow);
             ctx.StageOutbox(outbox);
 
             // Giả lập lỗi nghiệp vụ dẫn đến Failure

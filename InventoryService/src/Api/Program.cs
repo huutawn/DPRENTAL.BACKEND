@@ -1,12 +1,14 @@
 using System.IO;
 using Dprental.InventoryService.Api.Exceptions;
 using Dprental.InventoryService.Domain.Repositories;
+using Dprental.InventoryService.Application.Kafka.DependencyInjection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddInventoryServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddInventoryKafkaInfrastructure(builder.Configuration);
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<InventoryServiceDbContext>(

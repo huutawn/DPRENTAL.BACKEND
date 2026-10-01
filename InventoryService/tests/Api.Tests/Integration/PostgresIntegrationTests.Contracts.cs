@@ -32,7 +32,7 @@ public sealed partial class PostgresIntegrationTests
             Assert.Equal(2, expired.Transitions.Count);
             var release = expired.ExpireHold(now, operationKey: "expire");
             if (release.IsFailure) return release.Error;
-            ctx.StageOutbox(OutboxMessage.Create(Guid.NewGuid(), "ReservationReleased", "Reservation", expired.Id.ToString(), "{}", now));
+            ctx.StageOutbox(OutboxMessage.Create(Guid.NewGuid(), "inventory.reservation.events.v1", $"{equipment.OrganizationId}:{expired.Id}", "{}", now));
             return Result.Success(expired.Transitions.Count);
         });
         Assert.True(result.IsSuccess, result.Error.Message);
@@ -41,7 +41,7 @@ public sealed partial class PostgresIntegrationTests
         var persisted = await verify.Reservations.Include(r => r.Transitions).SingleAsync(r => r.Id == hold.Id);
         Assert.Equal(ReservationStatus.Released, persisted.Status);
         Assert.Equal(Enumerable.Range(1, 3), persisted.Transitions.OrderBy(t => t.Sequence).Select(t => t.Sequence));
-        Assert.Single(await verify.OutboxMessages.Where(m => m.AggregateId == hold.Id.ToString()).ToListAsync());
+        Assert.Single(await verify.OutboxMessages.Where(m => m.KafkaKey == $"{equipment.OrganizationId}:{hold.Id}").ToListAsync());
     }
 
     [Theory]
@@ -136,7 +136,7 @@ public sealed partial class PostgresIntegrationTests
             Assert.Equal(lockedId, ctx.EquipmentId);
             var reservation = Reservation.CreateManual(Guid.NewGuid(), other.Id, new(today, today), "Renter", "0900000000", now).Value;
             ctx.Reservations.Add(reservation);
-            ctx.StageOutbox(OutboxMessage.Create(Guid.NewGuid(), "ReservationConfirmed", "Reservation", reservation.Id.ToString(), "{}", now));
+            ctx.StageOutbox(OutboxMessage.Create(Guid.NewGuid(), "inventory.reservation.events.v1", $"{other.OrganizationId}:{reservation.Id}", "{}", now));
             return Task.FromResult(Result.Success(reservation.Id));
         });
         Assert.Equal("EQUIPMENT_LOCK_MISMATCH", result.Error.Code);

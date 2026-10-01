@@ -6,7 +6,7 @@ namespace Dprental.InventoryService.Domain.Entities;
 
 /// <summary>
 /// Thực thể lưu trữ các thông điệp nhận từ bên ngoài (Transactional Inbox Pattern).
-/// Đảm bảo tính duy nhất và idempotency khi xử lý thông điệp từ Message Broker, ngăn ngừa duplicate message.
+/// Đảm bảo tính duy nhất và idempotency khi xử lý thông điệp từ Message Broker theo cặp (Handler, MessageId).
 /// </summary>
 [Table("inbox_messages", Schema = "inventory")]
 public sealed class InboxMessage
@@ -19,14 +19,14 @@ public sealed class InboxMessage
     public Guid Id { get; private set; }
 
     /// <summary>
-    /// Tên của Consumer hoặc dịch vụ tiếp nhận xử lý thông điệp.
+    /// Tên của Handler tiếp nhận và xử lý thông điệp (ví dụ: EquipmentRegisteredHandler).
     /// </summary>
-    [Column("consumer")]
+    [Column("handler")]
     [MaxLength(200)]
-    public string Consumer { get; private set; } = string.Empty;
+    public string Handler { get; private set; } = string.Empty;
 
     /// <summary>
-    /// Mã định danh thông điệp từ Message Broker (kết hợp với Consumer để tạo khóa duy nhất).
+    /// Mã định danh thông điệp từ Message Broker (kết hợp với Handler để tạo khóa duy nhất).
     /// </summary>
     [Column("message_id")]
     [MaxLength(100)]
@@ -39,22 +39,28 @@ public sealed class InboxMessage
     public DateTimeOffset ReceivedAt { get; private set; }
 
     /// <summary>
-    /// Thời điểm xử lý thông điệp thành công hoàn tất (UTC).
+    /// Thời điểm xử lý thông điệp thành công hoàn tất (UTC). Chỉ khi có giá trị này thì nghiệp vụ mới được xem là hoàn tất.
     /// </summary>
     [Column("processed_at")]
     public DateTimeOffset? ProcessedAt { get; private set; }
 
     /// <summary>
-    /// Trạng thái tiến trình xử lý thông điệp (Received, Processing, Processed, Failed).
+    /// Trạng thái tiến trình xử lý thông điệp (Received, Processing, Processed, Failed, DeadLettered).
     /// </summary>
     [Column("status")]
     public InboxMessageStatus Status { get; private set; }
 
     /// <summary>
-    /// Số lần đã thử xử lý lại thông điệp khi gặp lỗi.
+    /// Số lần đã thử xử lý thông điệp (bao gồm lần đầu, tối đa 5 lần).
     /// </summary>
     [Column("retry_count")]
     public int RetryCount { get; private set; }
+
+    /// <summary>
+    /// Thời điểm sớm nhất được phép thử lại xử lý thông điệp (UTC) theo exponential backoff.
+    /// </summary>
+    [Column("next_attempt_at")]
+    public DateTimeOffset? NextAttemptAt { get; private set; }
 
     /// <summary>
     /// Thời hạn khóa độc quyền xử lý của worker đang giữ thông điệp (UTC).
@@ -79,31 +85,40 @@ public sealed class InboxMessage
     /// <summary>
     /// Tạo mới một bản ghi tiếp nhận thông điệp vào Inbox.
     /// </summary>
-    /// <param name="id">ID bản ghi.</param>
-    /// <param name="consumer">Tên consumer tiếp nhận.</param>
-    /// <param name="messageId">ID thông điệp từ broker.</param>
-    /// <param name="now">Thời điểm nhận (UTC).</param>
     public static InboxMessage Create(
         Guid id,
-        string consumer,
+        string handler,
         string messageId,
         DateTimeOffset now)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(handler);
+        ArgumentException.ThrowIfNullOrWhiteSpace(messageId);
+
         return new InboxMessage
         {
             Id = id,
-            Consumer = consumer,
+            Handler = handler,
             MessageId = messageId,
             ReceivedAt = now,
             Status = InboxMessageStatus.Received,
-            RetryCount = 0
+            RetryCount = 0,
+            NextAttemptAt = now
         };
+    }
+
+    /// <summary>
+    /// Đánh dấu thông điệp đang được xử lý trong transaction boundary.
+    /// </summary>
+    public void MarkAsProcessing(DateTimeOffset now, DateTimeOffset leaseExpiry)
+    {
+        Status = InboxMessageStatus.Processing;
+        LockLeaseExpiresAt = leaseExpiry;
+        Error = null;
     }
 
     /// <summary>
     /// Đánh dấu thông điệp đã được xử lý hoàn tất thành công.
     /// </summary>
-    /// <param name="now">Thời điểm hoàn tất (UTC).</param>
     public void MarkAsProcessed(DateTimeOffset now)
     {
         Status = InboxMessageStatus.Processed;
@@ -113,15 +128,26 @@ public sealed class InboxMessage
     }
 
     /// <summary>
-    /// Ghi nhận xử lý thông điệp thất bại kèm nội dung lỗi.
+    /// Ghi nhận xử lý thông điệp thất bại kèm lịch retry tiếp theo.
     /// </summary>
-    /// <param name="error">Mô tả lỗi.</param>
-    /// <param name="leaseExpiry">Thời hạn khóa lease.</param>
-    public void RecordFailure(string error, DateTimeOffset? leaseExpiry = null)
+    public void RecordFailure(string error, DateTimeOffset nextAttemptAt, DateTimeOffset? leaseExpiry = null)
     {
         Status = InboxMessageStatus.Failed;
         RetryCount++;
         Error = error;
+        NextAttemptAt = nextAttemptAt;
         LockLeaseExpiresAt = leaseExpiry;
+    }
+
+    /// <summary>
+    /// Đánh dấu thông điệp đã chuyển vào Dead Letter Queue (DLQ) do hết retry budget hoặc format không hợp lệ.
+    /// </summary>
+    public void MarkAsDeadLettered(string error, DateTimeOffset now)
+    {
+        Status = InboxMessageStatus.DeadLettered;
+        RetryCount++;
+        Error = error;
+        ProcessedAt = now;
+        LockLeaseExpiresAt = null;
     }
 }

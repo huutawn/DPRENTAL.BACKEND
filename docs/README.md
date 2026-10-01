@@ -128,3 +128,74 @@ Bảng này chỉ phục vụ migration: chủ sở hữu là Inventory migratio
 EF design-time factory đọc `ConnectionStrings__Postgres`; khi chỉ sinh metadata, fallback dùng host `.invalid` không thể nhầm sang database thật. Muốn apply migration phải cấu hình connection string. Không tự migrate khi API khởi động.
 
 Integration tests dùng PostgreSQL 17 và tạo database `inventory_tests_<uuid>` riêng, migrate và drop database đó sau test. Connection string cấu hình chỉ dùng để xác định server/credentials; database ứng dụng không bị migrate/clear. Test account cần quyền CREATE DATABASE. Tests kiểm tra schema 9 bảng, timestamp roundtrip, expiry history, early/late return, giới hạn báo hỏng theo reservation, payload retry, khóa sai equipment, nested transaction, migration backfill/removal và cạnh tranh thực tế quan sát qua `pg_locks`.
+
+---
+
+## Kafka Foundation, Outbox/Inbox và Saga Runtime
+
+### 1. Kiến trúc Kafka Transport và Contracts
+
+- **Thư viện**: Sử dụng `Confluent.Kafka` 2.15.1, pin dependency tập trung trong `Directory.Packages.props`. Chỉ các transport worker tham chiếu thư viện Confluent; public contracts hoàn toàn độc lập với Kafka client.
+- **MessageEnvelope<T>**:
+  - Chuẩn hóa: `MessageId` (Guid), `MessageType` (string), `Version` (positive int), `CorrelationId` (string), `CausationId` (Guid nullable), `AggregateId` (string), `OrganizationId` (Guid), `OccurredAt` (DateTimeOffset UTC), `Producer` (string), `Payload` (T).
+  - Serialization: UTF-8 camelCase, format timestamp ISO 8601 UTC.
+  - Factory: `CreateRoot` tạo message gốc (sinh MessageId mới, CausationId = null); `CreateContinuation` tạo message tiếp nối (sinh MessageId mới, giữ nguyên CorrelationId, CausationId trỏ tới MessageId nguồn); Retry giữ nguyên toàn bộ envelope và ID.
+  - Kafka key kết hợp: `{OrganizationId:D}:{AggregateId}` đảm bảo phân vùng ổn định theo tenant và aggregate.
+- **Baseline Topics**:
+  - `catalog.equipment.events.v1`
+  - `inventory.reservation.commands.v1`
+  - `inventory.reservation.events.v1`
+  - `inventory.equipment.events.v1`
+  - `inventory.damage.events.v1`
+  - Mỗi topic đều có Dead Letter Queue (DLQ) dạng `${topic}.dlq`.
+- **Topic Provisioning & Outage Resilience**:
+  - Development: Tự động provision các topic baseline và DLQ qua `KafkaTopicProvisioner` (mặc định 3 partitions, replication factor 1) bằng cơ chế idempotent.
+  - Production: Chỉ kiểm tra danh sách topics được provision bởi deployment script, không tự ý tạo topic.
+  - Broker outage: Khi Kafka broker không khả dụng lúc khởi động, `KafkaTopicStartupTask` ghi log cảnh báo và không ném lỗi làm sập API. API vẫn tiếp tục nhận và lưu các transaction PostgreSQL bình thường.
+
+### 2. Transactional Outbox và Thao tác Phục hồi Thủ công (Requeue)
+
+- **Lưu trữ**: Bảng `inventory.outbox_messages` lưu trực tiếp wire JSON, topic, key và headers. Không tái tạo envelope khi xuất bản.
+- **Publisher Worker**: `OutboxPublisherWorker` claim thông điệp bằng transaction ngắn với `FOR UPDATE SKIP LOCKED`, xuất bản ra Kafka ngoài database transaction, và cập nhật `published_at` sau khi nhận được Broker ACK cùng `lock_lease_token` để ngăn worker mất lease ghi đè.
+- **Strict Key Ordering**: Cơ chế claim sử dụng điều kiện `NOT EXISTS` kiểm tra không có bản ghi unpublished nào trước đó có cùng `kafka_key`, đảm bảo thứ tự phát hành tuyệt đối cho từng partition key.
+- **Retry Budget & Backoff**: Tối đa 10 lần retry với exponential backoff từ 1 giây, cap 60 giây, jitter 20%.
+- **Manual Requeue (Phục hồi thông điệp cạn budget)**:
+  Khi thông điệp Outbox đã thử đủ 10 lần mà vẫn thất bại, bản ghi được giữ lại trong bảng `inventory.outbox_messages` (với `retry_count >= 10`, `last_error` được lưu lại để chẩn đoán) và không bị xóa hoặc đánh dấu published.
+  Để phục hồi và đưa thông điệp trở lại hàng đợi xuất bản, kỹ sư vận hành thực thi câu lệnh SQL sau trên cơ sở dữ liệu `inventoryservice`:
+
+  ```sql
+  -- Requeue một Outbox message cụ thể theo ID:
+  UPDATE inventory.outbox_messages
+  SET retry_count = 0,
+      next_attempt_at = NOW(),
+      last_error = NULL,
+      lock_lease_token = NULL,
+      lock_lease_expires_at = NULL
+  WHERE id = '<outbox_message_uuid>';
+
+  -- Hoặc requeue toàn bộ các outbox messages bị lỗi thuộc một topic cụ thể:
+  UPDATE inventory.outbox_messages
+  SET retry_count = 0,
+      next_attempt_at = NOW(),
+      last_error = NULL,
+      lock_lease_token = NULL,
+      lock_lease_expires_at = NULL
+  WHERE published_at IS NULL AND retry_count >= 10 AND topic = 'inventory.reservation.events.v1';
+  ```
+
+### 3. Transactional Inbox và Execution Boundary
+
+- **Lưu trữ**: Bảng `inventory.inbox_messages` đổi tên cột `consumer` thành `handler`, duy trì unique constraint `(handler, message_id)`.
+- **Execution Boundary**: `IInboxStore.ExecuteInTransactionAsync` quản lý vòng đời xử lý thông điệp:
+  1. Khóa receipt bản ghi Inbox bằng `FOR UPDATE`.
+  2. Bỏ qua an toàn nếu thông điệp đã `Processed` trước đó (Idempotent replay).
+  3. Khởi tạo transaction trên scoped DbContext.
+  4. Thực thi logic nghiệp vụ của handler. `IInventoryWriteTransaction` tham gia transaction này trên cùng scoped DbContext qua Ambient Context, giữ nguyên cơ chế equipment advisory lock và write scope validation; chỉ Inbox execution boundary mới commit/save.
+  5. Nếu thành công: Ghi `processed_at`, commit atomically toàn bộ thay đổi nghiệp vụ, Outbox messages và Saga transitions.
+  6. Nếu thất bại: Rollback transaction, xóa ChangeTracker; ghi nhận failure và lịch retry theo exponential backoff (tối đa 5 lần). Khi cạn budget retry (5 lần), tự động chuyển sang `DeadLettered` và stage bản ghi DLQ Outbox atomically trước khi commit offset Kafka.
+
+### 4. Saga Runtime và Quản lý Timeout
+
+- **Thực thể**: Bảng `inventory.saga_instances` có identity duy nhất là `(saga_type, organization_id, correlation_id)`. Quản lý `current_step`, `state` (enum `SagaState`), metadata `timeout_id`, `timeout_deadline`, `timeout_retry_count` và token `xmin` phát hiện cập nhật đồng thời trái phép.
+- **Saga Orchestrator**: `ISagaOrchestrator` khóa saga bằng `FOR UPDATE`, thực thi transition, stage outgoing Outbox messages và commit cùng transaction với Inbox.
+- **Timeout Worker**: `SagaTimeoutWorker` định kỳ quét các timeout quá hạn bằng `FOR UPDATE SKIP LOCKED`. Thực thi callback timeout, cập nhật saga và Outbox atomically. Hai worker cạnh tranh không bao giờ chạy trùng một timeout; restart hệ thống bảo toàn lịch timeout đã lưu bền vững trong PostgreSQL. Saga ở trạng thái terminal (`Completed`, `Failed`) tự động hủy timeout metadata.

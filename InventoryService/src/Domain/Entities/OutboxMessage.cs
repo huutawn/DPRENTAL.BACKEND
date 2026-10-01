@@ -5,57 +5,43 @@ namespace Dprental.InventoryService.Domain.Entities;
 
 /// <summary>
 /// Thực thể lưu trữ các thông điệp sự kiện cần phát ra ngoài (Transactional Outbox Pattern).
-/// Đảm bảo tính nhất quán cuối cùng (Eventual Consistency) giữa cơ sở dữ liệu nội bộ và Message Broker.
+/// Lưu trữ trực tiếp wire JSON, topic, Kafka key và headers để publish trực tiếp không tạo lại envelope.
 /// </summary>
 [Table("outbox_messages", Schema = "inventory")]
 public sealed class OutboxMessage
 {
     /// <summary>
-    /// Định danh duy nhất toàn cục của thông điệp outbox.
+    /// Định danh duy nhất toàn cục của thông điệp outbox (trùng với MessageId của envelope).
     /// </summary>
     [Key]
     [Column("id")]
     public Guid Id { get; private set; }
 
     /// <summary>
-    /// Tên loại sự kiện miền nghiệp vụ (ví dụ: InventoryEquipmentHoldCreated, ReservationCompleted).
+    /// Tên topic Kafka mục tiêu của thông điệp.
     /// </summary>
-    [Column("event_type")]
-    [MaxLength(200)]
-    public string EventType { get; private set; } = string.Empty;
+    [Column("topic")]
+    [MaxLength(250)]
+    public string Topic { get; private set; } = string.Empty;
 
     /// <summary>
-    /// Phiên bản schema của thông điệp sự kiện.
+    /// Khóa phân vùng Kafka (kết hợp OrganizationId và AggregateId).
     /// </summary>
-    [Column("event_version")]
-    public int EventVersion { get; private set; } = 1;
+    [Column("kafka_key")]
+    [MaxLength(250)]
+    public string KafkaKey { get; private set; } = string.Empty;
 
     /// <summary>
-    /// Loại aggregate phát sinh sự kiện (Equipment, Reservation, Block...).
-    /// </summary>
-    [Column("aggregate_type")]
-    [MaxLength(100)]
-    public string AggregateType { get; private set; } = string.Empty;
-
-    /// <summary>
-    /// Định danh của aggregate phát sinh sự kiện dưới dạng chuỗi.
-    /// </summary>
-    [Column("aggregate_id")]
-    [MaxLength(100)]
-    public string AggregateId { get; private set; } = string.Empty;
-
-    /// <summary>
-    /// Mã tương quan chuỗi xử lý (Correlation ID) phục vụ truy vết phân tán.
-    /// </summary>
-    [Column("correlation_id")]
-    [MaxLength(100)]
-    public string? CorrelationId { get; private set; }
-
-    /// <summary>
-    /// Nội dung chi tiết của sự kiện dưới định dạng JSONB của PostgreSQL.
+    /// Wire JSON UTF-8 của MessageEnvelope.
     /// </summary>
     [Column("payload", TypeName = "jsonb")]
     public string Payload { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// Wire JSON của Kafka headers đi kèm nếu có.
+    /// </summary>
+    [Column("headers", TypeName = "jsonb")]
+    public string? Headers { get; private set; }
 
     /// <summary>
     /// Thời điểm khởi tạo bản ghi outbox (UTC).
@@ -64,29 +50,41 @@ public sealed class OutboxMessage
     public DateTimeOffset CreatedAt { get; private set; }
 
     /// <summary>
-    /// Thời điểm thông điệp được xuất bản (publish) thành công lên Message Broker (UTC).
+    /// Thời điểm thông điệp được xuất bản (publish) thành công lên Message Broker và nhận broker ACK (UTC).
     /// </summary>
-    [Column("processed_at")]
-    public DateTimeOffset? ProcessedAt { get; private set; }
+    [Column("published_at")]
+    public DateTimeOffset? PublishedAt { get; private set; }
 
     /// <summary>
-    /// Số lần đã thử xuất bản lại khi gặp lỗi.
+    /// Thời điểm sớm nhất được phép thử xuất bản tiếp theo (UTC) phục vụ exponential backoff.
+    /// </summary>
+    [Column("next_attempt_at")]
+    public DateTimeOffset? NextAttemptAt { get; private set; }
+
+    /// <summary>
+    /// Số lần đã thử xuất bản thất bại (failure count, tối đa 10 lần trước khi chuyển sang trạng thái cần phục hồi thủ công).
     /// </summary>
     [Column("retry_count")]
     public int RetryCount { get; private set; }
 
     /// <summary>
-    /// Thời hạn khóa độc quyền xử lý (lease lock) dành cho worker đang xử lý thông điệp này (UTC).
-    /// </summary>
-    [Column("lock_lease_expires_at")]
-    public DateTimeOffset? LockLeaseExpiresAt { get; private set; }
-
-    /// <summary>
-    /// Thông báo lỗi gần nhất nếu quá trình xuất bản thất bại.
+    /// Thông báo lỗi gần nhất khi xuất bản thất bại.
     /// </summary>
     [Column("last_error")]
     [MaxLength(2000)]
     public string? LastError { get; private set; }
+
+    /// <summary>
+    /// Token định danh của worker đang nắm giữ lease để tránh worker khác hoặc worker mất lease ghi đè.
+    /// </summary>
+    [Column("lock_lease_token")]
+    public Guid? LockLeaseToken { get; private set; }
+
+    /// <summary>
+    /// Thời hạn khóa độc quyền xử lý (lease lock) dành cho worker đang xuất bản (UTC).
+    /// </summary>
+    [Column("lock_lease_expires_at")]
+    public DateTimeOffset? LockLeaseExpiresAt { get; private set; }
 
     /// <summary>
     /// Khởi tạo private phục vụ EF Core.
@@ -96,60 +94,74 @@ public sealed class OutboxMessage
     }
 
     /// <summary>
-    /// Tạo mới một thông điệp Outbox sẵn sàng để xuất bản.
+    /// Tạo mới một bản ghi Outbox lưu trữ wire JSON sẵn sàng xuất bản.
     /// </summary>
-    /// <param name="id">ID thông điệp.</param>
-    /// <param name="eventType">Loại sự kiện.</param>
-    /// <param name="aggregateType">Loại aggregate.</param>
-    /// <param name="aggregateId">ID aggregate.</param>
-    /// <param name="payload">Nội dung JSONB.</param>
-    /// <param name="now">Thời điểm tạo (UTC).</param>
-    /// <param name="correlationId">Correlation ID nếu có.</param>
-    /// <param name="eventVersion">Phiên bản sự kiện (mặc định 1).</param>
     public static OutboxMessage Create(
         Guid id,
-        string eventType,
-        string aggregateType,
-        string aggregateId,
+        string topic,
+        string kafkaKey,
         string payload,
         DateTimeOffset now,
-        string? correlationId = null,
-        int eventVersion = 1)
+        string? headers = null)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(topic);
+        ArgumentException.ThrowIfNullOrWhiteSpace(kafkaKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(payload);
+
         return new OutboxMessage
         {
             Id = id,
-            EventType = eventType,
-            AggregateType = aggregateType,
-            AggregateId = aggregateId,
+            Topic = topic,
+            KafkaKey = kafkaKey,
             Payload = payload,
+            Headers = headers,
             CreatedAt = now,
-            CorrelationId = correlationId,
-            EventVersion = eventVersion,
+            NextAttemptAt = now,
             RetryCount = 0
         };
     }
 
     /// <summary>
-    /// Đánh dấu thông điệp đã được xuất bản thành công lên Message Broker.
+    /// Gán lease độc quyền cho worker claim thông điệp.
     /// </summary>
-    /// <param name="now">Thời điểm xuất bản (UTC).</param>
-    public void MarkAsProcessed(DateTimeOffset now)
+    public void AssignLease(Guid leaseToken, DateTimeOffset leaseExpiresAt)
     {
-        ProcessedAt = now;
+        LockLeaseToken = leaseToken;
+        LockLeaseExpiresAt = leaseExpiresAt;
+    }
+
+    /// <summary>
+    /// Đánh dấu thông điệp đã được broker xác nhận xuất bản thành công.
+    /// </summary>
+    public void MarkAsPublished(DateTimeOffset now)
+    {
+        PublishedAt = now;
+        LockLeaseToken = null;
         LockLeaseExpiresAt = null;
         LastError = null;
     }
 
     /// <summary>
-    /// Ghi nhận xuất bản thất bại và gia tăng bộ đếm số lần retry.
+    /// Ghi nhận xuất bản thất bại kèm lịch thử lại theo exponential backoff.
     /// </summary>
-    /// <param name="error">Nội dung lỗi gặp phải.</param>
-    /// <param name="leaseExpiry">Thời hạn nhả khóa lease.</param>
-    public void RecordFailure(string error, DateTimeOffset? leaseExpiry = null)
+    public void RecordFailure(string error, DateTimeOffset nextAttemptAt, DateTimeOffset? leaseExpiry = null)
     {
         RetryCount++;
         LastError = error;
+        NextAttemptAt = nextAttemptAt;
+        LockLeaseToken = null;
         LockLeaseExpiresAt = leaseExpiry;
+    }
+
+    /// <summary>
+    /// Đặt lại trạng thái để phục hồi thủ công (requeue) cho thông điệp bị cạn budget retry.
+    /// </summary>
+    public void Requeue(DateTimeOffset now)
+    {
+        RetryCount = 0;
+        LastError = null;
+        NextAttemptAt = now;
+        LockLeaseToken = null;
+        LockLeaseExpiresAt = null;
     }
 }

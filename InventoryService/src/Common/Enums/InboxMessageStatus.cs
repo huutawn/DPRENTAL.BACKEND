@@ -21,7 +21,12 @@ public enum InboxMessageStatus
     Processed = 3,
 
     /// <summary>
-    /// Xử lý thất bại và chờ xử lý lại hoặc chuyển vào dead-letter.
+    /// Xử lý thất bại và chờ xử lý lại theo lịch backoff.
     /// </summary>
-    Failed = 4
+    Failed = 4,
+
+    /// <summary>
+    /// Thông điệp không hợp lệ hoặc cạn budget retry và đã được chuyển vào Dead Letter Queue (DLQ).
+    /// </summary>
+    DeadLettered = 5
 }
