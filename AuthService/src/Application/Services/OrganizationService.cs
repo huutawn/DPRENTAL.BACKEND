@@ -2,12 +2,14 @@ using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Mapping;
+using Dprental.AuthService.Application.Options;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
+using Microsoft.Extensions.Options;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -19,8 +21,13 @@ public sealed class OrganizationService(
     IOrganizationRepository organizationRepository,
     IOrganizationMembershipRepository membershipRepository,
     IRoleRepository roleRepository,
-    IMediaUrlResolver mediaUrlResolver) : IOrganizationService
+    IMediaUrlResolver mediaUrlResolver,
+    IOptions<OrganizationReviewOptions>? reviewOptions = null,
+    TimeProvider? timeProvider = null) : IOrganizationService
 {
+    private readonly OrganizationReviewOptions _reviewOptions = reviewOptions?.Value ?? new OrganizationReviewOptions();
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     public async Task<Result<OrganizationResponse>> GetByIdAsync(
         Guid actorUserId,
         Guid organizationId,
@@ -60,7 +67,30 @@ public sealed class OrganizationService(
             licenseExpires = accessResult.Value.ExpiresAtUtc.UtcDateTime;
         }
 
-        return Result.Success(org.ToResponse(logoUrl, licenseUrl, licenseExpires));
+        return Result.Success(org.ToResponse(logoUrl, licenseUrl, licenseExpires, _reviewOptions));
+    }
+
+    public async Task<Result<OrganizationResponse?>> GetMineAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        if (!DtoValidator.TryValidateId(userId, nameof(userId), out _))
+        {
+            return Result.Failure<OrganizationResponse?>(AuthErrors.User.NotFound);
+        }
+
+        IReadOnlyList<OrganizationMembership> memberships = await membershipRepository.GetMembershipsForUserAsync(userId, cancellationToken);
+
+        // Dữ liệu tạo trước khi có quy tắc 1-1 có thể còn nhiều tổ chức cho một tài khoản: lấy hồ sơ nộp gần nhất.
+        Organization? org = memberships
+            .Where(m => m.Status == MembershipStatus.Active && m.Organization is not null)
+            .Select(m => m.Organization)
+            .OrderByDescending(OrganizationReviewSchedule.SubmittedAtUtc)
+            .ThenBy(o => o.Id)
+            .FirstOrDefault();
+
+        return org is null
+            ? Result.Success<OrganizationResponse?>(null)
+            : Result.Success<OrganizationResponse?>(
+                org.ToResponse(mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId), reviewOptions: _reviewOptions));
     }
 
     public async Task<Result<PagedResult<OrganizationSummaryResponse>>> ListAsync(
@@ -93,7 +123,10 @@ public sealed class OrganizationService(
 
         PagedResult<Organization> paged = await organizationRepository.GetAllAsync(request, status, cancellationToken);
 
-        var items = paged.Items.Select(org => org.ToSummaryResponse(mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId))).ToList();
+        DateTime utcNow = _timeProvider.GetUtcNow().UtcDateTime;
+        var items = paged.Items
+            .Select(org => org.ToSummaryResponse(mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId), _reviewOptions, utcNow))
+            .ToList();
         return Result.Success(new PagedResult<OrganizationSummaryResponse>(items, paged.Page, paged.PageSize, paged.TotalCount));
     }
 

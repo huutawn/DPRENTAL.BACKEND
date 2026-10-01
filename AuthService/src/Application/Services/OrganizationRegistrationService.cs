@@ -2,12 +2,14 @@ using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Mapping;
+using Dprental.AuthService.Application.Options;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Common.Utils;
+using Microsoft.Extensions.Options;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -21,8 +23,10 @@ public sealed class OrganizationRegistrationService(
     ICorrelationIdProvider correlationIdProvider,
     IMediaServiceClient mediaServiceClient,
     IMediaUrlResolver mediaUrlResolver,
-    IMediaOutboxService mediaOutboxService) : IOrganizationRegistrationService
+    IMediaOutboxService mediaOutboxService,
+    IOptions<OrganizationReviewOptions>? reviewOptions = null) : IOrganizationRegistrationService
 {
+    private readonly OrganizationReviewOptions _reviewOptions = reviewOptions?.Value ?? new OrganizationReviewOptions();
     private static readonly Guid SeededOwnerRoleId = new("a1010000-0000-0000-0000-000000000001");
     private const int MaxSlugAttempts = 5;
 
@@ -50,6 +54,13 @@ public sealed class OrganizationRegistrationService(
         if (ProfileCompletionGuard.Check(actor) is Error profileError)
         {
             return Result.Failure<OrganizationRegisteredResponse>(profileError);
+        }
+
+        // Quan hệ 1-1: một tài khoản chỉ có một tổ chức, kể cả khi hồ sơ đang chờ hay bị từ chối (khi đó sửa hồ sơ cũ).
+        IReadOnlyList<OrganizationMembership> existing = await membershipRepository.GetMembershipsForUserAsync(actorUserId, cancellationToken);
+        if (existing.Any(m => m.Status == MembershipStatus.Active))
+        {
+            return Result.Failure<OrganizationRegisteredResponse>(AuthErrors.Organization.AlreadyRegistered);
         }
 
         if (request.Type is not (OrganizationType.Supplier or OrganizationType.Renter))
@@ -279,6 +290,9 @@ public sealed class OrganizationRegistrationService(
             org.RejectionReason = null;
             org.ReviewedByUserId = null;
             org.ReviewedAtUtc = null;
+            // Vòng duyệt mới: tính lại hạn duyệt từ lúc gửi lại, bỏ lần nhắc của vòng trước.
+            org.ResubmittedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
+            org.LastRemindedAtUtc = null;
         }
 
         await organizationRepository.UpdateAsync(org, cancellationToken);
@@ -295,7 +309,61 @@ public sealed class OrganizationRegistrationService(
         await transaction.CommitAsync(cancellationToken);
 
         string? logoUrl = mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId);
-        return Result.Success(org.ToResponse(logoUrl, accessResult.Value.Url, accessResult.Value.ExpiresAtUtc.UtcDateTime));
+        return Result.Success(org.ToResponse(logoUrl, accessResult.Value.Url, accessResult.Value.ExpiresAtUtc.UtcDateTime, _reviewOptions));
+    }
+
+    public async Task<Result<OrganizationResponse>> RemindReviewAsync(
+        Guid actorUserId,
+        Guid organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!DtoValidator.TryValidateId(organizationId, nameof(organizationId), out _) ||
+            !DtoValidator.TryValidateId(actorUserId, nameof(actorUserId), out _))
+        {
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.OrganizationNotFound);
+        }
+
+        OrganizationMembership? membership = await membershipRepository.GetByOrganizationAndUserAsync(organizationId, actorUserId, cancellationToken);
+        if (membership is not { Status: MembershipStatus.Active } ||
+            !string.Equals(membership.Role?.Name, SystemRoleCode.Owner, StringComparison.OrdinalIgnoreCase))
+        {
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.Forbidden);
+        }
+
+        await using IExecutionTransaction transaction = await organizationRepository.BeginTransactionAsync(cancellationToken);
+        Organization? org = await organizationRepository.GetByIdForUpdateAsync(organizationId, cancellationToken);
+        if (org is null)
+        {
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.OrganizationNotFound);
+        }
+
+        // Chỉ hồ sơ đang chờ mới có hạn duyệt; CanRemindAtUtc trả null cho mọi trạng thái khác.
+        if (OrganizationReviewSchedule.CanRemindAtUtc(org, _reviewOptions) is not DateTime canRemindAtUtc)
+        {
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.NotPendingReview);
+        }
+
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        if (now.UtcDateTime < canRemindAtUtc)
+        {
+            return Result.Failure<OrganizationResponse>(AuthErrors.Organization.ReviewReminderTooEarly);
+        }
+
+        org.LastRemindedAtUtc = now.UtcDateTime;
+        await organizationRepository.UpdateAsync(org, cancellationToken);
+        await auditLogRepository.AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorId = actorUserId,
+            Target = org.Id.ToString(),
+            Action = "Organization_ReviewReminder",
+            Result = "Success",
+            CorrelationId = correlationIdProvider.GetCorrelationId(),
+            Timestamp = now
+        }, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return Result.Success(org.ToResponse(mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId), reviewOptions: _reviewOptions));
     }
 
     /// <summary>Các trường Platform đã xác minh khi duyệt; so sánh theo giá trị (record) để biết Owner có đổi không.</summary>

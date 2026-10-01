@@ -1,5 +1,7 @@
 using Dprental.AuthService.Application.DTOs.Organization;
+using Dprental.AuthService.Application.Options;
 using Dprental.AuthService.Application.Services;
+using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
@@ -266,6 +268,198 @@ public sealed class OrganizationReviewTests
         Assert.Equal(AuthErrors.Organization.TaxCodeAlreadyExists, result.Error);
     }
 
+    [Fact]
+    public async Task ReminderIsRejectedWhileReviewIsStillWithinSla()
+    {
+        await using Fixture f = await Fixture.CreateAsync();
+        await f.SetReviewClockAsync(submittedHoursAgo: 47);
+
+        Result<OrganizationResponse> result = await f.Registration.RemindReviewAsync(f.OwnerId, f.OrgId);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Organization.ReviewReminderTooEarly, result.Error);
+        Assert.Null((await f.ReloadOrgAsync()).LastRemindedAtUtc);
+    }
+
+    [Fact]
+    public async Task OverdueReminderIsRecordedAuditedAndThenThrottled()
+    {
+        await using Fixture f = await Fixture.CreateAsync();
+        await f.SetReviewClockAsync(submittedHoursAgo: 49);
+
+        Result<OrganizationResponse> first = await f.Registration.RemindReviewAsync(f.OwnerId, f.OrgId);
+        Result<OrganizationResponse> second = await f.Registration.RemindReviewAsync(f.OwnerId, f.OrgId);
+
+        Assert.True(first.IsSuccess);
+        Organization org = await f.ReloadOrgAsync();
+        Assert.NotNull(org.LastRemindedAtUtc);
+        Assert.Equal(OrganizationStatus.Pending, org.Status);
+        // Lần nhắc kế tiếp phải cách lần này đủ thời gian chờ (mặc định 24 giờ).
+        Assert.Equal(org.LastRemindedAtUtc.Value.AddHours(24), first.Value.CanRemindAtUtc);
+        Assert.Equal(AuthErrors.Organization.ReviewReminderTooEarly, second.Error);
+        Assert.Single(f.Db.AuditLogs.Where(log => log.Action == "Organization_ReviewReminder"));
+    }
+
+    [Fact]
+    public async Task ReminderIsAllowedAgainAfterCooldown()
+    {
+        await using Fixture f = await Fixture.CreateAsync();
+        await f.SetReviewClockAsync(submittedHoursAgo: 100, remindedHoursAgo: 25);
+
+        Result<OrganizationResponse> result = await f.Registration.RemindReviewAsync(f.OwnerId, f.OrgId);
+
+        Assert.True(result.IsSuccess);
+        Assert.True((await f.ReloadOrgAsync()).LastRemindedAtUtc > DateTime.UtcNow.AddMinutes(-1));
+    }
+
+    [Fact]
+    public async Task OnlyOwnerCanRemindReview()
+    {
+        await using Fixture f = await Fixture.CreateAsync();
+        await f.SetReviewClockAsync(submittedHoursAgo: 49);
+
+        Result<OrganizationResponse> outsider = await f.Registration.RemindReviewAsync(f.OutsiderId, f.OrgId);
+        Result<OrganizationResponse> admin = await f.Registration.RemindReviewAsync(f.AdminId, f.OrgId);
+
+        Assert.Equal(AuthErrors.Organization.Forbidden, outsider.Error);
+        Assert.Equal(AuthErrors.Organization.Forbidden, admin.Error);
+        Assert.Null((await f.ReloadOrgAsync()).LastRemindedAtUtc);
+    }
+
+    [Theory]
+    [InlineData(OrganizationStatus.Active)]
+    [InlineData(OrganizationStatus.Rejected)]
+    [InlineData(OrganizationStatus.Suspended)]
+    public async Task ReminderRequiresPendingOrganization(OrganizationStatus status)
+    {
+        await using Fixture f = await Fixture.CreateAsync(status);
+        await f.SetReviewClockAsync(submittedHoursAgo: 49);
+
+        Result<OrganizationResponse> result = await f.Registration.RemindReviewAsync(f.OwnerId, f.OrgId);
+
+        Assert.Equal(AuthErrors.Organization.NotPendingReview, result.Error);
+    }
+
+    [Fact]
+    public async Task ResubmittingAfterRejectionRestartsReviewClockAndClearsReminder()
+    {
+        await using Fixture f = await Fixture.CreateAsync();
+        await f.SetReviewClockAsync(submittedHoursAgo: 100, remindedHoursAgo: 30);
+        await f.Review.RejectAsync(f.AdminId, f.OrgId, new RejectOrganizationRequest("Thiếu giấy phép"));
+
+        Result<OrganizationResponse> resubmitted = await f.Registration.UpdateProfileAsync(f.OwnerId, f.OrgId, Profile());
+        Result<OrganizationResponse> reminder = await f.Registration.RemindReviewAsync(f.OwnerId, f.OrgId);
+
+        Assert.True(resubmitted.IsSuccess);
+        Organization org = await f.ReloadOrgAsync();
+        Assert.Equal(OrganizationStatus.Pending, org.Status);
+        Assert.NotNull(org.ResubmittedAtUtc);
+        Assert.Null(org.LastRemindedAtUtc);
+        Assert.Equal(org.ResubmittedAtUtc, resubmitted.Value.SubmittedAtUtc);
+        Assert.Equal(org.ResubmittedAtUtc.Value.AddHours(48), resubmitted.Value.ReviewDueAtUtc);
+        // Vòng duyệt mới vừa bắt đầu nên chưa được nhắc.
+        Assert.Equal(AuthErrors.Organization.ReviewReminderTooEarly, reminder.Error);
+    }
+
+    [Fact]
+    public async Task EditingPendingProfileKeepsReviewClock()
+    {
+        await using Fixture f = await Fixture.CreateAsync();
+        await f.SetReviewClockAsync(submittedHoursAgo: 30);
+        DateTime createdAtUtc = (await f.ReloadOrgAsync()).CreatedAtUtc;
+
+        Result<OrganizationResponse> edited = await f.Registration.UpdateProfileAsync(
+            f.OwnerId, f.OrgId, Profile() with { ContactPhone = "0909999999" });
+
+        Assert.True(edited.IsSuccess);
+        Assert.Null((await f.ReloadOrgAsync()).ResubmittedAtUtc);
+        Assert.Equal(createdAtUtc, edited.Value.SubmittedAtUtc);
+        Assert.Equal(createdAtUtc.AddHours(48), edited.Value.ReviewDueAtUtc);
+    }
+
+    [Fact]
+    public async Task ReviewDeadlinesAreOnlyReportedForPendingOrganizations()
+    {
+        await using Fixture f = await Fixture.CreateAsync();
+
+        Result<OrganizationResponse> pending = await f.Organizations.GetByIdAsync(f.OwnerId, f.OrgId);
+        await f.Review.ApproveAsync(f.AdminId, f.OrgId);
+        Result<OrganizationResponse> active = await f.Organizations.GetByIdAsync(f.OwnerId, f.OrgId);
+
+        Assert.NotNull(pending.Value.ReviewDueAtUtc);
+        Assert.Equal(pending.Value.ReviewDueAtUtc, pending.Value.CanRemindAtUtc);
+        Assert.NotNull(active.Value.SubmittedAtUtc);
+        Assert.Null(active.Value.ReviewDueAtUtc);
+        Assert.Null(active.Value.CanRemindAtUtc);
+    }
+
+    [Fact]
+    public async Task PendingQueueListsRemindedFirstThenOldestAndFlagsOverdue()
+    {
+        await using Fixture f = await Fixture.CreateAsync();
+        await f.SetReviewClockAsync(submittedHoursAgo: 60);
+        Guid oldest = await f.AddOrganizationAsync("Oldest", OrganizationStatus.Pending, createdAt: DateTime.UtcNow.AddHours(-90));
+        Guid fresh = await f.AddOrganizationAsync("Fresh", OrganizationStatus.Pending, createdAt: DateTime.UtcNow.AddHours(-2));
+        await f.Registration.RemindReviewAsync(f.OwnerId, f.OrgId);
+
+        Result<PagedResult<OrganizationSummaryResponse>> queue =
+            await f.Organizations.ListAsync(f.AdminId, new PageRequest(), OrganizationStatus.Pending);
+
+        Assert.True(queue.IsSuccess);
+        Assert.Equal([f.OrgId, oldest, fresh], queue.Value.Items.Select(item => item.Id));
+        Assert.Equal([true, true, false], queue.Value.Items.Select(item => item.IsOverdue));
+        Assert.NotNull(queue.Value.Items[0].LastRemindedAtUtc);
+        Assert.Null(queue.Value.Items[1].LastRemindedAtUtc);
+    }
+
+    [Fact]
+    public async Task GetMineReturnsOwnOrganizationWithReviewScheduleAndNullWhenNoneRegistered()
+    {
+        await using Fixture f = await Fixture.CreateAsync();
+
+        Result<OrganizationResponse?> owner = await f.Organizations.GetMineAsync(f.OwnerId);
+        Result<OrganizationResponse?> outsider = await f.Organizations.GetMineAsync(f.OutsiderId);
+
+        Assert.True(owner.IsSuccess);
+        Assert.NotNull(owner.Value);
+        Assert.Equal(f.OrgId, owner.Value.Id);
+        Assert.Equal(OrganizationStatus.Pending, owner.Value.Status);
+        Assert.NotNull(owner.Value.ReviewDueAtUtc);
+        // Chỉ đọc DB: không cấp URL xem giấy phép.
+        Assert.Null(owner.Value.BusinessLicenseDocumentUrl);
+        Assert.True(outsider.IsSuccess);
+        Assert.Null(outsider.Value);
+    }
+
+    [Fact]
+    public async Task GetMineReflectsRejectionReason()
+    {
+        await using Fixture f = await Fixture.CreateAsync();
+        await f.Review.RejectAsync(f.AdminId, f.OrgId, new RejectOrganizationRequest("Thiếu giấy phép"));
+
+        Result<OrganizationResponse?> mine = await f.Organizations.GetMineAsync(f.OwnerId);
+
+        Assert.Equal(OrganizationStatus.Rejected, mine.Value?.Status);
+        Assert.Equal("Thiếu giấy phép", mine.Value?.RejectionReason);
+        Assert.Null(mine.Value?.ReviewDueAtUtc);
+    }
+
+    [Fact]
+    public void ReviewScheduleFollowsConfiguredHours()
+    {
+        DateTime submitted = new(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc);
+        Organization org = new() { Status = OrganizationStatus.Pending, CreatedAtUtc = submitted };
+        OrganizationReviewOptions options = new() { SlaHours = 24, ReminderCooldownHours = 12 };
+
+        Assert.Equal(submitted.AddHours(24), OrganizationReviewSchedule.ReviewDueAtUtc(org, options));
+        Assert.Equal(submitted.AddHours(24), OrganizationReviewSchedule.CanRemindAtUtc(org, options));
+        Assert.False(OrganizationReviewSchedule.IsOverdue(org, options, submitted.AddHours(24)));
+        Assert.True(OrganizationReviewSchedule.IsOverdue(org, options, submitted.AddHours(24).AddSeconds(1)));
+
+        org.LastRemindedAtUtc = submitted.AddHours(30);
+        Assert.Equal(submitted.AddHours(42), OrganizationReviewSchedule.CanRemindAtUtc(org, options));
+    }
+
     private static UpdateOrganizationProfileRequest Profile() =>
         new(
             Name: "Dong A Rental",
@@ -377,6 +571,17 @@ public sealed class OrganizationReviewTests
             await Db.SaveChangesAsync();
             Db.Entry(org).State = EntityState.Detached;
             return org.Id;
+        }
+
+        /// <summary>Đặt lại thời điểm nộp (và lần nhắc gần nhất) của tổ chức chính để kiểm tra các mốc hạn duyệt.</summary>
+        public async Task SetReviewClockAsync(double submittedHoursAgo, double? remindedHoursAgo = null)
+        {
+            Organization org = await Db.Organizations.SingleAsync(o => o.Id == OrgId);
+            org.CreatedAtUtc = DateTime.UtcNow.AddHours(-submittedHoursAgo);
+            org.ResubmittedAtUtc = null;
+            org.LastRemindedAtUtc = remindedHoursAgo is double hours ? DateTime.UtcNow.AddHours(-hours) : null;
+            await Db.SaveChangesAsync();
+            Db.Entry(org).State = EntityState.Detached;
         }
 
         public Task<Organization> ReloadOrgAsync() =>

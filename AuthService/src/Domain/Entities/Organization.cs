@@ -89,5 +89,11 @@ public class Organization
 
     public DateTime? ReviewedAtUtc { get; set; }
 
+    /// <summary>Lần gần nhất Owner gửi lại hồ sơ sau khi bị từ chối; null nếu chưa từng gửi lại (khi đó tính từ <see cref="CreatedAtUtc"/>).</summary>
+    public DateTime? ResubmittedAtUtc { get; set; }
+
+    /// <summary>Lần gần nhất Owner nhắc Platform duyệt hồ sơ đã quá hạn; xoá khi hồ sơ được gửi lại.</summary>
+    public DateTime? LastRemindedAtUtc { get; set; }
+
     public ICollection<OrganizationMembership> Memberships { get; set; } = new List<OrganizationMembership>();
 }

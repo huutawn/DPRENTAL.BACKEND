@@ -32,6 +32,8 @@ public static class AuthErrorCode
         public const string SelfReviewNotAllowed = "Organization.SelfReviewNotAllowed";
         public const string LegalInfoLocked = "Organization.LegalInfoLocked";
         public const string ConcurrentModification = "Organization.ConcurrentModification";
+        public const string ReviewReminderTooEarly = "Organization.ReviewReminderTooEarly";
+        public const string AlreadyRegistered = "Organization.AlreadyRegistered";
     }
 
     public static class Role
