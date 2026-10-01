@@ -1,9 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
+using Dprental.CatalogService.Common;
+using Dprental.CatalogService.Domain.DTOs.Equipments;
 using Dprental.CatalogService.Domain.IRepositories;
-using Dprental.CatalogService.Domain.ValueObjects;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
@@ -12,22 +14,25 @@ namespace Dprental.CatalogService.Api.Tests;
 
 public sealed class PublicCatalogEndpointTests
 {
+    private static readonly Guid PublishedEquipmentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid UnpublishedEquipmentId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+
     [Fact]
-    public async Task Listing_IsAnonymous_AndReturnsPagedResponse()
+    public async Task Listing_IsAnonymous_AndReturnsPagedResult()
     {
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync(
-            "/api/v1/catalog/equipments?keyword=komatsu&categoryId=11111111-1111-1111-1111-111111111111&minPrice=500000&page=2&pageSize=20");
-        PublicCatalogResponse? result = await response.Content.ReadFromJsonAsync<PublicCatalogResponse>();
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/catalog/equipments");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.NotNull(result);
-        Assert.Equal(2, result.Page);
-        Assert.Equal(20, result.PageSize);
-        Assert.Equal(1, result.TotalItems);
-        Assert.Equal(1, result.TotalPages);
+        var page = await response.Content.ReadFromJsonAsync<PagedResult<EquipmentListItemDto>>();
+        Assert.NotNull(page);
+        Assert.Equal(1, page.Page);
+        Assert.Equal(20, page.PageSize);
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(1, page.TotalPages);
+        Assert.Single(page.Items);
     }
 
     [Fact]
@@ -36,8 +41,7 @@ public sealed class PublicCatalogEndpointTests
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync(
-            "/api/v1/catalog/equipments?minPrice=3000000&maxPrice=500000");
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/catalog/equipments?minPrice=500&maxPrice=100");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -48,10 +52,12 @@ public sealed class PublicCatalogEndpointTests
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync(
-            "/api/v1/catalog/equipments/22222222-2222-2222-2222-222222222222");
+        using HttpResponseMessage response = await client.GetAsync($"/api/v1/catalog/equipments/{PublishedEquipmentId}");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var detail = await response.Content.ReadFromJsonAsync<EquipmentDetailDto>();
+        Assert.NotNull(detail);
+        Assert.Equal(PublishedEquipmentId, detail.Id);
     }
 
     [Fact]
@@ -60,67 +66,68 @@ public sealed class PublicCatalogEndpointTests
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync(
-            "/api/v1/catalog/equipments/33333333-3333-3333-3333-333333333333");
+        using HttpResponseMessage response = await client.GetAsync($"/api/v1/catalog/equipments/{UnpublishedEquipmentId}");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    private static WebApplicationFactory<Program> CreateFactory() =>
+    public static WebApplicationFactory<Program> CreateFactory() =>
         new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
+                builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
+                builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
+                builder.UseSetting("Auth:Jwt:Keys:0:PublicKeyPem", TestJwtHelper.PublicKeyPem);
+
                 builder.ConfigureTestServices(services =>
                 {
                     services.RemoveAll<IEquipmentQueryRepository>();
-                    services.AddSingleton<IEquipmentQueryRepository, FakeEquipmentQueryRepository>();
+                    services.AddScoped<IEquipmentQueryRepository, FakeEquipmentQueryRepository>();
                 });
             });
-
     private sealed class FakeEquipmentQueryRepository : IEquipmentQueryRepository
     {
-        private static readonly Guid PublishedId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        public Task<PagedResult<EquipmentListItemDto>> SearchPublishedAsync(
+            GetEquipmentsRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            var item = new EquipmentListItemDto(
+                PublishedEquipmentId,
+                "Máy quay Sony FX3",
+                "Sony",
+                1200000m,
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                new CategoryDto(Guid.NewGuid(), "Camera"));
 
-        public Task<PagedResult<EquipmentListItem>> SearchPublishedAsync(
-            EquipmentSearchCriteria criteria,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new PagedResult<EquipmentListItem>(
-                [new EquipmentListItem(
-                    Guid.Parse("11111111-1111-1111-1111-111111111111"),
-                    "Komatsu PC200",
-                    "Komatsu",
-                    1_500_000,
-                    Guid.Parse("44444444-4444-4444-4444-444444444444"),
-                    Guid.Parse("55555555-5555-5555-5555-555555555555"),
-                    new CategorySummary(
-                        Guid.Parse("11111111-1111-1111-1111-111111111111"),
-                        "Excavator"))], 1));
+            var result = new PagedResult<EquipmentListItemDto>([item], request.Page, request.PageSize, 1);
+            return Task.FromResult(result);
+        }
 
-        public Task<EquipmentDetail?> GetPublishedByIdAsync(
+        public Task<EquipmentDetailDto?> GetPublishedByIdAsync(
             Guid id,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult<EquipmentDetail?>(id == PublishedId
-                ? new EquipmentDetail(
-                    PublishedId,
-                    "EQ-001",
-                    "Komatsu PC200",
-                    "Komatsu",
-                    "Published equipment",
-                    1_500_000,
-                    Guid.Parse("44444444-4444-4444-4444-444444444444"),
-                    new CategorySummary(
-                        Guid.Parse("11111111-1111-1111-1111-111111111111"),
-                        "Excavator"),
-                    "{}",
-                    [Guid.Parse("55555555-5555-5555-5555-555555555555")])
-                : null);
-    }
+            CancellationToken cancellationToken = default)
+        {
+            if (id != PublishedEquipmentId)
+            {
+                return Task.FromResult<EquipmentDetailDto?>(null);
+            }
 
-    private sealed record PublicCatalogResponse(
-        IReadOnlyList<object> Items,
-        int Page,
-        int PageSize,
-        int TotalItems,
-        int TotalPages);
+            var detail = new EquipmentDetailDto(
+                PublishedEquipmentId,
+                "CAM-001",
+                "Máy quay Sony FX3",
+                "Sony",
+                "Mô tả máy quay",
+                1200000m,
+                Guid.NewGuid(),
+                new CategoryDto(Guid.NewGuid(), "Camera"),
+                null,
+                [Guid.NewGuid()]);
+
+            return Task.FromResult<EquipmentDetailDto?>(detail);
+        }
+    }
 }
