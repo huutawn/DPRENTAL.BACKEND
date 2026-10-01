@@ -25,7 +25,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
                 CatalogServiceDbContext.MigrationsHistoryTableName,
                 CatalogServiceDbContext.SchemaName)));
         services.AddScoped<IEquipmentQueryRepository, CatalogRepository>();
-
+        services.AddScoped<ICategoryRepository, CategoryRepository>();
         return services;
     }
 }
