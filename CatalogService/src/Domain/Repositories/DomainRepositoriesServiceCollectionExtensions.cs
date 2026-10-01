@@ -18,7 +18,11 @@ public static class DomainRepositoriesServiceCollectionExtensions
             throw new InvalidOperationException("Thiếu ConnectionStrings:Postgres.");
         }
 
-        services.AddDbContext<CatalogServiceDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddDbContext<CatalogServiceDbContext>(options => options.UseNpgsql(
+            connectionString,
+            npgsqlOptions => npgsqlOptions.MigrationsHistoryTable(
+                CatalogServiceDbContext.MigrationsHistoryTableName,
+                CatalogServiceDbContext.SchemaName)));
 
         return services;
     }
