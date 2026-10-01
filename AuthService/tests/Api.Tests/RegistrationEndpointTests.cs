@@ -38,6 +38,23 @@ public sealed class RegistrationEndpointTests
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
+    [Theory]
+    [InlineData("a@b", "Matkhau123!")]                    // tên miền không có đuôi
+    [InlineData("us..er@example.com", "Matkhau123!")]     // hai dấu chấm liền nhau
+    [InlineData("customer@example.com", "12345678")]      // mật khẩu phổ biến
+    [InlineData("customer@example.com", "customer-2026")] // mật khẩu chứa phần trước @ của email
+    public async Task PostRegisterWithMalformedEmailOrWeakPasswordReturnsBadRequest(string email, string password)
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/v1/auth/register",
+            new RegisterRequest(email, password, "Customer"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     [Fact]
     public async Task PostRegisterWithOptionalProfileFieldsReturnsCreated()
     {

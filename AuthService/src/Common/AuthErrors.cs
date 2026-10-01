@@ -218,6 +218,9 @@ public static class AuthErrors
         public static readonly Error InvalidCredentials =
             Error.Unauthorized(AuthErrorCode.Auth.InvalidCredentials, "Email hoặc mật khẩu không chính xác.");
 
+        public static readonly Error PasswordContainsPersonalInfo =
+            Error.Validation(AuthErrorCode.Auth.PasswordContainsPersonalInfo, "Mật khẩu không được chứa email hoặc họ tên của bạn.");
+
         public static readonly Error InactiveAccount =
             Error.Unauthorized(AuthErrorCode.Auth.InactiveAccount, "Tài khoản không tồn tại hoặc đã bị khóa.");
 

@@ -171,7 +171,7 @@ public sealed class UserServiceTests
         UserService service = CreateService(repository, roleRepository: roleRepo);
 
         Result<AccountCreatedResponse> result = await service.RegisterAdminAsync(
-            new RegisterAdminRequest("  Admin@Example.com ", "AdminPassword123!", "  Super Admin  "),
+            new RegisterAdminRequest("  Admin@Example.com ", "Matkhau123!", "  Super Admin  "),
             ValidBootstrapKey);
 
         Assert.True(result.IsSuccess);
