@@ -1,4 +1,6 @@
 using Dprental.AuthService.Application.DTOs.Organization;
+using Dprental.AuthService.Application.Options;
+using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Domain.Entities;
 
 namespace Dprental.AuthService.Application.Mapping;
@@ -10,9 +12,11 @@ public static class OrganizationMappingExtensions
         this Organization organization,
         string? logoUrl = null,
         string? businessLicenseDocumentUrl = null,
-        DateTime? businessLicenseDocumentUrlExpiresAtUtc = null)
+        DateTime? businessLicenseDocumentUrlExpiresAtUtc = null,
+        OrganizationReviewOptions? reviewOptions = null)
     {
         ArgumentNullException.ThrowIfNull(organization);
+        reviewOptions ??= new OrganizationReviewOptions();
         return new OrganizationResponse(
             organization.Id,
             organization.Name,
@@ -39,14 +43,21 @@ public static class OrganizationMappingExtensions
             businessLicenseDocumentUrl,
             businessLicenseDocumentUrlExpiresAtUtc,
             organization.RejectionReason,
-            organization.ReviewedAtUtc);
+            organization.ReviewedAtUtc,
+            OrganizationReviewSchedule.SubmittedAtUtc(organization),
+            OrganizationReviewSchedule.ReviewDueAtUtc(organization, reviewOptions),
+            OrganizationReviewSchedule.CanRemindAtUtc(organization, reviewOptions),
+            organization.LastRemindedAtUtc);
     }
 
     public static OrganizationSummaryResponse ToSummaryResponse(
         this Organization organization,
-        string? logoUrl = null)
+        string? logoUrl = null,
+        OrganizationReviewOptions? reviewOptions = null,
+        DateTime? utcNow = null)
     {
         ArgumentNullException.ThrowIfNull(organization);
+        reviewOptions ??= new OrganizationReviewOptions();
         return new OrganizationSummaryResponse(
             organization.Id,
             organization.Name,
@@ -56,6 +67,9 @@ public static class OrganizationMappingExtensions
             organization.LogoMediaId,
             logoUrl,
             organization.Province,
-            organization.CreatedAtUtc);
+            organization.CreatedAtUtc,
+            OrganizationReviewSchedule.SubmittedAtUtc(organization),
+            organization.LastRemindedAtUtc,
+            utcNow is DateTime now && OrganizationReviewSchedule.IsOverdue(organization, reviewOptions, now));
     }
 }

@@ -88,6 +88,12 @@ public static class AuthErrors
 
         public static readonly Error ConcurrentModification =
             Error.Conflict(AuthErrorCode.Organization.ConcurrentModification, "Hồ sơ tổ chức vừa thay đổi. Vui lòng tải lại và thử lại.");
+
+        public static readonly Error ReviewReminderTooEarly =
+            Error.Conflict(AuthErrorCode.Organization.ReviewReminderTooEarly, "Chưa đến thời điểm được nhắc duyệt hồ sơ. Vui lòng thử lại sau.");
+
+        public static readonly Error AlreadyRegistered =
+            Error.Conflict(AuthErrorCode.Organization.AlreadyRegistered, "Mỗi tài khoản chỉ đăng ký được một tổ chức. Hãy sửa hồ sơ tổ chức hiện có.");
     }
 
     public static class Role

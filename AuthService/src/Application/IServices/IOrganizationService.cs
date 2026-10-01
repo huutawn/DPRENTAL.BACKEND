@@ -8,6 +8,12 @@ public interface IOrganizationService
 {
     Task<Result<OrganizationResponse>> GetByIdAsync(Guid actorUserId, Guid organizationId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Tổ chức của chính người gọi (quan hệ 1-1), hoặc null nếu họ chưa đăng ký. Chỉ đọc DB — không cấp URL xem
+    /// giấy phép — để client gọi mỗi lần vào trang mà không phụ thuộc MediaService.
+    /// </summary>
+    Task<Result<OrganizationResponse?>> GetMineAsync(Guid userId, CancellationToken cancellationToken = default);
+
     /// <summary><paramref name="status"/> chỉ dành cho Platform (hàng chờ duyệt); user thường truyền vào sẽ bị từ chối.</summary>
     Task<Result<PagedResult<OrganizationSummaryResponse>>> ListAsync(
         Guid actorUserId,

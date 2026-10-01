@@ -181,6 +181,9 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Property<DateOnly?>("EstablishedDate")
                         .HasColumnType("date");
 
+                    b.Property<DateTime?>("LastRemindedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("LegalRepresentativeCitizenId")
                         .HasMaxLength(12)
                         .HasColumnType("character varying(12)");
@@ -204,6 +207,9 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Property<string>("RejectionReason")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("ResubmittedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("ReviewedAtUtc")
                         .HasColumnType("timestamp with time zone");

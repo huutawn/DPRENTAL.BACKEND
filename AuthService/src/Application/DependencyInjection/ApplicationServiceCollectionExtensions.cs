@@ -33,6 +33,13 @@ public static class ApplicationServiceCollectionExtensions
             .Bind(configuration.GetSection(MediaServiceOptions.SectionName))
             .ValidateOnStart();
 
+        services.AddOptions<OrganizationReviewOptions>()
+            .Bind(configuration.GetSection(OrganizationReviewOptions.SectionName))
+            .Validate(
+                options => options.SlaHours > 0 && options.ReminderCooldownHours > 0,
+                "OrganizationReview:SlaHours và OrganizationReview:ReminderCooldownHours phải lớn hơn 0.")
+            .ValidateOnStart();
+
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<RsaJwtKeyRing>();
         services.AddSingleton<IAccessTokenIssuer, RsaAccessTokenIssuer>();

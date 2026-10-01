@@ -2,11 +2,13 @@ using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Mapping;
+using Dprental.AuthService.Application.Options;
 using Dprental.AuthService.Application.Validation;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.IRepositories;
+using Microsoft.Extensions.Options;
 
 namespace Dprental.AuthService.Application.Services;
 
@@ -21,8 +23,11 @@ public sealed class OrganizationReviewService(
     IAuditLogRepository auditLogRepository,
     TimeProvider timeProvider,
     ICorrelationIdProvider correlationIdProvider,
-    IMediaUrlResolver mediaUrlResolver) : IOrganizationReviewService
+    IMediaUrlResolver mediaUrlResolver,
+    IOptions<OrganizationReviewOptions>? reviewOptions = null) : IOrganizationReviewService
 {
+    private readonly OrganizationReviewOptions _reviewOptions = reviewOptions?.Value ?? new OrganizationReviewOptions();
+
     public Task<Result<OrganizationResponse>> ApproveAsync(Guid actorUserId, Guid organizationId, CancellationToken cancellationToken = default) =>
         ReviewAsync(actorUserId, organizationId, OrganizationStatus.Active, rejectionReason: null, "Organization_Approve", cancellationToken);
 
@@ -140,7 +145,7 @@ public sealed class OrganizationReviewService(
         await transaction.CommitAsync(cancellationToken);
 
         string? logoUrl = mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId);
-        return Result.Success(org.ToResponse(logoUrl, licenseUrl, licenseExpires));
+        return Result.Success(org.ToResponse(logoUrl, licenseUrl, licenseExpires, _reviewOptions));
     }
 
 

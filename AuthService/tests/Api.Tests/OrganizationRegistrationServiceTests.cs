@@ -41,6 +41,28 @@ public sealed class OrganizationRegistrationServiceTests
         Assert.Equal(MembershipStatus.Active, membership.Status);
     }
 
+    [Theory]
+    [InlineData(OrganizationStatus.Pending)]
+    [InlineData(OrganizationStatus.Rejected)]
+    [InlineData(OrganizationStatus.Active)]
+    public async Task RegisterRejectsAccountThatAlreadyHasAnOrganization(OrganizationStatus existingStatus)
+    {
+        await using AuthDbContext dbContext = await CreateDbContextAsync();
+        User owner = await CreateUserAsync(dbContext, "owner@example.com");
+        OrganizationRegistrationService service = CreateService(dbContext);
+        await service.RegisterForExistingUserAsync(owner.Id, CreateProfile());
+        Organization first = await dbContext.Organizations.SingleAsync();
+        first.Status = existingStatus;
+        await dbContext.SaveChangesAsync();
+
+        Result<OrganizationRegisteredResponse> second = await service.RegisterForExistingUserAsync(
+            owner.Id, CreateProfile(name: "Another Company"));
+
+        Assert.True(second.IsFailure);
+        Assert.Equal(AuthErrors.Organization.AlreadyRegistered, second.Error);
+        Assert.Equal(1, await dbContext.Organizations.CountAsync());
+    }
+
     [Fact]
     public async Task RegisterRejectsUnknownActor()
     {

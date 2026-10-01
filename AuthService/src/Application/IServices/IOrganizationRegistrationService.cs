@@ -20,4 +20,13 @@ public interface IOrganizationRegistrationService
         Guid organizationId,
         UpdateOrganizationProfileRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Owner nhắc Platform duyệt hồ sơ đang Pending đã quá hạn duyệt. Hồ sơ giữ nguyên nội dung và thứ tự nộp,
+    /// chỉ được đưa lên đầu hàng chờ. Chưa đến hạn hoặc vừa nhắc xong thì trả lỗi.
+    /// </summary>
+    Task<Result<OrganizationResponse>> RemindReviewAsync(
+        Guid actorUserId,
+        Guid organizationId,
+        CancellationToken cancellationToken = default);
 }

@@ -36,7 +36,11 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
         IOrderedQueryable<Organization> ordered;
         if (status is OrganizationStatus filter)
         {
-            ordered = query.Where(o => o.Status == filter).OrderBy(o => o.CreatedAtUtc).ThenBy(o => o.Id);
+            // Hồ sơ Owner đã nhắc (quá hạn duyệt) lên trước, còn lại theo thứ tự nộp — cũ nhất trước.
+            ordered = query.Where(o => o.Status == filter)
+                .OrderByDescending(o => o.LastRemindedAtUtc != null)
+                .ThenBy(o => o.ResubmittedAtUtc ?? o.CreatedAtUtc)
+                .ThenBy(o => o.Id);
         }
         else
         {
