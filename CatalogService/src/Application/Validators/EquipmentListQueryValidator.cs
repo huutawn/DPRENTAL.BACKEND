@@ -1,47 +1,65 @@
-﻿using Dprental.CatalogService.Application.DTOs;
 using Dprental.CatalogService.Application.Options;
-using Dprental.CatalogService.Domain.ValueObjects;
+using Dprental.CatalogService.Common;
+using Dprental.CatalogService.Domain.DTOs.Equipments;
 using Microsoft.Extensions.Options;
 
 namespace Dprental.CatalogService.Application.Validators;
 
 public sealed class EquipmentListQueryValidator(IOptions<CatalogDiscoveryOptions> options)
 {
-    private static readonly Dictionary<string, EquipmentSort> SortMap = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> AllowedSorts = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["newest"] = EquipmentSort.Newest,
-        ["price_asc"] = EquipmentSort.PriceAscending,
-        ["price_desc"] = EquipmentSort.PriceDescending
+        "newest",
+        "price_asc",
+        "price_desc"
     };
 
-    /// <summary>Không truyền sort thì mặc định newest. Giá trị lạ phải đã bị Validate chặn trước đó.</summary>
-    public static EquipmentSort ParseSort(string? sort) =>
-        string.IsNullOrWhiteSpace(sort) ? EquipmentSort.Newest : SortMap[sort.Trim()];
-
-    public IReadOnlyList<ValidationError> Validate(EquipmentListQuery query)
+    public Result Validate(GetEquipmentsRequest request)
     {
-        ArgumentNullException.ThrowIfNull(query);
-        CatalogDiscoveryOptions settings = options.Value;
-        List<ValidationError> errors = [];
+        ArgumentNullException.ThrowIfNull(request);
 
-        if (query.Keyword is not null && query.Keyword.Trim().Length > settings.MaxKeywordLength)
-            errors.Add(new(nameof(query.Keyword), $"Từ khóa tối đa {settings.MaxKeywordLength} ký tự."));
+        if (request.Page <= 0)
+        {
+            return Result.Failure(CatalogErrors.Paging.InvalidPage);
+        }
 
-        if (query.MinPrice is < 0)
-            errors.Add(new(nameof(query.MinPrice), "minPrice không được âm."));
-        if (query.MaxPrice is < 0)
-            errors.Add(new(nameof(query.MaxPrice), "maxPrice không được âm."));
-        if (query.MinPrice is not null && query.MaxPrice is not null && query.MinPrice > query.MaxPrice)
-            errors.Add(new(nameof(query.MinPrice), "minPrice không được lớn hơn maxPrice."));
+        if (request.PageSize is <= 0 or > PageRequest.MaxPageSize)
+        {
+            return Result.Failure(CatalogErrors.Paging.InvalidPageSize);
+        }
 
-        if (!string.IsNullOrWhiteSpace(query.Sort) && !SortMap.ContainsKey(query.Sort.Trim()))
-            errors.Add(new(nameof(query.Sort), "sort chỉ nhận: newest, price_asc, price_desc."));
+        // Kiểm tra tràn số nguyên khi tính toán offset phân trang: (Page - 1) * PageSize
+        if ((long)(request.Page - 1) * request.PageSize > int.MaxValue)
+        {
+            return Result.Failure(CatalogErrors.Paging.Overflow);
+        }
 
-        if (query.Page is < 1)
-            errors.Add(new(nameof(query.Page), "page phải >= 1."));
-        if (query.PageSize is < 1 || query.PageSize > settings.MaxPageSize)
-            errors.Add(new(nameof(query.PageSize), $"pageSize phải từ 1 đến {settings.MaxPageSize}."));
+        int maxKeywordLength = options.Value.MaxKeywordLength;
+        if (request.Keyword?.Trim().Length > maxKeywordLength)
+        {
+            return Result.Failure(CatalogErrors.Equipment.InvalidKeyword);
+        }
 
-        return errors;
+        if (request.MinPrice < 0)
+        {
+            return Result.Failure(CatalogErrors.Equipment.InvalidMinPrice);
+        }
+
+        if (request.MaxPrice < 0)
+        {
+            return Result.Failure(CatalogErrors.Equipment.InvalidMaxPrice);
+        }
+
+        if (request.MinPrice is not null && request.MaxPrice is not null && request.MinPrice > request.MaxPrice)
+        {
+            return Result.Failure(CatalogErrors.Equipment.InvalidPriceRange);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Sort) && !AllowedSorts.Contains(request.Sort.Trim()))
+        {
+            return Result.Failure(CatalogErrors.Equipment.InvalidSort);
+        }
+
+        return Result.Success();
     }
 }

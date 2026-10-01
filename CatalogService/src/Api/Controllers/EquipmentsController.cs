@@ -1,35 +1,40 @@
-﻿using Dprental.CatalogService.Application.DTOs;
+using Dprental.CatalogService.Api.Filters;
 using Dprental.CatalogService.Application.IServices;
+using Dprental.CatalogService.Common;
+using Dprental.CatalogService.Domain.DTOs.Equipments;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Dprental.CatalogService.Api.Controllers;
 
+/// <summary>Cung cấp API discovery công khai cho thiết bị trong danh mục.</summary>
 [ApiController]
+[Route("equipments")]
+[Produces("application/json")]
 [AllowAnonymous]
-[Route("api/v1/catalog/equipments")]
 public sealed class EquipmentsController(ICatalogDiscoveryService discovery) : ControllerBase
 {
+    /// <summary>Tìm kiếm và phân trang thiết bị đã công khai.</summary>
     [HttpGet]
-    public async Task<ActionResult<PagedResponse<EquipmentListItemDto>>> Search(
-        [FromQuery] EquipmentListQuery query, CancellationToken cancellationToken)
+    [ProducesResponseType<PagedResult<EquipmentListItemDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<PagedResult<EquipmentListItemDto>>> Search(
+        [FromQuery] GetEquipmentsRequest request,
+        CancellationToken cancellationToken)
     {
-        SearchOutcome outcome = await discovery.SearchAsync(query, cancellationToken);
-        if (!outcome.IsValid)
-        {
-            var errors = outcome.Errors
-                .GroupBy(e => e.Field)
-                .ToDictionary(g => g.Key, g => g.Select(e => e.Message).ToArray());
-            return ValidationProblem(new ValidationProblemDetails(errors));
-        }
-
-        return Ok(outcome.Page);
+        Result<PagedResult<EquipmentListItemDto>> result = await discovery.SearchAsync(request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
+    /// <summary>Lấy chi tiết thiết bị theo ID nếu đã công khai.</summary>
     [HttpGet("{id:guid}")]
-    public async Task<ActionResult<EquipmentDetailDto>> GetById(Guid id, CancellationToken cancellationToken)
+    [ProducesResponseType<EquipmentDetailDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EquipmentDetailDto>> GetById(
+        Guid id,
+        CancellationToken cancellationToken)
     {
-        EquipmentDetailDto? detail = await discovery.GetDetailAsync(id, cancellationToken);
-        return detail is null ? NotFound() : Ok(detail);
+        Result<EquipmentDetailDto> result = await discovery.GetDetailAsync(id, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 }

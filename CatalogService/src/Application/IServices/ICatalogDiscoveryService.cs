@@ -1,14 +1,15 @@
-﻿using Dprental.CatalogService.Application.DTOs;
+using Dprental.CatalogService.Common;
+using Dprental.CatalogService.Domain.DTOs.Equipments;
 
 namespace Dprental.CatalogService.Application.IServices;
 
-public sealed record SearchOutcome(PagedResponse<EquipmentListItemDto>? Page, IReadOnlyList<ValidationError> Errors)
-{
-    public bool IsValid => Errors.Count == 0;
-}
-
 public interface ICatalogDiscoveryService
 {
-    Task<SearchOutcome> SearchAsync(EquipmentListQuery query, CancellationToken cancellationToken = default);
-    Task<EquipmentDetailDto?> GetDetailAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<Result<PagedResult<EquipmentListItemDto>>> SearchAsync(
+        GetEquipmentsRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<EquipmentDetailDto>> GetDetailAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
 }

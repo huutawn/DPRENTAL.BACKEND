@@ -1,43 +1,41 @@
-﻿using Dprental.CatalogService.Application.DTOs;
 using Dprental.CatalogService.Application.IServices;
-using Dprental.CatalogService.Application.Mapping;
-using Dprental.CatalogService.Application.Options;
 using Dprental.CatalogService.Application.Validators;
+using Dprental.CatalogService.Common;
+using Dprental.CatalogService.Domain.DTOs.Equipments;
 using Dprental.CatalogService.Domain.IRepositories;
-using Dprental.CatalogService.Domain.ValueObjects;
-using Microsoft.Extensions.Options;
 
 namespace Dprental.CatalogService.Application.Services;
 
 public sealed class CatalogDiscoveryService(
     IEquipmentQueryRepository repository,
-    EquipmentListQueryValidator validator,
-    IOptions<CatalogDiscoveryOptions> options) : ICatalogDiscoveryService
+    EquipmentListQueryValidator validator) : ICatalogDiscoveryService
 {
-    public async Task<SearchOutcome> SearchAsync(EquipmentListQuery query, CancellationToken cancellationToken = default)
+    public async Task<Result<PagedResult<EquipmentListItemDto>>> SearchAsync(
+        GetEquipmentsRequest request,
+        CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<ValidationError> errors = validator.Validate(query);
-        if (errors.Count > 0) return new SearchOutcome(null, errors);
+        ArgumentNullException.ThrowIfNull(request);
 
-        int page = query.Page ?? 1;
-        int pageSize = query.PageSize ?? options.Value.DefaultPageSize;
-        string? keyword = string.IsNullOrWhiteSpace(query.Keyword) ? null : query.Keyword.Trim();
+        Result validationResult = validator.Validate(request);
+        if (validationResult.IsFailure)
+        {
+            return validationResult.Error;
+        }
 
-        EquipmentSearchCriteria criteria = new(
-            keyword, query.CategoryId, query.RegionId, query.MinPrice, query.MaxPrice,
-            EquipmentListQueryValidator.ParseSort(query.Sort), page, pageSize);
-
-        PagedResult<EquipmentListItem> result = await repository.SearchPublishedAsync(criteria, cancellationToken);
-        int totalPages = (int)Math.Ceiling(result.TotalItems / (double)pageSize);
-
-        var response = new PagedResponse<EquipmentListItemDto>(
-            result.Items.Select(EquipmentMapper.ToDto).ToList(), page, pageSize, result.TotalItems, totalPages);
-        return new SearchOutcome(response, []);
+        PagedResult<EquipmentListItemDto> pagedResult = await repository.SearchPublishedAsync(request, cancellationToken);
+        return pagedResult;
     }
 
-    public async Task<EquipmentDetailDto?> GetDetailAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<Result<EquipmentDetailDto>> GetDetailAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
     {
-        EquipmentDetail? detail = await repository.GetPublishedByIdAsync(id, cancellationToken);
-        return detail is null ? null : EquipmentMapper.ToDto(detail);
+        EquipmentDetailDto? detail = await repository.GetPublishedByIdAsync(id, cancellationToken);
+        if (detail is null)
+        {
+            return CatalogErrors.Equipment.NotFound;
+        }
+
+        return detail;
     }
 }

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" />
     <ProjectReference Include="../Domain/CatalogService.Domain.csproj" />
   </ItemGroup>
 </Project>

@@ -1,17 +1,17 @@
 # CatalogService
 
-Dịch vụ CatalogService cho hệ sinh thái DPRENTAL, được xây dựng bằng .NET 10 theo kiến trúc phân lớp sạch (Clean Architecture) tương đồng với AuthService.
+Dịch vụ CatalogService cho hệ sinh thái DPRENTAL, được xây dựng bằng .NET 10 theo kiến trúc phân lớp chuẩn hóa tương đồng với AuthService.
 
 ## Cấu trúc
 
 ```text
 CatalogService/
   src/
-    Common/          # Kiểu dùng chung, Result/Error và utility
-    Domain/          # Entities, repository contracts và EF Core persistence
-    Application/     # DTOs, services, mapping
-    Api/             # Controllers, Filters, HTTP composition root
-  tests/             # Kiểm thử
+    Common/          # PagedResult, PageRequest, Result, Error catalog và kiểu dùng chung
+    Domain/          # Entities, DTOs contract (GetEquipmentsRequest, EquipmentListItemDto,...), DbContext và Repositories
+    Application/     # Services, Validators, Options, KeyRing
+    Api/             # Controllers, Routing, Security (JWT RS256, ForwardedHeaders), Observability, Exception handling
+  tests/             # Unit, Integration và API boundary tests
 Directory.Build.props
 Directory.Packages.props
 Dockerfile
@@ -19,6 +19,15 @@ docker-compose.yml
 docs/                # Tài liệu kỹ thuật
 scripts/             # Scripts hỗ trợ và Git hooks
 ```
+
+## Tính năng và chuẩn hóa theo AuthService
+
+- **Tiền tố API**: Toàn bộ endpoint của controller tự động ghép tiền tố `api/v1/catalog` (vd: `GET /api/v1/catalog/equipments`).
+- **Phân trang và DTO**: Dùng duy nhất `PagedResult<T>` (`items`, `page`, `pageSize`, `totalCount`, `totalPages`) và `PageRequest`. DTO chia sẻ giữa repository, service và controller.
+- **Xử lý lỗi**: Kết quả trả về qua `Result` và catalog mã lỗi `CatalogErrors` / `CatalogErrorCode`. Controller chuyển lỗi sang HTTP `ProblemDetails` qua extension tập trung.
+- **Xác thực JWT RS256**: Xác thực token qua key ring chứa public RSA key (tối thiểu 2048-bit), hỗ trợ Authorization header và cookie `accessToken`. Mặc định yêu cầu authentication, các endpoint discovery và health check mở anonymous.
+- **Quan sát (Observability)**: Correlation ID ổn định trong mỗi request và response header `X-Correlation-ID`. Tracing OpenTelemetry W3C với service name `dprental-catalog-service`.
+- **Bảo mật mạng**: Forwarded headers với proxy CIDR và cấu hình CORS chặt chẽ.
 
 ## Chạy hạ tầng cục bộ
 
@@ -32,7 +41,7 @@ PostgreSQL lắng nghe ở cổng cấu hình trong `.env`. File `.env` không �
 
 ## Chạy API cục bộ
 
-Nạp thông tin PostgreSQL từ `.env` vào môi trường của tiến trình API:
+Nạp thông tin PostgreSQL và JWT từ `.env` vào môi trường của tiến trình API:
 
 ```bash
 set -a
