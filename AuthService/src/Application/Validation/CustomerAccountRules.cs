@@ -26,6 +26,11 @@ internal static class CustomerAccountRules
         DateTimeOffset utcNow,
         CancellationToken cancellationToken)
     {
+        if (PasswordPolicy.CheckPersonalInfo(request.Password, normalizedEmail, request.FullName) is Error passwordError)
+        {
+            return passwordError;
+        }
+
         if (request.DateOfBirth is DateOnly dateOfBirth
             && IsUnderage(dateOfBirth, utcNow))
         {

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Dprental.AuthService.Application.Validation;
 
 namespace Dprental.AuthService.Application.DTOs.Auth;
 
@@ -8,16 +9,16 @@ namespace Dprental.AuthService.Application.DTOs.Auth;
 /// hoặc khi thuê với tư cách cá nhân (qua hoàn thiện hồ sơ, chưa xây dựng).
 /// </summary>
 public sealed record RegisterRequest(
-    [Required, EmailAddress, StringLength(254)] string Email,
-    [Required, StringLength(128, MinimumLength = 8)] string Password,
+    [Required, StrictEmail, StringLength(254)] string Email,
+    [Required, StringLength(PasswordPolicy.MaxLength, MinimumLength = PasswordPolicy.MinLength), NotCommonPassword] string Password,
     [Required, StringLength(100)] string FullName,
     [RegularExpression(RegistrationPatterns.PhoneNumber, ErrorMessage = "Số điện thoại không hợp lệ.")] string? PhoneNumber = null,
     DateOnly? DateOfBirth = null);
 
 /// <summary>Tạo tài khoản quản trị qua khóa khởi tạo — không yêu cầu thông tin định danh như customer.</summary>
 public sealed record RegisterAdminRequest(
-    [Required, EmailAddress, StringLength(254)] string Email,
-    [Required, StringLength(128, MinimumLength = 8)] string Password,
+    [Required, StrictEmail, StringLength(254)] string Email,
+    [Required, StringLength(PasswordPolicy.MaxLength, MinimumLength = PasswordPolicy.MinLength), NotCommonPassword] string Password,
     [Required, StringLength(100)] string FullName);
 
 public static class RegistrationPatterns
@@ -29,4 +30,6 @@ public static class RegistrationPatterns
 
     /// <summary>Mã số doanh nghiệp 10 số, hoặc 13 số dạng 10-3 cho chi nhánh.</summary>
     public const string TaxCode = @"^\d{10}(-\d{3})?$";
+
+
 }
