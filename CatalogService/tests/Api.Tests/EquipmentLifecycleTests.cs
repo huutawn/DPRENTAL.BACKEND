@@ -6,7 +6,7 @@ namespace Dprental.CatalogService.Api.Tests;
 
 public sealed class EquipmentLifecycleTests
 {
-    private static readonly DateTimeOffset Now = new(2026, 10, 1, 8, 0, 0, TimeSpan.Zero);
+    private static readonly DateTime Now = new(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc);
 
     [Fact]
     public void NewEquipment_StartsAsDraft()
@@ -35,7 +35,7 @@ public sealed class EquipmentLifecycleTests
     {
         Equipment equipment = new();
         equipment.Publish(Now);
-        DateTimeOffset later = Now.AddHours(1);
+        DateTime later = Now.AddHours(1);
 
         equipment.Hide(later);
 
@@ -50,7 +50,7 @@ public sealed class EquipmentLifecycleTests
         Equipment equipment = new();
         equipment.Publish(Now);
         equipment.Hide(Now.AddHours(1));
-        DateTimeOffset republishedAt = Now.AddHours(2);
+        DateTime republishedAt = Now.AddHours(2);
 
         equipment.Publish(republishedAt);
 
@@ -62,14 +62,16 @@ public sealed class EquipmentLifecycleTests
     public void PublishAndHide_NormalizeTimestampsToUtc()
     {
         Equipment equipment = new();
-        DateTimeOffset local = new(2026, 10, 1, 15, 0, 0, TimeSpan.FromHours(7));
+        DateTime local = Now.ToLocalTime();
+        DateTime unspecified = DateTime.SpecifyKind(Now.AddHours(1), DateTimeKind.Unspecified);
 
         equipment.Publish(local);
-        equipment.Hide(local.AddHours(1));
+        equipment.Hide(unspecified);
 
-        Assert.Equal(TimeSpan.Zero, equipment.PublishedAtUtc!.Value.Offset);
-        Assert.Equal(TimeSpan.Zero, equipment.UpdatedAtUtc!.Value.Offset);
-        Assert.Equal(local, equipment.PublishedAtUtc);
+        Assert.Equal(DateTimeKind.Utc, equipment.PublishedAtUtc!.Value.Kind);
+        Assert.Equal(Now, equipment.PublishedAtUtc);
+        Assert.Equal(DateTimeKind.Utc, equipment.UpdatedAtUtc!.Value.Kind);
+        Assert.Equal(Now.AddHours(1), equipment.UpdatedAtUtc);
     }
 
     [Fact]

@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace CatalogService.Domain.Migrations
+namespace Dprental.CatalogService.Domain.Migrations
 {
     /// <inheritdoc />
     public partial class InitialCatalogSchema : Migration
@@ -15,7 +15,7 @@ namespace CatalogService.Domain.Migrations
                 name: "catalog");
 
             migrationBuilder.CreateTable(
-                name: "categories",
+                name: "Categories",
                 schema: "catalog",
                 columns: table => new
                 {
@@ -24,16 +24,16 @@ namespace CatalogService.Domain.Migrations
                     Slug = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: false),
                     Description = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: true),
                     IsActive = table.Column<bool>(type: "boolean", nullable: false),
-                    CreatedAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    UpdatedAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
+                    CreatedAtUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UpdatedAtUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_categories", x => x.Id);
+                    table.PrimaryKey("PK_Categories", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
-                name: "equipments",
+                name: "Equipments",
                 schema: "catalog",
                 columns: table => new
                 {
@@ -48,26 +48,26 @@ namespace CatalogService.Domain.Migrations
                     RegionId = table.Column<Guid>(type: "uuid", nullable: false),
                     Status = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
                     Specifications = table.Column<string>(type: "jsonb", nullable: false, defaultValueSql: "'{}'::jsonb"),
-                    CreatedAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    UpdatedAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    PublishedAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
+                    CreatedAtUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UpdatedAtUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    PublishedAtUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_equipments", x => x.Id);
-                    table.CheckConstraint("CK_equipments_DailyPrice_NonNegative", "\"DailyPrice\" >= 0");
-                    table.CheckConstraint("CK_equipments_Specifications_IsObject", "jsonb_typeof(\"Specifications\") = 'object'");
+                    table.PrimaryKey("PK_Equipments", x => x.Id);
+                    table.CheckConstraint("CK_Equipments_DailyPrice_NonNegative", "\"DailyPrice\" >= 0");
+                    table.CheckConstraint("CK_Equipments_Specifications_IsObject", "jsonb_typeof(\"Specifications\") = 'object'");
                     table.ForeignKey(
-                        name: "FK_equipments_categories_CategoryId",
+                        name: "FK_Equipments_Categories_CategoryId",
                         column: x => x.CategoryId,
                         principalSchema: "catalog",
-                        principalTable: "categories",
+                        principalTable: "Categories",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
-                name: "equipment_media",
+                name: "EquipmentMedia",
                 schema: "catalog",
                 columns: table => new
                 {
@@ -79,79 +79,79 @@ namespace CatalogService.Domain.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_equipment_media", x => x.Id);
+                    table.PrimaryKey("PK_EquipmentMedia", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_equipment_media_equipments_EquipmentId",
+                        name: "FK_EquipmentMedia_Equipments_EquipmentId",
                         column: x => x.EquipmentId,
                         principalSchema: "catalog",
-                        principalTable: "equipments",
+                        principalTable: "Equipments",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateIndex(
-                name: "IX_categories_Slug",
+                name: "IX_Categories_Slug",
                 schema: "catalog",
-                table: "categories",
+                table: "Categories",
                 column: "Slug",
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_equipment_media_EquipmentId_MediaId",
+                name: "IX_EquipmentMedia_EquipmentId_MediaId",
                 schema: "catalog",
-                table: "equipment_media",
+                table: "EquipmentMedia",
                 columns: new[] { "EquipmentId", "MediaId" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "UX_equipment_media_EquipmentId_Thumbnail",
+                name: "UX_EquipmentMedia_EquipmentId_Thumbnail",
                 schema: "catalog",
-                table: "equipment_media",
+                table: "EquipmentMedia",
                 column: "EquipmentId",
                 unique: true,
                 filter: "\"IsThumbnail\" = TRUE");
 
             migrationBuilder.CreateIndex(
-                name: "IX_equipments_CategoryId",
+                name: "IX_Equipments_CategoryId",
                 schema: "catalog",
-                table: "equipments",
+                table: "Equipments",
                 column: "CategoryId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_equipments_CreatedAtUtc",
+                name: "IX_Equipments_CreatedAtUtc",
                 schema: "catalog",
-                table: "equipments",
+                table: "Equipments",
                 column: "CreatedAtUtc");
 
             migrationBuilder.CreateIndex(
-                name: "IX_equipments_DailyPrice",
+                name: "IX_Equipments_DailyPrice",
                 schema: "catalog",
-                table: "equipments",
+                table: "Equipments",
                 column: "DailyPrice");
 
             migrationBuilder.CreateIndex(
-                name: "IX_equipments_OrganizationId_Code",
+                name: "IX_Equipments_OrganizationId_Code",
                 schema: "catalog",
-                table: "equipments",
+                table: "Equipments",
                 columns: new[] { "OrganizationId", "Code" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_equipments_PublishedAtUtc",
+                name: "IX_Equipments_PublishedAtUtc",
                 schema: "catalog",
-                table: "equipments",
+                table: "Equipments",
                 column: "PublishedAtUtc");
 
             migrationBuilder.CreateIndex(
-                name: "IX_equipments_RegionId",
+                name: "IX_Equipments_RegionId",
                 schema: "catalog",
-                table: "equipments",
+                table: "Equipments",
                 column: "RegionId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_equipments_Status",
+                name: "IX_Equipments_Status",
                 schema: "catalog",
-                table: "equipments",
+                table: "Equipments",
                 column: "Status");
         }
 
@@ -159,15 +159,15 @@ namespace CatalogService.Domain.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(
-                name: "equipment_media",
+                name: "EquipmentMedia",
                 schema: "catalog");
 
             migrationBuilder.DropTable(
-                name: "equipments",
+                name: "Equipments",
                 schema: "catalog");
 
             migrationBuilder.DropTable(
-                name: "categories",
+                name: "Categories",
                 schema: "catalog");
         }
     }

@@ -1,4 +1,3 @@
-using Dprental.CatalogService.Domain.Configurations;
 using Dprental.CatalogService.Domain.Entities;
 using Dprental.CatalogService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -20,9 +19,9 @@ public sealed class CatalogSchemaTests
         IModel model = BuildModel();
 
         Assert.All(model.GetEntityTypes(), entity => Assert.Equal(CatalogServiceDbContext.SchemaName, entity.GetSchema()));
-        Assert.Equal("categories", Entity<Category>(model).GetTableName());
-        Assert.Equal("equipments", Entity<Equipment>(model).GetTableName());
-        Assert.Equal("equipment_media", Entity<EquipmentMedia>(model).GetTableName());
+        Assert.Equal("Categories", Entity<Category>(model).GetTableName());
+        Assert.Equal("Equipments", Entity<Equipment>(model).GetTableName());
+        Assert.Equal("EquipmentMedia", Entity<EquipmentMedia>(model).GetTableName());
     }
 
     [Fact]
@@ -72,7 +71,8 @@ public sealed class CatalogSchemaTests
     {
         IProperty property = Entity<Equipment>(BuildModel()).FindProperty(nameof(Equipment.Status))!;
 
-        Assert.Equal(typeof(string), property.GetProviderClrType());
+        Assert.Equal("character varying(20)", property.GetColumnType());
+        Assert.Equal(typeof(string), property.GetTypeMapping().Converter?.ProviderClrType);
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public sealed class CatalogSchemaTests
 
         Assert.Contains(
             equipment.GetCheckConstraints(),
-            constraint => constraint.Name == EquipmentConfiguration.DailyPriceCheckConstraintName);
+            constraint => constraint.Name == CatalogServiceDbContext.DailyPriceCheckConstraintName);
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public sealed class CatalogSchemaTests
 
         Assert.Contains(
             equipment.GetCheckConstraints(),
-            constraint => constraint.Name == EquipmentConfiguration.SpecificationsCheckConstraintName);
+            constraint => constraint.Name == CatalogServiceDbContext.SpecificationsCheckConstraintName);
     }
 
     [Theory]

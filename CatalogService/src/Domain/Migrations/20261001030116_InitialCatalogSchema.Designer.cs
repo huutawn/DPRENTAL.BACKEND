@@ -9,7 +9,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace CatalogService.Domain.Migrations
+namespace Dprental.CatalogService.Domain.Migrations
 {
     [DbContext(typeof(CatalogServiceDbContext))]
     [Migration("20261001030116_InitialCatalogSchema")]
@@ -31,7 +31,7 @@ namespace CatalogService.Domain.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                    b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Description")
@@ -51,7 +51,7 @@ namespace CatalogService.Domain.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("character varying(150)");
 
-                    b.Property<DateTimeOffset?>("UpdatedAtUtc")
+                    b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
@@ -59,7 +59,7 @@ namespace CatalogService.Domain.Migrations
                     b.HasIndex("Slug")
                         .IsUnique();
 
-                    b.ToTable("categories", "catalog");
+                    b.ToTable("Categories", "catalog");
                 });
 
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.Equipment", b =>
@@ -79,7 +79,7 @@ namespace CatalogService.Domain.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                    b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<decimal>("DailyPrice")
@@ -98,7 +98,7 @@ namespace CatalogService.Domain.Migrations
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid");
 
-                    b.Property<DateTimeOffset?>("PublishedAtUtc")
+                    b.Property<DateTime?>("PublishedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("RegionId")
@@ -115,7 +115,7 @@ namespace CatalogService.Domain.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
-                    b.Property<DateTimeOffset?>("UpdatedAtUtc")
+                    b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
@@ -135,11 +135,11 @@ namespace CatalogService.Domain.Migrations
                     b.HasIndex("OrganizationId", "Code")
                         .IsUnique();
 
-                    b.ToTable("equipments", "catalog", t =>
+                    b.ToTable("Equipments", "catalog", t =>
                         {
-                            t.HasCheckConstraint("CK_equipments_DailyPrice_NonNegative", "\"DailyPrice\" >= 0");
+                            t.HasCheckConstraint("CK_Equipments_DailyPrice_NonNegative", "\"DailyPrice\" >= 0");
 
-                            t.HasCheckConstraint("CK_equipments_Specifications_IsObject", "jsonb_typeof(\"Specifications\") = 'object'");
+                            t.HasCheckConstraint("CK_Equipments_Specifications_IsObject", "jsonb_typeof(\"Specifications\") = 'object'");
                         });
                 });
 
@@ -164,13 +164,13 @@ namespace CatalogService.Domain.Migrations
 
                     b.HasIndex("EquipmentId")
                         .IsUnique()
-                        .HasDatabaseName("UX_equipment_media_EquipmentId_Thumbnail")
+                        .HasDatabaseName("UX_EquipmentMedia_EquipmentId_Thumbnail")
                         .HasFilter("\"IsThumbnail\" = TRUE");
 
                     b.HasIndex("EquipmentId", "MediaId")
                         .IsUnique();
 
-                    b.ToTable("equipment_media", "catalog");
+                    b.ToTable("EquipmentMedia", "catalog");
                 });
 
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.Equipment", b =>
