@@ -16,3 +16,22 @@ Kiểm tra generator:
 ```bash
 python3 -m unittest discover -s scripts/tests -v
 ```
+
+## Common và xử lý lỗi
+
+Template có `Result`/`Result<T>` và `Error`/`ErrorType` (tham khảo AuthService).
+Application trả `Result` cho lỗi dự kiến; controller dùng `this.ToProblem(result.Error)`
+để ánh xạ sang 400/401/403/404/409/410/422/500. Không gọi `ToProblem(Error.None)`.
+`GlobalExceptionHandler` đã đăng ký tại API, trả 500 ProblemDetails kèm `traceId`,
+không trả exception message hoặc payload; request bị hủy không chuyển thành lỗi nghiệp vụ.
+
+`Domain/IRepositories/IRepo<TEntity, TKey>` là contract CRUD có CancellationToken,
+không phụ thuộc EF/HTTP. Repository theo aggregate chỉ kế thừa khi cần đủ các thao tác;
+nếu không, định nghĩa contract nhỏ theo use case. Implementation persistence ở
+`Domain/Repositories` theo bố cục hiện tại của AuthService; không sinh generic EF
+repository hoặc entity nghiệp vụ giả. `GetAllAsync` chỉ dùng cho tập dữ liệu nhỏ;
+với dữ liệu lớn, contract chuyên biệt phải hỗ trợ phân trang.
+
+Template test kiểm tra Result invariant, ánh xạ error và exception qua HTTP ở
+Production, gồm fallback khi client không nhận JSON. Không sao chép mã lỗi,
+constraint database hay dependency đặc thù nghiệp vụ AuthService.

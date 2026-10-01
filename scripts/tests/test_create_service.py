@@ -47,6 +47,16 @@ class CreateServiceTests(unittest.TestCase):
             "CatalogService/src/Application/DTOs",
         ):
             self.assertTrue((project / folder / ".gitkeep").is_file(), folder)
+        for relative in (
+            "src/Common/Result.cs", "src/Common/Error.cs",
+            "src/Domain/IRepositories/IRepo.cs",
+            "src/Api/Exceptions/GlobalExceptionHandler.cs",
+            "src/Api/Filters/ExpectedErrorFilterExtensions.cs",
+            "tests/Api.Tests/CommonBoundaryTests.cs",
+        ):
+            content = (project / "CatalogService" / relative).read_text()
+            self.assertNotIn("__SERVICE_NAME__", content)
+            self.assertIn("Dprental.CatalogService", content)
         self.assertFalse((project / ".git").exists())
         self.assertIn("Microsoft.EntityFrameworkCore", (project / "CatalogService/src/Domain/CatalogService.Domain.csproj").read_text())
 

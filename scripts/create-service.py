@@ -195,6 +195,15 @@ def main() -> None:
         (templates_dir / "service" / "tests" / "Api.Tests" / "HealthEndpointTests.cs", target_dir / service_name / "tests" / "Api.Tests" / "HealthEndpointTests.cs"),
     ]
 
+    for relative in (
+        "src/Common/Error.cs",
+        "src/Domain/IRepositories/IRepo.cs",
+        "src/Api/Filters/ExpectedErrorFilterExtensions.cs",
+        "src/Api/Exceptions/GlobalExceptionHandler.cs",
+        "tests/Api.Tests/CommonBoundaryTests.cs",
+    ):
+        template_files_map.append((templates_dir / "service" / relative, target_dir / service_name / relative))
+
     missing_templates = [source for source, _ in template_files_map if not source.is_file()]
     if missing_templates:
         sys.stderr.write("Lỗi: Thiếu file template:\n")

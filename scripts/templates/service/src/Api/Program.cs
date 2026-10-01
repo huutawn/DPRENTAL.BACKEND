@@ -1,4 +1,5 @@
 using System.IO;
+using Dprental.__SERVICE_NAME__.Api.Exceptions;
 using Dprental.__SERVICE_NAME__.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -15,6 +16,7 @@ builder.Services.AddHealthChecks()
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
