@@ -19,7 +19,7 @@ public sealed class UpdateEquipmentTypeRequestSchemaFilter : ISchemaFilter
         {
             var allowedProps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
-                "code", "name", "description", "categoryId", "media"
+                "code", "name", "description", "categoryIds", "media"
             };
 
             var toRemove = new List<object>();

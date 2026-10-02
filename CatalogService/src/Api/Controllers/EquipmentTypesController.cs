@@ -65,7 +65,7 @@ public sealed class EquipmentTypesController(IEquipmentTypeService service) : Co
         [FromBody] CreateEquipmentTypeRequest request,
         CancellationToken cancellationToken)
     {
-        Result<EquipmentTypeDetailDto> result = await service.CreateAsync(request, cancellationToken);
+        Result<EquipmentTypeDetailDto> result = await service.CreateAsync(request, GetOperatorUserId(), cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : StatusCode(StatusCodes.Status201Created, result.Value);
     }
 
@@ -82,7 +82,7 @@ public sealed class EquipmentTypesController(IEquipmentTypeService service) : Co
         [FromBody] UpdateEquipmentTypeRequest request,
         CancellationToken cancellationToken)
     {
-        Result<EquipmentTypeDetailDto> result = await service.UpdateAsync(id, request, cancellationToken);
+        Result<EquipmentTypeDetailDto> result = await service.UpdateAsync(id, request, GetOperatorUserId(), cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
@@ -117,4 +117,9 @@ public sealed class EquipmentTypesController(IEquipmentTypeService service) : Co
         Result<EquipmentTypeDetailDto> result = await service.DisableAsync(id, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
+
+    private string GetOperatorUserId() =>
+        User.FindFirst("sub")?.Value
+        ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+        ?? string.Empty;
 }

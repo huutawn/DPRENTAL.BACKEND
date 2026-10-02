@@ -309,13 +309,13 @@ public sealed class StartupAndConfigurationTests
         Assert.Contains("code", propertyNames, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("name", propertyNames, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("description", propertyNames, StringComparer.OrdinalIgnoreCase);
-        Assert.Contains("categoryId", propertyNames, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("categoryIds", propertyNames, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("media", propertyNames, StringComparer.OrdinalIgnoreCase);
 
         Assert.DoesNotContain("isCodeSpecified", propertyNames, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("isNameSpecified", propertyNames, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("isDescriptionSpecified", propertyNames, StringComparer.OrdinalIgnoreCase);
-        Assert.DoesNotContain("isCategoryIdSpecified", propertyNames, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("isCategoryIdsSpecified", propertyNames, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("isMediaSpecified", propertyNames, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("hasAnyFieldSpecified", propertyNames, StringComparer.OrdinalIgnoreCase);
 

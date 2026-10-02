@@ -43,9 +43,9 @@ public sealed class UpdateEquipmentTypeRequestValidator
             }
         }
 
-        if (request.IsCategoryIdSpecified)
+        if (request.IsCategoryIdsSpecified)
         {
-            var catResult = EquipmentTypeValidationRules.ValidateCategoryId(request.CategoryId);
+            var catResult = EquipmentTypeValidationRules.ValidateCategoryIds(request.CategoryIds);
             if (catResult.IsFailure)
             {
                 return catResult;

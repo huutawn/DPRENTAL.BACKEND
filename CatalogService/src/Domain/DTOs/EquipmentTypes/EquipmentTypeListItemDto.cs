@@ -5,5 +5,6 @@ public sealed record EquipmentTypeListItemDto(
     string Code,
     string Name,
     string? Description,
-    CategoryDto Category,
-    Guid? ThumbnailMediaId);
+    IReadOnlyList<CategoryDto> Categories,
+    Guid? ThumbnailMediaId,
+    string? ThumbnailUrl);

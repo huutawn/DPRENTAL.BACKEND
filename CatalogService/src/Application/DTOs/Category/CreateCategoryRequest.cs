@@ -1,11 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+namespace CatalogService.Application.DTOs.Category;
 
-namespace CatalogService.Application.DTOs.Category
-{
-    public sealed record CreateCategoryRequest(
+public sealed record CreateCategoryRequest(
     string Name,
-    string? Description
+    string? Description,
+    Guid? ImageMediaId = null
 );
-}
