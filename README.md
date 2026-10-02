@@ -85,8 +85,8 @@ Gateway là điểm vào công khai tại `http://localhost:5050`:
 - [Swagger UI cho AuthService và MediaService](http://localhost:5050/swagger/index.html). Chọn service trong menu ở đầu trang.
 - `GET /health/live` (hoặc `/_health/live`): kiểm tra tiến trình Gateway.
 - `GET /health/ready` (hoặc `/_health/ready`): yêu cầu JWKS và cấu hình proxy sẵn sàng.
-- `POST /api/v1/auth/register`: được proxy nguyên đường dẫn tới AuthService.
-
+    - `POST /api/v1/auth/register`: được proxy nguyên đường dẫn tới AuthService.
+    - `GET/POST /api/v1/inventory/{everything}`: được proxy nguyên đường dẫn tới InventoryService (scheme `InventoryBearer` với audience isolation).
 Trong Swagger UI, chọn **AuthService**, gọi `/api/v1/auth/register` để tạo user local, rồi `/api/v1/auth/login`. Browser lưu cookie HttpOnly `accessToken` do AuthService đặt trên cùng Gateway origin. Sau đó chuyển menu sang **MediaService** và gọi `POST /api/v1/media/uploads` với 1–10 phần `files`; không cần tạo entity hoặc nhập Bearer cho upload. Gateway xác thực cookie, chuyển thành Bearer và MediaService xác thực lại JWT bằng JWKS. Cookie không được chuyển tới MediaService.
 
 API key là credential dùng chung cho các API nội bộ, dùng header `X-Api-Key` (sử dụng cùng giá trị bí mật với `Auth:AdminBootstrap:CreationKey`). Gateway cho bốn route nội bộ của MediaService (`verify`, metadata, `access`, `visibility`) đi qua mà không yêu cầu Bearer token, chuyển tiếp `X-Api-Key` tới MediaService và loại bỏ header này khỏi các route khác. MediaService tự kiểm tra key trực tiếp, nên gọi thẳng trong mạng nội bộ không bỏ qua xác thực.
