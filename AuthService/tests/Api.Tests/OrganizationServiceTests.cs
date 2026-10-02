@@ -1,3 +1,5 @@
+using Dprental.AuthService.Application.Clients;
+using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Application.Security;
 using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
@@ -17,13 +19,45 @@ public sealed class OrganizationServiceTests
     private static readonly Guid MemberRoleId = new("a1010000-0000-0000-0000-000000000002");
 
     [Fact]
+    public async Task UpdateProfileAsyncRejectsLogoChangedBeforeRowLock()
+    {
+        FakeOrganizationRepository orgRepo = new();
+        FakeMembershipRepository memRepo = new();
+        FakeRoleRepository roleRepo = new();
+        FakeAuditLogRepository auditRepo = new();
+        FakeMediaOutboxService outbox = new();
+        Guid orgId = Guid.NewGuid();
+        Guid oldLogoId = Guid.NewGuid();
+        Guid currentLogoId = Guid.NewGuid();
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Original", LogoMediaId = oldLogoId };
+        memRepo.GlobalPermissions[ActorAdminId] = [Permissions.Organizations.Update];
+        orgRepo.BeforeLock = () => orgRepo.Organizations[orgId] = new Organization
+        {
+            Id = orgId,
+            Name = "Concurrent update",
+            LogoMediaId = currentLogoId
+        };
+        OrganizationService service = CreateService(orgRepo, memRepo, roleRepo, auditLogRepo: auditRepo, mediaOutboxService: outbox);
+
+        Result result = await service.UpdateProfileAsync(ActorAdminId, orgId,
+            new UpdateOrganizationRequest("Stale update", "admin@example.com", "0901234567", "123 Street", "HN", "Ward", LogoMediaId: oldLogoId));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(AuthErrors.Organization.ConcurrentModification, result.Error);
+        Assert.Equal(currentLogoId, orgRepo.Organizations[orgId].LogoMediaId);
+        Assert.Equal("Concurrent update", orgRepo.Organizations[orgId].Name);
+        Assert.Empty(auditRepo.Logs);
+        Assert.Empty(outbox.QueuedMediaIds);
+    }
+
+    [Fact]
     public async Task GetByIdAsyncInactiveOrganizationReturnsForbiddenForNormalUser()
     {
         FakeOrganizationRepository orgRepo = new();
         FakeMembershipRepository memRepo = new();
         FakeUserRepository userRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
+        OrganizationService service = CreateService(orgRepo, memRepo, roleRepo);
 
         Guid orgId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Inactive", Slug = "inactive", Status = OrganizationStatus.Suspended };
@@ -45,7 +79,7 @@ public sealed class OrganizationServiceTests
         FakeMembershipRepository memRepo = new();
         FakeUserRepository userRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
+        OrganizationService service = CreateService(orgRepo, memRepo, roleRepo);
 
         Guid orgId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
@@ -65,14 +99,14 @@ public sealed class OrganizationServiceTests
         FakeMembershipRepository memRepo = new();
         FakeUserRepository userRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
+        OrganizationService service = CreateService(orgRepo, memRepo, roleRepo);
 
         Guid orgId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorUserId] = new User { Id = ActorUserId, IsActive = true };
         memRepo.GlobalPermissions[ActorUserId] = [Permissions.Organizations.Update]; // NOT platform suspend admin
 
-        Result result = await service.SuspendAsync(ActorUserId, orgId);
+        Result result = await service.SuspendAsync(ActorUserId, orgId, new SuspendOrganizationRequest("Reason"));
 
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.Organization.PlatformAdminRequired, result.Error);
@@ -84,7 +118,7 @@ public sealed class OrganizationServiceTests
         FakeMembershipRepository memRepo = new();
         FakeUserRepository userRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
+        OrganizationService service = CreateService(orgRepo, memRepo, roleRepo);
 
         Guid userId = Guid.NewGuid();
         Guid activeOrgId = Guid.NewGuid();
@@ -130,7 +164,7 @@ public sealed class OrganizationServiceTests
         FakeOrganizationRepository orgRepo = new();
         FakeMembershipRepository memRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
+        OrganizationService service = CreateService(orgRepo, memRepo, roleRepo);
 
         Guid orgId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Org 1", Slug = "org-1", Status = OrganizationStatus.Active };
@@ -153,30 +187,52 @@ public sealed class OrganizationServiceTests
     }
 
     [Fact]
-    public async Task UpdateNameAsyncValidatesInputAndUpdates()
+    public async Task UpdateProfileAsyncValidatesInputAndUpdates()
     {
         FakeOrganizationRepository orgRepo = new();
         FakeMembershipRepository memRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
+        FakeAuditLogRepository auditRepo = new();
+        OrganizationService service = CreateService(orgRepo, memRepo, roleRepo, auditLogRepo: auditRepo);
 
         Guid orgId = Guid.NewGuid();
-        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Org Before", Slug = "org-before", Status = OrganizationStatus.Active };
+        orgRepo.Organizations[orgId] = new Organization
+        {
+            Id = orgId,
+            Name = "Org Before",
+            Slug = "org-before",
+            Status = OrganizationStatus.Active,
+            ContactEmail = "before@example.com",
+            ContactPhone = "0901234567",
+            Address = "123 Old St",
+            Province = "HN",
+            Ward = "WD"
+        };
         memRepo.GlobalPermissions[ActorUserId] = [PermissionCode.IdentityOrganizationsUpdate];
 
         // Empty name -> 400
-        Result empty = await service.UpdateNameAsync(ActorUserId, orgId, new UpdateOrganizationRequest(""));
+        Result empty = await service.UpdateProfileAsync(ActorUserId, orgId, new UpdateOrganizationRequest("", "contact@example.com", "0901234567", "123 St", "HN", "WD"));
         Assert.True(empty.IsFailure);
         Assert.Equal(AuthErrors.Organization.InvalidName, empty.Error);
 
-        // Same name -> 204 no-op
-        Result same = await service.UpdateNameAsync(ActorUserId, orgId, new UpdateOrganizationRequest("Org Before"));
+        // Same data -> 204 no-op, no new audit log
+        Result same = await service.UpdateProfileAsync(ActorUserId, orgId, new UpdateOrganizationRequest("Org Before", "before@example.com", "0901234567", "123 Old St", "HN", "WD"));
         Assert.True(same.IsSuccess);
+        Assert.Empty(auditRepo.Logs);
 
-        // Rename -> 204 updated
-        Result renamed = await service.UpdateNameAsync(ActorUserId, orgId, new UpdateOrganizationRequest("Org After"));
-        Assert.True(renamed.IsSuccess);
+        // Update -> 204 updated
+        UpdateOrganizationRequest validRequest = new("Org After", "new@example.com", "0912345678", "456 New St", "TP.HCM", "Phường Bến Nghé", "https://new.vn", null, "New description");
+        Result updated = await service.UpdateProfileAsync(ActorUserId, orgId, validRequest);
+        Assert.True(updated.IsSuccess);
         Assert.Equal("Org After", orgRepo.Organizations[orgId].Name);
+        Assert.Equal("new@example.com", orgRepo.Organizations[orgId].ContactEmail);
+        Assert.Equal("0912345678", orgRepo.Organizations[orgId].ContactPhone);
+        Assert.Equal("456 New St", orgRepo.Organizations[orgId].Address);
+        Assert.Equal("TP.HCM", orgRepo.Organizations[orgId].Province);
+        Assert.Equal("Phường Bến Nghé", orgRepo.Organizations[orgId].Ward);
+        Assert.Equal("https://new.vn", orgRepo.Organizations[orgId].Website);
+        Assert.Equal("New description", orgRepo.Organizations[orgId].Description);
+        Assert.Single(auditRepo.Logs, l => l.Action == "Organization_ProfileUpdate");
     }
 
     [Fact]
@@ -185,7 +241,7 @@ public sealed class OrganizationServiceTests
         FakeOrganizationRepository orgRepo = new();
         FakeMembershipRepository memRepo = new();
         FakeRoleRepository roleRepo = new();
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
+        OrganizationService service = CreateService(orgRepo, memRepo, roleRepo);
 
         Guid activeOrgId = Guid.NewGuid();
         Guid pendingOrgId = Guid.NewGuid();
@@ -198,18 +254,19 @@ public sealed class OrganizationServiceTests
         memRepo.GlobalPermissions[ActorUserId] = [PermissionCode.IdentityOrganizationsSuspend];
 
         // Suspend Pending -> 409
-        Result suspPending = await service.SuspendAsync(ActorUserId, pendingOrgId);
+        Result suspPending = await service.SuspendAsync(ActorUserId, pendingOrgId, new SuspendOrganizationRequest("Pending reason"));
         Assert.True(suspPending.IsFailure);
         Assert.Equal(AuthErrors.Organization.InvalidStateTransition, suspPending.Error);
 
         // Suspend Suspended -> 204 idempotent
-        Result suspSusp = await service.SuspendAsync(ActorUserId, suspendedOrgId);
+        Result suspSusp = await service.SuspendAsync(ActorUserId, suspendedOrgId, new SuspendOrganizationRequest("Already suspended"));
         Assert.True(suspSusp.IsSuccess);
 
         // Suspend Active -> 204 success
-        Result suspActive = await service.SuspendAsync(ActorUserId, activeOrgId);
+        Result suspActive = await service.SuspendAsync(ActorUserId, activeOrgId, new SuspendOrganizationRequest("Active to suspend"));
         Assert.True(suspActive.IsSuccess);
         Assert.Equal(OrganizationStatus.Suspended, orgRepo.Organizations[activeOrgId].Status);
+        Assert.Equal("Active to suspend", orgRepo.Organizations[activeOrgId].SuspensionReason);
 
         // Activate Pending -> 409
         Result actPending = await service.ActivateAsync(ActorUserId, pendingOrgId);
@@ -225,6 +282,7 @@ public sealed class OrganizationServiceTests
         Result actSuspended = await service.ActivateAsync(ActorUserId, suspendedOrgId);
         Assert.True(actSuspended.IsSuccess);
         Assert.Equal(OrganizationStatus.Active, orgRepo.Organizations[suspendedOrgId].Status);
+        Assert.Null(orgRepo.Organizations[suspendedOrgId].SuspensionReason);
     }
 
     private static readonly string[] AdminPermissions =
@@ -238,6 +296,26 @@ public sealed class OrganizationServiceTests
         PermissionCode.IdentityRolesAssignOrganization,
         PermissionCode.IdentityRolesRead
 ];
+    private static OrganizationService CreateService(
+        IOrganizationRepository orgRepo,
+        IOrganizationMembershipRepository memRepo,
+        IRoleRepository roleRepo,
+        IMediaUrlResolver? mediaUrlResolver = null,
+        IAuditLogRepository? auditLogRepo = null,
+        ICorrelationIdProvider? corrIdProvider = null,
+        IMediaServiceClient? mediaServiceClient = null,
+        IMediaOutboxService? mediaOutboxService = null) =>
+        new(
+            orgRepo,
+            memRepo,
+            roleRepo,
+            mediaUrlResolver ?? FakeMediaUrlResolver.Instance,
+            auditLogRepo ?? new FakeAuditLogRepository(),
+            corrIdProvider ?? FixedCorrelationIdProvider.Instance,
+            mediaServiceClient ?? new FakeMediaServiceClient(),
+            mediaOutboxService ?? new FakeMediaOutboxService());
+
+
 
     internal sealed class FakeOrganizationRepository : IOrganizationRepository
     {
@@ -248,6 +326,7 @@ public sealed class OrganizationServiceTests
         public Dictionary<Guid, Organization> Organizations { get; } = [];
         public HashSet<string> ExistingSlugs { get; } = [];
         public OrganizationMembership? LastCreatedInitialMembership { get; private set; }
+        public Action? BeforeLock { get; set; }
 
         public Task<Organization?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(Organizations.GetValueOrDefault(id));
@@ -258,13 +337,28 @@ public sealed class OrganizationServiceTests
         public Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default) =>
             Task.FromResult(ExistingSlugs.Contains(slug) || Organizations.Values.Any(o => o.Slug == slug));
 
-        public Task<Organization?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default) =>
-            GetByIdAsync(id, cancellationToken);
+        public Task<Organization?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            BeforeLock?.Invoke();
+            return GetByIdAsync(id, cancellationToken);
+        }
 
-        public Task<PagedResult<Organization>> GetAllAsync(PageRequest request, OrganizationStatus? status = null, CancellationToken cancellationToken = default)
+        public Task<PagedResult<Organization>> GetAllAsync(
+            PageRequest request,
+            OrganizationStatus? status = null,
+            OrganizationType? type = null,
+            string? province = null,
+            bool overdueOnly = false,
+            bool remindedOnly = false,
+            DateTime? overdueCutoffUtc = null,
+            CancellationToken cancellationToken = default)
         {
             List<Organization> list = Organizations.Values
                 .Where(o => status is null || o.Status == status)
+                .Where(o => type is null || o.Type == type)
+                .Where(o => province is null || (o.Province != null && o.Province.Equals(province, StringComparison.OrdinalIgnoreCase)))
+                .Where(o => !overdueOnly || o.Status == OrganizationStatus.Pending)
+                .Where(o => !remindedOnly || (o.Status == OrganizationStatus.Pending && o.LastRemindedAtUtc != null))
                 .OrderBy(o => o.CreatedAtUtc).ThenBy(o => o.Id).ToList();
             List<Organization> paged = list.Skip((request.Page - 1) * request.PageSize).Take(request.PageSize).ToList();
             return Task.FromResult(PagedResult.Create(paged, request.Page, request.PageSize, list.Count));

@@ -19,9 +19,13 @@ public sealed class AdminOrganizationsController(
     IOrganizationService organizationService,
     IOrganizationReviewService organizationReviewService) : ControllerBase
 {
-    /// <summary>Lấy danh sách organization có phân trang, tìm kiếm và lọc trạng thái.</summary>
+    /// <summary>Lấy danh sách organization có phân trang, tìm kiếm và lọc theo trạng thái, loại, tỉnh/thành, quá hạn duyệt hoặc đã nhắc duyệt.</summary>
     /// <param name="request">Tham số phân trang và từ khóa tìm kiếm (page, pageSize, search).</param>
     /// <param name="status">Lọc theo trạng thái tổ chức (Pending, Active, Suspended, Rejected).</param>
+    /// <param name="type">Lọc theo loại tổ chức (Supplier, Renter, Platform).</param>
+    /// <param name="province">Lọc theo tỉnh/thành phố.</param>
+    /// <param name="overdueOnly">Chỉ lấy hồ sơ Pending đã quá hạn duyệt.</param>
+    /// <param name="remindedOnly">Chỉ lấy hồ sơ Pending đã được Owner gửi nhắc duyệt.</param>
     /// <param name="cancellationToken">Token hủy request.</param>
     [HttpGet]
     [Authorize(Policy = Permissions.Organizations.Read)]
@@ -32,11 +36,23 @@ public sealed class AdminOrganizationsController(
     public async Task<ActionResult<PagedResult<OrganizationSummaryResponse>>> List(
         [FromQuery] PageRequest request,
         [FromQuery] OrganizationStatus? status,
-        CancellationToken cancellationToken)
+        [FromQuery] OrganizationType? type = null,
+        [FromQuery] string? province = null,
+        [FromQuery] bool overdueOnly = false,
+        [FromQuery] bool remindedOnly = false,
+        CancellationToken cancellationToken = default)
     {
         if (User.GetJwtSub() is not Guid adminId) return Unauthorized();
 
-        Result<PagedResult<OrganizationSummaryResponse>> result = await organizationService.ListAsync(adminId, request, status, cancellationToken);
+        Result<PagedResult<OrganizationSummaryResponse>> result = await organizationService.ListAsync(
+            adminId,
+            request,
+            status,
+            type,
+            province,
+            overdueOnly,
+            remindedOnly,
+            cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
@@ -57,9 +73,9 @@ public sealed class AdminOrganizationsController(
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
-    /// <summary>Đổi tên organization.</summary>
+    /// <summary>Cập nhật hồ sơ liên hệ và hiển thị của organization.</summary>
     /// <param name="id">Id của organization.</param>
-    /// <param name="request">Thông tin tên mới.</param>
+    /// <param name="request">Thông tin liên hệ và hiển thị mới.</param>
     /// <param name="cancellationToken">Token hủy request.</param>
     [HttpPut("{id:guid}")]
     [Authorize(Policy = Permissions.Organizations.Update)]
@@ -68,33 +84,61 @@ public sealed class AdminOrganizationsController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> UpdateName(
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Update(
         Guid id,
         [FromBody] UpdateOrganizationRequest request,
         CancellationToken cancellationToken)
     {
         if (User.GetJwtSub() is not Guid adminId) return Unauthorized();
 
-        Result result = await organizationService.UpdateNameAsync(adminId, id, request, cancellationToken);
+        Result result = await organizationService.UpdateProfileAsync(adminId, id, request, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
 
-    /// <summary>Khóa (suspend) một organization đang Active.</summary>
+    /// <summary>Khóa (suspend) một organization đang Active kèm lý do.</summary>
     /// <param name="id">Id của organization cần khóa.</param>
+    /// <param name="request">Thông tin lý do khóa (bắt buộc, tối đa 500 ký tự).</param>
     /// <param name="cancellationToken">Token hủy request.</param>
     [HttpPost("{id:guid}/suspend")]
     [Authorize(Policy = Permissions.Organizations.Suspend)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> Suspend(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> Suspend(
+        Guid id,
+        [FromBody] SuspendOrganizationRequest request,
+        CancellationToken cancellationToken)
     {
         if (User.GetJwtSub() is not Guid adminId) return Unauthorized();
 
-        Result result = await organizationService.SuspendAsync(adminId, id, cancellationToken);
+        Result result = await organizationService.SuspendAsync(adminId, id, request, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
+    }
+
+    /// <summary>Lấy nhật ký lịch sử của organization có phân trang, mới nhất trước.</summary>
+    /// <param name="id">Id của organization.</param>
+    /// <param name="request">Tham số phân trang (page, pageSize).</param>
+    /// <param name="cancellationToken">Token hủy request.</param>
+    [HttpGet("{id:guid}/history")]
+    [Authorize(Policy = Permissions.Organizations.Read)]
+    [ProducesResponseType<PagedResult<OrganizationHistoryResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PagedResult<OrganizationHistoryResponse>>> GetHistory(
+        Guid id,
+        [FromQuery] PageRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (User.GetJwtSub() is not Guid adminId) return Unauthorized();
+
+        Result<PagedResult<OrganizationHistoryResponse>> result = await organizationService.GetHistoryAsync(adminId, id, request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
     /// <summary>Mở khóa (activate) một organization đang Suspended.</summary>

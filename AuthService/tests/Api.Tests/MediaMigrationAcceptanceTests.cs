@@ -312,7 +312,11 @@ public sealed class MediaMigrationAcceptanceTests
             orgRepo,
             memRepo,
             roleRepo,
-            urlResolver);
+            urlResolver,
+            new FakeAuditLogRepository(),
+            FixedCorrelationIdProvider.Instance,
+            new FakeMediaServiceClient(),
+            new FakeMediaOutboxService());
 
         // 1. Outsider gets 403 CrossOrganizationAccessDenied
         var outsiderResult = await service.GetByIdAsync(outsiderId, orgId);

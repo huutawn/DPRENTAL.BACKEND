@@ -57,11 +57,31 @@ public sealed record UpdateOrganizationProfileRequest(
     [NonEmptyGuid] Guid? LogoMediaId = null,
     [StringLength(2000)] string? Description = null);
 
-/// <summary>Yêu cầu đổi tên organization dành cho admin (PUT /admin/organizations/{id}).</summary>
+/// <summary>Yêu cầu cập nhật hồ sơ liên hệ và hiển thị của organization dành cho admin (PUT /admin/organizations/{id}).</summary>
 public sealed record UpdateOrganizationRequest(
     [Required(ErrorMessage = "Tên organization không hợp lệ."), StringLength(150, MinimumLength = 1, ErrorMessage = "Tên organization không hợp lệ.")]
-    string Name);
+    string Name,
+    [Required, StrictEmail, StringLength(254)]
+    string ContactEmail,
+    [Required, RegularExpression(RegistrationPatterns.PhoneNumber, ErrorMessage = "Số điện thoại không hợp lệ.")]
+    string ContactPhone,
+    [Required, StringLength(250)]
+    string Address,
+    [Required, StringLength(100)]
+    string Province,
+    [Required, StringLength(100)]
+    string Ward,
+    [OptionalUrl, StringLength(500)]
+    string? Website = null,
+    [NonEmptyGuid]
+    Guid? LogoMediaId = null,
+    [StringLength(2000)]
+    string? Description = null);
 
+/// <summary>Yêu cầu khóa (suspend) organization kèm lý do dành cho admin (POST /admin/organizations/{id}/suspend).</summary>
+public sealed record SuspendOrganizationRequest(
+    [Required(ErrorMessage = "Lý do khóa không được để trống."), StringLength(500, MinimumLength = 1, ErrorMessage = "Lý do khóa không hợp lệ.")]
+    string Reason);
 /// <summary>Platform từ chối hồ sơ organization đang chờ duyệt; lý do được trả lại cho Owner để sửa và gửi lại.</summary>
 public sealed record RejectOrganizationRequest(
     [Required, StringLength(500)] string Reason);

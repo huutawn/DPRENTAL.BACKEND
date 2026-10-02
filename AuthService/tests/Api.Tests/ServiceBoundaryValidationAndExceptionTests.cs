@@ -476,6 +476,9 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
             Logs.Add(auditLog);
             return Task.CompletedTask;
         }
+
+        public Task<PagedResult<AuditLog>> GetOrganizationHistoryAsync(Guid organizationId, PageRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PagedResult<AuditLog>([], 1, 20, 0));
     }
 
     private sealed class RecordingRecoveryTokenRepo : IRecoveryTokenRepository
@@ -551,7 +554,15 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
         public Task<Organization?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult<Organization?>(null);
         public Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task<bool> TaxCodeExistsAsync(string taxCode, CancellationToken cancellationToken = default) => Task.FromResult(false);
-        public Task<PagedResult<Organization>> GetAllAsync(PageRequest request, OrganizationStatus? status = null, CancellationToken cancellationToken = default) => Task.FromResult(PagedResult.Create<Organization>([], 1, 10, 0));
+        public Task<PagedResult<Organization>> GetAllAsync(
+            PageRequest request,
+            OrganizationStatus? status = null,
+            OrganizationType? type = null,
+            string? province = null,
+            bool overdueOnly = false,
+            bool remindedOnly = false,
+            DateTime? overdueCutoffUtc = null,
+            CancellationToken cancellationToken = default) => Task.FromResult(PagedResult.Create<Organization>([], 1, 10, 0));
         public Task<Organization?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default) => GetByIdAsync(id, cancellationToken);
         public Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task LockOrganizationsAsync(IReadOnlyList<Guid> sortedOrganizationIds, CancellationToken cancellationToken = default) => Task.CompletedTask;

@@ -749,6 +749,8 @@ public sealed class UserServiceTests
     private sealed class FakeAuditLogRepo : IAuditLogRepository
     {
         public Task AddAsync(AuditLog auditLog, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<PagedResult<AuditLog>> GetOrganizationHistoryAsync(Guid organizationId, PageRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PagedResult<AuditLog>([], 1, 20, 0));
     }
     private sealed class FakeAuthSessionRepo : IAuthSessionRepository
     {

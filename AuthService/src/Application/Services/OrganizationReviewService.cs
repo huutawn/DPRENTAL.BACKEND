@@ -138,7 +138,8 @@ public sealed class OrganizationReviewService(
             ActorId = actorUserId,
             Target = org.Id.ToString(),
             Action = auditAction,
-            Result = rejectionReason is null ? "Success" : $"Success: {rejectionReason}",
+            Result = "Success",
+            Reason = rejectionReason,
             CorrelationId = correlationIdProvider.GetCorrelationId(),
             Timestamp = now
         }, cancellationToken);

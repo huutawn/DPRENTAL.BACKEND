@@ -23,16 +23,23 @@ public interface IOrganizationService
         Guid actorUserId,
         PageRequest request,
         OrganizationStatus? status = null,
+        OrganizationType? type = null,
+        string? province = null,
+        bool overdueOnly = false,
+        bool remindedOnly = false,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Đổi tên organization dành cho Admin (PUT /admin/organizations/{id}).</summary>
-    Task<Result> UpdateNameAsync(Guid actorUserId, Guid organizationId, UpdateOrganizationRequest request, CancellationToken cancellationToken = default);
+    /// <summary>Cập nhật hồ sơ liên hệ và hiển thị của organization dành cho Admin (PUT /admin/organizations/{id}).</summary>
+    Task<Result> UpdateProfileAsync(Guid actorUserId, Guid organizationId, UpdateOrganizationRequest request, CancellationToken cancellationToken = default);
 
-    /// <summary>Khóa organization dành cho Admin (POST /admin/organizations/{id}/suspend).</summary>
-    Task<Result> SuspendAsync(Guid actorUserId, Guid organizationId, CancellationToken cancellationToken = default);
+    /// <summary>Khóa organization kèm lý do dành cho Admin (POST /admin/organizations/{id}/suspend).</summary>
+    Task<Result> SuspendAsync(Guid actorUserId, Guid organizationId, SuspendOrganizationRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>Mở khóa organization dành cho Admin (POST /admin/organizations/{id}/activate).</summary>
     Task<Result> ActivateAsync(Guid actorUserId, Guid organizationId, CancellationToken cancellationToken = default);
+
+    /// <summary>Lấy nhật ký lịch sử của organization có phân trang dành cho Admin (GET /admin/organizations/{id}/history).</summary>
+    Task<Result<PagedResult<OrganizationHistoryResponse>>> GetHistoryAsync(Guid actorUserId, Guid organizationId, PageRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>MVP: mỗi organization chỉ có Owner (người đăng ký), không có thành viên/lời mời.</summary>
     Task<Result<IReadOnlyList<MyOrganizationResponse>>> GetMyOrganizationsAsync(Guid userId, CancellationToken cancellationToken = default);

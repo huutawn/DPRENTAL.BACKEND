@@ -519,6 +519,8 @@ public sealed class UserAccountServiceTests
         public List<AuditLog> Logs { get; } = [];
         public Task AddAsync(AuditLog log, CancellationToken cancellationToken = default) { Logs.Add(log); return Task.CompletedTask; }
         public Task<IReadOnlyList<AuditLog>> GetRecentLogsAsync(int count, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<PagedResult<AuditLog>> GetOrganizationHistoryAsync(Guid organizationId, PageRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PagedResult<AuditLog>([], 1, 20, 0));
     }
 
     internal sealed class FakeUserRepository : IUserRepository
@@ -683,7 +685,15 @@ public sealed class UserAccountServiceTests
         public Task<Organization?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<Organization?>(null);
         public Task<Organization?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult<Organization?>(null);
         public Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult(false);
-        public Task<PagedResult<Organization>> GetAllAsync(PageRequest request, OrganizationStatus? status = null, CancellationToken cancellationToken = default) => Task.FromResult(PagedResult.Create<Organization>([], 1, 10, 0));
+        public Task<PagedResult<Organization>> GetAllAsync(
+            PageRequest request,
+            OrganizationStatus? status = null,
+            OrganizationType? type = null,
+            string? province = null,
+            bool overdueOnly = false,
+            bool remindedOnly = false,
+            DateTime? overdueCutoffUtc = null,
+            CancellationToken cancellationToken = default) => Task.FromResult(PagedResult.Create<Organization>([], 1, 10, 0));
         public Task<Organization?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<Organization?>(null);
         public Task<Organization> CreateAsync(Organization organization, OrganizationMembership initialMembership, CancellationToken cancellationToken = default) => Task.FromResult(organization);
         public Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default) => Task.FromResult(true);

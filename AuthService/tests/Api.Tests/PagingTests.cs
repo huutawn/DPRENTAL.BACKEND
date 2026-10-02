@@ -172,7 +172,15 @@ public sealed class PagingTests
         FakeUserRepo userRepo = new();
         FakeRoleRepo roleRepo = new();
 
-        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
+        OrganizationService service = new(
+            orgRepo,
+            memRepo,
+            roleRepo,
+            FakeMediaUrlResolver.Instance,
+            new FakeAuditLogRepository(),
+            FixedCorrelationIdProvider.Instance,
+            new FakeMediaServiceClient(),
+            new FakeMediaOutboxService());
 
         Result<PagedResult<OrganizationSummaryResponse>> result = await service.ListAsync(actorId, new PageRequest(Page: 0, PageSize: 20));
         Assert.True(result.IsFailure);
@@ -194,7 +202,15 @@ public sealed class PagingTests
         public Task<Organization?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<Organization?>(null);
         public Task<Organization?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult<Organization?>(null);
         public Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult(false);
-        public Task<PagedResult<Organization>> GetAllAsync(PageRequest request, OrganizationStatus? status = null, CancellationToken cancellationToken = default) =>
+        public Task<PagedResult<Organization>> GetAllAsync(
+            PageRequest request,
+            OrganizationStatus? status = null,
+            OrganizationType? type = null,
+            string? province = null,
+            bool overdueOnly = false,
+            bool remindedOnly = false,
+            DateTime? overdueCutoffUtc = null,
+            CancellationToken cancellationToken = default) =>
             Task.FromResult(PagedResult.Create<Organization>([], request.Page, request.PageSize, 0));
         public Task<Organization?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<Organization?>(null);
         public Task<Organization> CreateAsync(Organization organization, OrganizationMembership initialMembership, CancellationToken cancellationToken = default) =>

@@ -38,6 +38,9 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Property<string>("CorrelationId")
                         .HasColumnType("text");
 
+                    b.Property<string>("Reason")
+                        .HasColumnType("text");
+
                     b.Property<string>("Result")
                         .IsRequired()
                         .HasColumnType("text");
@@ -54,6 +57,8 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.HasIndex("ActorId");
 
                     b.HasIndex("Timestamp");
+
+                    b.HasIndex("Target", "Timestamp");
 
                     b.ToTable("AuditLogs");
                 });
@@ -224,6 +229,10 @@ namespace Dprental.AuthService.Domain.Migrations
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
+
+                    b.Property<string>("SuspensionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<string>("TaxCode")
                         .HasMaxLength(14)
