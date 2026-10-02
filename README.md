@@ -98,3 +98,113 @@ Do các cột supplier bị drop vĩnh viễn không thể khôi phục qua reve
 ## Git hook
 
 Sau khi khởi tạo Git trong thư mục service, chạy `./scripts/setup-git-hooks.sh` (hoặc bản `.ps1` trên PowerShell). Hook kiểm tra branch nền `origin/catalog/develop`, rồi build và test trước khi push.
+
+## Deploy qua Gateway
+
+Build hai artifact từ cùng commit Catalog đã commit:
+
+```bash
+export CATALOG_RELEASE_SHA="$(git rev-parse HEAD)"
+export IMAGE_NAMESPACE=your-org
+# Thay your-org bằng namespace GHCR của bạn; đăng nhập registry trước khi push.
+docker build --target runtime -t "ghcr.io/$IMAGE_NAMESPACE/dprental-catalog:$CATALOG_RELEASE_SHA" .
+docker build --target migrator -t "ghcr.io/$IMAGE_NAMESPACE/dprental-catalog-migrator:$CATALOG_RELEASE_SHA" .
+docker push "ghcr.io/$IMAGE_NAMESPACE/dprental-catalog:$CATALOG_RELEASE_SHA"
+docker push "ghcr.io/$IMAGE_NAMESPACE/dprental-catalog-migrator:$CATALOG_RELEASE_SHA"
+```
+
+Runtime chạy non-root trên cổng 8080; Docker healthcheck gọi `/health/ready`. Migrator chạy EF Core
+10.0.12 và nhận `ConnectionStrings__Postgres` qua environment, sử dụng history table
+`catalog.__EFMigrationsHistory`. Migrator không cần JWT hoặc private key.
+
+Đặt hai image tags vào `release.env` của deployment platform, cập nhật Compose từ `deploy/dev`,
+chạy `catalog-migrate` trước rồi mới khởi động Catalog. Gateway phải dùng phiên bản chứa các route
+`/api/v1/catalog/categories` và `/api/v1/catalog/equipment-types`. Không công khai port Catalog lên VPS.
+
+Catalog xác thực JWT trực tiếp. Các biến bắt buộc:
+
+- `ConnectionStrings__Postgres`
+- `Auth__Jwt__Issuer`, `Auth__Jwt__Audience` (khớp Auth và Gateway)
+- `Auth__Jwt__Keys__0__KeyId` (khớp kid của token)
+- `Auth__Jwt__Keys__0__PublicKeyPem=/run/secrets/auth_jwt_public_key`
+
+Chỉ mount public key. Khi Auth đổi signing key, cập nhật key ring Catalog trước khi phát hành token
+bằng key mới và giữ key cũ đến khi token cũ hết hạn. Catalog hiện dùng static key ring, không tải JWKS.
+Quy trình backup, migration và smoke test nằm trong `deploy/dev/README.md` của platform repository.
+
+## CI/CD CatalogService cho dev
+
+Workflow [catalogservice-dev.yml](.github/workflows/catalogservice-dev.yml) chạy khi push vào
+`catalog/develop-ci-cd`. Mẫu publish/SSH deploy tham chiếu `media/develop-ci-cd`; Catalog có thêm job
+build/test (gồm PostgreSQL migration tests) trước publish. Hai image runtime và migrator dùng cùng
+full commit SHA, không dùng `latest`:
+
+```text
+ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-catalog:<git-sha>
+ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-catalog-migrator:<git-sha>
+```
+
+Trong GitHub Environment `dev`, dùng variable `GHCR_IMAGE_NAMESPACE` (namespace viết thường, ví dụ
+`huutawn`) và cùng các secrets với Media/Auth:
+
+| Secret | Giá trị |
+| --- | --- |
+| `DEV_VPS_HOST` | Host/IP VPS |
+| `DEV_VPS_USER` | User deploy có quyền Docker, đọc `.env`, ghi thư mục deploy và `release.env` |
+| `DEV_VPS_SSH_PRIVATE_KEY` | SSH deploy key |
+| `DEV_VPS_KNOWN_HOSTS` | Host key đã xác nhận của VPS |
+| `DEV_VPS_PORT` | Tùy chọn, mặc định `22` |
+
+`GITHUB_TOKEN` được GitHub cấp tự động. Nếu package Catalog đã được push thủ công, cấp repository
+workflow quyền Write trong Actions access của cả hai package. Workflow dùng concurrency group
+`dprental-dev` như Media/Auth để tránh các workflow trong cùng repository ghi `release.env` đồng thời.
+Không đưa PostgreSQL password, JWT private key hoặc `.env` lên GitHub.
+
+Script [deploy-catalogservice.sh](scripts/deploy-catalogservice.sh) chạy qua SSH stdin, login GHCR bằng
+Docker config tạm và chỉ cập nhật hai image Catalog trong `release.env`. Script validate Compose,
+pull image, start PostgreSQL, stop Catalog, backup schema `catalog` nếu có, chạy migrator, recreate
+Catalog, chờ Docker health rồi kiểm tra readiness nội bộ, Gateway readiness và hai public GET.
+Backup mặc định ở `/opt/dprental/dev/backups/catalog`, custom format `.dump`, directory mode 700,
+file mode 600; gồm cả `catalog.__EFMigrationsHistory`. Lần deploy đầu chưa có schema sẽ bỏ qua backup.
+Backup/migration lỗi dừng deploy; nếu Catalog đã stop thì service vẫn dừng để xử lý lỗi. Không tự
+rollback image hoặc schema vì refactor xóa supplier columns. Backup retention/restore do operator quản lý.
+
+### Chuẩn bị `/opt/dprental/dev` trước push đầu tiên
+
+1. **Compose:** đồng bộ các phần Catalog trong `deploy/dev/compose.yaml` của platform:
+   `catalog-service`, `catalog-migrate` (profile `migration`), public-key secret và network `services`.
+   Gateway cần routes 8..13 trỏ `catalog-service:8080` và image Gateway chứa route Catalog.
+   Runtime không expose host port; migrator dùng ENTRYPOINT trong image, không cần override kiểu Media.
+2. **`.env`:** không cần biến Catalog mới. Kiểm tra các biến sẵn có `DEV_DOMAIN`, `POSTGRES_DB`,
+   `POSTGRES_USER`, `POSTGRES_PASSWORD`, `AUTH_JWT_ISSUER`, `AUTH_JWT_AUDIENCE`,
+   `AUTH_JWT_ACTIVE_KEY_ID`, `CORS_ALLOWED_ORIGIN_0`. Giữ DB hiện tại; Catalog dùng schema `catalog`.
+   Public key của secret `auth_jwt_public_key` phải khớp active key id. Dùng `Staging` cho dev deploy.
+3. **`release.env`:** thêm hai dòng dưới trước khi cập nhật Compose. Namespace phải khớp variable
+   `GHCR_IMAGE_NAMESPACE`; pipeline thay tag `bootstrap` bằng SHA vừa publish trước khi pull.
+
+   ```dotenv
+   CATALOG_SERVICE_IMAGE=ghcr.io/huutawn/dprental-catalog:bootstrap
+   CATALOG_MIGRATOR_IMAGE=ghcr.io/huutawn/dprental-catalog-migrator:bootstrap
+   ```
+
+   Giữ các image service khác. Cập nhật `GATEWAY_IMAGE` tới revision đã có route Catalog và deploy
+   Gateway trước lần Catalog release đầu tiên. Script Catalog không tự deploy Gateway hoặc sync Compose.
+4. User SSH cần quyền ghi thư mục `/opt/dprental/dev` vì script thay `release.env` bằng atomic rename,
+   và cần quyền tạo `backups/catalog`. Đặt `release.env` mode 600; không commit release/secrets thật.
+5. Kiểm tra render trên VPS:
+
+   ```bash
+   cd /opt/dprental/dev
+   docker compose --env-file .env --env-file release.env config --quiet
+   ```
+
+Sau khi chuẩn bị, commit và push nhánh `catalog/develop-ci-cd` sẽ kích hoạt pipeline. Workflow không
+chạy cho PR; đặt branch rules nếu cần chỉ release sau merge. Không chạy auto-release đầu tiên trước
+khi public key và Gateway routes đã sẵn sàng.
+
+Kiểm tra script tại local (Docker/HTTP được mô phỏng, không deploy VPS):
+
+```bash
+bash -n scripts/deploy-catalogservice.sh scripts/tests/deploy-catalogservice.test.sh
+bash scripts/tests/deploy-catalogservice.test.sh
+```

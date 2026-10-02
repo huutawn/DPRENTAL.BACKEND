@@ -15,8 +15,15 @@ RUN dotnet publish CatalogService/src/Api/CatalogService.Api.csproj \
     --output /app/publish \
     --no-restore
 
+FROM build AS migrator
+RUN dotnet tool install --tool-path /tools dotnet-ef --version 10.0.12
+ENTRYPOINT ["/tools/dotnet-ef", "database", "update", "--project", "CatalogService/src/Domain/CatalogService.Domain.csproj", "--startup-project", "CatalogService/src/Api/CatalogService.Api.csproj", "--configuration", "Release", "--no-build"]
+
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends wget \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/publish ./
 
@@ -25,6 +32,6 @@ EXPOSE 8080
 
 USER $APP_UID
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=6 \
-    CMD perl -MIO::Socket::INET -e '$s=IO::Socket::INET->new("127.0.0.1:8080") or exit 1; print $s "GET /health/ready HTTP/1.0\r\n\r\n"; my $r=<$s>; exit($r =~ /200/ ? 0 : 1)' || exit 1
+    CMD wget --quiet --tries=1 --spider http://127.0.0.1:8080/health/ready || exit 1
 
 ENTRYPOINT ["dotnet", "CatalogService.Api.dll"]
