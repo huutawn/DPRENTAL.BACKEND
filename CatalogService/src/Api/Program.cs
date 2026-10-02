@@ -120,6 +120,7 @@ builder.Services.AddSwaggerGen(options =>
         options.IncludeXmlComments(apiXml, includeControllerXmlComments: true);
     }
     options.SchemaFilter<UpdateEquipmentTypeRequestSchemaFilter>();
+    options.OperationFilter<BearerSecurityRequirementOperationFilter>();
 });
 
 builder.Services.AddHealthChecks()

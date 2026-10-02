@@ -231,7 +231,16 @@ public sealed class StartupAndConfigurationTests
         Assert.True(securitySchemes.TryGetProperty("Bearer", out JsonElement bearerScheme));
         Assert.Equal("http", bearerScheme.GetProperty("type").GetString());
         Assert.Equal("bearer", bearerScheme.GetProperty("scheme").GetString());
+
+        // Thiếu security requirement trên operation thì Swagger UI không gửi token dù đã Authorize.
+        JsonElement equipmentTypes = doc.RootElement.GetProperty("paths").GetProperty("/api/v1/catalog/equipment-types");
+        JsonElement postSecurity = equipmentTypes.GetProperty("post").GetProperty("security");
+        Assert.Contains(postSecurity.EnumerateArray(), requirement => requirement.TryGetProperty("Bearer", out _));
+        Assert.False(
+            equipmentTypes.GetProperty("get").TryGetProperty("security", out JsonElement getSecurity)
+            && getSecurity.GetArrayLength() > 0);
     }
+
     [Fact]
     public async Task SwaggerDocument_ContainsSixEquipmentTypeEndpoints_AndNoLegacyEquipments()
     {

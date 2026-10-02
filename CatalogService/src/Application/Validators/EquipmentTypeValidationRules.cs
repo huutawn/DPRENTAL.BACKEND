@@ -9,6 +9,9 @@ public static class EquipmentTypeValidationRules
     public const int MaxNameLength = 200;
     public const int MaxDescriptionLength = 4000;
 
+    /// <summary>Mỗi media mới là một lần gọi verify sang Media Service, nên số lượng phải có trần.</summary>
+    public const int MaxMediaCount = 20;
+
     public static Result ValidateCode(string? code)
     {
         if (string.IsNullOrWhiteSpace(code) || code.Trim().Length > MaxCodeLength)
@@ -62,6 +65,11 @@ public static class EquipmentTypeValidationRules
     public static Result ValidateMedia(IReadOnlyList<EquipmentTypeMediaItemDto?> media)
     {
         ArgumentNullException.ThrowIfNull(media);
+
+        if (media.Count > MaxMediaCount)
+        {
+            return Result.Failure(CatalogErrors.EquipmentType.InvalidMedia);
+        }
 
         // 1. Kiểm tra null element trước khi đọc bất kỳ property nào của item
         if (media.Any(m => m is null))
