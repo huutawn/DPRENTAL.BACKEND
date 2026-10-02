@@ -174,8 +174,6 @@ public sealed class StartupAndConfigurationTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
-                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
-                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -194,8 +192,6 @@ public sealed class StartupAndConfigurationTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
-                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
-                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -216,8 +212,6 @@ public sealed class StartupAndConfigurationTests
             {
                 builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
-                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
-                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -255,8 +249,6 @@ public sealed class StartupAndConfigurationTests
             {
                 builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
-                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
-                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -298,8 +290,6 @@ public sealed class StartupAndConfigurationTests
             {
                 builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
-                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
-                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -328,13 +318,13 @@ public sealed class StartupAndConfigurationTests
         Assert.Contains("code", propertyNames, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("name", propertyNames, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("description", propertyNames, StringComparer.OrdinalIgnoreCase);
-        Assert.Contains("categoryId", propertyNames, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("categoryIds", propertyNames, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("media", propertyNames, StringComparer.OrdinalIgnoreCase);
 
         Assert.DoesNotContain("isCodeSpecified", propertyNames, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("isNameSpecified", propertyNames, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("isDescriptionSpecified", propertyNames, StringComparer.OrdinalIgnoreCase);
-        Assert.DoesNotContain("isCategoryIdSpecified", propertyNames, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("isCategoryIdsSpecified", propertyNames, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("isMediaSpecified", propertyNames, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("hasAnyFieldSpecified", propertyNames, StringComparer.OrdinalIgnoreCase);
 
@@ -378,8 +368,6 @@ public sealed class StartupAndConfigurationTests
             {
                 builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
-                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
-                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -406,8 +394,6 @@ public sealed class StartupAndConfigurationTests
             {
                 builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Production);
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
-                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
-                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);

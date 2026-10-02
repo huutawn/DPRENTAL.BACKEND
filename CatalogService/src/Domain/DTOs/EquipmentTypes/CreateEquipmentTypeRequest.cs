@@ -9,7 +9,7 @@ public sealed class CreateEquipmentTypeRequest
     public string Code { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
     public string? Description { get; init; }
-    public Guid CategoryId { get; init; }
+    public IReadOnlyList<Guid> CategoryIds { get; init; } = [];
     public IReadOnlyList<EquipmentTypeMediaItemDto?>? Media { get; init; } = [];
 
     [JsonIgnore]
@@ -23,14 +23,14 @@ public sealed class CreateEquipmentTypeRequest
         string code,
         string name,
         string? description,
-        Guid categoryId,
+        IReadOnlyList<Guid> categoryIds,
         IReadOnlyList<EquipmentTypeMediaItemDto?>? media,
         bool isMediaSpecified = true)
     {
         Code = code;
         Name = name;
         Description = description;
-        CategoryId = categoryId;
+        CategoryIds = categoryIds ?? [];
         Media = media ?? [];
         IsMediaSpecified = isMediaSpecified || media != null;
     }
@@ -48,7 +48,7 @@ public sealed class CreateEquipmentTypeRequestJsonConverter : JsonConverter<Crea
         string code = string.Empty;
         string name = string.Empty;
         string? description = null;
-        Guid categoryId = Guid.Empty;
+        IReadOnlyList<Guid> categoryIds = [];
         bool isMediaSpecified = false;
         IReadOnlyList<EquipmentTypeMediaItemDto?>? media = [];
 
@@ -61,7 +61,7 @@ public sealed class CreateEquipmentTypeRequestJsonConverter : JsonConverter<Crea
                     Code = code,
                     Name = name,
                     Description = description,
-                    CategoryId = categoryId,
+                    CategoryIds = categoryIds,
                     Media = media,
                     IsMediaSpecified = isMediaSpecified
                 };
@@ -87,19 +87,31 @@ public sealed class CreateEquipmentTypeRequestJsonConverter : JsonConverter<Crea
             {
                 description = reader.TokenType == JsonTokenType.Null ? null : reader.GetString();
             }
-            else if (string.Equals(propName, "categoryId", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(propName, "categoryIds", StringComparison.OrdinalIgnoreCase))
             {
                 if (reader.TokenType == JsonTokenType.Null)
                 {
-                    categoryId = Guid.Empty;
+                    categoryIds = null!;
                 }
-                else if (reader.TokenType == JsonTokenType.String && Guid.TryParse(reader.GetString(), out var g))
+                else if (reader.TokenType == JsonTokenType.StartArray)
                 {
-                    categoryId = g;
+                    var list = new List<Guid>();
+                    while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+                    {
+                        if (reader.TokenType == JsonTokenType.String && Guid.TryParse(reader.GetString(), out var g))
+                        {
+                            list.Add(g);
+                        }
+                        else
+                        {
+                            throw new JsonException("CategoryIds elements must be valid GUID strings.");
+                        }
+                    }
+                    categoryIds = list;
                 }
                 else
                 {
-                    throw new JsonException("CategoryId must be a valid GUID.");
+                    throw new JsonException("CategoryIds must be an array.");
                 }
             }
             else if (string.Equals(propName, "media", StringComparison.OrdinalIgnoreCase))
@@ -140,7 +152,22 @@ public sealed class CreateEquipmentTypeRequestJsonConverter : JsonConverter<Crea
         {
             writer.WriteNull("description");
         }
-        writer.WriteString("categoryId", value.CategoryId);
+
+        if (value.CategoryIds != null)
+        {
+            writer.WritePropertyName("categoryIds");
+            writer.WriteStartArray();
+            foreach (var id in value.CategoryIds)
+            {
+                writer.WriteStringValue(id);
+            }
+            writer.WriteEndArray();
+        }
+        else
+        {
+            writer.WriteNull("categoryIds");
+        }
+
         if (value.IsMediaSpecified || value.Media != null)
         {
             writer.WritePropertyName("media");

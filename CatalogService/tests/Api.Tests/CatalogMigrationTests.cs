@@ -244,9 +244,9 @@ public sealed class CatalogMigrationTests
                         fks.Add(fkReader.GetString(0));
                     }
                 }
-                Assert.Contains("FK_EquipmentTypes_Categories_CategoryId", fks);
+                Assert.Contains("FK_EquipmentTypeCategories_Categories_CategoryId", fks);
+                Assert.Contains("FK_EquipmentTypeCategories_EquipmentTypes_EquipmentTypeId", fks);
                 Assert.Contains("FK_EquipmentTypeMedia_EquipmentTypes_EquipmentTypeId", fks);
-
                 // Kiểm tra Indexes
                 await using var idxCmd = new NpgsqlCommand(
                     """
@@ -263,10 +263,9 @@ public sealed class CatalogMigrationTests
                     }
                 }
                 Assert.Contains("IX_EquipmentTypes_Code", indexes);
-                Assert.Contains("IX_EquipmentTypes_CategoryId", indexes);
+                Assert.Contains("IX_EquipmentTypeCategories_CategoryId", indexes);
                 Assert.Contains("IX_EquipmentTypeMedia_EquipmentTypeId_MediaId", indexes);
                 Assert.Contains("UX_EquipmentTypeMedia_EquipmentTypeId_Thumbnail", indexes);
-
                 // Kiểm tra migration history đủ cả 3 migrations trong catalog.__EFMigrationsHistory
                 await using var histCmd = new NpgsqlCommand(
                     "SELECT \"MigrationId\" FROM catalog.\"__EFMigrationsHistory\" ORDER BY \"MigrationId\";",
@@ -279,10 +278,19 @@ public sealed class CatalogMigrationTests
                         appliedMigrations.Add(histReader.GetString(0));
                     }
                 }
-                Assert.Equal(3, appliedMigrations.Count);
+                Assert.Equal(4, appliedMigrations.Count);
                 Assert.Contains(appliedMigrations, m => m.EndsWith("_InitialCatalogSchema", StringComparison.Ordinal));
                 Assert.Contains(appliedMigrations, m => m.EndsWith("_InitCategoryTable", StringComparison.Ordinal));
                 Assert.Contains(appliedMigrations, m => m.EndsWith("_RefactorEquipmentToEquipmentType", StringComparison.Ordinal));
+                Assert.Contains(appliedMigrations, m => m.EndsWith("_AddCategoryImagesAndEquipmentTypeCategories", StringComparison.Ordinal));
+
+                // Kiểm tra quan hệ nhiều-nhiều được copy đầy đủ từ CategoryId cũ (draftId, publishedId, hiddenId)
+                await using var checkCopyCmd = new NpgsqlCommand(
+                    "SELECT count(*) FROM catalog.\"EquipmentTypeCategories\" WHERE \"CategoryId\" = @catId;",
+                    verifyConn);
+                checkCopyCmd.Parameters.AddWithValue("catId", categoryId);
+                var copiedCount = (long)(await checkCopyCmd.ExecuteScalarAsync())!;
+                Assert.Equal(3, copiedCount);
             }
         }
         finally
@@ -422,10 +430,10 @@ public sealed class CatalogMigrationTests
             var equipmentType = new EquipmentType
             {
                 Id = Guid.NewGuid(),
-                CategoryId = category.Id,
                 Code = "FRESH-001",
                 Name = "Fresh Guitar",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                Categories = [category]
             };
             context.EquipmentTypes.Add(equipmentType);
 

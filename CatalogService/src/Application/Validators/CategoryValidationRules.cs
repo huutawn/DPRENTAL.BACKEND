@@ -26,4 +26,14 @@ public static class CategoryValidationRules
 
         return Result.Success();
     }
+
+    public static Result ValidateImageMediaId(Guid? imageMediaId, bool isSpecified)
+    {
+        if (isSpecified && imageMediaId.HasValue && imageMediaId.Value == Guid.Empty)
+        {
+            return Result.Failure(CatalogErrors.Category.InvalidImage);
+        }
+
+        return Result.Success();
+    }
 }

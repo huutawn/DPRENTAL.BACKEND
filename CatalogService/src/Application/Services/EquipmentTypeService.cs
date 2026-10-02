@@ -1,4 +1,5 @@
 using Dprental.CatalogService.Application.Clients;
+using Dprental.CatalogService.Application.Common;
 using Dprental.CatalogService.Application.IServices;
 using Dprental.CatalogService.Application.Validators;
 using Dprental.CatalogService.Common;
@@ -13,10 +14,10 @@ namespace Dprental.CatalogService.Application.Services;
 public sealed partial class EquipmentTypeService(
     IEquipmentTypeRepository repository,
     ICategoryRepository categoryRepository,
+    IMediaServiceClient mediaServiceClient,
     EquipmentTypeListQueryValidator listQueryValidator,
     CreateEquipmentTypeRequestValidator createValidator,
     UpdateEquipmentTypeRequestValidator updateValidator,
-    IMediaVerificationClient mediaVerificationClient,
     ILogger<EquipmentTypeService> logger) : IEquipmentTypeService
 {
     public async Task<Result<PagedResult<EquipmentTypeListItemDto>>> SearchAsync(
@@ -32,7 +33,7 @@ public sealed partial class EquipmentTypeService(
         }
 
         PagedResult<EquipmentTypeListItemDto> pagedResult = await repository.SearchPublishedAsync(request, cancellationToken);
-        return pagedResult;
+        return EnrichList(pagedResult);
     }
 
     public async Task<Result<EquipmentTypeDetailDto>> GetPublishedDetailAsync(
@@ -45,26 +46,28 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.NotFound;
         }
 
-        return detail;
+        return EnrichDetail(detail);
     }
 
     public async Task<Result<EquipmentTypeDetailDto>> CreateAsync(
         CreateEquipmentTypeRequest request,
+        string operatorUserId = "",
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        return Logged("Create", null, await CreateCoreAsync(request, cancellationToken));
+        return Logged("Create", null, await CreateCoreAsync(request, operatorUserId, cancellationToken));
     }
 
     public async Task<Result<EquipmentTypeDetailDto>> UpdateAsync(
         Guid id,
         UpdateEquipmentTypeRequest request,
+        string operatorUserId = "",
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        return Logged("Update", id, await UpdateCoreAsync(id, request, cancellationToken));
+        return Logged("Update", id, await UpdateCoreAsync(id, request, operatorUserId, cancellationToken));
     }
 
     public async Task<Result<EquipmentTypeDetailDto>> PublishAsync(
@@ -79,6 +82,7 @@ public sealed partial class EquipmentTypeService(
 
     private async Task<Result<EquipmentTypeDetailDto>> CreateCoreAsync(
         CreateEquipmentTypeRequest request,
+        string operatorUserId,
         CancellationToken cancellationToken)
     {
         Result validationResult = createValidator.Validate(request);
@@ -87,15 +91,21 @@ public sealed partial class EquipmentTypeService(
             return validationResult.Error;
         }
 
-        var category = await categoryRepository.GetByIdAsync(request.CategoryId, cancellationToken);
-        if (category is null)
+        var categories = new List<Category>();
+        foreach (var categoryId in request.CategoryIds)
         {
-            return CatalogErrors.EquipmentType.CategoryNotFound;
-        }
+            var category = await categoryRepository.GetByIdAsync(categoryId, cancellationToken);
+            if (category is null)
+            {
+                return CatalogErrors.EquipmentType.CategoryNotFound;
+            }
 
-        if (!category.IsActive)
-        {
-            return CatalogErrors.EquipmentType.CategoryInactive;
+            if (!category.IsActive)
+            {
+                return CatalogErrors.EquipmentType.CategoryInactive;
+            }
+
+            categories.Add(category);
         }
 
         string trimmedCode = request.Code.Trim();
@@ -104,29 +114,75 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.DuplicateCode;
         }
 
-        Result mediaResult = await VerifyMediaAsync(request.Media!.Select(m => m!.MediaId), cancellationToken);
-        if (mediaResult.IsFailure)
+        // Xác minh toàn bộ media trước khi public
+        var distinctMediaIds = request.Media?
+            .Where(m => m != null)
+            .Select(m => m!.MediaId)
+            .Distinct()
+            .ToList() ?? [];
+
+        if (distinctMediaIds.Count > 0)
         {
-            return mediaResult.Error;
+            foreach (var mediaId in distinctMediaIds)
+            {
+                var verifyResult = await mediaServiceClient.VerifyMediaAsync(mediaId, cancellationToken);
+                if (verifyResult.IsFailure)
+                {
+                    return verifyResult.Error;
+                }
+
+                var media = verifyResult.Value;
+                if (!MediaValidationHelper.IsReady(media.Status))
+                {
+                    return CatalogErrors.Media.NotReady;
+                }
+
+                if (!MediaValidationHelper.IsAllowedImageType(media.ContentType))
+                {
+                    return CatalogErrors.Media.InvalidContentType;
+                }
+
+                if (!string.IsNullOrWhiteSpace(operatorUserId) &&
+                    !string.Equals(media.UploadedByUserId?.Trim(), operatorUserId.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    return CatalogErrors.Media.Forbidden;
+                }
+            }
+
+            // Public tuần tự sau khi toàn bộ đã hợp lệ
+            foreach (var mediaId in distinctMediaIds)
+            {
+                var publicResult = await mediaServiceClient.SetVisibilityAsync(mediaId, "public", cancellationToken);
+                if (publicResult.IsFailure)
+                {
+                    return publicResult.Error;
+                }
+            }
         }
 
         var equipmentType = new EquipmentType
         {
             Id = Guid.NewGuid(),
-            CategoryId = request.CategoryId,
             Code = trimmedCode,
             Name = request.Name.Trim(),
             Description = request.Description,
             CreatedAt = DateTime.UtcNow,
-            Category = category
+            Categories = categories
         };
 
-        return await repository.AddAsync(equipmentType, request.Media, cancellationToken);
+        var saveResult = await repository.AddAsync(equipmentType, request.Media, cancellationToken);
+        if (saveResult.IsFailure)
+        {
+            return saveResult.Error;
+        }
+
+        return EnrichDetail(saveResult.Value);
     }
 
     private async Task<Result<EquipmentTypeDetailDto>> UpdateCoreAsync(
         Guid id,
         UpdateEquipmentTypeRequest request,
+        string operatorUserId,
         CancellationToken cancellationToken)
     {
         Result validationResult = updateValidator.Validate(request);
@@ -141,21 +197,33 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.NotFound;
         }
 
-        if (request.IsCategoryIdSpecified && request.CategoryId.HasValue)
+        if (request.IsCategoryIdsSpecified)
         {
-            var category = await categoryRepository.GetByIdAsync(request.CategoryId.Value, cancellationToken);
-            if (category is null)
+            var existingCategoryIds = entity.Categories.Select(c => c.Id).ToHashSet();
+            var newCategories = new List<Category>();
+
+            foreach (var categoryId in request.CategoryIds!)
             {
-                return CatalogErrors.EquipmentType.CategoryNotFound;
+                var category = await categoryRepository.GetByIdAsync(categoryId, cancellationToken);
+                if (category is null)
+                {
+                    return CatalogErrors.EquipmentType.CategoryNotFound;
+                }
+
+                // Chỉ gắn mới category active; category đã gắn rồi bị inactive được giữ lại
+                if (!category.IsActive && !existingCategoryIds.Contains(category.Id))
+                {
+                    return CatalogErrors.EquipmentType.CategoryInactive;
+                }
+
+                newCategories.Add(category);
             }
 
-            if (!category.IsActive)
+            entity.Categories.Clear();
+            foreach (var cat in newCategories)
             {
-                return CatalogErrors.EquipmentType.CategoryInactive;
+                entity.Categories.Add(cat);
             }
-
-            entity.CategoryId = request.CategoryId.Value;
-            entity.Category = category;
         }
 
         if (request.IsCodeSpecified && !string.IsNullOrWhiteSpace(request.Code))
@@ -179,22 +247,68 @@ public sealed partial class EquipmentTypeService(
             entity.Description = request.Description;
         }
 
-        IReadOnlyList<EquipmentTypeMediaItemDto?>? desiredMedia = request.IsMediaSpecified ? request.Media : null;
-        if (desiredMedia is not null)
+        if (request.IsMediaSpecified && request.Media != null)
         {
-            // Media đã gắn từ trước không verify lại, để admin vẫn sắp xếp hoặc gỡ được khi media đó đã bị xóa bên Media Service.
-            HashSet<Guid> attached = entity.Media.Select(m => m.MediaId).ToHashSet();
-            Result mediaResult = await VerifyMediaAsync(
-                desiredMedia.Select(m => m!.MediaId).Where(mediaId => !attached.Contains(mediaId)),
-                cancellationToken);
-            if (mediaResult.IsFailure)
+            var desiredMediaIds = request.Media
+                .Where(m => m != null)
+                .Select(m => m!.MediaId)
+                .Distinct()
+                .ToList();
+
+            var existingMediaIds = entity.Media.Select(m => m.MediaId).ToHashSet();
+            var newlyAddedMediaIds = desiredMediaIds.Where(mId => !existingMediaIds.Contains(mId)).ToList();
+
+            if (newlyAddedMediaIds.Count > 0)
             {
-                return mediaResult.Error;
+                // Xác minh media mới gắn
+                foreach (var mediaId in newlyAddedMediaIds)
+                {
+                    var verifyResult = await mediaServiceClient.VerifyMediaAsync(mediaId, cancellationToken);
+                    if (verifyResult.IsFailure)
+                    {
+                        return verifyResult.Error;
+                    }
+
+                    var media = verifyResult.Value;
+                    if (!MediaValidationHelper.IsReady(media.Status))
+                    {
+                        return CatalogErrors.Media.NotReady;
+                    }
+
+                    if (!MediaValidationHelper.IsAllowedImageType(media.ContentType))
+                    {
+                        return CatalogErrors.Media.InvalidContentType;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(operatorUserId) &&
+                        !string.Equals(media.UploadedByUserId?.Trim(), operatorUserId.Trim(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        return CatalogErrors.Media.Forbidden;
+                    }
+                }
+
+                // Đổi visibility sang public cho media mới
+                foreach (var mediaId in newlyAddedMediaIds)
+                {
+                    var publicResult = await mediaServiceClient.SetVisibilityAsync(mediaId, "public", cancellationToken);
+                    if (publicResult.IsFailure)
+                    {
+                        return publicResult.Error;
+                    }
+                }
             }
         }
 
         entity.UpdatedAt = DateTime.UtcNow;
-        return await repository.SaveAsync(entity, desiredMedia, cancellationToken);
+
+        IReadOnlyList<EquipmentTypeMediaItemDto?>? desiredMedia = request.IsMediaSpecified ? request.Media : null;
+        var saveResult = await repository.SaveAsync(entity, desiredMedia, cancellationToken);
+        if (saveResult.IsFailure)
+        {
+            return saveResult.Error;
+        }
+
+        return EnrichDetail(saveResult.Value);
     }
 
     private async Task<Result<EquipmentTypeDetailDto>> PublishCoreAsync(
@@ -212,19 +326,19 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.InvalidStateTransition;
         }
 
-        var category = await categoryRepository.GetByIdAsync(entity.CategoryId, cancellationToken);
-        if (category is null)
-        {
-            return CatalogErrors.EquipmentType.CategoryNotFound;
-        }
-
-        if (!category.IsActive)
+        if (entity.Categories.Count == 0 || !entity.Categories.Any(c => c.IsActive))
         {
             return CatalogErrors.EquipmentType.CategoryInactive;
         }
 
         entity.Publish(DateTime.UtcNow);
-        return await repository.SaveStateTransitionAsync(entity, cancellationToken);
+        var saveResult = await repository.SaveStateTransitionAsync(entity, cancellationToken);
+        if (saveResult.IsFailure)
+        {
+            return saveResult.Error;
+        }
+
+        return EnrichDetail(saveResult.Value);
     }
 
     private async Task<Result<EquipmentTypeDetailDto>> DisableCoreAsync(
@@ -242,36 +356,48 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.InvalidStateTransition;
         }
 
-        // Disable được phép ngay cả khi category inactive
         entity.Disable(DateTime.UtcNow);
-        return await repository.SaveStateTransitionAsync(entity, cancellationToken);
+        var saveResult = await repository.SaveStateTransitionAsync(entity, cancellationToken);
+        if (saveResult.IsFailure)
+        {
+            return saveResult.Error;
+        }
+
+        return EnrichDetail(saveResult.Value);
     }
 
-    /// <summary>
-    /// Xác minh media với Media Service trước khi mở transaction ghi.
-    /// Chỉ cần một media không xác minh được là trả Unavailable, vì khi đó chưa biết chắc tình trạng của cả danh sách.
-    /// </summary>
-    private async Task<Result> VerifyMediaAsync(IEnumerable<Guid> mediaIds, CancellationToken cancellationToken)
+    private static PagedResult<EquipmentTypeListItemDto> EnrichList(PagedResult<EquipmentTypeListItemDto> paged)
     {
-        MediaVerificationStatus[] statuses = await Task.WhenAll(
-            mediaIds.Select(mediaId => mediaVerificationClient.VerifyAsync(mediaId, cancellationToken)));
+        var enrichedItems = paged.Items
+            .Select(item => item with
+            {
+                ThumbnailUrl = MediaUrlResolver.ResolvePublicUrl(item.ThumbnailMediaId),
+                Categories = item.Categories
+                    .OrderBy(c => c.Name)
+                    .ThenBy(c => c.Id)
+                    .Select(c => c with { ImageUrl = MediaUrlResolver.ResolvePublicUrl(c.ImageMediaId) })
+                    .ToList()
+            })
+            .ToList();
 
-        if (statuses.Contains(MediaVerificationStatus.Unavailable))
+        return new PagedResult<EquipmentTypeListItemDto>(enrichedItems, paged.Page, paged.PageSize, paged.TotalCount);
+    }
+
+    private static EquipmentTypeDetailDto EnrichDetail(EquipmentTypeDetailDto detail)
+    {
+        return detail with
         {
-            return Result.Failure(CatalogErrors.Catalog.MediaServiceUnavailable);
-        }
-
-        if (statuses.Contains(MediaVerificationStatus.NotFound))
-        {
-            return Result.Failure(CatalogErrors.EquipmentType.MediaNotFound);
-        }
-
-        if (statuses.Contains(MediaVerificationStatus.NotReady))
-        {
-            return Result.Failure(CatalogErrors.EquipmentType.MediaNotReady);
-        }
-
-        return Result.Success();
+            Categories = detail.Categories
+                .OrderBy(c => c.Name)
+                .ThenBy(c => c.Id)
+                .Select(c => c with { ImageUrl = MediaUrlResolver.ResolvePublicUrl(c.ImageMediaId) })
+                .ToList(),
+            Media = detail.Media
+                .OrderBy(m => m.DisplayOrder)
+                .ThenBy(m => m.MediaId)
+                .Select(m => m with { Url = MediaUrlResolver.ResolvePublicUrl(m.MediaId) })
+                .ToList()
+        };
     }
 
     private Result<EquipmentTypeDetailDto> Logged(string operation, Guid? equipmentTypeId, Result<EquipmentTypeDetailDto> result)

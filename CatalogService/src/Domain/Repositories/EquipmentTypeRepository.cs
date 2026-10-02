@@ -11,9 +11,6 @@ namespace Dprental.CatalogService.Domain.Repositories;
 
 public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquipmentTypeRepository
 {
-    // Quy tắc chọn thumbnail dùng chung cho danh sách, chi tiết và response sau khi ghi:
-    // media có IsThumbnail trước, rồi DisplayOrder nhỏ nhất, rồi Id. Không có media thì null.
-    // EF không dùng chung được một đoạn biểu thức giữa các projection, nên ba nơi phải giữ cùng thứ tự sắp xếp này.
     private static readonly Expression<Func<EquipmentType, EquipmentTypeDetailDto>> DetailSelector = e =>
         new EquipmentTypeDetailDto(
             e.Id,
@@ -24,14 +21,16 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
             e.CreatedAt,
             e.UpdatedAt,
             e.PublishedAt,
-            new CategoryDto(e.CategoryId, e.Category.Name),
-            e.Media.OrderBy(m => m.DisplayOrder).ThenBy(m => m.Id).Select(m => m.MediaId).ToList(),
+            e.Categories
+                .OrderBy(c => c.Name)
+                .ThenBy(c => c.Id)
+                .Select(c => new CategoryDto(c.Id, c.Name, c.ImageMediaId, null))
+                .ToList(),
             e.Media
-                .OrderByDescending(m => m.IsThumbnail)
-                .ThenBy(m => m.DisplayOrder)
+                .OrderBy(m => m.DisplayOrder)
                 .ThenBy(m => m.Id)
-                .Select(m => (Guid?)m.MediaId)
-                .FirstOrDefault());
+                .Select(m => new EquipmentTypeMediaResponseDto(m.MediaId, null, m.DisplayOrder, m.IsThumbnail))
+                .ToList());
 
     public async Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(
         GetEquipmentTypesRequest request,
@@ -53,7 +52,7 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
 
         if (request.CategoryId.HasValue)
         {
-            query = query.Where(e => e.CategoryId == request.CategoryId.Value);
+            query = query.Where(e => e.Categories.Any(c => c.Id == request.CategoryId.Value));
         }
 
         var totalCount = await query.CountAsync(cancellationToken);
@@ -75,13 +74,18 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
                 e.Code,
                 e.Name,
                 e.Description,
-                new CategoryDto(e.CategoryId, e.Category.Name),
+                e.Categories
+                    .OrderBy(c => c.Name)
+                    .ThenBy(c => c.Id)
+                    .Select(c => new CategoryDto(c.Id, c.Name, c.ImageMediaId, null))
+                    .ToList(),
                 e.Media
                     .OrderByDescending(m => m.IsThumbnail)
                     .ThenBy(m => m.DisplayOrder)
                     .ThenBy(m => m.Id)
                     .Select(m => (Guid?)m.MediaId)
-                    .FirstOrDefault()
+                    .FirstOrDefault(),
+                null
             ))
             .ToListAsync(cancellationToken);
 
@@ -103,7 +107,7 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
         CancellationToken cancellationToken = default)
     {
         return await dbContext.EquipmentTypes
-            .Include(e => e.Category)
+            .Include(e => e.Categories)
             .Include(e => e.Media)
             .FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
     }
@@ -137,6 +141,14 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         try
         {
+            foreach (var category in equipmentType.Categories)
+            {
+                if (dbContext.Entry(category).State == EntityState.Detached)
+                {
+                    dbContext.Attach(category);
+                }
+            }
+
             dbContext.EquipmentTypes.Add(equipmentType);
             await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -182,6 +194,14 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         try
         {
+            foreach (var category in entity.Categories)
+            {
+                if (dbContext.Entry(category).State == EntityState.Detached)
+                {
+                    dbContext.Attach(category);
+                }
+            }
+
             // 1. Ghi parent với original xmin trước khi thay đổi media, kể cả media-only PATCH
             dbContext.Entry(entity).State = EntityState.Modified;
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -285,8 +305,6 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
 
     private static EquipmentTypeDetailDto ToDetailDto(EquipmentType entity)
     {
-        List<EquipmentTypeMedia> media = entity.Media.DistinctBy(m => m.Id).ToList();
-
         return new EquipmentTypeDetailDto(
             entity.Id,
             entity.Code,
@@ -296,18 +314,17 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
             entity.CreatedAt,
             entity.UpdatedAt,
             entity.PublishedAt,
-            new CategoryDto(entity.CategoryId, entity.Category?.Name ?? string.Empty),
-            media
+            entity.Categories
+                .OrderBy(c => c.Name)
+                .ThenBy(c => c.Id)
+                .Select(c => new CategoryDto(c.Id, c.Name, c.ImageMediaId, null))
+                .ToList(),
+            entity.Media
+                .DistinctBy(m => m.Id)
                 .OrderBy(m => m.DisplayOrder)
                 .ThenBy(m => m.Id)
-                .Select(m => m.MediaId)
-                .ToList(),
-            media
-                .OrderByDescending(m => m.IsThumbnail)
-                .ThenBy(m => m.DisplayOrder)
-                .ThenBy(m => m.Id)
-                .Select(m => (Guid?)m.MediaId)
-                .FirstOrDefault());
+                .Select(m => new EquipmentTypeMediaResponseDto(m.MediaId, null, m.DisplayOrder, m.IsThumbnail))
+                .ToList());
     }
 
     private static bool IsDuplicateCodeViolation(DbUpdateException ex)

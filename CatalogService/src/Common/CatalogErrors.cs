@@ -47,12 +47,6 @@ public static class CatalogErrors
         public static readonly Error InvalidMedia =
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidMedia, "Danh sách media không hợp lệ.");
 
-        public static readonly Error MediaNotFound =
-            Error.Validation(CatalogErrorCode.EquipmentType.MediaNotFound, "Media không tồn tại.");
-
-        public static readonly Error MediaNotReady =
-            Error.Validation(CatalogErrorCode.EquipmentType.MediaNotReady, "Media chưa sẵn sàng để sử dụng.");
-
         public static readonly Error InvalidPayload =
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidPayload, "Dữ liệu yêu cầu không hợp lệ.");
 
@@ -67,6 +61,8 @@ public static class CatalogErrors
 
         public static readonly Error InvalidCategory =
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidCategory, "CategoryId không hợp lệ.");
+        public static readonly Error InvalidCategories =
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidCategories, "Danh sách categoryIds không hợp lệ.");
     }
 
     public static class Category
@@ -79,7 +75,27 @@ public static class CatalogErrors
 
         public static readonly Error InvalidDescription =
             Error.Validation(CatalogErrorCode.Category.InvalidDescription, "Mô tả danh mục tối đa 1000 ký tự.");
+        public static readonly Error InvalidImage =
+            Error.Validation("Category.InvalidImage", "Ảnh đại diện danh mục không hợp lệ.");
     }
+    public static class Media
+    {
+        public static readonly Error NotFound =
+            Error.Validation(CatalogErrorCode.Media.NotFound, "Media không tồn tại.");
+
+        public static readonly Error NotReady =
+            Error.Validation(CatalogErrorCode.Media.NotReady, "Media chưa sẵn sàng để sử dụng.");
+
+        public static readonly Error InvalidContentType =
+            Error.Validation(CatalogErrorCode.Media.InvalidContentType, "Định dạng media không hợp lệ. Chỉ chấp nhận image/jpeg, image/png, image/webp.");
+
+        public static readonly Error Forbidden =
+            Error.Forbidden(CatalogErrorCode.Media.Forbidden, "Người dùng không sở hữu media này.");
+
+        public static readonly Error ServiceUnavailable =
+            Error.Unavailable(CatalogErrorCode.Media.ServiceUnavailable, "Dịch vụ MediaService tạm thời không khả dụng.");
+    }
+
 
     public static class Catalog
     {
@@ -94,8 +110,5 @@ public static class CatalogErrors
 
         public static readonly Error Forbidden =
             Error.Forbidden(CatalogErrorCode.Catalog.Forbidden, "Bạn không có quyền thực hiện thao tác này.");
-
-        public static readonly Error MediaServiceUnavailable =
-            Error.Unavailable(CatalogErrorCode.Catalog.MediaServiceUnavailable, "Không xác minh được media lúc này. Vui lòng thử lại sau.");
     }
 }

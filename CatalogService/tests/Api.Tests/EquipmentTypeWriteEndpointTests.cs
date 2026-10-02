@@ -4,6 +4,9 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Dprental.CatalogService.Application.Clients;
+using CatalogService.Application.DTOs.Category;
+using Dprental.CatalogService.Application.DTOs.Media;
+using Dprental.CatalogService.Common;
 using Dprental.CatalogService.Common.Enums;
 using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
 using Dprental.CatalogService.Domain.Entities;
@@ -23,7 +26,11 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
     private readonly WebApplicationFactory<Program> factory;
     private readonly HttpClient client;
     private readonly CatalogServiceDbContext dbContext;
-    private readonly FakeMediaVerificationClient mediaClient = new();
+
+    public TestMediaServiceClient TestMediaClient { get; } = new();
+
+    public static readonly Guid AdminUserGuid = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    public static string CurrentAdminUserId => AdminUserGuid.ToString();
 
     public EquipmentTypeWriteEndpointTests()
     {
@@ -31,17 +38,14 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", PostgreSqlFixture.ConnectionString);
-                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
-                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
                 builder.UseSetting("Auth:Jwt:Keys:0:PublicKeyPem", TestJwtHelper.PublicKeyPem);
-
                 builder.ConfigureTestServices(services =>
                 {
-                    services.RemoveAll<IMediaVerificationClient>();
-                    services.AddSingleton<IMediaVerificationClient>(mediaClient);
+                    services.RemoveAll<IMediaServiceClient>();
+                    services.AddSingleton<IMediaServiceClient>(TestMediaClient);
                 });
             });
 
@@ -60,7 +64,8 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
     public async Task InitializeAsync()
     {
         await dbContext.Database.MigrateAsync();
-        await dbContext.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"catalog\".\"EquipmentTypeMedia\", \"catalog\".\"EquipmentTypes\", \"catalog\".\"Categories\" CASCADE;");
+        await dbContext.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"catalog\".\"EquipmentTypeCategories\", \"catalog\".\"EquipmentTypeMedia\", \"catalog\".\"EquipmentTypes\", \"catalog\".\"Categories\" CASCADE;");
+        TestMediaClient.Reset();
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -73,7 +78,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
     }
 
     private static string AdminToken => TestJwtHelper.GenerateToken(
-        sub: Guid.NewGuid().ToString(),
+        sub: CurrentAdminUserId,
         sid: Guid.NewGuid().ToString(),
         role: "adm");
 
@@ -130,7 +135,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
             code: "DRUM-001",
             name: "Bộ trống Jazz",
             description: "Bộ trống chất lượng cao",
-            categoryId: category.Id,
+            categoryIds: [category.Id],
             media: [new EquipmentTypeMediaItemDto(mediaId, 0, true)]
         );
 
@@ -143,8 +148,12 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
         Assert.Equal("DRUM-001", detail.Code);
         Assert.Equal("Bộ trống Jazz", detail.Name);
         Assert.Null(detail.PublishedAt);
-        Assert.Single(detail.MediaIds);
-        Assert.Equal(mediaId, detail.MediaIds[0]);
+        Assert.Single(detail.Categories);
+        Assert.Equal(category.Id, detail.Categories[0].Id);
+        Assert.Single(detail.Media);
+        Assert.Equal(mediaId, detail.Media[0].MediaId);
+        Assert.NotNull(detail.Media[0].Url);
+        Assert.Contains(mediaId.ToString("D"), detail.Media[0].Url);
     }
 
     [Fact]
@@ -157,7 +166,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
             {
                 "code": "KEY-001",
                 "name": "Keyboard Yamaha",
-                "categoryId": "{{category.Id}}",
+                "categoryIds": ["{{category.Id}}"],
                 "brand": "Yamaha",
                 "dailyPrice": 500000
             }
@@ -176,13 +185,13 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
 
         // Missing Category
-        var missingCatReq = new CreateEquipmentTypeRequest("EQ-MISSING", "Name", null, Guid.NewGuid(), null);
+        var missingCatReq = new CreateEquipmentTypeRequest("EQ-MISSING", "Name", null, [Guid.NewGuid()], null);
         var missingRes = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", missingCatReq);
         Assert.Equal(HttpStatusCode.BadRequest, missingRes.StatusCode);
 
         // Inactive Category
         Category inactiveCat = await CreateCategoryAsync("Inactive Cat", isActive: false);
-        var inactiveCatReq = new CreateEquipmentTypeRequest("EQ-INACTIVE", "Name", null, inactiveCat.Id, null);
+        var inactiveCatReq = new CreateEquipmentTypeRequest("EQ-INACTIVE", "Name", null, [inactiveCat.Id], null);
         var inactiveRes = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", inactiveCatReq);
         Assert.Equal(HttpStatusCode.BadRequest, inactiveRes.StatusCode);
     }
@@ -193,11 +202,11 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
         Category category = await CreateCategoryAsync("Monitors", isActive: true);
 
-        var req1 = new CreateEquipmentTypeRequest("MON-001", "Monitor A", null, category.Id, null);
+        var req1 = new CreateEquipmentTypeRequest("MON-001", "Monitor A", null, [category.Id], null);
         var res1 = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", req1);
         Assert.Equal(HttpStatusCode.Created, res1.StatusCode);
 
-        var req2 = new CreateEquipmentTypeRequest("MON-001", "Monitor B", null, category.Id, null);
+        var req2 = new CreateEquipmentTypeRequest("MON-001", "Monitor B", null, [category.Id], null);
         var res2 = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", req2);
         Assert.Equal(HttpStatusCode.Conflict, res2.StatusCode);
     }
@@ -241,7 +250,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
 
         var nullCatRes = await client.PatchAsync(
             $"/api/v1/catalog/equipment-types/{eq.Id}",
-            new StringContent("""{"categoryId": null}""", Encoding.UTF8, "application/json"));
+            new StringContent("""{"categoryIds": null}""", Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.BadRequest, nullCatRes.StatusCode);
     }
 
@@ -291,7 +300,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
         Assert.Equal(HttpStatusCode.OK, res1.StatusCode);
         var detail1 = await res1.Content.ReadFromJsonAsync<EquipmentTypeDetailDto>();
         Assert.NotNull(detail1);
-        Assert.Equal(2, detail1.MediaIds.Count);
+        Assert.Equal(2, detail1.Media.Count);
 
         // Xóa hết media bằng "media": []
         string patchEmptyMedia = """{"media": []}""";
@@ -301,8 +310,9 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
         Assert.Equal(HttpStatusCode.OK, res2.StatusCode);
         var detail2 = await res2.Content.ReadFromJsonAsync<EquipmentTypeDetailDto>();
         Assert.NotNull(detail2);
-        Assert.Empty(detail2.MediaIds);
+        Assert.Empty(detail2.Media);
     }
+
     [Fact]
     public async Task Create_WithNullMediaElement_Returns400InvalidMedia()
     {
@@ -313,7 +323,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
             {
                 "code": "VIO-001",
                 "name": "Violin Classic",
-                "categoryId": "{{category.Id}}",
+                "categoryIds": ["{{category.Id}}"],
                 "media": [null]
             }
             """;
@@ -354,7 +364,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
             {
                 "code": "FLU-001",
                 "name": "Flute Concert",
-                "categoryId": "{{category.Id}}",
+                "categoryIds": ["{{category.Id}}"],
                 "media": null
             }
             """;
@@ -395,10 +405,38 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
             {
                 "code": "TRU-001",
                 "name": "Trumpet",
-                "categoryId": "{{category.Id}}",
+                "categoryIds": ["{{category.Id}}"],
                 "media": [
                     { "mediaId": "00000000-0000-0000-0000-000000000000", "displayOrder": 0, "isThumbnail": true }
                 ]
+            }
+            """;
+
+        var response = await client.PostAsync(
+            "/api/v1/catalog/equipment-types",
+            new StringContent(json, Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("EquipmentType.InvalidMedia", problem.GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task Create_WithMoreThanMaxMediaCount_Returns400InvalidMedia()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+        Category category = await CreateCategoryAsync("Strings", isActive: true);
+        string media = string.Join(
+            ",",
+            Enumerable.Range(0, 21).Select(index =>
+                $$"""{ "mediaId": "{{Guid.NewGuid()}}", "displayOrder": {{index}}, "isThumbnail": false }"""));
+
+        string json = $$"""
+            {
+                "code": "STR-021",
+                "name": "Violin",
+                "categoryIds": ["{{category.Id}}"],
+                "media": [{{media}}]
             }
             """;
 
@@ -422,7 +460,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
             {
                 "code": "HRN-001",
                 "name": "French Horn",
-                "categoryId": "{{category.Id}}",
+                "categoryIds": ["{{category.Id}}"],
                 "media": [
                     { "mediaId": "{{sharedMedia}}", "displayOrder": 0, "isThumbnail": true },
                     { "mediaId": "{{sharedMedia}}", "displayOrder": 1, "isThumbnail": false }
@@ -449,7 +487,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
             {
                 "code": "TUB-001",
                 "name": "Tuba",
-                "categoryId": "{{category.Id}}",
+                "categoryIds": ["{{category.Id}}"],
                 "media": [
                     { "mediaId": "{{Guid.NewGuid()}}", "displayOrder": -1, "isThumbnail": true }
                 ]
@@ -475,7 +513,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
             {
                 "code": "OBO-001",
                 "name": "Oboe",
-                "categoryId": "{{category.Id}}",
+                "categoryIds": ["{{category.Id}}"],
                 "media": [
                     { "mediaId": "{{Guid.NewGuid()}}", "displayOrder": 0, "isThumbnail": true },
                     { "mediaId": "{{Guid.NewGuid()}}", "displayOrder": 1, "isThumbnail": true }
@@ -503,7 +541,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
             {
                 "code": "HRP-001",
                 "name": "Concert Harp",
-                "categoryId": "{{category.Id}}",
+                "categoryIds": ["{{category.Id}}"],
                 "media": [
                     { "mediaId": "{{Guid.NewGuid()}}", "displayOrder": 0, "isThumbnail": true, "extraNested": "notAllowed" }
                 ]
@@ -541,7 +579,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
             {
                 "code": "UKU-001",
                 "name": "Ukulele Soprano",
-                "categoryId": "{{category.Id}}"
+                "categoryIds": ["{{category.Id}}"]
             }
             """;
 
@@ -552,7 +590,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var detail = await response.Content.ReadFromJsonAsync<EquipmentTypeDetailDto>();
         Assert.NotNull(detail);
-        Assert.Empty(detail.MediaIds);
+        Assert.Empty(detail.Media);
     }
 
     [Fact]
@@ -601,7 +639,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
         var detailDis = await disPubRes.Content.ReadFromJsonAsync<EquipmentTypeDetailDto>();
         Assert.NotNull(detailDis);
         Assert.Equal(EquipmentTypeStatus.Disabled, detailDis.Status);
-        Assert.NotNull(detailDis.PublishedAt); // PublishedAt được giữ lại!
+        Assert.NotNull(detailDis.PublishedAt);
 
         // 3. Disable khi đã Disabled -> 409 Conflict
         var disAgainRes = await client.PostAsync($"/api/v1/catalog/equipment-types/{draft.Id}/disable", null);
@@ -617,6 +655,399 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
 
         var disInactiveCatRes = await client.PostAsync($"/api/v1/catalog/equipment-types/{pub2.Id}/disable", null);
         Assert.Equal(HttpStatusCode.OK, disInactiveCatRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task Create_WithMismatchedUploader_Returns403Forbidden()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+        Category category = await CreateCategoryAsync("Percussion", isActive: true);
+
+        Guid mediaId = Guid.NewGuid();
+        TestMediaClient.ForcedUploaderUserId = "different-user-999";
+
+        var request = new CreateEquipmentTypeRequest(
+            code: "PERC-001",
+            name: "Percussion",
+            description: "High quality",
+            categoryIds: [category.Id],
+            media: [new EquipmentTypeMediaItemDto(mediaId, 0, true)]
+        );
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", request);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+
+        // Đảm bảo không lưu vào database
+        bool exists = await dbContext.EquipmentTypes.AnyAsync(e => e.Code == "PERC-001");
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public async Task Create_WithMediaNotReady_Returns400BadRequest()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+        Category category = await CreateCategoryAsync("Violas", isActive: true);
+
+        Guid mediaId = Guid.NewGuid();
+        TestMediaClient.VerifyOverride = (id, ct) => Task.FromResult(Result.Success(new MediaVerificationDto(
+            id, "PendingUpload", CurrentAdminUserId, "pic.jpg", "image/jpeg", 100, DateTimeOffset.UtcNow)));
+
+        var request = new CreateEquipmentTypeRequest(
+            code: "VLA-001",
+            name: "Viola",
+            description: null,
+            categoryIds: [category.Id],
+            media: [new EquipmentTypeMediaItemDto(mediaId, 0, true)]
+        );
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", request);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        bool exists = await dbContext.EquipmentTypes.AnyAsync(e => e.Code == "VLA-001");
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public async Task Create_WithInvalidMime_Returns400BadRequest()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+        Category category = await CreateCategoryAsync("Basses", isActive: true);
+
+        Guid mediaId = Guid.NewGuid();
+        TestMediaClient.VerifyOverride = (id, ct) => Task.FromResult(Result.Success(new MediaVerificationDto(
+            id, "Ready", CurrentAdminUserId, "doc.pdf", "application/pdf", 100, DateTimeOffset.UtcNow)));
+
+        var request = new CreateEquipmentTypeRequest(
+            code: "BAS-001",
+            name: "Bass",
+            description: null,
+            categoryIds: [category.Id],
+            media: [new EquipmentTypeMediaItemDto(mediaId, 0, true)]
+        );
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", request);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        bool exists = await dbContext.EquipmentTypes.AnyAsync(e => e.Code == "BAS-001");
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public async Task Create_WhenMediaServiceUnavailable_Returns503()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+        Category category = await CreateCategoryAsync("Flutes 2", isActive: true);
+
+        Guid mediaId = Guid.NewGuid();
+        TestMediaClient.VerifyOverride = (id, ct) => Task.FromResult(Result.Failure<MediaVerificationDto>(
+            Error.Unavailable(CatalogErrorCode.Media.ServiceUnavailable, "MediaService is down.")));
+
+        var request = new CreateEquipmentTypeRequest(
+            code: "FLU-002",
+            name: "Flute 2",
+            description: null,
+            categoryIds: [category.Id],
+            media: [new EquipmentTypeMediaItemDto(mediaId, 0, true)]
+        );
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", request);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+
+        bool exists = await dbContext.EquipmentTypes.AnyAsync(e => e.Code == "FLU-002");
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public async Task Create_WhenVisibilityFails_Returns503_AndDoesNotSaveEquipment()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+        Category category = await CreateCategoryAsync("Organs", isActive: true);
+
+        Guid mediaId = Guid.NewGuid();
+        TestMediaClient.VisibilityOverride = (id, vis, ct) => Task.FromResult(Result.Failure(
+            Error.Unavailable(CatalogErrorCode.Media.ServiceUnavailable, "Visibility error.")));
+
+        var request = new CreateEquipmentTypeRequest(
+            code: "ORG-001",
+            name: "Pipe Organ",
+            description: null,
+            categoryIds: [category.Id],
+            media: [new EquipmentTypeMediaItemDto(mediaId, 0, true)]
+        );
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", request);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+
+        bool exists = await dbContext.EquipmentTypes.AnyAsync(e => e.Code == "ORG-001");
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public async Task Patch_CategoryIds_ReplacesFullList_AndRejectsEmptyOrNull()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+        Category cat1 = await CreateCategoryAsync("Cat 1", isActive: true);
+        Category cat2 = await CreateCategoryAsync("Cat 2", isActive: true);
+        Category cat3 = await CreateCategoryAsync("Cat 3", isActive: true);
+
+        EquipmentType eq = await CreateEquipmentTypeAsync("MULT-001", "Multi Cat Item", cat1.Id);
+
+        // Thay toàn bộ danh sách thành [cat2, cat3]
+        string patchValid = $$"""
+            {
+                "categoryIds": ["{{cat2.Id}}", "{{cat3.Id}}"]
+            }
+            """;
+        var res1 = await client.PatchAsync(
+            $"/api/v1/catalog/equipment-types/{eq.Id}",
+            new StringContent(patchValid, Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.OK, res1.StatusCode);
+        var detail1 = await res1.Content.ReadFromJsonAsync<EquipmentTypeDetailDto>();
+        Assert.NotNull(detail1);
+        Assert.Equal(2, detail1.Categories.Count);
+        Assert.Contains(detail1.Categories, c => c.Id == cat2.Id);
+        Assert.Contains(detail1.Categories, c => c.Id == cat3.Id);
+        Assert.DoesNotContain(detail1.Categories, c => c.Id == cat1.Id);
+
+        // Gửi [] bị từ chối 400
+        string patchEmpty = """{"categoryIds": []}""";
+        var resEmpty = await client.PatchAsync(
+            $"/api/v1/catalog/equipment-types/{eq.Id}",
+            new StringContent(patchEmpty, Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, resEmpty.StatusCode);
+
+        // Gửi null bị từ chối 400
+        string patchNull = """{"categoryIds": null}""";
+        var resNull = await client.PatchAsync(
+            $"/api/v1/catalog/equipment-types/{eq.Id}",
+            new StringContent(patchNull, Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, resNull.StatusCode);
+    }
+
+    [Fact]
+    public async Task Patch_CategoryIds_PreservesExistingInactiveCategory_AndRejectsNewInactiveCategory()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+        Category existingCat = await CreateCategoryAsync("Old Cat", isActive: true);
+        Category newActiveCat = await CreateCategoryAsync("New Active Cat", isActive: true);
+        Category newInactiveCat = await CreateCategoryAsync("New Inactive Cat", isActive: false);
+
+        EquipmentType eq = await CreateEquipmentTypeAsync("INACT-001", "Inactive test", existingCat.Id);
+
+        // Biến existingCat thành inactive
+        existingCat.IsActive = false;
+        await dbContext.SaveChangesAsync();
+
+        // PATCH giữ existingCat (đang inactive) và thêm newActiveCat -> HỢP LỆ!
+        string patchKeepExistingInactive = $$"""
+            {
+                "categoryIds": ["{{existingCat.Id}}", "{{newActiveCat.Id}}"]
+            }
+            """;
+        var resOk = await client.PatchAsync(
+            $"/api/v1/catalog/equipment-types/{eq.Id}",
+            new StringContent(patchKeepExistingInactive, Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, resOk.StatusCode);
+
+        // PATCH thêm newInactiveCat (chưa từng gắn) -> BỊ TỪ CHỐI 400!
+        string patchNewInactive = $$"""
+            {
+                "categoryIds": ["{{existingCat.Id}}", "{{newInactiveCat.Id}}"]
+            }
+            """;
+        var resReject = await client.PatchAsync(
+            $"/api/v1/catalog/equipment-types/{eq.Id}",
+            new StringContent(patchNewInactive, Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, resReject.StatusCode);
+    }
+
+    [Fact]
+    public async Task Category_CreateAndPatch_ImageMedia_AndUrlResolution()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+
+        Guid imgId1 = Guid.NewGuid();
+        var createCatReq = new CreateCategoryRequest("Guitars with image", "Description", imgId1);
+        var createRes = await client.PostAsJsonAsync("/api/v1/catalog/categories", createCatReq);
+        Assert.Equal(HttpStatusCode.Created, createRes.StatusCode);
+
+        var catDetail = await createRes.Content.ReadFromJsonAsync<CategoryDetailResponse>();
+        Assert.NotNull(catDetail);
+        Assert.Equal(imgId1, catDetail.ImageMediaId);
+        Assert.NotNull(catDetail.ImageUrl);
+        Assert.Contains(imgId1.ToString("D"), catDetail.ImageUrl);
+
+        // PATCH gỡ ảnh bằng "imageMediaId": null
+        string patchRemoveImg = """{"imageMediaId": null}""";
+        var patchRes1 = await client.PatchAsync(
+            $"/api/v1/catalog/categories/{catDetail.Id}",
+            new StringContent(patchRemoveImg, Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, patchRes1.StatusCode);
+        var catDetailAfterRemove = await patchRes1.Content.ReadFromJsonAsync<CategoryDetailResponse>();
+        Assert.NotNull(catDetailAfterRemove);
+        Assert.Null(catDetailAfterRemove.ImageMediaId);
+        Assert.Null(catDetailAfterRemove.ImageUrl);
+
+        // PATCH gắn ảnh mới
+        Guid imgId2 = Guid.NewGuid();
+        string patchNewImg = $$"""{"imageMediaId": "{{imgId2}}"}""";
+        var patchRes2 = await client.PatchAsync(
+            $"/api/v1/catalog/categories/{catDetail.Id}",
+            new StringContent(patchNewImg, Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, patchRes2.StatusCode);
+        var catDetailAfterNew = await patchRes2.Content.ReadFromJsonAsync<CategoryDetailResponse>();
+        Assert.NotNull(catDetailAfterNew);
+        Assert.Equal(imgId2, catDetailAfterNew.ImageMediaId);
+        Assert.NotNull(catDetailAfterNew.ImageUrl);
+        Assert.Contains(imgId2.ToString("D"), catDetailAfterNew.ImageUrl);
+
+        // PATCH rỗng GUID bị từ chối
+        string patchEmptyGuid = """{"imageMediaId": "00000000-0000-0000-0000-000000000000"}""";
+        var patchResEmpty = await client.PatchAsync(
+            $"/api/v1/catalog/categories/{catDetail.Id}",
+            new StringContent(patchEmptyGuid, Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, patchResEmpty.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetEndpoints_Succeed_WhenMediaServiceIsDown()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+        Category category = await CreateCategoryAsync("Public Get Cat", isActive: true);
+        EquipmentType eq = await CreateEquipmentTypeAsync("PUB-001", "Public Item", category.Id, description: "Desc");
+        eq.Publish(DateTime.UtcNow);
+        await dbContext.SaveChangesAsync();
+
+        // Cấu hình mock MediaService ném lỗi hoặc down
+        TestMediaClient.VerifyOverride = (id, ct) => Task.FromResult(Result.Failure<MediaVerificationDto>(
+            Error.Unavailable(CatalogErrorCode.Media.ServiceUnavailable, "Service is down.")));
+
+        // GET public listing vẫn thành công 200 OK mà không gọi MediaService
+        using HttpClient anonymousClient = factory.CreateClient();
+        var listRes = await anonymousClient.GetAsync("/api/v1/catalog/equipment-types");
+        Assert.Equal(HttpStatusCode.OK, listRes.StatusCode);
+
+        // GET public detail vẫn thành công 200 OK
+        var detailRes = await anonymousClient.GetAsync($"/api/v1/catalog/equipment-types/{eq.Id}");
+        Assert.Equal(HttpStatusCode.OK, detailRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task Create_WhenApiKeyRejected_Returns503_AndDoesNotSaveCatalog()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+        Category category = await CreateCategoryAsync("ApiKey Test Cat", isActive: true);
+
+        Guid mediaId = Guid.NewGuid();
+        TestMediaClient.VerifyOverride = (id, ct) => Task.FromResult(Result.Failure<MediaVerificationDto>(
+            Error.Unavailable(CatalogErrorCode.Media.ServiceUnavailable, "Khóa API nội bộ của MediaService bị từ chối.")));
+
+        var request = new CreateEquipmentTypeRequest(
+            code: "KEY-ERR-001",
+            name: "Key Error Item",
+            description: null,
+            categoryIds: [category.Id],
+            media: [new EquipmentTypeMediaItemDto(mediaId, 0, true)]
+        );
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", request);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+
+        bool exists = await dbContext.EquipmentTypes.AnyAsync(e => e.Code == "KEY-ERR-001");
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public async Task Create_WhenTimeout_Returns503_AndDoesNotSaveCatalog()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+        Category category = await CreateCategoryAsync("Timeout Test Cat", isActive: true);
+
+        Guid mediaId = Guid.NewGuid();
+        TestMediaClient.VerifyOverride = (id, ct) => Task.FromResult(Result.Failure<MediaVerificationDto>(
+            Error.Unavailable(CatalogErrorCode.Media.ServiceUnavailable, "Hết thời gian chờ phản hồi từ MediaService.")));
+
+        var request = new CreateEquipmentTypeRequest(
+            code: "TO-ERR-001",
+            name: "Timeout Error Item",
+            description: null,
+            categoryIds: [category.Id],
+            media: [new EquipmentTypeMediaItemDto(mediaId, 0, true)]
+        );
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", request);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+
+        bool exists = await dbContext.EquipmentTypes.AnyAsync(e => e.Code == "TO-ERR-001");
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public async Task Create_WhenVisibilityFailsMidList_Returns503_AndDoesNotSaveCatalog()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+        Category category = await CreateCategoryAsync("MidList Visibility Cat", isActive: true);
+
+        Guid m1 = Guid.NewGuid();
+        Guid m2 = Guid.NewGuid();
+
+        // Verify succeeds for both, but Visibility fails on the 2nd
+        TestMediaClient.VisibilityOverride = (id, vis, ct) =>
+        {
+            if (id == m2)
+            {
+                return Task.FromResult(Result.Failure(Error.Unavailable(CatalogErrorCode.Media.ServiceUnavailable, "Visibility 2 failed")));
+            }
+            return Task.FromResult(Result.Success());
+        };
+
+        var request = new CreateEquipmentTypeRequest(
+            code: "MID-ERR-001",
+            name: "Mid Visibility Error Item",
+            description: null,
+            categoryIds: [category.Id],
+            media: [
+                new EquipmentTypeMediaItemDto(m1, 0, true),
+                new EquipmentTypeMediaItemDto(m2, 1, false)
+            ]
+        );
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", request);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+
+        // Catalog changes MUST NOT be saved
+        bool exists = await dbContext.EquipmentTypes.AnyAsync(e => e.Code == "MID-ERR-001");
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public async Task Create_WhenDatabaseFailsAfterPublic_DoesNotRollbackMediaPublicStatus()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+        Category category = await CreateCategoryAsync("DB Fail Cat", isActive: true);
+
+        // Pre-create an item with same code to trigger DB duplicate code failure
+        await CreateEquipmentTypeAsync("DUP-DB-001", "Existing Item", category.Id);
+
+        Guid mediaId = Guid.NewGuid();
+        var publicCalls = new List<(Guid Id, string Vis)>();
+        TestMediaClient.VisibilityOverride = (id, vis, ct) =>
+        {
+            publicCalls.Add((id, vis));
+            return Task.FromResult(Result.Success());
+        };
+
+        var request = new CreateEquipmentTypeRequest(
+            code: "DUP-DB-001",
+            name: "Conflict Item",
+            description: null,
+            categoryIds: [category.Id],
+            media: [new EquipmentTypeMediaItemDto(mediaId, 0, true)]
+        );
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", request);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
     private async Task<Category> CreateCategoryAsync(string name, bool isActive = true)
@@ -640,17 +1071,59 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
         Guid categoryId,
         string? description = null)
     {
+        var category = await dbContext.Categories.FindAsync(categoryId);
         EquipmentType eq = new()
         {
             Id = Guid.NewGuid(),
             Code = code,
             Name = name,
             Description = description,
-            CategoryId = categoryId,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            Categories = category != null ? [category] : []
         };
         dbContext.EquipmentTypes.Add(eq);
         await dbContext.SaveChangesAsync();
         return eq;
+    }
+
+    public sealed class TestMediaServiceClient : IMediaServiceClient
+    {
+        public Func<Guid, CancellationToken, Task<Result<MediaVerificationDto>>>? VerifyOverride { get; set; }
+        public Func<Guid, string, CancellationToken, Task<Result>>? VisibilityOverride { get; set; }
+        public string? ForcedUploaderUserId { get; set; }
+
+        public void Reset()
+        {
+            VerifyOverride = null;
+            VisibilityOverride = null;
+            ForcedUploaderUserId = null;
+        }
+
+        public async Task<Result<MediaVerificationDto>> VerifyMediaAsync(Guid mediaId, CancellationToken cancellationToken = default)
+        {
+            if (VerifyOverride != null)
+            {
+                return await VerifyOverride(mediaId, cancellationToken);
+            }
+
+            return Result.Success(new MediaVerificationDto(
+                mediaId,
+                "Ready",
+                ForcedUploaderUserId ?? CurrentAdminUserId,
+                "photo.jpg",
+                "image/jpeg",
+                1024,
+                DateTimeOffset.UtcNow));
+        }
+
+        public async Task<Result> SetVisibilityAsync(Guid mediaId, string visibility, CancellationToken cancellationToken = default)
+        {
+            if (VisibilityOverride != null)
+            {
+                return await VisibilityOverride(mediaId, visibility, cancellationToken);
+            }
+
+            return Result.Success();
+        }
     }
 }

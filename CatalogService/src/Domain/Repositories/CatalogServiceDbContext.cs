@@ -68,9 +68,6 @@ public sealed class CatalogServiceDbContext : DbContext
                 .IsUnique()
                 .HasDatabaseName("IX_EquipmentTypes_Code");
 
-            entity.HasIndex(e => e.CategoryId)
-                .HasDatabaseName("IX_EquipmentTypes_CategoryId");
-
             entity.HasIndex(e => e.Status)
                 .HasDatabaseName("IX_EquipmentTypes_Status");
 
@@ -80,11 +77,26 @@ public sealed class CatalogServiceDbContext : DbContext
             entity.HasIndex(e => e.PublishedAt)
                 .HasDatabaseName("IX_EquipmentTypes_PublishedAt");
 
-            entity.HasOne(e => e.Category)
+            entity.HasMany(e => e.Categories)
                 .WithMany(c => c.EquipmentTypes)
-                .HasForeignKey(e => e.CategoryId)
-                .OnDelete(DeleteBehavior.Restrict)
-                .HasConstraintName("FK_EquipmentTypes_Categories_CategoryId");
+                .UsingEntity<Dictionary<string, object>>(
+                    "EquipmentTypeCategories",
+                    j => j.HasOne<Category>()
+                          .WithMany()
+                          .HasForeignKey("CategoryId")
+                          .OnDelete(DeleteBehavior.Restrict)
+                          .HasConstraintName("FK_EquipmentTypeCategories_Categories_CategoryId"),
+                    j => j.HasOne<EquipmentType>()
+                          .WithMany()
+                          .HasForeignKey("EquipmentTypeId")
+                          .OnDelete(DeleteBehavior.Cascade)
+                          .HasConstraintName("FK_EquipmentTypeCategories_EquipmentTypes_EquipmentTypeId"),
+                    j =>
+                    {
+                        j.ToTable("EquipmentTypeCategories", SchemaName);
+                        j.HasKey("EquipmentTypeId", "CategoryId").HasName("PK_EquipmentTypeCategories");
+                        j.HasIndex("CategoryId").HasDatabaseName("IX_EquipmentTypeCategories_CategoryId");
+                    });
 
             entity.HasMany(e => e.Media)
                 .WithOne(m => m.EquipmentType)

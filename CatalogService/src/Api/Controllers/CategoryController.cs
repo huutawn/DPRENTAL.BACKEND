@@ -27,7 +27,7 @@ public class CategoryController : ControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> CreateCategory([FromBody] CreateCategoryRequest request, CancellationToken cancellationToken)
     {
-        Result<CategoryDetailResponse> result = await _categoryService.CreateCategoryAsync(request, cancellationToken);
+        Result<CategoryDetailResponse> result = await _categoryService.CreateCategoryAsync(request, GetOperatorUserId(), cancellationToken);
 
         // Trả về mã 201 Created cùng với data của danh mục vừa tạo
         return result.IsFailure ? this.ToProblem(result.Error) : StatusCode(StatusCodes.Status201Created, result.Value);
@@ -45,7 +45,7 @@ public class CategoryController : ControllerBase
         [FromBody] UpdateCategoryRequest request,
         CancellationToken cancellationToken)
     {
-        Result<CategoryDetailResponse> result = await _categoryService.UpdateCategoryAsync(id, request, cancellationToken);
+        Result<CategoryDetailResponse> result = await _categoryService.UpdateCategoryAsync(id, request, GetOperatorUserId(), cancellationToken);
 
         // Trả về mã 200 OK cùng với data đã được cập nhật
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
@@ -71,4 +71,9 @@ public class CategoryController : ControllerBase
         Result<CategoryDetailResponse> result = await _categoryService.GetActiveCategoryByIdAsync(id, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
+
+    private string GetOperatorUserId() =>
+        User.FindFirst("sub")?.Value
+        ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+        ?? string.Empty;
 }

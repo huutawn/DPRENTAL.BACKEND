@@ -22,13 +22,12 @@ public static class CatalogErrorCode
         public const string CategoryNotFound = "EquipmentType.CategoryNotFound";
         public const string CategoryInactive = "EquipmentType.CategoryInactive";
         public const string InvalidMedia = "EquipmentType.InvalidMedia";
-        public const string MediaNotFound = "EquipmentType.MediaNotFound";
-        public const string MediaNotReady = "EquipmentType.MediaNotReady";
         public const string InvalidPayload = "EquipmentType.InvalidPayload";
         public const string InvalidCode = "EquipmentType.InvalidCode";
         public const string InvalidName = "EquipmentType.InvalidName";
         public const string InvalidDescription = "EquipmentType.InvalidDescription";
         public const string InvalidCategory = "EquipmentType.InvalidCategory";
+        public const string InvalidCategories = "EquipmentType.InvalidCategories";
     }
 
     public static class Category
@@ -37,6 +36,15 @@ public static class CatalogErrorCode
         public const string InvalidName = "Category.InvalidName";
         public const string InvalidDescription = "Category.InvalidDescription";
     }
+    public static class Media
+    {
+        public const string NotFound = "Media.NotFound";
+        public const string NotReady = "Media.NotReady";
+        public const string InvalidContentType = "Media.InvalidContentType";
+        public const string Forbidden = "Media.Forbidden";
+        public const string ServiceUnavailable = "Media.ServiceUnavailable";
+    }
+
 
     public static class Catalog
     {
@@ -44,6 +52,5 @@ public static class CatalogErrorCode
         public const string InvalidRequest = "Catalog.InvalidRequest";
         public const string Unauthorized = "Catalog.Unauthorized";
         public const string Forbidden = "Catalog.Forbidden";
-        public const string MediaServiceUnavailable = "Catalog.MediaServiceUnavailable";
     }
 }

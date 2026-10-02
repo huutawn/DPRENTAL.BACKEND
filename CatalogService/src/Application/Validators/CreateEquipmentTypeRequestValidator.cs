@@ -29,7 +29,7 @@ public sealed class CreateEquipmentTypeRequestValidator
             return descResult;
         }
 
-        var catResult = EquipmentTypeValidationRules.ValidateCategoryId(request.CategoryId);
+        var catResult = EquipmentTypeValidationRules.ValidateCategoryIds(request.CategoryIds);
         if (catResult.IsFailure)
         {
             return catResult;

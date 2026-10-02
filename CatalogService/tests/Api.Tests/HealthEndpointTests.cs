@@ -56,8 +56,6 @@ public sealed class HealthEndpointTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "");
-                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
-                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -72,8 +70,6 @@ public sealed class HealthEndpointTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
-                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
-                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);

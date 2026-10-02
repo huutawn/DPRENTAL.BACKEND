@@ -34,6 +34,9 @@ namespace CatalogService.Domain.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<Guid?>("ImageMediaId")
+                        .HasColumnType("uuid");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
@@ -61,9 +64,6 @@ namespace CatalogService.Domain.Migrations
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentType", b =>
                 {
                     b.Property<Guid>("Id")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("CategoryId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Code")
@@ -101,9 +101,6 @@ namespace CatalogService.Domain.Migrations
                         .HasColumnName("xmin");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("CategoryId")
-                        .HasDatabaseName("IX_EquipmentTypes_CategoryId");
 
                     b.HasIndex("Code")
                         .IsUnique()
@@ -155,16 +152,21 @@ namespace CatalogService.Domain.Migrations
                     b.ToTable("EquipmentTypeMedia", "catalog");
                 });
 
-            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentType", b =>
+            modelBuilder.Entity("EquipmentTypeCategories", b =>
                 {
-                    b.HasOne("Dprental.CatalogService.Domain.Entities.Category", "Category")
-                        .WithMany("EquipmentTypes")
-                        .HasForeignKey("CategoryId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("FK_EquipmentTypes_Categories_CategoryId");
+                    b.Property<Guid>("EquipmentTypeId")
+                        .HasColumnType("uuid");
 
-                    b.Navigation("Category");
+                    b.Property<Guid>("CategoryId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("EquipmentTypeId", "CategoryId")
+                        .HasName("PK_EquipmentTypeCategories");
+
+                    b.HasIndex("CategoryId")
+                        .HasDatabaseName("IX_EquipmentTypeCategories_CategoryId");
+
+                    b.ToTable("EquipmentTypeCategories", "catalog");
                 });
 
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentTypeMedia", b =>
@@ -179,9 +181,21 @@ namespace CatalogService.Domain.Migrations
                     b.Navigation("EquipmentType");
                 });
 
-            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.Category", b =>
+            modelBuilder.Entity("EquipmentTypeCategories", b =>
                 {
-                    b.Navigation("EquipmentTypes");
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.Category", null)
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_EquipmentTypeCategories_Categories_CategoryId");
+
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.EquipmentType", null)
+                        .WithMany()
+                        .HasForeignKey("EquipmentTypeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_EquipmentTypeCategories_EquipmentTypes_EquipmentTypeId");
                 });
 
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentType", b =>

@@ -78,8 +78,6 @@ public sealed class PublicCatalogEndpointTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
-                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
-                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -103,8 +101,9 @@ public sealed class PublicCatalogEndpointTests
                 "CAM-001",
                 "Máy quay Sony FX3",
                 "Mô tả máy quay",
-                new CategoryDto(Guid.NewGuid(), "Camera"),
-                Guid.NewGuid());
+                [new CategoryDto(Guid.NewGuid(), "Camera", null, null)],
+                Guid.NewGuid(),
+                null);
 
             var result = new PagedResult<EquipmentTypeListItemDto>([item], request.Page, request.PageSize, 1);
             return Task.FromResult(result);
@@ -119,6 +118,7 @@ public sealed class PublicCatalogEndpointTests
                 return Task.FromResult<EquipmentTypeDetailDto?>(null);
             }
 
+            var mediaId = Guid.NewGuid();
             var detail = new EquipmentTypeDetailDto(
                 PublishedEquipmentTypeId,
                 "CAM-001",
@@ -128,9 +128,8 @@ public sealed class PublicCatalogEndpointTests
                 DateTime.UtcNow,
                 null,
                 DateTime.UtcNow,
-                new CategoryDto(Guid.NewGuid(), "Camera"),
-                [Guid.NewGuid()],
-                null);
+                [new CategoryDto(Guid.NewGuid(), "Camera", null, null)],
+                [new EquipmentTypeMediaResponseDto(mediaId, null, 0, true)]);
 
             return Task.FromResult<EquipmentTypeDetailDto?>(detail);
         }

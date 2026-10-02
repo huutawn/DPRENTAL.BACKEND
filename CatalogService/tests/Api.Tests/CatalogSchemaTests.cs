@@ -22,6 +22,7 @@ public sealed class CatalogSchemaTests
         Assert.Equal("Categories", Entity<Category>(model).GetTableName());
         Assert.Equal("EquipmentTypes", Entity<EquipmentType>(model).GetTableName());
         Assert.Equal("EquipmentTypeMedia", Entity<EquipmentTypeMedia>(model).GetTableName());
+        Assert.Equal("EquipmentTypeCategories", model.FindEntityType("EquipmentTypeCategories")?.GetTableName());
     }
 
     [Fact]
@@ -44,13 +45,20 @@ public sealed class CatalogSchemaTests
 
     [Theory]
     [InlineData(nameof(EquipmentType.Status))]
-    [InlineData(nameof(EquipmentType.CategoryId))]
     [InlineData(nameof(EquipmentType.CreatedAt))]
     [InlineData(nameof(EquipmentType.PublishedAt))]
     public void EquipmentType_HasIndexOn(string propertyName)
     {
         IIndex index = SingleIndex(Entity<EquipmentType>(BuildModel()), propertyName);
 
+        Assert.False(index.IsUnique);
+    }
+
+    [Fact]
+    public void EquipmentTypeCategories_HasIndexOnCategoryId()
+    {
+        IEntityType joinEntity = BuildModel().FindEntityType("EquipmentTypeCategories")!;
+        IIndex index = SingleIndex(joinEntity, "CategoryId");
         Assert.False(index.IsUnique);
     }
 
@@ -96,12 +104,14 @@ public sealed class CatalogSchemaTests
     }
 
     [Fact]
-    public void EquipmentType_ReferencesCategory_WithoutCascadeDelete()
+    public void EquipmentTypeCategories_ConfiguresForeignKeysCorrectly()
     {
-        IForeignKey foreignKey = Assert.Single(Entity<EquipmentType>(BuildModel()).GetForeignKeys());
+        IEntityType joinEntity = BuildModel().FindEntityType("EquipmentTypeCategories")!;
+        IForeignKey categoryFk = Assert.Single(joinEntity.GetForeignKeys(), fk => fk.PrincipalEntityType.ClrType == typeof(Category));
+        Assert.Equal(DeleteBehavior.Restrict, categoryFk.DeleteBehavior);
 
-        Assert.Equal(typeof(Category), foreignKey.PrincipalEntityType.ClrType);
-        Assert.Equal(DeleteBehavior.Restrict, foreignKey.DeleteBehavior);
+        IForeignKey equipmentFk = Assert.Single(joinEntity.GetForeignKeys(), fk => fk.PrincipalEntityType.ClrType == typeof(EquipmentType));
+        Assert.Equal(DeleteBehavior.Cascade, equipmentFk.DeleteBehavior);
     }
 
     [Fact]
@@ -134,7 +144,7 @@ public sealed class CatalogSchemaTests
         Assert.False(context.Database.HasPendingModelChanges());
         Assert.Contains(
             context.GetService<IMigrationsAssembly>().Migrations.Keys,
-            id => id.EndsWith("_RefactorEquipmentToEquipmentType", StringComparison.Ordinal));
+            id => id.EndsWith("_AddCategoryImagesAndEquipmentTypeCategories", StringComparison.Ordinal));
     }
 
     private static IEntityType Entity<TEntity>(IModel model) => model.FindEntityType(typeof(TEntity))!;

@@ -28,8 +28,8 @@ public sealed class ErrorBoundaryTests
     [InlineData(ErrorType.Forbidden, StatusCodes.Status403Forbidden)]
     [InlineData(ErrorType.NotFound, StatusCodes.Status404NotFound)]
     [InlineData(ErrorType.Conflict, StatusCodes.Status409Conflict)]
-    [InlineData(ErrorType.Unavailable, StatusCodes.Status503ServiceUnavailable)]
     [InlineData(ErrorType.Failure, StatusCodes.Status500InternalServerError)]
+    [InlineData(ErrorType.Unavailable, StatusCodes.Status503ServiceUnavailable)]
     public void ExpectedErrorFilterExtensions_MapsAllErrorTypesCorrectly(ErrorType errorType, int expectedStatusCode)
     {
         var controller = new DummyController();
@@ -113,8 +113,6 @@ public sealed class ErrorBoundaryTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
-                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
-                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
