@@ -7,7 +7,6 @@ namespace Dprental.InventoryService.Application.Security;
 public static class InventoryAccessEvaluator
 {
     public const string PermissionAssetManage = "inventory.asset.manage";
-    public const string PermissionCalendarRead = "inventory.calendar.read";
     public const string ScopeAllocationWrite = "inventory.allocation.write";
     public const string ScopeCalendarRead = "inventory.calendar.read";
 
@@ -41,17 +40,23 @@ public static class InventoryAccessEvaluator
     }
 
     /// <summary>
-    /// Kiểm tra quyền xem chi tiết lịch của tài sản (Calendar detail):
-    /// - Human có permission inventory.calendar.read và sở hữu tài sản (assetOwnerUserId == sub).
-    /// - Human Admin (r=adm) được phép xuyên user.
-    /// - Service bị từ chối.
-    /// - Thiếu assetOwnerUserId phải fail closed.
+    /// Kiểm tra quyền truy cập lịch của tài sản (Calendar access cho đọc/tạo/xóa block theo DPR-149):
+    /// - Chỉ Human có JWT sub == asset.OwnerUserId được phép.
+    /// - Không yêu cầu permission 'p'.
+    /// - Admin không được bypass ownership.
+    /// - Service principal bị từ chối.
+    /// - Thiếu caller.UserId hoặc assetOwnerUserId phải fail closed.
     /// </summary>
-    public static bool CanReadCalendarDetail(IInventoryCallerContext caller, Guid? assetOwnerUserId)
+    public static bool CanAccessCalendar(IInventoryCallerContext caller, Guid? assetOwnerUserId)
     {
         ArgumentNullException.ThrowIfNull(caller);
 
         if (!caller.IsAuthenticated || caller.IsService)
+        {
+            return false;
+        }
+
+        if (caller.UserId is null || caller.UserId == Guid.Empty)
         {
             return false;
         }
@@ -61,12 +66,7 @@ public static class InventoryAccessEvaluator
             return false;
         }
 
-        if (caller.IsAdmin)
-        {
-            return true;
-        }
-
-        return caller.Permissions.Contains(PermissionCalendarRead) && caller.UserId == assetOwnerUserId;
+        return caller.UserId == assetOwnerUserId;
     }
 
     /// <summary>

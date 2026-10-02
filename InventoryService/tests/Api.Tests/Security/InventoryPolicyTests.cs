@@ -35,7 +35,7 @@ public sealed class InventoryPolicyTests
         foreach (Guid? owner in new Guid?[] { null, Guid.Empty })
         {
             Assert.False(Dprental.InventoryService.Application.Security.InventoryAccessEvaluator.CanManageAsset(caller, owner));
-            Assert.False(Dprental.InventoryService.Application.Security.InventoryAccessEvaluator.CanReadCalendarDetail(caller, owner));
+            Assert.False(Dprental.InventoryService.Application.Security.InventoryAccessEvaluator.CanAccessCalendar(caller, owner));
             Assert.False(Dprental.InventoryService.Application.Security.InventoryAccessEvaluator.CanManualAllocate(caller, owner));
         }
     }
@@ -251,19 +251,54 @@ public sealed class InventoryPolicyTests
     }
 
     [Fact]
-    public async Task CalendarRead_OwnerMatches_Succeeds()
+    public async Task CalendarRead_OwnerMatchesWithoutPermission_Succeeds()
     {
         await using var factory = new InventorySecurityTestFactory();
         using var client = factory.CreateClient();
 
         var asset = CreateTestAsset(factory, _ownerUserId);
-        string token = factory.CreateHumanToken(_ownerUserId, permissions: ["inventory.calendar.read"]);
+        // DPR-149: Không yêu cầu permission 'p', chỉ cần JWT sub == asset.OwnerUserId
+        string token = factory.CreateHumanToken(_ownerUserId, permissions: null);
 
         using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/test/assets/{asset.Id}/calendar");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         using var response = await client.SendAsync(request);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CalendarRead_AdminNonOwner_IsForbidden()
+    {
+        await using var factory = new InventorySecurityTestFactory();
+        using var client = factory.CreateClient();
+
+        var asset = CreateTestAsset(factory, _ownerUserId);
+        // DPR-149: Admin không được bypass ownership
+        string adminToken = factory.CreateAdminToken(_otherUserId);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/test/assets/{asset.Id}/calendar");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CalendarRead_ServicePrincipal_IsForbidden()
+    {
+        await using var factory = new InventorySecurityTestFactory();
+        using var client = factory.CreateClient();
+
+        var asset = CreateTestAsset(factory, _ownerUserId);
+        // DPR-149: Service principal bị từ chối
+        string serviceToken = factory.CreateServiceToken(Guid.NewGuid(), scopes: ["inventory.calendar.read"]);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/test/assets/{asset.Id}/calendar");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
+
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]

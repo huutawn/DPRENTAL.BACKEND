@@ -33,6 +33,7 @@ public sealed class CommonBoundaryTests
     [InlineData(ErrorType.Conflict, 409)]
     [InlineData(ErrorType.Expired, 410)]
     [InlineData(ErrorType.Unprocessable, 422)]
+    [InlineData(ErrorType.Unavailable, 503)]
     [InlineData(ErrorType.Failure, 500)]
     public void ExpectedError_MapsStatusAndPreservesCode(ErrorType type, int status)
     {
@@ -57,6 +58,10 @@ public sealed class CommonBoundaryTests
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+            builder.UseSetting("MediaService:InternalBaseUrl", "http://media-service:8080");
+            builder.UseSetting("MediaService:PublicGatewayUrl", "https://gateway.example");
+            builder.UseSetting("MediaService:ApiKey", "test-api-key");
+            builder.UseSetting("MediaService:TimeoutSeconds", "10");
             builder.ConfigureTestServices(services => services.AddControllers()
                 .AddApplicationPart(typeof(BoundaryProbeController).Assembly));
         });

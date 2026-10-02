@@ -70,7 +70,7 @@ public sealed class InventoryAuthorizationHandler : IAuthorizationHandler
     private void HandleCalendarRead(AuthorizationHandlerContext context, CalendarReadRequirement req)
     {
         Guid? ownerUserId = ExtractOwnerUserId(context.Resource);
-        if (InventoryAccessEvaluator.CanReadCalendarDetail(_caller, ownerUserId))
+        if (InventoryAccessEvaluator.CanAccessCalendar(_caller, ownerUserId))
         {
             context.Succeed(req);
         }

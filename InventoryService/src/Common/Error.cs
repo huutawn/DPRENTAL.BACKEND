@@ -45,7 +45,12 @@ public enum ErrorType
     /// <summary>
     /// Lỗi hệ thống hoặc thất bại chung không xác định (Internal Failure).
     /// </summary>
-    Failure = 7
+    Failure = 7,
+
+    /// <summary>
+    /// Lỗi dịch vụ phụ thuộc hoặc upstream tạm thời không khả dụng (Service Unavailable).
+    /// </summary>
+    Unavailable = 8
 }
 
 /// <summary>
@@ -106,5 +111,11 @@ public sealed record Error(string Code, string Message, ErrorType Type = ErrorTy
     /// </summary>
     public static Error Failure(string code, string message) =>
         new(code, message, ErrorType.Failure);
+
+    /// <summary>
+    /// Tạo lỗi dịch vụ hoặc tài nguyên phụ thuộc không khả dụng.
+    /// </summary>
+    public static Error Unavailable(string code, string message) =>
+        new(code, message, ErrorType.Unavailable);
 }
 

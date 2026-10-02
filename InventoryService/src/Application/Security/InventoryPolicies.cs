@@ -11,7 +11,7 @@ public static class InventoryPolicies
     public const string AssetManage = "InventoryAssetManage";
 
     /// <summary>
-    /// Quyền đọc chi tiết lịch tài sản: Human p=inventory.calendar.read + own asset, hoặc Admin r=adm. Service bị từ chối.
+    /// Quyền truy cập lịch tài sản (DPR-149): Human own asset (OwnerUserId == sub, không cần p). Admin được phép nếu là owner, không bypass. Service bị từ chối.
     /// </summary>
     public const string CalendarRead = "InventoryCalendarRead";
 

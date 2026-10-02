@@ -7,6 +7,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Dprental.InventoryService.Api.Security;
+using Dprental.InventoryService.Application.Kafka.DependencyInjection;
+using Dprental.InventoryService.Application.Kafka.Outbox;
+using Dprental.InventoryService.Application.Kafka.Transport;
 using Dprental.InventoryService.Domain.Repositories;
 using Dprental.InventoryService.Domain.Entities;
 using Microsoft.AspNetCore.Hosting;
@@ -37,9 +40,13 @@ public sealed class InventorySecurityTestFactory : WebApplicationFactory<Program
     private readonly Task _listenerTask;
     public Uri JwksUri { get; }
     public int JwksRequestCount { get; private set; }
+    private readonly string? _postgresConnectionString;
+    private readonly TimeProvider? _timeProvider;
 
-    public InventorySecurityTestFactory()
+    public InventorySecurityTestFactory(string? postgresConnectionString = null, TimeProvider? timeProvider = null)
     {
+        _postgresConnectionString = postgresConnectionString;
+        _timeProvider = timeProvider;
         int port = GetAvailablePort();
         _jwksListener = new HttpListener();
         _jwksListener.Prefixes.Add(string.Create(CultureInfo.InvariantCulture, $"http://127.0.0.1:{port}/"));
@@ -50,32 +57,61 @@ public sealed class InventorySecurityTestFactory : WebApplicationFactory<Program
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        var pgConn = _postgresConnectionString ?? "Host=localhost;Database=test;Username=test;Password=test";
         builder.UseEnvironment("Development");
-        builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+        builder.UseSetting("ConnectionStrings:Postgres", pgConn);
         builder.ConfigureAppConfiguration((_, config) =>
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["ConnectionStrings:Postgres"] = "Host=localhost;Database=test;Username=test;Password=test",
+                ["ConnectionStrings:Postgres"] = pgConn,
                 ["Authentication:Jwt:Issuer"] = Issuer,
                 ["Authentication:Jwt:HumanAudience"] = HumanAudience,
                 ["Authentication:Jwt:ServiceAudience"] = ServiceAudience,
                 ["Authentication:Jwt:JwksUri"] = JwksUri.ToString(),
                 ["Authentication:Jwt:TimeoutSeconds"] = "5",
                 ["Authentication:Jwt:CacheDurationMinutes"] = "5",
-                ["Authentication:Jwt:MaxStaleMinutes"] = "10"
+                ["Authentication:Jwt:MaxStaleMinutes"] = "10",
+                ["MediaService:InternalBaseUrl"] = "http://media-service:8080",
+                ["MediaService:PublicGatewayUrl"] = "https://gateway.example",
+                ["MediaService:ApiKey"] = "test-media-api-key",
+                ["MediaService:TimeoutSeconds"] = "10"
             });
         });
 
         builder.ConfigureTestServices(services =>
         {
-            // Thay thế DbContext bằng InMemory để chạy unit test authentication / authorization không cần Postgres
-            services.RemoveAll<DbContextOptions<InventoryServiceDbContext>>();
-            services.RemoveAll<IDbContextOptionsConfiguration<InventoryServiceDbContext>>();
-            services.AddDbContext<InventoryServiceDbContext>(options =>
-                options.UseInMemoryDatabase(Guid.NewGuid().ToString("N")));
+            if (_postgresConnectionString is null)
+            {
+                // Thay thế DbContext bằng InMemory để chạy unit test authentication / authorization không cần Postgres
+                services.RemoveAll<DbContextOptions<InventoryServiceDbContext>>();
+                services.RemoveAll<IDbContextOptionsConfiguration<InventoryServiceDbContext>>();
+                services.AddDbContext<InventoryServiceDbContext>(options =>
+                    options.UseInMemoryDatabase(Guid.NewGuid().ToString("N")));
 
-            services.AddSingleton<IReadOnlyDictionary<Guid, InventoryAsset>>(TestAssets);
+                services.AddSingleton<IReadOnlyDictionary<Guid, InventoryAsset>>(TestAssets);
+            }
+            else
+            {
+                // Chỉ tắt đúng ba Kafka hosted services; không RemoveAll<IHostedService>()
+                for (int i = services.Count - 1; i >= 0; i--)
+                {
+                    var descriptor = services[i];
+                    if (descriptor.ServiceType == typeof(Microsoft.Extensions.Hosting.IHostedService) &&
+                        (descriptor.ImplementationType == typeof(KafkaTopicStartupTask) ||
+                         descriptor.ImplementationType == typeof(OutboxPublisherWorker) ||
+                         descriptor.ImplementationType == typeof(KafkaConsumerWorker)))
+                    {
+                        services.RemoveAt(i);
+                    }
+                }
+            }
+
+            if (_timeProvider is not null)
+            {
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton(_timeProvider);
+            }
             // Thêm PolicyProbeController vào Mvc builder
             services.AddControllers().AddApplicationPart(typeof(PolicyProbeController).Assembly);
         });
