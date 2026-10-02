@@ -1,8 +1,9 @@
 using System.IO;
 using Dprental.InventoryService.Api.Exceptions;
 using Dprental.InventoryService.Api.Security;
-using Dprental.InventoryService.Domain.Repositories;
+using Dprental.InventoryService.Application.Calendar;
 using Dprental.InventoryService.Application.Kafka.DependencyInjection;
+using Dprental.InventoryService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -14,7 +15,8 @@ builder.Services.AddInventoryKafkaInfrastructure(builder.Configuration);
 // DPR-147: JWT Authentication & Authorization
 builder.Services.AddInventoryJwtAuthentication(builder.Configuration);
 builder.Services.AddInventoryAuthorization();
-
+// DPR-149: Calendar application service
+builder.Services.AddScoped<CalendarService>();
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<InventoryServiceDbContext>(
         "postgres",

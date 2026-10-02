@@ -20,13 +20,6 @@ public sealed class JwksConfigurationManagerTests : IAsyncDisposable
     private int _requestCount;
     private bool _simulateDown;
 
-    private sealed class CustomTimeProvider(DateTimeOffset initialUtcNow) : TimeProvider
-    {
-        public DateTimeOffset UtcNow { get; set; } = initialUtcNow;
-        public override DateTimeOffset GetUtcNow() => UtcNow;
-        public void Advance(TimeSpan delta) => UtcNow = UtcNow.Add(delta);
-    }
-
     public JwksConfigurationManagerTests()
     {
         using var probe = new TcpListener(IPAddress.Loopback, 0);
@@ -44,7 +37,7 @@ public sealed class JwksConfigurationManagerTests : IAsyncDisposable
     [Fact]
     public async Task GetConfigurationAsync_CachesResult_WithinRefreshInterval()
     {
-        var fakeTime = new CustomTimeProvider(DateTimeOffset.UtcNow);
+        var fakeTime = new TestTimeProvider(DateTimeOffset.UtcNow);
         using var client = new HttpClient();
         var options = new JwtOptions
         {
@@ -80,7 +73,7 @@ public sealed class JwksConfigurationManagerTests : IAsyncDisposable
     [Fact]
     public async Task RequestRefresh_ForcesImmediateReload()
     {
-        var fakeTime = new CustomTimeProvider(DateTimeOffset.UtcNow);
+        var fakeTime = new TestTimeProvider(DateTimeOffset.UtcNow);
         using var client = new HttpClient();
         var options = new JwtOptions
         {
@@ -103,7 +96,7 @@ public sealed class JwksConfigurationManagerTests : IAsyncDisposable
     [Fact]
     public async Task Outage_WithinMaxStale_ReturnsCachedConfiguration()
     {
-        var fakeTime = new CustomTimeProvider(DateTimeOffset.UtcNow);
+        var fakeTime = new TestTimeProvider(DateTimeOffset.UtcNow);
         using var client = new HttpClient();
         var options = new JwtOptions
         {
@@ -131,7 +124,7 @@ public sealed class JwksConfigurationManagerTests : IAsyncDisposable
     [Fact]
     public async Task Outage_ExceedingMaxStale_ThrowsInvalidOperationException()
     {
-        var fakeTime = new CustomTimeProvider(DateTimeOffset.UtcNow);
+        var fakeTime = new TestTimeProvider(DateTimeOffset.UtcNow);
         using var client = new HttpClient();
         var options = new JwtOptions
         {
@@ -172,7 +165,7 @@ public sealed class JwksConfigurationManagerTests : IAsyncDisposable
     [Fact]
     public async Task OutageDoesNotFetchForEveryAuthenticatedRequest()
     {
-        var clock = new CustomTimeProvider(DateTimeOffset.UtcNow);
+        var clock = new TestTimeProvider(DateTimeOffset.UtcNow);
         using var client = new HttpClient();
         using var manager = new JwksConfigurationManager(client, new JwtOptions { JwksUri = _jwksUri.ToString() }, clock);
         await manager.GetConfigurationAsync(CancellationToken.None);

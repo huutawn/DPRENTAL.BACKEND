@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
@@ -51,6 +52,23 @@ public sealed class InventoryAssetRepository : IInventoryAssetRepository
             .Skip(skip)
             .Take(take)
             .ToListAsync(cancellationToken);
+    }
+    /// <inheritdoc />
+    public async Task<InventoryAsset?> GetCalendarSnapshotAsync(
+        Guid assetId,
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        return await _context.Assets
+            .AsNoTrackingWithIdentityResolution()
+            .AsSingleQuery()
+            .Include(a => a.CalendarBlocks.Where(cb => cb.StartDate <= endDate && cb.EndDate >= startDate))
+            .Include(a => a.Allocations.Where(al =>
+                (al.Status == AllocationStatus.Held || al.Status == AllocationStatus.Allocated) &&
+                al.RentalPeriod.StartDate <= endDate &&
+                al.RentalPeriod.EndDate >= startDate))
+            .FirstOrDefaultAsync(a => a.Id == assetId, cancellationToken);
     }
 
     /// <inheritdoc />

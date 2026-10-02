@@ -40,45 +40,91 @@ public static class AssetAvailabilityPolicy
             return Error.Validation("ASSET_NOT_ACCEPTING_BOOKINGS", "Tài sản hiện tại không mở nhận đặt lịch.");
         }
 
-        // 2. Kiểm tra trùng lặp với các khoảng chặn lịch (Calendar Blocks)
+        // 2. Kiểm tra trùng lặp lịch dùng chung qua CheckCalendarOverlap
+        return CheckCalendarOverlap(
+            candidatePeriod.StartDate,
+            candidatePeriod.EndDate,
+            now,
+            existingAllocations,
+            existingBlocks,
+            excludeAllocationId: excludeAllocationId);
+    }
+
+    /// <summary>
+    /// Kiểm tra trùng lặp với các khoảng chặn lịch và các lượt phân bổ đang chiếm lịch trên tài sản.
+    /// Không kiểm tra công tắc AcceptingBookings (phục vụ cả việc tạo CalendarBlock khi tài sản tắt booking).
+    /// </summary>
+    /// <param name="startDate">Ngày bắt đầu cần kiểm tra (inclusive).</param>
+    /// <param name="endDate">Ngày kết thúc cần kiểm tra (inclusive).</param>
+    /// <param name="now">Thời điểm hiện tại (UTC).</param>
+    /// <param name="existingAllocations">Danh sách các phân bổ hiện có.</param>
+    /// <param name="existingBlocks">Danh sách các khoảng chặn lịch hiện có.</param>
+    /// <param name="excludeAllocationId">ID phân bổ cần loại trừ (nếu có).</param>
+    /// <returns>Result thành công nếu không bị overlap, ngược lại trả về Conflict lỗi tương ứng.</returns>
+    public static Result CheckCalendarOverlap(
+        DateOnly startDate,
+        DateOnly endDate,
+        DateTimeOffset now,
+        IEnumerable<AssetAllocation> existingAllocations,
+        IEnumerable<CalendarBlock> existingBlocks,
+        Guid? excludeAllocationId = null)
+    {
+        ArgumentNullException.ThrowIfNull(existingAllocations);
+        ArgumentNullException.ThrowIfNull(existingBlocks);
+
+        if (startDate > endDate)
+        {
+            return Error.Validation("INVALID_DATE_ORDER", "Ngày bắt đầu không thể sau ngày kết thúc.");
+        }
+
+        // 1. Kiểm tra trùng lặp với các khoảng chặn lịch (Calendar Blocks)
         foreach (var block in existingBlocks)
         {
-            if (candidatePeriod.Overlaps(block.StartDate, block.EndDate))
+            if (block.Overlaps(startDate, endDate))
             {
                 return Error.Conflict("ASSET_BLOCKED", $"Tài sản đã bị chặn lịch từ ngày {block.StartDate:yyyy-MM-dd} đến {block.EndDate:yyyy-MM-dd} (Lý do: {block.Reason}).");
             }
         }
 
-        // 3. Kiểm tra trùng lặp với các lượt phân bổ hiện có (Allocations)
+        // 2. Kiểm tra trùng lặp với các lượt phân bổ hiện có (Allocations)
         foreach (var alloc in existingAllocations)
         {
-            if (alloc.Id == excludeAllocationId)
+            if (excludeAllocationId.HasValue && alloc.Id == excludeAllocationId.Value)
             {
                 continue;
             }
 
-            // A. Lượt giữ chỗ (Held) đã quá hạn tại thời điểm kiểm tra: không chiếm lịch
-            if (alloc.Status == AllocationStatus.Held)
-            {
-                if (alloc.HoldExpiresAt.HasValue && now >= alloc.HoldExpiresAt.Value)
-                {
-                    continue;
-                }
-            }
-
-            // B. Trạng thái kết thúc không chiếm lịch: Released, Cancelled
-            if (alloc.Status is AllocationStatus.Released or AllocationStatus.Cancelled)
+            if (!OccupiesCalendar(alloc, now))
             {
                 continue;
             }
 
-            // C. Các trạng thái đang chiếm lịch: Held (còn hạn) và Allocated
-            if (candidatePeriod.Overlaps(alloc.RentalPeriod))
+            if (alloc.RentalPeriod.Overlaps(startDate, endDate))
             {
                 return Error.Conflict("ASSET_UNAVAILABLE", $"Tài sản đã có lượt phân bổ ({alloc.ExternalReference}, trạng thái: {alloc.Status}) trùng với khoảng thời gian từ {alloc.RentalPeriod.StartDate:yyyy-MM-dd} đến {alloc.RentalPeriod.EndDate:yyyy-MM-dd}.");
             }
         }
 
         return Result.Success();
+    }
+    /// <summary>
+    /// Predicate dùng chung xác định một lượt phân bổ có đang chiếm lịch tại thời điểm kiểm tra hay không.
+    /// Dùng cho cả việc kiểm tra overlap và đọc lịch tổng hợp (Calendar Read).
+    /// </summary>
+    /// <param name="allocation">Lượt phân bổ cần kiểm tra.</param>
+    /// <param name="now">Thời điểm hiện tại (UTC).</param>
+    /// <returns>True nếu phân bổ đang chiếm lịch; ngược lại False.</returns>
+    public static bool OccupiesCalendar(AssetAllocation allocation, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(allocation);
+
+        return allocation.Status switch
+        {
+            AllocationStatus.Held => allocation.HoldExpiresAt.HasValue && allocation.HoldExpiresAt.Value > now,
+            AllocationStatus.Allocated => true,
+            AllocationStatus.Released => false,
+            AllocationStatus.Cancelled => false,
+            _ => false
+        };
     }
 }

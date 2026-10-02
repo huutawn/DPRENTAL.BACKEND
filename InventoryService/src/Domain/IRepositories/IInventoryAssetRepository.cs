@@ -24,6 +24,15 @@ public interface IInventoryAssetRepository : IRepo<InventoryAsset, Guid>
     Task<IReadOnlyList<InventoryAsset>> ListAllAsync(int skip, int take, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Lấy snapshot tài sản cùng các khoảng chặn lịch (CalendarBlocks) và các lượt phân bổ ứng viên (Held/Allocated)
+    /// giao với cửa sổ ngày [startDate, endDate] phục vụ đọc lịch tổng hợp (Calendar Read) trong một single query snapshot.
+    /// </summary>
+    Task<InventoryAsset?> GetCalendarSnapshotAsync(
+        Guid assetId,
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default);
+    /// <summary>
     /// Đưa tài sản mới vào hàng đợi lưu trữ.
     /// </summary>
     void Add(InventoryAsset asset);

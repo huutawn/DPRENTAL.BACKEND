@@ -132,6 +132,16 @@ public sealed class CalendarBlock
             return Error.Validation("CREATED_BY_REQUIRED", "Cần cung cấp thông tin người tạo chặn lịch.");
         }
 
+        if (!Enum.IsDefined(reason))
+        {
+            return Error.Validation("INVALID_BLOCK_REASON", "Lý do chặn lịch không hợp lệ.");
+        }
+
+        if (notes is not null && notes.Length > 500)
+        {
+            return Error.Validation("INVALID_BLOCK_NOTES", "Ghi chú chặn lịch không được vượt quá 500 ký tự.");
+        }
+
         if (startDate > endDate)
         {
             return Error.Validation("INVALID_DATE_ORDER", "Ngày bắt đầu chặn lịch không thể sau ngày kết thúc.");
