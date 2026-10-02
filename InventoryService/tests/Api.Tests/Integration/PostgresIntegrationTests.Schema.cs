@@ -17,6 +17,34 @@ namespace Dprental.InventoryService.Api.Tests.Integration;
 public sealed partial class PostgresIntegrationTests
 {
     [Fact]
+    public async Task MigrationHistory_IsOwnedByInventoryAndDoesNotChangePublicHistory()
+    {
+        await using var context = await CreateMigratedDbContextAsync();
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE public."__EFMigrationsHistory" (
+                "MigrationId" varchar(150) PRIMARY KEY, "ProductVersion" varchar(32) NOT NULL);
+            INSERT INTO public."__EFMigrationsHistory" VALUES ('auth-sentinel', '10.0.12');
+            """);
+
+        await context.Database.MigrateAsync();
+        await context.Database.MigrateAsync();
+
+        var inventoryHistoryExists = await context.Database.SqlQueryRaw<bool>(
+            """
+            SELECT to_regclass('inventory."__EFMigrationsHistory"') IS NOT NULL AS "Value"
+            """
+        ).SingleAsync();
+        Assert.True(inventoryHistoryExists);
+        Assert.Equal(context.Database.GetMigrations(), await context.Database.GetAppliedMigrationsAsync());
+        var publicHistory = await context.Database.SqlQueryRaw<string>(
+            """
+            SELECT "MigrationId" AS "Value" FROM public."__EFMigrationsHistory"
+            """
+        ).ToListAsync();
+        Assert.Equal("auth-sentinel", Assert.Single(publicHistory));
+    }
+
+    [Fact]
     public async Task Migration_AppliesSuccessfullyOnPostgres()
     {
         await using var context = await CreateMigratedDbContextAsync();

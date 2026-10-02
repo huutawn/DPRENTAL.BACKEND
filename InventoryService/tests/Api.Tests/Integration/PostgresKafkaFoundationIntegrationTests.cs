@@ -102,7 +102,7 @@ public sealed class PostgresKafkaFoundationIntegrationTests : IAsyncLifetime
 
         // Kiểm tra cơ sở dữ liệu: không có Allocation, không có Outbox message nào được lưu
         await using var verifyDb = new InventoryServiceDbContext(
-            new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(_fixture.ConnectionString).Options);
+            new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(_fixture.ConnectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName)).Options);
 
         Assert.Empty(await verifyDb.AssetAllocations.Where(a => a.AssetId == assetId).ToListAsync());
         Assert.Null(await verifyDb.OutboxMessages.FindAsync(outboxId));
@@ -227,7 +227,7 @@ public sealed class PostgresKafkaFoundationIntegrationTests : IAsyncLifetime
         Assert.Equal(InboxProcessingStatus.AlreadyProcessed, lateResult.Status);
 
         await using var verifyDb = new InventoryServiceDbContext(
-            new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(_fixture.ConnectionString).Options);
+            new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(_fixture.ConnectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName)).Options);
         var recordAfterLate = await verifyDb.InboxMessages.AsNoTracking()
             .SingleAsync(m => m.Handler == handler && m.MessageId == messageId);
 

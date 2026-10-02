@@ -21,7 +21,7 @@ public sealed class InventoryServiceDbContextFactory : IDesignTimeDbContextFacto
         // Chuỗi kết nối thiết kế mẫu phục vụ biên dịch metadata và mapping của PostgreSQL provider
         string designConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Postgres")
             ?? "Host=inventory-design.invalid;Database=inventory_design;Username=design;Timeout=1";
-        optionsBuilder.UseNpgsql(designConnectionString);
+        optionsBuilder.UseNpgsql(designConnectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName));
 
         return new InventoryServiceDbContext(optionsBuilder.Options);
     }

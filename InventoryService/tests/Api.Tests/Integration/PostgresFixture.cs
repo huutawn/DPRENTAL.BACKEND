@@ -29,7 +29,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         await create.ExecuteNonQueryAsync();
         try
         {
-            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(ConnectionString).Options;
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(ConnectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName)).Options;
             await using var db = new InventoryServiceDbContext(options);
             await db.GetService<IMigrator>().MigrateAsync(TargetMigration);
         }

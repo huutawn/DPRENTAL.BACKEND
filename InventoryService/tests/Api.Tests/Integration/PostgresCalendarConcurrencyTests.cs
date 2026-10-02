@@ -46,7 +46,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
     private InventoryServiceDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
-            .UseNpgsql(_connectionString)
+            .UseNpgsql(_connectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
             .Options;
         return new InventoryServiceDbContext(options);
     }

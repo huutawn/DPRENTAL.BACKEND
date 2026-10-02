@@ -17,7 +17,7 @@ public sealed partial class PostgresIntegrationTests
         await fixture.InitializeAsync();
         try
         {
-            await using var db = new InventoryServiceDbContext(new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(fixture.ConnectionString).Options);
+            await using var db = new InventoryServiceDbContext(new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(fixture.ConnectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName)).Options);
             var assetId = Guid.NewGuid();
             var reservationId = Guid.NewGuid();
             var mediaId = Guid.NewGuid();
@@ -52,7 +52,7 @@ public sealed partial class PostgresIntegrationTests
         await fixture.InitializeAsync();
         try
         {
-            await using var db = new InventoryServiceDbContext(new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(fixture.ConnectionString).Options);
+            await using var db = new InventoryServiceDbContext(new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(fixture.ConnectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName)).Options);
             var asset = Dprental.InventoryService.Domain.Entities.InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, DateTimeOffset.UtcNow).Value;
             db.Assets.Add(asset);
             await db.SaveChangesAsync();
@@ -81,7 +81,7 @@ public sealed partial class PostgresIntegrationTests
         await fixture.InitializeAsync();
         try
         {
-            await using var db = new InventoryServiceDbContext(new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(fixture.ConnectionString).Options);
+            await using var db = new InventoryServiceDbContext(new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(fixture.ConnectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName)).Options);
             var assetId = Guid.NewGuid();
             var allocationId = Guid.NewGuid();
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.assets(id,owner_user_id,organization_id,equipment_type_id,schema_version,spec_values,accepting_bookings,created_at,updated_at) VALUES({assetId},{Guid.NewGuid()},{Guid.NewGuid()},{Guid.NewGuid()},{version},{specs}::jsonb,true,NOW(),NOW())");
@@ -101,7 +101,7 @@ public sealed partial class PostgresIntegrationTests
         await fixture.InitializeAsync();
         try
         {
-            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(fixture.ConnectionString).Options;
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(fixture.ConnectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName)).Options;
             await using var db = new InventoryServiceDbContext(options);
 
             var equipmentId = Guid.NewGuid();
@@ -301,7 +301,7 @@ public sealed partial class PostgresIntegrationTests
         await fixture.InitializeAsync();
         try
         {
-            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(fixture.ConnectionString).Options;
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(fixture.ConnectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName)).Options;
             await using var db = new InventoryServiceDbContext(options);
 
             var equipmentId = Guid.NewGuid();

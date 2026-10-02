@@ -244,7 +244,7 @@ public sealed class KafkaRealIntegrationTests : IAsyncLifetime
 
         // Outbox có bản ghi DLQ được commit atomically
         await using var verifyDb = new InventoryServiceDbContext(
-            new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(_fixture.ConnectionString).Options);
+            new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(_fixture.ConnectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName)).Options);
 
         var dlqMessage = await verifyDb.OutboxMessages.FirstOrDefaultAsync(m => m.Topic == "test.topic.dlq");
         Assert.NotNull(dlqMessage);

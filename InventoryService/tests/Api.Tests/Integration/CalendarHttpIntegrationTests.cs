@@ -40,7 +40,7 @@ public sealed class CalendarHttpIntegrationTests : IClassFixture<PostgresFixture
     private InventoryServiceDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
-            .UseNpgsql(_fixture.ConnectionString)
+            .UseNpgsql(_fixture.ConnectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
             .Options;
         return new InventoryServiceDbContext(options);
     }

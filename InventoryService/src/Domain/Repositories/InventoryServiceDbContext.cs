@@ -14,6 +14,9 @@ public sealed class InventoryServiceDbContext : DbContext
     /// </summary>
     public const string SchemaName = "inventory";
 
+    /// <summary>Migration history thuộc schema Inventory, độc lập với các service khác.</summary>
+    public const string MigrationsHistoryTableName = "__EFMigrationsHistory";
+
     /// <summary>
     /// Bảng quản lý thông tin tài sản trong kho.
     /// </summary>
