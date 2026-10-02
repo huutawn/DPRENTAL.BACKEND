@@ -12,7 +12,47 @@ public sealed class InventoryPolicyTests
     private readonly Guid _otherUserId = Guid.NewGuid();
     private readonly Guid _orgId = Guid.NewGuid();
 
-    private InventoryAsset CreateTestAsset(Guid ownerId, Guid? assetId = null)
+    [Theory]
+    [InlineData("manage", "POST")]
+    [InlineData("calendar", "GET")]
+    [InlineData("manual-allocate", "POST")]
+    public async Task MissingToken_ResourcePoliciesReturn401(string capability, string method)
+    {
+        await using var factory = new InventorySecurityTestFactory();
+        using var client = factory.CreateClient();
+        var asset = CreateTestAsset(factory, _ownerUserId);
+        using var request = new HttpRequestMessage(new HttpMethod(method), $"/api/test/assets/{asset.Id}/{capability}");
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public void AdminCannotAuthorizeMissingOwnershipResource()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("sub", Guid.NewGuid().ToString()), new Claim("r", "adm")], "Bearer"));
+        var caller = new Dprental.InventoryService.Api.Security.InventoryCallerContext(principal);
+        foreach (Guid? owner in new Guid?[] { null, Guid.Empty })
+        {
+            Assert.False(Dprental.InventoryService.Application.Security.InventoryAccessEvaluator.CanManageAsset(caller, owner));
+            Assert.False(Dprental.InventoryService.Application.Security.InventoryAccessEvaluator.CanReadCalendarDetail(caller, owner));
+            Assert.False(Dprental.InventoryService.Application.Security.InventoryAccessEvaluator.CanManualAllocate(caller, owner));
+        }
+    }
+
+    [Fact]
+    public async Task BareOwnerGuidIsNotATrustedAuthorizationResource()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("sub", _ownerUserId.ToString()), new Claim("r", "adm")], "Bearer"));
+        var caller = new Dprental.InventoryService.Api.Security.InventoryCallerContext(principal);
+        var requirement = new Dprental.InventoryService.Api.Security.AssetManageRequirement();
+        var context = new Microsoft.AspNetCore.Authorization.AuthorizationHandlerContext([requirement], principal, _ownerUserId);
+        await new Dprental.InventoryService.Api.Security.InventoryAuthorizationHandler(caller).HandleAsync(context);
+        Assert.False(context.HasSucceeded);
+    }
+
+    private InventoryAsset CreateTestAsset(InventorySecurityTestFactory factory, Guid ownerId, Guid? assetId = null)
     {
         var id = assetId ?? Guid.NewGuid();
         var asset = InventoryAsset.Create(
@@ -24,7 +64,7 @@ public sealed class InventoryPolicyTests
             "{\"serial\":\"TEST\"}",
             true,
             DateTimeOffset.UtcNow).Value;
-        PolicyProbeController.TestAssets[id] = asset;
+        factory.TestAssets[id] = asset;
         return asset;
     }
 
@@ -34,7 +74,7 @@ public sealed class InventoryPolicyTests
         await using var factory = new InventorySecurityTestFactory();
         using var client = factory.CreateClient();
 
-        var asset = CreateTestAsset(_ownerUserId);
+        var asset = CreateTestAsset(factory, _ownerUserId);
         string token = factory.CreateHumanToken(_ownerUserId, permissions: ["inventory.asset.manage"]);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/test/assets/{asset.Id}/manage");
@@ -50,7 +90,7 @@ public sealed class InventoryPolicyTests
         await using var factory = new InventorySecurityTestFactory();
         using var client = factory.CreateClient();
 
-        var asset = CreateTestAsset(_ownerUserId);
+        var asset = CreateTestAsset(factory, _ownerUserId);
         // _otherUserId có permission nhưng không phải chủ sở hữu tài sản
         string token = factory.CreateHumanToken(_otherUserId, permissions: ["inventory.asset.manage"]);
 
@@ -68,7 +108,7 @@ public sealed class InventoryPolicyTests
         using var client = factory.CreateClient();
 
         // 2 assets cùng orgId nhưng khác ownerUserId
-        var assetOfUserA = CreateTestAsset(_ownerUserId);
+        var assetOfUserA = CreateTestAsset(factory, _ownerUserId);
         string tokenUserB = factory.CreateHumanToken(_otherUserId, permissions: ["inventory.asset.manage"], orgId: _orgId);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/test/assets/{assetOfUserA.Id}/manage");
@@ -85,7 +125,7 @@ public sealed class InventoryPolicyTests
         await using var factory = new InventorySecurityTestFactory();
         using var client = factory.CreateClient();
 
-        var asset = CreateTestAsset(_ownerUserId);
+        var asset = CreateTestAsset(factory, _ownerUserId);
         // Đúng chủ sở hữu nhưng thiếu permission inventory.asset.manage
         string token = factory.CreateHumanToken(_ownerUserId, permissions: ["inventory.calendar.read"]);
 
@@ -102,7 +142,7 @@ public sealed class InventoryPolicyTests
         await using var factory = new InventorySecurityTestFactory();
         using var client = factory.CreateClient();
 
-        var asset = CreateTestAsset(_ownerUserId);
+        var asset = CreateTestAsset(factory, _ownerUserId);
         // Human Admin có r=adm, không cần permission p hay quyền sở hữu
         string adminToken = factory.CreateAdminToken(_otherUserId);
 
@@ -119,7 +159,7 @@ public sealed class InventoryPolicyTests
         await using var factory = new InventorySecurityTestFactory();
         using var client = factory.CreateClient();
 
-        var asset = CreateTestAsset(_ownerUserId);
+        var asset = CreateTestAsset(factory, _ownerUserId);
         // Service token giả mạo claim r=adm
         string serviceToken = factory.CreateServiceToken(Guid.NewGuid(), roles: ["adm"]);
 
@@ -194,7 +234,7 @@ public sealed class InventoryPolicyTests
         await using var factory = new InventorySecurityTestFactory();
         using var client = factory.CreateClient();
 
-        var asset = CreateTestAsset(_ownerUserId);
+        var asset = CreateTestAsset(factory, _ownerUserId);
         // Token của user B
         string tokenUserB = factory.CreateHumanToken(_otherUserId, permissions: ["inventory.asset.manage"]);
 
@@ -216,7 +256,7 @@ public sealed class InventoryPolicyTests
         await using var factory = new InventorySecurityTestFactory();
         using var client = factory.CreateClient();
 
-        var asset = CreateTestAsset(_ownerUserId);
+        var asset = CreateTestAsset(factory, _ownerUserId);
         string token = factory.CreateHumanToken(_ownerUserId, permissions: ["inventory.calendar.read"]);
 
         using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/test/assets/{asset.Id}/calendar");
@@ -232,7 +272,7 @@ public sealed class InventoryPolicyTests
         await using var factory = new InventorySecurityTestFactory();
         using var client = factory.CreateClient();
 
-        var asset = CreateTestAsset(_ownerUserId);
+        var asset = CreateTestAsset(factory, _ownerUserId);
         string token = factory.CreateHumanToken(_ownerUserId, permissions: ["inventory.asset.manage"]);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/test/assets/{asset.Id}/manual-allocate");

@@ -76,6 +76,7 @@ public sealed class CommonBoundaryTests
 [ApiController]
 public sealed class BoundaryProbeController : ControllerBase
 {
+    [Microsoft.AspNetCore.Authorization.AllowAnonymous]
     [HttpGet("/__tests/exception")]
     public IActionResult ThrowUnexpected() => throw new InvalidOperationException($"private-token {HttpContext.TraceIdentifier}");
 }

@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using Dprental.InventoryService.Api.Security;
 using Dprental.InventoryService.Domain.Repositories;
+using Dprental.InventoryService.Domain.Entities;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -25,6 +26,8 @@ public sealed class InventorySecurityTestFactory : WebApplicationFactory<Program
     public const string Issuer = "https://auth.dprental.test";
     public const string HumanAudience = "dprental-clients";
     public const string ServiceAudience = "inventory-api";
+
+    public Dictionary<Guid, InventoryAsset> TestAssets { get; } = new();
 
     public RSA SigningKey { get; } = RSA.Create(2048);
     public string ActiveKeyId { get; set; } = "key-active-1";
@@ -72,6 +75,7 @@ public sealed class InventorySecurityTestFactory : WebApplicationFactory<Program
             services.AddDbContext<InventoryServiceDbContext>(options =>
                 options.UseInMemoryDatabase(Guid.NewGuid().ToString("N")));
 
+            services.AddSingleton<IReadOnlyDictionary<Guid, InventoryAsset>>(TestAssets);
             // Thêm PolicyProbeController vào Mvc builder
             services.AddControllers().AddApplicationPart(typeof(PolicyProbeController).Assembly);
         });

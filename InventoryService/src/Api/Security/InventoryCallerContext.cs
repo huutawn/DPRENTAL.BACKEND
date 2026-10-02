@@ -41,7 +41,7 @@ public sealed class InventoryCallerContext : IInventoryCallerContext
         get
         {
             if (!IsAuthenticated) return null;
-            string? sub = _user?.FindFirst("sub")?.Value ?? _user?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            string? sub = _user?.FindFirst("sub")?.Value;
             return Guid.TryParse(sub, out Guid id) && id != Guid.Empty ? id : null;
         }
     }

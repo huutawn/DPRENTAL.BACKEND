@@ -369,7 +369,14 @@ namespace InventoryService.Domain.Migrations
                     b.HasIndex("OwnerUserId")
                         .HasDatabaseName("ix_assets_owner_user_id");
 
-                    b.ToTable("assets", "inventory");
+                    b.ToTable("assets", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_assets_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND organization_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_assets_schema_version", "schema_version >= 1");
+
+                            t.HasCheckConstraint("ck_assets_spec_values_object", "jsonb_typeof(spec_values) = 'object'");
+                        });
                 });
 
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.OutboxMessage", b =>

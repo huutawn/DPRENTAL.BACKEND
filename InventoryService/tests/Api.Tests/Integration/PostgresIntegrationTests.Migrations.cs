@@ -1,5 +1,6 @@
 using Dprental.InventoryService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Npgsql;
 using Xunit;
 
@@ -7,6 +8,92 @@ namespace Dprental.InventoryService.Api.Tests.Integration;
 
 public sealed partial class PostgresIntegrationTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HistoricalCompletedMigrationRequiresAuditedBackfill(bool supplyBackfill)
+    {
+        var fixture = new PostgresFixture { TargetMigration = "20261001035544_InitialInventoryBaseline" };
+        await fixture.InitializeAsync();
+        try
+        {
+            await using var db = new InventoryServiceDbContext(new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(fixture.ConnectionString).Options);
+            var assetId = Guid.NewGuid();
+            var reservationId = Guid.NewGuid();
+            var mediaId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.equipments(id,organization_id,catalog_lifecycle_status,accepting_bookings,created_at,updated_at) VALUES({assetId},{Guid.NewGuid()},1,true,NOW(),NOW())");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.reservations(id,equipment_id,source_type,status,start_date,end_date,delivered_at,delivered_by,returned_at,returned_by,return_condition,delivery_photo_ids,return_photo_ids,created_at,updated_at) VALUES({reservationId},{assetId},1,4,'2026-11-01','2026-11-02',NOW()-INTERVAL '1 hour','staff',NOW(),'staff','Original damage evidence',ARRAY[]::uuid[],ARRAY[{mediaId}],NOW(),NOW())");
+            var migrator = db.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>();
+            if (supplyBackfill)
+            {
+                await db.Database.ExecuteSqlRawAsync("CREATE TABLE inventory.return_condition_backfill(reservation_id uuid PRIMARY KEY,condition integer NOT NULL CHECK(condition IN (1,2)))");
+                await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.return_condition_backfill VALUES({reservationId},2)");
+                await migrator.MigrateAsync("20261001043209_HardenInventoryContracts");
+                var condition = await db.Database.SqlQuery<int>($"SELECT return_condition AS \"Value\" FROM inventory.reservations WHERE id={reservationId}").SingleAsync();
+                Assert.Equal(2, condition);
+                var evidence = await db.Database.SqlQuery<string>($"SELECT return_condition_notes AS \"Value\" FROM inventory.reservations WHERE id={reservationId}").SingleAsync();
+                Assert.Equal("Original damage evidence", evidence);
+                Assert.True(await db.Database.SqlQueryRaw<bool>("SELECT to_regclass('inventory.return_condition_backfill') IS NULL AS \"Value\"").SingleAsync());
+            }
+            else
+            {
+                var error = await Assert.ThrowsAsync<PostgresException>(() => migrator.MigrateAsync("20261001043209_HardenInventoryContracts"));
+                Assert.Contains("audited", error.Message);
+                Assert.Single(await db.Database.GetAppliedMigrationsAsync());
+            }
+        }
+        finally { await fixture.DisposeAsync(); }
+    }
+
+    [Fact]
+    public async Task HardenBoundary_UpgradesPopulatedRefactoredDatabaseAndRemovesLegacyText()
+    {
+        var fixture = new PostgresFixture { TargetMigration = "20261002011635_RefactorInventoryBoundary" };
+        await fixture.InitializeAsync();
+        try
+        {
+            await using var db = new InventoryServiceDbContext(new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(fixture.ConnectionString).Options);
+            var asset = Dprental.InventoryService.Domain.Entities.InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, DateTimeOffset.UtcNow).Value;
+            db.Assets.Add(asset);
+            await db.SaveChangesAsync();
+            var allocationId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.asset_allocations(id,asset_id,source_system,external_reference,status,start_date,end_date,created_at,updated_at,notes) VALUES({allocationId},{asset.Id},'inventory.manual',{allocationId.ToString()},6,'2026-11-01','2026-11-02',NOW(),NOW(),'Customer name and phone')");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.allocation_transitions(id,allocation_id,sequence,operation_type,from_status,to_status,created_at,actor,reason,operation_key,request_fingerprint) VALUES({Guid.NewGuid()},{allocationId},1,7,2,6,NOW(),'staff','Hoàn tất kỳ phân bổ','return-before-cutover',{new string('A', 64)})");
+            await db.Database.MigrateAsync();
+            var allocation = await db.AssetAllocations.Include(a => a.Transitions).SingleAsync();
+            Assert.Null(allocation.Notes);
+            Assert.Null(allocation.Transitions.Single().Reason);
+            Assert.Null(allocation.Transitions.Single().RequestFingerprint);
+            Assert.Equal("return-before-cutover", allocation.Transitions.Single().OperationKey);
+            var ex = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE inventory.assets SET spec_values='[]'::jsonb WHERE id={asset.Id}"));
+            Assert.Equal("ck_assets_spec_values_object", ex.ConstraintName);
+            Assert.Single(await db.AssetAllocations.ToListAsync());
+        }
+        finally { await fixture.DisposeAsync(); }
+    }
+
+    [Theory]
+    [InlineData("[]", 1)]
+    [InlineData("{}", 0)]
+    public async Task HardenBoundary_InvalidExistingAssetRollsBackWithoutDeletingText(string specs, int version)
+    {
+        var fixture = new PostgresFixture { TargetMigration = "20261002011635_RefactorInventoryBoundary" };
+        await fixture.InitializeAsync();
+        try
+        {
+            await using var db = new InventoryServiceDbContext(new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(fixture.ConnectionString).Options);
+            var assetId = Guid.NewGuid();
+            var allocationId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.assets(id,owner_user_id,organization_id,equipment_type_id,schema_version,spec_values,accepting_bookings,created_at,updated_at) VALUES({assetId},{Guid.NewGuid()},{Guid.NewGuid()},{Guid.NewGuid()},{version},{specs}::jsonb,true,NOW(),NOW())");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.asset_allocations(id,asset_id,source_system,external_reference,status,start_date,end_date,created_at,updated_at,notes) VALUES({allocationId},{assetId},'inventory.manual',{allocationId.ToString()},6,'2026-11-01','2026-11-02',NOW(),NOW(),'original note')");
+            await Assert.ThrowsAsync<PostgresException>(() => db.Database.MigrateAsync());
+            Assert.Equal(4, (await db.Database.GetAppliedMigrationsAsync()).Count());
+            Assert.Single(await db.Assets.ToListAsync());
+            Assert.Equal("original note", (await db.AssetAllocations.SingleAsync()).Notes);
+        }
+        finally { await fixture.DisposeAsync(); }
+    }
+
     [Fact]
     public async Task ForwardMigration_PopulatedUpgrade_MigratesAllEntitiesAndStatusesSuccessfully()
     {

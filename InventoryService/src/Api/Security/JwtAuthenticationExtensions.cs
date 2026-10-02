@@ -81,22 +81,7 @@ public static class JwtAuthenticationExtensions
 
                         return audiences.Contains(options.HumanAudience, StringComparer.Ordinal);
                     },
-                    IssuerSigningKeyResolver = (token, securityToken, kid, validationParameters) =>
-                    {
-                        var config = configManager.GetConfigurationAsync(CancellationToken.None).GetAwaiter().GetResult();
-                        var keys = config?.SigningKeys;
-                        if (keys != null)
-                        {
-                            var matched = keys.Where(k => string.Equals(k.KeyId, kid, StringComparison.Ordinal)).ToList();
-                            if (matched.Count > 0)
-                            {
-                                return matched;
-                            }
-                        }
-
-                        configManager.RequestRefresh();
-                        return keys ?? [];
-                    },
+                    TryAllIssuerSigningKeys = false,
                     ValidateIssuerSigningKey = true,
                     ValidateLifetime = true,
                     RequireExpirationTime = true,
@@ -109,17 +94,40 @@ public static class JwtAuthenticationExtensions
 
                 bearerOptions.Events = new JwtBearerEvents
                 {
-                    OnAuthenticationFailed = context =>
+                    OnMessageReceived = async context =>
                     {
-                        if (context.Exception is SecurityTokenSignatureKeyNotFoundException
-                            || context.Exception?.Message.Contains("key", StringComparison.OrdinalIgnoreCase) == true)
+                        string authorization = context.Request.Headers.Authorization.ToString();
+                        if (!authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return;
+                        string token = authorization[7..].Trim();
+                        if (!new JsonWebTokenHandler().CanReadToken(token)) return;
+                        try
                         {
-                            configManager.RequestRefresh();
+                            // An unvalidated kid only selects a public key; claims remain untrusted.
+                            var jwt = new JsonWebToken(token);
+                            if (!await configManager.EnsureSigningKeyAsync(jwt.Kid, context.HttpContext.RequestAborted))
+                                context.Fail("Unknown signing key.");
                         }
-                        return Task.CompletedTask;
+                        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or
+                            System.Text.Json.JsonException or ArgumentException or OperationCanceledException)
+                        {
+                            if (context.HttpContext.RequestAborted.IsCancellationRequested) throw;
+                            context.Fail("JWT signing keys are unavailable.");
+                        }
                     },
                     OnTokenValidated = context =>
                     {
+                        var tokenUses = context.Principal?.FindAll("u").Select(c => c.Value).ToArray() ?? [];
+                        if (tokenUses.Length > 1 || tokenUses.Length == 1 && tokenUses[0] != "svc")
+                        {
+                            context.Fail("Unsupported token use.");
+                            return Task.CompletedTask;
+                        }
+                        var subjects = context.Principal?.FindAll("sub").ToArray() ?? [];
+                        if (subjects.Length != 1)
+                        {
+                            context.Fail("A single subject is required.");
+                            return Task.CompletedTask;
+                        }
                         var sub = context.Principal?.FindFirst("sub")?.Value;
                         if (string.IsNullOrWhiteSpace(sub) || !Guid.TryParse(sub, out var subGuid) || subGuid == Guid.Empty)
                         {

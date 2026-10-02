@@ -113,7 +113,7 @@ public sealed partial class PostgresIntegrationTests
     }
 
     [Fact]
-    public async Task Availability_ExpiredHeldDoesNotOccupy_AllocatedOccupies_ReleasedDoesNotOccupy()
+    public async Task Availability_ExpiredHeldDoesNotOccupy_AllocatedOccupies_ReleasedAndCancelledDoNotOccupy()
     {
         await using var db = await CreateMigratedDbContextAsync();
         var assetId = Guid.NewGuid();
@@ -135,7 +135,11 @@ public sealed partial class PostgresIntegrationTests
         var released = AssetAllocation.CreateManual(Guid.NewGuid(), assetId, period3, now, "REL-01").Value;
         released.Release("Xong", now.AddHours(1), "op");
 
-        db.AssetAllocations.AddRange(expiredHold, allocated, released);
+        var cancelledPeriod = new RentalPeriod(new DateOnly(2026, 12, 1), new DateOnly(2026, 12, 5));
+        var cancelled = AssetAllocation.CreateManual(Guid.NewGuid(), assetId, cancelledPeriod, now, "CANCEL-01").Value;
+        Assert.True(cancelled.Cancel("Cancelled", now.AddHours(1), "op").IsSuccess);
+
+        db.AssetAllocations.AddRange(expiredHold, allocated, released, cancelled);
         await db.SaveChangesAsync();
 
         var allAllocations = await db.AssetAllocations.Where(a => a.AssetId == assetId).ToListAsync();
@@ -152,6 +156,7 @@ public sealed partial class PostgresIntegrationTests
         // Kiểm tra availability cho period3 (trùng với released): Khả dụng!
         var avail3 = AssetAvailabilityPolicy.CheckAvailability(asset, period3, now, allAllocations, []);
         Assert.True(avail3.IsSuccess);
+        Assert.True(AssetAvailabilityPolicy.CheckAvailability(asset, cancelledPeriod, now, allAllocations, []).IsSuccess);
     }
 
     [Fact]

@@ -297,8 +297,11 @@ public sealed partial class PostgresIntegrationTests
         // Giả lập thời gian sau khi hold hết hạn
         DateTimeOffset afterExpiry = now.AddSeconds(5);
 
-        // ExpireHold thành công trước
-        var expireResult = await executor.ExecuteAsync<bool>(assetId, async (ctx, ct) =>
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var expireTask = Task.Run(async () =>
+        {
+            await start.Task;
+            return await executor.ExecuteAsync<bool>(assetId, async (ctx, ct) =>
         {
             var alloc = await ctx.Allocations.GetByIdAsync(hold.Id, ct);
             Assert.NotNull(alloc);
@@ -307,10 +310,12 @@ public sealed partial class PostgresIntegrationTests
             return res.IsSuccess ? Result.Success(true) : res.Error;
         });
 
-        Assert.True(expireResult.IsSuccess);
+        });
 
-        // Sau đó Allocate đến sau -> Thất bại vì đã ở terminal state Released
-        var allocateResult = await executor.ExecuteAsync<bool>(assetId, async (ctx, ct) =>
+        var allocateTask = Task.Run(async () =>
+        {
+            await start.Task;
+            return await executor.ExecuteAsync<bool>(assetId, async (ctx, ct) =>
         {
             var alloc = await ctx.Allocations.GetByIdAsync(hold.Id, ct);
             Assert.NotNull(alloc);
@@ -319,7 +324,19 @@ public sealed partial class PostgresIntegrationTests
             return res.IsSuccess ? Result.Success(true) : res.Error;
         });
 
+        });
+
+        start.SetResult();
+        await Task.WhenAll(expireTask, allocateTask);
+        var expireResult = await expireTask;
+        var allocateResult = await allocateTask;
+        Assert.True(expireResult.IsSuccess);
         Assert.True(allocateResult.IsFailure);
-        Assert.Equal("ALLOCATION_IN_TERMINAL_STATE", allocateResult.Error.Code);
+        Assert.True(allocateResult.Error.Code is "ALLOCATION_IN_TERMINAL_STATE" or "HOLD_EXPIRED", allocateResult.Error.Code);
+
+        await using var verify = await CreateMigratedDbContextAsync();
+        var saved = await verify.AssetAllocations.Include(a => a.Transitions).SingleAsync(a => a.Id == hold.Id);
+        Assert.Equal(AllocationStatus.Released, saved.Status);
+        Assert.Single(saved.Transitions, t => t.ToStatus == AllocationStatus.Released);
     }
 }

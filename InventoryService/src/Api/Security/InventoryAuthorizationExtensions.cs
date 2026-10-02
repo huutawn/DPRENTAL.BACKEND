@@ -14,7 +14,6 @@ public static class InventoryAuthorizationExtensions
         services.AddHttpContextAccessor();
 
         // Đăng ký Access Evaluator và Caller Context
-        services.AddSingleton<InventoryAccessEvaluator>();
         services.AddScoped<IInventoryCallerContext, InventoryCallerContext>();
 
         // Đăng ký Authorization Handler
@@ -23,6 +22,7 @@ public static class InventoryAuthorizationExtensions
         // Đăng ký 5 Policies chuẩn theo DPR-147
         services.AddAuthorization(options =>
         {
+            options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
             options.AddPolicy(InventoryPolicies.AssetManage, policy =>
                 policy.RequireAuthenticatedUser()
                       .AddRequirements(new AssetManageRequirement()));

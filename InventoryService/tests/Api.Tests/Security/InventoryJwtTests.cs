@@ -7,6 +7,32 @@ namespace Dprental.InventoryService.Api.Tests.Security;
 
 public sealed class InventoryJwtTests
 {
+    [Theory]
+    [InlineData("svc", InventorySecurityTestFactory.HumanAudience)]
+    [InlineData(null, InventorySecurityTestFactory.ServiceAudience)]
+    [InlineData("unsupported", InventorySecurityTestFactory.HumanAudience)]
+    public async Task TokenUseMustMatchAudience(string? tokenUse, string audience)
+    {
+        await using var factory = new InventorySecurityTestFactory();
+        using var client = factory.CreateClient();
+        var claims = tokenUse is null ? Array.Empty<System.Security.Claims.Claim>() : [new System.Security.Claims.Claim("u", tokenUse)];
+        string token = factory.CreateToken(Guid.NewGuid().ToString(), claims, audience);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var response = await client.GetAsync("/api/test/availability/sanitized");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WrongIssuerIsRejected()
+    {
+        await using var factory = new InventorySecurityTestFactory();
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            factory.CreateToken(Guid.NewGuid().ToString(), issuer: "https://untrusted.test"));
+        using var response = await client.GetAsync("/api/test/availability/sanitized");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
     [Fact]
     public async Task MissingToken_Returns401Unauthorized()
     {
@@ -128,20 +154,15 @@ public sealed class InventoryJwtTests
         Assert.Equal(HttpStatusCode.OK, resp1.StatusCode);
         int initialRequests = factory.JwksRequestCount;
 
-        // Token với kid chưa biết
-        string tokenUnknownKid = factory.CreateToken(
-            Guid.NewGuid().ToString("D"),
-            keyId: "key-unknown-rotating");
-
+        // Rotate both the key material and kid: the first request must succeed.
+        using var rotatedKey = RSA.Create(2048);
+        factory.SigningKey.ImportParameters(rotatedKey.ExportParameters(true));
+        factory.ActiveKeyId = "key-rotated";
+        string rotatedToken = factory.CreateHumanToken(Guid.NewGuid());
         using var request2 = new HttpRequestMessage(HttpMethod.Get, "/api/test/availability/sanitized");
-        request2.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenUnknownKid);
-        await client.SendAsync(request2);
-
-        // Yêu cầu tiếp theo sẽ thực sự thực hiện reload JWKS từ endpoint
-        using var request3 = new HttpRequestMessage(HttpMethod.Get, "/api/test/availability/sanitized");
-        request3.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token1);
-        await client.SendAsync(request3);
-
-        Assert.True(factory.JwksRequestCount > initialRequests);
+        request2.Headers.Authorization = new AuthenticationHeaderValue("Bearer", rotatedToken);
+        using var response2 = await client.SendAsync(request2);
+        Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
+        Assert.Equal(initialRequests + 1, factory.JwksRequestCount);
     }
 }

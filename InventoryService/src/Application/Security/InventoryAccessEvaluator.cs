@@ -4,7 +4,7 @@ namespace Dprental.InventoryService.Application.Security;
 /// Bộ đánh giá quyền truy cập tập trung của Inventory Service (Access Evaluator).
 /// Thực thi ma trận phân quyền DPR-147 dựa trên User Ownership (OwnerUserId) và Claims.
 /// </summary>
-public sealed class InventoryAccessEvaluator
+public static class InventoryAccessEvaluator
 {
     public const string PermissionAssetManage = "inventory.asset.manage";
     public const string PermissionCalendarRead = "inventory.calendar.read";
@@ -27,14 +27,14 @@ public sealed class InventoryAccessEvaluator
             return false;
         }
 
-        if (caller.IsAdmin)
-        {
-            return true;
-        }
-
         if (assetOwnerUserId is null || assetOwnerUserId == Guid.Empty)
         {
             return false;
+        }
+
+        if (caller.IsAdmin)
+        {
+            return true;
         }
 
         return caller.Permissions.Contains(PermissionAssetManage) && caller.UserId == assetOwnerUserId;
@@ -56,14 +56,14 @@ public sealed class InventoryAccessEvaluator
             return false;
         }
 
-        if (caller.IsAdmin)
-        {
-            return true;
-        }
-
         if (assetOwnerUserId is null || assetOwnerUserId == Guid.Empty)
         {
             return false;
+        }
+
+        if (caller.IsAdmin)
+        {
+            return true;
         }
 
         return caller.Permissions.Contains(PermissionCalendarRead) && caller.UserId == assetOwnerUserId;
@@ -125,14 +125,14 @@ public sealed class InventoryAccessEvaluator
             return false;
         }
 
-        if (caller.IsAdmin)
-        {
-            return true;
-        }
-
         if (assetOwnerUserId is null || assetOwnerUserId == Guid.Empty)
         {
             return false;
+        }
+
+        if (caller.IsAdmin)
+        {
+            return true;
         }
 
         return caller.Permissions.Contains(PermissionAssetManage) && caller.UserId == assetOwnerUserId;

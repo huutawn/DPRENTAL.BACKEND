@@ -157,6 +157,46 @@ public sealed class JwksConfigurationManagerTests : IAsyncDisposable
         Assert.Contains("stale", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task ConcurrentUnknownKidsShareOneForcedRefresh()
+    {
+        using var client = new HttpClient();
+        using var manager = new JwksConfigurationManager(client, new JwtOptions { JwksUri = _jwksUri.ToString() });
+        await manager.GetConfigurationAsync(CancellationToken.None);
+        var results = await Task.WhenAll(Enumerable.Range(0, 20)
+            .Select(i => manager.EnsureSigningKeyAsync($"unknown-{i}", CancellationToken.None)));
+        Assert.All(results, Assert.False);
+        Assert.Equal(2, _requestCount);
+    }
+
+    [Fact]
+    public async Task OutageDoesNotFetchForEveryAuthenticatedRequest()
+    {
+        var clock = new CustomTimeProvider(DateTimeOffset.UtcNow);
+        using var client = new HttpClient();
+        using var manager = new JwksConfigurationManager(client, new JwtOptions { JwksUri = _jwksUri.ToString() }, clock);
+        await manager.GetConfigurationAsync(CancellationToken.None);
+        _simulateDown = true;
+        clock.Advance(TimeSpan.FromMinutes(6));
+        for (int i = 0; i < 20; i++) await manager.GetConfigurationAsync(CancellationToken.None);
+        Assert.Equal(2, _requestCount);
+        clock.Advance(TimeSpan.FromMinutes(5));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => manager.GetConfigurationAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ColdOutageHasBoundedFetches()
+    {
+        _simulateDown = true;
+        using var client = new HttpClient();
+        using var manager = new JwksConfigurationManager(client, new JwtOptions { JwksUri = _jwksUri.ToString() });
+        await Assert.ThrowsAsync<HttpRequestException>(() => manager.GetConfigurationAsync(CancellationToken.None));
+        for (int i = 0; i < 10; i++)
+            await Assert.ThrowsAsync<InvalidOperationException>(() => manager.GetConfigurationAsync(CancellationToken.None));
+        Assert.Equal(1, _requestCount);
+        Assert.False(manager.HasUsableConfiguration());
+    }
+
     private async Task AcceptRequestsAsync()
     {
         try

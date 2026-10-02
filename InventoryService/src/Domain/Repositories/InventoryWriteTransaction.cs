@@ -84,6 +84,19 @@ public sealed class InventoryWriteTransaction : IInventoryWriteTransaction
         {
             throw;
         }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Error.Conflict("STALE_INVENTORY_WRITE", "Dữ liệu đã được thay đổi; đọc lại trước khi thử lại.");
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg && pg.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            return Error.Conflict("INVENTORY_DUPLICATE_KEY", "Khóa nghiệp vụ đã tồn tại; đọc lại và đối chiếu payload.");
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg &&
+            pg.SqlState is PostgresErrorCodes.CheckViolation or PostgresErrorCodes.ForeignKeyViolation or PostgresErrorCodes.NotNullViolation)
+        {
+            return Error.Validation("INVENTORY_CONSTRAINT_VIOLATION", "Dữ liệu không thỏa ràng buộc Inventory.");
+        }
         catch (Exception ex)
         {
             if (_logger is not null)
@@ -91,7 +104,7 @@ public sealed class InventoryWriteTransaction : IInventoryWriteTransaction
                 LogFailure(_logger, assetId, ex);
             }
 
-            return Error.Failure("TRANSACTION_FAILED", $"Thao tác ghi thất bại trên tài sản {assetId}: {ex.Message}");
+            return Error.Failure("TRANSACTION_FAILED", "Không thể lưu thay đổi Inventory.");
         }
         finally
         {
@@ -106,6 +119,8 @@ public sealed class InventoryWriteTransaction : IInventoryWriteTransaction
         Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation,
         CancellationToken cancellationToken)
     {
+        if (!db.Database.IsNpgsql())
+            return Error.Failure("POSTGRES_REQUIRED", "Write transaction cần PostgreSQL.");
         await AcquireAssetLockAsync(db, assetId, cancellationToken);
 
         var context = CreateWriteContext(db, assetId, services);
@@ -122,7 +137,7 @@ public sealed class InventoryWriteTransaction : IInventoryWriteTransaction
             return validationResult.Error;
         }
 
-        await db.SaveChangesAsync(cancellationToken);
+        // Inbox owns SaveChanges and commit for the complete handler execution.
         return result;
     }
 
@@ -134,6 +149,8 @@ public sealed class InventoryWriteTransaction : IInventoryWriteTransaction
         await using var scope = _scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<InventoryServiceDbContext>();
 
+        if (!db.Database.IsNpgsql())
+            return Error.Failure("POSTGRES_REQUIRED", "Write transaction cần PostgreSQL.");
         await using var transaction = await db.Database.BeginTransactionAsync(
             IsolationLevel.ReadCommitted, cancellationToken);
 
@@ -194,6 +211,17 @@ public sealed class InventoryWriteTransaction : IInventoryWriteTransaction
                 CalendarBlock block => block.AssetId,
                 _ => null
             };
+
+            if (entry.State is EntityState.Modified or EntityState.Deleted &&
+                entry.Entity is AssetAllocation or CalendarBlock &&
+                entry.Property(nameof(AssetAllocation.AssetId)).OriginalValue is Guid originalAssetId && originalAssetId != assetId)
+                return Error.Conflict("ASSET_LOCK_MISMATCH", "Dữ liệu ghi không thuộc tài sản đang giữ khóa.");
+
+            if (entry.Entity is InventoryAsset && entry.State == EntityState.Modified &&
+                entry.Properties.Any(p => p.IsModified && p.OriginalValue is Guid original &&
+                    p.CurrentValue is Guid current && original != current &&
+                    p.Metadata.Name is nameof(InventoryAsset.OwnerUserId) or nameof(InventoryAsset.OrganizationId) or nameof(InventoryAsset.EquipmentTypeId)))
+                return Error.Conflict("ASSET_IDENTITY_IMMUTABLE", "Không được đổi ownership hoặc identity của tài sản.");
 
             Guid? allocationId = entry.Entity switch
             {

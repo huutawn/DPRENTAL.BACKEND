@@ -9,23 +9,25 @@ namespace Dprental.InventoryService.Api.Tests.Security;
 /// Controller kiểm thử nội bộ phục vụ kiểm chứng 5 authorization policies của DPR-147.
 /// </summary>
 [ApiController]
+[Authorize]
 [Route("api/test")]
 public sealed class PolicyProbeController : ControllerBase
 {
     private readonly IAuthorizationService _authService;
 
     // Bộ nhớ in-memory giả lập danh sách tài sản phục vụ resource-based authorization
-    public static readonly Dictionary<Guid, InventoryAsset> TestAssets = new();
+    private readonly IReadOnlyDictionary<Guid, InventoryAsset> _assets;
 
-    public PolicyProbeController(IAuthorizationService authService)
+    public PolicyProbeController(IAuthorizationService authService, IReadOnlyDictionary<Guid, InventoryAsset> assets)
     {
         _authService = authService;
+        _assets = assets;
     }
 
     [HttpPost("assets/{assetId}/manage")]
     public async Task<IActionResult> ProbeAssetManage(Guid assetId)
     {
-        if (!TestAssets.TryGetValue(assetId, out var asset))
+        if (!_assets.TryGetValue(assetId, out var asset))
         {
             return NotFound();
         }
@@ -37,7 +39,7 @@ public sealed class PolicyProbeController : ControllerBase
     [HttpGet("assets/{assetId}/calendar")]
     public async Task<IActionResult> ProbeCalendarRead(Guid assetId)
     {
-        if (!TestAssets.TryGetValue(assetId, out var asset))
+        if (!_assets.TryGetValue(assetId, out var asset))
         {
             return NotFound();
         }
@@ -63,7 +65,7 @@ public sealed class PolicyProbeController : ControllerBase
     [HttpPost("assets/{assetId}/manual-allocate")]
     public async Task<IActionResult> ProbeManualAllocate(Guid assetId)
     {
-        if (!TestAssets.TryGetValue(assetId, out var asset))
+        if (!_assets.TryGetValue(assetId, out var asset))
         {
             return NotFound();
         }

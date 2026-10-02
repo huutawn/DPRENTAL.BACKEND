@@ -14,6 +14,118 @@ namespace Dprental.InventoryService.Api.Tests.Integration;
 public sealed partial class PostgresIntegrationTests
 {
     [Fact]
+    public async Task OwnerCannotBeChangedWithinAssetWriteBoundary()
+    {
+        using var services = BuildServiceProvider();
+        await using var setup = await CreateMigratedDbContextAsync();
+        var owner = Guid.NewGuid();
+        var asset = InventoryAsset.Create(Guid.NewGuid(), owner, Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, DateTimeOffset.UtcNow).Value;
+        setup.Assets.Add(asset);
+        await setup.SaveChangesAsync();
+        var result = await services.GetRequiredService<IInventoryWriteTransaction>().ExecuteAsync<bool>(asset.Id, async (ctx, ct) =>
+        {
+            var tracked = await ctx.Assets.GetByIdAsync(asset.Id, ct);
+            Assert.NotNull(tracked);
+            typeof(InventoryAsset).GetProperty(nameof(InventoryAsset.OwnerUserId))!.SetValue(tracked, Guid.NewGuid());
+            return Result.Success(true);
+        });
+        Assert.Equal("ASSET_IDENTITY_IMMUTABLE", result.Error.Code);
+        await using var verify = await CreateMigratedDbContextAsync();
+        Assert.Equal(owner, (await verify.Assets.SingleAsync(a => a.Id == asset.Id)).OwnerUserId);
+    }
+
+    [Fact]
+    public async Task ReparentingAllocationRequiresOriginalAssetLockAndRollsBack()
+    {
+        using var services = BuildServiceProvider();
+        await using var setup = await CreateMigratedDbContextAsync();
+        var now = DateTimeOffset.UtcNow;
+        var a = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value;
+        var b = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value;
+        var day = BusinessDateTime.ToVietnamDate(now).AddDays(1);
+        var allocation = AssetAllocation.CreateManual(Guid.NewGuid(), a.Id, new RentalPeriod(day, day), now).Value;
+        setup.Assets.AddRange(a, b);
+        setup.AssetAllocations.Add(allocation);
+        await setup.SaveChangesAsync();
+        var result = await services.GetRequiredService<IInventoryWriteTransaction>().ExecuteAsync<bool>(b.Id, async (ctx, ct) =>
+        {
+            var tracked = await ctx.Allocations.GetByIdAsync(allocation.Id, ct);
+            Assert.NotNull(tracked);
+            typeof(AssetAllocation).GetProperty(nameof(AssetAllocation.AssetId))!.SetValue(tracked, b.Id);
+            return Result.Success(true);
+        });
+        Assert.Equal("ASSET_LOCK_MISMATCH", result.Error.Code);
+        await using var verify = await CreateMigratedDbContextAsync();
+        Assert.Equal(a.Id, (await verify.AssetAllocations.SingleAsync(x => x.Id == allocation.Id)).AssetId);
+    }
+
+    [Fact]
+    public async Task DuplicateWriteReturnsConflictAndDoesNotExposeDatabaseDetails()
+    {
+        using var services = BuildServiceProvider();
+        await using var setup = await CreateMigratedDbContextAsync();
+        var now = DateTimeOffset.UtcNow;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value;
+        setup.Assets.Add(asset);
+        await setup.SaveChangesAsync();
+        var transaction = services.GetRequiredService<IInventoryWriteTransaction>();
+        var period = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(1), BusinessDateTime.ToVietnamDate(now).AddDays(2));
+        var reference = Guid.NewGuid().ToString();
+        Task<Result<bool>> Insert() => transaction.ExecuteAsync<bool>(asset.Id, (ctx, ct) =>
+        {
+            ctx.Allocations.Add(AssetAllocation.CreateManual(Guid.NewGuid(), asset.Id, period, now, reference).Value);
+            return Task.FromResult(Result.Success(true));
+        });
+        Assert.True((await Insert()).IsSuccess);
+        var duplicate = await Insert();
+        Assert.Equal(ErrorType.Conflict, duplicate.Error.Type);
+        Assert.Equal("INVENTORY_DUPLICATE_KEY", duplicate.Error.Code);
+        Assert.DoesNotContain(reference, duplicate.Error.Message);
+        var unexpected = await transaction.ExecuteAsync<bool>(asset.Id, (ctx, ct) => throw new InvalidOperationException("sensitive-internal-value"));
+        Assert.Equal(ErrorType.Failure, unexpected.Error.Type);
+        Assert.DoesNotContain("sensitive-internal-value", unexpected.Error.Message);
+    }
+
+    [Fact]
+    public async Task StaleWriteReturnsConflict()
+    {
+        using var services = BuildServiceProvider();
+        await using var setup = await CreateMigratedDbContextAsync();
+        var now = DateTimeOffset.UtcNow;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value;
+        setup.Assets.Add(asset);
+        await setup.SaveChangesAsync();
+        await using var concurrent = await CreateMigratedDbContextAsync();
+        var newer = await concurrent.Assets.SingleAsync(a => a.Id == asset.Id);
+        newer.DisableBookings("maintenance", now);
+        await concurrent.SaveChangesAsync();
+        asset.DisableBookings("stale", now);
+        var result = await services.GetRequiredService<IInventoryWriteTransaction>().ExecuteAsync<bool>(asset.Id, (ctx, ct) =>
+        {
+            ctx.Assets.Update(asset);
+            return Task.FromResult(Result.Success(true));
+        });
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.Equal("STALE_INVENTORY_WRITE", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task ForeignKeyWriteReturnsValidation()
+    {
+        using var services = BuildServiceProvider();
+        var missingAsset = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var period = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(1), BusinessDateTime.ToVietnamDate(now).AddDays(2));
+        var result = await services.GetRequiredService<IInventoryWriteTransaction>().ExecuteAsync<bool>(missingAsset, (ctx, ct) =>
+        {
+            ctx.Allocations.Add(AssetAllocation.CreateManual(Guid.NewGuid(), missingAsset, period, now).Value);
+            return Task.FromResult(Result.Success(true));
+        });
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal("INVENTORY_CONSTRAINT_VIOLATION", result.Error.Code);
+    }
+
+    [Fact]
     public async Task ExpiredHoldRehydratesHistoryAndPersistsReleaseAndOutboxAtomically()
     {
         using var services = BuildServiceProvider();

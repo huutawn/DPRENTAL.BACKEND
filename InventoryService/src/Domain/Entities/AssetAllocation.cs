@@ -227,12 +227,14 @@ public sealed partial class AssetAllocation
             : Error.Conflict("IDEMPOTENCY_KEY_REUSED", "Operation key đã được dùng cho thao tác hoặc payload khác.");
     }
 
-    public Result ValidateExternalRetry(Guid assetId, RentalPeriod period, DateTimeOffset holdExpiresAt, string? notes = null) =>
-        AssetId == assetId && RentalPeriod == period &&
-        _transitions.First(t => t.OperationType == AllocationOperationType.CreateHold).NewHoldExpiresAt == BusinessDateTime.NormalizeUtc(holdExpiresAt) &&
-        Notes == notes?.Trim()
-            ? Result.Success()
-            : Error.Conflict("EXTERNAL_REFERENCE_REUSED", "Mã tham chiếu đã được dùng với payload khác.");
+    public Result ValidateExternalRetry(Guid assetId, RentalPeriod period, DateTimeOffset holdExpiresAt, string? notes = null)
+    {
+        var creation = _transitions.Find(t => t.OperationType == AllocationOperationType.CreateHold);
+        return creation is not null && AssetId == assetId && RentalPeriod == period &&
+            creation.NewHoldExpiresAt == BusinessDateTime.NormalizeUtc(holdExpiresAt) && Notes == notes?.Trim()
+                ? Result.Success()
+                : Error.Conflict("EXTERNAL_REFERENCE_REUSED", "Mã tham chiếu đã được dùng với payload khác.");
+    }
 
     private void AddTransition(
         AllocationOperationType operationType,

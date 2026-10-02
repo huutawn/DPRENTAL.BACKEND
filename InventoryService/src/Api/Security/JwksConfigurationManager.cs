@@ -17,10 +17,11 @@ public sealed class JwksConfigurationManager : IConfigurationManager<OpenIdConne
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private readonly Uri _jwksUri;
 
-    private OpenIdConnectConfiguration? _currentConfiguration;
-    private DateTimeOffset _fetchedAtUtc;
-    private DateTimeOffset _refreshAfterUtc;
+    private sealed record KeyCache(OpenIdConnectConfiguration Configuration, DateTimeOffset FetchedAtUtc, DateTimeOffset RefreshAfterUtc);
+    private KeyCache? _cache;
     private int _refreshRequested;
+    private long _nextForcedRefreshTicks;
+    private DateTimeOffset _retryAfterUtc;
 
     public JwksConfigurationManager(
         HttpClient httpClient,
@@ -36,28 +37,33 @@ public sealed class JwksConfigurationManager : IConfigurationManager<OpenIdConne
     /// <inheritdoc />
     public async Task<OpenIdConnectConfiguration> GetConfigurationAsync(CancellationToken cancel)
     {
-        var cached = Volatile.Read(ref _currentConfiguration);
+        var cached = Volatile.Read(ref _cache);
         var now = _timeProvider.GetUtcNow();
 
         if (cached is not null
             && Volatile.Read(ref _refreshRequested) == 0
-            && now < _refreshAfterUtc)
+            && now < cached.RefreshAfterUtc
+            && now - cached.FetchedAtUtc <= TimeSpan.FromMinutes(_options.MaxStaleMinutes))
         {
-            return cached;
+            return cached.Configuration;
         }
 
         await _refreshLock.WaitAsync(cancel);
         try
         {
-            cached = _currentConfiguration;
+            cached = _cache;
             now = _timeProvider.GetUtcNow();
 
             if (cached is not null
                 && Volatile.Read(ref _refreshRequested) == 0
-                && now < _refreshAfterUtc)
+                && now < cached.RefreshAfterUtc
+            && now - cached.FetchedAtUtc <= TimeSpan.FromMinutes(_options.MaxStaleMinutes))
             {
-                return cached;
+                return cached.Configuration;
             }
+
+            if (now < _retryAfterUtc)
+                throw new InvalidOperationException("JWKS refresh is temporarily unavailable.");
 
             try
             {
@@ -66,34 +72,39 @@ public sealed class JwksConfigurationManager : IConfigurationManager<OpenIdConne
 
                 string document = await response.Content.ReadAsStringAsync(cancel);
                 var keySet = new JsonWebKeySet(document);
-                if (keySet.Keys.Count == 0)
+                var signingKeys = keySet.Keys.Where(k => k.Kty == "RSA" && !string.IsNullOrWhiteSpace(k.Kid) &&
+                    (string.IsNullOrEmpty(k.Use) || k.Use == "sig") &&
+                    (string.IsNullOrEmpty(k.Alg) || k.Alg == "RS256")).ToArray();
+                if (signingKeys.Length == 0)
                 {
                     throw new InvalidOperationException("AuthService JWKS document không chứa signing key nào.");
                 }
 
                 var configuration = new OpenIdConnectConfiguration();
-                foreach (var key in keySet.Keys)
+                foreach (var key in signingKeys)
                 {
                     configuration.SigningKeys.Add(key);
                 }
 
                 DateTimeOffset refreshedAt = _timeProvider.GetUtcNow();
-                _fetchedAtUtc = refreshedAt;
-                _refreshAfterUtc = refreshedAt.Add(GetRefreshInterval(response.Headers.CacheControl));
-
-                Volatile.Write(ref _currentConfiguration, configuration);
+                Volatile.Write(ref _cache, new KeyCache(configuration, refreshedAt,
+                    refreshedAt.Add(GetRefreshInterval(response.Headers.CacheControl))));
                 Volatile.Write(ref _refreshRequested, 0);
 
                 return configuration;
             }
-            catch when (cached is not null && (_timeProvider.GetUtcNow() - _fetchedAtUtc) <= TimeSpan.FromMinutes(_options.MaxStaleMinutes))
+            catch when (!cancel.IsCancellationRequested && cached is not null && (_timeProvider.GetUtcNow() - cached.FetchedAtUtc) <= TimeSpan.FromMinutes(_options.MaxStaleMinutes))
             {
-                // Cho phép tái sử dụng key cache trong giới hạn MaxStaleMinutes khi gặp sự cố mạng tạm thời
-                return cached;
+                // Bound outage retries without extending the original key trust deadline.
+                Volatile.Write(ref _cache, cached with { RefreshAfterUtc = _timeProvider.GetUtcNow().AddSeconds(10) });
+                Volatile.Write(ref _refreshRequested, 0);
+                return cached.Configuration;
             }
             catch (Exception ex)
             {
-                if (cached is not null && (_timeProvider.GetUtcNow() - _fetchedAtUtc) > TimeSpan.FromMinutes(_options.MaxStaleMinutes))
+                if (cancel.IsCancellationRequested) throw;
+                _retryAfterUtc = _timeProvider.GetUtcNow().AddSeconds(10);
+                if (cached is not null && (_timeProvider.GetUtcNow() - cached.FetchedAtUtc) > TimeSpan.FromMinutes(_options.MaxStaleMinutes))
                 {
                     throw new InvalidOperationException(
                         $"JWKS key cache đã vượt quá giới hạn stale tối đa ({_options.MaxStaleMinutes} phút) và không thể kết nối tới AuthService.", ex);
@@ -111,7 +122,24 @@ public sealed class JwksConfigurationManager : IConfigurationManager<OpenIdConne
     /// <inheritdoc />
     public void RequestRefresh()
     {
-        Volatile.Write(ref _refreshRequested, 1);
+        long now = _timeProvider.GetUtcNow().UtcTicks;
+        long next = Interlocked.Read(ref _nextForcedRefreshTicks);
+        if (now >= next && Interlocked.CompareExchange(ref _nextForcedRefreshTicks,
+            now + TimeSpan.FromSeconds(10).Ticks, next) == next)
+        {
+            Volatile.Write(ref _refreshRequested, 1);
+        }
+    }
+
+    /// <summary>Refreshes an unknown kid before the current request is validated.</summary>
+    public async Task<bool> EnsureSigningKeyAsync(string? kid, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(kid)) return false;
+        var configuration = await GetConfigurationAsync(cancellationToken);
+        if (configuration.SigningKeys.Any(k => k.KeyId == kid)) return true;
+        RequestRefresh();
+        configuration = await GetConfigurationAsync(cancellationToken);
+        return configuration.SigningKeys.Any(k => k.KeyId == kid);
     }
 
     /// <summary>
@@ -119,8 +147,9 @@ public sealed class JwksConfigurationManager : IConfigurationManager<OpenIdConne
     /// </summary>
     public bool HasUsableConfiguration()
     {
-        return _currentConfiguration is not null
-            && (_timeProvider.GetUtcNow() - _fetchedAtUtc) <= TimeSpan.FromMinutes(_options.MaxStaleMinutes);
+        var cached = Volatile.Read(ref _cache);
+        return cached is not null
+            && (_timeProvider.GetUtcNow() - cached.FetchedAtUtc) <= TimeSpan.FromMinutes(_options.MaxStaleMinutes);
     }
 
     private TimeSpan GetRefreshInterval(CacheControlHeaderValue? cacheControl)

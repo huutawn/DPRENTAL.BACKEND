@@ -24,11 +24,11 @@ SELECT
     COUNT(b.asset_id) AS backfilled_count,
     COUNT(CASE
         WHEN b.asset_id IS NULL
-          OR b.owner_user_id = '00000000-0000-0000-0000-000000000001'::uuid AND false
           OR b.owner_user_id = '00000000-0000-0000-0000-000000000000'::uuid
           OR b.equipment_type_id = '00000000-0000-0000-0000-000000000000'::uuid
           OR b.schema_version < 1
           OR b.spec_values IS NULL
+          OR jsonb_typeof(b.spec_values) <> 'object'
         THEN 1
     END) AS missing_or_invalid_count
 FROM inventory.equipments e

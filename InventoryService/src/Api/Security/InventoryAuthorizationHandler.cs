@@ -122,7 +122,6 @@ public sealed class InventoryAuthorizationHandler : IAuthorizationHandler
         return resource switch
         {
             InventoryAsset asset => asset.OwnerUserId,
-            Guid ownerId when ownerId != Guid.Empty => ownerId,
             _ => null
         };
     }

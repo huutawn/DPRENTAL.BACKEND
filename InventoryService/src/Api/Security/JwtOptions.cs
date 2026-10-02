@@ -5,7 +5,7 @@ namespace Dprental.InventoryService.Api.Security;
 /// <summary>
 /// Tùy chọn cấu hình JWT Authentication và kết nối JWKS tới AuthService.
 /// </summary>
-public sealed class JwtOptions
+public sealed class JwtOptions : IValidatableObject
 {
     public const string SectionName = "Authentication:Jwt";
 
@@ -51,4 +51,14 @@ public sealed class JwtOptions
     /// </summary>
     [Range(1, 120, ErrorMessage = "MaxStaleMinutes phải từ 1 đến 120 phút.")]
     public int MaxStaleMinutes { get; set; } = 10;
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (!Uri.TryCreate(JwksUri, UriKind.Absolute, out var uri) ||
+            uri.Scheme is not ("http" or "https"))
+            yield return new ValidationResult("JwksUri must be an absolute HTTP(S) URI.", [nameof(JwksUri)]);
+        if (CacheDurationMinutes > MaxStaleMinutes)
+            yield return new ValidationResult("CacheDurationMinutes must not exceed MaxStaleMinutes.", [nameof(CacheDurationMinutes)]);
+        if (HumanAudience == ServiceAudience)
+            yield return new ValidationResult("Human and service audiences must be different.", [nameof(ServiceAudience)]);
+    }
 }

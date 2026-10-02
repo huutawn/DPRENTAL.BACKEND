@@ -15,6 +15,15 @@ public sealed class AllocationContractTests
         AssetAllocation.CreateManual(Guid.NewGuid(), assetId, Period, Created, "MANUAL-001", operationKey: key).Value;
 
     [Fact]
+    public void HoldRetryAgainstManualReferenceReturnsConflict()
+    {
+        var allocation = Manual(Guid.NewGuid());
+        var retry = allocation.ValidateExternalRetry(allocation.AssetId, Period, Created.AddHours(1));
+        Assert.True(retry.IsFailure);
+        Assert.Equal("EXTERNAL_REFERENCE_REUSED", retry.Error.Code);
+    }
+
+    [Fact]
     public void TransitionsCollectionCannotBeMutatedByCallers()
     {
         var allocation = Manual(Guid.NewGuid());

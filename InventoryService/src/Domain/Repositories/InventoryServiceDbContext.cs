@@ -70,6 +70,13 @@ public sealed class InventoryServiceDbContext : DbContext
             b.Property(a => a.SpecValues)
                 .HasColumnType("jsonb");
 
+            b.ToTable(t =>
+            {
+                t.HasCheckConstraint("ck_assets_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND organization_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+                t.HasCheckConstraint("ck_assets_schema_version", "schema_version >= 1");
+                t.HasCheckConstraint("ck_assets_spec_values_object", "jsonb_typeof(spec_values) = 'object'");
+            });
+
             b.HasMany(a => a.Allocations)
                 .WithOne(al => al.Asset)
                 .HasForeignKey(al => al.AssetId)
