@@ -28,6 +28,9 @@ public class Category
 
     /// <summary>Category ngừng hoạt động không nhận equipment type mới và không cho publish.</summary>
     public bool IsActive { get; set; } = true;
+    /// <summary>Ảnh đại diện của category, tham chiếu logic tới MediaService.</summary>
+    public Guid? ImageMediaId { get; set; }
+
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 

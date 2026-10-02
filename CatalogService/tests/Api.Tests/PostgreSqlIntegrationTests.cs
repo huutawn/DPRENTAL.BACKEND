@@ -26,7 +26,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
     public async Task InitializeAsync()
     {
         await dbContext.Database.MigrateAsync();
-        await dbContext.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"catalog\".\"EquipmentTypeMedia\", \"catalog\".\"EquipmentTypes\", \"catalog\".\"Categories\" CASCADE;");
+        await dbContext.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"catalog\".\"EquipmentTypeCategories\", \"catalog\".\"EquipmentTypeMedia\", \"catalog\".\"EquipmentTypes\", \"catalog\".\"Categories\" CASCADE;");
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -76,8 +76,53 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
         Assert.Equal(2, result.Items.Count);
         Assert.All(result.Items, item =>
         {
-            Assert.Equal(catA.Id, item.Category.Id);
+            Assert.Contains(item.Categories, c => c.Id == catA.Id);
         });
+    }
+
+    [Fact]
+    public async Task Search_ManyToMany_MultipleCategories_NoDuplicatesAndBidirectional()
+    {
+        Category cat1 = await CreateCategoryAsync("Cat Multi 1");
+        Category cat2 = await CreateCategoryAsync("Cat Multi 2");
+        Category cat3 = await CreateCategoryAsync("Cat Multi 3");
+
+        var eq1 = new EquipmentType
+        {
+            Id = Guid.NewGuid(),
+            Code = "MULTI-001",
+            Name = "Multi 1",
+            Categories = [cat1, cat2, cat3],
+            CreatedAt = DateTime.UtcNow
+        };
+        eq1.Publish(DateTime.UtcNow);
+
+        var eq2 = new EquipmentType
+        {
+            Id = Guid.NewGuid(),
+            Code = "MULTI-002",
+            Name = "Multi 2",
+            Categories = [cat1, cat2],
+            CreatedAt = DateTime.UtcNow
+        };
+        eq2.Publish(DateTime.UtcNow);
+
+        dbContext.EquipmentTypes.AddRange(eq1, eq2);
+        await dbContext.SaveChangesAsync();
+
+        // 1. Search Category 1 -> Phải trả về đúng 2 equipment, không trùng lặp row
+        var result = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { CategoryId = cat1.Id, Page = 1, PageSize = 10 });
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal(2, result.Items.Count);
+        Assert.Equal(2, result.Items.Select(i => i.Id).Distinct().Count());
+
+        // 2. Kiểm tra quan hệ 2 chiều:
+        var loadedCat = await dbContext.Categories.Include(c => c.EquipmentTypes).FirstAsync(c => c.Id == cat1.Id);
+        Assert.Contains(loadedCat.EquipmentTypes, e => e.Id == eq1.Id);
+        Assert.Contains(loadedCat.EquipmentTypes, e => e.Id == eq2.Id);
+
+        var loadedEq = await dbContext.EquipmentTypes.Include(e => e.Categories).FirstAsync(e => e.Id == eq1.Id);
+        Assert.Equal(3, loadedEq.Categories.Count);
     }
 
     [Fact]
@@ -139,7 +184,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
             Id = id1,
             Code = "TIE-001",
             Name = "Identical Name",
-            CategoryId = cat.Id,
+            Categories = [cat],
             CreatedAt = sharedTime
         };
         item1.Publish(sharedTime);
@@ -149,7 +194,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
             Id = id2,
             Code = "TIE-002",
             Name = "Identical Name",
-            CategoryId = cat.Id,
+            Categories = [cat],
             CreatedAt = sharedTime
         };
         item2.Publish(sharedTime);
@@ -192,9 +237,9 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
 
         EquipmentTypeDetailDto? detail = await repository.GetPublishedByIdAsync(eq.Id);
         Assert.NotNull(detail);
-        Assert.Equal(2, detail.MediaIds.Count);
-        Assert.Equal(mediaNormal, detail.MediaIds[0]);
-        Assert.Equal(mediaThumb, detail.MediaIds[1]);
+        Assert.Equal(2, detail.Media.Count);
+        Assert.Equal(mediaNormal, detail.Media[0].MediaId);
+        Assert.Equal(mediaThumb, detail.Media[1].MediaId);
     }
 
     [Fact]
@@ -258,10 +303,11 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
         var task1 = Task.Run(async () =>
         {
             barrier.SignalAndWait();
+            var cat1 = await ctx1.Categories.FindAsync(cat.Id);
             var eq = new EquipmentType
             {
                 Id = Guid.NewGuid(),
-                CategoryId = cat.Id,
+                Categories = [cat1!],
                 Code = "RACE-CREATE-001",
                 Name = "Race 1",
                 CreatedAt = DateTime.UtcNow
@@ -272,10 +318,11 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
         var task2 = Task.Run(async () =>
         {
             barrier.SignalAndWait();
+            var cat2 = await ctx2.Categories.FindAsync(cat.Id);
             var eq = new EquipmentType
             {
                 Id = Guid.NewGuid(),
-                CategoryId = cat.Id,
+                Categories = [cat2!],
                 Code = "RACE-CREATE-001",
                 Name = "Race 2",
                 CreatedAt = DateTime.UtcNow
@@ -287,7 +334,6 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
 
         Assert.Single(results, r => r.IsSuccess);
         Assert.Single(results, r => r.IsFailure && r.Error.Code == CatalogErrorCode.EquipmentType.DuplicateCode);
-
         // Kiểm tra database chỉ có đúng 1 row
         int count = await dbContext.EquipmentTypes.CountAsync(e => e.Code == "RACE-CREATE-001");
         Assert.Equal(1, count);
@@ -492,7 +538,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
         var duplicateEq = new EquipmentType
         {
             Id = Guid.NewGuid(),
-            CategoryId = cat.Id,
+            Categories = [cat],
             Code = "EXISTING-CODE",
             Name = "Duplicate",
             CreatedAt = DateTime.UtcNow
@@ -534,14 +580,15 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
         EquipmentTypeStatus status,
         string? description = null)
     {
+        var category = await dbContext.Categories.FindAsync(categoryId);
         EquipmentType eq = new()
         {
             Id = Guid.NewGuid(),
             Code = code,
             Name = name,
             Description = description,
-            CategoryId = categoryId,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            Categories = category != null ? [category] : []
         };
 
         DateTime now = DateTime.UtcNow;

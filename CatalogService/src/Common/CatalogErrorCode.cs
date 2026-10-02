@@ -27,6 +27,7 @@ public static class CatalogErrorCode
         public const string InvalidName = "EquipmentType.InvalidName";
         public const string InvalidDescription = "EquipmentType.InvalidDescription";
         public const string InvalidCategory = "EquipmentType.InvalidCategory";
+        public const string InvalidCategories = "EquipmentType.InvalidCategories";
     }
 
     public static class Category
@@ -35,6 +36,15 @@ public static class CatalogErrorCode
         public const string InvalidName = "Category.InvalidName";
         public const string InvalidDescription = "Category.InvalidDescription";
     }
+    public static class Media
+    {
+        public const string NotFound = "Media.NotFound";
+        public const string NotReady = "Media.NotReady";
+        public const string InvalidContentType = "Media.InvalidContentType";
+        public const string Forbidden = "Media.Forbidden";
+        public const string ServiceUnavailable = "Media.ServiceUnavailable";
+    }
+
 
     public static class Catalog
     {

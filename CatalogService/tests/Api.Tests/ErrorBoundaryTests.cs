@@ -29,6 +29,7 @@ public sealed class ErrorBoundaryTests
     [InlineData(ErrorType.NotFound, StatusCodes.Status404NotFound)]
     [InlineData(ErrorType.Conflict, StatusCodes.Status409Conflict)]
     [InlineData(ErrorType.Failure, StatusCodes.Status500InternalServerError)]
+    [InlineData(ErrorType.Unavailable, StatusCodes.Status503ServiceUnavailable)]
     public void ExpectedErrorFilterExtensions_MapsAllErrorTypesCorrectly(ErrorType errorType, int expectedStatusCode)
     {
         var controller = new DummyController();

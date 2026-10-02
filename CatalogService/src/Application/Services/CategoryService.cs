@@ -1,4 +1,6 @@
 using CatalogService.Application.DTOs.Category;
+using Dprental.CatalogService.Application.Clients;
+using Dprental.CatalogService.Application.Common;
 using Dprental.CatalogService.Application.Validators;
 using Dprental.CatalogService.Common;
 using Dprental.CatalogService.Common.Utils;
@@ -11,40 +13,49 @@ namespace Dprental.CatalogService.Application.Services;
 public partial class CategoryService : ICategoryService
 {
     private readonly ICategoryRepository _repository;
+    private readonly IMediaServiceClient _mediaServiceClient;
     private readonly ILogger<CategoryService> _logger;
 
-    public CategoryService(ICategoryRepository repository, ILogger<CategoryService> logger)
+    public CategoryService(
+        ICategoryRepository repository,
+        IMediaServiceClient mediaServiceClient,
+        ILogger<CategoryService> logger)
     {
-        _repository = repository;
-        _logger = logger;
+        _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+        _mediaServiceClient = mediaServiceClient ?? throw new ArgumentNullException(nameof(mediaServiceClient));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<Result<CategoryDetailResponse>> CreateCategoryAsync(CreateCategoryRequest request, CancellationToken cancellationToken = default)
+    public async Task<Result<CategoryDetailResponse>> CreateCategoryAsync(
+        CreateCategoryRequest request,
+        string operatorUserId = "",
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        return Logged("Create", null, await CreateCoreAsync(request, cancellationToken));
+        return Logged("Create", null, await CreateCoreAsync(request, operatorUserId, cancellationToken));
     }
 
-    public async Task<Result<CategoryDetailResponse>> UpdateCategoryAsync(Guid id, UpdateCategoryRequest request, CancellationToken cancellationToken = default)
+    public async Task<Result<CategoryDetailResponse>> UpdateCategoryAsync(
+        Guid id,
+        UpdateCategoryRequest request,
+        string operatorUserId = "",
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        return Logged("Update", id, await UpdateCoreAsync(id, request, cancellationToken));
+        return Logged("Update", id, await UpdateCoreAsync(id, request, operatorUserId, cancellationToken));
     }
 
     public async Task<IEnumerable<CategoryDetailResponse>> GetActiveCategoriesAsync(CancellationToken cancellationToken = default)
     {
         var categories = await _repository.GetAllActiveAsync(cancellationToken);
-
         return categories.Select(ToResponse);
     }
 
     public async Task<Result<CategoryDetailResponse>> GetActiveCategoryByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var category = await _repository.GetByIdAsync(id, cancellationToken);
-
-        // Danh mục inactive (xóa mềm) được trả về như không tồn tại
         if (category == null || !category.IsActive)
         {
             return CatalogErrors.Category.NotFound;
@@ -53,7 +64,10 @@ public partial class CategoryService : ICategoryService
         return ToResponse(category);
     }
 
-    private async Task<Result<CategoryDetailResponse>> CreateCoreAsync(CreateCategoryRequest request, CancellationToken cancellationToken)
+    private async Task<Result<CategoryDetailResponse>> CreateCoreAsync(
+        CreateCategoryRequest request,
+        string operatorUserId,
+        CancellationToken cancellationToken)
     {
         Result nameResult = CategoryValidationRules.ValidateName(request.Name);
         if (nameResult.IsFailure)
@@ -65,6 +79,44 @@ public partial class CategoryService : ICategoryService
         if (descriptionResult.IsFailure)
         {
             return descriptionResult.Error;
+        }
+
+        if (request.ImageMediaId.HasValue && request.ImageMediaId.Value == Guid.Empty)
+        {
+            return CatalogErrors.Category.InvalidImage;
+        }
+
+        // Kiểm tra media nếu có ảnh
+        if (request.ImageMediaId.HasValue)
+        {
+            var verifyResult = await _mediaServiceClient.VerifyMediaAsync(request.ImageMediaId.Value, cancellationToken);
+            if (verifyResult.IsFailure)
+            {
+                return verifyResult.Error;
+            }
+
+            var media = verifyResult.Value;
+            if (!MediaValidationHelper.IsReady(media.Status))
+            {
+                return CatalogErrors.Media.NotReady;
+            }
+
+            if (!MediaValidationHelper.IsAllowedImageType(media.ContentType))
+            {
+                return CatalogErrors.Media.InvalidContentType;
+            }
+
+            if (!string.IsNullOrWhiteSpace(operatorUserId) &&
+                !string.Equals(media.UploadedByUserId?.Trim(), operatorUserId.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return CatalogErrors.Media.Forbidden;
+            }
+
+            var publicResult = await _mediaServiceClient.SetVisibilityAsync(request.ImageMediaId.Value, "public", cancellationToken);
+            if (publicResult.IsFailure)
+            {
+                return publicResult.Error;
+            }
         }
 
         // 1. Generate Slug từ Name
@@ -80,9 +132,10 @@ public partial class CategoryService : ICategoryService
         var category = new Category
         {
             Id = Guid.NewGuid(),
-            Name = request.Name,
+            Name = request.Name.Trim(),
             Slug = slug,
             Description = request.Description,
+            ImageMediaId = request.ImageMediaId,
             IsActive = true
         };
 
@@ -92,9 +145,13 @@ public partial class CategoryService : ICategoryService
         return ToResponse(category);
     }
 
-    private async Task<Result<CategoryDetailResponse>> UpdateCoreAsync(Guid id, UpdateCategoryRequest request, CancellationToken cancellationToken)
+    private async Task<Result<CategoryDetailResponse>> UpdateCoreAsync(
+        Guid id,
+        UpdateCategoryRequest request,
+        string operatorUserId,
+        CancellationToken cancellationToken)
     {
-        if (request.Name != null)
+        if (request.IsNameSpecified && request.Name != null)
         {
             Result nameResult = CategoryValidationRules.ValidateName(request.Name);
             if (nameResult.IsFailure)
@@ -103,10 +160,18 @@ public partial class CategoryService : ICategoryService
             }
         }
 
-        Result descriptionResult = CategoryValidationRules.ValidateDescription(request.Description);
-        if (descriptionResult.IsFailure)
+        if (request.IsDescriptionSpecified)
         {
-            return descriptionResult.Error;
+            Result descriptionResult = CategoryValidationRules.ValidateDescription(request.Description);
+            if (descriptionResult.IsFailure)
+            {
+                return descriptionResult.Error;
+            }
+        }
+
+        if (request.IsImageMediaIdSpecified && request.ImageMediaId.HasValue && request.ImageMediaId.Value == Guid.Empty)
+        {
+            return CatalogErrors.Category.InvalidImage;
         }
 
         var category = await _repository.GetByIdAsync(id, cancellationToken);
@@ -115,9 +180,53 @@ public partial class CategoryService : ICategoryService
             return CatalogErrors.Category.NotFound;
         }
 
-        if (request.Name != null) category.Name = request.Name;
-        if (request.Description != null) category.Description = request.Description;
-        if (request.IsActive.HasValue) category.IsActive = request.IsActive.Value;
+        if (request.IsImageMediaIdSpecified)
+        {
+            if (!request.ImageMediaId.HasValue)
+            {
+                // Gỡ ảnh
+                category.ImageMediaId = null;
+            }
+            else if (category.ImageMediaId != request.ImageMediaId.Value)
+            {
+                // Ảnh mới gắn: xác minh và public
+                var verifyResult = await _mediaServiceClient.VerifyMediaAsync(request.ImageMediaId.Value, cancellationToken);
+                if (verifyResult.IsFailure)
+                {
+                    return verifyResult.Error;
+                }
+
+                var media = verifyResult.Value;
+                if (!MediaValidationHelper.IsReady(media.Status))
+                {
+                    return CatalogErrors.Media.NotReady;
+                }
+
+                if (!MediaValidationHelper.IsAllowedImageType(media.ContentType))
+                {
+                    return CatalogErrors.Media.InvalidContentType;
+                }
+
+                if (!string.IsNullOrWhiteSpace(operatorUserId) &&
+                    !string.Equals(media.UploadedByUserId?.Trim(), operatorUserId.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    return CatalogErrors.Media.Forbidden;
+                }
+
+                var publicResult = await _mediaServiceClient.SetVisibilityAsync(request.ImageMediaId.Value, "public", cancellationToken);
+                if (publicResult.IsFailure)
+                {
+                    return publicResult.Error;
+                }
+
+                category.ImageMediaId = request.ImageMediaId.Value;
+            }
+        }
+
+        if (request.IsNameSpecified && request.Name != null) category.Name = request.Name.Trim();
+        if (request.IsDescriptionSpecified) category.Description = request.Description;
+        if (request.IsActiveSpecified && request.IsActive.HasValue) category.IsActive = request.IsActive.Value;
+        category.UpdatedAtUtc = DateTime.UtcNow;
 
         await _repository.UpdateAsync(category, cancellationToken);
 
@@ -125,7 +234,14 @@ public partial class CategoryService : ICategoryService
     }
 
     private static CategoryDetailResponse ToResponse(Category category) =>
-        new(category.Id, category.Name, category.Slug, category.Description, category.IsActive);
+        new(
+            category.Id,
+            category.Name,
+            category.Slug,
+            category.Description,
+            category.IsActive,
+            category.ImageMediaId,
+            MediaUrlResolver.ResolvePublicUrl(category.ImageMediaId));
 
     private Result<CategoryDetailResponse> Logged(string operation, Guid? categoryId, Result<CategoryDetailResponse> result)
     {

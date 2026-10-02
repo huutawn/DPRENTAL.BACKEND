@@ -19,8 +19,8 @@ public sealed class UpdateEquipmentTypeRequest
     public string? Description { get; init; }
 
     [JsonIgnore]
-    public bool IsCategoryIdSpecified { get; init; }
-    public Guid? CategoryId { get; init; }
+    public bool IsCategoryIdsSpecified { get; init; }
+    public IReadOnlyList<Guid>? CategoryIds { get; init; }
 
     [JsonIgnore]
     public bool IsMediaSpecified { get; init; }
@@ -28,7 +28,7 @@ public sealed class UpdateEquipmentTypeRequest
 
     [JsonIgnore]
     public bool HasAnyFieldSpecified =>
-        IsCodeSpecified || IsNameSpecified || IsDescriptionSpecified || IsCategoryIdSpecified || IsMediaSpecified;
+        IsCodeSpecified || IsNameSpecified || IsDescriptionSpecified || IsCategoryIdsSpecified || IsMediaSpecified;
 }
 
 public sealed class UpdateEquipmentTypeRequestJsonConverter : JsonConverter<UpdateEquipmentTypeRequest>
@@ -46,8 +46,8 @@ public sealed class UpdateEquipmentTypeRequestJsonConverter : JsonConverter<Upda
         string? name = null;
         bool isDescriptionSpecified = false;
         string? description = null;
-        bool isCategoryIdSpecified = false;
-        Guid? categoryId = null;
+        bool isCategoryIdsSpecified = false;
+        IReadOnlyList<Guid>? categoryIds = null;
         bool isMediaSpecified = false;
         IReadOnlyList<EquipmentTypeMediaItemDto?>? media = null;
 
@@ -63,8 +63,8 @@ public sealed class UpdateEquipmentTypeRequestJsonConverter : JsonConverter<Upda
                     Name = name,
                     IsDescriptionSpecified = isDescriptionSpecified,
                     Description = description,
-                    IsCategoryIdSpecified = isCategoryIdSpecified,
-                    CategoryId = categoryId,
+                    IsCategoryIdsSpecified = isCategoryIdsSpecified,
+                    CategoryIds = categoryIds,
                     IsMediaSpecified = isMediaSpecified,
                     Media = media
                 };
@@ -126,20 +126,32 @@ public sealed class UpdateEquipmentTypeRequestJsonConverter : JsonConverter<Upda
                     throw new JsonException("Description must be a string or null.");
                 }
             }
-            else if (string.Equals(propName, "categoryId", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(propName, "categoryIds", StringComparison.OrdinalIgnoreCase))
             {
-                isCategoryIdSpecified = true;
+                isCategoryIdsSpecified = true;
                 if (reader.TokenType == JsonTokenType.Null)
                 {
-                    categoryId = null;
+                    categoryIds = null;
                 }
-                else if (reader.TokenType == JsonTokenType.String && Guid.TryParse(reader.GetString(), out var g))
+                else if (reader.TokenType == JsonTokenType.StartArray)
                 {
-                    categoryId = g;
+                    var list = new List<Guid>();
+                    while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+                    {
+                        if (reader.TokenType == JsonTokenType.String && Guid.TryParse(reader.GetString(), out var g))
+                        {
+                            list.Add(g);
+                        }
+                        else
+                        {
+                            throw new JsonException("CategoryIds elements must be valid GUID strings.");
+                        }
+                    }
+                    categoryIds = list;
                 }
                 else
                 {
-                    throw new JsonException("CategoryId must be a valid GUID.");
+                    throw new JsonException("CategoryIds must be an array or null.");
                 }
             }
             else if (string.Equals(propName, "media", StringComparison.OrdinalIgnoreCase))
@@ -182,9 +194,22 @@ public sealed class UpdateEquipmentTypeRequestJsonConverter : JsonConverter<Upda
         {
             if (value.Description is null) writer.WriteNull("description"); else writer.WriteString("description", value.Description);
         }
-        if (value.IsCategoryIdSpecified)
+        if (value.IsCategoryIdsSpecified)
         {
-            if (value.CategoryId is null) writer.WriteNull("categoryId"); else writer.WriteString("categoryId", value.CategoryId.Value);
+            if (value.CategoryIds is null)
+            {
+                writer.WriteNull("categoryIds");
+            }
+            else
+            {
+                writer.WritePropertyName("categoryIds");
+                writer.WriteStartArray();
+                foreach (var id in value.CategoryIds)
+                {
+                    writer.WriteStringValue(id);
+                }
+                writer.WriteEndArray();
+            }
         }
         if (value.IsMediaSpecified)
         {

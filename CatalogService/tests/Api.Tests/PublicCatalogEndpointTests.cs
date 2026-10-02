@@ -101,8 +101,9 @@ public sealed class PublicCatalogEndpointTests
                 "CAM-001",
                 "Máy quay Sony FX3",
                 "Mô tả máy quay",
-                new CategoryDto(Guid.NewGuid(), "Camera"),
-                Guid.NewGuid());
+                [new CategoryDto(Guid.NewGuid(), "Camera", null, null)],
+                Guid.NewGuid(),
+                null);
 
             var result = new PagedResult<EquipmentTypeListItemDto>([item], request.Page, request.PageSize, 1);
             return Task.FromResult(result);
@@ -117,6 +118,7 @@ public sealed class PublicCatalogEndpointTests
                 return Task.FromResult<EquipmentTypeDetailDto?>(null);
             }
 
+            var mediaId = Guid.NewGuid();
             var detail = new EquipmentTypeDetailDto(
                 PublishedEquipmentTypeId,
                 "CAM-001",
@@ -126,8 +128,8 @@ public sealed class PublicCatalogEndpointTests
                 DateTime.UtcNow,
                 null,
                 DateTime.UtcNow,
-                new CategoryDto(Guid.NewGuid(), "Camera"),
-                [Guid.NewGuid()]);
+                [new CategoryDto(Guid.NewGuid(), "Camera", null, null)],
+                [new EquipmentTypeMediaResponseDto(mediaId, null, 0, true)]);
 
             return Task.FromResult<EquipmentTypeDetailDto?>(detail);
         }

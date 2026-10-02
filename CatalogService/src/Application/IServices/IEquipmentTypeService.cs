@@ -15,11 +15,13 @@ public interface IEquipmentTypeService
 
     Task<Result<EquipmentTypeDetailDto>> CreateAsync(
         CreateEquipmentTypeRequest request,
+        string operatorUserId = "",
         CancellationToken cancellationToken = default);
 
     Task<Result<EquipmentTypeDetailDto>> UpdateAsync(
         Guid id,
         UpdateEquipmentTypeRequest request,
+        string operatorUserId = "",
         CancellationToken cancellationToken = default);
 
     Task<Result<EquipmentTypeDetailDto>> PublishAsync(

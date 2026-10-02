@@ -39,11 +39,21 @@ public static class EquipmentTypeValidationRules
         return Result.Success();
     }
 
-    public static Result ValidateCategoryId(Guid? categoryId)
+    public static Result ValidateCategoryIds(IReadOnlyList<Guid>? categoryIds)
     {
-        if (!categoryId.HasValue || categoryId.Value == Guid.Empty)
+        if (categoryIds == null || categoryIds.Count == 0)
         {
-            return Result.Failure(CatalogErrors.EquipmentType.InvalidCategory);
+            return Result.Failure(CatalogErrors.EquipmentType.InvalidCategories);
+        }
+
+        if (categoryIds.Any(id => id == Guid.Empty))
+        {
+            return Result.Failure(CatalogErrors.EquipmentType.InvalidCategories);
+        }
+
+        if (categoryIds.Distinct().Count() != categoryIds.Count)
+        {
+            return Result.Failure(CatalogErrors.EquipmentType.InvalidCategories);
         }
 
         return Result.Success();

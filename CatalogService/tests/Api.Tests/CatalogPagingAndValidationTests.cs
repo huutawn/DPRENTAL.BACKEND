@@ -170,6 +170,7 @@ public sealed class CatalogPagingAndValidationTests
         var service = new EquipmentTypeService(
             repoMock,
             new FakeCategoryRepository(),
+            new DummyMediaServiceClient(),
             validator,
             new CreateEquipmentTypeRequestValidator(),
             new UpdateEquipmentTypeRequestValidator(),
@@ -268,5 +269,14 @@ public sealed class CatalogPagingAndValidationTests
 
         public Task<IEnumerable<Category>> GetAllActiveAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IEnumerable<Category>>([]);
+    }
+
+    private sealed class DummyMediaServiceClient : Dprental.CatalogService.Application.Clients.IMediaServiceClient
+    {
+        public Task<Result<Dprental.CatalogService.Application.DTOs.Media.MediaVerificationDto>> VerifyMediaAsync(Guid mediaId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(new Dprental.CatalogService.Application.DTOs.Media.MediaVerificationDto(mediaId, "Ready", "test-user", "test.jpg", "image/jpeg", 1024, DateTimeOffset.UtcNow)));
+
+        public Task<Result> SetVisibilityAsync(Guid mediaId, string visibility, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success());
     }
 }

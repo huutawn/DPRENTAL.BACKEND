@@ -8,11 +8,8 @@ public class EquipmentType
     /// <summary>Id do ứng dụng tự gán.</summary>
     public Guid Id { get; set; }
 
-    public Guid CategoryId { get; set; }
-
-    /// <summary>Không cho xóa category đang có equipment type.</summary>
-    public Category Category { get; set; } = null!;
-
+    /// <summary>Danh sách category mà equipment type này thuộc về.</summary>
+    public ICollection<Category> Categories { get; set; } = new List<Category>();
     /// <summary>Mã thiết bị duy nhất trong toàn bộ Catalog.</summary>
     public string Code { get; set; } = string.Empty;
 
