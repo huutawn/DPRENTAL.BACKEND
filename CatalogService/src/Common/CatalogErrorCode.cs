@@ -28,6 +28,8 @@ public static class CatalogErrorCode
         public const string InvalidDescription = "EquipmentType.InvalidDescription";
         public const string InvalidCategory = "EquipmentType.InvalidCategory";
         public const string InvalidCategories = "EquipmentType.InvalidCategories";
+        public const string OrganizationRequired = "EquipmentType.OrganizationRequired";
+        public const string OrganizationForbidden = "EquipmentType.OrganizationForbidden";
     }
 
     public static class Category

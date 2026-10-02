@@ -40,8 +40,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
                 builder.UseSetting("ConnectionStrings:Postgres", PostgreSqlFixture.ConnectionString);
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
-                builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
-                builder.UseSetting("Auth:Jwt:Keys:0:PublicKeyPem", TestJwtHelper.PublicKeyPem);
+                builder.UseTestJwks();
                 builder.ConfigureTestServices(services =>
                 {
                     services.RemoveAll<IMediaServiceClient>();
@@ -86,6 +85,193 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
         sub: Guid.NewGuid().ToString(),
         sid: Guid.NewGuid().ToString(),
         role: "cus");
+
+    private static string OwnerToken(params Guid[] organizationIds) => TestJwtHelper.GenerateToken(
+        sub: Guid.NewGuid().ToString(),
+        sid: Guid.NewGuid().ToString(),
+        role: "own",
+        organizationIds: organizationIds);
+
+    private void Authenticate(string token) =>
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+    private async Task<Guid> SeedEquipmentTypeAsync(string code, Guid? organizationId)
+    {
+        Category category = await CreateCategoryAsync($"Category {code}", isActive: true);
+        EquipmentType equipmentType = new()
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = organizationId,
+            Code = code,
+            Name = $"Thiết bị {code}",
+            CreatedAt = DateTime.UtcNow,
+            Categories = [category]
+        };
+        dbContext.EquipmentTypes.Add(equipmentType);
+        await dbContext.SaveChangesAsync();
+        dbContext.ChangeTracker.Clear();
+        return equipmentType.Id;
+    }
+
+    private Task<Guid?> ReadOrganizationIdAsync(Guid equipmentTypeId) =>
+        dbContext.EquipmentTypes.AsNoTracking()
+            .Where(e => e.Id == equipmentTypeId)
+            .Select(e => e.OrganizationId)
+            .SingleAsync();
+
+    private static StringContent PatchName(string name) =>
+        new(JsonSerializer.Serialize(new { name }), Encoding.UTF8, "application/json");
+
+    [Fact]
+    public async Task Owner_SingleOrganization_Create_TakesOrganizationFromToken()
+    {
+        Guid organizationId = Guid.NewGuid();
+        Authenticate(OwnerToken(organizationId));
+        Category category = await CreateCategoryAsync("Org Single", isActive: true);
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types",
+            new CreateEquipmentTypeRequest { Code = "ORG-001", Name = "Loa", CategoryIds = [category.Id] });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var detail = await response.Content.ReadFromJsonAsync<EquipmentTypeDetailDto>();
+        Assert.Equal(organizationId, await ReadOrganizationIdAsync(detail!.Id));
+    }
+
+    [Fact]
+    public async Task Owner_Create_WithOrganizationOutsideToken_Returns403()
+    {
+        Authenticate(OwnerToken(Guid.NewGuid()));
+        Category category = await CreateCategoryAsync("Org Foreign", isActive: true);
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types",
+            new CreateEquipmentTypeRequest { Code = "ORG-002", Name = "Loa", CategoryIds = [category.Id], OrganizationId = Guid.NewGuid() });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(CatalogErrorCode.EquipmentType.OrganizationForbidden, problem.GetProperty("title").GetString());
+        Assert.False(await dbContext.EquipmentTypes.AnyAsync(e => e.Code == "ORG-002"));
+    }
+
+    [Fact]
+    public async Task Owner_MultipleOrganizations_Create_RequiresExplicitChoiceAmongOwnOrganizations()
+    {
+        Guid firstOrganization = Guid.NewGuid();
+        Guid secondOrganization = Guid.NewGuid();
+        Authenticate(OwnerToken(firstOrganization, secondOrganization));
+        Category category = await CreateCategoryAsync("Org Multi", isActive: true);
+
+        var ambiguous = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types",
+            new CreateEquipmentTypeRequest { Code = "ORG-003", Name = "Loa", CategoryIds = [category.Id] });
+        Assert.Equal(HttpStatusCode.BadRequest, ambiguous.StatusCode);
+        var problem = await ambiguous.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(CatalogErrorCode.EquipmentType.OrganizationRequired, problem.GetProperty("title").GetString());
+
+        var chosen = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types",
+            new CreateEquipmentTypeRequest { Code = "ORG-003", Name = "Loa", CategoryIds = [category.Id], OrganizationId = secondOrganization });
+        Assert.Equal(HttpStatusCode.Created, chosen.StatusCode);
+        var detail = await chosen.Content.ReadFromJsonAsync<EquipmentTypeDetailDto>();
+        Assert.Equal(secondOrganization, await ReadOrganizationIdAsync(detail!.Id));
+    }
+
+    [Fact]
+    public async Task Owner_WithoutOrganizationClaim_Create_Returns403()
+    {
+        Authenticate(OwnerToken());
+        Category category = await CreateCategoryAsync("Org None", isActive: true);
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types",
+            new CreateEquipmentTypeRequest { Code = "ORG-004", Name = "Loa", CategoryIds = [category.Id] });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Owner_OwnOrganization_CanUpdatePublishAndDisable()
+    {
+        Guid organizationId = Guid.NewGuid();
+        Guid id = await SeedEquipmentTypeAsync("ORG-OWN", organizationId);
+        Authenticate(OwnerToken(organizationId));
+
+        var patchRes = await client.PatchAsync($"/api/v1/catalog/equipment-types/{id}", PatchName("Tên mới"));
+        Assert.Equal(HttpStatusCode.OK, patchRes.StatusCode);
+
+        var publishRes = await client.PostAsync($"/api/v1/catalog/equipment-types/{id}/publish", null);
+        Assert.Equal(HttpStatusCode.OK, publishRes.StatusCode);
+
+        var disableRes = await client.PostAsync($"/api/v1/catalog/equipment-types/{id}/disable", null);
+        Assert.Equal(HttpStatusCode.OK, disableRes.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Owner_CannotManage_RecordsOutsideOwnOrganization(bool ownedByOtherOrganization)
+    {
+        // false: bản ghi dùng chung (OrganizationId null) chỉ Admin quản lý.
+        Guid id = await SeedEquipmentTypeAsync("ORG-OTHER", ownedByOtherOrganization ? Guid.NewGuid() : null);
+        Authenticate(OwnerToken(Guid.NewGuid()));
+
+        var patchRes = await client.PatchAsync($"/api/v1/catalog/equipment-types/{id}", PatchName("Chiếm quyền"));
+        Assert.Equal(HttpStatusCode.Forbidden, patchRes.StatusCode);
+
+        var publishRes = await client.PostAsync($"/api/v1/catalog/equipment-types/{id}/publish", null);
+        Assert.Equal(HttpStatusCode.Forbidden, publishRes.StatusCode);
+
+        var disableRes = await client.PostAsync($"/api/v1/catalog/equipment-types/{id}/disable", null);
+        Assert.Equal(HttpStatusCode.Forbidden, disableRes.StatusCode);
+
+        EquipmentType unchanged = await dbContext.EquipmentTypes.AsNoTracking().SingleAsync(e => e.Id == id);
+        Assert.Equal("Thiết bị ORG-OTHER", unchanged.Name);
+        Assert.Equal(EquipmentTypeStatus.Draft, unchanged.Status);
+    }
+
+    [Fact]
+    public async Task Admin_CanManage_RecordsOfAnyOrganization()
+    {
+        Guid id = await SeedEquipmentTypeAsync("ORG-ADMIN", Guid.NewGuid());
+        Authenticate(AdminToken);
+
+        var patchRes = await client.PatchAsync($"/api/v1/catalog/equipment-types/{id}", PatchName("Admin sửa"));
+        Assert.Equal(HttpStatusCode.OK, patchRes.StatusCode);
+
+        var publishRes = await client.PostAsync($"/api/v1/catalog/equipment-types/{id}/publish", null);
+        Assert.Equal(HttpStatusCode.OK, publishRes.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("mem", null)]
+    [InlineData("cus", null)]
+    [InlineData("own", "svc")]
+    public async Task EquipmentManage_RejectsNonOwnerRoles_AndServiceTokens(string role, string? tokenUse)
+    {
+        Guid organizationId = Guid.NewGuid();
+        Guid id = await SeedEquipmentTypeAsync("ORG-ROLE", organizationId);
+        Authenticate(TestJwtHelper.GenerateToken(
+            sub: Guid.NewGuid().ToString(),
+            sid: Guid.NewGuid().ToString(),
+            role: role,
+            tokenUse: tokenUse,
+            organizationIds: [organizationId]));
+
+        var patchRes = await client.PatchAsync($"/api/v1/catalog/equipment-types/{id}", PatchName("Không được"));
+
+        Assert.Equal(HttpStatusCode.Forbidden, patchRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task IdentityHeaders_DoNotGrantOrganizationAccess()
+    {
+        Guid ownerOrganization = Guid.NewGuid();
+        Guid id = await SeedEquipmentTypeAsync("ORG-HDR", ownerOrganization);
+        Authenticate(OwnerToken(Guid.NewGuid()));
+
+        using HttpRequestMessage request = new(HttpMethod.Post, $"/api/v1/catalog/equipment-types/{id}/publish");
+        request.Headers.Add("X-Organization-Id", ownerOrganization.ToString());
+        request.Headers.Add("X-Role", "adm");
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
 
     [Fact]
     public async Task WriteEndpoints_Anonymous_ReturnsUnauthorized401()

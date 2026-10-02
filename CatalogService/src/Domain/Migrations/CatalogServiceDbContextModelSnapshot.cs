@@ -83,6 +83,9 @@ namespace CatalogService.Domain.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -108,6 +111,9 @@ namespace CatalogService.Domain.Migrations
 
                     b.HasIndex("CreatedAt")
                         .HasDatabaseName("IX_EquipmentTypes_CreatedAt");
+
+                    b.HasIndex("OrganizationId")
+                        .HasDatabaseName("IX_EquipmentTypes_OrganizationId");
 
                     b.HasIndex("PublishedAt")
                         .HasDatabaseName("IX_EquipmentTypes_PublishedAt");

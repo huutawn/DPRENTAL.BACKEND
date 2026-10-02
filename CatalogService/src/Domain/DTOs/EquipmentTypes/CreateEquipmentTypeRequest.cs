@@ -12,6 +12,12 @@ public sealed class CreateEquipmentTypeRequest
     public IReadOnlyList<Guid> CategoryIds { get; init; } = [];
     public IReadOnlyList<EquipmentTypeMediaItemDto?>? Media { get; init; } = [];
 
+    /// <summary>
+    /// Organization sẽ sở hữu equipment type. Chỉ là lựa chọn trong các organization của caller:
+    /// service luôn đối chiếu với claim <c>o</c>, không tin giá trị này một mình.
+    /// </summary>
+    public Guid? OrganizationId { get; init; }
+
     [JsonIgnore]
     public bool IsMediaSpecified { get; init; }
 
@@ -51,6 +57,7 @@ public sealed class CreateEquipmentTypeRequestJsonConverter : JsonConverter<Crea
         IReadOnlyList<Guid> categoryIds = [];
         bool isMediaSpecified = false;
         IReadOnlyList<EquipmentTypeMediaItemDto?>? media = [];
+        Guid? organizationId = null;
 
         while (reader.Read())
         {
@@ -63,6 +70,7 @@ public sealed class CreateEquipmentTypeRequestJsonConverter : JsonConverter<Crea
                     Description = description,
                     CategoryIds = categoryIds,
                     Media = media,
+                    OrganizationId = organizationId,
                     IsMediaSpecified = isMediaSpecified
                 };
             }
@@ -112,6 +120,21 @@ public sealed class CreateEquipmentTypeRequestJsonConverter : JsonConverter<Crea
                 else
                 {
                     throw new JsonException("CategoryIds must be an array.");
+                }
+            }
+            else if (string.Equals(propName, "organizationId", StringComparison.OrdinalIgnoreCase))
+            {
+                if (reader.TokenType == JsonTokenType.Null)
+                {
+                    organizationId = null;
+                }
+                else if (reader.TokenType == JsonTokenType.String && Guid.TryParse(reader.GetString(), out var parsedOrganizationId))
+                {
+                    organizationId = parsedOrganizationId;
+                }
+                else
+                {
+                    throw new JsonException("OrganizationId must be a valid GUID string.");
                 }
             }
             else if (string.Equals(propName, "media", StringComparison.OrdinalIgnoreCase))
@@ -172,6 +195,11 @@ public sealed class CreateEquipmentTypeRequestJsonConverter : JsonConverter<Crea
         {
             writer.WritePropertyName("media");
             JsonSerializer.Serialize(writer, value.Media, options);
+        }
+
+        if (value.OrganizationId.HasValue)
+        {
+            writer.WriteString("organizationId", value.OrganizationId.Value);
         }
         writer.WriteEndObject();
     }

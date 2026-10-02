@@ -8,6 +8,12 @@ public class EquipmentType
     /// <summary>Id do ứng dụng tự gán.</summary>
     public Guid Id { get; set; }
 
+    /// <summary>
+    /// Organization sở hữu equipment type, lấy từ claim <c>o</c> của người tạo.
+    /// Null với bản ghi dùng chung do Admin quản lý (gồm dữ liệu có trước khi thêm cột này).
+    /// </summary>
+    public Guid? OrganizationId { get; set; }
+
     /// <summary>Danh sách category mà equipment type này thuộc về.</summary>
     public ICollection<Category> Categories { get; set; } = new List<Category>();
     /// <summary>Mã thiết bị duy nhất trong toàn bộ Catalog.</summary>

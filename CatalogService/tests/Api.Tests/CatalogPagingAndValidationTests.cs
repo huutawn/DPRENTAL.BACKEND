@@ -174,6 +174,7 @@ public sealed class CatalogPagingAndValidationTests
             validator,
             new CreateEquipmentTypeRequestValidator(),
             new UpdateEquipmentTypeRequestValidator(),
+            new Dprental.CatalogService.Api.Security.CatalogCallerContext((System.Security.Claims.ClaimsPrincipal?)null),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<EquipmentTypeService>.Instance);
 
         var badRequest = new GetEquipmentTypesRequest { Page = 0 };
