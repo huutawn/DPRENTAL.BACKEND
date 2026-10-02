@@ -31,7 +31,7 @@ public sealed class RsaJwtAuthTests
     [InlineData("ADM", HttpStatusCode.Forbidden)]
     [InlineData("", HttpStatusCode.Forbidden)]
     [InlineData("adm", HttpStatusCode.BadRequest)]
-    public async Task CatalogWrites_RequireAuthServiceAdminAlias(string? role, HttpStatusCode expectedStatus)
+    public async Task CatalogWrites_EnforceManagementPolicies(string? role, HttpStatusCode expectedStatus)
     {
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
@@ -41,7 +41,8 @@ public sealed class RsaJwtAuthTests
                 TestJwtHelper.GenerateToken(sub: Guid.NewGuid().ToString(), sid: Guid.NewGuid().ToString(), role: role));
         }
 
-        // Invalid JSON proves adm reaches model binding without invoking persistence.
+        // Invalid JSON proves an authorized role reaches model binding without invoking persistence.
+        // adm quản lý cả category lẫn equipment type; own chỉ qua được policy của equipment type.
         string id = Guid.NewGuid().ToString();
         (HttpMethod Method, string Path)[] endpoints =
         [
@@ -58,9 +59,11 @@ public sealed class RsaJwtAuthTests
             using HttpRequestMessage request = new(method, $"/api/v1/catalog/{path}");
             request.Content = new StringContent("{", System.Text.Encoding.UTF8, "application/json");
             using HttpResponseMessage response = await client.SendAsync(request);
-            HttpStatusCode expected = role == "adm" && (path.EndsWith("/publish", StringComparison.Ordinal) || path.EndsWith("/disable", StringComparison.Ordinal))
-                ? HttpStatusCode.NotFound
-                : expectedStatus;
+            bool isAuthorized = role == "adm" || (role == "own" && path.StartsWith("equipment-types", StringComparison.Ordinal));
+            bool isStateTransition = path.EndsWith("/publish", StringComparison.Ordinal) || path.EndsWith("/disable", StringComparison.Ordinal);
+            HttpStatusCode expected = !isAuthorized
+                ? expectedStatus
+                : isStateTransition ? HttpStatusCode.NotFound : HttpStatusCode.BadRequest;
             Assert.Equal(expected, response.StatusCode);
         }
     }
@@ -329,8 +332,7 @@ public sealed class RsaJwtAuthTests
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
-                builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
-                builder.UseSetting("Auth:Jwt:Keys:0:PublicKeyPem", TestJwtHelper.PublicKeyPem);
+                builder.UseTestJwks();
 
                 builder.ConfigureTestServices(services =>
                 {
@@ -340,7 +342,7 @@ public sealed class RsaJwtAuthTests
                 });
             });
 
-    private sealed class FakeEquipmentTypeRepository : IEquipmentTypeRepository
+    internal sealed class FakeEquipmentTypeRepository : IEquipmentTypeRepository
     {
         public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(GetEquipmentTypesRequest request, CancellationToken cancellationToken = default) =>
             Task.FromResult(new PagedResult<EquipmentTypeListItemDto>([], 1, 20, 0));

@@ -155,7 +155,7 @@ public sealed class CatalogMigrationTests
                     """
                     SELECT column_name FROM information_schema.columns
                     WHERE table_schema = 'catalog' AND table_name = 'EquipmentTypes'
-                      AND column_name IN ('OrganizationId', 'Brand', 'DailyPrice', 'RegionId', 'Specifications', 'CreatedAtUtc', 'UpdatedAtUtc', 'PublishedAtUtc');
+                      AND column_name IN ('Brand', 'DailyPrice', 'RegionId', 'Specifications', 'CreatedAtUtc', 'UpdatedAtUtc', 'PublishedAtUtc');
                     """, verifyConn);
                 await using var reader = await droppedColsCmd.ExecuteReaderAsync();
                 Assert.False(await reader.ReadAsync(), "Các supplier columns hoặc timestamp cũ vẫn còn tồn tại!");
@@ -278,11 +278,12 @@ public sealed class CatalogMigrationTests
                         appliedMigrations.Add(histReader.GetString(0));
                     }
                 }
-                Assert.Equal(4, appliedMigrations.Count);
+                Assert.Equal(5, appliedMigrations.Count);
                 Assert.Contains(appliedMigrations, m => m.EndsWith("_InitialCatalogSchema", StringComparison.Ordinal));
                 Assert.Contains(appliedMigrations, m => m.EndsWith("_InitCategoryTable", StringComparison.Ordinal));
                 Assert.Contains(appliedMigrations, m => m.EndsWith("_RefactorEquipmentToEquipmentType", StringComparison.Ordinal));
                 Assert.Contains(appliedMigrations, m => m.EndsWith("_AddCategoryImagesAndEquipmentTypeCategories", StringComparison.Ordinal));
+                Assert.Contains(appliedMigrations, m => m.EndsWith("_AddEquipmentTypeOrganizationId", StringComparison.Ordinal));
 
                 // Kiểm tra quan hệ nhiều-nhiều được copy đầy đủ từ CategoryId cũ (draftId, publishedId, hiddenId)
                 await using var checkCopyCmd = new NpgsqlCommand(

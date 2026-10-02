@@ -1,5 +1,7 @@
 using CatalogService.Application.DTOs.Category;
 using Dprental.CatalogService.Api.Filters;
+using Dprental.CatalogService.Api.Security;
+using Dprental.CatalogService.Application.IServices;
 using Dprental.CatalogService.Application.Services;
 using Dprental.CatalogService.Common;
 using Microsoft.AspNetCore.Authorization;
@@ -9,14 +11,16 @@ namespace Dprental.CatalogService.Api.Controllers;
 
 [ApiController]
 [Route("categories")]
-[Authorize(Roles = "adm")]
+[Authorize(Policy = CatalogPolicies.CategoryManage)]
 public class CategoryController : ControllerBase
 {
     private readonly ICategoryService _categoryService;
+    private readonly ICatalogCallerContext _caller;
 
-    public CategoryController(ICategoryService categoryService)
+    public CategoryController(ICategoryService categoryService, ICatalogCallerContext caller)
     {
         _categoryService = categoryService;
+        _caller = caller;
     }
 
     // POST /api/v1/catalog/categories
@@ -72,8 +76,5 @@ public class CategoryController : ControllerBase
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
-    private string GetOperatorUserId() =>
-        User.FindFirst("sub")?.Value
-        ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-        ?? string.Empty;
+    private string GetOperatorUserId() => _caller.UserId?.ToString() ?? string.Empty;
 }

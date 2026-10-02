@@ -26,6 +26,7 @@ builder.Services.AddJwtBearerSecurity(builder.Configuration);
 builder.Services.AddAuthForwardedHeaders(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICorrelationIdProvider, CorrelationIdProvider>();
+builder.Services.AddScoped<ICatalogCallerContext, CatalogCallerContext>();
 
 var mediaSection = builder.Configuration.GetSection(MediaServiceOptions.SectionName);
 var mediaOptions = mediaSection.Get<MediaServiceOptions>() ?? new MediaServiceOptions();

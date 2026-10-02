@@ -71,6 +71,9 @@ public sealed class CatalogServiceDbContext : DbContext
             entity.HasIndex(e => e.Status)
                 .HasDatabaseName("IX_EquipmentTypes_Status");
 
+            entity.HasIndex(e => e.OrganizationId)
+                .HasDatabaseName("IX_EquipmentTypes_OrganizationId");
+
             entity.HasIndex(e => e.CreatedAt)
                 .HasDatabaseName("IX_EquipmentTypes_CreatedAt");
 

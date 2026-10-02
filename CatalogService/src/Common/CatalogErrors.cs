@@ -63,6 +63,12 @@ public static class CatalogErrors
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidCategory, "CategoryId không hợp lệ.");
         public static readonly Error InvalidCategories =
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidCategories, "Danh sách categoryIds không hợp lệ.");
+
+        public static readonly Error OrganizationRequired =
+            Error.Validation(CatalogErrorCode.EquipmentType.OrganizationRequired, "Tài khoản thuộc nhiều organization, cần chỉ định organizationId.");
+
+        public static readonly Error OrganizationForbidden =
+            Error.Forbidden(CatalogErrorCode.EquipmentType.OrganizationForbidden, "Bạn không có quyền quản lý thiết bị của organization này.");
     }
 
     public static class Category
