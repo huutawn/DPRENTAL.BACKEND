@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Dprental.CatalogService.Api.Observability;
 using Dprental.CatalogService.Application.IServices;
 using Dprental.CatalogService.Common;
 using Microsoft.AspNetCore.Diagnostics;
@@ -31,11 +32,10 @@ public sealed class GlobalExceptionHandler(
 
         string corrId = httpContext.RequestServices.GetService<ICorrelationIdProvider>()?.GetCorrelationId() ?? "unknown";
         logger.LogError(
-            "Unexpected exception during {Path}. CorrelationId: {CorrelationId}, ExceptionType: {ExceptionType}, StackTrace: {StackTrace}",
+            exception,
+            "Unexpected exception during {Path}. CorrelationId: {CorrelationId}",
             httpContext.Request.Path.Value ?? "unknown",
-            corrId,
-            exception.GetType().FullName,
-            exception.StackTrace);
+            corrId);
 
         const int statusCode = StatusCodes.Status500InternalServerError;
         string title = CatalogErrors.Catalog.Uncategorized.Code;
@@ -53,6 +53,7 @@ public sealed class GlobalExceptionHandler(
             Instance = httpContext.Request.Path
         };
         problemDetails.Extensions["traceId"] = httpContext.TraceIdentifier;
+        problemDetails.Extensions[CorrelationIdMiddleware.ProblemDetailsKey] = corrId;
 
         bool written = await problemDetailsService.TryWriteAsync(new ProblemDetailsContext
         {

@@ -1,6 +1,8 @@
 using System.IdentityModel.Tokens.Jwt;
+using Dprental.CatalogService.Api.Observability;
 using Dprental.CatalogService.Application.Options;
 using Dprental.CatalogService.Application.Security.Jwt;
+using Dprental.CatalogService.Common;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -98,12 +100,14 @@ internal static class JwtBearerServiceCollectionExtensions
                         var problem = new ProblemDetails
                         {
                             Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
-                            Title = "Unauthorized",
+                            Title = CatalogErrors.Catalog.Unauthorized.Code,
                             Status = StatusCodes.Status401Unauthorized,
-                            Detail = context.AuthenticateFailure?.Message ?? "Không có quyền truy cập.",
+                            // Không trả AuthenticateFailure.Message: thông điệp của thư viện JWT có thể lộ chi tiết token/khóa.
+                            Detail = CatalogErrors.Catalog.Unauthorized.Message,
                             Instance = context.HttpContext.Request.Path
                         };
                         problem.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+                        problem.Extensions[CorrelationIdMiddleware.ProblemDetailsKey] = CorrelationIdMiddleware.GetCorrelationId(context.HttpContext);
 
                         await context.Response.WriteAsJsonAsync(problem);
                     },
@@ -116,12 +120,13 @@ internal static class JwtBearerServiceCollectionExtensions
                         var problem = new ProblemDetails
                         {
                             Type = "https://tools.ietf.org/html/rfc9110#section-15.5.4",
-                            Title = "Forbidden",
+                            Title = CatalogErrors.Catalog.Forbidden.Code,
                             Status = StatusCodes.Status403Forbidden,
-                            Detail = "Bạn không có quyền thực hiện thao tác này.",
+                            Detail = CatalogErrors.Catalog.Forbidden.Message,
                             Instance = context.HttpContext.Request.Path
                         };
                         problem.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+                        problem.Extensions[CorrelationIdMiddleware.ProblemDetailsKey] = CorrelationIdMiddleware.GetCorrelationId(context.HttpContext);
 
                         await context.Response.WriteAsJsonAsync(problem);
                     }

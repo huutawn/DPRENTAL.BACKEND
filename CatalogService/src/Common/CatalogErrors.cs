@@ -63,9 +63,30 @@ public static class CatalogErrors
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidCategory, "CategoryId không hợp lệ.");
     }
 
+    public static class Category
+    {
+        public static readonly Error NotFound =
+            Error.NotFound(CatalogErrorCode.Category.NotFound, "Danh mục không tồn tại hoặc đang ở trạng thái không hoạt động.");
+
+        public static readonly Error InvalidName =
+            Error.Validation(CatalogErrorCode.Category.InvalidName, "Tên danh mục không được để trống và tối đa 150 ký tự.");
+
+        public static readonly Error InvalidDescription =
+            Error.Validation(CatalogErrorCode.Category.InvalidDescription, "Mô tả danh mục tối đa 1000 ký tự.");
+    }
+
     public static class Catalog
     {
         public static readonly Error Uncategorized =
             Error.Failure(CatalogErrorCode.Catalog.Uncategorized, "Đã xảy ra lỗi hệ thống. Vui lòng thử lại sau.");
+
+        public static readonly Error InvalidRequest =
+            Error.Validation(CatalogErrorCode.Catalog.InvalidRequest, "Dữ liệu yêu cầu không đúng định dạng.");
+
+        public static readonly Error Unauthorized =
+            Error.Unauthorized(CatalogErrorCode.Catalog.Unauthorized, "Yêu cầu chưa được xác thực hoặc token không hợp lệ.");
+
+        public static readonly Error Forbidden =
+            Error.Forbidden(CatalogErrorCode.Catalog.Forbidden, "Bạn không có quyền thực hiện thao tác này.");
     }
 }
