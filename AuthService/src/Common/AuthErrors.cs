@@ -47,7 +47,7 @@ public static class AuthErrors
             Error.Validation(AuthErrorCode.Organization.LastOwner, "Không thể xóa, đình chỉ hoặc hạ quyền Owner cuối cùng của organization.");
 
         public static readonly Error InvalidStateTransition =
-            Error.Validation(AuthErrorCode.Organization.InvalidStateTransition, "Chuyển đổi trạng thái không hợp lệ.");
+            Error.Conflict(AuthErrorCode.Organization.InvalidStateTransition, "Chuyển đổi trạng thái không hợp lệ.");
 
         public static readonly Error CannotActivateInvitation =
             Error.Validation(AuthErrorCode.Organization.CannotActivateInvitation, "Chỉ người được mời mới có thể tự kích hoạt lời mời qua endpoint accept.");

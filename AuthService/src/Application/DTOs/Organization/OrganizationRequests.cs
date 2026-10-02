@@ -57,12 +57,10 @@ public sealed record UpdateOrganizationProfileRequest(
     [NonEmptyGuid] Guid? LogoMediaId = null,
     [StringLength(2000)] string? Description = null);
 
-/// <summary>Admin đổi tên, tạm khóa hoặc mở lại organization (PATCH /{id}). Trường null = không đổi.</summary>
+/// <summary>Yêu cầu đổi tên organization dành cho admin (PUT /admin/organizations/{id}).</summary>
 public sealed record UpdateOrganizationRequest(
-    [MaxLength(150)]
-    string? Name = null,
-
-    bool? IsActive = null);
+    [Required(ErrorMessage = "Tên organization không hợp lệ."), StringLength(150, MinimumLength = 1, ErrorMessage = "Tên organization không hợp lệ.")]
+    string Name);
 
 /// <summary>Platform từ chối hồ sơ organization đang chờ duyệt; lý do được trả lại cho Owner để sửa và gửi lại.</summary>
 public sealed record RejectOrganizationRequest(

@@ -251,7 +251,11 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
             .SelectMany(ur => ur.Role.RolePermissions)
             .Select(rp => rp.Permission.Code) ?? [];
 
-        var orgPermissions = user.OrganizationMemberships?
+        var activeMemberships = user.OrganizationMemberships?
+            .Where(m => m.Status == Dprental.AuthService.Common.Enums.MembershipStatus.Active &&
+                m.Organization.Status == Dprental.AuthService.Common.Enums.OrganizationStatus.Active)
+            .ToArray() ?? [];
+        var orgPermissions = activeMemberships
             .SelectMany(m => m.Role.RolePermissions)
             .Select(rp => rp.Permission.Code) ?? [];
 
@@ -259,10 +263,10 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
             .Where(name => !string.IsNullOrEmpty(name))
             .Distinct()
             .ToArray();
-        Guid[] orgIds = user.OrganizationMemberships?
+        Guid[] orgIds = activeMemberships
             .Select(m => m.OrganizationId)
             .Distinct()
-            .ToArray() ?? [];
+            .ToArray();
 
         return new AuthSessionPrincipal(user.Id, roles, permissions, orgIds, SessionId: sessionId);
     }
