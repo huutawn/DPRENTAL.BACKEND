@@ -20,6 +20,51 @@ public sealed class RsaJwtAuthTests
 {
     private const string ProtectedEndpointUrl = "/api/v1/catalog/test-protected";
 
+    [Theory]
+    [InlineData(null, HttpStatusCode.Unauthorized)]
+    [InlineData("cus", HttpStatusCode.Forbidden)]
+    [InlineData("adp", HttpStatusCode.Forbidden)]
+    [InlineData("own", HttpStatusCode.Forbidden)]
+    [InlineData("mem", HttpStatusCode.Forbidden)]
+    [InlineData("Admin", HttpStatusCode.Forbidden)]
+    [InlineData("admin", HttpStatusCode.Forbidden)]
+    [InlineData("ADM", HttpStatusCode.Forbidden)]
+    [InlineData("", HttpStatusCode.Forbidden)]
+    [InlineData("adm", HttpStatusCode.BadRequest)]
+    public async Task CatalogWrites_RequireAuthServiceAdminAlias(string? role, HttpStatusCode expectedStatus)
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        using HttpClient client = factory.CreateClient();
+        if (role is not null)
+        {
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+                TestJwtHelper.GenerateToken(sub: Guid.NewGuid().ToString(), sid: Guid.NewGuid().ToString(), role: role));
+        }
+
+        // Invalid JSON proves adm reaches model binding without invoking persistence.
+        string id = Guid.NewGuid().ToString();
+        (HttpMethod Method, string Path)[] endpoints =
+        [
+            (HttpMethod.Post, "categories"),
+            (HttpMethod.Patch, $"categories/{id}"),
+            (HttpMethod.Post, "equipment-types"),
+            (HttpMethod.Patch, $"equipment-types/{id}"),
+            (HttpMethod.Post, $"equipment-types/{id}/publish"),
+            (HttpMethod.Post, $"equipment-types/{id}/disable")
+        ];
+
+        foreach (var (method, path) in endpoints)
+        {
+            using HttpRequestMessage request = new(method, $"/api/v1/catalog/{path}");
+            request.Content = new StringContent("{", System.Text.Encoding.UTF8, "application/json");
+            using HttpResponseMessage response = await client.SendAsync(request);
+            HttpStatusCode expected = role == "adm" && (path.EndsWith("/publish", StringComparison.Ordinal) || path.EndsWith("/disable", StringComparison.Ordinal))
+                ? HttpStatusCode.NotFound
+                : expectedStatus;
+            Assert.Equal(expected, response.StatusCode);
+        }
+    }
+
     [Fact]
     public async Task ProtectedEndpoint_WithoutToken_Returns401_WithProblemDetails_AndWwwAuthenticate()
     {
@@ -45,7 +90,7 @@ public sealed class RsaJwtAuthTests
         string token = TestJwtHelper.GenerateToken(
             sub: Guid.NewGuid().ToString(),
             sid: Guid.NewGuid().ToString(),
-            role: "customer");
+            role: "cus");
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using HttpResponseMessage response = await client.GetAsync(ProtectedEndpointUrl);
@@ -62,7 +107,7 @@ public sealed class RsaJwtAuthTests
         string token = TestJwtHelper.GenerateToken(
             sub: Guid.NewGuid().ToString(),
             sid: Guid.NewGuid().ToString(),
-            role: "customer");
+            role: "cus");
 
         HttpRequestMessage request = new(HttpMethod.Get, ProtectedEndpointUrl);
         request.Headers.Add("Cookie", $"accessToken={token}");
@@ -81,7 +126,7 @@ public sealed class RsaJwtAuthTests
         string validToken = TestJwtHelper.GenerateToken(
             sub: Guid.NewGuid().ToString(),
             sid: Guid.NewGuid().ToString(),
-            role: "customer");
+            role: "cus");
 
         string invalidToken = "invalid-cookie-token";
 

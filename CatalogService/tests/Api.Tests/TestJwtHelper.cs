@@ -24,7 +24,7 @@ public static class TestJwtHelper
     public static string GenerateToken(
         string? sub = null,
         string? sid = null,
-        string? role = "customer",
+        string? role = "cus",
         string? tokenUse = null,
         string? issuer = DefaultIssuer,
         string? audience = DefaultAudience,

@@ -343,7 +343,7 @@ public sealed class StartupAndConfigurationTests
             description = (string?)null
         };
         string payloadJson = JsonSerializer.Serialize(validPayload);
-        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", TestJwtHelper.GenerateToken(sub: Guid.NewGuid().ToString(), sid: Guid.NewGuid().ToString(), role: "Admin"));
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", TestJwtHelper.GenerateToken(sub: Guid.NewGuid().ToString(), sid: Guid.NewGuid().ToString(), role: "adm"));
         using HttpResponseMessage patchRes = await client.PatchAsync(
             $"/api/v1/catalog/equipment-types/{Guid.NewGuid()}",
             new StringContent(payloadJson, System.Text.Encoding.UTF8, "application/json"));

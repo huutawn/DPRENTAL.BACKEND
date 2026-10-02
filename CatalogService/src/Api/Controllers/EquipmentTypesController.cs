@@ -11,7 +11,7 @@ namespace Dprental.CatalogService.Api.Controllers;
 [ApiController]
 [Route("equipment-types")]
 [Produces("application/json")]
-[Authorize(Roles = "Admin")]
+[Authorize(Roles = "adm")]
 public sealed class EquipmentTypesController(IEquipmentTypeService service) : ControllerBase
 {
     private static readonly HashSet<string> AllowedQueryKeys = new(StringComparer.OrdinalIgnoreCase)

@@ -7,7 +7,7 @@ namespace Dprental.CatalogService.Api.Controllers;
 
 [ApiController]
 [Route("categories")]
-[Authorize(Roles = "Admin")]
+[Authorize(Roles = "adm")]
 public class CategoryController : ControllerBase
 {
     private readonly ICategoryService _categoryService;
