@@ -4,7 +4,8 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Dprental.CatalogService.Common;
-using Dprental.CatalogService.Domain.DTOs.Equipments;
+using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
+using Dprental.CatalogService.Domain.Entities;
 using Dprental.CatalogService.Domain.IRepositories;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -18,6 +19,51 @@ namespace Dprental.CatalogService.Api.Tests;
 public sealed class RsaJwtAuthTests
 {
     private const string ProtectedEndpointUrl = "/api/v1/catalog/test-protected";
+
+    [Theory]
+    [InlineData(null, HttpStatusCode.Unauthorized)]
+    [InlineData("cus", HttpStatusCode.Forbidden)]
+    [InlineData("adp", HttpStatusCode.Forbidden)]
+    [InlineData("own", HttpStatusCode.Forbidden)]
+    [InlineData("mem", HttpStatusCode.Forbidden)]
+    [InlineData("Admin", HttpStatusCode.Forbidden)]
+    [InlineData("admin", HttpStatusCode.Forbidden)]
+    [InlineData("ADM", HttpStatusCode.Forbidden)]
+    [InlineData("", HttpStatusCode.Forbidden)]
+    [InlineData("adm", HttpStatusCode.BadRequest)]
+    public async Task CatalogWrites_RequireAuthServiceAdminAlias(string? role, HttpStatusCode expectedStatus)
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        using HttpClient client = factory.CreateClient();
+        if (role is not null)
+        {
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+                TestJwtHelper.GenerateToken(sub: Guid.NewGuid().ToString(), sid: Guid.NewGuid().ToString(), role: role));
+        }
+
+        // Invalid JSON proves adm reaches model binding without invoking persistence.
+        string id = Guid.NewGuid().ToString();
+        (HttpMethod Method, string Path)[] endpoints =
+        [
+            (HttpMethod.Post, "categories"),
+            (HttpMethod.Patch, $"categories/{id}"),
+            (HttpMethod.Post, "equipment-types"),
+            (HttpMethod.Patch, $"equipment-types/{id}"),
+            (HttpMethod.Post, $"equipment-types/{id}/publish"),
+            (HttpMethod.Post, $"equipment-types/{id}/disable")
+        ];
+
+        foreach (var (method, path) in endpoints)
+        {
+            using HttpRequestMessage request = new(method, $"/api/v1/catalog/{path}");
+            request.Content = new StringContent("{", System.Text.Encoding.UTF8, "application/json");
+            using HttpResponseMessage response = await client.SendAsync(request);
+            HttpStatusCode expected = role == "adm" && (path.EndsWith("/publish", StringComparison.Ordinal) || path.EndsWith("/disable", StringComparison.Ordinal))
+                ? HttpStatusCode.NotFound
+                : expectedStatus;
+            Assert.Equal(expected, response.StatusCode);
+        }
+    }
 
     [Fact]
     public async Task ProtectedEndpoint_WithoutToken_Returns401_WithProblemDetails_AndWwwAuthenticate()
@@ -44,7 +90,7 @@ public sealed class RsaJwtAuthTests
         string token = TestJwtHelper.GenerateToken(
             sub: Guid.NewGuid().ToString(),
             sid: Guid.NewGuid().ToString(),
-            role: "customer");
+            role: "cus");
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using HttpResponseMessage response = await client.GetAsync(ProtectedEndpointUrl);
@@ -61,7 +107,7 @@ public sealed class RsaJwtAuthTests
         string token = TestJwtHelper.GenerateToken(
             sub: Guid.NewGuid().ToString(),
             sid: Guid.NewGuid().ToString(),
-            role: "customer");
+            role: "cus");
 
         HttpRequestMessage request = new(HttpMethod.Get, ProtectedEndpointUrl);
         request.Headers.Add("Cookie", $"accessToken={token}");
@@ -80,7 +126,7 @@ public sealed class RsaJwtAuthTests
         string validToken = TestJwtHelper.GenerateToken(
             sub: Guid.NewGuid().ToString(),
             sid: Guid.NewGuid().ToString(),
-            role: "customer");
+            role: "cus");
 
         string invalidToken = "invalid-cookie-token";
 
@@ -269,7 +315,7 @@ public sealed class RsaJwtAuthTests
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage listRes = await client.GetAsync("/api/v1/catalog/equipments");
+        using HttpResponseMessage listRes = await client.GetAsync("/api/v1/catalog/equipment-types");
         Assert.Equal(HttpStatusCode.OK, listRes.StatusCode);
 
         using HttpResponseMessage liveRes = await client.GetAsync("/health/live");
@@ -289,18 +335,36 @@ public sealed class RsaJwtAuthTests
                 builder.ConfigureTestServices(services =>
                 {
                     services.AddControllers().AddApplicationPart(typeof(RsaJwtAuthTests).Assembly);
-                    services.RemoveAll<IEquipmentQueryRepository>();
-                    services.AddScoped<IEquipmentQueryRepository, FakeEquipmentQueryRepository>();
+                    services.RemoveAll<IEquipmentTypeRepository>();
+                    services.AddScoped<IEquipmentTypeRepository, FakeEquipmentTypeRepository>();
                 });
             });
 
-    private sealed class FakeEquipmentQueryRepository : IEquipmentQueryRepository
+    private sealed class FakeEquipmentTypeRepository : IEquipmentTypeRepository
     {
-        public Task<PagedResult<EquipmentListItemDto>> SearchPublishedAsync(GetEquipmentsRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new PagedResult<EquipmentListItemDto>([], 1, 20, 0));
+        public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(GetEquipmentTypesRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PagedResult<EquipmentTypeListItemDto>([], 1, 20, 0));
 
-        public Task<EquipmentDetailDto?> GetPublishedByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult<EquipmentDetailDto?>(null);
+        public Task<EquipmentTypeDetailDto?> GetPublishedByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeDetailDto?>(null);
+
+        public Task<EquipmentType?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentType?>(null);
+
+        public Task<EquipmentTypeDetailDto?> GetDetailByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeDetailDto?>(null);
+
+        public Task<bool> ExistsByCodeAsync(string code, Guid? excludeId = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
+        public Task<Result<EquipmentTypeDetailDto>> AddAsync(EquipmentType equipmentType, IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<Result<EquipmentTypeDetailDto>> SaveAsync(EquipmentType entity, IReadOnlyList<EquipmentTypeMediaItemDto?>? desiredMedia, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<Result<EquipmentTypeDetailDto>> SaveStateTransitionAsync(EquipmentType entity, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
     }
 }
 

@@ -1,0 +1,202 @@
+using Dprental.CatalogService.Application.IServices;
+using Dprental.CatalogService.Application.Validators;
+using Dprental.CatalogService.Common;
+using Dprental.CatalogService.Common.Enums;
+using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
+using Dprental.CatalogService.Domain.Entities;
+using Dprental.CatalogService.Domain.IRepositories;
+
+namespace Dprental.CatalogService.Application.Services;
+
+public sealed class EquipmentTypeService(
+    IEquipmentTypeRepository repository,
+    ICategoryRepository categoryRepository,
+    EquipmentTypeListQueryValidator listQueryValidator,
+    CreateEquipmentTypeRequestValidator createValidator,
+    UpdateEquipmentTypeRequestValidator updateValidator) : IEquipmentTypeService
+{
+    public async Task<Result<PagedResult<EquipmentTypeListItemDto>>> SearchAsync(
+        GetEquipmentTypesRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        Result validationResult = listQueryValidator.Validate(request);
+        if (validationResult.IsFailure)
+        {
+            return validationResult.Error;
+        }
+
+        PagedResult<EquipmentTypeListItemDto> pagedResult = await repository.SearchPublishedAsync(request, cancellationToken);
+        return pagedResult;
+    }
+
+    public async Task<Result<EquipmentTypeDetailDto>> GetPublishedDetailAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        EquipmentTypeDetailDto? detail = await repository.GetPublishedByIdAsync(id, cancellationToken);
+        if (detail is null)
+        {
+            return CatalogErrors.EquipmentType.NotFound;
+        }
+
+        return detail;
+    }
+
+    public async Task<Result<EquipmentTypeDetailDto>> CreateAsync(
+        CreateEquipmentTypeRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        Result validationResult = createValidator.Validate(request);
+        if (validationResult.IsFailure)
+        {
+            return validationResult.Error;
+        }
+
+        var category = await categoryRepository.GetByIdAsync(request.CategoryId, cancellationToken);
+        if (category is null)
+        {
+            return CatalogErrors.EquipmentType.CategoryNotFound;
+        }
+
+        if (!category.IsActive)
+        {
+            return CatalogErrors.EquipmentType.CategoryInactive;
+        }
+
+        string trimmedCode = request.Code.Trim();
+        if (await repository.ExistsByCodeAsync(trimmedCode, null, cancellationToken))
+        {
+            return CatalogErrors.EquipmentType.DuplicateCode;
+        }
+
+        var equipmentType = new EquipmentType
+        {
+            Id = Guid.NewGuid(),
+            CategoryId = request.CategoryId,
+            Code = trimmedCode,
+            Name = request.Name.Trim(),
+            Description = request.Description,
+            CreatedAt = DateTime.UtcNow,
+            Category = category
+        };
+
+        return await repository.AddAsync(equipmentType, request.Media, cancellationToken);
+    }
+
+    public async Task<Result<EquipmentTypeDetailDto>> UpdateAsync(
+        Guid id,
+        UpdateEquipmentTypeRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        Result validationResult = updateValidator.Validate(request);
+        if (validationResult.IsFailure)
+        {
+            return validationResult.Error;
+        }
+
+        var entity = await repository.GetByIdAsync(id, cancellationToken);
+        if (entity is null)
+        {
+            return CatalogErrors.EquipmentType.NotFound;
+        }
+
+        if (request.IsCategoryIdSpecified && request.CategoryId.HasValue)
+        {
+            var category = await categoryRepository.GetByIdAsync(request.CategoryId.Value, cancellationToken);
+            if (category is null)
+            {
+                return CatalogErrors.EquipmentType.CategoryNotFound;
+            }
+
+            if (!category.IsActive)
+            {
+                return CatalogErrors.EquipmentType.CategoryInactive;
+            }
+
+            entity.CategoryId = request.CategoryId.Value;
+            entity.Category = category;
+        }
+
+        if (request.IsCodeSpecified && !string.IsNullOrWhiteSpace(request.Code))
+        {
+            string trimmedCode = request.Code.Trim();
+            if (await repository.ExistsByCodeAsync(trimmedCode, id, cancellationToken))
+            {
+                return CatalogErrors.EquipmentType.DuplicateCode;
+            }
+
+            entity.Code = trimmedCode;
+        }
+
+        if (request.IsNameSpecified)
+        {
+            entity.Name = request.Name!.Trim();
+        }
+
+        if (request.IsDescriptionSpecified)
+        {
+            entity.Description = request.Description;
+        }
+
+        entity.UpdatedAt = DateTime.UtcNow;
+
+        IReadOnlyList<EquipmentTypeMediaItemDto?>? desiredMedia = request.IsMediaSpecified ? request.Media : null;
+        return await repository.SaveAsync(entity, desiredMedia, cancellationToken);
+    }
+
+    public async Task<Result<EquipmentTypeDetailDto>> PublishAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await repository.GetByIdAsync(id, cancellationToken);
+        if (entity is null)
+        {
+            return CatalogErrors.EquipmentType.NotFound;
+        }
+
+        if (entity.Status == EquipmentTypeStatus.Published)
+        {
+            return CatalogErrors.EquipmentType.InvalidStateTransition;
+        }
+
+        var category = await categoryRepository.GetByIdAsync(entity.CategoryId, cancellationToken);
+        if (category is null)
+        {
+            return CatalogErrors.EquipmentType.CategoryNotFound;
+        }
+
+        if (!category.IsActive)
+        {
+            return CatalogErrors.EquipmentType.CategoryInactive;
+        }
+
+        entity.Publish(DateTime.UtcNow);
+        return await repository.SaveStateTransitionAsync(entity, cancellationToken);
+    }
+
+    public async Task<Result<EquipmentTypeDetailDto>> DisableAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await repository.GetByIdAsync(id, cancellationToken);
+        if (entity is null)
+        {
+            return CatalogErrors.EquipmentType.NotFound;
+        }
+
+        if (entity.Status != EquipmentTypeStatus.Published)
+        {
+            return CatalogErrors.EquipmentType.InvalidStateTransition;
+        }
+
+        // Disable được phép ngay cả khi category inactive
+        entity.Disable(DateTime.UtcNow);
+        return await repository.SaveStateTransitionAsync(entity, cancellationToken);
+    }
+}

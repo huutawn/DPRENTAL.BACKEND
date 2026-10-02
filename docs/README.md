@@ -36,3 +36,33 @@ Domain sở hữu repository contracts, EF Core DbContext và repository impleme
    ```
 
    Development lắng nghe tại `https://localhost:57297` và `http://localhost:47297`.
+
+## Triển khai và Rollback (RefactorEquipmentToEquipmentType)
+
+### 1. Khoảng dừng ghi và Sao lưu
+- Tạm dừng ghi đối với CatalogService trước khi tiến hành migration.
+- Tạo bản sao lưu đầy đủ:
+  ```bash
+  pg_dump -h <host> -p <port> -U <user> -Fc -d catalogservice > catalogservice_pre_refactor.dump
+  ```
+
+### 2. Preflight và Migration
+- Migration thực hiện trong transaction độc quyền với preflight kiểm tra trùng `Code`.
+- Nếu có duplicate `Code`, transaction abort ngay lập tức và giữ nguyên dữ liệu/schema cũ.
+- Thực hiện migration:
+  ```bash
+  dotnet ef database update --project CatalogService/src/Domain/CatalogService.Domain.csproj --startup-project CatalogService/src/Api/CatalogService.Api.csproj
+  ```
+
+### 3. Deploy và Mở ghi
+- Khởi động phiên bản API mới với base route `/api/v1/catalog/equipment-types`.
+- Tiến hành smoke test các endpoint GET và POST/PATCH.
+- Khôi phục luồng ghi dữ liệu.
+
+### 4. Rollback
+- Phương thức `Down` ném `NotSupportedException` do các cột supplier bị drop vĩnh viễn.
+- Rollback bằng cách khôi phục cơ sở dữ liệu từ bản sao lưu:
+  ```bash
+  pg_restore -h <host> -p <port> -U <user> -d catalogservice --clean catalogservice_pre_refactor.dump
+  ```
+- Khởi động lại phiên bản API cũ.

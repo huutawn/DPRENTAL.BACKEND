@@ -10,35 +10,23 @@ public static class CatalogErrorCode
         public const string Overflow = "Paging.Overflow";
     }
 
-    public static class Equipment
-    {
-        public const string NotFound = "Equipment.NotFound";
-        public const string InvalidKeyword = "Equipment.InvalidKeyword";
-        public const string InvalidSort = "Equipment.InvalidSort";
-        public const string InvalidMinPrice = "Equipment.InvalidMinPrice";
-        public const string InvalidMaxPrice = "Equipment.InvalidMaxPrice";
-        public const string InvalidPriceRange = "Equipment.InvalidPriceRange";
-    }
-
-    public static class Category
-    {
-        public const string NotFound = "Category.NotFound";
-        public const string Inactive = "Category.Inactive";
-    }
-
     public static class EquipmentType
     {
         public const string NotFound = "EquipmentType.NotFound";
-        public const string CodeRequired = "EquipmentType.CodeRequired";
-        public const string CodeInvalid = "EquipmentType.CodeInvalid";
-        public const string CodeAlreadyExists = "EquipmentType.CodeAlreadyExists";
-        public const string CodeLocked = "EquipmentType.CodeLocked";
-        public const string NameRequired = "EquipmentType.NameRequired";
-        public const string NameAlreadyExists = "EquipmentType.NameAlreadyExists";
-        public const string AlreadyPublished = "EquipmentType.AlreadyPublished";
-        public const string NotPublished = "EquipmentType.NotPublished";
-        public const string NotPublishable = "EquipmentType.NotPublishable";
-        public const string ConcurrentUpdate = "EquipmentType.ConcurrentUpdate";
+        public const string InvalidKeyword = "EquipmentType.InvalidKeyword";
+        public const string InvalidSort = "EquipmentType.InvalidSort";
+        public const string InvalidQuery = "EquipmentType.InvalidQuery";
+        public const string DuplicateCode = "EquipmentType.DuplicateCode";
+        public const string InvalidStateTransition = "EquipmentType.InvalidStateTransition";
+        public const string ConcurrencyConflict = "EquipmentType.ConcurrencyConflict";
+        public const string CategoryNotFound = "EquipmentType.CategoryNotFound";
+        public const string CategoryInactive = "EquipmentType.CategoryInactive";
+        public const string InvalidMedia = "EquipmentType.InvalidMedia";
+        public const string InvalidPayload = "EquipmentType.InvalidPayload";
+        public const string InvalidCode = "EquipmentType.InvalidCode";
+        public const string InvalidName = "EquipmentType.InvalidName";
+        public const string InvalidDescription = "EquipmentType.InvalidDescription";
+        public const string InvalidCategory = "EquipmentType.InvalidCategory";
     }
 
     public static class Catalog

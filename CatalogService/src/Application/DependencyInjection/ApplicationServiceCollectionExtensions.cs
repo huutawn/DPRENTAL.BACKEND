@@ -6,7 +6,6 @@ using Dprental.CatalogService.Domain.IRepositories;
 using Dprental.CatalogService.Domain.Repositories;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Dprental.CatalogService.Application.DependencyInjection;
 
@@ -19,14 +18,12 @@ public static class ApplicationServiceCollectionExtensions
         services.AddOptions<CatalogDiscoveryOptions>();
         services.Configure<CatalogDiscoveryOptions>(
             configuration.GetSection(CatalogDiscoveryOptions.SectionName));
-        services.AddScoped<EquipmentListQueryValidator>();
-        services.AddScoped<ICatalogDiscoveryService, CatalogDiscoveryService>();
+        services.AddScoped<EquipmentTypeListQueryValidator>();
+        services.AddScoped<CreateEquipmentTypeRequestValidator>();
+        services.AddScoped<UpdateEquipmentTypeRequestValidator>();
+        services.AddScoped<IEquipmentTypeService, EquipmentTypeService>();
         services.AddScoped<ICategoryRepository, CategoryRepository>();
         services.AddScoped<ICategoryService, CategoryService>();
-
-        services.TryAddSingleton(TimeProvider.System);
-        services.AddScoped<IEquipmentTypeManagementService, EquipmentTypeManagementService>();
-        services.AddScoped<IEquipmentTypeCatalogService, EquipmentTypeCatalogService>();
 
         return services;
     }

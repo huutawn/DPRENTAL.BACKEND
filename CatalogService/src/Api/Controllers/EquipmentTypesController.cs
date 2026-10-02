@@ -1,111 +1,120 @@
 using Dprental.CatalogService.Api.Filters;
-using Dprental.CatalogService.Api.Security;
-using Dprental.CatalogService.Application.DTOs.EquipmentType;
 using Dprental.CatalogService.Application.IServices;
 using Dprental.CatalogService.Common;
+using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Dprental.CatalogService.Api.Controllers;
 
-/// <summary>
-/// Equipment type của Canonical Catalog. Admin quản lý vòng đời (tạo, sửa, publish, disable);
-/// mọi người đọc được các type đang Published.
-/// </summary>
+/// <summary>Cung cấp API quản lý và discovery cho loại thiết bị trong Catalog.</summary>
 [ApiController]
 [Route("equipment-types")]
-[Authorize(Policy = CatalogPolicies.CatalogAdmin)]
-public sealed class EquipmentTypesController(
-    IEquipmentTypeManagementService managementService,
-    IEquipmentTypeCatalogService catalogService) : ControllerBase
+[Produces("application/json")]
+[Authorize(Roles = "adm")]
+public sealed class EquipmentTypesController(IEquipmentTypeService service) : ControllerBase
 {
-    /// <summary>Admin tạo equipment type mới ở trạng thái Draft.</summary>
-    [HttpPost]
-    [ProducesResponseType<EquipmentTypeManagementResponse>(StatusCodes.Status201Created)]
-    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> Create(CreateEquipmentTypeRequest request, CancellationToken cancellationToken)
+    private static readonly HashSet<string> AllowedQueryKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        Result<EquipmentTypeManagementResponse> result = await managementService.CreateAsync(request, cancellationToken);
-        if (result.IsFailure)
-        {
-            return this.ToProblem(result.Error);
-        }
+        "keyword",
+        "categoryId",
+        "page",
+        "pageSize",
+        "sort"
+    };
 
-        return CreatedAtAction(nameof(GetForManagement), new { id = result.Value.Id }, result.Value);
-    }
-
-    /// <summary>Admin cập nhật các field được phép sửa; field bỏ trống được giữ nguyên.</summary>
-    [HttpPatch("{id:guid}")]
-    [ProducesResponseType<EquipmentTypeManagementResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
-    public async Task<IActionResult> Update(Guid id, UpdateEquipmentTypeRequest request, CancellationToken cancellationToken)
-    {
-        Result<EquipmentTypeManagementResponse> result = await managementService.UpdateAsync(id, request, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
-    }
-
-    /// <summary>Admin xem chi tiết equipment type ở mọi trạng thái.</summary>
-    [HttpGet("{id:guid}/management")]
-    [ProducesResponseType<EquipmentTypeManagementResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetForManagement(Guid id, CancellationToken cancellationToken)
-    {
-        Result<EquipmentTypeManagementResponse> result = await managementService.GetForManagementAsync(id, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
-    }
-
-    /// <summary>Admin công khai equipment type Draft hoặc Disabled sau khi kiểm tra điều kiện publish.</summary>
-    [HttpPost("{id:guid}/publish")]
-    [ProducesResponseType<EquipmentTypeManagementResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
-    public async Task<IActionResult> Publish(Guid id, CancellationToken cancellationToken)
-    {
-        Result<EquipmentTypeManagementResponse> result = await managementService.PublishAsync(id, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
-    }
-
-    /// <summary>Admin ngừng dùng equipment type đang Published; dữ liệu không bị xóa.</summary>
-    [HttpPost("{id:guid}/disable")]
-    [ProducesResponseType<EquipmentTypeManagementResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> Disable(Guid id, CancellationToken cancellationToken)
-    {
-        Result<EquipmentTypeManagementResponse> result = await managementService.DisableAsync(id, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
-    }
-
-    /// <summary>Danh sách công khai các equipment type đang Published, có thể lọc theo category.</summary>
+    /// <summary>Tìm kiếm và phân trang loại thiết bị đã công khai.</summary>
     [AllowAnonymous]
     [HttpGet]
-    [ProducesResponseType<IReadOnlyList<EquipmentTypeResponse>>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> ListPublished([FromQuery] Guid? categoryId, CancellationToken cancellationToken) =>
-        Ok(await catalogService.ListPublishedAsync(categoryId, cancellationToken));
+    [ProducesResponseType<PagedResult<EquipmentTypeListItemDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<PagedResult<EquipmentTypeListItemDto>>> Search(
+        [FromQuery] GetEquipmentTypesRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (Request.Query.Keys.Any(k => !AllowedQueryKeys.Contains(k)))
+        {
+            return this.ToProblem(CatalogErrors.EquipmentType.InvalidQuery);
+        }
 
-    /// <summary>Chi tiết công khai một equipment type; type Draft hoặc Disabled trả 404.</summary>
+        Result<PagedResult<EquipmentTypeListItemDto>> result = await service.SearchAsync(request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Lấy chi tiết loại thiết bị theo ID nếu đã công khai.</summary>
     [AllowAnonymous]
     [HttpGet("{id:guid}")]
-    [ProducesResponseType<EquipmentTypeResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetPublished(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<EquipmentTypeDetailDto>> GetById(
+        Guid id,
+        CancellationToken cancellationToken)
     {
-        Result<EquipmentTypeResponse> result = await catalogService.GetPublishedAsync(id, cancellationToken);
+        Result<EquipmentTypeDetailDto> result = await service.GetPublishedDetailAsync(id, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Tạo mới loại thiết bị ở trạng thái Draft.</summary>
+    [HttpPost]
+    [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Create(
+        [FromBody] CreateEquipmentTypeRequest request,
+        CancellationToken cancellationToken)
+    {
+        Result<EquipmentTypeDetailDto> result = await service.CreateAsync(request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : StatusCode(StatusCodes.Status201Created, result.Value);
+    }
+
+    /// <summary>Cập nhật thông tin canonical và danh sách media của loại thiết bị.</summary>
+    [HttpPatch("{id:guid}")]
+    [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Update(
+        Guid id,
+        [FromBody] UpdateEquipmentTypeRequest request,
+        CancellationToken cancellationToken)
+    {
+        Result<EquipmentTypeDetailDto> result = await service.UpdateAsync(id, request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Công khai loại thiết bị lên public catalog từ trạng thái Draft hoặc Disabled.</summary>
+    [HttpPost("{id:guid}/publish")]
+    [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Publish(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        Result<EquipmentTypeDetailDto> result = await service.PublishAsync(id, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Vô hiệu hóa loại thiết bị đang công khai khỏi public catalog.</summary>
+    [HttpPost("{id:guid}/disable")]
+    [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Disable(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        Result<EquipmentTypeDetailDto> result = await service.DisableAsync(id, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 }

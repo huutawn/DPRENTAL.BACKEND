@@ -6,7 +6,8 @@ using Dprental.CatalogService.Api.Filters;
 using Dprental.CatalogService.Api.Observability;
 using Dprental.CatalogService.Application.IServices;
 using Dprental.CatalogService.Common;
-using Dprental.CatalogService.Domain.DTOs.Equipments;
+using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
+using Dprental.CatalogService.Domain.Entities;
 using Dprental.CatalogService.Domain.IRepositories;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -31,13 +32,13 @@ public sealed class ErrorBoundaryTests
     public void ExpectedErrorFilterExtensions_MapsAllErrorTypesCorrectly(ErrorType errorType, int expectedStatusCode)
     {
         var controller = new DummyController();
-        var error = new Error("TEST_CODE", "Test message", errorType);
+        var error = new Error("Test.Error", "Test message", errorType);
 
-        ObjectResult problemResult = controller.ToProblem(error);
+        var result = controller.ToProblem(error);
 
-        Assert.Equal(expectedStatusCode, problemResult.StatusCode);
-        var problemDetails = Assert.IsAssignableFrom<ProblemDetails>(problemResult.Value);
-        Assert.Equal("TEST_CODE", problemDetails.Title);
+        Assert.Equal(expectedStatusCode, result.StatusCode);
+        var problemDetails = Assert.IsType<ProblemDetails>(result.Value);
+        Assert.Equal("Test.Error", problemDetails.Title);
         Assert.Equal("Test message", problemDetails.Detail);
     }
 
@@ -48,7 +49,7 @@ public sealed class ErrorBoundaryTests
             new InvalidOperationException("SECRET_DATABASE_CREDENTIALS_LEAK"));
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync("/api/v1/catalog/equipments");
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/catalog/equipment-types");
 
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         string content = await response.Content.ReadAsStringAsync();
@@ -68,7 +69,7 @@ public sealed class ErrorBoundaryTests
         using WebApplicationFactory<Program> factory = PublicCatalogEndpointTests.CreateFactory();
         using HttpClient client = factory.CreateClient();
 
-        using HttpRequestMessage request = new(HttpMethod.Get, "/api/v1/catalog/equipments");
+        using HttpRequestMessage request = new(HttpMethod.Get, "/api/v1/catalog/equipment-types");
         request.Headers.Add("X-Correlation-ID", customCorrelationId);
 
         using HttpResponseMessage response = await client.SendAsync(request);
@@ -83,7 +84,7 @@ public sealed class ErrorBoundaryTests
         using WebApplicationFactory<Program> factory = PublicCatalogEndpointTests.CreateFactory();
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync("/api/v1/catalog/equipments");
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/catalog/equipment-types");
 
         Assert.True(response.Headers.TryGetValues("X-Correlation-ID", out var values));
         string? correlationId = values.FirstOrDefault();
@@ -94,17 +95,14 @@ public sealed class ErrorBoundaryTests
     [Fact]
     public async Task GlobalExceptionHandler_CancellationRequested_ReturnsFalse_AndDoesNotConvertInto500()
     {
-        var handler = new GlobalExceptionHandler(
-            new DummyProblemDetailsService(),
-            NullLogger<GlobalExceptionHandler>.Instance);
-
+        var problemDetailsService = new DummyProblemDetailsService();
+        var handler = new GlobalExceptionHandler(problemDetailsService, NullLogger<GlobalExceptionHandler>.Instance);
         var context = new DefaultHttpContext();
-        using CancellationTokenSource cts = new();
+
+        var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        OperationCanceledException oce = new(cts.Token);
-
-        bool handled = await handler.TryHandleAsync(context, oce, cts.Token);
+        bool handled = await handler.TryHandleAsync(context, new OperationCanceledException(cts.Token), cts.Token);
 
         Assert.False(handled);
     }
@@ -121,8 +119,8 @@ public sealed class ErrorBoundaryTests
 
                 builder.ConfigureTestServices(services =>
                 {
-                    services.RemoveAll<IEquipmentQueryRepository>();
-                    services.AddScoped<IEquipmentQueryRepository>(_ => new ThrowingEquipmentRepository(ex));
+                    services.RemoveAll<IEquipmentTypeRepository>();
+                    services.AddScoped<IEquipmentTypeRepository>(_ => new ThrowingEquipmentTypeRepository(ex));
                 });
             });
 
@@ -134,16 +132,34 @@ public sealed class ErrorBoundaryTests
         public ValueTask WriteAsync(ProblemDetailsContext context) => ValueTask.CompletedTask;
     }
 
-    private sealed class ThrowingEquipmentRepository(Exception exception) : IEquipmentQueryRepository
+    private sealed class ThrowingEquipmentTypeRepository(Exception exception) : IEquipmentTypeRepository
     {
-        public Task<PagedResult<EquipmentListItemDto>> SearchPublishedAsync(GetEquipmentsRequest request, CancellationToken cancellationToken = default)
+        public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(GetEquipmentTypesRequest request, CancellationToken cancellationToken = default)
         {
             throw exception;
         }
 
-        public Task<EquipmentDetailDto?> GetPublishedByIdAsync(Guid id, CancellationToken cancellationToken = default)
+        public Task<EquipmentTypeDetailDto?> GetPublishedByIdAsync(Guid id, CancellationToken cancellationToken = default)
         {
             throw exception;
         }
+
+        public Task<EquipmentType?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            throw exception;
+
+        public Task<EquipmentTypeDetailDto?> GetDetailByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            throw exception;
+
+        public Task<bool> ExistsByCodeAsync(string code, Guid? excludeId = null, CancellationToken cancellationToken = default) =>
+            throw exception;
+
+        public Task<Result<EquipmentTypeDetailDto>> AddAsync(EquipmentType equipmentType, IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems, CancellationToken cancellationToken = default) =>
+            throw exception;
+
+        public Task<Result<EquipmentTypeDetailDto>> SaveAsync(EquipmentType entity, IReadOnlyList<EquipmentTypeMediaItemDto?>? desiredMedia, CancellationToken cancellationToken = default) =>
+            throw exception;
+
+        public Task<Result<EquipmentTypeDetailDto>> SaveStateTransitionAsync(EquipmentType entity, CancellationToken cancellationToken = default) =>
+            throw exception;
     }
 }

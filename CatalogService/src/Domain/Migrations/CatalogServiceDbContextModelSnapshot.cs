@@ -58,14 +58,10 @@ namespace CatalogService.Domain.Migrations
                     b.ToTable("Categories", "catalog");
                 });
 
-            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.Equipment", b =>
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentType", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
-
-                    b.Property<string>("Brand")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
 
                     b.Property<Guid>("CategoryId")
                         .HasColumnType("uuid");
@@ -75,12 +71,8 @@ namespace CatalogService.Domain.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
-                    b.Property<DateTime>("CreatedAtUtc")
+                    b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<decimal>("DailyPrice")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
 
                     b.Property<string>("Description")
                         .HasMaxLength(4000)
@@ -91,55 +83,48 @@ namespace CatalogService.Domain.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<Guid>("OrganizationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("PublishedAtUtc")
+                    b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("RegionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Specifications")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("jsonb")
-                        .HasDefaultValueSql("'{}'::jsonb");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
-                    b.Property<DateTime?>("UpdatedAtUtc")
+                    b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CategoryId");
+                    b.HasIndex("CategoryId")
+                        .HasDatabaseName("IX_EquipmentTypes_CategoryId");
 
-                    b.HasIndex("CreatedAtUtc");
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("IX_EquipmentTypes_Code");
 
-                    b.HasIndex("DailyPrice");
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("IX_EquipmentTypes_CreatedAt");
 
-                    b.HasIndex("PublishedAtUtc");
+                    b.HasIndex("PublishedAt")
+                        .HasDatabaseName("IX_EquipmentTypes_PublishedAt");
 
-                    b.HasIndex("RegionId");
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_EquipmentTypes_Status");
 
-                    b.HasIndex("Status");
-
-                    b.HasIndex("OrganizationId", "Code")
-                        .IsUnique();
-
-                    b.ToTable("Equipments", "catalog", t =>
+                    b.ToTable("EquipmentTypes", "catalog", t =>
                         {
-                            t.HasCheckConstraint("CK_Equipments_DailyPrice_NonNegative", "\"DailyPrice\" >= 0");
-
-                            t.HasCheckConstraint("CK_Equipments_Specifications_IsObject", "jsonb_typeof(\"Specifications\") = 'object'");
+                            t.HasCheckConstraint("CK_EquipmentTypes_Status_Canonical", "\"Status\" IN ('Draft', 'Published', 'Disabled')");
                         });
                 });
 
-            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentMedia", b =>
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentTypeMedia", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
@@ -147,7 +132,7 @@ namespace CatalogService.Domain.Migrations
                     b.Property<int>("DisplayOrder")
                         .HasColumnType("integer");
 
-                    b.Property<Guid>("EquipmentId")
+                    b.Property<Guid>("EquipmentTypeId")
                         .HasColumnType("uuid");
 
                     b.Property<bool>("IsThumbnail")
@@ -158,122 +143,48 @@ namespace CatalogService.Domain.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EquipmentId")
+                    b.HasIndex("EquipmentTypeId")
                         .IsUnique()
-                        .HasDatabaseName("UX_EquipmentMedia_EquipmentId_Thumbnail")
+                        .HasDatabaseName("UX_EquipmentTypeMedia_EquipmentTypeId_Thumbnail")
                         .HasFilter("\"IsThumbnail\" = TRUE");
 
-                    b.HasIndex("EquipmentId", "MediaId")
-                        .IsUnique();
+                    b.HasIndex("EquipmentTypeId", "MediaId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_EquipmentTypeMedia_EquipmentTypeId_MediaId");
 
-                    b.ToTable("EquipmentMedia", "catalog");
+                    b.ToTable("EquipmentTypeMedia", "catalog");
                 });
 
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentType", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("CategoryId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<DateTime?>("DisabledAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("NormalizedName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTime?>("PublishedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("RequiresSpecSchema")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<uint>("Version")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Code")
-                        .IsUnique();
-
-                    b.HasIndex("Status");
-
-                    b.HasIndex("CategoryId", "NormalizedName")
-                        .IsUnique();
-
-                    b.ToTable("EquipmentTypes", "catalog");
-                });
-
-            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.Equipment", b =>
-                {
                     b.HasOne("Dprental.CatalogService.Domain.Entities.Category", "Category")
-                        .WithMany("Equipments")
+                        .WithMany("EquipmentTypes")
                         .HasForeignKey("CategoryId")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .IsRequired()
+                        .HasConstraintName("FK_EquipmentTypes_Categories_CategoryId");
 
                     b.Navigation("Category");
                 });
 
-            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentMedia", b =>
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentTypeMedia", b =>
                 {
-                    b.HasOne("Dprental.CatalogService.Domain.Entities.Equipment", "Equipment")
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.EquipmentType", "EquipmentType")
                         .WithMany("Media")
-                        .HasForeignKey("EquipmentId")
+                        .HasForeignKey("EquipmentTypeId")
                         .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .IsRequired()
+                        .HasConstraintName("FK_EquipmentTypeMedia_EquipmentTypes_EquipmentTypeId");
 
-                    b.Navigation("Equipment");
-                });
-
-            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentType", b =>
-                {
-                    b.HasOne("Dprental.CatalogService.Domain.Entities.Category", "Category")
-                        .WithMany()
-                        .HasForeignKey("CategoryId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Category");
+                    b.Navigation("EquipmentType");
                 });
 
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.Category", b =>
                 {
-                    b.Navigation("Equipments");
+                    b.Navigation("EquipmentTypes");
                 });
 
-            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.Equipment", b =>
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentType", b =>
                 {
                     b.Navigation("Media");
                 });

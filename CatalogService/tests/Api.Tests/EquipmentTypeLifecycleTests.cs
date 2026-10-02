@@ -9,111 +9,93 @@ public sealed class EquipmentTypeLifecycleTests
     private static readonly DateTime Now = new(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc);
 
     [Fact]
-    public void NewEquipmentType_StartsAsDraft_WithUnlockedCode()
+    public void NewEquipmentType_StartsAsDraft()
     {
-        EquipmentType type = new();
+        var equipmentType = new EquipmentType();
 
-        Assert.Equal(EquipmentTypeStatus.Draft, type.Status);
-        Assert.Null(type.PublishedAtUtc);
-        Assert.Null(type.DisabledAtUtc);
-        Assert.False(type.IsCodeLocked);
-        Assert.False(type.RequiresSpecSchema);
+        Assert.Equal(EquipmentTypeStatus.Draft, equipmentType.Status);
+        Assert.Null(equipmentType.PublishedAt);
+        Assert.Null(equipmentType.UpdatedAt);
     }
 
     [Fact]
-    public void Publish_FromDraft_SetsPublished_AndLocksCode()
+    public void Publish_FromDraft_SetsPublishedAndTimestamp()
     {
-        EquipmentType type = new();
+        var equipmentType = new EquipmentType();
 
-        type.Publish(Now);
+        equipmentType.Publish(Now);
 
-        Assert.Equal(EquipmentTypeStatus.Published, type.Status);
-        Assert.Equal(Now, type.PublishedAtUtc);
-        Assert.Equal(Now, type.UpdatedAtUtc);
-        Assert.True(type.IsCodeLocked);
+        Assert.Equal(EquipmentTypeStatus.Published, equipmentType.Status);
+        Assert.Equal(Now, equipmentType.PublishedAt);
+        Assert.Equal(Now, equipmentType.UpdatedAt);
     }
 
     [Fact]
-    public void Disable_FromPublished_SetsDisabled_AndKeepsCodeLocked()
+    public void Disable_FromPublished_SetsDisabledAndKeepsPublishedAt()
     {
-        EquipmentType type = new();
-        type.Publish(Now);
-        DateTime later = Now.AddHours(1);
+        var equipmentType = new EquipmentType();
+        equipmentType.Publish(Now);
 
-        type.Disable(later);
+        DateTime later = Now.AddHours(2);
+        equipmentType.Disable(later);
 
-        Assert.Equal(EquipmentTypeStatus.Disabled, type.Status);
-        Assert.Equal(later, type.DisabledAtUtc);
-        Assert.Equal(Now, type.PublishedAtUtc);
-        Assert.True(type.IsCodeLocked);
+        Assert.Equal(EquipmentTypeStatus.Disabled, equipmentType.Status);
+        Assert.Equal(Now, equipmentType.PublishedAt);
+        Assert.Equal(later, equipmentType.UpdatedAt);
     }
 
     [Fact]
-    public void Publish_FromDisabled_PublishesAgain_AndClearsDisabledAt()
+    public void Publish_FromDisabled_PublishesAgainWithNewTimestamp()
     {
-        EquipmentType type = new();
-        type.Publish(Now);
-        type.Disable(Now.AddHours(1));
-        DateTime republishedAt = Now.AddHours(2);
+        var equipmentType = new EquipmentType();
+        equipmentType.Publish(Now);
+        equipmentType.Disable(Now.AddHours(1));
 
-        type.Publish(republishedAt);
+        DateTime republishedAt = Now.AddDays(1);
+        equipmentType.Publish(republishedAt);
 
-        Assert.Equal(EquipmentTypeStatus.Published, type.Status);
-        Assert.Equal(republishedAt, type.PublishedAtUtc);
-        Assert.Null(type.DisabledAtUtc);
-    }
-
-    [Fact]
-    public void InvalidTransitions_Throw_AndLeaveStatusUnchanged()
-    {
-        EquipmentType draft = new();
-        Assert.Throws<InvalidOperationException>(() => draft.Disable(Now));
-        Assert.Equal(EquipmentTypeStatus.Draft, draft.Status);
-
-        EquipmentType published = new();
-        published.Publish(Now);
-        Assert.Throws<InvalidOperationException>(() => published.Publish(Now.AddHours(1)));
-
-        published.Disable(Now.AddHours(1));
-        Assert.Throws<InvalidOperationException>(() => published.Disable(Now.AddHours(2)));
-        Assert.Equal(EquipmentTypeStatus.Disabled, published.Status);
+        Assert.Equal(EquipmentTypeStatus.Published, equipmentType.Status);
+        Assert.Equal(republishedAt, equipmentType.PublishedAt);
     }
 
     [Fact]
     public void PublishAndDisable_NormalizeTimestampsToUtc()
     {
-        EquipmentType type = new();
+        var equipmentType = new EquipmentType();
+        DateTime unspecified = new(2026, 10, 1, 10, 0, 0, DateTimeKind.Unspecified);
 
-        type.Publish(Now.ToLocalTime());
-        type.Disable(DateTime.SpecifyKind(Now.AddHours(1), DateTimeKind.Unspecified));
+        equipmentType.Publish(unspecified);
+        Assert.Equal(DateTimeKind.Utc, equipmentType.PublishedAt!.Value.Kind);
 
-        Assert.Equal(DateTimeKind.Utc, type.PublishedAtUtc!.Value.Kind);
-        Assert.Equal(Now, type.PublishedAtUtc);
-        Assert.Equal(DateTimeKind.Utc, type.DisabledAtUtc!.Value.Kind);
-        Assert.Equal(Now.AddHours(1), type.DisabledAtUtc);
+        equipmentType.Disable(unspecified.AddHours(1));
+        Assert.Equal(DateTimeKind.Utc, equipmentType.UpdatedAt!.Value.Kind);
     }
 
-    [Theory]
-    [InlineData("Forklift 1.5–3.5T", "FORKLIFT 1.5–3.5T")]
-    [InlineData("  forklift   1.5–3.5t ", "FORKLIFT 1.5–3.5T")]
-    [InlineData("Máy xúc\tđào", "MÁY XÚC ĐÀO")]
-    public void Rename_TrimsName_AndNormalizesForDuplicateDetection(string input, string expectedNormalized)
+    [Fact]
+    public void Publish_WhenAlreadyPublished_Throws()
     {
-        EquipmentType type = new();
+        var equipmentType = new EquipmentType();
+        equipmentType.Publish(Now);
 
-        type.Rename(input);
-
-        Assert.Equal(input.Trim(), type.Name);
-        Assert.Equal(expectedNormalized, type.NormalizedName);
+        Assert.Throws<InvalidOperationException>(() => equipmentType.Publish(Now.AddMinutes(5)));
     }
 
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void Rename_RejectsBlankName(string input)
+    [Fact]
+    public void Disable_FromDraft_Throws()
     {
-        EquipmentType type = new();
+        var equipmentType = new EquipmentType();
 
-        Assert.Throws<ArgumentException>(() => type.Rename(input));
+        Assert.Throws<InvalidOperationException>(() => equipmentType.Disable(Now));
+        Assert.Equal(EquipmentTypeStatus.Draft, equipmentType.Status);
+    }
+
+    [Fact]
+    public void Disable_WhenAlreadyDisabled_Throws()
+    {
+        var equipmentType = new EquipmentType();
+        equipmentType.Publish(Now);
+        equipmentType.Disable(Now.AddMinutes(1));
+
+        Assert.Throws<InvalidOperationException>(() => equipmentType.Disable(Now.AddMinutes(2)));
     }
 }

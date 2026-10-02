@@ -1,11 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using Dprental.CatalogService.Common;
-using Dprental.CatalogService.Domain.DTOs.Equipments;
+using Dprental.CatalogService.Common.Enums;
+using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
+using Dprental.CatalogService.Domain.Entities;
 using Dprental.CatalogService.Domain.IRepositories;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
@@ -14,8 +15,8 @@ namespace Dprental.CatalogService.Api.Tests;
 
 public sealed class PublicCatalogEndpointTests
 {
-    private static readonly Guid PublishedEquipmentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
-    private static readonly Guid UnpublishedEquipmentId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid PublishedEquipmentTypeId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid UnpublishedEquipmentTypeId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
     [Fact]
     public async Task Listing_IsAnonymous_AndReturnsPagedResult()
@@ -23,10 +24,10 @@ public sealed class PublicCatalogEndpointTests
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync("/api/v1/catalog/equipments");
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/catalog/equipment-types");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var page = await response.Content.ReadFromJsonAsync<PagedResult<EquipmentListItemDto>>();
+        var page = await response.Content.ReadFromJsonAsync<PagedResult<EquipmentTypeListItemDto>>();
         Assert.NotNull(page);
         Assert.Equal(1, page.Page);
         Assert.Equal(20, page.PageSize);
@@ -36,37 +37,38 @@ public sealed class PublicCatalogEndpointTests
     }
 
     [Fact]
-    public async Task Listing_WithInvalidPriceRange_ReturnsBadRequest()
+    public async Task Listing_WithUnexpectedQueryKey_ReturnsBadRequest()
     {
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync("/api/v1/catalog/equipments?minPrice=500&maxPrice=100");
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/catalog/equipment-types?minPrice=500");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
-    public async Task Detail_ReturnsPublishedEquipment()
+    public async Task Detail_ReturnsPublishedEquipmentType()
     {
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync($"/api/v1/catalog/equipments/{PublishedEquipmentId}");
+        using HttpResponseMessage response = await client.GetAsync($"/api/v1/catalog/equipment-types/{PublishedEquipmentTypeId}");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var detail = await response.Content.ReadFromJsonAsync<EquipmentDetailDto>();
+        var detail = await response.Content.ReadFromJsonAsync<EquipmentTypeDetailDto>();
         Assert.NotNull(detail);
-        Assert.Equal(PublishedEquipmentId, detail.Id);
+        Assert.Equal(PublishedEquipmentTypeId, detail.Id);
+        Assert.Equal(EquipmentTypeStatus.Published, detail.Status);
     }
 
     [Fact]
-    public async Task Detail_DoesNotExposeUnknownOrUnpublishedEquipment()
+    public async Task Detail_DoesNotExposeUnknownOrUnpublishedEquipmentType()
     {
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync($"/api/v1/catalog/equipments/{UnpublishedEquipmentId}");
+        using HttpResponseMessage response = await client.GetAsync($"/api/v1/catalog/equipment-types/{UnpublishedEquipmentTypeId}");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -83,51 +85,69 @@ public sealed class PublicCatalogEndpointTests
 
                 builder.ConfigureTestServices(services =>
                 {
-                    services.RemoveAll<IEquipmentQueryRepository>();
-                    services.AddScoped<IEquipmentQueryRepository, FakeEquipmentQueryRepository>();
+                    services.RemoveAll<IEquipmentTypeRepository>();
+                    services.AddScoped<IEquipmentTypeRepository, FakeEquipmentTypeRepository>();
                 });
             });
-    private sealed class FakeEquipmentQueryRepository : IEquipmentQueryRepository
+
+    private sealed class FakeEquipmentTypeRepository : IEquipmentTypeRepository
     {
-        public Task<PagedResult<EquipmentListItemDto>> SearchPublishedAsync(
-            GetEquipmentsRequest request,
+        public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(
+            GetEquipmentTypesRequest request,
             CancellationToken cancellationToken = default)
         {
-            var item = new EquipmentListItemDto(
-                PublishedEquipmentId,
+            var item = new EquipmentTypeListItemDto(
+                PublishedEquipmentTypeId,
+                "CAM-001",
                 "Máy quay Sony FX3",
-                "Sony",
-                1200000m,
-                Guid.NewGuid(),
-                Guid.NewGuid(),
-                new CategoryDto(Guid.NewGuid(), "Camera"));
+                "Mô tả máy quay",
+                new CategoryDto(Guid.NewGuid(), "Camera"),
+                Guid.NewGuid());
 
-            var result = new PagedResult<EquipmentListItemDto>([item], request.Page, request.PageSize, 1);
+            var result = new PagedResult<EquipmentTypeListItemDto>([item], request.Page, request.PageSize, 1);
             return Task.FromResult(result);
         }
 
-        public Task<EquipmentDetailDto?> GetPublishedByIdAsync(
+        public Task<EquipmentTypeDetailDto?> GetPublishedByIdAsync(
             Guid id,
             CancellationToken cancellationToken = default)
         {
-            if (id != PublishedEquipmentId)
+            if (id != PublishedEquipmentTypeId)
             {
-                return Task.FromResult<EquipmentDetailDto?>(null);
+                return Task.FromResult<EquipmentTypeDetailDto?>(null);
             }
 
-            var detail = new EquipmentDetailDto(
-                PublishedEquipmentId,
+            var detail = new EquipmentTypeDetailDto(
+                PublishedEquipmentTypeId,
                 "CAM-001",
                 "Máy quay Sony FX3",
-                "Sony",
                 "Mô tả máy quay",
-                1200000m,
-                Guid.NewGuid(),
-                new CategoryDto(Guid.NewGuid(), "Camera"),
+                EquipmentTypeStatus.Published,
+                DateTime.UtcNow,
                 null,
+                DateTime.UtcNow,
+                new CategoryDto(Guid.NewGuid(), "Camera"),
                 [Guid.NewGuid()]);
 
-            return Task.FromResult<EquipmentDetailDto?>(detail);
+            return Task.FromResult<EquipmentTypeDetailDto?>(detail);
         }
+
+        public Task<EquipmentType?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentType?>(null);
+
+        public Task<EquipmentTypeDetailDto?> GetDetailByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeDetailDto?>(null);
+
+        public Task<bool> ExistsByCodeAsync(string code, Guid? excludeId = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
+        public Task<Result<EquipmentTypeDetailDto>> AddAsync(EquipmentType equipmentType, IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<Result<EquipmentTypeDetailDto>> SaveAsync(EquipmentType entity, IReadOnlyList<EquipmentTypeMediaItemDto?>? desiredMedia, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<Result<EquipmentTypeDetailDto>> SaveStateTransitionAsync(EquipmentType entity, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
     }
 }

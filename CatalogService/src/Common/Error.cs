@@ -11,7 +11,6 @@ public enum ErrorType
     Conflict,
     Unauthorized,
     Forbidden,
-    Unprocessable,
 }
 
 /// <summary>Describes an expected failure returned from a <see cref="Result"/>.</summary>
@@ -31,6 +30,4 @@ public sealed record Error(string Code, string Message, ErrorType Type)
     public static Error Unauthorized(string code, string message) => new(code, message, ErrorType.Unauthorized);
 
     public static Error Forbidden(string code, string message) => new(code, message, ErrorType.Forbidden);
-
-    public static Error Unprocessable(string code, string message) => new(code, message, ErrorType.Unprocessable);
 }

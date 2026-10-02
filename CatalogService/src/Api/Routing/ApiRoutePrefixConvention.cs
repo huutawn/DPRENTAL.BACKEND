@@ -12,7 +12,7 @@ internal static class ApiRoutes
 
 /// <summary>
 /// Ghép <see cref="ApiRoutes.Prefix"/> vào trước route của mọi controller, nên <c>[Route]</c> trên
-/// controller chỉ ghi phần con (vd <c>[Route("equipments")]</c>). Route bắt đầu bằng <c>/</c> hoặc <c>~/</c>
+/// controller chỉ ghi phần con (vd <c>[Route("equipment-types")]</c>). Route bắt đầu bằng <c>/</c> hoặc <c>~/</c>
 /// được giữ nguyên, dùng khi một controller cần thoát khỏi tiền tố.
 /// </summary>
 internal sealed class ApiRoutePrefixConvention(string prefix) : IApplicationModelConvention
