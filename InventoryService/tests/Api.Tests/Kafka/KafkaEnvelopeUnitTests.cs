@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Application.Kafka.Contracts;
-using Dprental.InventoryService.Application.Kafka.Saga;
 using Dprental.InventoryService.Application.Kafka.Transport;
 using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Common.Utils;
@@ -284,44 +283,6 @@ public sealed class KafkaEnvelopeUnitTests
         Assert.IsType<ArgumentNullException>(ex.InnerException);
     }
 
-    [Fact]
-    public void Saga_TransitionsAndTerminalState_ClearsTimeout()
-    {
-        var orgId = Guid.NewGuid();
-        var sagaId = Guid.NewGuid();
-        var now = DateTimeOffset.UtcNow;
-        var timeoutId = Guid.NewGuid();
-        var deadline = now.AddMinutes(15);
-
-        var instance = SagaInstance.Create(
-            sagaId,
-            "ReservationSaga",
-            orgId,
-            "corr-123",
-            SagaState.Executing,
-            "AwaitingHoldConfirmation",
-            "{}",
-            now,
-            timeoutId,
-            deadline);
-
-        Assert.Equal(SagaState.Executing, instance.State);
-        Assert.Equal("AwaitingHoldConfirmation", instance.CurrentStep);
-        Assert.Equal(timeoutId, instance.TimeoutId);
-        Assert.Equal(deadline, instance.TimeoutDeadline);
-
-        // Chuyển sang Completed -> Terminal state phải tự xóa timeout
-        instance.TransitionTo(
-            SagaState.Completed,
-            "Completed",
-            "{\"result\":\"success\"}",
-            now.AddMinutes(5));
-
-        Assert.Equal(SagaState.Completed, instance.State);
-        Assert.Equal("Completed", instance.CurrentStep);
-        Assert.Null(instance.TimeoutId);
-        Assert.Null(instance.TimeoutDeadline);
-    }
 
     private sealed class TestHandler : IMessageHandler<TestPayload>
     {

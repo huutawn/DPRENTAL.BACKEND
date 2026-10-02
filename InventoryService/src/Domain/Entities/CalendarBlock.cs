@@ -7,8 +7,8 @@ using Dprental.InventoryService.Common.Utils;
 namespace Dprental.InventoryService.Domain.Entities;
 
 /// <summary>
-/// Thực thể đại diện cho một khoảng thời gian chặn lịch sử dụng thiết bị (Calendar Block).
-/// Phục vụ các mục đích bảo trì, sử dụng nội bộ hoặc kiểm định chất lượng, ngăn không cho khách thuê đặt lịch.
+/// Thực thể đại diện cho một khoảng thời gian chặn lịch sử dụng tài sản (Calendar Block).
+/// Phục vụ các mục đích bảo trì, sử dụng nội bộ hoặc kiểm định chất lượng, ngăn không cho đặt lịch.
 /// </summary>
 [Table("calendar_blocks", Schema = "inventory")]
 public sealed class CalendarBlock
@@ -21,10 +21,10 @@ public sealed class CalendarBlock
     public Guid Id { get; private set; }
 
     /// <summary>
-    /// Định danh thiết bị trong kho bị chặn lịch.
+    /// Định danh tài sản trong kho bị chặn lịch.
     /// </summary>
-    [Column("equipment_id")]
-    public Guid EquipmentId { get; private set; }
+    [Column("asset_id")]
+    public Guid AssetId { get; private set; }
 
     /// <summary>
     /// Ngày bắt đầu chặn lịch (tính theo ngày dương lịch tại Việt Nam, inclusive).
@@ -72,24 +72,18 @@ public sealed class CalendarBlock
     public uint Version { get; set; }
 
     /// <summary>
-    /// Bản ghi thiết bị liên kết với khoảng chặn lịch này.
+    /// Bản ghi tài sản liên kết với khoảng chặn lịch này.
     /// </summary>
-    [ForeignKey(nameof(EquipmentId))]
-    public InventoryEquipment Equipment { get; private set; } = null!;
+    [ForeignKey(nameof(AssetId))]
+    public InventoryAsset Asset { get; private set; } = null!;
 
-    /// <summary>
-    /// Khởi tạo private phục vụ EF Core.
-    /// </summary>
     private CalendarBlock()
     {
     }
 
-    /// <summary>
-    /// Khởi tạo bản ghi chặn lịch mới.
-    /// </summary>
     private CalendarBlock(
         Guid id,
-        Guid equipmentId,
+        Guid assetId,
         DateOnly startDate,
         DateOnly endDate,
         CalendarBlockReason reason,
@@ -98,7 +92,7 @@ public sealed class CalendarBlock
         string? notes)
     {
         Id = id;
-        EquipmentId = equipmentId;
+        AssetId = assetId;
         StartDate = startDate;
         EndDate = endDate;
         Reason = reason;
@@ -108,23 +102,12 @@ public sealed class CalendarBlock
     }
 
     /// <summary>
-    /// Tạo mới một khoảng chặn lịch cho thiết bị với kiểm tra tính hợp lệ về ngày và chân trời nghiệp vụ.
-    /// Lưu ý: Không áp dụng giới hạn 30 ngày của lượt thuê lên khoảng chặn lịch, nhưng tối đa không quá chân trời 6 tháng.
+    /// Tạo mới một khoảng chặn lịch cho tài sản với kiểm tra tính hợp lệ về ngày và chân trời nghiệp vụ.
+    /// Lưu ý: Không áp dụng giới hạn thời lượng thuê lên khoảng chặn lịch, nhưng tối đa không quá chân trời 6 tháng.
     /// </summary>
-    /// <param name="id">ID duy nhất của block.</param>
-    /// <param name="equipmentId">ID thiết bị cần chặn lịch.</param>
-    /// <param name="startDate">Ngày bắt đầu chặn lịch.</param>
-    /// <param name="endDate">Ngày kết thúc chặn lịch.</param>
-    /// <param name="reason">Lý do chặn lịch.</param>
-    /// <param name="createdBy">Người thực hiện chặn lịch.</param>
-    /// <param name="now">Thời điểm hiện tại (UTC).</param>
-    /// <param name="today">Ngày hôm nay tại Việt Nam.</param>
-    /// <param name="notes">Ghi chú bổ sung.</param>
-    /// <param name="maxMonthsAhead">Chân trời tối đa cho phép chặn lịch (mặc định 6 tháng).</param>
-    /// <returns>Result chứa CalendarBlock nếu hợp lệ hoặc lỗi validation.</returns>
     public static Result<CalendarBlock> Create(
         Guid id,
-        Guid equipmentId,
+        Guid assetId,
         DateOnly startDate,
         DateOnly endDate,
         CalendarBlockReason reason,
@@ -139,9 +122,9 @@ public sealed class CalendarBlock
             return Error.Validation("INVALID_BLOCK_ID", "Calendar Block ID không được rỗng.");
         }
 
-        if (equipmentId == Guid.Empty)
+        if (assetId == Guid.Empty)
         {
-            return Error.Validation("INVALID_EQUIPMENT_ID", "Equipment ID không được rỗng.");
+            return Error.Validation("INVALID_ASSET_ID", "Asset ID không được rỗng.");
         }
 
         if (string.IsNullOrWhiteSpace(createdBy))
@@ -167,7 +150,7 @@ public sealed class CalendarBlock
 
         return new CalendarBlock(
             id: id,
-            equipmentId: equipmentId,
+            assetId: assetId,
             startDate: startDate,
             endDate: endDate,
             reason: reason,
@@ -179,9 +162,6 @@ public sealed class CalendarBlock
     /// <summary>
     /// Kiểm tra khoảng chặn lịch có bị trùng lặp với một khoảng thời gian khác hay không.
     /// </summary>
-    /// <param name="start">Ngày bắt đầu cần so sánh.</param>
-    /// <param name="end">Ngày kết thúc cần so sánh.</param>
-    /// <returns>True nếu trùng lặp, ngược lại False.</returns>
     public bool Overlaps(DateOnly start, DateOnly end)
     {
         return StartDate <= end && EndDate >= start;

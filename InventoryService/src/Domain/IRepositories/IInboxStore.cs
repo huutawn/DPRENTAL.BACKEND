@@ -83,7 +83,7 @@ public interface IInboxStore
     /// 2. Bỏ qua an toàn nếu đã xử lý thành công trước đó (idempotency)
     /// 3. Khởi tạo transaction trên DbContext (nếu chưa có)
     /// 4. Chạy handler operation
-    /// 5. Commit atomically: nghiệp vụ + staged Outbox/Saga + ProcessedAt
+    /// 5. Commit atomically: nghiệp vụ + staged Outbox + ProcessedAt
     /// 6. Nếu lỗi: rollback nghiệp vụ, cập nhật failure và lịch retry; nếu cạn budget thì commit DLQ
     /// </summary>
     Task<InboxExecutionResult<T>> ExecuteInTransactionAsync<T>(

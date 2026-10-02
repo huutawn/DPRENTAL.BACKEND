@@ -7,237 +7,191 @@ using Xunit;
 namespace Dprental.InventoryService.Api.Tests.Domain;
 
 /// <summary>
-/// Bộ kiểm thử đơn vị cho EquipmentAvailabilityPolicy theo các quy tắc nghiệp vụ trong SRS v3.1.
-/// Bao gồm kiểm tra thiết bị tắt nhận đặt, hold hết hạn không chiếm lịch, ngày thu hồi D của lượt Completed
-/// và tình trạng quá hạn trả (overdue) đối với các lượt đặt bắt đầu hôm nay/ngày mai.
+/// Bộ kiểm thử đơn vị cho AssetAvailabilityPolicy trong target domain.
+/// Kiểm tra công tắc AcceptingBookings, các khoảng CalendarBlock, Held còn hạn vs hết hạn, và Allocated.
 /// </summary>
 public sealed class AvailabilityPolicyTests
 {
-    private readonly Guid _equipmentId = Guid.NewGuid();
-    private readonly Guid _organizationId = Guid.NewGuid();
-    private readonly DateTimeOffset _now = new(2026, 10, 10, 10, 0, 0, TimeSpan.Zero); // Hôm nay là ngày 2026-10-10 tại VN
+    private readonly Guid _assetId = Guid.NewGuid();
+    private readonly Guid _ownerUserId = Guid.NewGuid();
+    private readonly Guid _orgId = Guid.NewGuid();
+    private readonly Guid _equipmentTypeId = Guid.NewGuid();
+    private readonly DateTimeOffset _now = new(2026, 10, 10, 10, 0, 0, TimeSpan.Zero);
 
-    private InventoryEquipment CreateActiveEquipment() =>
-        InventoryEquipment.Create(
-            _equipmentId,
-            _organizationId,
-            CatalogLifecycleStatus.Active,
-            acceptingBookings: true,
+    private InventoryAsset CreateActiveAsset(bool acceptingBookings = true) =>
+        InventoryAsset.Create(
+            _assetId,
+            _ownerUserId,
+            _orgId,
+            _equipmentTypeId,
+            1,
+            "{\"serial\":\"123\"}",
+            acceptingBookings,
             _now).Value;
 
-    /// <summary>
-    /// Kiểm thử từ chối đặt lịch khi thiết bị đang tắt tính năng nhận đặt lịch (AcceptingBookings == false).
-    /// </summary>
     [Fact]
     public void CheckAvailability_WhenNotAcceptingBookings_Fails()
     {
-        var equipment = InventoryEquipment.Create(
-            _equipmentId,
-            _organizationId,
-            CatalogLifecycleStatus.Active,
-            acceptingBookings: false,
-            _now,
-            "Tạm dừng nhận đặt").Value;
-
+        var asset = CreateActiveAsset(acceptingBookings: false);
         var candidate = new RentalPeriod(new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18));
 
-        var result = EquipmentAvailabilityPolicy.CheckAvailability(
-            equipment,
+        var result = AssetAvailabilityPolicy.CheckAvailability(
+            asset,
             candidate,
             _now,
-            existingReservations: [],
+            existingAllocations: [],
             existingBlocks: []);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("EQUIPMENT_NOT_ACCEPTING_BOOKINGS", result.Error.Code);
+        Assert.Equal("ASSET_NOT_ACCEPTING_BOOKINGS", result.Error.Code);
     }
 
-    /// <summary>
-    /// Kiểm thử lượt giữ chỗ đã hết hạn (Held quá hạn) không chiếm lịch và cho phép khách mới đặt lịch.
-    /// </summary>
     [Fact]
     public void CheckAvailability_ExpiredHold_DoesNotOccupyCalendar()
     {
-        var equipment = CreateActiveEquipment();
+        var asset = CreateActiveAsset();
         var candidate = new RentalPeriod(new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18));
 
-        // Lượt giữ chỗ đã hết hạn 2 giờ trước
         DateTimeOffset holdExpiredTime = _now.AddHours(-2);
-        var expiredHold = Reservation.CreateHold(
+        var expiredHold = AssetAllocation.CreateHold(
             Guid.NewGuid(),
-            _equipmentId,
+            _assetId,
             candidate,
             holdExpiredTime,
-            _now.AddHours(-10), sourceSystem: "tests", externalReference: Guid.NewGuid().ToString(), renterAccountId: Guid.NewGuid()).Value;
+            _now.AddHours(-10),
+            "rental",
+            "EXT-01").Value;
 
-        var result = EquipmentAvailabilityPolicy.CheckAvailability(
-            equipment,
+        var result = AssetAvailabilityPolicy.CheckAvailability(
+            asset,
             candidate,
             _now,
-            existingReservations: [expiredHold],
+            existingAllocations: [expiredHold],
             existingBlocks: []);
 
         Assert.True(result.IsSuccess);
     }
 
-    /// <summary>
-    /// Kiểm thử lượt giữ chỗ còn hiệu lực (Held chưa hết hạn) chiếm lịch và gây xung đột với lượt đặt trùng.
-    /// </summary>
     [Fact]
-    public void CheckAvailability_ActiveHold_OccupiessCalendarAndConflicts()
+    public void CheckAvailability_ActiveHold_OccupiesCalendarAndConflicts()
     {
-        var equipment = CreateActiveEquipment();
+        var asset = CreateActiveAsset();
         var candidate = new RentalPeriod(new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18));
 
-        // Lượt giữ chỗ còn hạn 5 giờ nữa
         DateTimeOffset holdExpiresAt = _now.AddHours(5);
-        var activeHold = Reservation.CreateHold(
+        var activeHold = AssetAllocation.CreateHold(
             Guid.NewGuid(),
-            _equipmentId,
+            _assetId,
             candidate,
             holdExpiresAt,
-            _now, sourceSystem: "tests", externalReference: Guid.NewGuid().ToString(), renterAccountId: Guid.NewGuid()).Value;
+            _now,
+            "rental",
+            "EXT-02").Value;
 
-        var result = EquipmentAvailabilityPolicy.CheckAvailability(
-            equipment,
+        var result = AssetAvailabilityPolicy.CheckAvailability(
+            asset,
             candidate,
             _now,
-            existingReservations: [activeHold],
+            existingAllocations: [activeHold],
             existingBlocks: []);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("EQUIPMENT_UNAVAILABLE", result.Error.Code);
+        Assert.Equal("ASSET_UNAVAILABLE", result.Error.Code);
     }
 
-    /// <summary>
-    /// Kiểm thử quy tắc: Thu hồi ngày D cho đặt lại từ D+1. Availability phải giữ ngày D là ngày bận dù reservation đã Completed.
-    /// Khách đặt bắt đầu vào đúng ngày D sẽ bị từ chối; khách đặt từ D+1 sẽ thành công.
-    /// </summary>
     [Fact]
-    public void CheckAvailability_CompletedReservation_DayDIsBusy_DayDPlusOneIsAvailable()
+    public void CheckAvailability_Allocated_OccupiesCalendarAndConflicts()
     {
-        var equipment = CreateActiveEquipment();
-        DateOnly dayD = new(2026, 10, 10);
-        var completedPeriod = new RentalPeriod(new DateOnly(2026, 10, 10), dayD.AddDays(5));
+        var asset = CreateActiveAsset();
+        var candidate = new RentalPeriod(new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18));
 
-        var completedRes = Reservation.CreateManual(
+        var allocated = AssetAllocation.CreateManual(
             Guid.NewGuid(),
-            _equipmentId,
-            completedPeriod,
-            "Renter",
-            "0901234567",
-            _now.AddDays(-2)).Value;
+            _assetId,
+            candidate,
+            _now).Value;
 
-        completedRes.Deliver("staff", _now.AddDays(-1), "ok", null, _now.AddDays(-1));
-        completedRes.Return("staff", _now, EquipmentReturnCondition.Intact, "ok", null, _now); // Completed ngày D
-
-        // 1. Khách mới đặt bao gồm ngày D (ví dụ từ ngày D đến D+3): BỊ TỪ CHỐI vì ngày D vẫn bận
-        var candidateOverlappingDayD = new RentalPeriod(dayD, dayD.AddDays(3));
-        var resultOverlapD = EquipmentAvailabilityPolicy.CheckAvailability(
-            equipment,
-            candidateOverlappingDayD,
+        var result = AssetAvailabilityPolicy.CheckAvailability(
+            asset,
+            candidate,
             _now,
-            existingReservations: [completedRes],
+            existingAllocations: [allocated],
             existingBlocks: []);
 
-        Assert.True(resultOverlapD.IsFailure);
-        Assert.Equal("EQUIPMENT_UNAVAILABLE", resultOverlapD.Error.Code);
-
-        // 2. Khách mới đặt bắt đầu từ ngày D+1 (từ 2026-10-16): THÀNH CÔNG
-        var candidateStartingDPlusOne = new RentalPeriod(dayD.AddDays(1), dayD.AddDays(4));
-        var resultDPlusOne = EquipmentAvailabilityPolicy.CheckAvailability(
-            equipment,
-            candidateStartingDPlusOne,
-            _now,
-            existingReservations: [completedRes],
-            existingBlocks: []);
-
-        Assert.True(resultDPlusOne.IsSuccess);
+        Assert.True(result.IsFailure);
+        Assert.Equal("ASSET_UNAVAILABLE", result.Error.Code);
     }
 
-    /// <summary>
-    /// Kiểm thử quy tắc Overdue: Thiết bị có reservation đang InUse mà EndDate &lt; hôm nay (quá hạn trả),
-    /// thì từ chối các lượt đặt lịch mới bắt đầu vào hôm nay hoặc ngày mai (hôm nay + 1).
-    /// </summary>
     [Fact]
-    public void CheckAvailability_WhenEquipmentOverdue_BlocksTodayAndTomorrow()
+    public void CheckAvailability_ReleasedOrCancelled_DoesNotOccupyCalendar()
     {
-        var equipment = CreateActiveEquipment();
+        var asset = CreateActiveAsset();
+        var candidate = new RentalPeriod(new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18));
 
-        // Lượt thuê InUse có EndDate là ngày 2026-10-09 (hôm qua, đã quá hạn vì hôm nay là 2026-10-10)
-        var overduePeriod = new RentalPeriod(new DateOnly(2026, 10, 5), new DateOnly(2026, 10, 9));
-        var overdueRes = Reservation.CreateManual(
+        var alloc = AssetAllocation.CreateManual(
             Guid.NewGuid(),
-            _equipmentId,
-            overduePeriod,
-            "Renter",
-            "0901234567",
-            _now.AddDays(-5)).Value;
-        overdueRes.Deliver("staff", _now.AddDays(-5), "ok", null, _now.AddDays(-5)); // Đang InUse
+            _assetId,
+            candidate,
+            _now).Value;
+        alloc.Cancel("Hủy", _now.AddHours(1), "operator");
 
-        // 1. Đặt lịch bắt đầu hôm nay (2026-10-10): BỊ TỪ CHỐI do overdue
-        var candidateToday = new RentalPeriod(new DateOnly(2026, 10, 10), new DateOnly(2026, 10, 12));
-        var resultToday = EquipmentAvailabilityPolicy.CheckAvailability(
-            equipment,
-            candidateToday,
+        var result = AssetAvailabilityPolicy.CheckAvailability(
+            asset,
+            candidate,
             _now,
-            existingReservations: [overdueRes],
+            existingAllocations: [alloc],
             existingBlocks: []);
 
-        Assert.True(resultToday.IsFailure);
-        Assert.Equal("EQUIPMENT_OVERDUE_UNAVAILABLE", resultToday.Error.Code);
-
-        // 2. Đặt lịch bắt đầu ngày mai (2026-10-11): BỊ TỪ CHỐI do overdue
-        var candidateTomorrow = new RentalPeriod(new DateOnly(2026, 10, 11), new DateOnly(2026, 10, 13));
-        var resultTomorrow = EquipmentAvailabilityPolicy.CheckAvailability(
-            equipment,
-            candidateTomorrow,
-            _now,
-            existingReservations: [overdueRes],
-            existingBlocks: []);
-
-        Assert.True(resultTomorrow.IsFailure);
-        Assert.Equal("EQUIPMENT_OVERDUE_UNAVAILABLE", resultTomorrow.Error.Code);
-
-        // 3. Đặt lịch bắt đầu sau ngày mai (ví dụ từ ngày 2026-10-15): Cho phép kiểm tra bình thường
-        var candidateLater = new RentalPeriod(new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18));
-        var resultLater = EquipmentAvailabilityPolicy.CheckAvailability(
-            equipment,
-            candidateLater,
-            _now,
-            existingReservations: [overdueRes],
-            existingBlocks: []);
-
-        Assert.True(resultLater.IsSuccess);
+        Assert.True(result.IsSuccess);
     }
 
-    /// <summary>
-    /// Kiểm thử khoảng chặn lịch (CalendarBlock) chặn thành công khoảng thời gian tương ứng.
-    /// </summary>
     [Fact]
-    public void CheckAvailability_OverlappingCalendarBlock_Conflicts()
+    public void CheckAvailability_CalendarBlock_OccupiesCalendarAndConflicts()
     {
-        var equipment = CreateActiveEquipment();
+        var asset = CreateActiveAsset();
+        var candidate = new RentalPeriod(new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18));
+
         var block = CalendarBlock.Create(
             Guid.NewGuid(),
-            _equipmentId,
-            new DateOnly(2026, 10, 14),
-            new DateOnly(2026, 10, 20),
+            _assetId,
+            new DateOnly(2026, 10, 16),
+            new DateOnly(2026, 10, 17),
             CalendarBlockReason.Maintenance,
-            "admin",
+            "tech",
             _now,
             new DateOnly(2026, 10, 10)).Value;
 
-        var candidate = new RentalPeriod(new DateOnly(2026, 10, 18), new DateOnly(2026, 10, 22));
-
-        var result = EquipmentAvailabilityPolicy.CheckAvailability(
-            equipment,
+        var result = AssetAvailabilityPolicy.CheckAvailability(
+            asset,
             candidate,
             _now,
-            existingReservations: [],
+            existingAllocations: [],
             existingBlocks: [block]);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("EQUIPMENT_BLOCKED", result.Error.Code);
+        Assert.Equal("ASSET_BLOCKED", result.Error.Code);
+    }
+
+    [Fact]
+    public void CheckAvailability_SelfExcludeAllocationId_IgnoresSelf()
+    {
+        var asset = CreateActiveAsset();
+        var candidate = new RentalPeriod(new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18));
+
+        var allocated = AssetAllocation.CreateManual(
+            Guid.NewGuid(),
+            _assetId,
+            candidate,
+            _now).Value;
+
+        var result = AssetAvailabilityPolicy.CheckAvailability(
+            asset,
+            candidate,
+            _now,
+            existingAllocations: [allocated],
+            existingBlocks: [],
+            excludeAllocationId: allocated.Id);
+
+        Assert.True(result.IsSuccess);
     }
 }

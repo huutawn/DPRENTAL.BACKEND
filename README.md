@@ -7,18 +7,27 @@ Dịch vụ InventoryService cho hệ sinh thái DPRENTAL, được xây dựng 
 ```text
 InventoryService/
   src/
-    Common/          # Kiểu dùng chung, Result/Error và utility
-    Domain/          # Entities, repository contracts và EF Core persistence
-    Application/     # DTOs, services, mapping
-    Api/             # Controllers, Filters, HTTP composition root
-  tests/             # Kiểm thử
+    Common/          # Kiểu dùng chung, Result/Error, AllocationStatus và utility
+    Domain/          # Entities (Asset, Allocation, Block), repository contracts và EF Core persistence
+    Application/     # DTOs, Kafka transport, Security evaluators & policies
+    Api/             # Controllers, Filters, JWT Authentication, Authorization handlers, HTTP composition root
+  tests/             # Unit, Integration, Migration & Security Tests
 Directory.Build.props
 Directory.Packages.props
 Dockerfile
 docker-compose.yml
 docs/                # Tài liệu kỹ thuật
-scripts/             # Scripts hỗ trợ và Git hooks
+scripts/             # Scripts hỗ trợ, Git hooks và migration preflight
 ```
+
+## Ranh giới dữ liệu và Bảo mật (DPR-147)
+
+**Inventory bảo vệ dữ liệu theo `OwnerUserId`, không kiểm tra permission theo organization.**
+
+- **Human thông thường**: Bắt buộc có permission tương ứng trong `p` (`inventory.asset.manage`, `inventory.calendar.read`) và `asset.OwnerUserId == JWT.sub`.
+- **Human Admin (`r=adm`)**: Được phép đọc/sửa tài sản xuyên người dùng mà không cần permission `*.all`.
+- **Service Principal**: Bắt buộc `u=svc`, `aud=inventory-api` và scope tương ứng trong claim `s` (`inventory.allocation.write`, `inventory.calendar.read`).
+- **OrganizationId**: Là metadata liên kết của tài sản, không phải authorization boundary. Thành viên chung tổ chức không được tự động truy cập tài sản của Owner khác.
 
 ## Chạy hạ tầng cục bộ
 
@@ -28,7 +37,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-PostgreSQL lắng nghe ở cổng cấu hình trong `.env`. File `.env` không được commit.
+PostgreSQL lắng nghe ở cổng cấu hình trong `.env` (mặc định 5433). File `.env` không được commit.
 
 ## Chạy API cục bộ
 
@@ -51,18 +60,10 @@ dotnet build InventoryService.sln
 dotnet test InventoryService.sln
 ```
 
-## Git hook
+## Hợp đồng dùng chung và Concurrency Protocol
 
-Sau khi khởi tạo Git trong thư mục service, chạy `./scripts/setup-git-hooks.sh` (hoặc bản `.ps1` trên PowerShell). Hook kiểm tra branch nền `origin/inventory/develop`, rồi build và test trước khi push.
-
-## Hợp đồng dùng chung và xử lý lỗi
-
-Thiết kế tham chiếu AuthService, với một implementation cho mỗi hành vi:
-
-- `Common/Result.cs`: Result và Result<T> cho lỗi dự kiến; giữ API và invariant hiện tại. Truy cập Value của failure ném InvalidOperationException.
-- `Common/Error.cs`: Error/ErrorType được tách khỏi Result; giữ nguyên mã enum và factory hiện tại.
-- `Domain/IRepositories/IRepo.cs`: hợp đồng đọc theo ID được dùng bởi năm repository. Không cung cấp GetAll hoặc CRUD tự lưu: Inventory ghi qua IInventoryWriteTransaction để giữ advisory lock, idempotency và atomic commit. GetById không kiểm tra quyền; use case theo tổ chức phải dùng GetByIdForOrganizationAsync.
-- `Api/Filters/ExpectedErrorFilterExtensions.cs`: controller gọi `this.ToProblem(result.Error)` khi Result thất bại. Validation → 400, Unauthorized → 401, Forbidden → 403, NotFound → 404, Conflict → 409, Expired → 410, Unprocessable → 422, Failure → 500. Error.None bị từ chối.
-- `Api/Exceptions/GlobalExceptionHandler.cs`: exception ngoài dự kiến trả 500 ProblemDetails với mã Inventory.Unexpected và traceId; log loại exception cùng traceId, không log message/payload. Hủy request được trả về middleware để xử lý theo lifecycle của kết nối. Không suy đoán lỗi database bất kỳ là conflict; lỗi nghiệp vụ đã nhận diện tiếp tục thuộc transaction/use case.
-
-ProblemDetails cũng được cấu hình traceId cho lỗi tại API boundary. Các primitive trong Common không phụ thuộc ASP.NET; HTTP mapping và exception handling chỉ nằm tại Api. Chưa tách package dùng chung giữa các service hoặc thêm paging khi chưa có use case Application cần chúng.
+- `Common/Result.cs`: Result và Result<T> cho lỗi dự kiến.
+- `Common/Error.cs`: Error/ErrorType với mã chuẩn.
+- `Domain/IRepositories/IRepo.cs`: Hợp đồng đọc theo ID. Không cung cấp CRUD tự lưu: Inventory ghi qua `IInventoryWriteTransaction` để giữ PostgreSQL advisory lock (`AssetLockKey.FromAssetId`), idempotency và atomic commit.
+- `Application/Security/InventoryAccessEvaluator.cs`: Thực thi ma trận phân quyền DPR-147.
+- `Application/Kafka/Contracts/KafkaTopics.cs`: Các topics target: `inventory.allocation.commands.v1`, `inventory.allocation.events.v1`, `inventory.asset.events.v1` cùng DLQ tương ứng.
