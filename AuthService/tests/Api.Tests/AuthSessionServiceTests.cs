@@ -204,6 +204,8 @@ public sealed class AuthSessionServiceTests
     {
         public Task AddAsync(AuditLog auditLog, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<IReadOnlyList<AuditLog>> GetRecentLogsAsync(int count, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<PagedResult<AuditLog>> GetOrganizationHistoryAsync(Guid organizationId, PageRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PagedResult<AuditLog>([], 1, 20, 0));
     }
 
     private sealed class FakeAccessTokenIssuer : IAccessTokenIssuer

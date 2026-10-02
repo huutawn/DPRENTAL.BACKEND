@@ -1,3 +1,4 @@
+using Dprental.AuthService.Common.Utils;
 using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Application.IServices;
@@ -22,16 +23,19 @@ public sealed class OrganizationService(
     IOrganizationMembershipRepository membershipRepository,
     IRoleRepository roleRepository,
     IMediaUrlResolver mediaUrlResolver,
-    IAuditLogRepository? auditLogRepository = null,
-    ICorrelationIdProvider? correlationIdProvider = null,
+    IAuditLogRepository auditLogRepository,
+    ICorrelationIdProvider correlationIdProvider,
+    IMediaServiceClient mediaServiceClient,
+    IMediaOutboxService mediaOutboxService,
     IOptions<OrganizationReviewOptions>? reviewOptions = null,
     TimeProvider? timeProvider = null) : IOrganizationService
 {
-    private readonly IAuditLogRepository? _auditLogRepository = auditLogRepository;
-    private readonly ICorrelationIdProvider? _correlationIdProvider = correlationIdProvider;
+    private readonly IAuditLogRepository _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
+    private readonly ICorrelationIdProvider _correlationIdProvider = correlationIdProvider ?? throw new ArgumentNullException(nameof(correlationIdProvider));
+    private readonly IMediaServiceClient _mediaServiceClient = mediaServiceClient ?? throw new ArgumentNullException(nameof(mediaServiceClient));
+    private readonly IMediaOutboxService _mediaOutboxService = mediaOutboxService ?? throw new ArgumentNullException(nameof(mediaOutboxService));
     private readonly OrganizationReviewOptions _reviewOptions = reviewOptions?.Value ?? new OrganizationReviewOptions();
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
-
     /// <summary>Lấy chi tiết organization khi người gọi là Owner (GET /organizations/{id}).</summary>
     public async Task<Result<OrganizationResponse>> GetByIdAsync(
         Guid actorUserId,
@@ -110,6 +114,10 @@ public sealed class OrganizationService(
         Guid actorUserId,
         PageRequest request,
         OrganizationStatus? status = null,
+        OrganizationType? type = null,
+        string? province = null,
+        bool overdueOnly = false,
+        bool remindedOnly = false,
         CancellationToken cancellationToken = default)
     {
         if (request is null)
@@ -123,6 +131,16 @@ public sealed class OrganizationService(
             return Result.Failure<PagedResult<OrganizationSummaryResponse>>(validation.Error);
         }
 
+        if (status.HasValue && !DtoValidator.TryValidateEnum(status.Value, nameof(status), out Error? statusError))
+        {
+            return Result.Failure<PagedResult<OrganizationSummaryResponse>>(statusError);
+        }
+
+        if (type.HasValue && !DtoValidator.TryValidateEnum(type.Value, nameof(type), out Error? typeError))
+        {
+            return Result.Failure<PagedResult<OrganizationSummaryResponse>>(typeError);
+        }
+
         if (!DtoValidator.TryValidateId(actorUserId, nameof(actorUserId), out _))
         {
             return Result.Failure<PagedResult<OrganizationSummaryResponse>>(AuthErrors.Organization.UserNotFound);
@@ -133,17 +151,27 @@ public sealed class OrganizationService(
             return Result.Failure<PagedResult<OrganizationSummaryResponse>>(AuthErrors.Organization.PlatformAdminRequired);
         }
 
-        PagedResult<Organization> paged = await organizationRepository.GetAllAsync(request, status, cancellationToken);
-
         DateTime utcNow = _timeProvider.GetUtcNow().UtcDateTime;
+        DateTime overdueCutoffUtc = utcNow.AddHours(-_reviewOptions.SlaHours);
+
+        PagedResult<Organization> paged = await organizationRepository.GetAllAsync(
+            request,
+            status,
+            type,
+            province,
+            overdueOnly,
+            remindedOnly,
+            overdueCutoffUtc,
+            cancellationToken);
+
         var items = paged.Items
             .Select(org => org.ToSummaryResponse(mediaUrlResolver.ResolvePublicUrl(org.LogoMediaId), _reviewOptions, utcNow))
             .ToList();
         return Result.Success(new PagedResult<OrganizationSummaryResponse>(items, paged.Page, paged.PageSize, paged.TotalCount));
     }
 
-    /// <summary>Đổi tên organization dành cho Admin (PUT /admin/organizations/{id}).</summary>
-    public async Task<Result> UpdateNameAsync(
+    /// <summary>Cập nhật hồ sơ liên hệ và hiển thị của organization dành cho Admin (PUT /admin/organizations/{id}).</summary>
+    public async Task<Result> UpdateProfileAsync(
         Guid actorUserId,
         Guid organizationId,
         UpdateOrganizationRequest request,
@@ -160,7 +188,12 @@ public sealed class OrganizationService(
             return Result.Failure(AuthErrors.Organization.EmptyPatch);
         }
 
-        string? trimmedName = request.Name?.Trim();
+        if (!DtoValidator.TryValidate(request, out Error? validationError))
+        {
+            return Result.Failure(validationError);
+        }
+
+        string trimmedName = request.Name.Trim();
         if (string.IsNullOrEmpty(trimmedName) || trimmedName.Length > 150)
         {
             return Result.Failure(AuthErrors.Organization.InvalidName);
@@ -171,6 +204,36 @@ public sealed class OrganizationService(
             return Result.Failure(AuthErrors.Organization.PlatformAdminRequired);
         }
 
+        Organization? before = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
+        if (before is null)
+        {
+            return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
+        }
+
+        // Remote media verification must finish before opening the row-lock transaction.
+        if (request.LogoMediaId.HasValue && request.LogoMediaId != before.LogoMediaId)
+        {
+            var logoVerify = await _mediaServiceClient.VerifyMediaAsync(request.LogoMediaId.Value, cancellationToken);
+            if (logoVerify.IsFailure)
+            {
+                return Result.Failure(logoVerify.Error);
+            }
+            var logoValidation = MediaVerificationRules.ValidateImage(logoVerify.Value, actorUserId);
+            if (logoValidation.IsFailure)
+            {
+                return Result.Failure(logoValidation.Error);
+            }
+        }
+
+        string normalizedEmail = UserService.NormalizeEmail(request.ContactEmail);
+        string normalizedPhone = request.ContactPhone.Trim();
+        string normalizedAddress = request.Address.Trim();
+        string normalizedProvince = request.Province.Trim();
+        string normalizedWard = request.Ward.Trim();
+        string? normalizedWebsite = StringUtility.NullIfBlank(request.Website);
+        Guid? normalizedLogo = request.LogoMediaId;
+        string? normalizedDescription = StringUtility.NullIfBlank(request.Description);
+
         await using IExecutionTransaction transaction = await organizationRepository.BeginTransactionAsync(cancellationToken);
         Organization? org = await organizationRepository.GetByIdForUpdateAsync(organizationId, cancellationToken);
         if (org is null)
@@ -178,28 +241,56 @@ public sealed class OrganizationService(
             return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
         }
 
-        bool nameChanged = !string.Equals(trimmedName, org.Name, StringComparison.Ordinal);
-        if (!nameChanged)
+        if (org.LogoMediaId != before.LogoMediaId)
+        {
+            return Result.Failure(AuthErrors.Organization.ConcurrentModification);
+        }
+
+        bool hasChanges =
+            !string.Equals(org.Name, trimmedName, StringComparison.Ordinal) ||
+            !string.Equals(org.ContactEmail, normalizedEmail, StringComparison.Ordinal) ||
+            !string.Equals(org.ContactPhone, normalizedPhone, StringComparison.Ordinal) ||
+            !string.Equals(org.Address, normalizedAddress, StringComparison.Ordinal) ||
+            !string.Equals(org.Province, normalizedProvince, StringComparison.Ordinal) ||
+            !string.Equals(org.Ward, normalizedWard, StringComparison.Ordinal) ||
+            !string.Equals(org.Website, normalizedWebsite, StringComparison.Ordinal) ||
+            org.LogoMediaId != normalizedLogo ||
+            !string.Equals(org.Description, normalizedDescription, StringComparison.Ordinal);
+
+        if (!hasChanges)
         {
             return Result.Success();
         }
 
-        org.Name = trimmedName!;
+        Guid? oldLogoId = org.LogoMediaId;
+        org.Name = trimmedName;
+        org.ContactEmail = normalizedEmail;
+        org.ContactPhone = normalizedPhone;
+        org.Address = normalizedAddress;
+        org.Province = normalizedProvince;
+        org.Ward = normalizedWard;
+        org.Website = normalizedWebsite;
+        org.LogoMediaId = normalizedLogo;
+        org.Description = normalizedDescription;
+
+        if (normalizedLogo.HasValue && normalizedLogo != oldLogoId)
+        {
+            await _mediaOutboxService.QueuePublicVisibilityAsync(normalizedLogo.Value, cancellationToken);
+        }
+
         await organizationRepository.UpdateAsync(org, cancellationToken);
 
-        if (_auditLogRepository is not null)
+        await _auditLogRepository.AddAsync(new AuditLog
         {
-            await _auditLogRepository.AddAsync(new AuditLog
-            {
-                Id = Guid.NewGuid(),
-                ActorId = actorUserId,
-                Target = org.Id.ToString(),
-                Action = "Organization_Rename",
-                Result = "Success",
-                CorrelationId = _correlationIdProvider?.GetCorrelationId() ?? string.Empty,
-                Timestamp = _timeProvider.GetUtcNow()
-            }, cancellationToken);
-        }
+            Id = Guid.NewGuid(),
+            ActorId = actorUserId,
+            Target = org.Id.ToString(),
+            Action = "Organization_ProfileUpdate",
+            Result = "Success",
+            Reason = null,
+            CorrelationId = _correlationIdProvider.GetCorrelationId(),
+            Timestamp = _timeProvider.GetUtcNow()
+        }, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
         return Result.Success();
@@ -209,12 +300,29 @@ public sealed class OrganizationService(
     public async Task<Result> SuspendAsync(
         Guid actorUserId,
         Guid organizationId,
+        SuspendOrganizationRequest request,
         CancellationToken cancellationToken = default)
     {
         if (!DtoValidator.TryValidateId(organizationId, nameof(organizationId), out _) ||
             !DtoValidator.TryValidateId(actorUserId, nameof(actorUserId), out _))
         {
             return Result.Failure(AuthErrors.Organization.OrganizationNotFound);
+        }
+
+        if (request is null)
+        {
+            return Result.Failure(Error.Validation("Validation.Reason", "Lý do khóa không được để trống."));
+        }
+
+        if (!DtoValidator.TryValidate(request, out Error? validationError))
+        {
+            return Result.Failure(validationError);
+        }
+
+        string trimmedReason = request.Reason.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedReason) || trimmedReason.Length > 500)
+        {
+            return Result.Failure(Error.Validation("Validation.Reason", "Lý do khóa không hợp lệ."));
         }
 
         if (!await CanPlatformSuspendAsync(actorUserId, cancellationToken))
@@ -240,21 +348,20 @@ public sealed class OrganizationService(
         }
 
         org.Status = OrganizationStatus.Suspended;
+        org.SuspensionReason = trimmedReason;
         await organizationRepository.UpdateAsync(org, cancellationToken);
 
-        if (_auditLogRepository is not null)
+        await _auditLogRepository.AddAsync(new AuditLog
         {
-            await _auditLogRepository.AddAsync(new AuditLog
-            {
-                Id = Guid.NewGuid(),
-                ActorId = actorUserId,
-                Target = org.Id.ToString(),
-                Action = "Organization_Suspend",
-                Result = "Success",
-                CorrelationId = _correlationIdProvider?.GetCorrelationId() ?? string.Empty,
-                Timestamp = _timeProvider.GetUtcNow()
-            }, cancellationToken);
-        }
+            Id = Guid.NewGuid(),
+            ActorId = actorUserId,
+            Target = org.Id.ToString(),
+            Action = "Organization_Suspend",
+            Result = "Success",
+            Reason = trimmedReason,
+            CorrelationId = _correlationIdProvider.GetCorrelationId(),
+            Timestamp = _timeProvider.GetUtcNow()
+        }, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
         return Result.Success();
@@ -295,24 +402,63 @@ public sealed class OrganizationService(
         }
 
         org.Status = OrganizationStatus.Active;
+        org.SuspensionReason = null;
         await organizationRepository.UpdateAsync(org, cancellationToken);
 
-        if (_auditLogRepository is not null)
+        await _auditLogRepository.AddAsync(new AuditLog
         {
-            await _auditLogRepository.AddAsync(new AuditLog
-            {
-                Id = Guid.NewGuid(),
-                ActorId = actorUserId,
-                Target = org.Id.ToString(),
-                Action = "Organization_Activate",
-                Result = "Success",
-                CorrelationId = _correlationIdProvider?.GetCorrelationId() ?? string.Empty,
-                Timestamp = _timeProvider.GetUtcNow()
-            }, cancellationToken);
-        }
+            Id = Guid.NewGuid(),
+            ActorId = actorUserId,
+            Target = org.Id.ToString(),
+            Action = "Organization_Activate",
+            Result = "Success",
+            Reason = null,
+            CorrelationId = _correlationIdProvider.GetCorrelationId(),
+            Timestamp = _timeProvider.GetUtcNow()
+        }, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
         return Result.Success();
+    }
+
+    /// <summary>Lấy nhật ký lịch sử của organization có phân trang dành cho Admin (GET /admin/organizations/{id}/history).</summary>
+    public async Task<Result<PagedResult<OrganizationHistoryResponse>>> GetHistoryAsync(
+        Guid actorUserId,
+        Guid organizationId,
+        PageRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!DtoValidator.TryValidateId(organizationId, nameof(organizationId), out _) ||
+            !DtoValidator.TryValidateId(actorUserId, nameof(actorUserId), out _))
+        {
+            return Result.Failure<PagedResult<OrganizationHistoryResponse>>(AuthErrors.Organization.OrganizationNotFound);
+        }
+
+        if (request is null)
+        {
+            return Result.Failure<PagedResult<OrganizationHistoryResponse>>(AuthErrors.Paging.InvalidPage);
+        }
+
+        Result validation = request.Validate();
+        if (validation.IsFailure)
+        {
+            return Result.Failure<PagedResult<OrganizationHistoryResponse>>(validation.Error);
+        }
+
+        if (!await CanPlatformReadAsync(actorUserId, cancellationToken))
+        {
+            return Result.Failure<PagedResult<OrganizationHistoryResponse>>(AuthErrors.Organization.PlatformAdminRequired);
+        }
+
+        Organization? org = await organizationRepository.GetByIdAsync(organizationId, cancellationToken);
+        if (org is null)
+        {
+            return Result.Failure<PagedResult<OrganizationHistoryResponse>>(AuthErrors.Organization.OrganizationNotFound);
+        }
+
+        PagedResult<AuditLog> paged = await _auditLogRepository.GetOrganizationHistoryAsync(organizationId, request, cancellationToken);
+        var items = paged.Items.Select(l => l.ToHistoryResponse()).ToList();
+        return Result.Success(new PagedResult<OrganizationHistoryResponse>(items, paged.Page, paged.PageSize, paged.TotalCount));
     }
 
     public async Task<Result<IReadOnlyList<MyOrganizationResponse>>> GetMyOrganizationsAsync(
@@ -339,7 +485,8 @@ public sealed class OrganizationService(
                 m.Organization?.Status ?? OrganizationStatus.Active,
                 m.Role?.Name ?? string.Empty,
                 m.Status,
-                m.JoinedAtUtc))
+                m.JoinedAtUtc,
+                m.Organization?.SuspensionReason))
             .ToList();
 
         return Result.Success(result);

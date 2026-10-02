@@ -164,11 +164,15 @@ public sealed class OrganizationIntegrationTests
         using HttpClient normalClient = CreateAuthenticatedClient(factory, normalUserId, "customer");
 
         // Normal user attempts to suspend -> 403
-        using HttpResponseMessage normalUpdateRes = await normalClient.PostAsync($"/api/v1/auth/admin/organizations/{orgId}/suspend", null);
+        using HttpResponseMessage normalUpdateRes = await normalClient.PostAsJsonAsync(
+            $"/api/v1/auth/admin/organizations/{orgId}/suspend",
+            new SuspendOrganizationRequest("Normal user attempt"));
         Assert.Equal(HttpStatusCode.Forbidden, normalUpdateRes.StatusCode);
 
         // Platform admin suspends organization -> 204
-        using HttpResponseMessage adminDeactRes = await adminClient.PostAsync($"/api/v1/auth/admin/organizations/{orgId}/suspend", null);
+        using HttpResponseMessage adminDeactRes = await adminClient.PostAsJsonAsync(
+            $"/api/v1/auth/admin/organizations/{orgId}/suspend",
+            new SuspendOrganizationRequest("Admin suspension reason"));
         Assert.Equal(HttpStatusCode.NoContent, adminDeactRes.StatusCode);
 
         // Normal user accesses deactivated organization -> 403

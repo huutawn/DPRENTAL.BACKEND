@@ -156,13 +156,24 @@ public sealed class OrganizationRegistrationService(
             Status = MembershipStatus.Active,
             JoinedAtUtc = now
         };
-
+        await using IExecutionTransaction transaction = await organizationRepository.BeginTransactionAsync(cancellationToken);
         if (request.LogoMediaId.HasValue)
         {
             await mediaOutboxService.QueuePublicVisibilityAsync(request.LogoMediaId.Value, cancellationToken);
         }
         await organizationRepository.CreateAsync(organization, ownerMembership, cancellationToken);
-
+        await auditLogRepository.AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorId = actor.Id,
+            Target = organization.Id.ToString(),
+            Action = "Organization_Register",
+            Result = "Success",
+            Reason = null,
+            CorrelationId = correlationIdProvider.GetCorrelationId(),
+            Timestamp = timeProvider.GetUtcNow()
+        }, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return Result.Success(new OrganizationRegisteredResponse(actor.Id, organization.Id, organization.Slug, organization.Status));
     }
 

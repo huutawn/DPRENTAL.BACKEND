@@ -18,7 +18,15 @@ public interface IOrganizationRepository
     /// Không truyền <paramref name="status"/>: sắp theo tên. Có truyền: chỉ lấy đúng trạng thái đó, cũ nhất trước
     /// để hàng chờ duyệt được xử lý theo thứ tự nộp.
     /// </summary>
-    Task<PagedResult<Organization>> GetAllAsync(PageRequest request, OrganizationStatus? status = null, CancellationToken cancellationToken = default);
+    Task<PagedResult<Organization>> GetAllAsync(
+        PageRequest request,
+        OrganizationStatus? status = null,
+        OrganizationType? type = null,
+        string? province = null,
+        bool overdueOnly = false,
+        bool remindedOnly = false,
+        DateTime? overdueCutoffUtc = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Đọc organization dạng tracked và khóa row (SELECT ... FOR UPDATE) tới hết transaction hiện tại,

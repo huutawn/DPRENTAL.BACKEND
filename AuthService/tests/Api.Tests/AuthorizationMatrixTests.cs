@@ -118,11 +118,11 @@ public sealed class AuthorizationMatrixTests
     [Fact]
     public async Task SuperAdminHasFullAuthorizationAcrossPlatformAndGlobalRoles()
     {
-        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FakeMediaUrlResolver.Instance);
+        OrganizationService orgService = CreateOrgService();
         RoleAssignmentService roleService = new(_roleRepo);
 
         // 1. Can suspend/activate org
-        Result suspendRes = await orgService.SuspendAsync(SuperAdminUserId, OrganizationId);
+        Result suspendRes = await orgService.SuspendAsync(SuperAdminUserId, OrganizationId, new SuspendOrganizationRequest("SuperAdmin suspend"));
         Assert.True(suspendRes.IsSuccess);
 
         // 2. Can assign global role
@@ -138,11 +138,11 @@ public sealed class AuthorizationMatrixTests
     [Fact]
     public async Task PlatformAdminCanManageOrganizationsButCannotAssignOrRevokeGlobalRoles()
     {
-        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FakeMediaUrlResolver.Instance);
+        OrganizationService orgService = CreateOrgService();
         RoleAssignmentService roleService = new(_roleRepo);
 
         // 1. Can suspend/activate org (has identity.organizations.suspend)
-        Result suspendRes = await orgService.SuspendAsync(PlatformAdminUserId, OrganizationId);
+        Result suspendRes = await orgService.SuspendAsync(PlatformAdminUserId, OrganizationId, new SuspendOrganizationRequest("PlatformAdmin suspend"));
         Assert.True(suspendRes.IsSuccess);
 
         // 2. CANNOT assign global role (lacks identity.roles.assign.global)
@@ -160,16 +160,16 @@ public sealed class AuthorizationMatrixTests
     [Fact]
     public async Task OwnerCannotRenameSuspendOrgOrAssignGlobalRoles()
     {
-        OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FakeMediaUrlResolver.Instance);
+        OrganizationService orgService = CreateOrgService();
         RoleAssignmentService roleService = new(_roleRepo);
 
-        // 1. CANNOT rename org (lacks global identity.organizations.update)
-        Result nameRes = await orgService.UpdateNameAsync(OwnerUserId, OrganizationId, new UpdateOrganizationRequest("Renamed Org"));
+        // 1. CANNOT update profile (lacks global identity.organizations.update)
+        Result nameRes = await orgService.UpdateProfileAsync(OwnerUserId, OrganizationId, new UpdateOrganizationRequest("Renamed Org", "owner@ex.com", "0901234567", "123 St", "HN", "WD"));
         Assert.True(nameRes.IsFailure);
         Assert.Equal(AuthErrors.Organization.PlatformAdminRequired, nameRes.Error);
 
         // 2. CANNOT suspend/activate org (lacks identity.organizations.suspend)
-        Result suspendRes = await orgService.SuspendAsync(OwnerUserId, OrganizationId);
+        Result suspendRes = await orgService.SuspendAsync(OwnerUserId, OrganizationId, new SuspendOrganizationRequest("Owner suspend"));
         Assert.True(suspendRes.IsFailure);
         Assert.Equal(AuthErrors.Organization.PlatformAdminRequired, suspendRes.Error);
 
@@ -191,6 +191,16 @@ public sealed class AuthorizationMatrixTests
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.Role.InvalidScope, result.Error);
     }
+    private OrganizationService CreateOrgService() => new(
+        _orgRepo,
+        _memRepo,
+        _roleRepo,
+        FakeMediaUrlResolver.Instance,
+        new FakeAuditLogRepository(),
+        FixedCorrelationIdProvider.Instance,
+        new FakeMediaServiceClient(),
+        new FakeMediaOutboxService());
+
 
     private sealed class FakeOrgRepo : IOrganizationRepository
     {
@@ -202,7 +212,15 @@ public sealed class AuthorizationMatrixTests
         public Task<Organization?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(Organizations.GetValueOrDefault(id));
         public Task<Organization?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult(Organizations.Values.FirstOrDefault(o => o.Slug == slug));
         public Task<bool> SlugExistsAsync(string slug, CancellationToken cancellationToken = default) => Task.FromResult(false);
-        public Task<PagedResult<Organization>> GetAllAsync(PageRequest request, OrganizationStatus? status = null, CancellationToken cancellationToken = default) =>
+        public Task<PagedResult<Organization>> GetAllAsync(
+            PageRequest request,
+            OrganizationStatus? status = null,
+            OrganizationType? type = null,
+            string? province = null,
+            bool overdueOnly = false,
+            bool remindedOnly = false,
+            DateTime? overdueCutoffUtc = null,
+            CancellationToken cancellationToken = default) =>
             Task.FromResult(PagedResult.Create<Organization>([.. Organizations.Values], request.Page, request.PageSize, Organizations.Count));
         public Task<Organization?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default) => GetByIdAsync(id, cancellationToken);
         public Task<Organization> CreateAsync(Organization organization, OrganizationMembership initialMembership, CancellationToken cancellationToken = default) =>

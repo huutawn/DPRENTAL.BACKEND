@@ -126,12 +126,12 @@ public sealed class OrganizationReviewTests
     }
 
     [Fact]
-    public async Task OnlyPlatformCanRenameActiveOrganization()
+    public async Task OnlyPlatformCanUpdateActiveOrganizationProfile()
     {
         await using Fixture f = await Fixture.CreateAsync(OrganizationStatus.Active);
 
-        Result owner = await f.Organizations.UpdateNameAsync(f.OwnerId, f.OrgId, new UpdateOrganizationRequest("Owner Rename"));
-        Result admin = await f.Organizations.UpdateNameAsync(f.AdminId, f.OrgId, new UpdateOrganizationRequest("Admin Rename"));
+        Result owner = await f.Organizations.UpdateProfileAsync(f.OwnerId, f.OrgId, new UpdateOrganizationRequest("Owner Rename", "o@ex.com", "0901234567", "123 St", "HN", "WD"));
+        Result admin = await f.Organizations.UpdateProfileAsync(f.AdminId, f.OrgId, new UpdateOrganizationRequest("Admin Rename", "a@ex.com", "0901234567", "123 St", "HN", "WD"));
 
         Assert.True(owner.IsFailure);
         Assert.Equal(AuthErrors.Organization.PlatformAdminRequired, owner.Error);
@@ -509,7 +509,9 @@ public sealed class OrganizationReviewTests
             new EfRoleRepository(Db),
             FakeMediaUrlResolver.Instance,
             new EfAuditLogRepository(Db),
-            FixedCorrelationIdProvider.Instance);
+            FixedCorrelationIdProvider.Instance,
+            new FakeMediaServiceClient { AutoVerify = true, DefaultUserId = AdminId },
+            new FakeMediaOutboxService());
 
         public static async Task<Fixture> CreateAsync(OrganizationStatus status = OrganizationStatus.Pending)
         {

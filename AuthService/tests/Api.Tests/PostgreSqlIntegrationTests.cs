@@ -493,17 +493,19 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
             new EfRoleRepository(context),
             FakeMediaUrlResolver.Instance,
             new EfAuditLogRepository(context),
-            FixedCorrelationIdProvider.Instance);
+            FixedCorrelationIdProvider.Instance,
+            new FakeMediaServiceClient(),
+            new FakeMediaOutboxService());
 
         Task<Result> taskA = Task.Run(async () =>
         {
             await using var dbA = CreateDbContext();
-            return await CreateService(dbA).SuspendAsync(adminAId, orgId);
+            return await CreateService(dbA).SuspendAsync(adminAId, orgId, new SuspendOrganizationRequest("Concurrent suspend A"));
         });
         Task<Result> taskB = Task.Run(async () =>
         {
             await using var dbB = CreateDbContext();
-            return await CreateService(dbB).SuspendAsync(adminBId, orgId);
+            return await CreateService(dbB).SuspendAsync(adminBId, orgId, new SuspendOrganizationRequest("Concurrent suspend B"));
         });
 
         Result[] results = await Task.WhenAll(taskA, taskB);
@@ -518,7 +520,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task PostgreSql_Organization_AuditFailure_RollsBackRenameAndSuspend()
+    public async Task PostgreSql_Organization_AuditFailure_RollsBackProfileOutboxAndSuspend()
     {
         await using var db = CreateDbContext();
 
@@ -545,25 +547,32 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         await db.SaveChangesAsync();
 
         var throwingAuditRepo = new ThrowingAuditLogRepository();
+        Guid logoId = Guid.NewGuid();
+        var mediaClient = new FakeMediaServiceClient { AutoVerify = true, DefaultUserId = adminId };
         var service = new OrganizationService(
             new EfOrganizationRepository(db),
             new EfOrganizationMembershipRepository(db),
             new EfRoleRepository(db),
             FakeMediaUrlResolver.Instance,
             throwingAuditRepo,
-            FixedCorrelationIdProvider.Instance);
+            FixedCorrelationIdProvider.Instance,
+            mediaClient,
+            new MediaOutboxService(new EfMediaOutboxRepository(db), mediaClient, TimeProvider.System, NullLogger<MediaOutboxService>.Instance));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.UpdateNameAsync(adminId, orgId, new UpdateOrganizationRequest("Should Rollback Name")));
+            service.UpdateProfileAsync(adminId, orgId, new UpdateOrganizationRequest("Should Rollback Name", "rollback@example.com", "0901234567", "123 Street", "Hà Nội", "Phường 1", LogoMediaId: logoId)));
 
         await using (var verifyDb = CreateDbContext())
         {
             Organization org = await verifyDb.Organizations.SingleAsync(o => o.Id == orgId);
             Assert.Equal("Original Unchanged Name", org.Name);
+            Assert.Null(org.LogoMediaId);
+            Assert.False(await verifyDb.MediaOutboxMessages.AnyAsync(m => m.MediaId == logoId));
+            Assert.False(await verifyDb.AuditLogs.AnyAsync(l => l.Target == orgId.ToString()));
         }
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.SuspendAsync(adminId, orgId));
+            service.SuspendAsync(adminId, orgId, new SuspendOrganizationRequest("Rollback reason")));
 
         await using (var verifyDb = CreateDbContext())
         {
@@ -572,10 +581,140 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task PostgreSql_Organization_ConcurrentProfileUpdates_AreSerializedByRowLock()
+    {
+        await using var setup = CreateDbContext();
+        Guid orgId = Guid.NewGuid();
+        Guid adminA = Guid.NewGuid();
+        Guid adminB = Guid.NewGuid();
+
+        setup.Organizations.Add(new Organization
+        {
+            Id = orgId,
+            Name = "Concurrent Name",
+            Slug = $"conc-{Guid.NewGuid():N}",
+            Status = OrganizationStatus.Active,
+            CreatedAtUtc = DateTime.UtcNow
+        });
+
+        Permission updatePerm = await setup.Permissions.SingleAsync(p => p.Code == PermissionCode.IdentityOrganizationsUpdate);
+        Role adminRole = new() { Id = Guid.NewGuid(), Name = $"admin_conc_{Guid.NewGuid():N}", Scope = RoleScope.Global };
+        setup.Roles.Add(adminRole);
+        setup.RolePermissions.Add(new RolePermission { RoleId = adminRole.Id, PermissionId = updatePerm.Id });
+
+        setup.Users.AddRange(
+            new User { Id = adminA, Email = $"adminA_{adminA:N}@test.com", FullName = "Admin A", PasswordHash = "h", IsActive = true, CreatedAt = DateTime.UtcNow },
+            new User { Id = adminB, Email = $"adminB_{adminB:N}@test.com", FullName = "Admin B", PasswordHash = "h", IsActive = true, CreatedAt = DateTime.UtcNow }
+        );
+        setup.UserRoles.AddRange(
+            new UserRole { UserId = adminA, RoleId = adminRole.Id },
+            new UserRole { UserId = adminB, RoleId = adminRole.Id }
+        );
+        await setup.SaveChangesAsync();
+
+        Task<Result> taskA = Task.Run(async () =>
+        {
+            await using var dbA = CreateDbContext();
+            var service = new OrganizationService(
+                new EfOrganizationRepository(dbA),
+                new EfOrganizationMembershipRepository(dbA),
+                new EfRoleRepository(dbA),
+                FakeMediaUrlResolver.Instance,
+                new EfAuditLogRepository(dbA),
+                FixedCorrelationIdProvider.Instance,
+                new FakeMediaServiceClient(),
+                new FakeMediaOutboxService());
+            return await service.UpdateProfileAsync(adminA, orgId, new UpdateOrganizationRequest("Name From A", "a@test.com", "0901234567", "Addr A", "HN", "W1"));
+        });
+
+        Task<Result> taskB = Task.Run(async () =>
+        {
+            await using var dbB = CreateDbContext();
+            var service = new OrganizationService(
+                new EfOrganizationRepository(dbB),
+                new EfOrganizationMembershipRepository(dbB),
+                new EfRoleRepository(dbB),
+                FakeMediaUrlResolver.Instance,
+                new EfAuditLogRepository(dbB),
+                FixedCorrelationIdProvider.Instance,
+                new FakeMediaServiceClient(),
+                new FakeMediaOutboxService());
+            return await service.UpdateProfileAsync(adminB, orgId, new UpdateOrganizationRequest("Name From B", "b@test.com", "0901234567", "Addr B", "HN", "W2"));
+        });
+
+        Result[] results = await Task.WhenAll(taskA, taskB);
+        Assert.All(results, r => Assert.True(r.IsSuccess));
+
+        await using var verifyDb = CreateDbContext();
+        Organization stored = await verifyDb.Organizations.SingleAsync(o => o.Id == orgId);
+        Assert.True(stored.Name is "Name From A" or "Name From B");
+
+        var auditLogs = await verifyDb.AuditLogs.Where(l => l.Target == orgId.ToString() && l.Action == "Organization_ProfileUpdate").ToListAsync();
+        Assert.Equal(2, auditLogs.Count);
+    }
+
+    [Fact]
+    public async Task PostgreSql_Organization_AuditFailure_RollsBackRegistration()
+    {
+        await using var db = CreateDbContext();
+        Guid userId = Guid.NewGuid();
+        Role ownerRole = await db.Roles.SingleAsync(r => r.Name == "Owner");
+
+        db.Users.Add(new User
+        {
+            Id = userId,
+            Email = $"reg_{userId:N}@example.com",
+            FullName = "Reg User",
+            PasswordHash = "h",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            CitizenId = Random.Shared.NextInt64(100000000000L, 999999999999L).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ProfileCompletedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var throwingAudit = new ThrowingAuditLogRepository();
+        var regService = new OrganizationRegistrationService(
+            new EfOrganizationRepository(db),
+            new EfOrganizationMembershipRepository(db),
+            new EfUserRepository(db),
+            new EfRoleRepository(db),
+            throwingAudit,
+            TimeProvider.System,
+            FixedCorrelationIdProvider.Instance,
+            new FakeMediaServiceClient { AutoVerify = true, DefaultUserId = userId },
+            FakeMediaUrlResolver.Instance,
+            new FakeMediaOutboxService());
+
+        string slug = $"fail-reg-{Guid.NewGuid():N}";
+        OrganizationProfileRequest request = new(
+            "Fail Reg Corp",
+            OrganizationType.Supplier,
+            Random.Shared.Next(1000000000, 1999999999).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "Nguyen Van Reg",
+            $"reg_{userId:N}@example.com",
+            "0901234567",
+            "123 Street",
+            "Hà Nội",
+            "Phường 1",
+            BusinessLicenseDocumentMediaId: Guid.NewGuid(),
+            Slug: slug);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            regService.RegisterForExistingUserAsync(userId, request));
+
+        await using var verifyDb = CreateDbContext();
+        Assert.Null(await verifyDb.Organizations.SingleOrDefaultAsync(o => o.Slug == slug));
+    }
+
     private sealed class ThrowingAuditLogRepository : IAuditLogRepository
     {
         public Task AddAsync(AuditLog auditLog, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Simulated audit write failure for transaction rollback test.");
+
+        public Task<PagedResult<AuditLog>> GetOrganizationHistoryAsync(Guid organizationId, PageRequest request, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Simulated audit read failure for transaction rollback test.");
     }
 
     private sealed class DummyAccessTokenIssuer : IAccessTokenIssuer

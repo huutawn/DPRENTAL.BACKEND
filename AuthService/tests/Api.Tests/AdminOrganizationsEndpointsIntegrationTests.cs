@@ -25,7 +25,7 @@ using Xunit;
 namespace Dprental.AuthService.Api.Tests;
 
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test method naming convention")]
-public sealed class AdminOrganizationsEndpointsIntegrationTests
+public sealed partial class AdminOrganizationsEndpointsIntegrationTests
 {
     private static readonly Guid AdminRoleId = new("a0000000-0000-0000-0000-000000000001");
     private static readonly Guid CustomerRoleId = new("a0000000-0000-0000-0000-000000000002");
@@ -170,7 +170,7 @@ public sealed class AdminOrganizationsEndpointsIntegrationTests
     // =========================================================================
 
     [Fact]
-    public async Task RenameOrganization_SuccessValidationAndIdempotency()
+    public async Task UpdateOrganizationProfile_SuccessValidationAndIdempotency()
     {
         using WebApplicationFactory<Program> factory = CreateFactory();
         await SeedDatabaseAsync(factory);
@@ -182,65 +182,84 @@ public sealed class AdminOrganizationsEndpointsIntegrationTests
 
         using HttpClient adminClient = CreateClientWithToken(factory, adminId, ["Admin"], [Permissions.Organizations.Update]);
 
-        // 1. Rename to new name -> 204
-        using HttpResponseMessage renameRes = await adminClient.PutAsJsonAsync(
-            $"/api/v1/auth/admin/organizations/{orgId}",
-            new UpdateOrganizationRequest("Renamed Name"));
-        Assert.Equal(HttpStatusCode.NoContent, renameRes.StatusCode);
+        UpdateOrganizationRequest validRequest = new(
+            "Renamed Name",
+            "contact@renamed.com",
+            "0901234567",
+            "123 Street",
+            "Hà Nội",
+            "Phường Bến Nghé",
+            "https://renamed.com",
+            null,
+            "Updated description");
 
-        // Verify name changed and audit log written
+        // 1. Update profile -> 204
+        using HttpResponseMessage updateRes = await adminClient.PutAsJsonAsync(
+            $"/api/v1/auth/admin/organizations/{orgId}",
+            validRequest);
+        Assert.Equal(HttpStatusCode.NoContent, updateRes.StatusCode);
+
+        // Verify data changed and audit log written
         using (IServiceScope scope = factory.Services.CreateScope())
         {
             AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
             Organization updated = await db.Organizations.SingleAsync(o => o.Id == orgId);
             Assert.Equal("Renamed Name", updated.Name);
+            Assert.Equal("contact@renamed.com", updated.ContactEmail);
+            Assert.Equal("0901234567", updated.ContactPhone);
+            Assert.Equal("123 Street", updated.Address);
+            Assert.Equal("Hà Nội", updated.Province);
+            Assert.Equal("Phường Bến Nghé", updated.Ward);
+            Assert.Equal("https://renamed.com", updated.Website);
+            Assert.Equal("Updated description", updated.Description);
 
-            AuditLog audit = Assert.Single(db.AuditLogs.Where(l => l.Target == orgId.ToString() && l.Action == "Organization_Rename"));
+            AuditLog audit = Assert.Single(db.AuditLogs.Where(l => l.Target == orgId.ToString() && l.Action == "Organization_ProfileUpdate"));
             Assert.Equal(adminId, audit.ActorId);
             Assert.Equal("Success", audit.Result);
+            Assert.Null(audit.Reason);
         }
 
-        // 2. Idempotency: send same name again -> 204, no new audit log!
-        using HttpResponseMessage sameNameRes = await adminClient.PutAsJsonAsync(
+        // 2. Idempotency: send same data again -> 204, no new audit log!
+        using HttpResponseMessage sameDataRes = await adminClient.PutAsJsonAsync(
             $"/api/v1/auth/admin/organizations/{orgId}",
-            new UpdateOrganizationRequest("Renamed Name"));
-        Assert.Equal(HttpStatusCode.NoContent, sameNameRes.StatusCode);
+            validRequest);
+        Assert.Equal(HttpStatusCode.NoContent, sameDataRes.StatusCode);
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
             AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-            Assert.Single(db.AuditLogs.Where(l => l.Target == orgId.ToString() && l.Action == "Organization_Rename"));
+            Assert.Single(db.AuditLogs.Where(l => l.Target == orgId.ToString() && l.Action == "Organization_ProfileUpdate"));
         }
 
-        // 3. Rename works for organization in ANY status (e.g. Suspended)
+        // 3. Update works for organization in ANY status (e.g. Suspended)
         Guid suspendedOrgId = await SeedOrganizationAsync(factory, "Suspended Corp", "suspended-corp", OrganizationStatus.Suspended);
-        using HttpResponseMessage renameSuspendedRes = await adminClient.PutAsJsonAsync(
+        using HttpResponseMessage updateSuspendedRes = await adminClient.PutAsJsonAsync(
             $"/api/v1/auth/admin/organizations/{suspendedOrgId}",
-            new UpdateOrganizationRequest("Suspended Corp Renamed"));
-        Assert.Equal(HttpStatusCode.NoContent, renameSuspendedRes.StatusCode);
+            new UpdateOrganizationRequest("Suspended Corp Renamed", "contact@susp.com", "0901234567", "123 Street", "Hà Nội", "Phường Bến Nghé"));
+        Assert.Equal(HttpStatusCode.NoContent, updateSuspendedRes.StatusCode);
 
         // 4. Invalid empty name -> 400
         using HttpResponseMessage emptyNameRes = await adminClient.PutAsJsonAsync(
             $"/api/v1/auth/admin/organizations/{orgId}",
-            new { name = "" });
+            new { name = "", contactEmail = "c@e.com", contactPhone = "0901234567", address = "A", province = "P", ward = "W" });
         Assert.Equal(HttpStatusCode.BadRequest, emptyNameRes.StatusCode);
 
         // 5. Invalid whitespace name -> 400
         using HttpResponseMessage wsNameRes = await adminClient.PutAsJsonAsync(
             $"/api/v1/auth/admin/organizations/{orgId}",
-            new { name = "   " });
+            new { name = "   ", contactEmail = "c@e.com", contactPhone = "0901234567", address = "A", province = "P", ward = "W" });
         Assert.Equal(HttpStatusCode.BadRequest, wsNameRes.StatusCode);
 
         // 6. Invalid name > 150 chars -> 400
         using HttpResponseMessage tooLongRes = await adminClient.PutAsJsonAsync(
             $"/api/v1/auth/admin/organizations/{orgId}",
-            new { name = new string('x', 151) });
+            new { name = new string('x', 151), contactEmail = "c@e.com", contactPhone = "0901234567", address = "A", province = "P", ward = "W" });
         Assert.Equal(HttpStatusCode.BadRequest, tooLongRes.StatusCode);
 
         // 7. NotFound -> 404
         using HttpResponseMessage notFoundRes = await adminClient.PutAsJsonAsync(
             $"/api/v1/auth/admin/organizations/{Guid.NewGuid()}",
-            new UpdateOrganizationRequest("Valid Name"));
+            new UpdateOrganizationRequest("Valid Name", "c@e.com", "0901234567", "A", "P", "W"));
         Assert.Equal(HttpStatusCode.NotFound, notFoundRes.StatusCode);
 
         // 8. Owner with permission in JWT but no global role -> 403
@@ -249,7 +268,7 @@ public sealed class AdminOrganizationsEndpointsIntegrationTests
         using HttpClient ownerClient = CreateClientWithToken(factory, ownerId, ["Customer"], [Permissions.Organizations.Update]);
         using HttpResponseMessage forbidRes = await ownerClient.PutAsJsonAsync(
             $"/api/v1/auth/admin/organizations/{orgId}",
-            new UpdateOrganizationRequest("Owner Attempt"));
+            new UpdateOrganizationRequest("Owner Attempt", "c@e.com", "0901234567", "A", "P", "W"));
         Assert.Equal(HttpStatusCode.Forbidden, forbidRes.StatusCode);
     }
 
@@ -272,8 +291,10 @@ public sealed class AdminOrganizationsEndpointsIntegrationTests
 
         using HttpClient adminClient = CreateClientWithToken(factory, adminId, ["Admin"], [Permissions.Organizations.Suspend]);
 
-        // 1. Active -> Suspended: 204 NoContent
-        using HttpResponseMessage suspendRes = await adminClient.PostAsync($"/api/v1/auth/admin/organizations/{activeOrgId}/suspend", null);
+        // 1. Active -> Suspended: 204 NoContent with reason
+        using HttpResponseMessage suspendRes = await adminClient.PostAsJsonAsync(
+            $"/api/v1/auth/admin/organizations/{activeOrgId}/suspend",
+            new SuspendOrganizationRequest("Vi phạm hợp đồng thuê"));
         Assert.Equal(HttpStatusCode.NoContent, suspendRes.StatusCode);
 
         using (IServiceScope scope = factory.Services.CreateScope())
@@ -281,35 +302,62 @@ public sealed class AdminOrganizationsEndpointsIntegrationTests
             AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
             Organization org = await db.Organizations.SingleAsync(o => o.Id == activeOrgId);
             Assert.Equal(OrganizationStatus.Suspended, org.Status);
+            Assert.Equal("Vi phạm hợp đồng thuê", org.SuspensionReason);
 
             AuditLog log = Assert.Single(db.AuditLogs.Where(l => l.Target == activeOrgId.ToString() && l.Action == "Organization_Suspend"));
             Assert.Equal(adminId, log.ActorId);
             Assert.Equal("Success", log.Result);
+            Assert.Equal("Vi phạm hợp đồng thuê", log.Reason);
         }
 
-        // 2. Calling suspend when ALREADY Suspended -> 204 NoContent, NO duplicate audit log
-        using HttpResponseMessage repeatRes = await adminClient.PostAsync($"/api/v1/auth/admin/organizations/{activeOrgId}/suspend", null);
+        // 2. Calling suspend when ALREADY Suspended -> 204 NoContent, NO duplicate audit log, NO reason change
+        using HttpResponseMessage repeatRes = await adminClient.PostAsJsonAsync(
+            $"/api/v1/auth/admin/organizations/{activeOrgId}/suspend",
+            new SuspendOrganizationRequest("Lý do mới không được đổi"));
         Assert.Equal(HttpStatusCode.NoContent, repeatRes.StatusCode);
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
             AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            Organization org = await db.Organizations.SingleAsync(o => o.Id == activeOrgId);
+            Assert.Equal("Vi phạm hợp đồng thuê", org.SuspensionReason);
             Assert.Single(db.AuditLogs.Where(l => l.Target == activeOrgId.ToString() && l.Action == "Organization_Suspend"));
         }
 
         // 3. Suspending Pending org -> 409 Conflict
-        using HttpResponseMessage pendingRes = await adminClient.PostAsync($"/api/v1/auth/admin/organizations/{pendingOrgId}/suspend", null);
+        using HttpResponseMessage pendingRes = await adminClient.PostAsJsonAsync(
+            $"/api/v1/auth/admin/organizations/{pendingOrgId}/suspend",
+            new SuspendOrganizationRequest("Reason"));
         Assert.Equal(HttpStatusCode.Conflict, pendingRes.StatusCode);
 
         // 4. Suspending Rejected org -> 409 Conflict
-        using HttpResponseMessage rejectedRes = await adminClient.PostAsync($"/api/v1/auth/admin/organizations/{rejectedOrgId}/suspend", null);
+        using HttpResponseMessage rejectedRes = await adminClient.PostAsJsonAsync(
+            $"/api/v1/auth/admin/organizations/{rejectedOrgId}/suspend",
+            new SuspendOrganizationRequest("Reason"));
         Assert.Equal(HttpStatusCode.Conflict, rejectedRes.StatusCode);
 
         // 5. NotFound -> 404
-        using HttpResponseMessage notFoundRes = await adminClient.PostAsync($"/api/v1/auth/admin/organizations/{Guid.NewGuid()}/suspend", null);
+        using HttpResponseMessage notFoundRes = await adminClient.PostAsJsonAsync(
+            $"/api/v1/auth/admin/organizations/{Guid.NewGuid()}/suspend",
+            new SuspendOrganizationRequest("Reason"));
         Assert.Equal(HttpStatusCode.NotFound, notFoundRes.StatusCode);
-    }
 
+        // 6. Invalid reason (empty/whitespace/too long) -> 400 BadRequest
+        using HttpResponseMessage emptyReasonRes = await adminClient.PostAsJsonAsync(
+            $"/api/v1/auth/admin/organizations/{activeOrgId}/suspend",
+            new { reason = "" });
+        Assert.Equal(HttpStatusCode.BadRequest, emptyReasonRes.StatusCode);
+
+        using HttpResponseMessage wsReasonRes = await adminClient.PostAsJsonAsync(
+            $"/api/v1/auth/admin/organizations/{activeOrgId}/suspend",
+            new { reason = "   " });
+        Assert.Equal(HttpStatusCode.BadRequest, wsReasonRes.StatusCode);
+
+        using HttpResponseMessage tooLongReasonRes = await adminClient.PostAsJsonAsync(
+            $"/api/v1/auth/admin/organizations/{activeOrgId}/suspend",
+            new { reason = new string('r', 501) });
+        Assert.Equal(HttpStatusCode.BadRequest, tooLongReasonRes.StatusCode);
+    }
     // =========================================================================
     // 5. POST /api/v1/auth/admin/organizations/{id}/activate (Activate)
     // =========================================================================
@@ -338,7 +386,7 @@ public sealed class AdminOrganizationsEndpointsIntegrationTests
             AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
             Organization org = await db.Organizations.SingleAsync(o => o.Id == suspendedOrgId);
             Assert.Equal(OrganizationStatus.Active, org.Status);
-
+            Assert.Null(org.SuspensionReason);
             AuditLog log = Assert.Single(db.AuditLogs.Where(l => l.Target == suspendedOrgId.ToString() && l.Action == "Organization_Activate"));
             Assert.Equal(adminId, log.ActorId);
             Assert.Equal("Success", log.Result);
@@ -550,7 +598,13 @@ public sealed class AdminOrganizationsEndpointsIntegrationTests
         OrganizationStatus status,
         DateTime? createdAt = null,
         Guid? ownerUserId = null,
-        Guid? licenseMediaId = null)
+        Guid? licenseMediaId = null,
+        OrganizationType type = OrganizationType.Supplier,
+        string? province = null,
+        DateTime? lastRemindedAt = null,
+        DateTime? resubmittedAt = null,
+        Guid? logoMediaId = null,
+        string? suspensionReason = null)
     {
         using IServiceScope scope = factory.Services.CreateScope();
         AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
@@ -562,9 +616,15 @@ public sealed class AdminOrganizationsEndpointsIntegrationTests
             Name = name,
             Slug = slug,
             Status = status,
+            Type = type,
+            Province = province,
             TaxCode = $"TX_{Guid.NewGuid():N}"[..14],
             CreatedAtUtc = createdAt ?? DateTime.UtcNow,
-            BusinessLicenseDocumentMediaId = licenseMediaId
+            ResubmittedAtUtc = resubmittedAt,
+            LastRemindedAtUtc = lastRemindedAt,
+            BusinessLicenseDocumentMediaId = licenseMediaId,
+            LogoMediaId = logoMediaId,
+            SuspensionReason = suspensionReason
         };
         db.Organizations.Add(org);
 
@@ -607,7 +667,7 @@ public sealed class AdminOrganizationsEndpointsIntegrationTests
         await db.SaveChangesAsync();
     }
 
-    private static WebApplicationFactory<Program> CreateFactory(bool mediaFail = false)
+    private static WebApplicationFactory<Program> CreateFactory(bool mediaFail = false, FakeMediaServiceClient? fakeMediaClient = null)
     {
         string inMemoryDatabaseName = Guid.NewGuid().ToString("N");
         using RSA rsa = RSA.Create(2048);
@@ -639,6 +699,9 @@ public sealed class AdminOrganizationsEndpointsIntegrationTests
                 services.RemoveAll<DbContextOptions<AuthDbContext>>();
                 services.RemoveAll<IDbContextOptionsConfiguration<AuthDbContext>>();
                 services.AddDbContext<AuthDbContext>(options => options.UseInMemoryDatabase(inMemoryDatabaseName));
+
+                services.RemoveAll<IMediaServiceClient>();
+                services.AddSingleton<IMediaServiceClient>(fakeMediaClient ?? new FakeMediaServiceClient { AutoVerify = true });
 
                 if (mediaFail)
                 {

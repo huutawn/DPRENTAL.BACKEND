@@ -1,3 +1,4 @@
+using Dprental.AuthService.Common.Utils;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.Entities;
@@ -27,17 +28,56 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
     public async Task<PagedResult<Organization>> GetAllAsync(
         PageRequest request,
         OrganizationStatus? status = null,
+        OrganizationType? type = null,
+        string? province = null,
+        bool overdueOnly = false,
+        bool remindedOnly = false,
+        DateTime? overdueCutoffUtc = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         IQueryable<Organization> query = ApplySearch(dbContext.Organizations.AsNoTracking(), request.GetSearchTerm());
 
+        if (status is OrganizationStatus statusFilter)
+        {
+            query = query.Where(o => o.Status == statusFilter);
+        }
+
+        if (type is OrganizationType typeFilter)
+        {
+            query = query.Where(o => o.Type == typeFilter);
+        }
+
+        string? trimmedProvince = StringUtility.NullIfBlank(province);
+        if (trimmedProvince is not null)
+        {
+#pragma warning disable CA1304, CA1311, CA1862
+            string lowerProvince = trimmedProvince.ToLowerInvariant();
+            query = query.Where(o => o.Province != null && o.Province.ToLower() == lowerProvince);
+#pragma warning restore CA1304, CA1311, CA1862
+        }
+
+        if (overdueOnly)
+        {
+            query = query.Where(o => o.Status == OrganizationStatus.Pending);
+            if (overdueCutoffUtc.HasValue)
+            {
+                DateTime cutoff = overdueCutoffUtc.Value;
+                query = query.Where(o => (o.ResubmittedAtUtc ?? o.CreatedAtUtc) < cutoff);
+            }
+        }
+
+        if (remindedOnly)
+        {
+            query = query.Where(o => o.Status == OrganizationStatus.Pending && o.LastRemindedAtUtc != null);
+        }
+
         IOrderedQueryable<Organization> ordered;
-        if (status is OrganizationStatus filter)
+        if (status.HasValue || overdueOnly || remindedOnly)
         {
             // Hồ sơ Owner đã nhắc (quá hạn duyệt) lên trước, còn lại theo thứ tự nộp — cũ nhất trước.
-            ordered = query.Where(o => o.Status == filter)
+            ordered = query
                 .OrderByDescending(o => o.LastRemindedAtUtc != null)
                 .ThenBy(o => o.ResubmittedAtUtc ?? o.CreatedAtUtc)
                 .ThenBy(o => o.Id);

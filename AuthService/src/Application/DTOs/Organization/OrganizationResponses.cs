@@ -35,6 +35,7 @@ public sealed record OrganizationResponse(
     string? BusinessLicenseDocumentUrl = null,
     DateTime? BusinessLicenseDocumentUrlExpiresAtUtc = null,
     string? RejectionReason = null,
+    string? SuspensionReason = null,
     DateTime? ReviewedAtUtc = null,
     DateTime? SubmittedAtUtc = null,
     DateTime? ReviewDueAtUtc = null,
@@ -75,4 +76,16 @@ public sealed record MyOrganizationResponse(
     OrganizationStatus OrganizationStatus,
     string RoleName,
     MembershipStatus MembershipStatus,
-    DateTime JoinedAtUtc);
+    DateTime JoinedAtUtc,
+    string? SuspensionReason = null);
+
+/// <summary>
+/// Một dòng nhật ký lịch sử của organization (GET /admin/organizations/{id}/history).
+/// </summary>
+public sealed record OrganizationHistoryResponse(
+    Guid Id,
+    Guid? ActorId,
+    DateTimeOffset Timestamp,
+    string Action,
+    string Result,
+    string? Reason = null);

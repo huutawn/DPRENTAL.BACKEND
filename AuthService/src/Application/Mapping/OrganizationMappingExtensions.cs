@@ -43,6 +43,7 @@ public static class OrganizationMappingExtensions
             businessLicenseDocumentUrl,
             businessLicenseDocumentUrlExpiresAtUtc,
             organization.RejectionReason,
+            organization.SuspensionReason,
             organization.ReviewedAtUtc,
             OrganizationReviewSchedule.SubmittedAtUtc(organization),
             OrganizationReviewSchedule.ReviewDueAtUtc(organization, reviewOptions),
@@ -71,5 +72,17 @@ public static class OrganizationMappingExtensions
             OrganizationReviewSchedule.SubmittedAtUtc(organization),
             organization.LastRemindedAtUtc,
             utcNow is DateTime now && OrganizationReviewSchedule.IsOverdue(organization, reviewOptions, now));
+    }
+
+    public static OrganizationHistoryResponse ToHistoryResponse(this AuditLog log)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        return new OrganizationHistoryResponse(
+            log.Id,
+            log.ActorId,
+            log.Timestamp,
+            log.Action,
+            log.Result,
+            log.Reason);
     }
 }

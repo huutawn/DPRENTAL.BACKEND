@@ -293,3 +293,19 @@ Bảng `auth.ExternalLogins` được tạo bởi migration `AddExternalLogins`;
 ### Organization identifier uniqueness
 
 Organization registration checks slug and tax code against approved organizations (Active or Suspended). Pending and Rejected applications may share identifiers. Approval checks both identifiers again; filtered unique indexes enforce this rule for concurrent approvals. Apply the `AllowUnapprovedOrganizationIdentifiers` migration before deploying this behavior. Rolling back requires resolving duplicate identifiers among Pending/Rejected organizations before restoring the global unique indexes.
+
+### Quản lý Organization dành cho Admin
+
+Admin thao tác qua `/api/v1/auth/admin/organizations`:
+
+- `GET /api/v1/auth/admin/organizations`: Lấy danh sách organization có phân trang, tìm kiếm và lọc kết hợp bằng AND (`status`, `type`, `province`, `overdueOnly`, `remindedOnly`). Hai cờ `overdueOnly` và `remindedOnly` mặc định `false`; khi `true` chỉ lấy hồ sơ `Pending` tương ứng. Yêu cầu permission `identity.organizations.read`.
+- `GET /api/v1/auth/admin/organizations/{id}`: Chi tiết organization dành cho Admin. Yêu cầu permission `identity.organizations.read`.
+- `PUT /api/v1/auth/admin/organizations/{id}`: Cập nhật toàn bộ thông tin liên hệ và hiển thị: `name`, `contactEmail`, `contactPhone`, `address`, `province`, `ward`, `website`, `logoMediaId`, `description`. Các trường tùy chọn gửi `null` để xóa. Giữ nguyên thông tin pháp lý và trạng thái. Trả `204`. Logo mới phải là ảnh `Ready` do chính admin upload. Yêu cầu permission `identity.organizations.update`.
+- `POST /api/v1/auth/admin/organizations/{id}/suspend`: Khóa organization đang `Active`, yêu cầu body `{ "reason": "..." }` (bắt buộc, trim, tối đa 500 ký tự). Trả `204`. Chuyển trạng thái sang `Suspended` và lưu `suspensionReason` để Owner có thể xem qua `/mine` hoặc `GET /{id}`. Gọi lặp trả `204` không đổi lý do. `Pending` hoặc `Rejected` trả `409`. Yêu cầu permission `identity.organizations.suspend`.
+- `POST /api/v1/auth/admin/organizations/{id}/activate`: Mở khóa organization đang `Suspended`, xóa `suspensionReason` hiện tại. Trả `204`. Gọi lặp trả `204`. Yêu cầu permission `identity.organizations.suspend`.
+- `GET /api/v1/auth/admin/organizations/{id}/history`: Lấy nhật ký audit lịch sử của organization có phân trang, sắp xếp mới nhất trước. Mỗi dòng gồm ID, actor ID, thời điểm, hành động, kết quả và lý do nếu có. Yêu cầu permission `identity.organizations.read`.
+- `PATCH /api/v1/auth/admin/organizations/{id}/approve` và `PATCH /api/v1/auth/admin/organizations/{id}/reject`: Duyệt hoặc từ chối hồ sơ `Pending`; từ chối yêu cầu body `{ "reason": "..." }`. Admin không được tự duyệt/từ chối org mình là thành viên. Yêu cầu permission `identity.organizations.suspend`.
+
+Client phải cập nhật cùng đợt phát hành: PUT không còn chỉ nhận tên mà yêu cầu đầy đủ liên hệ/địa chỉ; suspend không còn nhận body rỗng. Hai API đều trả `204` khi gọi lặp mà dữ liệu/trạng thái không đổi, không ghi audit mới. Nếu logo bị cập nhật đồng thời trong lúc kiểm tra media, PUT trả `409` để client đọc lại hồ sơ rồi gửi lại. JWT permission chỉ là lớp kiểm tra đầu tiên; service kiểm tra quyền global trong DB cho mọi thao tác admin.
+
+Migration `AddOrganizationSuspensionAndAuditReason` bổ sung cột `SuspensionReason` cho bảng `Organizations`, cột `Reason` và index `(Target, Timestamp)` cho bảng `AuditLogs`, đồng thời tách lý do từ chối cũ dạng `Success: ...` sang trường `Reason`. Áp dụng migration trước khi deploy ứng dụng mới.

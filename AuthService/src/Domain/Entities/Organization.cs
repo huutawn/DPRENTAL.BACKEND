@@ -84,6 +84,9 @@ public class Organization
 
     [MaxLength(500)]
     public string? RejectionReason { get; set; }
+    [MaxLength(500)]
+    public string? SuspensionReason { get; set; }
+
 
     public Guid? ReviewedByUserId { get; set; }
 

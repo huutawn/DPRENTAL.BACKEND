@@ -156,3 +156,29 @@ public sealed class FakeMediaOutboxRepository : IMediaOutboxRepository
         return Task.CompletedTask;
     }
 }
+
+public sealed class FakeAuditLogRepository : IAuditLogRepository
+{
+    public List<AuditLog> Logs { get; } = [];
+
+    public Task AddAsync(AuditLog auditLog, CancellationToken cancellationToken = default)
+    {
+        Logs.Add(auditLog);
+        return Task.CompletedTask;
+    }
+
+    public Task<PagedResult<AuditLog>> GetOrganizationHistoryAsync(
+        Guid organizationId,
+        PageRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        string target = organizationId.ToString();
+        List<AuditLog> list = Logs
+            .Where(l => l.Target == target && l.Action.StartsWith("Organization_", StringComparison.Ordinal))
+            .OrderByDescending(l => l.Timestamp)
+            .ThenByDescending(l => l.Id)
+            .ToList();
+        List<AuditLog> paged = list.Skip((request.Page - 1) * request.PageSize).Take(request.PageSize).ToList();
+        return Task.FromResult(new PagedResult<AuditLog>(paged, request.Page, request.PageSize, list.Count));
+    }
+}
