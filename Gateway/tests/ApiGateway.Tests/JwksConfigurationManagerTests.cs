@@ -36,9 +36,11 @@ public sealed class JwksConfigurationManagerTests
         Assert.Contains((await manager.GetConfigurationAsync(CancellationToken.None)).SigningKeys, key => key.KeyId == "second");
 
         available = false;
-        clock.Advance(TimeSpan.FromMinutes(11));
-        manager.RequestRefresh();
+        clock.Advance(TimeSpan.FromMinutes(6));
         Assert.Contains((await manager.GetConfigurationAsync(CancellationToken.None)).SigningKeys, key => key.KeyId == "second");
+        Assert.True(manager.HasUsableConfiguration());
+        clock.Advance(TimeSpan.FromMinutes(5));
+        await Assert.ThrowsAsync<HttpRequestException>(() => manager.GetConfigurationAsync(CancellationToken.None));
         Assert.False(manager.HasUsableConfiguration());
     }
 
