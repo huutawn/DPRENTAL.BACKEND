@@ -107,22 +107,25 @@ public sealed class RbacMigrationTests
             [new Guid("c3030000-0000-0000-0000-000000000008")] = PermissionCode.IdentityServicePrincipalsManage,
             [new Guid("c3030000-0000-0000-0000-000000000009")] = PermissionCode.IdentityServicePrincipalsRotateSecret,
             [new Guid("c3030000-0000-0000-0000-000000000010")] = PermissionCode.IdentityServicePrincipalsManageScopes,
+            [new Guid("e5050000-0000-0000-0000-000000000002")] = PermissionCode.InventoryAssetManage,
+            [new Guid("e5050000-0000-0000-0000-000000000003")] = PermissionCode.InventoryCalendarRead,
+            [new Guid("e5050000-0000-0000-0000-000000000004")] = PermissionCode.InventoryAllocationWrite,
         };
 
-        // All canonical permissions present, and zero legacy permissions
-        Assert.Equal(17, permissions.Count);
-        Assert.All(permissions.Values, code => Assert.StartsWith("identity.", code, StringComparison.Ordinal));
+        // All canonical permissions present (17 identity + 3 inventory), and zero legacy permissions
+        Assert.Equal(20, permissions.Count);
+        Assert.All(permissions.Values, code => Assert.True(code.StartsWith("identity.", StringComparison.Ordinal) || code.StartsWith("inventory.", StringComparison.Ordinal)));
         Assert.Equal(PermissionCode.All.OrderBy(x => x), permissions.Values.OrderBy(x => x));
 
-        // Admin: all permissions
+        // Admin: all identity permissions
         HashSet<string> adminPerms = [.. permissions.Values];
-        Assert.Equal(17, adminPerms.Count);
+        Assert.Equal(20, adminPerms.Count);
 
         // Platform Admin: all except global role assign/revoke
         HashSet<string> platformAdminPerms = [.. permissions.Values];
         platformAdminPerms.Remove(PermissionCode.IdentityRolesAssignGlobal);
         platformAdminPerms.Remove(PermissionCode.IdentityRolesRevokeGlobal);
-        Assert.Equal(15, platformAdminPerms.Count);
+        Assert.Equal(18, platformAdminPerms.Count);
         Assert.DoesNotContain(PermissionCode.IdentityRolesAssignGlobal, platformAdminPerms);
         Assert.DoesNotContain(PermissionCode.IdentityRolesRevokeGlobal, platformAdminPerms);
 
@@ -135,18 +138,21 @@ public sealed class RbacMigrationTests
             PermissionCode.IdentityMembersManage,
             PermissionCode.IdentityRolesRead,
             PermissionCode.IdentityRolesAssignOrganization,
-            PermissionCode.IdentityRolesRevokeOrganization
+            PermissionCode.IdentityRolesRevokeOrganization,
+            PermissionCode.InventoryAssetManage,
+            PermissionCode.InventoryCalendarRead
         ];
-        Assert.Equal(7, ownerPerms.Count);
+        Assert.Equal(9, ownerPerms.Count);
 
         // Member: 3 permissions
         HashSet<string> memberPerms =
         [
             PermissionCode.IdentityOrganizationsRead,
             PermissionCode.IdentityMembersRead,
-            PermissionCode.IdentityRolesRead
+            PermissionCode.IdentityRolesRead,
+            PermissionCode.InventoryCalendarRead
         ];
-        Assert.Equal(3, memberPerms.Count);
+        Assert.Equal(4, memberPerms.Count);
     }
 
     [Fact]

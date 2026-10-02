@@ -24,6 +24,9 @@ public static class PermissionCode
     public const string IdentityServicePrincipalsManage = "identity.service-principals.manage";
     public const string IdentityServicePrincipalsRotateSecret = "identity.service-principals.rotate-secret";
     public const string IdentityServicePrincipalsManageScopes = "identity.service-principals.manage-scopes";
+    public const string InventoryAssetManage = "inventory.asset.manage";
+    public const string InventoryCalendarRead = "inventory.calendar.read";
+    public const string InventoryAllocationWrite = "inventory.allocation.write";
 
     public static readonly IReadOnlyCollection<string> All =
     [
@@ -43,6 +46,9 @@ public static class PermissionCode
         IdentityServicePrincipalsRead,
         IdentityServicePrincipalsManage,
         IdentityServicePrincipalsRotateSecret,
-        IdentityServicePrincipalsManageScopes
+        IdentityServicePrincipalsManageScopes,
+        InventoryAssetManage,
+        InventoryCalendarRead,
+        InventoryAllocationWrite
     ];
 }
