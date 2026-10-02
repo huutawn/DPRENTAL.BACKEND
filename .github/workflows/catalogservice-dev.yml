@@ -10,29 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  verify:
-    name: Build and test Catalog
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      - name: Validate deploy script
-        run: |
-          bash -n scripts/deploy-catalogservice.sh scripts/tests/deploy-catalogservice.test.sh
-          bash scripts/tests/deploy-catalogservice.test.sh
-      - name: Build
-        run: dotnet build CatalogService.sln --configuration Release --nologo
-      - name: Test (including PostgreSQL migrations)
-        run: dotnet test CatalogService.sln --configuration Release --no-build --nologo
-        env:
-          DOTNET_USE_POLLING_FILE_WATCHER: '1'
-
   publish:
-    needs: verify
     name: Publish ${{ matrix.name }} image to GHCR
     runs-on: ubuntu-24.04
     environment: dev

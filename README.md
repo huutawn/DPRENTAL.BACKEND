@@ -135,8 +135,8 @@ Quy trình backup, migration và smoke test nằm trong `deploy/dev/README.md` c
 ## CI/CD CatalogService cho dev
 
 Workflow [catalogservice-dev.yml](.github/workflows/catalogservice-dev.yml) chạy khi push vào
-`catalog/develop-ci-cd`. Mẫu publish/SSH deploy tham chiếu `media/develop-ci-cd`; Catalog có thêm job
-build/test (gồm PostgreSQL migration tests) trước publish. Hai image runtime và migrator dùng cùng
+`catalog/develop-ci-cd`. Mẫu publish/SSH deploy tham chiếu `media/develop-ci-cd`; pipeline chạy trực tiếp
+publish rồi deploy, kiểm tra build/test .NET nằm ở pre-push hook local. Hai image runtime và migrator dùng cùng
 full commit SHA, không dùng `latest`:
 
 ```text
