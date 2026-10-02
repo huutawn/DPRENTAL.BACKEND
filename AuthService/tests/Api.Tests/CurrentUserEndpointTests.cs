@@ -65,7 +65,7 @@ public sealed class CurrentUserEndpointTests
         Assert.Equal(UserId, root.GetProperty("id").GetGuid());
         Assert.Equal("tan.len@example.com", root.GetProperty("email").GetString());
         Assert.Equal("Huynh Tan Len", root.GetProperty("fullName").GetString());
-        Assert.Equal(["Admin"], root.GetProperty("roles").EnumerateArray().Select(item => item.GetString()));
+        Assert.Equal(["Admin", SystemRoleCode.Owner], root.GetProperty("roles").EnumerateArray().Select(item => item.GetString()));
         Assert.Equal(
             ["roles.assign", "roles.revoke"],
             root.GetProperty("permissions").EnumerateArray().Select(item => item.GetString()).Order(StringComparer.Ordinal));

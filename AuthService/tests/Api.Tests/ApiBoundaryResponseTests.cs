@@ -6,6 +6,7 @@ using Dprental.AuthService.Application.DTOs.Auth;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
+using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Common.Utils;
 using Dprental.AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
@@ -230,6 +231,83 @@ public sealed class ApiBoundaryResponseTests
 
         var problem = await response.Content.ReadFromJsonAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
         Assert.Equal(AuthErrorCode.Auth.InvalidRefreshToken, problem?.Title);
+    }
+
+    [Theory]
+    [InlineData(OrganizationType.Supplier, OrganizationStatus.Active, true)]
+    [InlineData(OrganizationType.Supplier, OrganizationStatus.Pending, false)]
+    [InlineData(OrganizationType.Supplier, OrganizationStatus.Rejected, false)]
+    [InlineData(OrganizationType.Supplier, OrganizationStatus.Suspended, false)]
+    [InlineData(OrganizationType.Renter, OrganizationStatus.Active, true)]
+    public async Task Login_AddsOwnerRoleToTokenAndMe_OnlyWhenOrganizationIsApproved(
+        OrganizationType organizationType,
+        OrganizationStatus organizationStatus,
+        bool expectOwnerRole)
+    {
+        // Đi qua luồng thật: role Owner của tổ chức phải vào claim "r" (alias "own") và GET /me cùng lúc,
+        // chỉ khi tổ chức đã được duyệt.
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        using HttpClient client = factory.CreateClient();
+        Guid userId = await SeedUserAsync(factory, "orgowner@example.com", "Password123!", isActive: true);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            Role customer = new() { Id = Guid.NewGuid(), Name = SystemRoleCode.Customer, Scope = RoleScope.Global };
+            Role owner = new() { Id = Guid.NewGuid(), Name = SystemRoleCode.Owner, Scope = RoleScope.Organization };
+            Organization organization = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "Role Test Org",
+                Slug = "role-test-org",
+                Type = organizationType,
+                Status = organizationStatus,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            db.Roles.AddRange(customer, owner);
+            db.Organizations.Add(organization);
+            db.UserRoles.Add(new UserRole { UserId = userId, RoleId = customer.Id });
+            db.OrganizationMemberships.Add(new OrganizationMembership
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                OrganizationId = organization.Id,
+                RoleId = owner.Id,
+                Status = MembershipStatus.Active,
+                JoinedAtUtc = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        HttpResponseMessage loginResponse = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest(
+            Email: "orgowner@example.com",
+            Password: "Password123!"));
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+
+        string accessToken = loginResponse.Headers.GetValues("Set-Cookie")
+            .First(c => c.StartsWith("accessToken=", StringComparison.OrdinalIgnoreCase))
+            .Split(';')[0]["accessToken=".Length..];
+        string[] tokenRoles = new JwtSecurityTokenHandler().ReadJwtToken(accessToken).Claims
+            .Where(c => c.Type == JwtClaimCatalog.Claims.Role)
+            .Select(c => c.Value)
+            .ToArray();
+
+        HttpRequestMessage meRequest = new(HttpMethod.Get, "/api/v1/auth/users/me");
+        meRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+        HttpResponseMessage meResponse = await client.SendAsync(meRequest);
+        Assert.Equal(HttpStatusCode.OK, meResponse.StatusCode);
+        using JsonDocument me = JsonDocument.Parse(await meResponse.Content.ReadAsStringAsync());
+        string?[] meRoles = me.RootElement.GetProperty("roles").EnumerateArray().Select(r => r.GetString()).ToArray();
+
+        // Token dùng alias rút gọn, GET /me trả tên đầy đủ.
+        string[] expectedTokenRoles = expectOwnerRole
+            ? [JwtClaimCatalog.RoleAliases.Customer, JwtClaimCatalog.RoleAliases.Owner]
+            : [JwtClaimCatalog.RoleAliases.Customer];
+        string[] expectedMeRoles = expectOwnerRole
+            ? [SystemRoleCode.Customer, SystemRoleCode.Owner]
+            : [SystemRoleCode.Customer];
+        Assert.Equal(expectedTokenRoles, tokenRoles);
+        Assert.Equal(expectedMeRoles, meRoles);
     }
 
     [Fact]

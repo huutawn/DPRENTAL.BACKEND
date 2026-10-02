@@ -242,11 +242,7 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
 
     private static AuthSessionPrincipal BuildPrincipal(User user, Guid? sessionId = null)
     {
-        string[] roles = user.UserRoles?
-            .Select(ur => ur.Role.Name)
-            .Where(name => !string.IsNullOrEmpty(name))
-            .Distinct()
-            .ToArray() ?? [];
+        var globalRoles = user.UserRoles?.Select(ur => ur.Role.Name) ?? [];
         var globalPermissions = user.UserRoles?
             .SelectMany(ur => ur.Role.RolePermissions)
             .Select(rp => rp.Permission.Code) ?? [];
@@ -255,6 +251,11 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
             .Where(m => m.Status == Dprental.AuthService.Common.Enums.MembershipStatus.Active &&
                 m.Organization.Status == Dprental.AuthService.Common.Enums.OrganizationStatus.Active)
             .ToArray() ?? [];
+        // Role trong organization (vd Owner) vào claim "r" cùng role toàn cục, chỉ khi organization đã Active.
+        string[] roles = globalRoles.Concat(activeMemberships.Select(m => m.Role.Name))
+            .Where(name => !string.IsNullOrEmpty(name))
+            .Distinct()
+            .ToArray();
         var orgPermissions = activeMemberships
             .SelectMany(m => m.Role.RolePermissions)
             .Select(rp => rp.Permission.Code) ?? [];

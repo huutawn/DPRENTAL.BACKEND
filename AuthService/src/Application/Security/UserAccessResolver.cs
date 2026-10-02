@@ -26,6 +26,23 @@ public static class UserAccessResolver
             .ToArray();
     }
 
+    /// <summary>
+    /// Role trong phạm vi organization (vd Owner) của các membership đang có hiệu lực. Organization chờ duyệt,
+    /// bị từ chối hay bị khoá không tính — cùng điều kiện với permission.
+    /// </summary>
+    public static string[] OrganizationRoles(User user) =>
+        ActiveMemberships(user)
+            .Select(membership => membership.Role.Name)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+    /// <summary>Role đưa vào access token (claim <c>r</c>) và GET /me: role toàn cục cộng role organization đang có hiệu lực.</summary>
+    public static string[] EffectiveRoles(User user) =>
+        Roles(user)
+            .Concat(OrganizationRoles(user))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
     /// <summary>Permission từ role toàn cục cộng permission từ role của các membership Active.</summary>
     public static string[] Permissions(User user)
     {
