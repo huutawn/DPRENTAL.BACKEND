@@ -5,24 +5,8 @@ name: dprental
 services:
   gateway:
     build:
-      context: .
-      dockerfile_inline: |
-        FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
-        WORKDIR /src
-        COPY Gateway/Gateway/Gateway.sln Gateway/Gateway/Directory.Build.props Gateway/Gateway/
-        COPY Gateway/Gateway/src/ApiGateway/ApiGateway.csproj Gateway/Gateway/src/ApiGateway/
-        COPY Gateway/Gateway/tests/ApiGateway.Tests/ApiGateway.Tests.csproj Gateway/Gateway/tests/ApiGateway.Tests/
-        RUN dotnet restore Gateway/Gateway/Gateway.sln
-        COPY Gateway/Gateway/ Gateway/Gateway/
-        RUN dotnet publish Gateway/Gateway/src/ApiGateway/ApiGateway.csproj --configuration Release --output /app/publish --no-restore
-
-        FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
-        WORKDIR /app
-        COPY --from=build /app/publish .
-        ENV ASPNETCORE_URLS=http://+:8080
-        EXPOSE 8080
-        USER 1654
-        ENTRYPOINT ["dotnet", "ApiGateway.dll"]
+      context: ./Gateway
+      dockerfile: Dockerfile
     restart: unless-stopped
     ports:
       - "${GATEWAY_PORT:-5050}:8080"
@@ -31,7 +15,17 @@ services:
       Gateway__Authentication__Jwt__Issuer: ${AUTH_JWT_ISSUER:-dprental-authservice-dev}
       Gateway__Authentication__Jwt__Audience: ${AUTH_JWT_AUDIENCE:-dprental-clients}
       Gateway__Authentication__Jwt__JwksUri: http://auth-service:8080/.well-known/jwks.json
-      ReverseProxy__Clusters__auth-service__Destinations__primary__Address: http://auth-service:8080/
+      Gateway__Authentication__Jwt__InventoryAudience: inventory-api
+      Routes__0__DownstreamHostAndPorts__0__Host: auth-service
+      Routes__0__DownstreamHostAndPorts__0__Port: 8080
+      Routes__1__DownstreamHostAndPorts__0__Host: auth-service
+      Routes__1__DownstreamHostAndPorts__0__Port: 8080
+      Routes__2__DownstreamHostAndPorts__0__Host: auth-service
+      Routes__2__DownstreamHostAndPorts__0__Port: 8080
+      Routes__3__DownstreamHostAndPorts__0__Host: auth-service
+      Routes__3__DownstreamHostAndPorts__0__Port: 8080
+      Routes__4__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__4__DownstreamHostAndPorts__0__Port: 8080
       Gateway__Security__Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:-http://localhost:3000}
       Gateway__Security__Cors__AllowedOrigins__1: ${CORS_ALLOWED_ORIGIN_1:-http://localhost:5173}
       Gateway__Security__Cors__AllowedOrigins__2: http://localhost:${GATEWAY_PORT:-5050}
@@ -44,8 +38,12 @@ services:
       Telemetry__Tracing__SamplingRatio: ${TRACING_SAMPLING_RATIO:-1.0}
       Telemetry__Otlp__TracesEndpoint: ${OTLP_TRACES_ENDPOINT:-}
     depends_on:
+      inventory-service:
+        condition: service_started
       auth-service:
         condition: service_started
+      media-service:
+        condition: service_healthy
     networks:
       - dprental
 
@@ -55,7 +53,7 @@ services:
       dockerfile_inline: |
         FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
         WORKDIR /src
-        COPY AuthService/AuthService.sln AuthService/Directory.Build.props ./
+        COPY AuthService/AuthService.sln AuthService/Directory.Build.props AuthService/Directory.Packages.props ./
         COPY AuthService/AuthService/src/Common/AuthService.Common.csproj AuthService/src/Common/
         COPY AuthService/AuthService/src/Domain/AuthService.Domain.csproj AuthService/src/Domain/
         COPY AuthService/AuthService/src/Application/AuthService.Application.csproj AuthService/src/Application/
@@ -87,8 +85,12 @@ services:
       Auth__Jwt__Issuer: ${AUTH_JWT_ISSUER:-dprental-authservice-dev}
       Auth__Jwt__Audience: ${AUTH_JWT_AUDIENCE:-dprental-clients}
       Auth__Jwt__AccessTokenLifetimeMinutes: ${AUTH_JWT_ACCESS_TOKEN_LIFETIME_MINUTES:-15}
+      Auth__AdminBootstrap__CreationKey: ${AUTH_ADMIN_BOOTSTRAP_CREATION_KEY:?Set AUTH_ADMIN_BOOTSTRAP_CREATION_KEY in .env}
       Auth__Jwt__ActiveKeyId: ${AUTH_JWT_ACTIVE_KEY_ID:?Set AUTH_JWT_ACTIVE_KEY_ID in .env}
       Auth__Jwt__Keys__0__KeyId: ${AUTH_JWT_ACTIVE_KEY_ID:?Set AUTH_JWT_ACTIVE_KEY_ID in .env}
+      MediaService__InternalBaseUrl: http://media-service:8080
+      MediaService__PublicGatewayUrl: http://localhost:${GATEWAY_PORT:-5050}
+      MediaService__ApiKey: ${AUTH_ADMIN_BOOTSTRAP_CREATION_KEY:?Set AUTH_ADMIN_BOOTSTRAP_CREATION_KEY in .env}
       Telemetry__Tracing__SamplingRatio: ${TRACING_SAMPLING_RATIO:-1.0}
       Telemetry__Otlp__TracesEndpoint: ${OTLP_TRACES_ENDPOINT:-}
     depends_on:
@@ -129,7 +131,7 @@ services:
       dockerfile_inline: |
         FROM mcr.microsoft.com/dotnet/sdk:10.0
         WORKDIR /src
-        COPY AuthService/AuthService.sln AuthService/Directory.Build.props ./
+        COPY AuthService/AuthService.sln AuthService/Directory.Build.props AuthService/Directory.Packages.props ./
         COPY AuthService/AuthService/ AuthService/
         RUN dotnet restore AuthService.sln \
           && dotnet tool install --tool-path /tools dotnet-ef --version 10.0.12
@@ -158,6 +160,116 @@ services:
         condition: service_completed_successfully
     volumes:
       - jwt-keys:/run/dprental-jwt:ro
+    networks:
+      - dprental
+
+  media-service:
+    build:
+      context: ./MediaService
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ConnectionStrings__Postgres: Host=media-postgres;Port=5432;Database=mediaservice;Username=mediaservice;Password=${MEDIA_POSTGRES_PASSWORD:?Set MEDIA_POSTGRES_PASSWORD in .env}
+      ObjectStorage__Endpoint: http://media-minio:9000
+      ObjectStorage__BrowserEndpoint: http://localhost:${MEDIA_MINIO_API_PORT:-9002}
+      ObjectStorage__Bucket: dprental-media
+      ObjectStorage__AccessKey: ${MEDIA_MINIO_ROOT_USER:-mediaadmin}
+      ObjectStorage__SecretKey: ${MEDIA_MINIO_ROOT_PASSWORD:?Set MEDIA_MINIO_ROOT_PASSWORD in .env}
+      Jwt__Issuer: ${AUTH_JWT_ISSUER:-dprental-authservice-dev}
+      Jwt__Audience: ${AUTH_JWT_AUDIENCE:-dprental-clients}
+      Jwt__JwksUri: http://auth-service:8080/.well-known/jwks.json
+      ApiKey: ${AUTH_ADMIN_BOOTSTRAP_CREATION_KEY:?Set AUTH_ADMIN_BOOTSTRAP_CREATION_KEY in .env}
+    depends_on:
+      media-postgres:
+        condition: service_healthy
+      media-minio-init:
+        condition: service_completed_successfully
+      media-migrate:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_started
+    networks:
+      - dprental
+
+  media-migrate:
+    build:
+      context: ./MediaService
+      dockerfile_inline: |
+        FROM mcr.microsoft.com/dotnet/sdk:10.0
+        WORKDIR /src
+        COPY Directory.Build.props Directory.Packages.props ./
+        COPY MediaService/ MediaService/
+        RUN dotnet restore MediaService/src/Domain/MediaService.Domain.csproj \
+          && dotnet tool install --tool-path /tools dotnet-ef --version 10.0.12
+    restart: "no"
+    entrypoint:
+      - /tools/dotnet-ef
+      - database
+      - update
+      - --project
+      - MediaService/src/Domain/MediaService.Domain.csproj
+    environment:
+      ConnectionStrings__Postgres: Host=media-postgres;Port=5432;Database=mediaservice;Username=mediaservice;Password=${MEDIA_POSTGRES_PASSWORD:?Set MEDIA_POSTGRES_PASSWORD in .env}
+    depends_on:
+      media-postgres:
+        condition: service_healthy
+    networks:
+      - dprental
+
+  media-postgres:
+    image: postgres:17.11-alpine3.24
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mediaservice
+      POSTGRES_USER: mediaservice
+      POSTGRES_PASSWORD: ${MEDIA_POSTGRES_PASSWORD:?Set MEDIA_POSTGRES_PASSWORD in .env}
+    volumes:
+      - media-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=$$POSTGRES_USER --dbname=$$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - dprental
+
+  media-minio:
+    image: ${MEDIA_MINIO_IMAGE:-ghcr.io/coollabsio/minio:latest}
+    command: ["server", "/data", "--console-address", ":9001"]
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MEDIA_MINIO_ROOT_USER:-mediaadmin}
+      MINIO_ROOT_PASSWORD: ${MEDIA_MINIO_ROOT_PASSWORD:?Set MEDIA_MINIO_ROOT_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${MEDIA_MINIO_API_PORT:-9002}:9000"
+      - "127.0.0.1:${MEDIA_MINIO_CONSOLE_PORT:-9003}:9001"
+    volumes:
+      - media-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - dprental
+
+  media-minio-init:
+    image: ${MEDIA_MINIO_IMAGE:-ghcr.io/coollabsio/minio:latest}
+    restart: "no"
+    depends_on:
+      media-minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set local http://media-minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing local/dprental-media
+        mc anonymous set none local/dprental-media
+    environment:
+      MINIO_ROOT_USER: ${MEDIA_MINIO_ROOT_USER:-mediaadmin}
+      MINIO_ROOT_PASSWORD: ${MEDIA_MINIO_ROOT_PASSWORD:?Set MEDIA_MINIO_ROOT_PASSWORD in .env}
     networks:
       - dprental
 
@@ -227,11 +339,58 @@ services:
     networks:
       - dprental
 
+  inventory-postgres:
+    image: postgres:17.11-alpine3.24
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${INVENTORY_POSTGRES_DB:-inventoryservice}
+      POSTGRES_USER: ${INVENTORY_POSTGRES_USER:-inventoryservice}
+      POSTGRES_PASSWORD: ${INVENTORY_POSTGRES_PASSWORD:-inventory_dev_secret_123!}
+    ports:
+      - "127.0.0.1:${INVENTORY_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - inventory-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - dprental
+
+  inventory-service:
+    build:
+      context: ./InventoryService
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${INVENTORY_SERVICE_PORT:-8083}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ConnectionStrings__Postgres: "Host=inventory-postgres;Port=5432;Database=${INVENTORY_POSTGRES_DB:-inventoryservice};Username=${INVENTORY_POSTGRES_USER:-inventoryservice};Password=${INVENTORY_POSTGRES_PASSWORD:-inventory_dev_secret_123!}"
+      Authentication__Jwt__Issuer: ${AUTH_JWT_ISSUER:-dprental-authservice-dev}
+      Authentication__Jwt__HumanAudience: dprental-clients
+      Authentication__Jwt__ServiceAudience: inventory-api
+      Authentication__Jwt__JwksUri: http://auth-service:8080/.well-known/jwks.json
+      Kafka__BootstrapServers: kafka:9092
+    depends_on:
+      inventory-postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+    networks:
+      - dprental
+
 volumes:
   postgres-data:
+  media-postgres-data:
+  media-minio-data:
   valkey-data:
   kafka-data:
   jwt-keys:
+  inventory-postgres-data:
 
 networks:
   dprental:
