@@ -74,7 +74,7 @@ public sealed class KafkaRealIntegrationTests : IAsyncLifetime
         var db = scope.ServiceProvider.GetRequiredService<InventoryServiceDbContext>();
         var publisher = scope.ServiceProvider.GetRequiredService<OutboxPublisherWorker>();
 
-        var topic = KafkaTopics.InventoryReservationEventsV1;
+        var topic = KafkaTopics.InventoryAllocationEventsV1;
         var messageId = Guid.NewGuid();
         var orgId = Guid.NewGuid();
         var aggregateId = "RES-PUBLISH-1";
@@ -144,7 +144,7 @@ public sealed class KafkaRealIntegrationTests : IAsyncLifetime
         var publisher = scope.ServiceProvider.GetRequiredService<OutboxPublisherWorker>();
         publisher.BatchSize = 1; // Chỉ claim 1 bản ghi mỗi lần
 
-        var topic = KafkaTopics.InventoryEquipmentEventsV1;
+        var topic = KafkaTopics.InventoryAssetEventsV1;
         var orgId = Guid.NewGuid();
         var aggregateId = "EQ-ORDER-STRICT";
         var now = DateTimeOffset.UtcNow;
@@ -260,7 +260,7 @@ public sealed class KafkaRealIntegrationTests : IAsyncLifetime
         var db = scope.ServiceProvider.GetRequiredService<InventoryServiceDbContext>();
         var producer = scope.ServiceProvider.GetRequiredService<IKafkaProducer>();
 
-        var topic = KafkaTopics.CatalogEquipmentEventsV1;
+        var topic = KafkaTopics.InventoryAllocationCommandsV1;
         var messageId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         var key = "test-crash-key";
@@ -354,7 +354,7 @@ public sealed class KafkaRealIntegrationTests : IAsyncLifetime
         var outboxStore = scope.ServiceProvider.GetRequiredService<IOutboxStore>();
 
         // Giả lập message với payload: null
-        var topic = KafkaTopics.InventoryReservationEventsV1;
+        var topic = KafkaTopics.InventoryAllocationEventsV1;
         var dlqTopic = KafkaTopics.GetDlqTopic(topic);
         var rawJson = $$"""
             {
@@ -399,8 +399,8 @@ public sealed class KafkaRealIntegrationTests : IAsyncLifetime
     public void Registry_IndependentGroups_BothResolveSameEvent()
     {
         var registry = new KafkaHandlerRegistry();
-        var topic = KafkaTopics.InventoryReservationEventsV1;
-        var eventType = "ReservationConfirmed";
+        var topic = KafkaTopics.InventoryAllocationEventsV1;
+        var eventType = "AllocationCreated";
 
         // 2 handlers độc lập thuộc 2 consumer groups khác nhau đăng ký cùng 1 event
         registry.Register<TestConsumerHandlerA, TestPayload>(topic, eventType, 1, "ReservationAuditHandler", "group-audit");

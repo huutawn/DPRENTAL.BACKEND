@@ -1,7 +1,6 @@
 using Dprental.InventoryService.Application.Kafka.Contracts;
 using Dprental.InventoryService.Application.Kafka.Options;
 using Dprental.InventoryService.Application.Kafka.Outbox;
-using Dprental.InventoryService.Application.Kafka.Saga;
 using Dprental.InventoryService.Application.Kafka.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,7 +10,7 @@ using Microsoft.Extensions.Logging;
 namespace Dprental.InventoryService.Application.Kafka.DependencyInjection;
 
 /// <summary>
-/// Mở rộng IServiceCollection đăng ký toàn bộ Kafka infrastructure, Outbox publisher, Consumer workers và Saga runtime.
+/// Mở rộng IServiceCollection đăng ký toàn bộ Kafka infrastructure, Outbox publisher và Consumer workers.
 /// </summary>
 public static class KafkaServiceCollectionExtensions
 {
@@ -36,14 +35,10 @@ public static class KafkaServiceCollectionExtensions
         services.AddSingleton<IKafkaProducer>(sp => sp.GetRequiredService<KafkaProducer>());
         services.AddSingleton<KafkaTopicProvisioner>();
 
-        // Đăng ký Saga runtime
-        services.AddScoped<ISagaOrchestrator, SagaOrchestrator>();
-
         // Đăng ký background workers
         services.AddHostedService<KafkaTopicStartupTask>();
         services.AddHostedService<OutboxPublisherWorker>();
         services.AddHostedService<KafkaConsumerWorker>();
-        services.AddHostedService<SagaTimeoutWorker>();
 
         return services;
     }

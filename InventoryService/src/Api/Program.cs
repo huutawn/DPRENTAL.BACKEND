@@ -1,5 +1,6 @@
 using System.IO;
 using Dprental.InventoryService.Api.Exceptions;
+using Dprental.InventoryService.Api.Security;
 using Dprental.InventoryService.Domain.Repositories;
 using Dprental.InventoryService.Application.Kafka.DependencyInjection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -9,6 +10,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddInventoryServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
 builder.Services.AddInventoryKafkaInfrastructure(builder.Configuration);
+
+// DPR-147: JWT Authentication & Authorization
+builder.Services.AddInventoryJwtAuthentication(builder.Configuration);
+builder.Services.AddInventoryAuthorization();
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<InventoryServiceDbContext>(
@@ -23,6 +28,7 @@ builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
+    options.InferSecuritySchemes();
     var apiXml = Path.Combine(AppContext.BaseDirectory, $"{typeof(Program).Assembly.GetName().Name}.xml");
     if (File.Exists(apiXml))
     {
@@ -54,6 +60,9 @@ HealthCheckOptions readinessOptions = new()
     AllowCachingResponses = false
 };
 app.MapHealthChecks("/health/ready", readinessOptions).AllowAnonymous();
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 

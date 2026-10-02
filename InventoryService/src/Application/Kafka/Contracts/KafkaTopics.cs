@@ -1,24 +1,21 @@
 namespace Dprental.InventoryService.Application.Kafka.Contracts;
 
 /// <summary>
-/// Định nghĩa 5 topics baseline và các hằng số liên quan của Inventory Service.
+/// Định nghĩa các topics baseline của Inventory Service theo target domain:
+/// inventory.allocation.commands.v1, inventory.allocation.events.v1, inventory.asset.events.v1.
 /// Mỗi topic đều có một Dead Letter Queue (DLQ) tương ứng dạng ${topic}.dlq.
 /// </summary>
 public static class KafkaTopics
 {
-    public const string CatalogEquipmentEventsV1 = "catalog.equipment.events.v1";
-    public const string InventoryReservationCommandsV1 = "inventory.reservation.commands.v1";
-    public const string InventoryReservationEventsV1 = "inventory.reservation.events.v1";
-    public const string InventoryEquipmentEventsV1 = "inventory.equipment.events.v1";
-    public const string InventoryDamageEventsV1 = "inventory.damage.events.v1";
+    public const string InventoryAllocationCommandsV1 = "inventory.allocation.commands.v1";
+    public const string InventoryAllocationEventsV1 = "inventory.allocation.events.v1";
+    public const string InventoryAssetEventsV1 = "inventory.asset.events.v1";
 
     public static readonly IReadOnlyList<string> BaselineTopics =
     [
-        CatalogEquipmentEventsV1,
-        InventoryReservationCommandsV1,
-        InventoryReservationEventsV1,
-        InventoryEquipmentEventsV1,
-        InventoryDamageEventsV1
+        InventoryAllocationCommandsV1,
+        InventoryAllocationEventsV1,
+        InventoryAssetEventsV1
     ];
 
     /// <summary>
@@ -31,7 +28,7 @@ public static class KafkaTopics
     }
 
     /// <summary>
-    /// Danh sách tất cả topic baseline và DLQ tương ứng (10 topics).
+    /// Danh sách tất cả topic baseline và DLQ tương ứng (6 topics).
     /// </summary>
     public static IReadOnlyList<string> AllBaselineAndDlqTopics =>
         BaselineTopics.Concat(BaselineTopics.Select(GetDlqTopic)).ToArray();

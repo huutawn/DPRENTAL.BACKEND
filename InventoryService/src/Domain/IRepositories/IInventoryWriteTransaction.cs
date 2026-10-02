@@ -3,7 +3,7 @@ using Dprental.InventoryService.Common;
 namespace Dprental.InventoryService.Domain.IRepositories;
 
 /// <summary>
-/// Giao diện thực thi giao dịch ghi nguyên tử có khóa mức thiết bị (Equipment-level advisory lock).
+/// Giao diện thực thi giao dịch ghi nguyên tử có khóa mức tài sản (Asset-level advisory lock).
 /// </summary>
 public interface IInventoryWriteTransaction
 {
@@ -13,12 +13,12 @@ public interface IInventoryWriteTransaction
     /// Nếu callback trả về thất bại hoặc phát sinh lỗi, toàn bộ giao dịch sẽ tự động rollback.
     /// </summary>
     /// <typeparam name="T">Kiểu dữ liệu kết quả trả về khi thành công.</typeparam>
-    /// <param name="equipmentId">Định danh thiết bị cần khóa độc quyền.</param>
+    /// <param name="assetId">Định danh tài sản cần khóa độc quyền.</param>
     /// <param name="operation">Callback chứa logic nghiệp vụ và các thay đổi dữ liệu.</param>
     /// <param name="cancellationToken">Token hủy thao tác.</param>
     /// <returns>Result chứa kết quả của callback nếu commit thành công, hoặc lỗi nếu rollback.</returns>
     Task<Result<T>> ExecuteAsync<T>(
-        Guid equipmentId,
+        Guid assetId,
         Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation,
         CancellationToken cancellationToken = default);
 }

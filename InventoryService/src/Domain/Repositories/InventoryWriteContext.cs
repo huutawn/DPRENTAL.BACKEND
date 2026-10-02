@@ -5,55 +5,36 @@ namespace Dprental.InventoryService.Domain.Repositories;
 
 /// <summary>
 /// Triển khai IInventoryWriteContext cung cấp các repository dùng chung một scoped DbContext trong giao dịch.
-/// Đảm bảo tất cả các aggregate được đọc và ghi trong cùng một transaction boundary.
 /// </summary>
 public sealed class InventoryWriteContext : IInventoryWriteContext
 {
     private readonly InventoryServiceDbContext _context;
 
-    /// <summary>
-    /// Khởi tạo bối cảnh thực thi ghi với DbContext và các repository liên quan.
-    /// </summary>
-    /// <param name="context">DbContext độc quyền của transaction.</param>
-    /// <param name="equipments">Repository thiết bị.</param>
-    /// <param name="reservations">Repository lượt đặt lịch.</param>
-    /// <param name="calendarBlocks">Repository khoảng chặn lịch.</param>
-    /// <param name="damageReports">Repository báo cáo hư hỏng.</param>
-    /// <param name="notifications">Repository thông báo tổ chức.</param>
     public InventoryWriteContext(
         InventoryServiceDbContext context,
-        Guid equipmentId,
-        IInventoryEquipmentRepository equipments,
-        IReservationRepository reservations,
-        ICalendarBlockRepository calendarBlocks,
-        IDamageReportRepository damageReports,
-        INotificationRepository notifications)
+        Guid assetId,
+        IInventoryAssetRepository assets,
+        IAssetAllocationRepository allocations,
+        ICalendarBlockRepository calendarBlocks)
     {
-        _context = context;
-        EquipmentId = equipmentId;
-        Equipments = equipments;
-        Reservations = reservations;
-        CalendarBlocks = calendarBlocks;
-        DamageReports = damageReports;
-        Notifications = notifications;
+        _context = context ?? throw new ArgumentNullException(nameof(context));
+        AssetId = assetId;
+        Assets = assets ?? throw new ArgumentNullException(nameof(assets));
+        Allocations = allocations ?? throw new ArgumentNullException(nameof(allocations));
+        CalendarBlocks = calendarBlocks ?? throw new ArgumentNullException(nameof(calendarBlocks));
     }
 
     /// <inheritdoc />
-    public Guid EquipmentId { get; }
-
-    public IInventoryEquipmentRepository Equipments { get; }
+    public Guid AssetId { get; }
 
     /// <inheritdoc />
-    public IReservationRepository Reservations { get; }
+    public IInventoryAssetRepository Assets { get; }
+
+    /// <inheritdoc />
+    public IAssetAllocationRepository Allocations { get; }
 
     /// <inheritdoc />
     public ICalendarBlockRepository CalendarBlocks { get; }
-
-    /// <inheritdoc />
-    public IDamageReportRepository DamageReports { get; }
-
-    /// <inheritdoc />
-    public INotificationRepository Notifications { get; }
 
     /// <inheritdoc />
     public void StageOutbox(OutboxMessage message)

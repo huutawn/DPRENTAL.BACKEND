@@ -400,7 +400,7 @@ public sealed class KafkaConsumerWorker : BackgroundService
                 if (!partitionToken.IsCancellationRequested)
                     // Seek lại đúng failed offset trước khi resume partition
                     consumer.Seek(consumeResult.TopicPartitionOffset);
-                    consumer.Resume([tp]);
+                consumer.Resume([tp]);
             }
         }
         catch (OperationCanceledException) when (partitionToken.IsCancellationRequested)

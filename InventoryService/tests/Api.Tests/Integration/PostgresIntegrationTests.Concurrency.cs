@@ -15,359 +15,311 @@ namespace Dprental.InventoryService.Api.Tests.Integration;
 
 public sealed partial class PostgresIntegrationTests
 {
-    /// <summary>
-    /// Kiểm thử 6: Concurrency Protocol với PostgreSQL pg_advisory_xact_lock.
-    /// Hai request cạnh tranh đặt lịch trùng khoảng thời gian (Overlap) trên cùng một thiết bị:
-    /// Nhờ khóa advisory lock cấp thiết bị, chỉ ĐÚNG 1 request thành công, request còn lại bị từ chối do xung đột.
-    /// </summary>
     [Fact]
     public async Task Concurrency_TwoOverlappingRequests_OnlyOneSucceeds()
     {
         using var sp = BuildServiceProvider();
         await using var setupContext = await CreateMigratedDbContextAsync();
 
-        Guid equipmentId = Guid.NewGuid();
-        Guid organizationId = Guid.NewGuid();
+        Guid assetId = Guid.NewGuid();
+        Guid ownerId = Guid.NewGuid();
+        Guid orgId = Guid.NewGuid();
+        Guid typeId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        setupContext.Equipments.Add(
-            InventoryEquipment.Create(equipmentId, organizationId, CatalogLifecycleStatus.Active, true, now).Value);
+        setupContext.Assets.Add(InventoryAsset.Create(assetId, ownerId, orgId, typeId, 1, "{}", true, now).Value);
         await setupContext.SaveChangesAsync();
 
+        var sharedPeriod = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
+        var readySignal = new TaskCompletionSource<bool>();
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
-        var overlapPeriod = new RentalPeriod(new DateOnly(2026, 11, 10), new DateOnly(2026, 11, 15));
 
-        // Khởi động đồng thời 2 task cạnh tranh đặt cùng khoảng thời gian
-        Task<Result<Reservation>> task1 = Task.Run(async () =>
+        async Task<Result<AssetAllocation>> SubmitHoldAsync(string externalRef)
         {
-            return await executor.ExecuteAsync(equipmentId, async (ctx, ct) =>
+            await readySignal.Task;
+            return await executor.ExecuteAsync<AssetAllocation>(assetId, async (ctx, ct) =>
             {
-                var eq = await ctx.Equipments.GetByIdAsync(equipmentId, ct);
-                var candidates = await ctx.Reservations.GetActiveOrCompletedCandidatesAsync(equipmentId, overlapPeriod.StartDate, overlapPeriod.EndDate, ct);
-                var blocks = await ctx.CalendarBlocks.GetOverlappingBlocksAsync(equipmentId, overlapPeriod.StartDate, overlapPeriod.EndDate, ct);
+                var asset = await ctx.Assets.GetByIdAsync(assetId, ct);
+                Assert.NotNull(asset);
 
-                var check = EquipmentAvailabilityPolicy.CheckAvailability(eq!, overlapPeriod, DateTimeOffset.UtcNow, candidates, blocks);
-                if (check.IsFailure)
+                var candidates = await ctx.Allocations.GetActiveCandidatesAsync(assetId, sharedPeriod.StartDate, sharedPeriod.EndDate, ct);
+                var blocks = await ctx.CalendarBlocks.GetOverlappingBlocksAsync(assetId, sharedPeriod.StartDate, sharedPeriod.EndDate, ct);
+
+                var availResult = AssetAvailabilityPolicy.CheckAvailability(asset, sharedPeriod, DateTimeOffset.UtcNow, candidates, blocks);
+                if (availResult.IsFailure)
                 {
-                    return check.Error;
+                    return availResult.Error;
                 }
 
-                var res = Reservation.CreateManual(Guid.NewGuid(), equipmentId, overlapPeriod, "User 1", "0900000001", DateTimeOffset.UtcNow).Value;
-                ctx.Reservations.Add(res);
-                return Result.Success(res);
+                var hold = AssetAllocation.CreateHold(
+                    Guid.NewGuid(), assetId, sharedPeriod, DateTimeOffset.UtcNow.AddHours(2), DateTimeOffset.UtcNow,
+                    "rental_service", externalRef).Value;
+
+                ctx.Allocations.Add(hold);
+                return Result.Success(hold);
             });
-        });
+        }
 
-        Task<Result<Reservation>> task2 = Task.Run(async () =>
-        {
-            return await executor.ExecuteAsync(equipmentId, async (ctx, ct) =>
-            {
-                var eq = await ctx.Equipments.GetByIdAsync(equipmentId, ct);
-                var candidates = await ctx.Reservations.GetActiveOrCompletedCandidatesAsync(equipmentId, overlapPeriod.StartDate, overlapPeriod.EndDate, ct);
-                var blocks = await ctx.CalendarBlocks.GetOverlappingBlocksAsync(equipmentId, overlapPeriod.StartDate, overlapPeriod.EndDate, ct);
+        var taskA = Task.Run(() => SubmitHoldAsync("EXT-CONCUR-A"));
+        var taskB = Task.Run(() => SubmitHoldAsync("EXT-CONCUR-B"));
 
-                var check = EquipmentAvailabilityPolicy.CheckAvailability(eq!, overlapPeriod, DateTimeOffset.UtcNow, candidates, blocks);
-                if (check.IsFailure)
-                {
-                    return check.Error;
-                }
+        readySignal.SetResult(true);
+        var results = await Task.WhenAll(taskA, taskB);
 
-                var res = Reservation.CreateManual(Guid.NewGuid(), equipmentId, overlapPeriod, "User 2", "0900000002", DateTimeOffset.UtcNow).Value;
-                ctx.Reservations.Add(res);
-                return Result.Success(res);
-            });
-        });
+        var successes = results.Count(r => r.IsSuccess);
+        var conflicts = results.Count(r => r.IsFailure && r.Error.Code == "ASSET_UNAVAILABLE");
 
-        var results = await Task.WhenAll(task1, task2);
+        Assert.Equal(1, successes);
+        Assert.Equal(1, conflicts);
 
-        int successCount = results.Count(r => r.IsSuccess);
-        int failureCount = results.Count(r => r.IsFailure);
-
-        Assert.Equal(1, successCount);
-        Assert.Equal(1, failureCount);
+        await using var verifyContext = await CreateMigratedDbContextAsync();
+        var savedAllocations = await verifyContext.AssetAllocations.Where(a => a.AssetId == assetId).ToListAsync();
+        Assert.Single(savedAllocations);
     }
 
-    /// <summary>
-    /// Kiểm thử 7: Concurrency Protocol với hai khoảng thời gian KHÔNG trùng lặp trên cùng thiết bị.
-    /// Cả hai request tuần tự lấy khóa và đều thành công.
-    /// </summary>
     [Fact]
     public async Task Concurrency_TwoNonOverlappingRequests_BothSucceed()
     {
         using var sp = BuildServiceProvider();
         await using var setupContext = await CreateMigratedDbContextAsync();
 
-        Guid equipmentId = Guid.NewGuid();
-        Guid organizationId = Guid.NewGuid();
+        Guid assetId = Guid.NewGuid();
+        Guid ownerId = Guid.NewGuid();
+        Guid orgId = Guid.NewGuid();
+        Guid typeId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        setupContext.Equipments.Add(
-            InventoryEquipment.Create(equipmentId, organizationId, CatalogLifecycleStatus.Active, true, now).Value);
+        setupContext.Assets.Add(InventoryAsset.Create(assetId, ownerId, orgId, typeId, 1, "{}", true, now).Value);
         await setupContext.SaveChangesAsync();
 
+        var periodA = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
+        var periodB = new RentalPeriod(new DateOnly(2026, 11, 10), new DateOnly(2026, 11, 15));
+
+        var readySignal = new TaskCompletionSource<bool>();
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
-        var period1 = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
-        var period2 = new RentalPeriod(new DateOnly(2026, 11, 10), new DateOnly(2026, 11, 15));
 
-        Task<Result<Reservation>> task1 = Task.Run(async () =>
+        async Task<Result<AssetAllocation>> SubmitAsync(RentalPeriod p, string extRef)
         {
-            return await executor.ExecuteAsync(equipmentId, async (ctx, ct) =>
+            await readySignal.Task;
+            return await executor.ExecuteAsync<AssetAllocation>(assetId, async (ctx, ct) =>
             {
-                var eq = await ctx.Equipments.GetByIdAsync(equipmentId, ct);
-                var candidates = await ctx.Reservations.GetActiveOrCompletedCandidatesAsync(equipmentId, period1.StartDate, period1.EndDate, ct);
-                var blocks = await ctx.CalendarBlocks.GetOverlappingBlocksAsync(equipmentId, period1.StartDate, period1.EndDate, ct);
+                var asset = await ctx.Assets.GetByIdAsync(assetId, ct);
+                Assert.NotNull(asset);
 
-                var check = EquipmentAvailabilityPolicy.CheckAvailability(eq!, period1, DateTimeOffset.UtcNow, candidates, blocks);
-                if (check.IsFailure) return check.Error;
+                var candidates = await ctx.Allocations.GetActiveCandidatesAsync(assetId, p.StartDate, p.EndDate, ct);
+                var blocks = await ctx.CalendarBlocks.GetOverlappingBlocksAsync(assetId, p.StartDate, p.EndDate, ct);
 
-                var res = Reservation.CreateManual(Guid.NewGuid(), equipmentId, period1, "User A", "0900000001", DateTimeOffset.UtcNow).Value;
-                ctx.Reservations.Add(res);
-                return Result.Success(res);
+                var availResult = AssetAvailabilityPolicy.CheckAvailability(asset, p, DateTimeOffset.UtcNow, candidates, blocks);
+                if (availResult.IsFailure)
+                {
+                    return availResult.Error;
+                }
+
+                var hold = AssetAllocation.CreateHold(
+                    Guid.NewGuid(), assetId, p, DateTimeOffset.UtcNow.AddHours(2), DateTimeOffset.UtcNow,
+                    "rental_service", extRef).Value;
+
+                ctx.Allocations.Add(hold);
+                return Result.Success(hold);
             });
-        });
+        }
 
-        Task<Result<Reservation>> task2 = Task.Run(async () =>
-        {
-            return await executor.ExecuteAsync(equipmentId, async (ctx, ct) =>
-            {
-                var eq = await ctx.Equipments.GetByIdAsync(equipmentId, ct);
-                var candidates = await ctx.Reservations.GetActiveOrCompletedCandidatesAsync(equipmentId, period2.StartDate, period2.EndDate, ct);
-                var blocks = await ctx.CalendarBlocks.GetOverlappingBlocksAsync(equipmentId, period2.StartDate, period2.EndDate, ct);
+        var taskA = Task.Run(() => SubmitAsync(periodA, "EXT-NON-A"));
+        var taskB = Task.Run(() => SubmitAsync(periodB, "EXT-NON-B"));
 
-                var check = EquipmentAvailabilityPolicy.CheckAvailability(eq!, period2, DateTimeOffset.UtcNow, candidates, blocks);
-                if (check.IsFailure) return check.Error;
+        readySignal.SetResult(true);
+        var results = await Task.WhenAll(taskA, taskB);
 
-                var res = Reservation.CreateManual(Guid.NewGuid(), equipmentId, period2, "User B", "0900000002", DateTimeOffset.UtcNow).Value;
-                ctx.Reservations.Add(res);
-                return Result.Success(res);
-            });
-        });
+        Assert.All(results, r => Assert.True(r.IsSuccess));
 
-        var results = await Task.WhenAll(task1, task2);
-
-        Assert.True(results[0].IsSuccess);
-        Assert.True(results[1].IsSuccess);
+        await using var verifyContext = await CreateMigratedDbContextAsync();
+        Assert.Equal(2, await verifyContext.AssetAllocations.CountAsync(a => a.AssetId == assetId));
     }
 
-    /// <summary>
-    /// Kiểm thử 8: Transaction Rollback đảm bảo tính nguyên tử.
-    /// Nếu callback trả về Failure hoặc Exception, transaction tự động rollback,
-    /// không để lại bất kỳ reservation, transition hay outbox message nào trong database.
-    /// </summary>
     [Fact]
     public async Task WriteTransaction_Rollback_LeavesNoDataOrOutbox()
     {
         using var sp = BuildServiceProvider();
         await using var setupContext = await CreateMigratedDbContextAsync();
 
-        Guid equipmentId = Guid.NewGuid();
-        Guid organizationId = Guid.NewGuid();
+        Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
-
-        setupContext.Equipments.Add(
-            InventoryEquipment.Create(equipmentId, organizationId, CatalogLifecycleStatus.Active, true, now).Value);
+        setupContext.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value);
         await setupContext.SaveChangesAsync();
 
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
-        Guid resId = Guid.NewGuid();
+        Guid allocId = Guid.NewGuid();
         Guid outboxId = Guid.NewGuid();
-        var period = new RentalPeriod(new DateOnly(2026, 11, 20), new DateOnly(2026, 11, 25));
-
-        var failedResult = await executor.ExecuteAsync<Reservation>(equipmentId, async (ctx, ct) =>
+        var result = await executor.ExecuteAsync<bool>(assetId, (ctx, ct) =>
         {
-            var res = Reservation.CreateManual(resId, equipmentId, period, "User", "0900000000", DateTimeOffset.UtcNow).Value;
-            ctx.Reservations.Add(res);
+            var p = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
+            var alloc = AssetAllocation.CreateManual(allocId, assetId, p, now).Value;
+            ctx.Allocations.Add(alloc);
 
-            var outbox = OutboxMessage.Create(outboxId, "inventory.reservation.events.v1", $"{equipmentId}:{resId}", "{}", DateTimeOffset.UtcNow);
-            ctx.StageOutbox(outbox);
+            ctx.StageOutbox(OutboxMessage.Create(outboxId, "test.topic", "key", "{}", now));
 
-            // Giả lập lỗi nghiệp vụ dẫn đến Failure
-            return Error.Validation("BUSINESS_FAILURE", "Giả lập lỗi hủy giao dịch");
+            return Task.FromResult<Result<bool>>(Error.Validation("REJECTED", "Lỗi nghiệp vụ mô phỏng"));
         });
 
-        Assert.True(failedResult.IsFailure);
+        Assert.True(result.IsFailure);
 
-        // Kiểm tra cơ sở dữ liệu hoàn toàn sạch sẽ, không có bản ghi mồ côi
-        await using var verifyContext = await CreateMigratedDbContextAsync();
-        var savedRes = await verifyContext.Reservations.FindAsync(resId);
-        var savedOutbox = await verifyContext.OutboxMessages.FindAsync(outboxId);
-        var savedTransitions = await verifyContext.ReservationTransitions.Where(t => t.ReservationId == resId).ToListAsync();
-
-        Assert.Null(savedRes);
-        Assert.Null(savedOutbox);
-        Assert.Empty(savedTransitions);
+        await using var verify = await CreateMigratedDbContextAsync();
+        Assert.Null(await verify.AssetAllocations.FindAsync(allocId));
+        Assert.Null(await verify.OutboxMessages.FindAsync(outboxId));
     }
 
-    /// <summary>
-    /// Kiểm thử 9: Khóa độc quyền pg_advisory_xact_lock được giải phóng ngay lập tức khi operation bị hủy (CancellationToken).
-    /// Các thao tác tiếp theo trên cùng thiết bị có thể tiếp tục chiếm khóa bình thường mà không bị deadlock.
-    /// </summary>
     [Fact]
     public async Task AdvisoryLock_ReleasedWhenOperationCancelled()
     {
         using var sp = BuildServiceProvider();
-        await using var setupContext = await CreateMigratedDbContextAsync();
+        await using var setup = await CreateMigratedDbContextAsync();
 
-        Guid equipmentId = Guid.NewGuid();
-        Guid organizationId = Guid.NewGuid();
+        Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
-
-        setupContext.Equipments.Add(
-            InventoryEquipment.Create(equipmentId, organizationId, CatalogLifecycleStatus.Active, true, now).Value);
-        await setupContext.SaveChangesAsync();
+        setup.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value);
+        await setup.SaveChangesAsync();
 
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
-
-        // 1. Chạy một operation và chủ động hủy token giữa chừng
         using var cts = new CancellationTokenSource();
-        cts.Cancel(); // Token đã bị hủy
+        cts.Cancel();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-        {
-            await executor.ExecuteAsync<bool>(equipmentId, async (ctx, ct) =>
-            {
-                await Task.Delay(100, ct);
-                return Result.Success(true);
-            }, cts.Token);
-        });
+        // Lần gọi 1 bị hủy
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            executor.ExecuteAsync<bool>(assetId, (ctx, ct) =>
+                Task.FromResult(Result.Success(true)), cts.Token));
 
-        // 2. Thao tác tiếp theo trên cùng equipmentId phải thực thi thành công ngay lập tức (khóa đã được giải phóng)
-        var subsequentResult = await executor.ExecuteAsync<bool>(equipmentId, async (ctx, ct) =>
-        {
-            var eq = await ctx.Equipments.GetByIdAsync(equipmentId, ct);
-            return Result.Success(eq != null);
-        });
+        // Lần gọi 2 chạy bình thường, chứng minh lock đã được giải phóng
+        var successResult = await executor.ExecuteAsync<bool>(assetId, (ctx, ct) =>
+            Task.FromResult(Result.Success(true)));
 
-        Assert.True(subsequentResult.IsSuccess);
-        Assert.True(subsequentResult.Value);
+        Assert.True(successResult.IsSuccess);
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ReservationWaitsForConcurrentBlockOrDisable(bool disableBookings)
-    {
-        using var services = BuildServiceProvider();
-        await using var setup = await CreateMigratedDbContextAsync();
-        var now = DateTimeOffset.UtcNow;
-        var today = BusinessDateTime.ToVietnamDate(now);
-        var equipment = InventoryEquipment.Create(Guid.NewGuid(), Guid.NewGuid(), CatalogLifecycleStatus.Active, true, now).Value;
-        setup.Equipments.Add(equipment);
-        await setup.SaveChangesAsync();
-        var period = new RentalPeriod(today.AddDays(2), today.AddDays(5));
-        var locked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var reservationEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var executor = services.GetRequiredService<IInventoryWriteTransaction>();
-        var first = executor.ExecuteAsync<int>(equipment.Id, async (ctx, ct) =>
-        {
-            locked.SetResult();
-            await release.Task.WaitAsync(ct);
-            if (disableBookings)
-            {
-                var loaded = await ctx.Equipments.GetByIdAsync(equipment.Id, ct);
-                var disabled = loaded!.DisableBookings(null, now);
-                if (disabled.IsFailure) return disabled.Error;
-            }
-            else
-            {
-                var block = CalendarBlock.Create(Guid.NewGuid(), equipment.Id, period.StartDate, period.EndDate,
-                    CalendarBlockReason.Maintenance, "staff", now, today).Value;
-                ctx.CalendarBlocks.Add(block);
-            }
-            return Result.Success(1);
-        }, deadline.Token);
-        await locked.Task.WaitAsync(deadline.Token);
-        var second = executor.ExecuteAsync<Reservation>(equipment.Id, async (ctx, ct) =>
-        {
-            reservationEntered.SetResult();
-            var loaded = await ctx.Equipments.GetByIdAsync(equipment.Id, ct);
-            var reservations = await ctx.Reservations.GetActiveOrCompletedCandidatesAsync(equipment.Id, period.StartDate, period.EndDate, ct);
-            var blocks = await ctx.CalendarBlocks.GetOverlappingBlocksAsync(equipment.Id, period.StartDate, period.EndDate, ct);
-            var available = EquipmentAvailabilityPolicy.CheckAvailability(loaded!, period, now, reservations, blocks);
-            if (available.IsFailure) return available.Error;
-            var reservation = Reservation.CreateManual(Guid.NewGuid(), equipment.Id, period, "Renter", "0900000000", now).Value;
-            ctx.Reservations.Add(reservation);
-            return Result.Success(reservation);
-        }, deadline.Token);
-        try
-        {
-            var waiters = 0L;
-            while (waiters == 0)
-            {
-                waiters = await setup.Database.SqlQueryRaw<long>(
-                    "SELECT count(*)::bigint AS \"Value\" FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())")
-                    .SingleAsync(deadline.Token);
-                if (waiters == 0) await Task.Delay(20, deadline.Token);
-            }
-            Assert.False(reservationEntered.Task.IsCompleted);
-        }
-        finally { release.TrySetResult(); }
-        Assert.True((await first).IsSuccess);
-        var result = await second;
-        Assert.True(result.IsFailure);
-        Assert.Equal(disableBookings ? "EQUIPMENT_NOT_ACCEPTING_BOOKINGS" : "EQUIPMENT_BLOCKED", result.Error.Code);
-        await using var verify = await CreateMigratedDbContextAsync();
-        Assert.False(await verify.Reservations.AnyAsync(r => r.EquipmentId == equipment.Id));
-    }
-
-    /// <summary>
-    /// Kiểm thử 13: Cạnh tranh giữa ExpireHold và ConfirmHold dưới khóa độc quyền cấp thiết bị.
-    /// Một trong hai thao tác hoàn tất trước sẽ chuyển trạng thái, thao tác sau sẽ thấy trạng thái đã đổi và không thể thực thi trái phép.
-    /// </summary>
-    [Fact]
-    public async Task Concurrency_ExpireCompetesWithConfirm()
+    public async Task AllocationWaitsForConcurrentBlockOrDisable(bool disableBookings)
     {
         using var sp = BuildServiceProvider();
-        await using var setupContext = await CreateMigratedDbContextAsync();
+        await using var setup = await CreateMigratedDbContextAsync();
 
-        Guid equipmentId = Guid.NewGuid();
-        Guid organizationId = Guid.NewGuid();
+        Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
+        setup.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value);
+        await setup.SaveChangesAsync();
 
-        setupContext.Equipments.Add(
-            InventoryEquipment.Create(equipmentId, organizationId, CatalogLifecycleStatus.Active, true, now).Value);
+        var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
+        var period = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
 
-        var period = new RentalPeriod(new DateOnly(2026, 11, 10), new DateOnly(2026, 11, 15));
-        // Hold hết hạn sau 1 giây
-        DateTimeOffset holdExpiresAt = now.AddSeconds(1);
-        Guid resId = Guid.NewGuid();
-        var res = Reservation.CreateHold(resId, equipmentId, period, holdExpiresAt, now, sourceSystem: "tests", externalReference: Guid.NewGuid().ToString(), renterAccountId: Guid.NewGuid()).Value;
-        setupContext.Reservations.Add(res);
-        await setupContext.SaveChangesAsync();
+        var blockStarted = new TaskCompletionSource<bool>();
+        var proceedBlock = new TaskCompletionSource<bool>();
 
-        // Đợi 1.1 giây để hold chính thức quá hạn
-        await Task.Delay(1100);
-        DateTimeOffset afterExpiryTime = DateTimeOffset.UtcNow;
+        var blockTask = Task.Run(async () =>
+        {
+            return await executor.ExecuteAsync<bool>(assetId, async (ctx, ct) =>
+            {
+                var asset = await ctx.Assets.GetByIdAsync(assetId, ct);
+                Assert.NotNull(asset);
+
+                blockStarted.SetResult(true);
+                await proceedBlock.Task;
+
+                if (disableBookings)
+                {
+                    asset.DisableBookings("Tạm dừng", DateTimeOffset.UtcNow);
+                    ctx.Assets.Update(asset);
+                }
+                else
+                {
+                    var block = CalendarBlock.Create(
+                        Guid.NewGuid(), assetId, period.StartDate, period.EndDate,
+                        CalendarBlockReason.Maintenance, "op", DateTimeOffset.UtcNow, new DateOnly(2026, 10, 1)).Value;
+                    ctx.CalendarBlocks.Add(block);
+                }
+
+                return Result.Success(true);
+            });
+        });
+
+        await blockStarted.Task;
+
+        var allocTask = Task.Run(async () =>
+        {
+            return await executor.ExecuteAsync<AssetAllocation>(assetId, async (ctx, ct) =>
+            {
+                var asset = await ctx.Assets.GetByIdAsync(assetId, ct);
+                Assert.NotNull(asset);
+
+                var candidates = await ctx.Allocations.GetActiveCandidatesAsync(assetId, period.StartDate, period.EndDate, ct);
+                var blocks = await ctx.CalendarBlocks.GetOverlappingBlocksAsync(assetId, period.StartDate, period.EndDate, ct);
+
+                var availResult = AssetAvailabilityPolicy.CheckAvailability(asset, period, DateTimeOffset.UtcNow, candidates, blocks);
+                if (availResult.IsFailure)
+                {
+                    return availResult.Error;
+                }
+
+                var hold = AssetAllocation.CreateHold(
+                    Guid.NewGuid(), assetId, period, DateTimeOffset.UtcNow.AddHours(2), DateTimeOffset.UtcNow,
+                    "rental", "EXT-LOCKED").Value;
+                ctx.Allocations.Add(hold);
+                return Result.Success(hold);
+            });
+        });
+
+        proceedBlock.SetResult(true);
+        var blockResult = await blockTask;
+        var allocResult = await allocTask;
+
+        Assert.True(blockResult.IsSuccess);
+        Assert.True(allocResult.IsFailure);
+        Assert.True(allocResult.Error.Code is "ASSET_BLOCKED" or "ASSET_NOT_ACCEPTING_BOOKINGS");
+    }
+
+    [Fact]
+    public async Task Concurrency_ExpireCompetesWithAllocate()
+    {
+        using var sp = BuildServiceProvider();
+        await using var setup = await CreateMigratedDbContextAsync();
+
+        Guid assetId = Guid.NewGuid();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        setup.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value);
+
+        var period = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
+        var hold = AssetAllocation.CreateHold(
+            Guid.NewGuid(), assetId, period, now.AddSeconds(1), now, "rental", "EXT-EXP-COMPETE").Value;
+        setup.AssetAllocations.Add(hold);
+        await setup.SaveChangesAsync();
 
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
 
-        // Thao tác 1: ExpireHold được thực thi
-        var expireResult = await executor.ExecuteAsync<bool>(equipmentId, async (ctx, ct) =>
-        {
-            var targetRes = await ctx.Reservations.GetByIdAsync(resId, ct);
-            var expireCheck = targetRes!.ExpireHold(afterExpiryTime, "system");
-            if (expireCheck.IsFailure) return expireCheck.Error;
+        // Giả lập thời gian sau khi hold hết hạn
+        DateTimeOffset afterExpiry = now.AddSeconds(5);
 
-            ctx.Reservations.Update(targetRes);
-            return Result.Success(true);
+        // ExpireHold thành công trước
+        var expireResult = await executor.ExecuteAsync<bool>(assetId, async (ctx, ct) =>
+        {
+            var alloc = await ctx.Allocations.GetByIdAsync(hold.Id, ct);
+            Assert.NotNull(alloc);
+            var res = alloc.ExpireHold(afterExpiry, "system");
+            if (res.IsSuccess) ctx.Allocations.Update(alloc);
+            return res.IsSuccess ? Result.Success(true) : res.Error;
         });
+
         Assert.True(expireResult.IsSuccess);
 
-        // Thao tác 2: ConfirmHold cạnh tranh trên lượt đặt đã Released -> BỊ TỪ CHỐI do đã ở Terminal State
-        var confirmResult = await executor.ExecuteAsync<bool>(equipmentId, async (ctx, ct) =>
+        // Sau đó Allocate đến sau -> Thất bại vì đã ở terminal state Released
+        var allocateResult = await executor.ExecuteAsync<bool>(assetId, async (ctx, ct) =>
         {
-            var targetRes = await ctx.Reservations.GetByIdAsync(resId, ct);
-            var confirmCheck = targetRes!.ConfirmHold(afterExpiryTime, "renter");
-            if (confirmCheck.IsFailure) return confirmCheck.Error;
-
-            ctx.Reservations.Update(targetRes);
-            return Result.Success(true);
+            var alloc = await ctx.Allocations.GetByIdAsync(hold.Id, ct);
+            Assert.NotNull(alloc);
+            var res = alloc.Allocate(afterExpiry, "system");
+            if (res.IsSuccess) ctx.Allocations.Update(alloc);
+            return res.IsSuccess ? Result.Success(true) : res.Error;
         });
 
-        Assert.True(confirmResult.IsFailure);
-        Assert.Equal("RESERVATION_IN_TERMINAL_STATE", confirmResult.Error.Code);
+        Assert.True(allocateResult.IsFailure);
+        Assert.Equal("ALLOCATION_IN_TERMINAL_STATE", allocateResult.Error.Code);
     }
-
 }

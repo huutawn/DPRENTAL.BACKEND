@@ -10,7 +10,7 @@ namespace Dprental.InventoryService.Domain.Repositories;
 
 /// <summary>
 /// Triển khai Transactional Inbox store và execution boundary trên PostgreSQL.
-/// Đảm bảo tính duy nhất theo (Handler, MessageId) và commit atomic với Outbox/Saga.
+/// Đảm bảo tính duy nhất theo (Handler, MessageId) và commit atomic với Outbox.
 /// </summary>
 public sealed class InboxStore : IInboxStore
 {
