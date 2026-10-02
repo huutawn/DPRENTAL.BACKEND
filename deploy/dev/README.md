@@ -132,7 +132,7 @@ Catalog riêng như bước 6. Compose không tự apply migrations khi start ru
 ## Phát hành InventoryService
 
 Pipeline `.github/workflows/inventoryservice-dev.yml` trên branch `inventory/develop-ci-cd`
-kiểm tra tests không cần hạ tầng ngoài, publish runtime/migrator với cùng commit SHA rồi gọi
+publish runtime/migrator với cùng commit SHA rồi gọi
 `scripts/deploy-inventoryservice.sh`. Dùng GitHub Environment `dev`, variable
 `GHCR_IMAGE_NAMESPACE` và các secrets `DEV_VPS_SSH_PRIVATE_KEY`, `DEV_VPS_KNOWN_HOSTS`,
 `DEV_VPS_HOST`, `DEV_VPS_USER`, `DEV_VPS_PORT` (mặc định 22), giống pipeline Catalog.
