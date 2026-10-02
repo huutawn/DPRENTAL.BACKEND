@@ -20,6 +20,11 @@ internal sealed class GatewayJwtOptionsValidator : IValidateOptions<GatewayJwtOp
             failures.Add("Gateway:Authentication:Jwt:Audience must be configured.");
         }
 
+        if (string.IsNullOrWhiteSpace(options.InventoryAudience))
+        {
+            failures.Add("Gateway:Authentication:Jwt:InventoryAudience must be configured.");
+        }
+
         if (!Uri.TryCreate(options.JwksUri, UriKind.Absolute, out Uri? jwksUri)
             || (jwksUri.Scheme != Uri.UriSchemeHttps && jwksUri.Scheme != Uri.UriSchemeHttp))
         {

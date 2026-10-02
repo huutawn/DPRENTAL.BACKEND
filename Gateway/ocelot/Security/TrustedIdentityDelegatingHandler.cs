@@ -43,10 +43,13 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
         {
             var headers = request.Headers;
 
-            // MediaService receives only the authenticated bearer token, never browser session cookies.
+            // MediaService và InventoryService chỉ nhận authenticated bearer token, không nhận browser session cookies
             bool isMediaRequest = httpContext.Request.Path.StartsWithSegments("/api/v1/media");
+            bool isInventoryRequest = httpContext.Request.Path.StartsWithSegments("/api/v1/inventory");
             if (isMediaRequest ||
-                httpContext.Request.Path.StartsWithSegments("/media/swagger"))
+                isInventoryRequest ||
+                httpContext.Request.Path.StartsWithSegments("/media/swagger") ||
+                httpContext.Request.Path.StartsWithSegments("/inventory/swagger"))
             {
                 headers.Remove("Cookie");
             }
@@ -95,26 +98,34 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
                 headers.TryAddWithoutValidation(GatewayHeaderConstants.ServiceName, serviceName);
             }
 
+            // Chuyển đổi Cookie token sang Authorization Bearer cho downstream nếu client chỉ gửi Cookie (không áp dụng cho ApiKey routes)
+            if (!routePolicy.RequiresApiKey(httpContext.Request) &&
+                headers.Authorization is null &&
+                httpContext.Request.Cookies.TryGetValue("accessToken", out string? cookieToken) &&
+                !string.IsNullOrWhiteSpace(cookieToken))
+            {
+                headers.TryAddWithoutValidation("Authorization", $"Bearer {cookieToken}");
+            }
+
             // 4. Trusted Identity Forwarding:
-            // Chỉ chuyển tiếp danh tính người dùng; service principal không được giả thành X-User-Id.
-            if (httpContext.User?.Identity is not null && httpContext.User.Identity.IsAuthenticated &&
+            // Chỉ chuyển tiếp danh tính người dùng cho các service tin cậy header;
+            // Riêng InventoryService không tin tưởng các header danh tính mà tự xác thực JWT.
+            if (!isInventoryRequest &&
+                httpContext.User?.Identity is not null && httpContext.User.Identity.IsAuthenticated &&
                 !httpContext.User.HasClaim("u", "svc"))
             {
                 IdentityContext identity = identityExtractor.Extract(httpContext.User);
                 if (identity.IsAuthenticated && !string.IsNullOrWhiteSpace(identity.UserId))
                 {
-                    // Chuyển tiếp UserId thật trích xuất từ claim "sub" của JWT
                     headers.Remove(GatewayHeaderConstants.UserId);
                     headers.TryAddWithoutValidation(GatewayHeaderConstants.UserId, identity.UserId);
 
-                    // Chuyển tiếp PartyId nếu tồn tại trong token
                     headers.Remove(GatewayHeaderConstants.PartyId);
                     if (!string.IsNullOrWhiteSpace(identity.PartyId))
                     {
                         headers.TryAddWithoutValidation(GatewayHeaderConstants.PartyId, identity.PartyId);
                     }
 
-                    // Chuyển tiếp các vai trò (Roles) hợp lệ đã xác thực
                     headers.Remove(GatewayHeaderConstants.Role);
                     foreach (string role in identity.Roles)
                     {
@@ -123,16 +134,15 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
                             headers.TryAddWithoutValidation(GatewayHeaderConstants.Role, role);
                         }
                     }
-
                 }
-
-                // Chuyển đổi Cookie token sang Authorization Bearer cho downstream nếu client chỉ gửi Cookie
-                if (headers.Authorization is null &&
-                    httpContext.Request.Cookies.TryGetValue("accessToken", out string? cookieToken) &&
-                    !string.IsNullOrWhiteSpace(cookieToken))
-                {
-                    headers.TryAddWithoutValidation("Authorization", $"Bearer {cookieToken}");
-                }
+            }
+            else if (isInventoryRequest)
+            {
+                // Đảm bảo không chuyển tiếp spoofable identity headers xuống Inventory
+                headers.Remove(GatewayHeaderConstants.UserId);
+                headers.Remove(GatewayHeaderConstants.PartyId);
+                headers.Remove(GatewayHeaderConstants.Role);
+                headers.Remove(GatewayHeaderConstants.OrganizationId);
             }
         }
 

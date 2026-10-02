@@ -17,6 +17,11 @@ public static class GatewayHeaderConstants
     public const string PartyId = "X-Party-Id";
 
     /// <summary>
+    /// Tiêu đề HTTP định danh tổ chức của người dùng.
+    /// </summary>
+    public const string OrganizationId = "X-Organization-Id";
+
+    /// <summary>
     /// Tiêu đề HTTP biểu diễn vai trò của người dùng đã được xác thực qua JWT.
     /// </summary>
     public const string Role = "X-Role";
@@ -54,6 +59,7 @@ public static class GatewayHeaderConstants
     {
         UserId,
         PartyId,
+        OrganizationId,
         Role,
         "X-Roles",
         ServiceName,
