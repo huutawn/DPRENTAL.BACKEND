@@ -63,12 +63,12 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
     private static string AdminToken => TestJwtHelper.GenerateToken(
         sub: Guid.NewGuid().ToString(),
         sid: Guid.NewGuid().ToString(),
-        role: "Admin");
+        role: "adm");
 
     private static string CustomerToken => TestJwtHelper.GenerateToken(
         sub: Guid.NewGuid().ToString(),
         sid: Guid.NewGuid().ToString(),
-        role: "customer");
+        role: "cus");
 
     [Fact]
     public async Task WriteEndpoints_Anonymous_ReturnsUnauthorized401()

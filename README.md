@@ -29,6 +29,21 @@ scripts/             # Scripts hỗ trợ và Git hooks
 - **Quan sát (Observability)**: Correlation ID ổn định trong mỗi request và response header `X-Correlation-ID`. Tracing OpenTelemetry W3C với service name `dprental-catalog-service`.
 - **Bảo mật mạng**: Forwarded headers với proxy CIDR và cấu hình CORS chặt chẽ.
 
+## Quyền truy cập API
+
+Catalog đọc nguyên claim `r` do AuthService phát hành: `adm` (Admin), `adp` (AdminPlatform), `own` (Owner), `mem` (Member), `cus` (Customer).
+
+| API (tiền tố `/api/v1/catalog`) | Quyền |
+| --- | --- |
+| `GET /categories`, `GET /categories/{id}` | Công khai |
+| `GET /equipment-types`, `GET /equipment-types/{id}` | Công khai |
+| `POST /categories`, `PATCH /categories/{id}` | JWT hợp lệ, role `adm` |
+| `POST /equipment-types`, `PATCH /equipment-types/{id}` | JWT hợp lệ, role `adm` |
+| `POST /equipment-types/{id}/publish`, `POST /equipment-types/{id}/disable` | JWT hợp lệ, role `adm` |
+| `GET /health/live`, `GET /health/ready` (không có tiền tố) | Công khai |
+
+API ghi trả `401` khi thiếu/token không hợp lệ, `403` khi token hợp lệ nhưng thiếu `adm`. Các role `adp`, `own`, `mem`, `cus` không cấp quyền quản trị catalog; tên `Admin`/`admin` không thay thế mã `adm` trong token.
+
 ## Chạy hạ tầng cục bộ
 
 ```bash
