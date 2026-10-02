@@ -14,6 +14,7 @@ builder.Services.AddCatalogServiceDistributedTracing(builder.Configuration);
 builder.Services.AddCatalogServiceApplication(builder.Configuration);
 builder.Services.AddCatalogServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
 builder.Services.AddJwtBearerSecurity(builder.Configuration);
+builder.Services.AddCatalogAuthorizationPolicies();
 builder.Services.AddAuthForwardedHeaders(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICorrelationIdProvider, CorrelationIdProvider>();

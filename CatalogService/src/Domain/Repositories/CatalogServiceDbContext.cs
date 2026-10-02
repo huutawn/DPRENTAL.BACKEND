@@ -12,6 +12,7 @@ public sealed class CatalogServiceDbContext : DbContext
     public const string SpecificationsCheckConstraintName = "CK_Equipments_Specifications_IsObject";
     public DbSet<Equipment> Equipments { get; set; }
     public DbSet<Category> Categories { get; set; }
+    public DbSet<EquipmentType> EquipmentTypes { get; set; }
     public CatalogServiceDbContext(DbContextOptions<CatalogServiceDbContext> options) : base(options)
     {
     }

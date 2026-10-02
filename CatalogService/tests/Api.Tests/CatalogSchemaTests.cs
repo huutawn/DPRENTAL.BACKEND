@@ -99,6 +99,7 @@ public sealed class CatalogSchemaTests
     [InlineData(typeof(Category))]
     [InlineData(typeof(Equipment))]
     [InlineData(typeof(EquipmentMedia))]
+    [InlineData(typeof(EquipmentType))]
     public void Ids_AreAssignedByApplication(Type entityType)
     {
         IProperty id = BuildModel().FindEntityType(entityType)!.FindProperty("Id")!;
@@ -135,6 +136,58 @@ public sealed class CatalogSchemaTests
 
         IIndex pair = SingleIndex(media, nameof(EquipmentMedia.EquipmentId), nameof(EquipmentMedia.MediaId));
         Assert.True(pair.IsUnique);
+    }
+
+    [Fact]
+    public void EquipmentType_IsUniqueByCode_AndByNameWithinCategory()
+    {
+        IEntityType type = Entity<EquipmentType>(BuildModel());
+
+        IIndex code = SingleIndex(type, nameof(EquipmentType.Code));
+        Assert.True(code.IsUnique);
+        Assert.Equal(EquipmentTypeRepository.CodeIndexName, code.GetDatabaseName());
+
+        IIndex name = SingleIndex(type, nameof(EquipmentType.CategoryId), nameof(EquipmentType.NormalizedName));
+        Assert.True(name.IsUnique);
+        Assert.Equal(EquipmentTypeRepository.NameIndexName, name.GetDatabaseName());
+    }
+
+    [Fact]
+    public void EquipmentType_StoresStatusAsString_AndReferencesCategoryWithoutCascade()
+    {
+        IEntityType type = Entity<EquipmentType>(BuildModel());
+
+        IProperty status = type.FindProperty(nameof(EquipmentType.Status))!;
+        Assert.Equal("character varying(20)", status.GetColumnType());
+        Assert.Equal(typeof(string), status.GetTypeMapping().Converter?.ProviderClrType);
+
+        IForeignKey foreignKey = Assert.Single(type.GetForeignKeys());
+        Assert.Equal(typeof(Category), foreignKey.PrincipalEntityType.ClrType);
+        Assert.Equal(DeleteBehavior.Restrict, foreignKey.DeleteBehavior);
+    }
+
+    [Fact]
+    public void EquipmentType_UsesXminAsConcurrencyToken()
+    {
+        IProperty version = Entity<EquipmentType>(BuildModel()).FindProperty(nameof(EquipmentType.Version))!;
+
+        Assert.True(version.IsConcurrencyToken);
+        Assert.Equal("xmin", version.GetColumnName());
+    }
+
+    [Theory]
+    [InlineData("OrganizationId")]
+    [InlineData("DailyPrice")]
+    [InlineData("RegionId")]
+    [InlineData("Specifications")]
+    [InlineData("Media")]
+    public void EquipmentType_HasNoSupplierAssetFields(string supplierField)
+    {
+        IEntityType type = Entity<EquipmentType>(BuildModel());
+
+        Assert.Null(type.FindProperty(supplierField));
+        Assert.Null(type.FindNavigation(supplierField));
+        Assert.Null(typeof(EquipmentType).GetProperty(supplierField));
     }
 
     [Fact]
