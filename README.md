@@ -24,9 +24,9 @@ scripts/             # Scripts hỗ trợ và Git hooks
 
 - **Tiền tố API**: Toàn bộ endpoint của controller tự động ghép tiền tố `api/v1/catalog` (vd: `GET /api/v1/catalog/equipment-types`).
 - **Phân trang và DTO**: Dùng duy nhất `PagedResult<T>` (`items`, `page`, `pageSize`, `totalCount`, `totalPages`) và `PageRequest`. DTO chia sẻ giữa repository, service và controller.
-- **Xử lý lỗi**: Kết quả trả về qua `Result` và catalog mã lỗi `CatalogErrors` / `CatalogErrorCode`. Controller chuyển lỗi sang HTTP `ProblemDetails` qua extension tập trung.
+- **Xử lý lỗi**: Kết quả trả về qua `Result` và catalog mã lỗi `CatalogErrors` / `CatalogErrorCode`. Controller chuyển lỗi sang HTTP `ProblemDetails` qua extension tập trung. `title` là mã lỗi ổn định (machine contract), `detail` là thông báo cho người đọc. Lỗi biên dùng `Catalog.InvalidRequest` (400 model binding), `Catalog.Unauthorized` (401), `Catalog.Forbidden` (403), `Catalog.Uncategorized` (500).
 - **Xác thực JWT RS256**: Xác thực token qua key ring chứa public RSA key (tối thiểu 2048-bit), hỗ trợ Authorization header và cookie `accessToken`. Mặc định yêu cầu authentication, các endpoint discovery và health check mở anonymous.
-- **Quan sát (Observability)**: Correlation ID ổn định trong mỗi request và response header `X-Correlation-ID`. Tracing OpenTelemetry W3C với service name `dprental-catalog-service`.
+- **Quan sát (Observability)**: Correlation ID ổn định trong mỗi request và response header `X-Correlation-ID`. ID nằm trong log scope của mọi dòng log và trong extension `correlationId` của `ProblemDetails`; header không hợp lệ (quá 64 ký tự hoặc có ký tự ngoài chữ, số, `-`, `_`, `.`) được thay bằng ID mới. Log console dạng JSON (Development dùng `simple`), ghi kết quả các thao tác ghi của Category/EquipmentType; không log header hay token. Tracing OpenTelemetry W3C với service name `dprental-catalog-service`.
 - **Bảo mật mạng**: Forwarded headers với proxy CIDR và cấu hình CORS chặt chẽ.
 
 ## Quyền truy cập API

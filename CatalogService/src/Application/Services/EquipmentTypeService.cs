@@ -5,15 +5,17 @@ using Dprental.CatalogService.Common.Enums;
 using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
 using Dprental.CatalogService.Domain.Entities;
 using Dprental.CatalogService.Domain.IRepositories;
+using Microsoft.Extensions.Logging;
 
 namespace Dprental.CatalogService.Application.Services;
 
-public sealed class EquipmentTypeService(
+public sealed partial class EquipmentTypeService(
     IEquipmentTypeRepository repository,
     ICategoryRepository categoryRepository,
     EquipmentTypeListQueryValidator listQueryValidator,
     CreateEquipmentTypeRequestValidator createValidator,
-    UpdateEquipmentTypeRequestValidator updateValidator) : IEquipmentTypeService
+    UpdateEquipmentTypeRequestValidator updateValidator,
+    ILogger<EquipmentTypeService> logger) : IEquipmentTypeService
 {
     public async Task<Result<PagedResult<EquipmentTypeListItemDto>>> SearchAsync(
         GetEquipmentTypesRequest request,
@@ -50,6 +52,33 @@ public sealed class EquipmentTypeService(
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        return Logged("Create", null, await CreateCoreAsync(request, cancellationToken));
+    }
+
+    public async Task<Result<EquipmentTypeDetailDto>> UpdateAsync(
+        Guid id,
+        UpdateEquipmentTypeRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Logged("Update", id, await UpdateCoreAsync(id, request, cancellationToken));
+    }
+
+    public async Task<Result<EquipmentTypeDetailDto>> PublishAsync(
+        Guid id,
+        CancellationToken cancellationToken = default) =>
+        Logged("Publish", id, await PublishCoreAsync(id, cancellationToken));
+
+    public async Task<Result<EquipmentTypeDetailDto>> DisableAsync(
+        Guid id,
+        CancellationToken cancellationToken = default) =>
+        Logged("Disable", id, await DisableCoreAsync(id, cancellationToken));
+
+    private async Task<Result<EquipmentTypeDetailDto>> CreateCoreAsync(
+        CreateEquipmentTypeRequest request,
+        CancellationToken cancellationToken)
+    {
         Result validationResult = createValidator.Validate(request);
         if (validationResult.IsFailure)
         {
@@ -87,13 +116,11 @@ public sealed class EquipmentTypeService(
         return await repository.AddAsync(equipmentType, request.Media, cancellationToken);
     }
 
-    public async Task<Result<EquipmentTypeDetailDto>> UpdateAsync(
+    private async Task<Result<EquipmentTypeDetailDto>> UpdateCoreAsync(
         Guid id,
         UpdateEquipmentTypeRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(request);
-
         Result validationResult = updateValidator.Validate(request);
         if (validationResult.IsFailure)
         {
@@ -150,9 +177,9 @@ public sealed class EquipmentTypeService(
         return await repository.SaveAsync(entity, desiredMedia, cancellationToken);
     }
 
-    public async Task<Result<EquipmentTypeDetailDto>> PublishAsync(
+    private async Task<Result<EquipmentTypeDetailDto>> PublishCoreAsync(
         Guid id,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
         var entity = await repository.GetByIdAsync(id, cancellationToken);
         if (entity is null)
@@ -180,9 +207,9 @@ public sealed class EquipmentTypeService(
         return await repository.SaveStateTransitionAsync(entity, cancellationToken);
     }
 
-    public async Task<Result<EquipmentTypeDetailDto>> DisableAsync(
+    private async Task<Result<EquipmentTypeDetailDto>> DisableCoreAsync(
         Guid id,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
         var entity = await repository.GetByIdAsync(id, cancellationToken);
         if (entity is null)
@@ -199,4 +226,24 @@ public sealed class EquipmentTypeService(
         entity.Disable(DateTime.UtcNow);
         return await repository.SaveStateTransitionAsync(entity, cancellationToken);
     }
+
+    private Result<EquipmentTypeDetailDto> Logged(string operation, Guid? equipmentTypeId, Result<EquipmentTypeDetailDto> result)
+    {
+        if (result.IsSuccess)
+        {
+            LogSucceeded(logger, operation, result.Value.Id, result.Value.Status);
+        }
+        else
+        {
+            LogFailed(logger, operation, equipmentTypeId, result.Error.Code);
+        }
+
+        return result;
+    }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "EquipmentType {Operation} succeeded. EquipmentTypeId: {EquipmentTypeId}, Status: {Status}")]
+    private static partial void LogSucceeded(ILogger logger, string operation, Guid equipmentTypeId, EquipmentTypeStatus status);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "EquipmentType {Operation} failed. EquipmentTypeId: {EquipmentTypeId}, ErrorCode: {ErrorCode}")]
+    private static partial void LogFailed(ILogger logger, string operation, Guid? equipmentTypeId, string errorCode);
 }

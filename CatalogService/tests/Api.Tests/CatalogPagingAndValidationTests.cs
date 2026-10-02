@@ -172,7 +172,8 @@ public sealed class CatalogPagingAndValidationTests
             new FakeCategoryRepository(),
             validator,
             new CreateEquipmentTypeRequestValidator(),
-            new UpdateEquipmentTypeRequestValidator());
+            new UpdateEquipmentTypeRequestValidator(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<EquipmentTypeService>.Instance);
 
         var badRequest = new GetEquipmentTypesRequest { Page = 0 };
         Result<PagedResult<EquipmentTypeListItemDto>> result = await service.SearchAsync(badRequest);
