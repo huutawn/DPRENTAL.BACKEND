@@ -4,7 +4,8 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Dprental.CatalogService.Common;
-using Dprental.CatalogService.Domain.DTOs.Equipments;
+using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
+using Dprental.CatalogService.Domain.Entities;
 using Dprental.CatalogService.Domain.IRepositories;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -269,7 +270,7 @@ public sealed class RsaJwtAuthTests
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage listRes = await client.GetAsync("/api/v1/catalog/equipments");
+        using HttpResponseMessage listRes = await client.GetAsync("/api/v1/catalog/equipment-types");
         Assert.Equal(HttpStatusCode.OK, listRes.StatusCode);
 
         using HttpResponseMessage liveRes = await client.GetAsync("/health/live");
@@ -289,18 +290,36 @@ public sealed class RsaJwtAuthTests
                 builder.ConfigureTestServices(services =>
                 {
                     services.AddControllers().AddApplicationPart(typeof(RsaJwtAuthTests).Assembly);
-                    services.RemoveAll<IEquipmentQueryRepository>();
-                    services.AddScoped<IEquipmentQueryRepository, FakeEquipmentQueryRepository>();
+                    services.RemoveAll<IEquipmentTypeRepository>();
+                    services.AddScoped<IEquipmentTypeRepository, FakeEquipmentTypeRepository>();
                 });
             });
 
-    private sealed class FakeEquipmentQueryRepository : IEquipmentQueryRepository
+    private sealed class FakeEquipmentTypeRepository : IEquipmentTypeRepository
     {
-        public Task<PagedResult<EquipmentListItemDto>> SearchPublishedAsync(GetEquipmentsRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new PagedResult<EquipmentListItemDto>([], 1, 20, 0));
+        public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(GetEquipmentTypesRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PagedResult<EquipmentTypeListItemDto>([], 1, 20, 0));
 
-        public Task<EquipmentDetailDto?> GetPublishedByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult<EquipmentDetailDto?>(null);
+        public Task<EquipmentTypeDetailDto?> GetPublishedByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeDetailDto?>(null);
+
+        public Task<EquipmentType?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentType?>(null);
+
+        public Task<EquipmentTypeDetailDto?> GetDetailByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeDetailDto?>(null);
+
+        public Task<bool> ExistsByCodeAsync(string code, Guid? excludeId = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
+        public Task<Result<EquipmentTypeDetailDto>> AddAsync(EquipmentType equipmentType, IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<Result<EquipmentTypeDetailDto>> SaveAsync(EquipmentType entity, IReadOnlyList<EquipmentTypeMediaItemDto?>? desiredMedia, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<Result<EquipmentTypeDetailDto>> SaveStateTransitionAsync(EquipmentType entity, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
     }
 }
 

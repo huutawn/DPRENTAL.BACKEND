@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.CatalogService.Domain.Entities;
 
-/// <summary>Nhóm phân loại equipment. MVP dùng danh sách phẳng, chưa có phân cấp.</summary>
+/// <summary>Nhóm phân loại equipment type. MVP dùng danh sách phẳng, chưa có phân cấp.</summary>
 [Table("Categories", Schema = "catalog")]
 [Index(nameof(Slug), IsUnique = true)]
 public class Category
@@ -26,12 +26,12 @@ public class Category
     [MaxLength(1000)]
     public string? Description { get; set; }
 
-    /// <summary>Category ngừng hoạt động không nhận equipment mới và không cho publish.</summary>
+    /// <summary>Category ngừng hoạt động không nhận equipment type mới và không cho publish.</summary>
     public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
     public DateTime? UpdatedAtUtc { get; set; }
 
-    public ICollection<Equipment> Equipments { get; set; } = new List<Equipment>();
+    public ICollection<EquipmentType> EquipmentTypes { get; set; } = new List<EquipmentType>();
 }

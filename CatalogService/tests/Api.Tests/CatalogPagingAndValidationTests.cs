@@ -5,7 +5,8 @@ using Dprental.CatalogService.Application.Options;
 using Dprental.CatalogService.Application.Services;
 using Dprental.CatalogService.Application.Validators;
 using Dprental.CatalogService.Common;
-using Dprental.CatalogService.Domain.DTOs.Equipments;
+using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
+using Dprental.CatalogService.Domain.Entities;
 using Dprental.CatalogService.Domain.IRepositories;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -76,7 +77,7 @@ public sealed class CatalogPagingAndValidationTests
     public void Validation_InvalidPage_Fails(int page)
     {
         var validator = CreateValidator();
-        var request = new GetEquipmentsRequest { Page = page };
+        var request = new GetEquipmentTypesRequest { Page = page };
 
         Result result = validator.Validate(request);
 
@@ -93,7 +94,7 @@ public sealed class CatalogPagingAndValidationTests
     public void Validation_InvalidPageSize_Fails(int pageSize)
     {
         var validator = CreateValidator();
-        var request = new GetEquipmentsRequest { PageSize = pageSize };
+        var request = new GetEquipmentTypesRequest { PageSize = pageSize };
 
         Result result = validator.Validate(request);
 
@@ -106,7 +107,7 @@ public sealed class CatalogPagingAndValidationTests
     public void Validation_PagingOverflow_Fails()
     {
         var validator = CreateValidator();
-        var request = new GetEquipmentsRequest { Page = int.MaxValue, PageSize = 100 };
+        var request = new GetEquipmentTypesRequest { Page = int.MaxValue, PageSize = 100 };
 
         Result result = validator.Validate(request);
 
@@ -119,38 +120,42 @@ public sealed class CatalogPagingAndValidationTests
     public void Validation_KeywordTooLong_Fails()
     {
         var validator = CreateValidator();
-        var request = new GetEquipmentsRequest { Keyword = new string('a', 101) };
+        var request = new GetEquipmentTypesRequest { Keyword = new string('a', 101) };
 
         Result result = validator.Validate(request);
 
         Assert.True(result.IsFailure);
-        Assert.Equal(CatalogErrorCode.Equipment.InvalidKeyword, result.Error.Code);
+        Assert.Equal(CatalogErrorCode.EquipmentType.InvalidKeyword, result.Error.Code);
     }
 
-    [Fact]
-    public void Validation_InvalidSort_Fails()
+    [Theory]
+    [InlineData("invalid_sort_code")]
+    [InlineData("price_asc")]
+    [InlineData("price_desc")]
+    public void Validation_InvalidSort_Fails(string sort)
     {
         var validator = CreateValidator();
-        var request = new GetEquipmentsRequest { Sort = "invalid_sort_code" };
+        var request = new GetEquipmentTypesRequest { Sort = sort };
 
         Result result = validator.Validate(request);
 
         Assert.True(result.IsFailure);
-        Assert.Equal(CatalogErrorCode.Equipment.InvalidSort, result.Error.Code);
+        Assert.Equal(CatalogErrorCode.EquipmentType.InvalidSort, result.Error.Code);
     }
 
     [Theory]
     [InlineData("newest")]
-    [InlineData("price_asc")]
-    [InlineData("price_desc")]
+    [InlineData("name_asc")]
+    [InlineData("name_desc")]
     [InlineData("NEWEST")]
-    [InlineData("PRICE_ASC")]
+    [InlineData("NAME_ASC")]
+    [InlineData("NAME_DESC")]
     [InlineData(null)]
     [InlineData("")]
     public void Validation_ValidSort_Succeeds(string? sort)
     {
         var validator = CreateValidator();
-        var request = new GetEquipmentsRequest { Sort = sort };
+        var request = new GetEquipmentTypesRequest { Sort = sort };
 
         Result result = validator.Validate(request);
 
@@ -158,50 +163,19 @@ public sealed class CatalogPagingAndValidationTests
     }
 
     [Fact]
-    public void Validation_NegativeMinPrice_Fails()
-    {
-        var validator = CreateValidator();
-        var request = new GetEquipmentsRequest { MinPrice = -10m };
-
-        Result result = validator.Validate(request);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(CatalogErrorCode.Equipment.InvalidMinPrice, result.Error.Code);
-    }
-
-    [Fact]
-    public void Validation_NegativeMaxPrice_Fails()
-    {
-        var validator = CreateValidator();
-        var request = new GetEquipmentsRequest { MaxPrice = -5m };
-
-        Result result = validator.Validate(request);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(CatalogErrorCode.Equipment.InvalidMaxPrice, result.Error.Code);
-    }
-
-    [Fact]
-    public void Validation_MinPriceGreaterThanMaxPrice_Fails()
-    {
-        var validator = CreateValidator();
-        var request = new GetEquipmentsRequest { MinPrice = 500m, MaxPrice = 100m };
-
-        Result result = validator.Validate(request);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(CatalogErrorCode.Equipment.InvalidPriceRange, result.Error.Code);
-    }
-
-    [Fact]
     public async Task Service_DoesNotCallRepository_WhenValidationFails()
     {
-        var repoMock = new TrackingEquipmentRepository();
+        var repoMock = new TrackingEquipmentTypeRepository();
         var validator = CreateValidator();
-        var service = new CatalogDiscoveryService(repoMock, validator);
+        var service = new EquipmentTypeService(
+            repoMock,
+            new FakeCategoryRepository(),
+            validator,
+            new CreateEquipmentTypeRequestValidator(),
+            new UpdateEquipmentTypeRequestValidator());
 
-        var badRequest = new GetEquipmentsRequest { Page = 0 };
-        Result<PagedResult<EquipmentListItemDto>> result = await service.SearchAsync(badRequest);
+        var badRequest = new GetEquipmentTypesRequest { Page = 0 };
+        Result<PagedResult<EquipmentTypeListItemDto>> result = await service.SearchAsync(badRequest);
 
         Assert.True(result.IsFailure);
         Assert.Equal(CatalogErrorCode.Paging.InvalidPage, result.Error.Code);
@@ -214,19 +188,20 @@ public sealed class CatalogPagingAndValidationTests
         using WebApplicationFactory<Program> factory = PublicCatalogEndpointTests.CreateFactory();
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync("/api/v1/catalog/equipments?page=abc");
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/catalog/equipment-types?page=abc");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Theory]
-    [InlineData("/api/v1/catalog/equipments?page=0", CatalogErrorCode.Paging.InvalidPage)]
-    [InlineData("/api/v1/catalog/equipments?pageSize=0", CatalogErrorCode.Paging.InvalidPageSize)]
-    [InlineData("/api/v1/catalog/equipments?pageSize=150", CatalogErrorCode.Paging.InvalidPageSize)]
-    [InlineData("/api/v1/catalog/equipments?minPrice=-1", CatalogErrorCode.Equipment.InvalidMinPrice)]
-    [InlineData("/api/v1/catalog/equipments?maxPrice=-1", CatalogErrorCode.Equipment.InvalidMaxPrice)]
-    [InlineData("/api/v1/catalog/equipments?minPrice=200&maxPrice=100", CatalogErrorCode.Equipment.InvalidPriceRange)]
-    [InlineData("/api/v1/catalog/equipments?sort=random", CatalogErrorCode.Equipment.InvalidSort)]
+    [InlineData("/api/v1/catalog/equipment-types?page=0", CatalogErrorCode.Paging.InvalidPage)]
+    [InlineData("/api/v1/catalog/equipment-types?pageSize=0", CatalogErrorCode.Paging.InvalidPageSize)]
+    [InlineData("/api/v1/catalog/equipment-types?pageSize=150", CatalogErrorCode.Paging.InvalidPageSize)]
+    [InlineData("/api/v1/catalog/equipment-types?sort=random", CatalogErrorCode.EquipmentType.InvalidSort)]
+    [InlineData("/api/v1/catalog/equipment-types?sort=price_asc", CatalogErrorCode.EquipmentType.InvalidSort)]
+    [InlineData("/api/v1/catalog/equipment-types?minPrice=-1", CatalogErrorCode.EquipmentType.InvalidQuery)]
+    [InlineData("/api/v1/catalog/equipment-types?maxPrice=-1", CatalogErrorCode.EquipmentType.InvalidQuery)]
+    [InlineData("/api/v1/catalog/equipment-types?regionId=c0ffee00-0000-0000-0000-000000000000", CatalogErrorCode.EquipmentType.InvalidQuery)]
     public async Task Api_ValidationFailures_ReturnProblemDetails_WithCorrectErrorCode(string queryUrl, string expectedCode)
     {
         using WebApplicationFactory<Program> factory = PublicCatalogEndpointTests.CreateFactory();
@@ -239,24 +214,58 @@ public sealed class CatalogPagingAndValidationTests
         Assert.Equal(expectedCode, problem.GetProperty("title").GetString());
     }
 
-    private static EquipmentListQueryValidator CreateValidator()
+    private static EquipmentTypeListQueryValidator CreateValidator()
     {
-        return new EquipmentListQueryValidator(Options.Create(new CatalogDiscoveryOptions { MaxKeywordLength = 100 }));
+        return new EquipmentTypeListQueryValidator(Options.Create(new CatalogDiscoveryOptions { MaxKeywordLength = 100 }));
     }
 
-    private sealed class TrackingEquipmentRepository : IEquipmentQueryRepository
+    private sealed class TrackingEquipmentTypeRepository : IEquipmentTypeRepository
     {
         public int SearchCallCount { get; private set; }
 
-        public Task<PagedResult<EquipmentListItemDto>> SearchPublishedAsync(GetEquipmentsRequest request, CancellationToken cancellationToken = default)
+        public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(GetEquipmentTypesRequest request, CancellationToken cancellationToken = default)
         {
             SearchCallCount++;
-            return Task.FromResult(new PagedResult<EquipmentListItemDto>([], 1, 20, 0));
+            return Task.FromResult(new PagedResult<EquipmentTypeListItemDto>([], 1, 20, 0));
         }
 
-        public Task<EquipmentDetailDto?> GetPublishedByIdAsync(Guid id, CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult<EquipmentDetailDto?>(null);
-        }
+        public Task<EquipmentTypeDetailDto?> GetPublishedByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeDetailDto?>(null);
+
+        public Task<EquipmentType?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentType?>(null);
+
+        public Task<EquipmentTypeDetailDto?> GetDetailByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeDetailDto?>(null);
+
+        public Task<bool> ExistsByCodeAsync(string code, Guid? excludeId = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
+        public Task<Result<EquipmentTypeDetailDto>> AddAsync(EquipmentType equipmentType, IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<Result<EquipmentTypeDetailDto>> SaveAsync(EquipmentType entity, IReadOnlyList<EquipmentTypeMediaItemDto?>? desiredMedia, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<Result<EquipmentTypeDetailDto>> SaveStateTransitionAsync(EquipmentType entity, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+    }
+
+    private sealed class FakeCategoryRepository : ICategoryRepository
+    {
+        public Task<Category?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<Category?>(null);
+
+        public Task<bool> IsSlugExistsAsync(string slug, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
+        public Task AddAsync(Category category, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task UpdateAsync(Category category, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task<IEnumerable<Category>> GetAllActiveAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IEnumerable<Category>>([]);
     }
 }

@@ -33,7 +33,7 @@ public sealed record PageRequest(
 
         if (Search?.Trim().Length > MaxSearchLength)
         {
-            return Result.Failure(CatalogErrors.Equipment.InvalidKeyword);
+            return Result.Failure(CatalogErrors.EquipmentType.InvalidKeyword);
         }
 
         return Result.Success();

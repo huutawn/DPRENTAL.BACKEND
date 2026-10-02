@@ -1,4 +1,5 @@
 using Dprental.CatalogService.Api.Exceptions;
+using Dprental.CatalogService.Api.Filters;
 using Dprental.CatalogService.Api.Observability;
 using Dprental.CatalogService.Api.Routing;
 using Dprental.CatalogService.Api.Security;
@@ -53,6 +54,7 @@ builder.Services.AddSwaggerGen(options =>
     {
         options.IncludeXmlComments(apiXml, includeControllerXmlComments: true);
     }
+    options.SchemaFilter<UpdateEquipmentTypeRequestSchemaFilter>();
 });
 
 builder.Services.AddHealthChecks()

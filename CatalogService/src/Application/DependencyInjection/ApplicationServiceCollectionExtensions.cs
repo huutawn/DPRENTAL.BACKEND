@@ -18,8 +18,10 @@ public static class ApplicationServiceCollectionExtensions
         services.AddOptions<CatalogDiscoveryOptions>();
         services.Configure<CatalogDiscoveryOptions>(
             configuration.GetSection(CatalogDiscoveryOptions.SectionName));
-        services.AddScoped<EquipmentListQueryValidator>();
-        services.AddScoped<ICatalogDiscoveryService, CatalogDiscoveryService>();
+        services.AddScoped<EquipmentTypeListQueryValidator>();
+        services.AddScoped<CreateEquipmentTypeRequestValidator>();
+        services.AddScoped<UpdateEquipmentTypeRequestValidator>();
+        services.AddScoped<IEquipmentTypeService, EquipmentTypeService>();
         services.AddScoped<ICategoryRepository, CategoryRepository>();
         services.AddScoped<ICategoryService, CategoryService>();
 

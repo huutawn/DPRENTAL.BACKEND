@@ -15,25 +15,52 @@ public static class CatalogErrors
             Error.Validation(CatalogErrorCode.Paging.Overflow, "Trang yêu cầu vượt quá giới hạn hỗ trợ.");
     }
 
-    public static class Equipment
+    public static class EquipmentType
     {
         public static readonly Error NotFound =
-            Error.NotFound(CatalogErrorCode.Equipment.NotFound, "Thiết bị không tồn tại hoặc chưa được công khai.");
+            Error.NotFound(CatalogErrorCode.EquipmentType.NotFound, "Loại thiết bị không tồn tại hoặc chưa được công khai.");
 
         public static readonly Error InvalidKeyword =
-            Error.Validation(CatalogErrorCode.Equipment.InvalidKeyword, "Từ khóa tối đa 100 ký tự.");
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidKeyword, "Từ khóa tối đa 100 ký tự.");
 
         public static readonly Error InvalidSort =
-            Error.Validation(CatalogErrorCode.Equipment.InvalidSort, "sort chỉ nhận: newest, price_asc, price_desc.");
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidSort, "sort chỉ nhận: newest, name_asc, name_desc.");
 
-        public static readonly Error InvalidMinPrice =
-            Error.Validation(CatalogErrorCode.Equipment.InvalidMinPrice, "minPrice không được âm.");
+        public static readonly Error InvalidQuery =
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidQuery, "Tham số truy vấn không hợp lệ.");
 
-        public static readonly Error InvalidMaxPrice =
-            Error.Validation(CatalogErrorCode.Equipment.InvalidMaxPrice, "maxPrice không được âm.");
+        public static readonly Error DuplicateCode =
+            Error.Conflict(CatalogErrorCode.EquipmentType.DuplicateCode, "Mã thiết bị đã tồn tại trong Catalog.");
 
-        public static readonly Error InvalidPriceRange =
-            Error.Validation(CatalogErrorCode.Equipment.InvalidPriceRange, "minPrice không được lớn hơn maxPrice.");
+        public static readonly Error InvalidStateTransition =
+            Error.Conflict(CatalogErrorCode.EquipmentType.InvalidStateTransition, "Chuyển đổi trạng thái không hợp lệ.");
+
+        public static readonly Error ConcurrencyConflict =
+            Error.Conflict(CatalogErrorCode.EquipmentType.ConcurrencyConflict, "Dữ liệu đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại trang.");
+
+        public static readonly Error CategoryNotFound =
+            Error.Validation(CatalogErrorCode.EquipmentType.CategoryNotFound, "Danh mục không tồn tại.");
+
+        public static readonly Error CategoryInactive =
+            Error.Validation(CatalogErrorCode.EquipmentType.CategoryInactive, "Danh mục đang ở trạng thái không hoạt động.");
+
+        public static readonly Error InvalidMedia =
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidMedia, "Danh sách media không hợp lệ.");
+
+        public static readonly Error InvalidPayload =
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidPayload, "Dữ liệu yêu cầu không hợp lệ.");
+
+        public static readonly Error InvalidCode =
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidCode, "Mã thiết bị không được để trống và tối đa 50 ký tự.");
+
+        public static readonly Error InvalidName =
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidName, "Tên thiết bị không được để trống và tối đa 200 ký tự.");
+
+        public static readonly Error InvalidDescription =
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidDescription, "Mô tả tối đa 4000 ký tự.");
+
+        public static readonly Error InvalidCategory =
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidCategory, "CategoryId không hợp lệ.");
     }
 
     public static class Catalog

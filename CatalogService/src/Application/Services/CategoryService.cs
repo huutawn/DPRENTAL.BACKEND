@@ -47,18 +47,6 @@ public class CategoryService : ICategoryService
         var category = await _repository.GetByIdAsync(id, cancellationToken);
         if (category == null) return null;
 
-        // KIỂM TRA RULE: Không cho deactivate nếu đang có Published Equipment
-        if (request.IsActive.HasValue && request.IsActive.Value == false && category.IsActive == true)
-        {
-            // TODO (Phase 2): Gọi _equipmentRepository.HasPublishedEquipmentAsync(categoryId)
-            // Tạm thời để ghi chú khi nào làm tới bảng Equipment sẽ mở comment hàm check ở đây.
-            // bool hasPublishedEquipment = false; 
-            // if (hasPublishedEquipment) 
-            // {
-            //      throw new Exception("Cannot deactivate category. It contains published equipment.");
-            // }
-        }
-
         if (request.Name != null) category.Name = request.Name;
         if (request.Description != null) category.Description = request.Description;
         if (request.IsActive.HasValue) category.IsActive = request.IsActive.Value;

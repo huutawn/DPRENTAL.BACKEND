@@ -24,7 +24,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
             npgsqlOptions => npgsqlOptions.MigrationsHistoryTable(
                 CatalogServiceDbContext.MigrationsHistoryTableName,
                 CatalogServiceDbContext.SchemaName)));
-        services.AddScoped<IEquipmentQueryRepository, CatalogRepository>();
+        services.AddScoped<IEquipmentTypeRepository, EquipmentTypeRepository>();
         services.AddScoped<ICategoryRepository, CategoryRepository>();
         return services;
     }
