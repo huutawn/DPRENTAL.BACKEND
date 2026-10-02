@@ -1,8 +1,10 @@
 using System.IO;
+using Dprental.InventoryService.Api.Clients;
 using Dprental.InventoryService.Api.Exceptions;
 using Dprental.InventoryService.Api.Security;
 using Dprental.InventoryService.Application.Calendar;
 using Dprental.InventoryService.Application.Kafka.DependencyInjection;
+using Dprental.InventoryService.Application.Media;
 using Dprental.InventoryService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -17,6 +19,27 @@ builder.Services.AddInventoryJwtAuthentication(builder.Configuration);
 builder.Services.AddInventoryAuthorization();
 // DPR-149: Calendar application service
 builder.Services.AddScoped<CalendarService>();
+
+// MediaService Integration: Options validation, typed HTTP client, and application service
+builder.Services.AddOptions<MediaServiceOptions>()
+    .Bind(builder.Configuration.GetSection(MediaServiceOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+builder.Services.AddHttpClient<IMediaServiceClient, MediaServiceClient>((sp, client) =>
+{
+    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<MediaServiceOptions>>().Value;
+    client.BaseAddress = new Uri(options.InternalBaseUrl.TrimEnd('/') + "/");
+    client.DefaultRequestHeaders.Add("X-Api-Key", options.ApiKey);
+    client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+})
+.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    AllowAutoRedirect = false
+});
+
+builder.Services.AddScoped<InventoryMediaService>();
+
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<InventoryServiceDbContext>(
         "postgres",

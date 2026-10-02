@@ -53,13 +53,26 @@ public sealed class HealthEndpointTests
     public void MissingPostgresConnection_FailsAtStartup()
     {
         using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder => builder.UseSetting("ConnectionStrings:Postgres", ""));
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("ConnectionStrings:Postgres", "");
+                builder.UseSetting("MediaService:InternalBaseUrl", "http://media-service:8080");
+                builder.UseSetting("MediaService:PublicGatewayUrl", "https://gateway.example");
+                builder.UseSetting("MediaService:ApiKey", "test-api-key");
+                builder.UseSetting("MediaService:TimeoutSeconds", "10");
+            });
 
         Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
     }
 
     private static WebApplicationFactory<Program> CreateFactory() =>
         new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder => builder.UseSetting(
-                "ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test"));
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("MediaService:InternalBaseUrl", "http://media-service:8080");
+                builder.UseSetting("MediaService:PublicGatewayUrl", "https://gateway.example");
+                builder.UseSetting("MediaService:ApiKey", "test-api-key");
+                builder.UseSetting("MediaService:TimeoutSeconds", "10");
+            });
 }

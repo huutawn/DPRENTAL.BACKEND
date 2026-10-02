@@ -71,7 +71,11 @@ public sealed class InventorySecurityTestFactory : WebApplicationFactory<Program
                 ["Authentication:Jwt:JwksUri"] = JwksUri.ToString(),
                 ["Authentication:Jwt:TimeoutSeconds"] = "5",
                 ["Authentication:Jwt:CacheDurationMinutes"] = "5",
-                ["Authentication:Jwt:MaxStaleMinutes"] = "10"
+                ["Authentication:Jwt:MaxStaleMinutes"] = "10",
+                ["MediaService:InternalBaseUrl"] = "http://media-service:8080",
+                ["MediaService:PublicGatewayUrl"] = "https://gateway.example",
+                ["MediaService:ApiKey"] = "test-media-api-key",
+                ["MediaService:TimeoutSeconds"] = "10"
             });
         });
 
