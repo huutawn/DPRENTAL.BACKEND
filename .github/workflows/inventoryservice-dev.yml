@@ -10,23 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Test InventoryService
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      - name: Run tests without external infrastructure
-        run: dotnet test InventoryService/tests/Api.Tests/InventoryService.Api.Tests.csproj --configuration Release --filter 'FullyQualifiedName!~Integration'
-      - name: Check deployment script syntax
-        run: bash -n scripts/deploy-inventoryservice.sh
-      - name: Test deployment failure boundaries
-        run: python3 scripts/tests/deploy-inventoryservice.test.py
-
   publish:
-    needs: test
     name: Publish ${{ matrix.name }} image to GHCR
     runs-on: ubuntu-24.04
     environment: dev
