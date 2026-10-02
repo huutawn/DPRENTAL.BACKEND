@@ -78,7 +78,7 @@ public sealed class RsaJwtAuthTests
 
         var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(401, problem.GetProperty("status").GetInt32());
-        Assert.Equal("Unauthorized", problem.GetProperty("title").GetString());
+        Assert.Equal("Catalog.Unauthorized", problem.GetProperty("title").GetString());
     }
 
     [Fact]

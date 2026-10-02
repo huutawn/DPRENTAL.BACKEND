@@ -29,8 +29,18 @@ public static class CatalogErrorCode
         public const string InvalidCategory = "EquipmentType.InvalidCategory";
     }
 
+    public static class Category
+    {
+        public const string NotFound = "Category.NotFound";
+        public const string InvalidName = "Category.InvalidName";
+        public const string InvalidDescription = "Category.InvalidDescription";
+    }
+
     public static class Catalog
     {
         public const string Uncategorized = "Catalog.Uncategorized";
+        public const string InvalidRequest = "Catalog.InvalidRequest";
+        public const string Unauthorized = "Catalog.Unauthorized";
+        public const string Forbidden = "Catalog.Forbidden";
     }
 }

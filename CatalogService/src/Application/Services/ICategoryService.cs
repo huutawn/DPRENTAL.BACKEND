@@ -1,11 +1,12 @@
-﻿using CatalogService.Application.DTOs.Category;
+using CatalogService.Application.DTOs.Category;
+using Dprental.CatalogService.Common;
 
 namespace Dprental.CatalogService.Application.Services;
 
 public interface ICategoryService
 {
-    Task<CategoryDetailResponse> CreateCategoryAsync(CreateCategoryRequest request, CancellationToken cancellationToken = default);
-    Task<CategoryDetailResponse?> UpdateCategoryAsync(Guid id, UpdateCategoryRequest request, CancellationToken cancellationToken = default);
+    Task<Result<CategoryDetailResponse>> CreateCategoryAsync(CreateCategoryRequest request, CancellationToken cancellationToken = default);
+    Task<Result<CategoryDetailResponse>> UpdateCategoryAsync(Guid id, UpdateCategoryRequest request, CancellationToken cancellationToken = default);
     Task<IEnumerable<CategoryDetailResponse>> GetActiveCategoriesAsync(CancellationToken cancellationToken = default);
-    Task<CategoryDetailResponse?> GetActiveCategoryByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<Result<CategoryDetailResponse>> GetActiveCategoryByIdAsync(Guid id, CancellationToken cancellationToken = default);
 }

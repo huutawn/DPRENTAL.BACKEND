@@ -5,8 +5,11 @@ using Dprental.CatalogService.Api.Routing;
 using Dprental.CatalogService.Api.Security;
 using Dprental.CatalogService.Application.DependencyInjection;
 using Dprental.CatalogService.Application.IServices;
+using Dprental.CatalogService.Common;
 using Dprental.CatalogService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -42,8 +45,30 @@ builder.Services.AddCors(options =>
     });
 });
 
-builder.Services.AddControllers(options => options.Conventions.Add(new ApiRoutePrefixConvention(ApiRoutes.Prefix)));
-builder.Services.AddProblemDetails();
+builder.Services.AddControllers(options => options.Conventions.Add(new ApiRoutePrefixConvention(ApiRoutes.Prefix)))
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        // Lỗi model binding (JSON hỏng, sai kiểu dữ liệu) cũng trả mã ổn định thay cho title mặc định của framework.
+        options.InvalidModelStateResponseFactory = context =>
+        {
+            ProblemDetailsFactory factory = context.HttpContext.RequestServices.GetRequiredService<ProblemDetailsFactory>();
+            ValidationProblemDetails problem = factory.CreateValidationProblemDetails(
+                context.HttpContext,
+                context.ModelState,
+                statusCode: StatusCodes.Status400BadRequest,
+                title: CatalogErrors.Catalog.InvalidRequest.Code,
+                detail: CatalogErrors.Catalog.InvalidRequest.Message);
+
+            return new BadRequestObjectResult(problem)
+            {
+                ContentTypes = { "application/problem+json" }
+            };
+        };
+    });
+builder.Services.AddProblemDetails(options =>
+    options.CustomizeProblemDetails = context =>
+        context.ProblemDetails.Extensions[CorrelationIdMiddleware.ProblemDetailsKey] =
+            CorrelationIdMiddleware.GetCorrelationId(context.HttpContext));
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -67,19 +92,7 @@ var app = builder.Build();
 
 app.UseForwardedHeaders();
 
-app.Use(async (context, next) =>
-{
-    string? correlationId = context.Request.Headers[CorrelationIdProvider.HeaderName].FirstOrDefault();
-    if (string.IsNullOrWhiteSpace(correlationId))
-    {
-        correlationId = Guid.NewGuid().ToString();
-    }
-
-    context.Items[CorrelationIdProvider.ItemKey] = correlationId;
-    context.Response.Headers[CorrelationIdProvider.HeaderName] = correlationId;
-
-    await next();
-});
+app.UseMiddleware<CorrelationIdMiddleware>();
 
 if (app.Environment.IsDevelopment())
 {
