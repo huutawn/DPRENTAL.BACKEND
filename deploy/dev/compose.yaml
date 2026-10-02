@@ -35,6 +35,11 @@ services:
       Routes__0__DownstreamHostAndPorts__0__Port: 8080
       Routes__1__DownstreamHostAndPorts__0__Port: 8080
       Routes__2__DownstreamHostAndPorts__0__Port: 8080
+      Gateway__Authentication__Jwt__InventoryAudience: ${INVENTORY_JWT_SERVICE_AUDIENCE:-inventory-api}
+      Routes__6__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__6__DownstreamHostAndPorts__0__Port: 8080
+      Routes__7__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__7__DownstreamHostAndPorts__0__Port: 8080
       Routes__8__DownstreamHostAndPorts__0__Host: catalog-service
       Routes__8__DownstreamHostAndPorts__0__Port: 8080
       Routes__9__DownstreamHostAndPorts__0__Host: catalog-service
@@ -62,6 +67,8 @@ services:
       auth-service:
         condition: service_healthy
       media-service:
+        condition: service_healthy
+      inventory-service:
         condition: service_healthy
     networks:
       - edge
@@ -166,6 +173,74 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - services
+
+  inventory-service:
+    image: ${INVENTORY_SERVICE_IMAGE:?Set INVENTORY_SERVICE_IMAGE in release.env}
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Staging}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:-authservice};Username=${POSTGRES_USER:-authservice};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      Authentication__Jwt__Issuer: ${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER in .env}
+      Authentication__Jwt__HumanAudience: ${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE in .env}
+      Authentication__Jwt__ServiceAudience: ${INVENTORY_JWT_SERVICE_AUDIENCE:-inventory-api}
+      Authentication__Jwt__JwksUri: http://auth-service:8080/.well-known/jwks.json
+      Kafka__BootstrapServers: kafka:9092
+      MediaService__InternalBaseUrl: http://media-service:8080
+      MediaService__PublicGatewayUrl: https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
+      MediaService__ApiKey: ${AUTH_ADMIN_BOOTSTRAP_CREATION_KEY:?Set AUTH_ADMIN_BOOTSTRAP_CREATION_KEY in .env}
+      MediaService__TimeoutSeconds: ${INVENTORY_MEDIA_TIMEOUT_SECONDS:-10}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+    networks:
+      - services
+
+  inventory-migrate:
+    image: ${INVENTORY_MIGRATOR_IMAGE:?Set INVENTORY_MIGRATOR_IMAGE in release.env}
+    profiles: [migration]
+    restart: "no"
+    environment:
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:-authservice};Username=${POSTGRES_USER:-authservice};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - services
+
+  kafka:
+    image: ${KAFKA_IMAGE:?Set KAFKA_IMAGE in .env}
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+    volumes:
+      - kafka-data:/tmp/kraft-combined-logs
+    healthcheck:
+      test: [CMD-SHELL, /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
     networks:
       - services
 
@@ -295,6 +370,7 @@ volumes:
   postgres-data:
   valkey-data:
   media-minio-data:
+  kafka-data:
 
 networks:
   edge:

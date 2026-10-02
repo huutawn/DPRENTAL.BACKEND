@@ -45,7 +45,7 @@ Hiện AuthService nhận PostgreSQL connection string qua environment variable,
 
 ## Quy trình phát hành
 
-1. Mỗi CI/CD cập nhật đúng image SHA trong `release.env`: Gateway, AuthService/Auth migrator, MediaService/Media migrator hoặc Frontend. Không sửa image tag trong `.env`.
+1. Mỗi CI/CD cập nhật đúng image SHA trong `release.env`: Gateway, AuthService/Auth migrator, MediaService/Media migrator, CatalogService/Catalog migrator, InventoryService/Inventory migrator hoặc Frontend. Không sửa image tag trong `.env`.
 2. Render cấu hình để phát hiện biến hoặc secret file thiếu:
 
    ```bash
@@ -128,3 +128,78 @@ signing key cần cập nhật Catalog và giữ key cũ cho đến khi token c�
 Catalog không có dependency runtime tới MediaService: media là MediaId references. Gateway không phụ
 thuộc Catalog healthy để khởi động; gateway /health/ready kiểm tra JWKS/configuration, phải kiểm tra
 Catalog riêng như bước 6. Compose không tự apply migrations khi start runtime.
+
+## Phát hành InventoryService
+
+Pipeline `.github/workflows/inventoryservice-dev.yml` trên branch `inventory/develop-ci-cd`
+kiểm tra tests không cần hạ tầng ngoài, publish runtime/migrator với cùng commit SHA rồi gọi
+`scripts/deploy-inventoryservice.sh`. Dùng GitHub Environment `dev`, variable
+`GHCR_IMAGE_NAMESPACE` và các secrets `DEV_VPS_SSH_PRIVATE_KEY`, `DEV_VPS_KNOWN_HOSTS`,
+`DEV_VPS_HOST`, `DEV_VPS_USER`, `DEV_VPS_PORT` (mặc định 22), giống pipeline Catalog.
+
+Trước release đầu, đồng bộ compose và thêm vào `.env` các biến `KAFKA_IMAGE`,
+`INVENTORY_JWT_SERVICE_AUDIENCE`, `INVENTORY_MEDIA_TIMEOUT_SECONDS` từ `.env.example`.
+Thêm `INVENTORY_SERVICE_IMAGE` và `INVENTORY_MIGRATOR_IMAGE` vào `release.env` với namespace
+GHCR thực tế. Dùng các biến `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` hiện có.
+Không commit `.env` hoặc `release.env` thật.
+
+Inventory dùng chung PostgreSQL/database/credentials với Auth và Catalog, chỉ sở hữu schema
+`inventory`; migration history là `inventory.__EFMigrationsHistory`. Volume mới là `kafka-data`;
+không thêm PostgreSQL container, volume hoặc mật khẩu riêng.
+JWT dùng JWKS Auth, hai audiences human/service; Media API key dùng bootstrap key hiện có.
+Gateway route 6/7 trỏ tới `inventory-service:8080` và chờ Inventory healthy khi khởi động.
+Gateway đã có route `/api/v1/inventory/{everything}`; UI Swagger Development bổ sung Inventory.
+Staging không bật Swagger.
+
+Script pull images, khởi động các dependencies, stop Inventory, backup schema inventory nếu
+schema inventory đã tồn tại vào `backups/inventory`, rồi chạy `inventory-migrate`.
+Migration hoặc readiness lỗi sẽ dừng release, không tự rollback schema/image.
+`release.env` ghi SHA mới trước migration; failure cần người vận hành xử lý và chạy lại.
+Lần khởi tạo stack cần chạy Auth/Media/Catalog migrations theo hướng dẫn trước khi deploy Inventory.
+Compose không tự migrate Inventory khi `up` runtime.
+
+Kiểm tra readiness nội bộ bằng `wget` trong container và public Gateway `/health/ready`.
+API Inventory yêu cầu token; Gateway health không chứng minh request Inventory đi hết downstream.
+Kiểm tra calendar bằng client đã đăng nhập có quyền tương ứng sau triển khai.
+Kafka dev chỉ có một broker, replication factor 1; backup database không bao gồm Kafka volume.
+Nếu Inventory đã tồn tại trong database riêng, restore schema inventory và chuyển migration history
+của Inventory từ public sang inventory trước release đầu; không chuyển history của service khác.
+Nếu database chung đã chứa Inventory với history public cũ, thực hiện cutover history trước khi migrate.
+
+### Chuyển migration history Inventory cũ
+
+Chỉ áp dụng khi Inventory đã migrate bằng phiên bản lưu history ở `public`.
+Dừng Inventory cũ, backup toàn bộ database trước khi chạy SQL dưới đây trong database chung.
+Danh sách ID chỉ gồm các migrations Inventory hiện có; giữ nguyên records của Auth/Media/Catalog.
+Nếu đang dùng database riêng, restore dữ liệu schema inventory và các history records tương ứng
+vào database chung trước bước này. Không start Inventory cũ sau cutover.
+
+```sql
+BEGIN;
+CREATE SCHEMA IF NOT EXISTS inventory;
+CREATE TABLE IF NOT EXISTS inventory."__EFMigrationsHistory" (
+    "MigrationId" varchar(150) PRIMARY KEY,
+    "ProductVersion" varchar(32) NOT NULL
+);
+INSERT INTO inventory."__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+SELECT "MigrationId", "ProductVersion" FROM public."__EFMigrationsHistory"
+WHERE "MigrationId" IN (
+    '20261001035544_InitialInventoryBaseline',
+    '20261001043209_HardenInventoryContracts',
+    '20261001080639_AddKafkaFoundationAndSagaRuntime',
+    '20261002011635_RefactorInventoryBoundary',
+    '20261002024109_HardenInventoryBoundary'
+)
+ON CONFLICT ("MigrationId") DO NOTHING;
+DELETE FROM public."__EFMigrationsHistory"
+WHERE "MigrationId" IN (
+    '20261001035544_InitialInventoryBaseline',
+    '20261001043209_HardenInventoryContracts',
+    '20261001080639_AddKafkaFoundationAndSagaRuntime',
+    '20261002011635_RefactorInventoryBoundary',
+    '20261002024109_HardenInventoryBoundary'
+);
+COMMIT;
+```
+
+Đây là bước cutover một lần; deploy mới trên database trống không cần chạy SQL này.
