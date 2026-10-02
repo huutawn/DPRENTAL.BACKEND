@@ -63,13 +63,12 @@ public sealed class OrganizationIntegrationTests
         using HttpResponseMessage outsiderGet = await outsiderClient.GetAsync($"/api/v1/auth/organizations/{orgId}");
         Assert.Equal(HttpStatusCode.Forbidden, outsiderGet.StatusCode);
 
-        // 3. Admin duyệt bằng PATCH
-        using HttpResponseMessage approveRes = await adminClient.PatchAsync($"/api/v1/auth/organizations/{orgId}/approve", null);
+        // 3. Admin duyệt bằng PATCH /admin/organizations/{id}/approve
+        using HttpResponseMessage approveRes = await adminClient.PatchAsync($"/api/v1/auth/admin/organizations/{orgId}/approve", null);
         Assert.Equal(HttpStatusCode.OK, approveRes.StatusCode);
         OrganizationResponse? approved = await approveRes.Content.ReadFromJsonAsync<OrganizationResponse>();
         Assert.NotNull(approved);
         Assert.Equal(OrganizationStatus.Active, approved.Status);
-
         // 4. Owner thấy tổ chức trong /users/me với vai trò Owner
         using HttpResponseMessage meRes = await ownerClient.GetAsync("/api/v1/auth/users/me");
         Assert.Equal(HttpStatusCode.OK, meRes.StatusCode);
@@ -103,14 +102,14 @@ public sealed class OrganizationIntegrationTests
         OrganizationRegisteredResponse? registered = await registerRes.Content.ReadFromJsonAsync<OrganizationRegisteredResponse>();
         Assert.NotNull(registered);
 
-        using HttpResponseMessage selfApprove = await adminOwnerClient.PatchAsync($"/api/v1/auth/organizations/{registered.OrganizationId}/approve", null);
+        using HttpResponseMessage selfApprove = await adminOwnerClient.PatchAsync($"/api/v1/auth/admin/organizations/{registered.OrganizationId}/approve", null);
         Assert.Equal(HttpStatusCode.Forbidden, selfApprove.StatusCode);
 
         using HttpResponseMessage selfReject = await adminOwnerClient.PatchAsJsonAsync(
-            $"/api/v1/auth/organizations/{registered.OrganizationId}/reject", new RejectOrganizationRequest("Tự từ chối"));
+            $"/api/v1/auth/admin/organizations/{registered.OrganizationId}/reject", new RejectOrganizationRequest("Tự từ chối"));
         Assert.Equal(HttpStatusCode.Forbidden, selfReject.StatusCode);
 
-        using HttpResponseMessage otherApprove = await otherAdminClient.PatchAsync($"/api/v1/auth/organizations/{registered.OrganizationId}/approve", null);
+        using HttpResponseMessage otherApprove = await otherAdminClient.PatchAsync($"/api/v1/auth/admin/organizations/{registered.OrganizationId}/approve", null);
         Assert.Equal(HttpStatusCode.OK, otherApprove.StatusCode);
     }
 
@@ -124,9 +123,9 @@ public sealed class OrganizationIntegrationTests
         await CreateUserAsync(factory, adminId, "admin@example.com", "Admin", AdminRoleId);
         using HttpClient client = CreateAuthenticatedClient(factory, adminId, "admin");
 
-        // Route /organizations chỉ còn GET (danh sách); mọi tổ chức phải đi qua /register rồi được duyệt.
+        // Route /organizations chỉ còn các route của Owner/User; tạo trực tiếp không còn tồn tại -> 404 hoặc 405.
         using HttpResponseMessage res = await client.PostAsJsonAsync("/api/v1/auth/organizations", new { name = "Direct", slug = "direct", type = 1 });
-        Assert.Equal(HttpStatusCode.MethodNotAllowed, res.StatusCode);
+        Assert.True(res.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed);
     }
 
     [Fact]
@@ -148,7 +147,7 @@ public sealed class OrganizationIntegrationTests
     }
 
     [Fact]
-    public async Task PlatformAdminCanDeactivateInspectAndReactivateOrganization()
+    public async Task PlatformAdminCanSuspendInspectAndActivateOrganization()
     {
         using WebApplicationFactory<Program> factory = CreateFactory();
         await SeedDatabaseAsync(factory);
@@ -164,24 +163,24 @@ public sealed class OrganizationIntegrationTests
         using HttpClient adminClient = CreateAuthenticatedClient(factory, adminId, "admin");
         using HttpClient normalClient = CreateAuthenticatedClient(factory, normalUserId, "customer");
 
-        // Normal user attempts to change isActive -> 403
-        using HttpResponseMessage normalUpdateRes = await normalClient.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}", new UpdateOrganizationRequest(IsActive: false));
+        // Normal user attempts to suspend -> 403
+        using HttpResponseMessage normalUpdateRes = await normalClient.PostAsync($"/api/v1/auth/admin/organizations/{orgId}/suspend", null);
         Assert.Equal(HttpStatusCode.Forbidden, normalUpdateRes.StatusCode);
 
-        // Platform admin deactivates organization -> 204
-        using HttpResponseMessage adminDeactRes = await adminClient.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}", new UpdateOrganizationRequest(IsActive: false));
+        // Platform admin suspends organization -> 204
+        using HttpResponseMessage adminDeactRes = await adminClient.PostAsync($"/api/v1/auth/admin/organizations/{orgId}/suspend", null);
         Assert.Equal(HttpStatusCode.NoContent, adminDeactRes.StatusCode);
 
         // Normal user accesses deactivated organization -> 403
         using HttpResponseMessage normalGet = await normalClient.GetAsync($"/api/v1/auth/organizations/{orgId}");
         Assert.Equal(HttpStatusCode.Forbidden, normalGet.StatusCode);
 
-        // Platform admin can inspect deactivated organization -> 200
-        using HttpResponseMessage adminGet = await adminClient.GetAsync($"/api/v1/auth/organizations/{orgId}");
+        // Platform admin can inspect deactivated organization -> 200 via admin route
+        using HttpResponseMessage adminGet = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}");
         Assert.Equal(HttpStatusCode.OK, adminGet.StatusCode);
 
         // Platform admin reactivates organization -> 204
-        using HttpResponseMessage adminReactRes = await adminClient.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}", new UpdateOrganizationRequest(IsActive: true));
+        using HttpResponseMessage adminReactRes = await adminClient.PostAsync($"/api/v1/auth/admin/organizations/{orgId}/activate", null);
         Assert.Equal(HttpStatusCode.NoContent, adminReactRes.StatusCode);
     }
 
@@ -215,10 +214,10 @@ public sealed class OrganizationIntegrationTests
 
         Guid randomOrgId = Guid.NewGuid();
 
-        using HttpResponseMessage getRes = await client.GetAsync($"/api/v1/auth/organizations/{randomOrgId}");
+        using HttpResponseMessage getRes = await client.GetAsync($"/api/v1/auth/admin/organizations/{randomOrgId}");
         Assert.Equal(HttpStatusCode.NotFound, getRes.StatusCode);
 
-        using HttpResponseMessage approveRes = await client.PatchAsync($"/api/v1/auth/organizations/{randomOrgId}/approve", null);
+        using HttpResponseMessage approveRes = await client.PatchAsync($"/api/v1/auth/admin/organizations/{randomOrgId}/approve", null);
         Assert.Equal(HttpStatusCode.NotFound, approveRes.StatusCode);
     }
 
@@ -240,16 +239,16 @@ public sealed class OrganizationIntegrationTests
         using HttpResponseMessage invalidSlugRes = await client.PostAsJsonAsync("/api/v1/auth/organizations/register", Profile("invalid slug format!"));
         Assert.Equal(HttpStatusCode.BadRequest, invalidSlugRes.StatusCode);
 
-        // Empty PATCH -> 400
-        using HttpResponseMessage emptyPatchRes = await client.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}", new { });
-        Assert.Equal(HttpStatusCode.BadRequest, emptyPatchRes.StatusCode);
+        // Empty name -> 400
+        using HttpResponseMessage emptyNameRes = await client.PutAsJsonAsync($"/api/v1/auth/admin/organizations/{orgId}", new { name = "" });
+        Assert.Equal(HttpStatusCode.BadRequest, emptyNameRes.StatusCode);
 
-        // No-op PATCH -> 400
-        using HttpResponseMessage noopRes = await client.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}", new UpdateOrganizationRequest(Name: "Good Org", IsActive: true));
-        Assert.Equal(HttpStatusCode.BadRequest, noopRes.StatusCode);
+        // Name > 150 chars -> 400
+        using HttpResponseMessage tooLongRes = await client.PutAsJsonAsync($"/api/v1/auth/admin/organizations/{orgId}", new { name = new string('a', 151) });
+        Assert.Equal(HttpStatusCode.BadRequest, tooLongRes.StatusCode);
 
         // Reject thiếu lý do -> 400
-        using HttpResponseMessage rejectRes = await client.PatchAsJsonAsync($"/api/v1/auth/organizations/{orgId}/reject", new { reason = "" });
+        using HttpResponseMessage rejectRes = await client.PatchAsJsonAsync($"/api/v1/auth/admin/organizations/{orgId}/reject", new { reason = "" });
         Assert.Equal(HttpStatusCode.BadRequest, rejectRes.StatusCode);
     }
 
@@ -406,7 +405,7 @@ public sealed class OrganizationIntegrationTests
             await db.SaveChangesAsync();
 
             IAccessTokenIssuer issuer = scope.ServiceProvider.GetRequiredService<IAccessTokenIssuer>();
-            IssuedAccessToken adminToken = issuer.Issue(new AccessTokenRequest(adminId, ["admin"], [Permissions.Users.Read], SessionId: session.Id));
+            IssuedAccessToken adminToken = issuer.Issue(new AccessTokenRequest(adminId, ["admin"], [Permissions.Users.Read, Permissions.Organizations.Read], SessionId: session.Id));
             admin.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken.Value);
         }
         using HttpResponseMessage usersResponse = await admin.GetAsync("/api/v1/auth/admin/users?search=TARGET&Page=1&PageSize=1");
@@ -416,7 +415,7 @@ public sealed class OrganizationIntegrationTests
         Assert.Equal(targetId, Assert.Single(users.Items).Id);
         Assert.Equal(1, users.TotalCount);
 
-        using HttpResponseMessage organizationsResponse = await admin.GetAsync("/api/v1/auth/organizations?search=BLUE&status=Active");
+        using HttpResponseMessage organizationsResponse = await admin.GetAsync("/api/v1/auth/admin/organizations?search=BLUE&status=Active");
         Assert.Equal(HttpStatusCode.OK, organizationsResponse.StatusCode);
         PagedResult<OrganizationSummaryResponse>? organizations = await organizationsResponse.Content.ReadFromJsonAsync<PagedResult<OrganizationSummaryResponse>>();
         Assert.NotNull(organizations);
@@ -425,7 +424,7 @@ public sealed class OrganizationIntegrationTests
 
         string tooLong = new('x', PageRequest.MaxSearchLength + 1);
         Assert.Equal(HttpStatusCode.BadRequest, (await admin.GetAsync($"/api/v1/auth/admin/users?search={tooLong}")).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await admin.GetAsync($"/api/v1/auth/organizations?search={tooLong}")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.GetAsync($"/api/v1/auth/admin/organizations?search={tooLong}")).StatusCode);
         using HttpClient target = CreateAuthenticatedClient(factory, targetId, "customer");
         Assert.Equal(HttpStatusCode.Forbidden, (await target.GetAsync("/api/v1/auth/admin/users?search=admin")).StatusCode);
     }
@@ -549,8 +548,14 @@ public sealed class OrganizationIntegrationTests
         dbContext.Sessions.Add(session);
         dbContext.SaveChanges();
 
+        List<string> permissions = dbContext.UserRoles
+            .Where(ur => ur.UserId == userId)
+            .SelectMany(ur => ur.Role.RolePermissions.Select(rp => rp.Permission.Code))
+            .Distinct()
+            .ToList();
+
         IAccessTokenIssuer issuer = scope.ServiceProvider.GetRequiredService<IAccessTokenIssuer>();
-        IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(userId, roles, SessionId: session.Id));
+        IssuedAccessToken token = issuer.Issue(new AccessTokenRequest(userId, roles, Permissions: permissions, SessionId: session.Id));
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Value);
         return client;
     }

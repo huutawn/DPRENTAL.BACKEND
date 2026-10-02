@@ -114,11 +114,11 @@ public sealed class OrganizationReviewTests
     }
 
     [Fact]
-    public async Task PatchIsActiveNoLongerApprovesPendingOrganization()
+    public async Task ActivateCannotApprovePendingOrganization()
     {
         await using Fixture f = await Fixture.CreateAsync();
 
-        Result result = await f.Organizations.UpdateAsync(f.AdminId, f.OrgId, new UpdateOrganizationRequest(IsActive: true));
+        Result result = await f.Organizations.ActivateAsync(f.AdminId, f.OrgId);
 
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.Organization.InvalidStateTransition, result.Error);
@@ -126,15 +126,15 @@ public sealed class OrganizationReviewTests
     }
 
     [Fact]
-    public async Task OnlyPlatformCanRenameActiveOrganizationViaPatch()
+    public async Task OnlyPlatformCanRenameActiveOrganization()
     {
         await using Fixture f = await Fixture.CreateAsync(OrganizationStatus.Active);
 
-        Result owner = await f.Organizations.UpdateAsync(f.OwnerId, f.OrgId, new UpdateOrganizationRequest(Name: "Owner Rename"));
-        Result admin = await f.Organizations.UpdateAsync(f.AdminId, f.OrgId, new UpdateOrganizationRequest(Name: "Admin Rename"));
+        Result owner = await f.Organizations.UpdateNameAsync(f.OwnerId, f.OrgId, new UpdateOrganizationRequest("Owner Rename"));
+        Result admin = await f.Organizations.UpdateNameAsync(f.AdminId, f.OrgId, new UpdateOrganizationRequest("Admin Rename"));
 
         Assert.True(owner.IsFailure);
-        Assert.Equal(AuthErrors.Organization.LegalInfoLocked, owner.Error);
+        Assert.Equal(AuthErrors.Organization.PlatformAdminRequired, owner.Error);
         Assert.True(admin.IsSuccess);
         Assert.Equal("Admin Rename", (await f.ReloadOrgAsync()).Name);
     }
@@ -507,7 +507,9 @@ public sealed class OrganizationReviewTests
             new EfOrganizationRepository(Db),
             new EfOrganizationMembershipRepository(Db),
             new EfRoleRepository(Db),
-            FakeMediaUrlResolver.Instance);
+            FakeMediaUrlResolver.Instance,
+            new EfAuditLogRepository(Db),
+            FixedCorrelationIdProvider.Instance);
 
         public static async Task<Fixture> CreateAsync(OrganizationStatus status = OrganizationStatus.Pending)
         {

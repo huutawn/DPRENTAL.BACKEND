@@ -59,7 +59,7 @@ public sealed class OrganizationServiceTests
     }
 
     [Fact]
-    public async Task UpdateAsyncNonPlatformAdminCannotChangeIsActive()
+    public async Task SuspendAsyncNonPlatformAdminCannotSuspend()
     {
         FakeOrganizationRepository orgRepo = new();
         FakeMembershipRepository memRepo = new();
@@ -70,17 +70,13 @@ public sealed class OrganizationServiceTests
         Guid orgId = Guid.NewGuid();
         orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Acme", Slug = "acme", Status = OrganizationStatus.Active };
         userRepo.Users[ActorUserId] = new User { Id = ActorUserId, IsActive = true };
-        memRepo.GlobalPermissions[ActorUserId] = [Permissions.Organizations.Update]; // NOT platform admin
+        memRepo.GlobalPermissions[ActorUserId] = [Permissions.Organizations.Update]; // NOT platform suspend admin
 
-        Result result = await service.UpdateAsync(
-            ActorUserId,
-            orgId,
-            new UpdateOrganizationRequest(IsActive: false));
+        Result result = await service.SuspendAsync(ActorUserId, orgId);
 
         Assert.True(result.IsFailure);
         Assert.Equal(AuthErrors.Organization.PlatformAdminRequired, result.Error);
     }
-
     [Fact]
     public async Task GetMyOrganizationsAsyncReturnsActiveMembershipsOnly()
     {
@@ -126,6 +122,109 @@ public sealed class OrganizationServiceTests
         Assert.Equal(activeOrgId, item.OrganizationId);
         Assert.Equal("Active Co", item.Name);
         Assert.Equal("Member", item.RoleName);
+    }
+
+    [Fact]
+    public async Task GetAdminByIdAsyncChecksPermissionsAndNotFound()
+    {
+        FakeOrganizationRepository orgRepo = new();
+        FakeMembershipRepository memRepo = new();
+        FakeRoleRepository roleRepo = new();
+        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
+
+        Guid orgId = Guid.NewGuid();
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Org 1", Slug = "org-1", Status = OrganizationStatus.Active };
+
+        // 1. Without permission -> 403
+        Result<OrganizationResponse> noPerm = await service.GetAdminByIdAsync(ActorUserId, orgId);
+        Assert.True(noPerm.IsFailure);
+        Assert.Equal(AuthErrors.Organization.PlatformAdminRequired, noPerm.Error);
+
+        // 2. With permission but not found -> 404
+        memRepo.GlobalPermissions[ActorUserId] = [PermissionCode.IdentityOrganizationsRead];
+        Result<OrganizationResponse> notFound = await service.GetAdminByIdAsync(ActorUserId, Guid.NewGuid());
+        Assert.True(notFound.IsFailure);
+        Assert.Equal(AuthErrors.Organization.OrganizationNotFound, notFound.Error);
+
+        // 3. Success -> 200
+        Result<OrganizationResponse> ok = await service.GetAdminByIdAsync(ActorUserId, orgId);
+        Assert.True(ok.IsSuccess);
+        Assert.Equal("Org 1", ok.Value.Name);
+    }
+
+    [Fact]
+    public async Task UpdateNameAsyncValidatesInputAndUpdates()
+    {
+        FakeOrganizationRepository orgRepo = new();
+        FakeMembershipRepository memRepo = new();
+        FakeRoleRepository roleRepo = new();
+        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
+
+        Guid orgId = Guid.NewGuid();
+        orgRepo.Organizations[orgId] = new Organization { Id = orgId, Name = "Org Before", Slug = "org-before", Status = OrganizationStatus.Active };
+        memRepo.GlobalPermissions[ActorUserId] = [PermissionCode.IdentityOrganizationsUpdate];
+
+        // Empty name -> 400
+        Result empty = await service.UpdateNameAsync(ActorUserId, orgId, new UpdateOrganizationRequest(""));
+        Assert.True(empty.IsFailure);
+        Assert.Equal(AuthErrors.Organization.InvalidName, empty.Error);
+
+        // Same name -> 204 no-op
+        Result same = await service.UpdateNameAsync(ActorUserId, orgId, new UpdateOrganizationRequest("Org Before"));
+        Assert.True(same.IsSuccess);
+
+        // Rename -> 204 updated
+        Result renamed = await service.UpdateNameAsync(ActorUserId, orgId, new UpdateOrganizationRequest("Org After"));
+        Assert.True(renamed.IsSuccess);
+        Assert.Equal("Org After", orgRepo.Organizations[orgId].Name);
+    }
+
+    [Fact]
+    public async Task SuspendAndActivateAsyncValidatesStateTransitions()
+    {
+        FakeOrganizationRepository orgRepo = new();
+        FakeMembershipRepository memRepo = new();
+        FakeRoleRepository roleRepo = new();
+        OrganizationService service = new(orgRepo, memRepo, roleRepo, FakeMediaUrlResolver.Instance);
+
+        Guid activeOrgId = Guid.NewGuid();
+        Guid pendingOrgId = Guid.NewGuid();
+        Guid suspendedOrgId = Guid.NewGuid();
+
+        orgRepo.Organizations[activeOrgId] = new Organization { Id = activeOrgId, Name = "Active", Slug = "act", Status = OrganizationStatus.Active };
+        orgRepo.Organizations[pendingOrgId] = new Organization { Id = pendingOrgId, Name = "Pending", Slug = "pend", Status = OrganizationStatus.Pending };
+        orgRepo.Organizations[suspendedOrgId] = new Organization { Id = suspendedOrgId, Name = "Suspended", Slug = "susp", Status = OrganizationStatus.Suspended };
+
+        memRepo.GlobalPermissions[ActorUserId] = [PermissionCode.IdentityOrganizationsSuspend];
+
+        // Suspend Pending -> 409
+        Result suspPending = await service.SuspendAsync(ActorUserId, pendingOrgId);
+        Assert.True(suspPending.IsFailure);
+        Assert.Equal(AuthErrors.Organization.InvalidStateTransition, suspPending.Error);
+
+        // Suspend Suspended -> 204 idempotent
+        Result suspSusp = await service.SuspendAsync(ActorUserId, suspendedOrgId);
+        Assert.True(suspSusp.IsSuccess);
+
+        // Suspend Active -> 204 success
+        Result suspActive = await service.SuspendAsync(ActorUserId, activeOrgId);
+        Assert.True(suspActive.IsSuccess);
+        Assert.Equal(OrganizationStatus.Suspended, orgRepo.Organizations[activeOrgId].Status);
+
+        // Activate Pending -> 409
+        Result actPending = await service.ActivateAsync(ActorUserId, pendingOrgId);
+        Assert.True(actPending.IsFailure);
+        Assert.Equal(AuthErrors.Organization.InvalidStateTransition, actPending.Error);
+
+        // Activate Active -> 204 idempotent
+        orgRepo.Organizations[activeOrgId].Status = OrganizationStatus.Active;
+        Result actActive = await service.ActivateAsync(ActorUserId, activeOrgId);
+        Assert.True(actActive.IsSuccess);
+
+        // Activate Suspended -> 204 success
+        Result actSuspended = await service.ActivateAsync(ActorUserId, suspendedOrgId);
+        Assert.True(actSuspended.IsSuccess);
+        Assert.Equal(OrganizationStatus.Active, orgRepo.Organizations[suspendedOrgId].Status);
     }
 
     private static readonly string[] AdminPermissions =

@@ -458,6 +458,126 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         Assert.Equal(1, userCount);
     }
 
+    [Fact]
+    public async Task PostgreSql_Organization_ConcurrentSuspend_DoesNotOverwriteStateAndWritesSingleAuditLog()
+    {
+        await using var db = CreateDbContext();
+
+        Permission suspend = await db.Permissions.SingleAsync(p => p.Code == PermissionCode.IdentityOrganizationsSuspend);
+        Role adminRole = new() { Id = Guid.NewGuid(), Name = $"admin_suspend_{Guid.NewGuid():N}", Scope = RoleScope.Global };
+        db.Roles.Add(adminRole);
+        db.RolePermissions.Add(new RolePermission { RoleId = adminRole.Id, PermissionId = suspend.Id });
+
+        Guid adminAId = Guid.NewGuid();
+        Guid adminBId = Guid.NewGuid();
+        foreach (Guid adminId in new[] { adminAId, adminBId })
+        {
+            db.Users.Add(new User { Id = adminId, Email = $"admin_{adminId:N}@example.com", FullName = "Admin", PasswordHash = "h", IsActive = true, CreatedAt = DateTime.UtcNow });
+            db.UserRoles.Add(new UserRole { UserId = adminId, RoleId = adminRole.Id });
+        }
+
+        Guid orgId = Guid.NewGuid();
+        db.Organizations.Add(new Organization
+        {
+            Id = orgId,
+            Name = "Active Org For Concurrency",
+            Slug = $"active-concurrent-{Guid.NewGuid():N}",
+            Status = OrganizationStatus.Active,
+            CreatedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        static OrganizationService CreateService(AuthDbContext context) => new(
+            new EfOrganizationRepository(context),
+            new EfOrganizationMembershipRepository(context),
+            new EfRoleRepository(context),
+            FakeMediaUrlResolver.Instance,
+            new EfAuditLogRepository(context),
+            FixedCorrelationIdProvider.Instance);
+
+        Task<Result> taskA = Task.Run(async () =>
+        {
+            await using var dbA = CreateDbContext();
+            return await CreateService(dbA).SuspendAsync(adminAId, orgId);
+        });
+        Task<Result> taskB = Task.Run(async () =>
+        {
+            await using var dbB = CreateDbContext();
+            return await CreateService(dbB).SuspendAsync(adminBId, orgId);
+        });
+
+        Result[] results = await Task.WhenAll(taskA, taskB);
+        Assert.All(results, r => Assert.True(r.IsSuccess));
+
+        await using var verifyDb = CreateDbContext();
+        Organization stored = await verifyDb.Organizations.SingleAsync(o => o.Id == orgId);
+        Assert.Equal(OrganizationStatus.Suspended, stored.Status);
+
+        var auditLogs = await verifyDb.AuditLogs.Where(l => l.Target == orgId.ToString() && l.Action == "Organization_Suspend").ToListAsync();
+        Assert.Single(auditLogs);
+    }
+
+    [Fact]
+    public async Task PostgreSql_Organization_AuditFailure_RollsBackRenameAndSuspend()
+    {
+        await using var db = CreateDbContext();
+
+        Permission update = await db.Permissions.SingleAsync(p => p.Code == PermissionCode.IdentityOrganizationsUpdate);
+        Permission suspend = await db.Permissions.SingleAsync(p => p.Code == PermissionCode.IdentityOrganizationsSuspend);
+        Role adminRole = new() { Id = Guid.NewGuid(), Name = $"admin_tx_{Guid.NewGuid():N}", Scope = RoleScope.Global };
+        db.Roles.Add(adminRole);
+        db.RolePermissions.Add(new RolePermission { RoleId = adminRole.Id, PermissionId = update.Id });
+        db.RolePermissions.Add(new RolePermission { RoleId = adminRole.Id, PermissionId = suspend.Id });
+
+        Guid adminId = Guid.NewGuid();
+        db.Users.Add(new User { Id = adminId, Email = $"admin_tx_{adminId:N}@example.com", FullName = "Admin Tx", PasswordHash = "h", IsActive = true, CreatedAt = DateTime.UtcNow });
+        db.UserRoles.Add(new UserRole { UserId = adminId, RoleId = adminRole.Id });
+
+        Guid orgId = Guid.NewGuid();
+        db.Organizations.Add(new Organization
+        {
+            Id = orgId,
+            Name = "Original Unchanged Name",
+            Slug = $"tx-test-{Guid.NewGuid():N}",
+            Status = OrganizationStatus.Active,
+            CreatedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var throwingAuditRepo = new ThrowingAuditLogRepository();
+        var service = new OrganizationService(
+            new EfOrganizationRepository(db),
+            new EfOrganizationMembershipRepository(db),
+            new EfRoleRepository(db),
+            FakeMediaUrlResolver.Instance,
+            throwingAuditRepo,
+            FixedCorrelationIdProvider.Instance);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.UpdateNameAsync(adminId, orgId, new UpdateOrganizationRequest("Should Rollback Name")));
+
+        await using (var verifyDb = CreateDbContext())
+        {
+            Organization org = await verifyDb.Organizations.SingleAsync(o => o.Id == orgId);
+            Assert.Equal("Original Unchanged Name", org.Name);
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.SuspendAsync(adminId, orgId));
+
+        await using (var verifyDb = CreateDbContext())
+        {
+            Organization org = await verifyDb.Organizations.SingleAsync(o => o.Id == orgId);
+            Assert.Equal(OrganizationStatus.Active, org.Status);
+        }
+    }
+
+    private sealed class ThrowingAuditLogRepository : IAuditLogRepository
+    {
+        public Task AddAsync(AuditLog auditLog, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Simulated audit write failure for transaction rollback test.");
+    }
+
     private sealed class DummyAccessTokenIssuer : IAccessTokenIssuer
     {
         public IssuedAccessToken Issue(AccessTokenRequest request) =>

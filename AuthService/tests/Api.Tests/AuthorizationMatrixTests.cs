@@ -122,7 +122,7 @@ public sealed class AuthorizationMatrixTests
         RoleAssignmentService roleService = new(_roleRepo);
 
         // 1. Can suspend/activate org
-        Result suspendRes = await orgService.UpdateAsync(SuperAdminUserId, OrganizationId, new UpdateOrganizationRequest(IsActive: false));
+        Result suspendRes = await orgService.SuspendAsync(SuperAdminUserId, OrganizationId);
         Assert.True(suspendRes.IsSuccess);
 
         // 2. Can assign global role
@@ -142,7 +142,7 @@ public sealed class AuthorizationMatrixTests
         RoleAssignmentService roleService = new(_roleRepo);
 
         // 1. Can suspend/activate org (has identity.organizations.suspend)
-        Result suspendRes = await orgService.UpdateAsync(PlatformAdminUserId, OrganizationId, new UpdateOrganizationRequest(IsActive: false));
+        Result suspendRes = await orgService.SuspendAsync(PlatformAdminUserId, OrganizationId);
         Assert.True(suspendRes.IsSuccess);
 
         // 2. CANNOT assign global role (lacks identity.roles.assign.global)
@@ -163,13 +163,13 @@ public sealed class AuthorizationMatrixTests
         OrganizationService orgService = new(_orgRepo, _memRepo, _roleRepo, FakeMediaUrlResolver.Instance);
         RoleAssignmentService roleService = new(_roleRepo);
 
-        // 1. CANNOT rename org — tên là thông tin pháp lý đã được Platform xác minh
-        Result nameRes = await orgService.UpdateAsync(OwnerUserId, OrganizationId, new UpdateOrganizationRequest(Name: "Renamed Org"));
+        // 1. CANNOT rename org (lacks global identity.organizations.update)
+        Result nameRes = await orgService.UpdateNameAsync(OwnerUserId, OrganizationId, new UpdateOrganizationRequest("Renamed Org"));
         Assert.True(nameRes.IsFailure);
-        Assert.Equal(AuthErrors.Organization.LegalInfoLocked, nameRes.Error);
+        Assert.Equal(AuthErrors.Organization.PlatformAdminRequired, nameRes.Error);
 
         // 2. CANNOT suspend/activate org (lacks identity.organizations.suspend)
-        Result suspendRes = await orgService.UpdateAsync(OwnerUserId, OrganizationId, new UpdateOrganizationRequest(IsActive: false));
+        Result suspendRes = await orgService.SuspendAsync(OwnerUserId, OrganizationId);
         Assert.True(suspendRes.IsFailure);
         Assert.Equal(AuthErrors.Organization.PlatformAdminRequired, suspendRes.Error);
 
