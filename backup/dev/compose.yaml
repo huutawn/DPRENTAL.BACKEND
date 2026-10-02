@@ -1,0 +1,288 @@
+name: dprental-dev
+
+services:
+  caddy:
+    image: ${CADDY_IMAGE:?Set CADDY_IMAGE in .env}
+    restart: unless-stopped
+    environment:
+      DEV_DOMAIN: ${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
+      DEV_APP_DOMAIN: ${DEV_APP_DOMAIN:?Set DEV_APP_DOMAIN in .env}
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:?Set CADDY_ACME_EMAIL in .env}
+    ports:
+      - "127.0.0.1:18080:80"
+      - "127.0.0.1:18443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      gateway:
+        condition: service_started
+      frontend:
+        condition: service_started
+
+    networks:
+      - edge
+  media-service:
+      image: ${MEDIA_SERVICE_IMAGE:?Set MEDIA_SERVICE_IMAGE in release.env}
+      restart: unless-stopped
+      environment:
+        ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Staging}
+        ASPNETCORE_URLS: http://+:8080
+        ApiKey: ${Auth__AdminBootstrap__CreationKey:?Set Auth__AdminBootstrap__CreationKey in .env}
+        ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+        ObjectStorage__Endpoint: http://media-minio:9000
+        ObjectStorage__BrowserEndpoint: https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
+        ObjectStorage__Bucket: dprental-media
+        ObjectStorage__AccessKey: ${MEDIA_MINIO_ROOT_USER:?Set MEDIA_MINIO_ROOT_USER in .env}
+        ObjectStorage__SecretKey: ${MEDIA_MINIO_ROOT_PASSWORD:?Set MEDIA_MINIO_ROOT_PASSWORD in .env}
+        Jwt__Issuer: ${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER in .env}
+        Jwt__Audience: ${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE in .env}
+        Jwt__JwksUri: http://auth-service:8080/.well-known/jwks.json
+      depends_on:
+        auth-service:
+          condition: service_healthy
+        postgres:
+          condition: service_healthy
+        media-minio-init:
+          condition: service_completed_successfully
+      networks:
+        - services
+
+  media-migrate:
+    image: ${MEDIA_MIGRATOR_IMAGE:?Set MEDIA_MIGRATOR_IMAGE in release.env}
+    profiles: [migration]
+    restart: "no"
+    entrypoint:
+      - /tools/dotnet-ef
+      - database
+      - update
+      - --project
+      - MediaService/src/Domain/MediaService.Domain.csproj
+    environment:
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - services
+
+  media-minio:
+    image: ${MEDIA_MINIO_IMAGE:?Set MEDIA_MINIO_IMAGE in .env}
+    command: [server, /data, --console-address, ":9001"]
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MEDIA_MINIO_ROOT_USER:?Set MEDIA_MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MEDIA_MINIO_ROOT_PASSWORD:?Set MEDIA_MINIO_ROOT_PASSWORD in .env}
+      MINIO_API_CORS_ALLOW_ORIGIN: https://${DEV_APP_DOMAIN:?Set DEV_APP_DOMAIN in .env}
+    volumes:
+      - media-minio-data:/data
+    healthcheck:
+      test: [CMD, mc, ready, local]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - services
+      - edge
+
+  media-minio-init:
+    image: ${MEDIA_MINIO_IMAGE:?Set MEDIA_MINIO_IMAGE in .env}
+    restart: "no"
+    depends_on:
+      media-minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set local http://media-minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing local/dprental-media
+        mc anonymous set none local/dprental-media
+    environment:
+      MINIO_ROOT_USER: ${MEDIA_MINIO_ROOT_USER:?Set MEDIA_MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MEDIA_MINIO_ROOT_PASSWORD:?Set MEDIA_MINIO_ROOT_PASSWORD in .env}
+    networks:
+      - services
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?Set FRONTEND_IMAGE in release.env}
+    restart: unless-stopped
+    environment:
+      BACKEND_API_URL: http://gateway:8080
+      FRONTEND_ORIGIN: https://${DEV_APP_DOMAIN:?Set DEV_APP_DOMAIN in .env}
+      NEXT_PUBLIC_FIREBASE_API_KEY: ${NEXT_PUBLIC_FIREBASE_API_KEY}
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN}
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${NEXT_PUBLIC_FIREBASE_PROJECT_ID}
+      NEXT_PUBLIC_FIREBASE_APP_ID: ${NEXT_PUBLIC_FIREBASE_APP_ID}
+      NODE_ENV: production
+    depends_on:
+      gateway:
+        condition: service_started
+    networks:
+      - edge
+  gateway:
+    image: ${GATEWAY_IMAGE:?Set GATEWAY_IMAGE in .env}
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Staging}
+      ASPNETCORE_URLS: http://+:8080
+      Gateway__Authentication__Jwt__Issuer: ${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER in .env}
+      Gateway__Authentication__Jwt__Audience: ${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE in .env}
+      Gateway__Authentication__Jwt__JwksUri: http://auth-service:8080/.well-known/jwks.json
+      Routes__0__DownstreamScheme: http
+      Routes__0__DownstreamHostAndPorts__0__Host: auth-service
+      Routes__0__DownstreamHostAndPorts__0__Port: 8080
+      Routes__1__DownstreamScheme: http
+      Routes__1__DownstreamHostAndPorts__0__Host: auth-service
+      Routes__1__DownstreamHostAndPorts__0__Port: 8080
+      Routes__2__DownstreamScheme: http
+      Routes__2__DownstreamHostAndPorts__0__Host: auth-service
+      Routes__2__DownstreamHostAndPorts__0__Port: 8080
+      Routes__3__DownstreamScheme: http
+      Routes__3__DownstreamHostAndPorts__0__Host: media-service
+      Routes__3__DownstreamHostAndPorts__0__Port: 8080
+      GlobalConfiguration__BaseUrl: https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
+      Gateway__Security__RequestSize__MediaUploadMaxRequestBodySizeBytes: ${MEDIA_UPLOAD_MAX_REQUEST_BODY_SIZE_BYTES:-26214400}
+      Gateway__Security__Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:?Set CORS_ALLOWED_ORIGIN_0 in .env}
+      Gateway__Security__Cors__AllowedOrigins__1: ${CORS_ALLOWED_ORIGIN_1:-}
+      Gateway__Security__Cors__AllowedOrigins__2: ${CORS_ALLOWED_ORIGIN_2:-}
+      Gateway__Security__ForwardedHeaders__KnownNetworks__0: ${EDGE_NETWORK_CIDR:-172.30.0.0/24}
+      Gateway__Security__RequestSize__MaxRequestBodySizeBytes: ${MAX_REQUEST_BODY_SIZE_BYTES:-10485760}
+      GlobalConfiguration__Timeout: ${DEFAULT_TIMEOUT_SECONDS:-10}
+      Gateway__Traffic__RateLimiting__Anonymous__PermitLimit: ${RATE_LIMIT_ANONYMOUS_PERMIT:-20}
+      Gateway__Traffic__RateLimiting__Authenticated__PermitLimit: ${RATE_LIMIT_AUTHENTICATED_PERMIT:-100}
+      Gateway__Traffic__RateLimiting__Sensitive__PermitLimit: ${RATE_LIMIT_SENSITIVE_PERMIT:-5}
+      Telemetry__Tracing__SamplingRatio: ${TRACING_SAMPLING_RATIO:-0.1}
+      Telemetry__Otlp__TracesEndpoint: ${OTLP_TRACES_ENDPOINT:-}
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+    networks:
+      - edge
+      - services
+
+  auth-service:
+    image: ${AUTH_SERVICE_IMAGE:?Set AUTH_SERVICE_IMAGE in .env}
+    restart: unless-stopped
+    volumes:
+      - /opt/dprental/dev/firebase-service-account.json:/opt/dprental/dev/firebase-service-account.json:ro
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Staging}
+      ASPNETCORE_URLS: http://+:8080
+      MediaService__InternalBaseUrl: http://media-service:8080
+      MediaService__PublicGatewayUrl: https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
+      MediaService__ApiKey: ${Auth__AdminBootstrap__CreationKey:?Set Auth__AdminBootstrap__CreationKey in .env}
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      ConnectionStrings__Redis: valkey:6379
+      Auth__Jwt__Issuer: ${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER in .env}
+      Auth__Jwt__Audience: ${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE in .env}
+      Auth__Jwt__AccessTokenLifetimeMinutes: ${AUTH_JWT_ACCESS_TOKEN_LIFETIME_MINUTES:-15}
+      Auth__Jwt__ActiveKeyId: ${AUTH_JWT_ACTIVE_KEY_ID:?Set AUTH_JWT_ACTIVE_KEY_ID in .env}
+      Auth__Jwt__Keys__0__KeyId: ${AUTH_JWT_ACTIVE_KEY_ID:?Set AUTH_JWT_ACTIVE_KEY_ID in .env}
+      Auth__Jwt__Keys__0__PublicKeyPem: /run/secrets/auth_jwt_public_key
+      Auth__Jwt__Keys__0__PrivateKeyPem: /run/secrets/auth_jwt_private_key
+      Telemetry__Tracing__SamplingRatio: ${TRACING_SAMPLING_RATIO:-0.1}
+      Telemetry__Otlp__TracesEndpoint: ${OTLP_TRACES_ENDPOINT:-}
+      Auth__Google__ClientId: ${Auth__Google__ClientId}
+      Auth__Google__ClientSecret: ${Auth__Google__ClientSecret}
+      Auth__Google__AllowedReturnUrls__0: ${Auth__Google__AllowedReturnUrls__0}
+      Auth__Google__BffCallbackUrls__0: ${Auth__Google__BffCallbackUrls__0}
+      Auth__Google__AllowedReturnUrls__1: ${Auth__Google__AllowedReturnUrls__1}
+      Auth__Google__BffCallbackUrls__1: ${Auth__Google__BffCallbackUrls__1}      
+      Auth__ForwardedHeaders__Enabled: ${Auth__ForwardedHeaders__Enabled}
+      Auth__ForwardedHeaders__KnownNetworks__0: ${Auth__ForwardedHeaders__KnownNetworks__0}
+      Auth__AdminBootstrap__CreationKey: ${Auth__AdminBootstrap__CreationKey}
+      Auth__Firebase__Enabled: ${Auth__Firebase__Enabled}
+      Auth__Firebase__ProjectId: ${Auth__Firebase__ProjectId}
+      Auth__Firebase__CredentialsPath: ${Auth__Firebase__CredentialsPath}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    secrets:
+      - auth_jwt_private_key
+      - auth_jwt_public_key
+    networks:
+      - services
+      - egress
+
+  auth-migrate:
+    image: ${AUTH_MIGRATOR_IMAGE:?Set AUTH_MIGRATOR_IMAGE in .env}
+    profiles: [migration]
+    restart: "no"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Staging}
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      Auth__Jwt__Issuer: ${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER in .env}
+      Auth__Jwt__Audience: ${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE in .env}
+      Auth__Jwt__AccessTokenLifetimeMinutes: ${AUTH_JWT_ACCESS_TOKEN_LIFETIME_MINUTES:-15}
+      Auth__Jwt__ActiveKeyId: ${AUTH_JWT_ACTIVE_KEY_ID:?Set AUTH_JWT_ACTIVE_KEY_ID in .env}
+      Auth__Jwt__Keys__0__KeyId: ${AUTH_JWT_ACTIVE_KEY_ID:?Set AUTH_JWT_ACTIVE_KEY_ID in .env}
+      Auth__Jwt__Keys__0__PublicKeyPem: /run/secrets/auth_jwt_public_key
+      Auth__Jwt__Keys__0__PrivateKeyPem: /run/secrets/auth_jwt_private_key
+    depends_on:
+      postgres:
+        condition: service_healthy
+    secrets:
+      - auth_jwt_private_key
+      - auth_jwt_public_key
+    networks:
+      - services
+
+  postgres:
+    image: ${POSTGRES_IMAGE:?Set POSTGRES_IMAGE in .env}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready --username=$$POSTGRES_USER --dbname=$$POSTGRES_DB]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    networks:
+      - services
+
+  valkey:
+    image: ${VALKEY_IMAGE:?Set VALKEY_IMAGE in .env}
+    restart: unless-stopped
+    command: [valkey-server, --appendonly, 'yes']
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: [CMD, valkey-cli, ping]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - services
+
+secrets:
+  auth_jwt_private_key:
+    file: ${SECRETS_DIR:?Set SECRETS_DIR in .env}/auth-jwt-private.pem
+  auth_jwt_public_key:
+    file: ${SECRETS_DIR:?Set SECRETS_DIR in .env}/auth-jwt-public.pem
+
+volumes:
+  caddy-data:
+  caddy-config:
+  postgres-data:
+  valkey-data:
+  media-minio-data:
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: ${EDGE_NETWORK_CIDR:-172.30.0.0/24}
+  services:
+    internal: true
+  egress:
+    internal: false

@@ -1,8 +1,27 @@
 {
-    email {$CADDY_ACME_EMAIL}
+	email {$CADDY_ACME_EMAIL}
 }
 
 {$DEV_DOMAIN} {
-    encode zstd gzip
-    reverse_proxy gateway:8080
+	encode zstd gzip
+	@mediaFiles {
+		path /dprental-media/*
+		method GET HEAD OPTIONS
+	}
+	handle @mediaFiles {
+		reverse_proxy media-minio:9000 {
+			header_up Host {http.request.host}
+		}
+	}
+	handle {
+		reverse_proxy gateway:8080
+	}
+}
+
+{$DEV_APP_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy frontend:3000 {
+		header_up Host {http.request.host}
+		header_up X-Forwarded-Proto https
+	}
 }

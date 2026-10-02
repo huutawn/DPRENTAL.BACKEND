@@ -6,6 +6,7 @@ services:
     restart: unless-stopped
     environment:
       DEV_DOMAIN: ${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
+      DEV_APP_DOMAIN: ${DEV_APP_DOMAIN:?Set DEV_APP_DOMAIN in .env}
       CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:?Set CADDY_ACME_EMAIL in .env}
     ports:
       - "127.0.0.1:${OPSI_HTTP_LOCAL_PORT:-18080}:80"
@@ -16,6 +17,8 @@ services:
       - caddy-config:/config
     depends_on:
       gateway:
+        condition: service_started
+      frontend:
         condition: service_started
     networks:
       - edge
@@ -29,10 +32,26 @@ services:
       Gateway__Authentication__Jwt__Issuer: ${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER in .env}
       Gateway__Authentication__Jwt__Audience: ${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE in .env}
       Gateway__Authentication__Jwt__JwksUri: http://auth-service:8080/.well-known/jwks.json
-      ReverseProxy__Clusters__auth-service__Destinations__primary__Address: http://auth-service:8080/
+      Routes__0__DownstreamHostAndPorts__0__Port: 8080
+      Routes__1__DownstreamHostAndPorts__0__Port: 8080
+      Routes__2__DownstreamHostAndPorts__0__Port: 8080
+      Routes__8__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__8__DownstreamHostAndPorts__0__Port: 8080
+      Routes__9__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__9__DownstreamHostAndPorts__0__Port: 8080
+      Routes__10__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__10__DownstreamHostAndPorts__0__Port: 8080
+      Routes__11__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__11__DownstreamHostAndPorts__0__Port: 8080
+      Routes__12__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__12__DownstreamHostAndPorts__0__Port: 8080
+      Routes__13__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__13__DownstreamHostAndPorts__0__Port: 8080
+      GlobalConfiguration__BaseUrl: https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
       Gateway__Security__Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:?Set CORS_ALLOWED_ORIGIN_0 in .env}
       Gateway__Security__ForwardedHeaders__KnownNetworks__0: ${EDGE_NETWORK_CIDR:-172.30.0.0/24}
       Gateway__Security__RequestSize__MaxRequestBodySizeBytes: ${MAX_REQUEST_BODY_SIZE_BYTES:-10485760}
+      Gateway__Security__RequestSize__MediaUploadMaxRequestBodySizeBytes: ${MEDIA_UPLOAD_MAX_REQUEST_BODY_SIZE_BYTES:-26214400}
       Gateway__Traffic__Resilience__DefaultTimeoutSeconds: ${DEFAULT_TIMEOUT_SECONDS:-10}
       Gateway__Traffic__RateLimiting__Anonymous__PermitLimit: ${RATE_LIMIT_ANONYMOUS_PERMIT:-20}
       Gateway__Traffic__RateLimiting__Authenticated__PermitLimit: ${RATE_LIMIT_AUTHENTICATED_PERMIT:-100}
@@ -42,9 +61,24 @@ services:
     depends_on:
       auth-service:
         condition: service_healthy
+      media-service:
+        condition: service_healthy
     networks:
       - edge
       - services
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?Set FRONTEND_IMAGE in release.env}
+    restart: unless-stopped
+    environment:
+      BACKEND_API_URL: http://gateway:8080
+      FRONTEND_ORIGIN: https://${DEV_APP_DOMAIN:?Set DEV_APP_DOMAIN in .env}
+      NODE_ENV: production
+    depends_on:
+      gateway:
+        condition: service_started
+    networks:
+      - edge
 
   auth-service:
     image: ${AUTH_SERVICE_IMAGE:?Set AUTH_SERVICE_IMAGE in .env}
@@ -56,11 +90,15 @@ services:
       ConnectionStrings__Redis: valkey:6379
       Auth__Jwt__Issuer: ${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER in .env}
       Auth__Jwt__Audience: ${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE in .env}
+      Auth__AdminBootstrap__CreationKey: ${AUTH_ADMIN_BOOTSTRAP_CREATION_KEY:?Set AUTH_ADMIN_BOOTSTRAP_CREATION_KEY in .env}
       Auth__Jwt__AccessTokenLifetimeMinutes: ${AUTH_JWT_ACCESS_TOKEN_LIFETIME_MINUTES:-15}
       Auth__Jwt__ActiveKeyId: ${AUTH_JWT_ACTIVE_KEY_ID:?Set AUTH_JWT_ACTIVE_KEY_ID in .env}
       Auth__Jwt__Keys__0__KeyId: ${AUTH_JWT_ACTIVE_KEY_ID:?Set AUTH_JWT_ACTIVE_KEY_ID in .env}
       Auth__Jwt__Keys__0__PublicKeyPem: /run/secrets/auth_jwt_public_key
       Auth__Jwt__Keys__0__PrivateKeyPem: /run/secrets/auth_jwt_private_key
+      MediaService__InternalBaseUrl: http://media-service:8080
+      MediaService__PublicGatewayUrl: https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
+      MediaService__ApiKey: ${AUTH_ADMIN_BOOTSTRAP_CREATION_KEY:?Set AUTH_ADMIN_BOOTSTRAP_CREATION_KEY in .env}
       Telemetry__Tracing__SamplingRatio: ${TRACING_SAMPLING_RATIO:-0.1}
       Telemetry__Otlp__TracesEndpoint: ${OTLP_TRACES_ENDPOINT:-}
     depends_on:
@@ -94,6 +132,122 @@ services:
     secrets:
       - auth_jwt_private_key
       - auth_jwt_public_key
+    networks:
+      - services
+
+  catalog-service:
+    image: ${CATALOG_SERVICE_IMAGE:?Set CATALOG_SERVICE_IMAGE in release.env}
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Staging}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      Auth__Jwt__Issuer: ${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER in .env}
+      Auth__Jwt__Audience: ${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE in .env}
+      Auth__Jwt__Keys__0__KeyId: ${AUTH_JWT_ACTIVE_KEY_ID:?Set AUTH_JWT_ACTIVE_KEY_ID in .env}
+      Auth__Jwt__Keys__0__PublicKeyPem: /run/secrets/auth_jwt_public_key
+      Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:?Set CORS_ALLOWED_ORIGIN_0 in .env}
+      Telemetry__Tracing__SamplingRatio: ${TRACING_SAMPLING_RATIO:-0.1}
+      Telemetry__Otlp__TracesEndpoint: ${OTLP_TRACES_ENDPOINT:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    secrets:
+      - auth_jwt_public_key
+    networks:
+      - services
+
+  catalog-migrate:
+    image: ${CATALOG_MIGRATOR_IMAGE:?Set CATALOG_MIGRATOR_IMAGE in release.env}
+    profiles: [migration]
+    restart: "no"
+    environment:
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - services
+
+  media-service:
+    image: ${MEDIA_SERVICE_IMAGE:?Set MEDIA_SERVICE_IMAGE in release.env}
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Staging}
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      - ObjectStorage__Endpoint=http://media-minio:9000
+      - ObjectStorage__BrowserEndpoint=https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
+      - ObjectStorage__Bucket=dprental-media
+      - ObjectStorage__AccessKey=${MEDIA_MINIO_ROOT_USER:?Set MEDIA_MINIO_ROOT_USER in .env}
+      - ObjectStorage__SecretKey=${MEDIA_MINIO_ROOT_PASSWORD:?Set MEDIA_MINIO_ROOT_PASSWORD in .env}
+      - Jwt__Issuer=${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER in .env}
+      - Jwt__Audience=${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE in .env}
+      - Jwt__JwksUri=http://auth-service:8080/.well-known/jwks.json
+      - ApiKey=${AUTH_ADMIN_BOOTSTRAP_CREATION_KEY:?Set AUTH_ADMIN_BOOTSTRAP_CREATION_KEY in .env}
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      media-minio-init:
+        condition: service_completed_successfully
+    networks:
+      - services
+
+  media-migrate:
+    image: ${MEDIA_MIGRATOR_IMAGE:?Set MEDIA_MIGRATOR_IMAGE in release.env}
+    profiles: [migration]
+    restart: "no"
+    entrypoint:
+      - /tools/dotnet-ef
+      - database
+      - update
+      - --project
+      - MediaService/src/Domain/MediaService.Domain.csproj
+    environment:
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - services
+
+  media-minio:
+    image: ${MEDIA_MINIO_IMAGE:?Set MEDIA_MINIO_IMAGE in .env}
+    command: [server, /data, --console-address, ":9001"]
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MEDIA_MINIO_ROOT_USER:?Set MEDIA_MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MEDIA_MINIO_ROOT_PASSWORD:?Set MEDIA_MINIO_ROOT_PASSWORD in .env}
+      MINIO_API_CORS_ALLOW_ORIGIN: https://${DEV_APP_DOMAIN:?Set DEV_APP_DOMAIN in .env}
+    volumes:
+      - media-minio-data:/data
+    healthcheck:
+      test: [CMD, mc, ready, local]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - services
+      - edge
+
+  media-minio-init:
+    image: ${MEDIA_MINIO_IMAGE:?Set MEDIA_MINIO_IMAGE in .env}
+    restart: "no"
+    depends_on:
+      media-minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set local http://media-minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing local/dprental-media
+        mc anonymous set none local/dprental-media
+    environment:
+      MINIO_ROOT_USER: ${MEDIA_MINIO_ROOT_USER:?Set MEDIA_MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MEDIA_MINIO_ROOT_PASSWORD:?Set MEDIA_MINIO_ROOT_PASSWORD in .env}
     networks:
       - services
 
@@ -140,6 +294,7 @@ volumes:
   caddy-config:
   postgres-data:
   valkey-data:
+  media-minio-data:
 
 networks:
   edge:

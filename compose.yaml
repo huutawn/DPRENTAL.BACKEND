@@ -22,10 +22,16 @@ services:
       Routes__1__DownstreamHostAndPorts__0__Port: 8080
       Routes__2__DownstreamHostAndPorts__0__Host: auth-service
       Routes__2__DownstreamHostAndPorts__0__Port: 8080
-      Routes__3__DownstreamHostAndPorts__0__Host: auth-service
+      Routes__3__DownstreamHostAndPorts__0__Host: media-service
       Routes__3__DownstreamHostAndPorts__0__Port: 8080
-      Routes__4__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__4__DownstreamHostAndPorts__0__Host: media-service
       Routes__4__DownstreamHostAndPorts__0__Port: 8080
+      Routes__5__DownstreamHostAndPorts__0__Host: media-service
+      Routes__5__DownstreamHostAndPorts__0__Port: 8080
+      Routes__6__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__6__DownstreamHostAndPorts__0__Port: 8080
+      Routes__7__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__7__DownstreamHostAndPorts__0__Port: 8080
       Gateway__Security__Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:-http://localhost:3000}
       Gateway__Security__Cors__AllowedOrigins__1: ${CORS_ALLOWED_ORIGIN_1:-http://localhost:5173}
       Gateway__Security__Cors__AllowedOrigins__2: http://localhost:${GATEWAY_PORT:-5050}
@@ -345,7 +351,7 @@ services:
     environment:
       POSTGRES_DB: ${INVENTORY_POSTGRES_DB:-inventoryservice}
       POSTGRES_USER: ${INVENTORY_POSTGRES_USER:-inventoryservice}
-      POSTGRES_PASSWORD: ${INVENTORY_POSTGRES_PASSWORD:-inventory_dev_secret_123!}
+      POSTGRES_PASSWORD: ${INVENTORY_POSTGRES_PASSWORD:?Set INVENTORY_POSTGRES_PASSWORD in .env}
     ports:
       - "127.0.0.1:${INVENTORY_POSTGRES_PORT:-5433}:5432"
     volumes:
@@ -358,6 +364,27 @@ services:
     networks:
       - dprental
 
+  inventory-migrate:
+    build:
+      context: ./InventoryService
+      dockerfile_inline: |
+        FROM mcr.microsoft.com/dotnet/sdk:10.0
+        WORKDIR /src
+        COPY Directory.Build.props Directory.Packages.props ./
+        COPY InventoryService/ InventoryService/
+        RUN dotnet restore InventoryService/src/Domain/InventoryService.Domain.csproj \
+          && dotnet tool install --tool-path /tools dotnet-ef --version 10.0.12
+    restart: "no"
+    entrypoint: ["/tools/dotnet-ef", "database", "update", "--project", "InventoryService/src/Domain/InventoryService.Domain.csproj"]
+    environment:
+      ConnectionStrings__Postgres: "Host=inventory-postgres;Port=5432;Database=${INVENTORY_POSTGRES_DB:-inventoryservice};Username=${INVENTORY_POSTGRES_USER:-inventoryservice};Password=${INVENTORY_POSTGRES_PASSWORD:?Set INVENTORY_POSTGRES_PASSWORD in .env}"
+    depends_on:
+      inventory-postgres:
+        condition: service_healthy
+    networks:
+      - dprental
+
+
   inventory-service:
     build:
       context: ./InventoryService
@@ -367,7 +394,7 @@ services:
       - "${INVENTORY_SERVICE_PORT:-8083}:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
-      ConnectionStrings__Postgres: "Host=inventory-postgres;Port=5432;Database=${INVENTORY_POSTGRES_DB:-inventoryservice};Username=${INVENTORY_POSTGRES_USER:-inventoryservice};Password=${INVENTORY_POSTGRES_PASSWORD:-inventory_dev_secret_123!}"
+      ConnectionStrings__Postgres: "Host=inventory-postgres;Port=5432;Database=${INVENTORY_POSTGRES_DB:-inventoryservice};Username=${INVENTORY_POSTGRES_USER:-inventoryservice};Password=${INVENTORY_POSTGRES_PASSWORD:?Set INVENTORY_POSTGRES_PASSWORD in .env}"
       Authentication__Jwt__Issuer: ${AUTH_JWT_ISSUER:-dprental-authservice-dev}
       Authentication__Jwt__HumanAudience: dprental-clients
       Authentication__Jwt__ServiceAudience: inventory-api
@@ -376,6 +403,8 @@ services:
     depends_on:
       inventory-postgres:
         condition: service_healthy
+      inventory-migrate:
+        condition: service_completed_successfully
       auth-service:
         condition: service_started
       kafka:
