@@ -33,6 +33,7 @@ if (app.Environment.IsDevelopment())
         options.SwaggerEndpoint("/swagger/v1/swagger.json", "AuthService");
         options.SwaggerEndpoint("/media/swagger/v1/swagger.json", "MediaService");
         options.SwaggerEndpoint("/catalog/swagger/v1/swagger.json", "CatalogService");
+        options.SwaggerEndpoint("/inventory/swagger/v1/swagger.json", "InventoryService");
     });
 }
 
