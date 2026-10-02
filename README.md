@@ -18,6 +18,32 @@ Gateway/
 ```
 Gateway nhận JWT được AuthService ký và chỉ tải public key từ JWKS. Không đặt private key, token, hoặc password vào `appsettings*.json`.
 
+## CatalogService
+
+Gateway chuyển tiếp nguyên path/query/body của `/api/v1/catalog` tới `catalog-service:8080`.
+Bốn route GET công khai là categories, categories/{id}, equipment-types và equipment-types/{id}.
+Template detail kết thúc bằng `/` để Ocelot chỉ match một segment ID; URL caller không cần slash cuối.
+Các request Catalog còn lại yêu cầu JWT Bearer với audience `Gateway:Authentication:Jwt:Audience`;
+Catalog tự kiểm tra role `Admin` cho POST/PATCH/publish/disable. Gateway không thêm nghiệp vụ Catalog.
+
+Token `accessToken` trong cookie được chuyển thành Authorization Bearer; browser cookies và identity
+headers không được chuyển tới Catalog. Token dành riêng cho `inventory-api` không được dùng cho Catalog.
+Gateway tiếp tục chuyển nguyên status và ProblemDetails từ Catalog.
+
+Chạy Gateway trực tiếp ở Development dùng Catalog `http://localhost:47297`. Docker Compose của Gateway
+ánh xạ routes 8..13 qua `CATALOG_SERVICE_HOST`, `CATALOG_SERVICE_PORT`, `CATALOG_SERVICE_SCHEME`;
+mặc định `catalog-service:8080` trên network `dprental-network`. Catalog phải tham gia cùng network này.
+Khi chạy Catalog trên host, đặt host thành `host.docker.internal` và port thành `47297`.
+
+Swagger UI Development có CatalogService tại `/catalog/swagger/v1/swagger.json`. Catalog chỉ xuất Swagger
+ở Development; khi Catalog chạy Staging/Production, route tài liệu trả 401 nếu anonymous hoặc 404 với
+token hợp lệ. API Catalog vẫn hoạt động.
+
+VPS sử dụng Compose trong `deploy/dev` của platform repository: thêm `CATALOG_SERVICE_IMAGE` và
+`CATALOG_MIGRATOR_IMAGE` vào `release.env`, mount public key Auth, chạy catalog-migrate trước khi start
+catalog-service và deploy Gateway chứa routes mới. Xem quy trình Catalog trong `deploy/dev/README.md`.
+Gateway readiness chỉ kiểm tra JWKS/configuration, không thay thế readiness của Catalog.
+
 ## Chạy local & Kiểm thử
 
 ### Chạy automated test suite

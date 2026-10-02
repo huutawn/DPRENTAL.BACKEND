@@ -32,6 +32,7 @@ if (app.Environment.IsDevelopment())
         options.DocumentTitle = "DPRental API";
         options.SwaggerEndpoint("/swagger/v1/swagger.json", "AuthService");
         options.SwaggerEndpoint("/media/swagger/v1/swagger.json", "MediaService");
+        options.SwaggerEndpoint("/catalog/swagger/v1/swagger.json", "CatalogService");
     });
 }
 

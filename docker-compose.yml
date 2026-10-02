@@ -40,6 +40,26 @@ services:
       - Routes__3__DownstreamHostAndPorts__0__Host=${AUTH_SERVICE_HOST:-auth-service}
       - Routes__3__DownstreamHostAndPorts__0__Port=${AUTH_SERVICE_PORT:-5000}
 
+      # Catalog routes 8..13: public GET, authenticated commands, OpenAPI
+      - Routes__8__DownstreamScheme=${CATALOG_SERVICE_SCHEME:-http}
+      - Routes__8__DownstreamHostAndPorts__0__Host=${CATALOG_SERVICE_HOST:-catalog-service}
+      - Routes__8__DownstreamHostAndPorts__0__Port=${CATALOG_SERVICE_PORT:-8080}
+      - Routes__9__DownstreamScheme=${CATALOG_SERVICE_SCHEME:-http}
+      - Routes__9__DownstreamHostAndPorts__0__Host=${CATALOG_SERVICE_HOST:-catalog-service}
+      - Routes__9__DownstreamHostAndPorts__0__Port=${CATALOG_SERVICE_PORT:-8080}
+      - Routes__10__DownstreamScheme=${CATALOG_SERVICE_SCHEME:-http}
+      - Routes__10__DownstreamHostAndPorts__0__Host=${CATALOG_SERVICE_HOST:-catalog-service}
+      - Routes__10__DownstreamHostAndPorts__0__Port=${CATALOG_SERVICE_PORT:-8080}
+      - Routes__11__DownstreamScheme=${CATALOG_SERVICE_SCHEME:-http}
+      - Routes__11__DownstreamHostAndPorts__0__Host=${CATALOG_SERVICE_HOST:-catalog-service}
+      - Routes__11__DownstreamHostAndPorts__0__Port=${CATALOG_SERVICE_PORT:-8080}
+      - Routes__12__DownstreamScheme=${CATALOG_SERVICE_SCHEME:-http}
+      - Routes__12__DownstreamHostAndPorts__0__Host=${CATALOG_SERVICE_HOST:-catalog-service}
+      - Routes__12__DownstreamHostAndPorts__0__Port=${CATALOG_SERVICE_PORT:-8080}
+      - Routes__13__DownstreamScheme=${CATALOG_SERVICE_SCHEME:-http}
+      - Routes__13__DownstreamHostAndPorts__0__Host=${CATALOG_SERVICE_HOST:-catalog-service}
+      - Routes__13__DownstreamHostAndPorts__0__Port=${CATALOG_SERVICE_PORT:-8080}
+
       # Cấu hình Bảo mật CORS & Kích thước Payload
       - Gateway__Security__Cors__AllowedOrigins__0=${CORS_ALLOWED_ORIGIN_0:-http://localhost:3000}
       - Gateway__Security__Cors__AllowedOrigins__1=${CORS_ALLOWED_ORIGIN_1:-http://localhost:5173}

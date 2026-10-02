@@ -55,7 +55,7 @@ internal static class JwtAuthenticationServiceCollectionExtensions
         bearerOptions.MapInboundClaims = false;
         bearerOptions.ConfigurationManager = configurationManager;
         bearerOptions.RefreshOnIssuerKeyNotFound = true;
-        bearerOptions.Events = CreateBearerEvents();
+        bearerOptions.Events = CreateBearerEvents(configurationManager);
         bearerOptions.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -63,6 +63,7 @@ internal static class JwtAuthenticationServiceCollectionExtensions
             ValidateAudience = true,
             ValidAudience = jwtOptions.Audience,
             ValidateIssuerSigningKey = true,
+            TryAllIssuerSigningKeys = false,
             ValidateLifetime = true,
             RequireExpirationTime = true,
             RequireSignedTokens = true,
@@ -82,7 +83,7 @@ internal static class JwtAuthenticationServiceCollectionExtensions
         bearerOptions.MapInboundClaims = false;
         bearerOptions.ConfigurationManager = configurationManager;
         bearerOptions.RefreshOnIssuerKeyNotFound = true;
-        bearerOptions.Events = CreateBearerEvents();
+        bearerOptions.Events = CreateBearerEvents(configurationManager);
         bearerOptions.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -92,10 +93,17 @@ internal static class JwtAuthenticationServiceCollectionExtensions
             AudienceValidator = (audiences, securityToken, validationParameters) =>
             {
                 if (audiences is null || !audiences.Any()) return false;
-                return audiences.Contains(jwtOptions.Audience, StringComparer.Ordinal)
-                    || audiences.Contains(jwtOptions.InventoryAudience, StringComparer.Ordinal);
+                var claims = securityToken switch
+                {
+                    Microsoft.IdentityModel.JsonWebTokens.JsonWebToken jwt => jwt.Claims,
+                    JwtSecurityToken jwt => jwt.Claims,
+                    _ => []
+                };
+                bool service = claims.Any(c => c.Type == "u" && c.Value == "svc");
+                return audiences.Contains(service ? jwtOptions.InventoryAudience : jwtOptions.Audience, StringComparer.Ordinal);
             },
             ValidateIssuerSigningKey = true,
+            TryAllIssuerSigningKeys = false,
             ValidateLifetime = true,
             RequireExpirationTime = true,
             RequireSignedTokens = true,
@@ -106,9 +114,9 @@ internal static class JwtAuthenticationServiceCollectionExtensions
         };
     }
 
-    private static JwtBearerEvents CreateBearerEvents() => new()
+    private static JwtBearerEvents CreateBearerEvents(JwksConfigurationManager configurationManager) => new()
     {
-        OnMessageReceived = context =>
+        OnMessageReceived = async context =>
         {
             var routePolicy = context.HttpContext.RequestServices.GetService<ApiKeyRoutePolicy>();
             if (routePolicy?.RequiresApiKey(context.Request) == true)
@@ -116,7 +124,7 @@ internal static class JwtAuthenticationServiceCollectionExtensions
                 var identity = new ClaimsIdentity([new Claim("u", "svc")], "Bearer");
                 context.Principal = new ClaimsPrincipal(identity);
                 context.Success();
-                return Task.CompletedTask;
+                return;
             }
 
             if (string.IsNullOrWhiteSpace(context.Request.Headers.Authorization) &&
@@ -127,7 +135,23 @@ internal static class JwtAuthenticationServiceCollectionExtensions
                 context.Token = accessToken;
             }
 
-            return Task.CompletedTask;
+            string? token = context.Token;
+            string authorization = context.Request.Headers.Authorization.ToString();
+            if (token is null && authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                token = authorization[7..].Trim();
+            if (token is null || !new JwtSecurityTokenHandler().CanReadToken(token)) return;
+            try
+            {
+                var jwt = new JwtSecurityToken(token);
+                if (!await configurationManager.EnsureSigningKeyAsync(jwt.Header.Kid, context.HttpContext.RequestAborted))
+                    context.Fail("Unknown signing key.");
+            }
+            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or
+                ArgumentException or OperationCanceledException)
+            {
+                if (context.HttpContext.RequestAborted.IsCancellationRequested) throw;
+                context.Fail("JWT signing keys are unavailable.");
+            }
         }
     };
 }

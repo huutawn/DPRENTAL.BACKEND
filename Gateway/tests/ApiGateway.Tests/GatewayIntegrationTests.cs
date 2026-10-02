@@ -101,6 +101,8 @@ public sealed class GatewayIntegrationTests
         string uiConfiguration = await initializer.Content.ReadAsStringAsync();
         Assert.Contains("AuthService", uiConfiguration);
         Assert.Contains("MediaService", uiConfiguration);
+        Assert.Contains("CatalogService", uiConfiguration);
+        Assert.Contains("/catalog/swagger/v1/swagger.json", uiConfiguration);
         Assert.Contains("/swagger/v1/swagger.json", uiConfiguration);
         Assert.Contains("/media/swagger/v1/swagger.json", uiConfiguration);
         Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);

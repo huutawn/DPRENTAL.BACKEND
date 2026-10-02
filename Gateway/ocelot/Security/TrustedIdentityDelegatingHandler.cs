@@ -43,11 +43,13 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
         {
             var headers = request.Headers;
 
-            // MediaService và InventoryService chỉ nhận authenticated bearer token, không nhận browser session cookies
+            // Các service tự xác thực JWT chỉ nhận bearer token, không nhận browser session cookies
             bool isMediaRequest = httpContext.Request.Path.StartsWithSegments("/api/v1/media");
             bool isInventoryRequest = httpContext.Request.Path.StartsWithSegments("/api/v1/inventory");
+            bool isCatalogRequest = httpContext.Request.Path.StartsWithSegments("/api/v1/catalog");
             if (isMediaRequest ||
-                isInventoryRequest ||
+                isInventoryRequest || isCatalogRequest ||
+                httpContext.Request.Path.StartsWithSegments("/catalog/swagger") ||
                 httpContext.Request.Path.StartsWithSegments("/media/swagger") ||
                 httpContext.Request.Path.StartsWithSegments("/inventory/swagger"))
             {
@@ -109,8 +111,8 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
 
             // 4. Trusted Identity Forwarding:
             // Chỉ chuyển tiếp danh tính người dùng cho các service tin cậy header;
-            // Riêng InventoryService không tin tưởng các header danh tính mà tự xác thực JWT.
-            if (!isInventoryRequest &&
+            // InventoryService và CatalogService tự xác thực JWT.
+            if (!isInventoryRequest && !isCatalogRequest &&
                 httpContext.User?.Identity is not null && httpContext.User.Identity.IsAuthenticated &&
                 !httpContext.User.HasClaim("u", "svc"))
             {
@@ -136,9 +138,9 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
                     }
                 }
             }
-            else if (isInventoryRequest)
+            else if (isInventoryRequest || isCatalogRequest)
             {
-                // Đảm bảo không chuyển tiếp spoofable identity headers xuống Inventory
+                // Service tự xác thực JWT không nhận identity headers từ Gateway
                 headers.Remove(GatewayHeaderConstants.UserId);
                 headers.Remove(GatewayHeaderConstants.PartyId);
                 headers.Remove(GatewayHeaderConstants.Role);

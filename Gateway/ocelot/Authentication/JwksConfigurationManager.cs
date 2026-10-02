@@ -20,34 +20,40 @@ internal sealed class JwksConfigurationManager(
 
     private readonly SemaphoreSlim refreshLock = new(1, 1);
     private readonly Uri jwksUri = new(options.JwksUri, UriKind.Absolute);
-    private OpenIdConnectConfiguration? currentConfiguration;
-    private DateTimeOffset fetchedAtUtc;
-    private DateTimeOffset refreshAfterUtc;
+    private sealed record KeyCache(OpenIdConnectConfiguration Configuration, DateTimeOffset FetchedAtUtc, DateTimeOffset RefreshAfterUtc);
+    private KeyCache? cache;
     private int refreshRequested;
+    private long nextForcedRefreshTicks;
+    private DateTimeOffset retryAfterUtc;
 
     /// <summary>Returns the cached key set or refreshes it when its bounded cache lifetime has elapsed.</summary>
     public async Task<OpenIdConnectConfiguration> GetConfigurationAsync(CancellationToken cancel)
     {
-        OpenIdConnectConfiguration? cachedConfiguration = Volatile.Read(ref currentConfiguration);
+        var cachedConfiguration = Volatile.Read(ref cache);
         DateTimeOffset now = timeProvider.GetUtcNow();
         if (cachedConfiguration is not null
             && Volatile.Read(ref refreshRequested) == 0
-            && now < refreshAfterUtc)
+            && now < cachedConfiguration.RefreshAfterUtc
+            && now - cachedConfiguration.FetchedAtUtc <= MaximumUsableAge)
         {
-            return cachedConfiguration;
+            return cachedConfiguration.Configuration;
         }
 
         await refreshLock.WaitAsync(cancel);
         try
         {
-            cachedConfiguration = currentConfiguration;
+            cachedConfiguration = cache;
             now = timeProvider.GetUtcNow();
             if (cachedConfiguration is not null
                 && Volatile.Read(ref refreshRequested) == 0
-                && now < refreshAfterUtc)
+                && now < cachedConfiguration.RefreshAfterUtc
+            && now - cachedConfiguration.FetchedAtUtc <= MaximumUsableAge)
             {
-                return cachedConfiguration;
+                return cachedConfiguration.Configuration;
             }
+
+            if (now < retryAfterUtc)
+                throw new InvalidOperationException("JWKS refresh is temporarily unavailable.");
 
             try
             {
@@ -67,16 +73,23 @@ internal sealed class JwksConfigurationManager(
                 }
 
                 DateTimeOffset refreshedAtUtc = timeProvider.GetUtcNow();
-                fetchedAtUtc = refreshedAtUtc;
-                refreshAfterUtc = refreshedAtUtc.Add(GetRefreshInterval(response.Headers.CacheControl));
-                Volatile.Write(ref currentConfiguration, configuration);
+                Volatile.Write(ref cache, new KeyCache(configuration, refreshedAtUtc,
+                    refreshedAtUtc.Add(GetRefreshInterval(response.Headers.CacheControl))));
                 Volatile.Write(ref refreshRequested, 0);
                 return configuration;
             }
-            catch when (cachedConfiguration is not null)
+            catch when (!cancel.IsCancellationRequested && cachedConfiguration is not null &&
+                timeProvider.GetUtcNow() - cachedConfiguration.FetchedAtUtc <= MaximumUsableAge)
             {
-                // Preserve known-good keys. Readiness reports the cache stale after MaximumUsableAge.
-                return cachedConfiguration;
+                Volatile.Write(ref cache, cachedConfiguration with { RefreshAfterUtc = timeProvider.GetUtcNow().AddSeconds(10) });
+                Volatile.Write(ref refreshRequested, 0);
+                return cachedConfiguration.Configuration;
+            }
+            catch
+            {
+                if (cancel.IsCancellationRequested) throw;
+                retryAfterUtc = timeProvider.GetUtcNow().AddSeconds(10);
+                throw;
             }
         }
         finally
@@ -86,13 +99,31 @@ internal sealed class JwksConfigurationManager(
     }
 
     /// <summary>Requests an immediate refresh, for example when JWT bearer encounters an unknown key ID.</summary>
-    public void RequestRefresh() => Volatile.Write(ref refreshRequested, 1);
+    public void RequestRefresh()
+    {
+        long now = timeProvider.GetUtcNow().UtcTicks;
+        long next = Interlocked.Read(ref nextForcedRefreshTicks);
+        if (now >= next && Interlocked.CompareExchange(ref nextForcedRefreshTicks,
+            now + TimeSpan.FromSeconds(10).Ticks, next) == next)
+            Volatile.Write(ref refreshRequested, 1);
+    }
+
+    internal async Task<bool> EnsureSigningKeyAsync(string? kid, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(kid)) return false;
+        var configuration = await GetConfigurationAsync(cancellationToken);
+        if (configuration.SigningKeys.Any(k => k.KeyId == kid)) return true;
+        RequestRefresh();
+        configuration = await GetConfigurationAsync(cancellationToken);
+        return configuration.SigningKeys.Any(k => k.KeyId == kid);
+    }
 
     /// <summary>Returns whether the key cache is valid enough for Gateway readiness.</summary>
     internal bool HasUsableConfiguration()
     {
-        return Volatile.Read(ref currentConfiguration) is not null
-            && timeProvider.GetUtcNow() - fetchedAtUtc <= MaximumUsableAge;
+        var cachedConfiguration = Volatile.Read(ref cache);
+        return cachedConfiguration is not null
+            && timeProvider.GetUtcNow() - cachedConfiguration.FetchedAtUtc <= MaximumUsableAge;
     }
 
     /// <summary>Attempts an initial or stale-cache refresh for the readiness health check.</summary>
