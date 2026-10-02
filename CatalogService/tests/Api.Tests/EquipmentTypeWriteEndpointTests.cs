@@ -422,6 +422,34 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
     }
 
     [Fact]
+    public async Task Create_WithMoreThanMaxMediaCount_Returns400InvalidMedia()
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
+        Category category = await CreateCategoryAsync("Strings", isActive: true);
+        string media = string.Join(
+            ",",
+            Enumerable.Range(0, 21).Select(index =>
+                $$"""{ "mediaId": "{{Guid.NewGuid()}}", "displayOrder": {{index}}, "isThumbnail": false }"""));
+
+        string json = $$"""
+            {
+                "code": "STR-021",
+                "name": "Violin",
+                "categoryIds": ["{{category.Id}}"],
+                "media": [{{media}}]
+            }
+            """;
+
+        var response = await client.PostAsync(
+            "/api/v1/catalog/equipment-types",
+            new StringContent(json, Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("EquipmentType.InvalidMedia", problem.GetProperty("title").GetString());
+    }
+
+    [Fact]
     public async Task Create_WithDuplicateMediaId_Returns400InvalidMedia()
     {
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken);
