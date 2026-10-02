@@ -142,7 +142,7 @@ public sealed class GatewaySecurityIntegrationTests
         Assert.Equal(WhitelistedOrigin, response.Headers.GetValues("Access-Control-Allow-Origin").Single());
         Assert.Equal("true", response.Headers.GetValues("Access-Control-Allow-Credentials").Single());
         Assert.False(response.Headers.Contains("Access-Control-Allow-Methods"));
-        Assert.Equal("X-Correlation-ID", response.Headers.GetValues("Access-Control-Expose-Headers").Single());
+        Assert.Equal("X-Correlation-ID, Retry-After", response.Headers.GetValues("Access-Control-Expose-Headers").Single());
         string vary = string.Join(",", response.Headers.GetValues("Vary"));
         Assert.Contains("Accept-Encoding", vary, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Origin", vary, StringComparison.OrdinalIgnoreCase);

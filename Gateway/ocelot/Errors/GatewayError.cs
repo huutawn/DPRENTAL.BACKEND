@@ -17,4 +17,9 @@ internal sealed record GatewayError(string Code, string Message)
         "Gateway.Request.PayloadTooLarge",
         "The request payload exceeds the maximum allowed size.");
 
+    /// <summary>Lỗi khi số lượng request vượt quá giới hạn tần suất cho phép (Rate Limit Exceeded).</summary>
+    internal static readonly GatewayError RateLimitExceeded = new(
+        "Gateway.RateLimitExceeded",
+        "Too many requests. Please try again later.");
+
 }

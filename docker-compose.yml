@@ -65,6 +65,14 @@ services:
       - Gateway__Security__Cors__AllowedOrigins__1=${CORS_ALLOWED_ORIGIN_1:-http://localhost:5173}
       - Gateway__Security__RequestSize__MaxRequestBodySizeBytes=${MAX_REQUEST_BODY_SIZE_BYTES:-10485760}
 
+      # Cấu hình Rate Limiting
+      - Gateway__Security__RateLimiting__WindowSeconds=${RATE_LIMIT_WINDOW_SECONDS:-60}
+      - Gateway__Security__RateLimiting__SegmentsPerWindow=${RATE_LIMIT_SEGMENTS_PER_WINDOW:-6}
+      - Gateway__Security__RateLimiting__UserReadLimit=${RATE_LIMIT_USER_READ:-300}
+      - Gateway__Security__RateLimiting__UserWriteLimit=${RATE_LIMIT_USER_WRITE:-30}
+      - Gateway__Security__RateLimiting__IpReadLimit=${RATE_LIMIT_IP_READ:-1200}
+      - Gateway__Security__RateLimiting__IpWriteLimit=${RATE_LIMIT_IP_WRITE:-120}
+
       # Thời gian chờ proxy tới downstream
       - GlobalConfiguration__Timeout=${DEFAULT_TIMEOUT_SECONDS:-10}
 

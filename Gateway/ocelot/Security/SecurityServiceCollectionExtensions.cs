@@ -36,6 +36,7 @@ public static class SecurityServiceCollectionExtensions
         // 3. Đăng ký các thành phần nghiệp vụ làm sạch và trích xuất danh tính
         services.AddSingleton<HeaderSanitizer>();
         services.AddSingleton<IdentityExtractor>();
+        services.AddSingleton<IGatewayRateLimiter, GatewayRateLimiter>();
 
         // 4. Cấu hình ForwardedHeadersOptions của ASP.NET Core
         services.AddOptions<ForwardedHeadersOptions>()

@@ -69,6 +69,44 @@ public sealed class GatewaySecurityOptionsValidator : IValidateOptions<GatewaySe
             failures.Add("Gateway:Security:Identity:ServiceName không được để trống.");
         }
 
+        // 4. Kiểm tra cấu hình Rate Limiting
+        if (options.RateLimiting.WindowSeconds <= 0)
+        {
+            failures.Add("Gateway:Security:RateLimiting:WindowSeconds phải lớn hơn 0.");
+        }
+
+        if (options.RateLimiting.SegmentsPerWindow <= 0)
+        {
+            failures.Add("Gateway:Security:RateLimiting:SegmentsPerWindow phải lớn hơn 0.");
+        }
+
+        if (options.RateLimiting.UserReadLimit <= 0)
+        {
+            failures.Add("Gateway:Security:RateLimiting:UserReadLimit phải lớn hơn 0.");
+        }
+
+        if (options.RateLimiting.UserWriteLimit <= 0)
+        {
+            failures.Add("Gateway:Security:RateLimiting:UserWriteLimit phải lớn hơn 0.");
+        }
+
+        if (options.RateLimiting.IpReadLimit <= 0)
+        {
+            failures.Add("Gateway:Security:RateLimiting:IpReadLimit phải lớn hơn 0.");
+        }
+
+        if (options.RateLimiting.IpWriteLimit <= 0)
+        {
+            failures.Add("Gateway:Security:RateLimiting:IpWriteLimit phải lớn hơn 0.");
+        }
+
+        if (options.RateLimiting.WindowSeconds > 0 &&
+            options.RateLimiting.SegmentsPerWindow > 0 &&
+            options.RateLimiting.WindowSeconds % options.RateLimiting.SegmentsPerWindow != 0)
+        {
+            failures.Add("Gateway:Security:RateLimiting:WindowSeconds phải chia hết cho SegmentsPerWindow.");
+        }
+
         return failures.Count > 0
             ? ValidateOptionsResult.Fail(failures)
             : ValidateOptionsResult.Success;

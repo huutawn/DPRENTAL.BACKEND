@@ -139,6 +139,7 @@ Danh mục mã lỗi canonical chuẩn hóa của Gateway:
 | :--- | :--- | :--- |
 | `403 Forbidden` | `Gateway.Security.CorsOriginDenied` | Nguồn gốc (Origin) của request không nằm trong whitelist CORS. |
 | `413 Payload Too Large` | `Gateway.Request.PayloadTooLarge` | Kích thước request body vượt quá ngưỡng cho phép (MaxRequestBodySize). |
+| `429 Too Many Requests` | `Gateway.RateLimitExceeded` | Số lượng request vượt quá hạn mức cho phép (Rate Limit Exceeded). |
 | `500 Internal Error` | `Gateway.UnexpectedFailure` | Lỗi không mong đợi phát sinh trong nội bộ Gateway. |
 
 Ocelot xử lý xác thực và lỗi proxy theo phản hồi riêng: route được bảo vệ trả `401` khi thiếu hoặc sai JWT; lỗi kết nối upstream trả `502`; timeout upstream trả `503` trên Ocelot 25.0. Những phản hồi này không dùng payload JSON ở trên. Phản hồi và lỗi nghiệp vụ từ service đích được chuyển tiếp nguyên trạng.
@@ -181,6 +182,19 @@ Gateway đóng vai trò là ranh giới bảo mật vững chắc trước khi r
      - `Referrer-Policy: strict-origin-when-cross-origin`
      - `Content-Security-Policy: default-src 'self'; frame-ancestors 'none';`
      - `Strict-Transport-Security` (khi request là HTTPS).
+
+
+5. **Kiểm soát tần suất request (Rate Limiting)**:
+   - Áp dụng hạn mức riêng cho nhóm đọc (`GET`, `HEAD`) và nhóm ghi (`POST`, `PUT`, `PATCH`, `DELETE`, ...).
+   - Sử dụng `PartitionedRateLimiter` với cửa sổ trượt (sliding window 60s, 6 phân đoạn, không xếp hàng):
+     - **Đọc (`GET`, `HEAD`)**: 300 req/phút/user đã xác thực | 1.200 req/phút/IP (không có user ID hợp lệ).
+     - **Ghi (`POST`, `PUT`, `PATCH`, `DELETE`)**: 30 req/phút/user đã xác thực | 120 req/phút/IP (không có user ID hợp lệ).
+   - User đã xác thực chỉ chịu quota user, không chịu thêm quota IP.
+   - Quota được cộng chung trên toàn bộ route proxy trong từng nhóm đọc/ghi; đổi endpoint/query cùng user không tạo quota mới.
+   - Miễn trừ cho `OPTIONS` (preflight) và các endpoint health check (`/health/*`, `/_health/*`).
+   - Khi vượt quota: Gateway trả về `429 Too Many Requests`, header `Retry-After` (giây, tối thiểu 1) và JSON lỗi `Gateway.RateLimitExceeded`.
+   - CORS cấu hình `ExposedHeaders` bao gồm `Retry-After` để frontend có thể đọc và hiển thị thời gian chờ.
+   - Cấu hình qua section `Gateway:Security:RateLimiting` hoặc biến môi trường `RATE_LIMIT_WINDOW_SECONDS`, `RATE_LIMIT_SEGMENTS_PER_WINDOW`, `RATE_LIMIT_USER_READ`, `RATE_LIMIT_USER_WRITE`, `RATE_LIMIT_IP_READ`, `RATE_LIMIT_IP_WRITE`.
 
 ## Timeout và lỗi kết nối downstream
 

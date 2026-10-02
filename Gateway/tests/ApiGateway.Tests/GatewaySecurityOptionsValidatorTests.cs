@@ -111,4 +111,125 @@ public sealed class GatewaySecurityOptionsValidatorTests
         Assert.True(result.Failed);
         Assert.Contains("ServiceName", result.FailureMessage);
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void InvalidWindowSecondsFailsValidation(int invalidWindow)
+    {
+        GatewaySecurityOptions options = new()
+        {
+            Identity = new GatewayIdentityOptions { ServiceName = "ApiGateway" },
+            RateLimiting = new GatewayRateLimitingOptions { WindowSeconds = invalidWindow }
+        };
+
+        ValidateOptionsResult result = validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("WindowSeconds", result.FailureMessage);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public void InvalidSegmentsPerWindowFailsValidation(int invalidSegments)
+    {
+        GatewaySecurityOptions options = new()
+        {
+            Identity = new GatewayIdentityOptions { ServiceName = "ApiGateway" },
+            RateLimiting = new GatewayRateLimitingOptions { SegmentsPerWindow = invalidSegments }
+        };
+
+        ValidateOptionsResult result = validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("SegmentsPerWindow", result.FailureMessage);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-10)]
+    public void InvalidUserReadLimitFailsValidation(int invalidLimit)
+    {
+        GatewaySecurityOptions options = new()
+        {
+            Identity = new GatewayIdentityOptions { ServiceName = "ApiGateway" },
+            RateLimiting = new GatewayRateLimitingOptions { UserReadLimit = invalidLimit }
+        };
+
+        ValidateOptionsResult result = validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("UserReadLimit", result.FailureMessage);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void InvalidUserWriteLimitFailsValidation(int invalidLimit)
+    {
+        GatewaySecurityOptions options = new()
+        {
+            Identity = new GatewayIdentityOptions { ServiceName = "ApiGateway" },
+            RateLimiting = new GatewayRateLimitingOptions { UserWriteLimit = invalidLimit }
+        };
+
+        ValidateOptionsResult result = validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("UserWriteLimit", result.FailureMessage);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void InvalidIpReadLimitFailsValidation(int invalidLimit)
+    {
+        GatewaySecurityOptions options = new()
+        {
+            Identity = new GatewayIdentityOptions { ServiceName = "ApiGateway" },
+            RateLimiting = new GatewayRateLimitingOptions { IpReadLimit = invalidLimit }
+        };
+
+        ValidateOptionsResult result = validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("IpReadLimit", result.FailureMessage);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void InvalidIpWriteLimitFailsValidation(int invalidLimit)
+    {
+        GatewaySecurityOptions options = new()
+        {
+            Identity = new GatewayIdentityOptions { ServiceName = "ApiGateway" },
+            RateLimiting = new GatewayRateLimitingOptions { IpWriteLimit = invalidLimit }
+        };
+
+        ValidateOptionsResult result = validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("IpWriteLimit", result.FailureMessage);
+    }
+
+    [Fact]
+    public void WindowSecondsNotDivisibleBySegmentsFailsValidation()
+    {
+        GatewaySecurityOptions options = new()
+        {
+            Identity = new GatewayIdentityOptions { ServiceName = "ApiGateway" },
+            RateLimiting = new GatewayRateLimitingOptions
+            {
+                WindowSeconds = 60,
+                SegmentsPerWindow = 7 // 60 % 7 != 0
+            }
+        };
+
+        ValidateOptionsResult result = validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("phải chia hết cho SegmentsPerWindow", result.FailureMessage);
+    }
 }

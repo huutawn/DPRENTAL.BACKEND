@@ -52,7 +52,7 @@ HealthCheckOptions readinessOptions = new()
 app.UseHealthChecks("/health/ready", readinessOptions);
 app.UseHealthChecks("/_health/ready", readinessOptions);
 
-await app.UseOcelot();
+await app.UseGatewayOcelot();
 
 app.Run();
 
