@@ -12,4 +12,5 @@ public sealed record EquipmentTypeDetailDto(
     DateTime? UpdatedAt,
     DateTime? PublishedAt,
     CategoryDto Category,
-    IReadOnlyList<Guid> MediaIds);
+    IReadOnlyList<Guid> MediaIds,
+    Guid? ThumbnailMediaId);

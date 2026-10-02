@@ -3,13 +3,16 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Dprental.CatalogService.Application.Clients;
 using Dprental.CatalogService.Common.Enums;
 using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
 using Dprental.CatalogService.Domain.Entities;
 using Dprental.CatalogService.Domain.Repositories;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
 
 namespace Dprental.CatalogService.Api.Tests;
@@ -20,6 +23,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
     private readonly WebApplicationFactory<Program> factory;
     private readonly HttpClient client;
     private readonly CatalogServiceDbContext dbContext;
+    private readonly FakeMediaVerificationClient mediaClient = new();
 
     public EquipmentTypeWriteEndpointTests()
     {
@@ -27,10 +31,18 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", PostgreSqlFixture.ConnectionString);
+                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
+                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
                 builder.UseSetting("Auth:Jwt:Keys:0:PublicKeyPem", TestJwtHelper.PublicKeyPem);
+
+                builder.ConfigureTestServices(services =>
+                {
+                    services.RemoveAll<IMediaVerificationClient>();
+                    services.AddSingleton<IMediaVerificationClient>(mediaClient);
+                });
             });
 
         client = factory.CreateClient();

@@ -174,6 +174,8 @@ public sealed class StartupAndConfigurationTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
+                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -192,6 +194,8 @@ public sealed class StartupAndConfigurationTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
+                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -212,6 +216,8 @@ public sealed class StartupAndConfigurationTests
             {
                 builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
+                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -231,7 +237,16 @@ public sealed class StartupAndConfigurationTests
         Assert.True(securitySchemes.TryGetProperty("Bearer", out JsonElement bearerScheme));
         Assert.Equal("http", bearerScheme.GetProperty("type").GetString());
         Assert.Equal("bearer", bearerScheme.GetProperty("scheme").GetString());
+
+        // Thiếu security requirement trên operation thì Swagger UI không gửi token dù đã Authorize.
+        JsonElement equipmentTypes = doc.RootElement.GetProperty("paths").GetProperty("/api/v1/catalog/equipment-types");
+        JsonElement postSecurity = equipmentTypes.GetProperty("post").GetProperty("security");
+        Assert.Contains(postSecurity.EnumerateArray(), requirement => requirement.TryGetProperty("Bearer", out _));
+        Assert.False(
+            equipmentTypes.GetProperty("get").TryGetProperty("security", out JsonElement getSecurity)
+            && getSecurity.GetArrayLength() > 0);
     }
+
     [Fact]
     public async Task SwaggerDocument_ContainsSixEquipmentTypeEndpoints_AndNoLegacyEquipments()
     {
@@ -240,6 +255,8 @@ public sealed class StartupAndConfigurationTests
             {
                 builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
+                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -281,6 +298,8 @@ public sealed class StartupAndConfigurationTests
             {
                 builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
+                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -359,6 +378,8 @@ public sealed class StartupAndConfigurationTests
             {
                 builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
+                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -385,6 +406,8 @@ public sealed class StartupAndConfigurationTests
             {
                 builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Production);
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
+                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);

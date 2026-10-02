@@ -47,6 +47,12 @@ public static class CatalogErrors
         public static readonly Error InvalidMedia =
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidMedia, "Danh sách media không hợp lệ.");
 
+        public static readonly Error MediaNotFound =
+            Error.Validation(CatalogErrorCode.EquipmentType.MediaNotFound, "Media không tồn tại.");
+
+        public static readonly Error MediaNotReady =
+            Error.Validation(CatalogErrorCode.EquipmentType.MediaNotReady, "Media chưa sẵn sàng để sử dụng.");
+
         public static readonly Error InvalidPayload =
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidPayload, "Dữ liệu yêu cầu không hợp lệ.");
 
@@ -88,5 +94,8 @@ public static class CatalogErrors
 
         public static readonly Error Forbidden =
             Error.Forbidden(CatalogErrorCode.Catalog.Forbidden, "Bạn không có quyền thực hiện thao tác này.");
+
+        public static readonly Error MediaServiceUnavailable =
+            Error.Unavailable(CatalogErrorCode.Catalog.MediaServiceUnavailable, "Không xác minh được media lúc này. Vui lòng thử lại sau.");
     }
 }

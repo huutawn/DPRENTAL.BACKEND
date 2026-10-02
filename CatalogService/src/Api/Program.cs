@@ -1,3 +1,4 @@
+using Dprental.CatalogService.Api.Clients;
 using Dprental.CatalogService.Api.Exceptions;
 using Dprental.CatalogService.Api.Filters;
 using Dprental.CatalogService.Api.Observability;
@@ -17,6 +18,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddCatalogServiceDistributedTracing(builder.Configuration);
 builder.Services.AddCatalogServiceApplication(builder.Configuration);
 builder.Services.AddCatalogServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddMediaVerificationClient(builder.Configuration);
 builder.Services.AddJwtBearerSecurity(builder.Configuration);
 builder.Services.AddAuthForwardedHeaders(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
@@ -80,6 +82,7 @@ builder.Services.AddSwaggerGen(options =>
         options.IncludeXmlComments(apiXml, includeControllerXmlComments: true);
     }
     options.SchemaFilter<UpdateEquipmentTypeRequestSchemaFilter>();
+    options.OperationFilter<BearerSecurityRequirementOperationFilter>();
 });
 
 builder.Services.AddHealthChecks()

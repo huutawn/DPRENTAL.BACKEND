@@ -78,6 +78,8 @@ public sealed class PublicCatalogEndpointTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("MediaService:BaseUrl", "http://media.test");
+                builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
                 builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
@@ -127,7 +129,8 @@ public sealed class PublicCatalogEndpointTests
                 null,
                 DateTime.UtcNow,
                 new CategoryDto(Guid.NewGuid(), "Camera"),
-                [Guid.NewGuid()]);
+                [Guid.NewGuid()],
+                null);
 
             return Task.FromResult<EquipmentTypeDetailDto?>(detail);
         }

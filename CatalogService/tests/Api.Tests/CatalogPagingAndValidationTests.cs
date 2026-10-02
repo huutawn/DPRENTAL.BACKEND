@@ -173,6 +173,7 @@ public sealed class CatalogPagingAndValidationTests
             validator,
             new CreateEquipmentTypeRequestValidator(),
             new UpdateEquipmentTypeRequestValidator(),
+            new FakeMediaVerificationClient(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<EquipmentTypeService>.Instance);
 
         var badRequest = new GetEquipmentTypesRequest { Page = 0 };

@@ -11,6 +11,9 @@ namespace Dprental.CatalogService.Domain.Repositories;
 
 public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquipmentTypeRepository
 {
+    // Quy tắc chọn thumbnail dùng chung cho danh sách, chi tiết và response sau khi ghi:
+    // media có IsThumbnail trước, rồi DisplayOrder nhỏ nhất, rồi Id. Không có media thì null.
+    // EF không dùng chung được một đoạn biểu thức giữa các projection, nên ba nơi phải giữ cùng thứ tự sắp xếp này.
     private static readonly Expression<Func<EquipmentType, EquipmentTypeDetailDto>> DetailSelector = e =>
         new EquipmentTypeDetailDto(
             e.Id,
@@ -22,7 +25,13 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
             e.UpdatedAt,
             e.PublishedAt,
             new CategoryDto(e.CategoryId, e.Category.Name),
-            e.Media.OrderBy(m => m.DisplayOrder).ThenBy(m => m.Id).Select(m => m.MediaId).ToList());
+            e.Media.OrderBy(m => m.DisplayOrder).ThenBy(m => m.Id).Select(m => m.MediaId).ToList(),
+            e.Media
+                .OrderByDescending(m => m.IsThumbnail)
+                .ThenBy(m => m.DisplayOrder)
+                .ThenBy(m => m.Id)
+                .Select(m => (Guid?)m.MediaId)
+                .FirstOrDefault());
 
     public async Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(
         GetEquipmentTypesRequest request,
@@ -276,6 +285,8 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
 
     private static EquipmentTypeDetailDto ToDetailDto(EquipmentType entity)
     {
+        List<EquipmentTypeMedia> media = entity.Media.DistinctBy(m => m.Id).ToList();
+
         return new EquipmentTypeDetailDto(
             entity.Id,
             entity.Code,
@@ -286,12 +297,17 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
             entity.UpdatedAt,
             entity.PublishedAt,
             new CategoryDto(entity.CategoryId, entity.Category?.Name ?? string.Empty),
-            entity.Media
-                .DistinctBy(m => m.Id)
+            media
                 .OrderBy(m => m.DisplayOrder)
                 .ThenBy(m => m.Id)
                 .Select(m => m.MediaId)
-                .ToList());
+                .ToList(),
+            media
+                .OrderByDescending(m => m.IsThumbnail)
+                .ThenBy(m => m.DisplayOrder)
+                .ThenBy(m => m.Id)
+                .Select(m => (Guid?)m.MediaId)
+                .FirstOrDefault());
     }
 
     private static bool IsDuplicateCodeViolation(DbUpdateException ex)

@@ -1,3 +1,4 @@
+using Dprental.CatalogService.Application.Clients;
 using Dprental.CatalogService.Application.IServices;
 using Dprental.CatalogService.Application.Validators;
 using Dprental.CatalogService.Common;
@@ -15,6 +16,7 @@ public sealed partial class EquipmentTypeService(
     EquipmentTypeListQueryValidator listQueryValidator,
     CreateEquipmentTypeRequestValidator createValidator,
     UpdateEquipmentTypeRequestValidator updateValidator,
+    IMediaVerificationClient mediaVerificationClient,
     ILogger<EquipmentTypeService> logger) : IEquipmentTypeService
 {
     public async Task<Result<PagedResult<EquipmentTypeListItemDto>>> SearchAsync(
@@ -102,6 +104,12 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.DuplicateCode;
         }
 
+        Result mediaResult = await VerifyMediaAsync(request.Media!.Select(m => m!.MediaId), cancellationToken);
+        if (mediaResult.IsFailure)
+        {
+            return mediaResult.Error;
+        }
+
         var equipmentType = new EquipmentType
         {
             Id = Guid.NewGuid(),
@@ -171,9 +179,21 @@ public sealed partial class EquipmentTypeService(
             entity.Description = request.Description;
         }
 
-        entity.UpdatedAt = DateTime.UtcNow;
-
         IReadOnlyList<EquipmentTypeMediaItemDto?>? desiredMedia = request.IsMediaSpecified ? request.Media : null;
+        if (desiredMedia is not null)
+        {
+            // Media đã gắn từ trước không verify lại, để admin vẫn sắp xếp hoặc gỡ được khi media đó đã bị xóa bên Media Service.
+            HashSet<Guid> attached = entity.Media.Select(m => m.MediaId).ToHashSet();
+            Result mediaResult = await VerifyMediaAsync(
+                desiredMedia.Select(m => m!.MediaId).Where(mediaId => !attached.Contains(mediaId)),
+                cancellationToken);
+            if (mediaResult.IsFailure)
+            {
+                return mediaResult.Error;
+            }
+        }
+
+        entity.UpdatedAt = DateTime.UtcNow;
         return await repository.SaveAsync(entity, desiredMedia, cancellationToken);
     }
 
@@ -225,6 +245,33 @@ public sealed partial class EquipmentTypeService(
         // Disable được phép ngay cả khi category inactive
         entity.Disable(DateTime.UtcNow);
         return await repository.SaveStateTransitionAsync(entity, cancellationToken);
+    }
+
+    /// <summary>
+    /// Xác minh media với Media Service trước khi mở transaction ghi.
+    /// Chỉ cần một media không xác minh được là trả Unavailable, vì khi đó chưa biết chắc tình trạng của cả danh sách.
+    /// </summary>
+    private async Task<Result> VerifyMediaAsync(IEnumerable<Guid> mediaIds, CancellationToken cancellationToken)
+    {
+        MediaVerificationStatus[] statuses = await Task.WhenAll(
+            mediaIds.Select(mediaId => mediaVerificationClient.VerifyAsync(mediaId, cancellationToken)));
+
+        if (statuses.Contains(MediaVerificationStatus.Unavailable))
+        {
+            return Result.Failure(CatalogErrors.Catalog.MediaServiceUnavailable);
+        }
+
+        if (statuses.Contains(MediaVerificationStatus.NotFound))
+        {
+            return Result.Failure(CatalogErrors.EquipmentType.MediaNotFound);
+        }
+
+        if (statuses.Contains(MediaVerificationStatus.NotReady))
+        {
+            return Result.Failure(CatalogErrors.EquipmentType.MediaNotReady);
+        }
+
+        return Result.Success();
     }
 
     private Result<EquipmentTypeDetailDto> Logged(string operation, Guid? equipmentTypeId, Result<EquipmentTypeDetailDto> result)
