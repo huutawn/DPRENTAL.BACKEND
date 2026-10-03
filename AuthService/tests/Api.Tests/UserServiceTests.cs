@@ -284,7 +284,7 @@ public sealed class UserServiceTests
         Assert.Equal("tan.len@example.com", profile.Email);
         Assert.Equal("Huynh Tan Len", profile.FullName);
         Assert.Equal(createdAt, profile.CreatedAt);
-        Assert.Equal(["Admin"], profile.Roles);
+        Assert.Equal(["Admin", SystemRoleCode.Owner], profile.Roles);
         Assert.Equal(["roles.assign", "roles.revoke"], profile.Permissions.Order(StringComparer.Ordinal));
         UserOrganizationResponse organization = Assert.Single(profile.Organizations);
         Assert.Equal(activeOrg.Id, organization.OrganizationId);
