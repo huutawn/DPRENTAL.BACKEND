@@ -1,5 +1,6 @@
-using Dprental.InventoryService.Application.Kafka.Contracts;
-using Dprental.InventoryService.Application.Kafka.Transport;
+using Dprental.InventoryService.Application.DTOs.Calendar;
+using Dprental.InventoryService.Application.IServices;
+using Dprental.InventoryService.Application.Kafka.Outbox;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Enums;
@@ -8,12 +9,12 @@ using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Domain.IRepositories;
 using Dprental.InventoryService.Domain.Policies;
 
-namespace Dprental.InventoryService.Application.Calendar;
+namespace Dprental.InventoryService.Application.Services;
 
 /// <summary>
 /// Application service xử lý use cases đọc lịch, tạo khoảng chặn lịch và xóa khoảng chặn lịch cho tài sản.
 /// </summary>
-public sealed class CalendarService
+public sealed class CalendarService : ICalendarService
 {
     private readonly IInventoryAssetRepository _assetRepository;
     private readonly IInventoryWriteTransaction _writeTransaction;
@@ -286,23 +287,6 @@ public sealed class CalendarService
 
     private static OutboxMessage CreateAvailabilityChangedOutboxMessage(InventoryAsset asset, DateTimeOffset nowUtc)
     {
-        var payload = new InventoryAssetAvailabilityChangedPayload(asset.Id, nowUtc);
-        var envelope = MessageEnvelope.CreateRoot(
-            messageType: "InventoryAssetAvailabilityChanged",
-            organizationId: asset.OrganizationId,
-            aggregateId: asset.Id.ToString("D"),
-            payload: payload,
-            version: 1,
-            occurredAt: nowUtc);
-
-        var kafkaKey = MessageEnvelope.CreateKafkaKey(asset.OrganizationId, asset.Id.ToString("D"));
-        var wireJson = KafkaEnvelopeSerializer.Serialize(envelope);
-
-        return OutboxMessage.Create(
-            id: envelope.MessageId,
-            topic: KafkaTopics.InventoryAssetEventsV1,
-            kafkaKey: kafkaKey,
-            payload: wireJson,
-            now: nowUtc);
+        return InventoryAssetAvailabilityEvents.CreateAvailabilityChangedOutboxMessage(asset.Id, nowUtc);
     }
 }

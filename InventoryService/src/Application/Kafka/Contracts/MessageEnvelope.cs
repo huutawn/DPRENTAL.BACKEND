@@ -10,31 +10,27 @@ public static class MessageEnvelope
     public const string DefaultProducer = "InventoryService";
 
     /// <summary>
-    /// Tạo partition key chuẩn hóa kết hợp OrganizationId và AggregateId.
+    /// Tạo partition key chuẩn hóa sử dụng AggregateId cho Kafka.
     /// </summary>
-    public static string CreateKafkaKey(Guid organizationId, string aggregateId)
+    public static string CreateKafkaKey(string aggregateId)
     {
-        if (organizationId == Guid.Empty)
-        {
-            throw new ArgumentException("OrganizationId không được rỗng khi tạo Kafka key.", nameof(organizationId));
-        }
-
         ArgumentException.ThrowIfNullOrWhiteSpace(aggregateId);
-        return $"{organizationId:D}:{aggregateId}";
+        return aggregateId;
     }
+
 
     /// <summary>
     /// Factory tạo message gốc (root message): sinh MessageId mới, gán CorrelationId mới/chỉ định, CausationId là null.
     /// </summary>
     public static MessageEnvelope<T> CreateRoot<T>(
         string messageType,
-        Guid organizationId,
         string aggregateId,
         T payload,
         string? correlationId = null,
         int version = 1,
         string producer = DefaultProducer,
-        DateTimeOffset? occurredAt = null)
+        DateTimeOffset? occurredAt = null,
+        Guid? organizationId = null)
     {
         var now = (occurredAt ?? DateTimeOffset.UtcNow).ToUniversalTime();
         var messageId = Guid.NewGuid();
@@ -58,18 +54,19 @@ public static class MessageEnvelope
         return envelope;
     }
 
+
     /// <summary>
     /// Factory tạo message tiếp nối (continuation message): sinh MessageId mới, giữ CorrelationId, CausationId trỏ tới MessageId đầu vào.
     /// </summary>
     public static MessageEnvelope<T> CreateContinuation<T, TIn>(
         MessageEnvelope<TIn> incoming,
         string messageType,
-        Guid organizationId,
         string aggregateId,
         T payload,
         int version = 1,
         string producer = DefaultProducer,
-        DateTimeOffset? occurredAt = null)
+        DateTimeOffset? occurredAt = null,
+        Guid? organizationId = null)
     {
         ArgumentNullException.ThrowIfNull(incoming);
 
@@ -84,7 +81,7 @@ public static class MessageEnvelope
             CorrelationId = incoming.CorrelationId,
             CausationId = incoming.MessageId,
             AggregateId = aggregateId,
-            OrganizationId = organizationId,
+            OrganizationId = organizationId ?? incoming.OrganizationId,
             OccurredAt = now,
             Producer = producer,
             Payload = payload
@@ -94,6 +91,7 @@ public static class MessageEnvelope
         return envelope;
     }
 
+
     /// <summary>
     /// Factory tạo message tiếp nối từ CorrelationId và CausationId đã biết.
     /// </summary>
@@ -101,12 +99,12 @@ public static class MessageEnvelope
         string correlationId,
         Guid causationId,
         string messageType,
-        Guid organizationId,
         string aggregateId,
         T payload,
         int version = 1,
         string producer = DefaultProducer,
-        DateTimeOffset? occurredAt = null)
+        DateTimeOffset? occurredAt = null,
+        Guid? organizationId = null)
     {
         var now = (occurredAt ?? DateTimeOffset.UtcNow).ToUniversalTime();
         var messageId = Guid.NewGuid();
@@ -128,6 +126,7 @@ public static class MessageEnvelope
         envelope.Validate();
         return envelope;
     }
+
 }
 
 /// <summary>
@@ -164,7 +163,8 @@ public sealed record MessageEnvelope<T>
     public required string AggregateId { get; init; }
 
     [JsonPropertyName("organizationId")]
-    public required Guid OrganizationId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? OrganizationId { get; init; }
 
     [JsonPropertyName("occurredAt")]
     public required DateTimeOffset OccurredAt { get; init; }
@@ -176,10 +176,10 @@ public sealed record MessageEnvelope<T>
     public required T Payload { get; init; }
 
     /// <summary>
-    /// Lấy partition key kết hợp OrganizationId và AggregateId cho Kafka.
+    /// Lấy partition key theo AggregateId cho Kafka.
     /// </summary>
     [JsonIgnore]
-    public string KafkaKey => MessageEnvelope.CreateKafkaKey(OrganizationId, AggregateId);
+    public string KafkaKey => MessageEnvelope.CreateKafkaKey(AggregateId);
 
     /// <summary>
     /// Kiểm tra tính hợp lệ của envelope theo hợp đồng chuẩn hóa.
@@ -211,10 +211,6 @@ public sealed record MessageEnvelope<T>
             throw new ArgumentException("AggregateId không được rỗng.", nameof(AggregateId));
         }
 
-        if (OrganizationId == Guid.Empty)
-        {
-            throw new ArgumentException("OrganizationId không được rỗng.", nameof(OrganizationId));
-        }
 
         if (OccurredAt.Offset != TimeSpan.Zero)
         {

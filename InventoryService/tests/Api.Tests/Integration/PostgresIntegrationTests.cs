@@ -36,7 +36,7 @@ public sealed partial class PostgresIntegrationTests : IClassFixture<PostgresFix
     private Task<InventoryServiceDbContext> CreateMigratedDbContextAsync()
     {
         var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
-            .UseNpgsql(_connectionString)
+            .UseNpgsql(_connectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
             .Options;
 
         var context = new InventoryServiceDbContext(options);

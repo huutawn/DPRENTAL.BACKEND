@@ -14,6 +14,9 @@ public sealed class InventoryServiceDbContext : DbContext
     /// </summary>
     public const string SchemaName = "inventory";
 
+    /// <summary>Migration history thuộc schema Inventory, độc lập với các service khác.</summary>
+    public const string MigrationsHistoryTableName = "__EFMigrationsHistory";
+
     /// <summary>
     /// Bảng quản lý thông tin tài sản trong kho.
     /// </summary>
@@ -61,18 +64,24 @@ public sealed class InventoryServiceDbContext : DbContext
             b.HasIndex(a => a.OwnerUserId)
                 .HasDatabaseName("ix_assets_owner_user_id");
 
-            b.HasIndex(a => a.OrganizationId)
-                .HasDatabaseName("ix_assets_organization_id");
-
             b.HasIndex(a => a.EquipmentTypeId)
                 .HasDatabaseName("ix_assets_equipment_type_id");
+            b.Property(a => a.Model)
+                .HasMaxLength(200)
+                .IsRequired();
+
+            b.Property(a => a.SerialNumber)
+                .HasMaxLength(100);
 
             b.Property(a => a.SpecValues)
                 .HasColumnType("jsonb");
-
             b.ToTable(t =>
             {
-                t.HasCheckConstraint("ck_assets_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND organization_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+                t.HasCheckConstraint("ck_assets_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+                t.HasCheckConstraint("ck_assets_model", "model ~ '\\S' AND length(model) <= 200");
+                t.HasCheckConstraint("ck_assets_serial_number", "serial_number IS NULL OR (serial_number ~ '\\S' AND length(serial_number) <= 100)");
+                t.HasCheckConstraint("ck_assets_manufacture_year", "manufacture_year IS NULL OR manufacture_year >= 1900");
+                t.HasCheckConstraint("ck_assets_thumbnail_media_id", "thumbnail_media_id IS NULL OR thumbnail_media_id <> '00000000-0000-0000-0000-000000000000'::uuid");
                 t.HasCheckConstraint("ck_assets_schema_version", "schema_version >= 1");
                 t.HasCheckConstraint("ck_assets_spec_values_object", "jsonb_typeof(spec_values) = 'object'");
             });

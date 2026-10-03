@@ -17,6 +17,34 @@ namespace Dprental.InventoryService.Api.Tests.Integration;
 public sealed partial class PostgresIntegrationTests
 {
     [Fact]
+    public async Task MigrationHistory_IsOwnedByInventoryAndDoesNotChangePublicHistory()
+    {
+        await using var context = await CreateMigratedDbContextAsync();
+        await context.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE public."__EFMigrationsHistory" (
+                "MigrationId" varchar(150) PRIMARY KEY, "ProductVersion" varchar(32) NOT NULL);
+            INSERT INTO public."__EFMigrationsHistory" VALUES ('auth-sentinel', '10.0.12');
+            """);
+
+        await context.Database.MigrateAsync();
+        await context.Database.MigrateAsync();
+
+        var inventoryHistoryExists = await context.Database.SqlQueryRaw<bool>(
+            """
+            SELECT to_regclass('inventory."__EFMigrationsHistory"') IS NOT NULL AS "Value"
+            """
+        ).SingleAsync();
+        Assert.True(inventoryHistoryExists);
+        Assert.Equal(context.Database.GetMigrations(), await context.Database.GetAppliedMigrationsAsync());
+        var publicHistory = await context.Database.SqlQueryRaw<string>(
+            """
+            SELECT "MigrationId" AS "Value" FROM public."__EFMigrationsHistory"
+            """
+        ).ToListAsync();
+        Assert.Equal("auth-sentinel", Assert.Single(publicHistory));
+    }
+
+    [Fact]
     public async Task Migration_AppliesSuccessfullyOnPostgres()
     {
         await using var context = await CreateMigratedDbContextAsync();
@@ -66,8 +94,8 @@ public sealed partial class PostgresIntegrationTests
         await using var context = await CreateMigratedDbContextAsync();
 
         var asset = InventoryAsset.Create(
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-            1, "{}", true, DateTimeOffset.UtcNow).Value;
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
         context.Assets.Add(asset);
 
         var period = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
@@ -92,7 +120,7 @@ public sealed partial class PostgresIntegrationTests
         await using var context = await CreateMigratedDbContextAsync();
 
         var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, DateTimeOffset.UtcNow).Value;
+        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
         context.Assets.Add(asset);
         await context.SaveChangesAsync();
 
@@ -116,7 +144,7 @@ public sealed partial class PostgresIntegrationTests
         await using var context = await CreateMigratedDbContextAsync();
 
         var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, DateTimeOffset.UtcNow).Value;
+        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
         context.Assets.Add(asset);
         await context.SaveChangesAsync();
 
@@ -140,18 +168,12 @@ public sealed partial class PostgresIntegrationTests
         await using var context = await CreateMigratedDbContextAsync();
 
         var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, DateTimeOffset.UtcNow).Value;
+        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
         context.Assets.Add(asset);
+        await context.SaveChangesAsync();
 
         const string sourceSystem = "rental_service";
         var externalReference = $"REF_{Guid.NewGuid():N}";
-        var period = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
-
-        var alloc1 = AssetAllocation.CreateManual(Guid.NewGuid(), assetId, period, DateTimeOffset.UtcNow, externalReference).Value;
-        await context.Database.ExecuteSqlInterpolatedAsync($$"""
-            INSERT INTO inventory.assets (id, owner_user_id, organization_id, equipment_type_id, schema_version, spec_values, accepting_bookings, created_at, updated_at)
-            VALUES ({{assetId}}, {{Guid.NewGuid()}}, {{Guid.NewGuid()}}, {{Guid.NewGuid()}}, 1, '{}'::jsonb, true, NOW(), NOW());
-            """);
 
         await context.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO inventory.asset_allocations (id, asset_id, source_system, external_reference, status, start_date, end_date, created_at, updated_at)
@@ -176,7 +198,7 @@ public sealed partial class PostgresIntegrationTests
         await using var context2 = await CreateMigratedDbContextAsync();
 
         var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, DateTimeOffset.UtcNow).Value;
+        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
         context1.Assets.Add(asset);
         await context1.SaveChangesAsync();
 
@@ -205,8 +227,8 @@ public sealed partial class PostgresIntegrationTests
         var type = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
 
-        var assetA = InventoryAsset.Create(Guid.NewGuid(), ownerA, org, type, 1, "{}", true, now).Value;
-        var assetB = InventoryAsset.Create(Guid.NewGuid(), ownerB, org, type, 1, "{}", true, now).Value;
+        var assetA = InventoryAsset.Create(Guid.NewGuid(), ownerA, type, "Sony FX3", 1, "{}", now).Value;
+        var assetB = InventoryAsset.Create(Guid.NewGuid(), ownerB, type, "Sony A7S III", 1, "{}", now).Value;
         db.Assets.AddRange(assetA, assetB);
         await db.SaveChangesAsync();
 

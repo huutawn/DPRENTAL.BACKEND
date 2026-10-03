@@ -14,20 +14,27 @@ public sealed class AvailabilityPolicyTests
 {
     private readonly Guid _assetId = Guid.NewGuid();
     private readonly Guid _ownerUserId = Guid.NewGuid();
-    private readonly Guid _orgId = Guid.NewGuid();
     private readonly Guid _equipmentTypeId = Guid.NewGuid();
     private readonly DateTimeOffset _now = new(2026, 10, 10, 10, 0, 0, TimeSpan.Zero);
 
-    private InventoryAsset CreateActiveAsset(bool acceptingBookings = true) =>
-        InventoryAsset.Create(
+    private InventoryAsset CreateActiveAsset(bool acceptingBookings = true)
+    {
+        var asset = InventoryAsset.Create(
             _assetId,
             _ownerUserId,
-            _orgId,
             _equipmentTypeId,
+            "Sony FX3",
             1,
             "{\"serial\":\"123\"}",
-            acceptingBookings,
             _now).Value;
+
+        if (!acceptingBookings)
+        {
+            asset.DisableBookings("Suspended for test", _now);
+        }
+
+        return asset;
+    }
 
     [Fact]
     public void CheckAvailability_WhenNotAcceptingBookings_Fails()

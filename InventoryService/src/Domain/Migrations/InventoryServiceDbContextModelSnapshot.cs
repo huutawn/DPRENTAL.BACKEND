@@ -326,13 +326,23 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("equipment_type_id");
 
-                    b.Property<Guid>("OrganizationId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("organization_id");
+                    b.Property<int?>("ManufactureYear")
+                        .HasColumnType("integer")
+                        .HasColumnName("manufacture_year");
 
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("model");
                     b.Property<Guid>("OwnerUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("owner_user_id");
+
+                    b.Property<string>("SerialNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("serial_number");
 
                     b.Property<int>("SchemaVersion")
                         .HasColumnType("integer")
@@ -347,6 +357,10 @@ namespace InventoryService.Domain.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
                         .HasColumnName("suspension_reason");
+                    b.Property<Guid?>("ThumbnailMediaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("thumbnail_media_id");
+
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -363,19 +377,24 @@ namespace InventoryService.Domain.Migrations
                     b.HasIndex("EquipmentTypeId")
                         .HasDatabaseName("ix_assets_equipment_type_id");
 
-                    b.HasIndex("OrganizationId")
-                        .HasDatabaseName("ix_assets_organization_id");
-
                     b.HasIndex("OwnerUserId")
                         .HasDatabaseName("ix_assets_owner_user_id");
 
                     b.ToTable("assets", "inventory", t =>
                         {
-                            t.HasCheckConstraint("ck_assets_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND organization_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+                            t.HasCheckConstraint("ck_assets_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_assets_manufacture_year", "manufacture_year IS NULL OR manufacture_year >= 1900");
+
+                            t.HasCheckConstraint("ck_assets_model", "model ~ '\\S' AND length(model) <= 200");
 
                             t.HasCheckConstraint("ck_assets_schema_version", "schema_version >= 1");
 
+                            t.HasCheckConstraint("ck_assets_serial_number", "serial_number IS NULL OR (serial_number ~ '\\S' AND length(serial_number) <= 100)");
+
                             t.HasCheckConstraint("ck_assets_spec_values_object", "jsonb_typeof(spec_values) = 'object'");
+
+                            t.HasCheckConstraint("ck_assets_thumbnail_media_id", "thumbnail_media_id IS NULL OR thumbnail_media_id <> '00000000-0000-0000-0000-000000000000'::uuid");
                         });
                 });
 

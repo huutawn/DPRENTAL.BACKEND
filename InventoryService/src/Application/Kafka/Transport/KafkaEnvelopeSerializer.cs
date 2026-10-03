@@ -83,14 +83,17 @@ public static class KafkaEnvelopeSerializer
         var version = root.TryGetProperty("version", out var vProp) && vProp.TryGetInt32(out var v) ? v : 0;
         var correlationId = root.TryGetProperty("correlationId", out var cProp) ? cProp.GetString() ?? string.Empty : string.Empty;
 
-        Guid? causationId = root.TryGetProperty("causationId", out var causProp) && causProp.TryGetGuid(out var caus)
+        Guid? causationId = root.TryGetProperty("causationId", out var causProp) &&
+            causProp.ValueKind != JsonValueKind.Null &&
+            causProp.TryGetGuid(out var caus)
             ? caus : null;
 
         var aggregateId = root.TryGetProperty("aggregateId", out var aggProp) ? aggProp.GetString() ?? string.Empty : string.Empty;
 
-        var organizationId = root.TryGetProperty("organizationId", out var orgProp) && orgProp.TryGetGuid(out var org)
-            ? org : Guid.Empty;
-
+        Guid? organizationId = root.TryGetProperty("organizationId", out var orgProp) &&
+            orgProp.ValueKind != JsonValueKind.Null &&
+            orgProp.TryGetGuid(out var org)
+            ? org : null;
         var occurredAt = root.TryGetProperty("occurredAt", out var occProp) && occProp.TryGetDateTimeOffset(out var occ)
             ? occ : DateTimeOffset.MinValue;
 
@@ -119,7 +122,7 @@ public sealed record EnvelopeMetadata(
     string CorrelationId,
     Guid? CausationId,
     string AggregateId,
-    Guid OrganizationId,
+    Guid? OrganizationId,
     DateTimeOffset OccurredAt,
     string Producer)
 {
@@ -129,7 +132,6 @@ public sealed record EnvelopeMetadata(
         Version > 0 &&
         !string.IsNullOrWhiteSpace(CorrelationId) &&
         !string.IsNullOrWhiteSpace(AggregateId) &&
-        OrganizationId != Guid.Empty &&
         OccurredAt.Offset == TimeSpan.Zero &&
         !string.IsNullOrWhiteSpace(Producer);
 }

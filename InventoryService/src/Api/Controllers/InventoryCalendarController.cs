@@ -1,5 +1,6 @@
 using Dprental.InventoryService.Api.Filters;
-using Dprental.InventoryService.Application.Calendar;
+using Dprental.InventoryService.Application.DTOs.Calendar;
+using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -15,11 +16,11 @@ namespace Dprental.InventoryService.Api.Controllers;
 [Route("api/v1/inventory/assets/{assetId:guid}")]
 public sealed class InventoryCalendarController : ControllerBase
 {
-    private readonly CalendarService _calendarService;
+    private readonly ICalendarService _calendarService;
     private readonly IInventoryCallerContext _callerContext;
 
     public InventoryCalendarController(
-        CalendarService calendarService,
+        ICalendarService calendarService,
         IInventoryCallerContext callerContext)
     {
         _calendarService = calendarService ?? throw new ArgumentNullException(nameof(calendarService));

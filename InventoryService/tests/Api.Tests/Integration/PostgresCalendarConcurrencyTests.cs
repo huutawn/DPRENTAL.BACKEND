@@ -1,6 +1,9 @@
 using System.Globalization;
+using Dprental.InventoryService.Application.DTOs.Calendar;
+using Dprental.InventoryService.Application.IServices;
+using Dprental.InventoryService.Application.Kafka.Outbox;
+using Dprental.InventoryService.Application.Services;
 using Dprental.InventoryService.Api.Tests.Security;
-using Dprental.InventoryService.Application.Calendar;
 using Dprental.InventoryService.Application.Kafka.Contracts;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
@@ -46,7 +49,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
     private InventoryServiceDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
-            .UseNpgsql(_connectionString)
+            .UseNpgsql(_connectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
             .Options;
         return new InventoryServiceDbContext(options);
     }
@@ -57,12 +60,16 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         var asset = InventoryAsset.Create(
             Guid.NewGuid(),
             ownerUserId,
-            orgId,
             Guid.NewGuid(),
+            "Sony FX3",
             1,
             "{}",
-            acceptingBookings,
             InitialNow).Value;
+
+        if (!acceptingBookings)
+        {
+            asset.DisableBookings("Suspended for test", InitialNow);
+        }
 
         db.Assets.Add(asset);
         await db.SaveChangesAsync();
@@ -189,7 +196,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         Assert.Single(blocks);
         Assert.Equal(CalendarBlockReason.Maintenance, blocks[0].Reason);
 
-        var outbox = await db.OutboxMessages.Where(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")).ToListAsync();
+        var outbox = await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync();
         Assert.Single(outbox);
     }
 
@@ -264,7 +271,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         await using var db = CreateDbContext();
         Assert.Single(await db.CalendarBlocks.Where(b => b.AssetId == asset.Id).ToListAsync());
         Assert.Empty(await db.AssetAllocations.Where(a => a.AssetId == asset.Id).ToListAsync());
-        Assert.Single(await db.OutboxMessages.Where(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")).ToListAsync());
+        Assert.Single(await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync());
     }
 
     [Fact]
@@ -383,7 +390,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
 
         await using var db = CreateDbContext();
         Assert.Equal(2, await db.CalendarBlocks.CountAsync(b => b.AssetId == asset.Id));
-        Assert.Equal(2, await db.OutboxMessages.CountAsync(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")));
+        Assert.Equal(2, await db.OutboxMessages.CountAsync(m => m.KafkaKey == asset.Id.ToString("D")));
     }
 
     [Fact]
@@ -435,9 +442,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
                 ctx.CalendarBlocks.Add(block);
 
                 // Stage outbox
-                var payload = new InventoryAssetAvailabilityChangedPayload(asset.Id, InitialNow);
-                var envelope = MessageEnvelope.CreateRoot("InventoryAssetAvailabilityChanged", orgId, asset.Id.ToString("D"), payload);
-                var outboxMsg = OutboxMessage.Create(envelope.MessageId, KafkaTopics.InventoryAssetEventsV1, $"{orgId:D}:{asset.Id:D}", "{}", InitialNow);
+                var outboxMsg = InventoryAssetAvailabilityEvents.CreateAvailabilityChangedOutboxMessage(asset.Id, InitialNow);
                 ctx.StageOutbox(outboxMsg);
 
                 enteredLock.SetResult(true);
@@ -459,7 +464,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         await using (var db = CreateDbContext())
         {
             Assert.Empty(await db.CalendarBlocks.Where(b => b.AssetId == asset.Id).ToListAsync());
-            Assert.Empty(await db.OutboxMessages.Where(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")).ToListAsync());
+            Assert.Empty(await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync());
         }
 
         // Khẳng định 2: Transaction tiếp theo lấy được cùng lock ngay trong timeout
@@ -595,7 +600,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
 
         await using var dbFinal = CreateDbContext();
         Assert.Single(await dbFinal.CalendarBlocks.Where(b => b.AssetId == asset.Id).ToListAsync());
-        Assert.Single(await dbFinal.OutboxMessages.Where(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")).ToListAsync());
+        Assert.Single(await dbFinal.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync());
     }
 
     [Fact]

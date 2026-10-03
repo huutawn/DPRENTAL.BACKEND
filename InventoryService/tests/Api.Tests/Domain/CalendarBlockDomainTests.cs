@@ -14,21 +14,28 @@ public sealed class CalendarBlockDomainTests
 {
     private readonly Guid _assetId = Guid.NewGuid();
     private readonly Guid _ownerUserId = Guid.NewGuid();
-    private readonly Guid _orgId = Guid.NewGuid();
     private readonly Guid _equipmentTypeId = Guid.NewGuid();
     private readonly DateTimeOffset _now = new(2026, 10, 2, 10, 0, 0, TimeSpan.Zero);
     private readonly DateOnly _today = new(2026, 10, 2);
 
-    private InventoryAsset CreateAsset(bool acceptingBookings = true) =>
-        InventoryAsset.Create(
+    private InventoryAsset CreateAsset(bool acceptingBookings = true)
+    {
+        var asset = InventoryAsset.Create(
             _assetId,
             _ownerUserId,
-            _orgId,
             _equipmentTypeId,
+            "Sony FX3",
             1,
             "{}",
-            acceptingBookings,
             _now).Value;
+
+        if (!acceptingBookings)
+        {
+            asset.DisableBookings("Suspended for test", _now);
+        }
+
+        return asset;
+    }
 
     [Fact]
     public void Create_StartDateToday_Succeeds()

@@ -77,14 +77,14 @@ public sealed class KafkaRealIntegrationTests : IAsyncLifetime
         var topic = KafkaTopics.InventoryAllocationEventsV1;
         var messageId = Guid.NewGuid();
         var orgId = Guid.NewGuid();
-        var aggregateId = "RES-PUBLISH-1";
+        var aggregateId = $"RES-PUBLISH-{Guid.NewGuid():N}";
         var now = DateTimeOffset.UtcNow;
 
         var envelope = MessageEnvelope.CreateRoot(
             messageType: "ReservationPlaced",
-            organizationId: orgId,
             aggregateId: aggregateId,
-            payload: new { Status = "Placed", Amount = 500000 });
+            payload: new { Status = "Placed", Amount = 500000 },
+            organizationId: orgId);
 
         var wireJson = KafkaEnvelopeSerializer.Serialize(envelope);
         var outboxMessage = OutboxMessage.Create(messageId, topic, envelope.KafkaKey, wireJson, now);
@@ -132,6 +132,62 @@ public sealed class KafkaRealIntegrationTests : IAsyncLifetime
         consumer.Close();
 
         Assert.True(received, "Message không được nhận từ Kafka topic sau khi Outbox publish.");
+    }
+
+    [Fact]
+    public async Task PublishViaOutbox_LegacyMessageWithOrgKey_PublishesVerbatimKeyToBroker()
+    {
+        using var sp = BuildServiceProvider();
+        using var scope = sp.CreateScope();
+        var outboxStore = scope.ServiceProvider.GetRequiredService<IOutboxStore>();
+        var db = scope.ServiceProvider.GetRequiredService<InventoryServiceDbContext>();
+        var publisher = scope.ServiceProvider.GetRequiredService<OutboxPublisherWorker>();
+
+        var topic = KafkaTopics.InventoryAssetEventsV1;
+        var messageId = Guid.NewGuid();
+        var legacyOrgId = Guid.NewGuid();
+        var legacyAssetId = Guid.NewGuid();
+        var legacyKey = $"{legacyOrgId:D}:{legacyAssetId:D}";
+        var legacyPayload = $$"""{"messageId":"{{messageId}}","organizationId":"{{legacyOrgId}}","aggregateId":"{{legacyAssetId}}"}""";
+        var now = DateTimeOffset.UtcNow;
+
+        var legacyOutbox = OutboxMessage.Create(messageId, topic, legacyKey, legacyPayload, now);
+        outboxStore.Add(legacyOutbox);
+        await db.SaveChangesAsync();
+
+        var processed = await publisher.ProcessBatchAsync();
+        Assert.True(processed >= 1);
+
+        var consumerConfig = new ConsumerConfig
+        {
+            BootstrapServers = BootstrapServers,
+            GroupId = $"legacy-verifier-{Guid.NewGuid():N}",
+            AutoOffsetReset = AutoOffsetReset.Earliest,
+            EnableAutoCommit = false
+        };
+
+        using var consumer = new ConsumerBuilder<string, string>(consumerConfig).Build();
+        consumer.Subscribe(topic);
+
+        bool receivedVerbatim = false;
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var cr = consumer.Consume(TimeSpan.FromMilliseconds(500));
+            if (cr is not null && cr.Message.Key == legacyKey)
+            {
+                using var expectedDoc = JsonDocument.Parse(legacyPayload);
+                using var actualDoc = JsonDocument.Parse(cr.Message.Value);
+                Assert.Equal(expectedDoc.RootElement.GetProperty("messageId").GetString(), actualDoc.RootElement.GetProperty("messageId").GetString());
+                Assert.Equal(expectedDoc.RootElement.GetProperty("organizationId").GetString(), actualDoc.RootElement.GetProperty("organizationId").GetString());
+                Assert.Equal(expectedDoc.RootElement.GetProperty("aggregateId").GetString(), actualDoc.RootElement.GetProperty("aggregateId").GetString());
+                receivedVerbatim = true;
+                break;
+            }
+        }
+        consumer.Close();
+
+        Assert.True(receivedVerbatim, "Legacy Outbox message không được xuất bản với nguyên vẹn KafkaKey định dạng cũ.");
     }
 
     [Fact]
@@ -244,7 +300,7 @@ public sealed class KafkaRealIntegrationTests : IAsyncLifetime
 
         // Outbox có bản ghi DLQ được commit atomically
         await using var verifyDb = new InventoryServiceDbContext(
-            new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(_fixture.ConnectionString).Options);
+            new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(_fixture.ConnectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName)).Options);
 
         var dlqMessage = await verifyDb.OutboxMessages.FirstOrDefaultAsync(m => m.Topic == "test.topic.dlq");
         Assert.NotNull(dlqMessage);

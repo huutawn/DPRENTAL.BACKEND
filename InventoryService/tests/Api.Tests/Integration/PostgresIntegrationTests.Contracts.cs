@@ -19,7 +19,7 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var owner = Guid.NewGuid();
-        var asset = InventoryAsset.Create(Guid.NewGuid(), owner, Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, DateTimeOffset.UtcNow).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), owner, Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
         setup.Assets.Add(asset);
         await setup.SaveChangesAsync();
         var result = await services.GetRequiredService<IInventoryWriteTransaction>().ExecuteAsync<bool>(asset.Id, async (ctx, ct) =>
@@ -40,8 +40,8 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var a = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value;
-        var b = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value;
+        var a = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
+        var b = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
         var day = BusinessDateTime.ToVietnamDate(now).AddDays(1);
         var allocation = AssetAllocation.CreateManual(Guid.NewGuid(), a.Id, new RentalPeriod(day, day), now).Value;
         setup.Assets.AddRange(a, b);
@@ -65,7 +65,7 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
         setup.Assets.Add(asset);
         await setup.SaveChangesAsync();
         var transaction = services.GetRequiredService<IInventoryWriteTransaction>();
@@ -92,7 +92,7 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
         setup.Assets.Add(asset);
         await setup.SaveChangesAsync();
         await using var concurrent = await CreateMigratedDbContextAsync();
@@ -131,7 +131,7 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = BusinessDateTime.NormalizeUtc(DateTimeOffset.UtcNow);
-        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
         var start = BusinessDateTime.ToVietnamDate(now).AddDays(1);
         var hold = AssetAllocation.CreateHold(
             Guid.NewGuid(), asset.Id, new RentalPeriod(start, start), now.AddSeconds(-20), now.AddMinutes(-2),
@@ -171,8 +171,8 @@ public sealed partial class PostgresIntegrationTests
         var equipmentTypeId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
 
-        var asset1 = InventoryAsset.Create(Guid.NewGuid(), ownerId, orgId, equipmentTypeId, 1, "{\"lens\":\"24-70mm\",\"sn\":\"SN001\"}", true, now).Value;
-        var asset2 = InventoryAsset.Create(Guid.NewGuid(), ownerId, orgId, equipmentTypeId, 2, "{\"lens\":\"70-200mm\",\"sn\":\"SN002\"}", true, now).Value;
+        var asset1 = InventoryAsset.Create(Guid.NewGuid(), ownerId, equipmentTypeId, "Sony FX3", 1, "{\"lens\":\"24-70mm\",\"sn\":\"SN001\"}", now).Value;
+        var asset2 = InventoryAsset.Create(Guid.NewGuid(), ownerId, equipmentTypeId, "Sony A7S III", 2, "{\"lens\":\"70-200mm\",\"sn\":\"SN002\"}", now).Value;
 
         db.Assets.AddRange(asset1, asset2);
         await db.SaveChangesAsync();
@@ -195,8 +195,8 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var asset1 = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value;
-        var asset2 = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value;
+        var asset1 = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
+        var asset2 = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
         setup.Assets.AddRange(asset1, asset2);
         await setup.SaveChangesAsync();
 
@@ -240,7 +240,7 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
         setup.Assets.Add(asset);
         await setup.SaveChangesAsync();
 
