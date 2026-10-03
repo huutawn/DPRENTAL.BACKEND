@@ -75,7 +75,9 @@ public sealed class InventorySecurityTestFactory : WebApplicationFactory<Program
                 ["MediaService:InternalBaseUrl"] = "http://media-service:8080",
                 ["MediaService:PublicGatewayUrl"] = "https://gateway.example",
                 ["MediaService:ApiKey"] = "test-media-api-key",
-                ["MediaService:TimeoutSeconds"] = "10"
+                ["MediaService:TimeoutSeconds"] = "10",
+                ["CatalogService:BaseUrl"] = "http://catalog-service:8080",
+                ["CatalogService:TimeoutSeconds"] = "10",
             });
         });
 

@@ -1,5 +1,7 @@
 using Dprental.InventoryService.Api.Tests.Security;
-using Dprental.InventoryService.Application.Calendar;
+using Dprental.InventoryService.Application.DTOs.Calendar;
+using Dprental.InventoryService.Application.IServices;
+using Dprental.InventoryService.Application.Services;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Enums;
@@ -53,12 +55,16 @@ public sealed class PostgresCalendarAtomicityTests : IClassFixture<PostgresFixtu
         var asset = InventoryAsset.Create(
             Guid.NewGuid(),
             ownerUserId,
-            orgId,
             Guid.NewGuid(),
+            "Sony FX3",
             1,
             "{}",
-            acceptingBookings,
             FixedNow).Value;
+
+        if (!acceptingBookings)
+        {
+            asset.DisableBookings("Suspended for test", FixedNow);
+        }
 
         db.Assets.Add(asset);
         await db.SaveChangesAsync();
@@ -189,7 +195,7 @@ public sealed class PostgresCalendarAtomicityTests : IClassFixture<PostgresFixtu
             Assert.NotNull(savedBlock);
             Assert.Equal(sharedPeriod.StartDate, savedBlock.StartDate);
 
-            var outboxMsg = await db.OutboxMessages.SingleOrDefaultAsync(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}"));
+            var outboxMsg = await db.OutboxMessages.SingleOrDefaultAsync(m => m.KafkaKey == asset.Id.ToString("D"));
             Assert.NotNull(outboxMsg);
         }
     }
@@ -220,7 +226,7 @@ public sealed class PostgresCalendarAtomicityTests : IClassFixture<PostgresFixtu
             var block = await db.CalendarBlocks.SingleOrDefaultAsync(b => b.AssetId == asset.Id);
             Assert.NotNull(block);
 
-            var outbox = await db.OutboxMessages.SingleOrDefaultAsync(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}"));
+            var outbox = await db.OutboxMessages.SingleOrDefaultAsync(m => m.KafkaKey == asset.Id.ToString("D"));
             Assert.NotNull(outbox);
             Assert.Equal("inventory.asset.events.v1", outbox.Topic);
             Assert.Contains("InventoryAssetAvailabilityChanged", outbox.Payload);
@@ -257,7 +263,7 @@ public sealed class PostgresCalendarAtomicityTests : IClassFixture<PostgresFixtu
             Assert.Null(block);
 
             // Hai sự kiện outbox đã commit: 1 từ create, 1 từ delete
-            var events = await db.OutboxMessages.Where(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")).ToListAsync();
+            var events = await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync();
             Assert.Equal(2, events.Count);
         }
     }
@@ -286,7 +292,7 @@ public sealed class PostgresCalendarAtomicityTests : IClassFixture<PostgresFixtu
                 CREATE OR REPLACE FUNCTION {triggerFuncName}()
                 RETURNS TRIGGER AS $$
                 BEGIN
-                    IF NEW.kafka_key LIKE '%:' || '{asset.Id:D}' THEN
+                    IF NEW.kafka_key = '{asset.Id:D}' OR NEW.kafka_key LIKE '%:' || '{asset.Id:D}' THEN
                         RAISE EXCEPTION 'Simulated outbox insert failure for asset %', '{asset.Id:D}';
                     END IF;
                     RETURN NEW;
@@ -324,7 +330,7 @@ public sealed class PostgresCalendarAtomicityTests : IClassFixture<PostgresFixtu
                 var blocks = await db.CalendarBlocks.Where(b => b.AssetId == asset.Id).ToListAsync();
                 Assert.Empty(blocks);
 
-                var outbox = await db.OutboxMessages.Where(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")).ToListAsync();
+                var outbox = await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync();
                 Assert.Empty(outbox);
             }
         }
@@ -374,7 +380,7 @@ public sealed class PostgresCalendarAtomicityTests : IClassFixture<PostgresFixtu
                 CREATE OR REPLACE FUNCTION {triggerFuncName}()
                 RETURNS TRIGGER AS $$
                 BEGIN
-                    IF NEW.kafka_key LIKE '%:' || '{asset.Id:D}' THEN
+                    IF NEW.kafka_key = '{asset.Id:D}' OR NEW.kafka_key LIKE '%:' || '{asset.Id:D}' THEN
                         RAISE EXCEPTION 'Simulated outbox insert failure on delete for asset %', '{asset.Id:D}';
                     END IF;
                     RETURN NEW;
@@ -404,7 +410,7 @@ public sealed class PostgresCalendarAtomicityTests : IClassFixture<PostgresFixtu
                 Assert.NotNull(blockStillExists);
 
                 // Số lượng event chỉ có đúng 1 từ lúc create, không có event delete
-                var events = await db.OutboxMessages.Where(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")).ToListAsync();
+                var events = await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync();
                 Assert.Single(events);
             }
         }

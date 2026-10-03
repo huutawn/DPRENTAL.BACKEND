@@ -220,7 +220,7 @@ public sealed class InventoryWriteTransaction : IInventoryWriteTransaction
             if (entry.Entity is InventoryAsset && entry.State == EntityState.Modified &&
                 entry.Properties.Any(p => p.IsModified && p.OriginalValue is Guid original &&
                     p.CurrentValue is Guid current && original != current &&
-                    p.Metadata.Name is nameof(InventoryAsset.OwnerUserId) or nameof(InventoryAsset.OrganizationId) or nameof(InventoryAsset.EquipmentTypeId)))
+                    p.Metadata.Name is nameof(InventoryAsset.OwnerUserId) or nameof(InventoryAsset.EquipmentTypeId)))
                 return Error.Conflict("ASSET_IDENTITY_IMMUTABLE", "Không được đổi ownership hoặc identity của tài sản.");
 
             Guid? allocationId = entry.Entity switch

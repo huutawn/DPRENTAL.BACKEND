@@ -1,23 +1,7 @@
+using Dprental.InventoryService.Application.DTOs.Media;
 using Dprental.InventoryService.Common;
 
-namespace Dprental.InventoryService.Application.Media;
-
-/// <summary>
-/// DTO chứa thông tin kết quả xác minh media từ MediaService.
-/// </summary>
-public sealed record MediaVerificationInfo(
-    Guid MediaId,
-    string Status,
-    string UploadedByUserId
-);
-
-/// <summary>
-/// DTO chứa thông tin kết quả cập nhật visibility từ MediaService.
-/// </summary>
-public sealed record MediaVisibilityInfo(
-    Guid MediaId,
-    string Visibility
-);
+namespace Dprental.InventoryService.Application.Clients;
 
 /// <summary>
 /// Hợp đồng client gọi tới MediaService nội bộ theo chuẩn Server-to-Server.

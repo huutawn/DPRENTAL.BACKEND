@@ -53,19 +53,18 @@ public sealed partial class PostgresIntegrationTests
         try
         {
             await using var db = new InventoryServiceDbContext(new DbContextOptionsBuilder<InventoryServiceDbContext>().UseNpgsql(fixture.ConnectionString, options => options.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName)).Options);
-            var asset = Dprental.InventoryService.Domain.Entities.InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, DateTimeOffset.UtcNow).Value;
-            db.Assets.Add(asset);
-            await db.SaveChangesAsync();
+            var assetId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.assets(id,owner_user_id,organization_id,equipment_type_id,schema_version,spec_values,accepting_bookings,created_at,updated_at) VALUES({assetId},{Guid.NewGuid()},{Guid.NewGuid()},{Guid.NewGuid()},1,'{{}}'::jsonb,true,NOW(),NOW())");
             var allocationId = Guid.NewGuid();
-            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.asset_allocations(id,asset_id,source_system,external_reference,status,start_date,end_date,created_at,updated_at,notes) VALUES({allocationId},{asset.Id},'inventory.manual',{allocationId.ToString()},6,'2026-11-01','2026-11-02',NOW(),NOW(),'Customer name and phone')");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.asset_allocations(id,asset_id,source_system,external_reference,status,start_date,end_date,created_at,updated_at,notes) VALUES({allocationId},{assetId},'inventory.manual',{allocationId.ToString()},6,'2026-11-01','2026-11-02',NOW(),NOW(),'Customer name and phone')");
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.allocation_transitions(id,allocation_id,sequence,operation_type,from_status,to_status,created_at,actor,reason,operation_key,request_fingerprint) VALUES({Guid.NewGuid()},{allocationId},1,7,2,6,NOW(),'staff','Hoàn tất kỳ phân bổ','return-before-cutover',{new string('A', 64)})");
-            await db.Database.MigrateAsync();
+            await db.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>().MigrateAsync("20261002024109_HardenInventoryBoundary");
             var allocation = await db.AssetAllocations.Include(a => a.Transitions).SingleAsync();
             Assert.Null(allocation.Notes);
             Assert.Null(allocation.Transitions.Single().Reason);
             Assert.Null(allocation.Transitions.Single().RequestFingerprint);
             Assert.Equal("return-before-cutover", allocation.Transitions.Single().OperationKey);
-            var ex = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE inventory.assets SET spec_values='[]'::jsonb WHERE id={asset.Id}"));
+            var ex = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE inventory.assets SET spec_values='[]'::jsonb WHERE id={assetId}"));
             Assert.Equal("ck_assets_spec_values_object", ex.ConstraintName);
             Assert.Single(await db.AssetAllocations.ToListAsync());
         }
@@ -86,9 +85,10 @@ public sealed partial class PostgresIntegrationTests
             var allocationId = Guid.NewGuid();
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.assets(id,owner_user_id,organization_id,equipment_type_id,schema_version,spec_values,accepting_bookings,created_at,updated_at) VALUES({assetId},{Guid.NewGuid()},{Guid.NewGuid()},{Guid.NewGuid()},{version},{specs}::jsonb,true,NOW(),NOW())");
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.asset_allocations(id,asset_id,source_system,external_reference,status,start_date,end_date,created_at,updated_at,notes) VALUES({allocationId},{assetId},'inventory.manual',{allocationId.ToString()},6,'2026-11-01','2026-11-02',NOW(),NOW(),'original note')");
-            await Assert.ThrowsAsync<PostgresException>(() => db.Database.MigrateAsync());
+            var migrator = db.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>();
+            await Assert.ThrowsAsync<PostgresException>(() => migrator.MigrateAsync("20261002024109_HardenInventoryBoundary"));
             Assert.Equal(4, (await db.Database.GetAppliedMigrationsAsync()).Count());
-            Assert.Single(await db.Assets.ToListAsync());
+            Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*)::integer AS \"Value\" FROM inventory.assets").SingleAsync());
             Assert.Equal("original note", (await db.AssetAllocations.SingleAsync()).Notes);
         }
         finally { await fixture.DisposeAsync(); }
@@ -235,7 +235,7 @@ public sealed partial class PostgresIntegrationTests
                 """);
 
             // 10. Chạy forward migration RefactorInventoryBoundary
-            await db.Database.MigrateAsync();
+            await db.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>().MigrateAsync("20261002011635_RefactorInventoryBoundary");
 
             // 11. Kiểm tra kết quả migration:
             var assetRow = await db.Database.SqlQuery<string>($"""
@@ -323,6 +323,230 @@ public sealed partial class PostgresIntegrationTests
             // Chỉ 3 migrations được apply
             var applied = await db.Database.GetAppliedMigrationsAsync();
             Assert.Equal(3, applied.Count());
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CompleteAssetManagement_PopulatedUpgradeWithBackfill_MigratesModelAndDropsOrganization()
+    {
+        var fixture = new PostgresFixture { TargetMigration = "20261002024109_HardenInventoryBoundary" };
+        await fixture.InitializeAsync();
+        try
+        {
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
+                .UseNpgsql(fixture.ConnectionString, o => o.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
+                .Options;
+            await using var db = new InventoryServiceDbContext(options);
+
+            var assetId = Guid.NewGuid();
+            var ownerId = Guid.NewGuid();
+            var orgId = Guid.NewGuid();
+            var equipmentTypeId = Guid.NewGuid();
+
+            // Seed asset với schema cũ (có organization_id, chưa có model)
+            await db.Database.ExecuteSqlInterpolatedAsync($$"""
+                INSERT INTO inventory.assets (id, owner_user_id, organization_id, equipment_type_id, schema_version, spec_values, accepting_bookings, suspension_reason, created_at, updated_at)
+                VALUES ({{assetId}}, {{ownerId}}, {{orgId}}, {{equipmentTypeId}}, 1, '{"lens":"24-70mm"}'::jsonb, true, NULL, NOW(), NOW());
+                """);
+
+            // Chuẩn bị bảng staging asset_model_backfill
+            await db.Database.ExecuteSqlRawAsync("""
+                CREATE TABLE IF NOT EXISTS inventory.asset_model_backfill (
+                    asset_id uuid PRIMARY KEY,
+                    model character varying(200) NOT NULL,
+                    serial_number character varying(100),
+                    manufacture_year integer,
+                    thumbnail_media_id uuid
+                );
+                """);
+
+            var thumbId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO inventory.asset_model_backfill (asset_id, model, serial_number, manufacture_year, thumbnail_media_id)
+                VALUES ({assetId}, 'Sony FX3 Cinema Line', 'SN-98765', 2024, {thumbId});
+                """);
+
+            // Thực hiện forward migration sang CompleteInventoryAssetManagement
+            await db.Database.MigrateAsync();
+
+            // Kiểm tra kết quả migration:
+            var row = await db.Database.SqlQuery<string>($"""
+                SELECT model AS "Value" FROM inventory.assets WHERE id = {assetId}
+                """).SingleAsync();
+            Assert.Equal("Sony FX3 Cinema Line", row);
+
+            var serialRow = await db.Database.SqlQuery<string>($"""
+                SELECT serial_number AS "Value" FROM inventory.assets WHERE id = {assetId}
+                """).SingleAsync();
+            Assert.Equal("SN-98765", serialRow);
+
+            var yearRow = await db.Database.SqlQuery<int>($"""
+                SELECT manufacture_year AS "Value" FROM inventory.assets WHERE id = {assetId}
+                """).SingleAsync();
+            Assert.Equal(2024, yearRow);
+
+            var thumbRow = await db.Database.SqlQuery<Guid>($"""
+                SELECT thumbnail_media_id AS "Value" FROM inventory.assets WHERE id = {assetId}
+                """).SingleAsync();
+            Assert.Equal(thumbId, thumbRow);
+
+            // Bảng staging asset_model_backfill đã bị drop
+            var stagingExists = await db.Database.SqlQueryRaw<bool>("SELECT to_regclass('inventory.asset_model_backfill') IS NOT NULL AS \"Value\"").SingleAsync();
+            Assert.False(stagingExists);
+
+            // Cột organization_id không còn tồn tại trên bảng assets
+            var orgColumnExists = await db.Database.SqlQueryRaw<bool>("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'inventory' AND table_name = 'assets' AND column_name = 'organization_id'
+                ) AS "Value"
+                """).SingleAsync();
+            Assert.False(orgColumnExists);
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CompleteAssetManagement_MissingOrInvalidBackfill_RollsBack()
+    {
+        var fixture = new PostgresFixture { TargetMigration = "20261002024109_HardenInventoryBoundary" };
+        await fixture.InitializeAsync();
+        try
+        {
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
+                .UseNpgsql(fixture.ConnectionString, o => o.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
+                .Options;
+            await using var db = new InventoryServiceDbContext(options);
+
+            var assetId = Guid.NewGuid();
+            var ownerId = Guid.NewGuid();
+            var orgId = Guid.NewGuid();
+            var equipmentTypeId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($$"""
+                INSERT INTO inventory.assets (id, owner_user_id, organization_id, equipment_type_id, schema_version, spec_values, accepting_bookings, suspension_reason, created_at, updated_at)
+                VALUES ({{assetId}}, {{ownerId}}, {{orgId}}, {{equipmentTypeId}}, 1, '{}'::jsonb, true, NULL, NOW(), NOW());
+                """);
+
+            // Không có backfill hợp lệ -> migration phải fail và rollback
+            var ex = await Assert.ThrowsAsync<PostgresException>(() => db.Database.MigrateAsync());
+            Assert.Contains("asset_model_backfill thieu hoac khong hop le", ex.Message);
+
+            // Xác nhận asset vẫn còn nguyên vẹn trên schema cũ
+            var assetCount = await db.Database.SqlQuery<int>($"""
+                SELECT COUNT(*)::integer AS "Value" FROM inventory.assets WHERE id = {assetId}
+                """).SingleAsync();
+            Assert.Equal(1, assetCount);
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CompleteAssetManagement_FutureYearBackfill_RollsBack()
+    {
+        var fixture = new PostgresFixture { TargetMigration = "20261002024109_HardenInventoryBoundary" };
+        await fixture.InitializeAsync();
+        try
+        {
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
+                .UseNpgsql(fixture.ConnectionString, o => o.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
+                .Options;
+            await using var db = new InventoryServiceDbContext(options);
+
+            var assetId = Guid.NewGuid();
+            var ownerId = Guid.NewGuid();
+            var orgId = Guid.NewGuid();
+            var equipmentTypeId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($$"""
+                INSERT INTO inventory.assets (id, owner_user_id, organization_id, equipment_type_id, schema_version, spec_values, accepting_bookings, suspension_reason, created_at, updated_at)
+                VALUES ({{assetId}}, {{ownerId}}, {{orgId}}, {{equipmentTypeId}}, 1, '{}'::jsonb, true, NULL, NOW(), NOW());
+                """);
+
+            await db.Database.ExecuteSqlRawAsync("""
+                CREATE TABLE IF NOT EXISTS inventory.asset_model_backfill (
+                    asset_id uuid PRIMARY KEY,
+                    model character varying(200) NOT NULL,
+                    serial_number character varying(100),
+                    manufacture_year integer,
+                    thumbnail_media_id uuid
+                );
+                """);
+
+            // Seed năm 2099 (năm tương lai) -> migration phải từ chối và rollback
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO inventory.asset_model_backfill (asset_id, model, manufacture_year)
+                VALUES ({assetId}, 'Future Model', 2099);
+                """);
+
+            var ex = await Assert.ThrowsAsync<PostgresException>(() => db.Database.MigrateAsync());
+            Assert.Contains("asset_model_backfill thieu hoac khong hop le", ex.Message);
+
+            // Asset vẫn nguyên vẹn
+            var assetCount = await db.Database.SqlQuery<int>($"""
+                SELECT COUNT(*)::integer AS "Value" FROM inventory.assets WHERE id = {assetId}
+                """).SingleAsync();
+            Assert.Equal(1, assetCount);
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CompleteAssetManagement_WhitespaceOnlyModelBackfill_RollsBack()
+    {
+        var fixture = new PostgresFixture { TargetMigration = "20261002024109_HardenInventoryBoundary" };
+        await fixture.InitializeAsync();
+        try
+        {
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
+                .UseNpgsql(fixture.ConnectionString, o => o.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
+                .Options;
+            await using var db = new InventoryServiceDbContext(options);
+
+            var assetId = Guid.NewGuid();
+            var ownerId = Guid.NewGuid();
+            var orgId = Guid.NewGuid();
+            var equipmentTypeId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($$"""
+                INSERT INTO inventory.assets (id, owner_user_id, organization_id, equipment_type_id, schema_version, spec_values, accepting_bookings, suspension_reason, created_at, updated_at)
+                VALUES ({{assetId}}, {{ownerId}}, {{orgId}}, {{equipmentTypeId}}, 1, '{}'::jsonb, true, NULL, NOW(), NOW());
+                """);
+
+            await db.Database.ExecuteSqlRawAsync("""
+                CREATE TABLE IF NOT EXISTS inventory.asset_model_backfill (
+                    asset_id uuid PRIMARY KEY,
+                    model character varying(200) NOT NULL,
+                    serial_number character varying(100),
+                    manufacture_year integer,
+                    thumbnail_media_id uuid
+                );
+                """);
+
+            // Seed model chỉ gồm tab, newline và space -> migration phải từ chối và rollback
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO inventory.asset_model_backfill (asset_id, model)
+                VALUES ({assetId}, E'\t  \r\n  ');
+                """);
+
+            var ex = await Assert.ThrowsAsync<PostgresException>(() => db.Database.MigrateAsync());
+            Assert.Contains("asset_model_backfill thieu hoac khong hop le", ex.Message);
+
+            // Asset vẫn nguyên vẹn
+            var assetCount = await db.Database.SqlQuery<int>($"""
+                SELECT COUNT(*)::integer AS "Value" FROM inventory.assets WHERE id = {assetId}
+                """).SingleAsync();
+            Assert.Equal(1, assetCount);
         }
         finally
         {

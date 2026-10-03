@@ -6,7 +6,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dprental.InventoryService.Api.Tests.Security;
-using Dprental.InventoryService.Application.Calendar;
+using Dprental.InventoryService.Application.DTOs.Calendar;
+using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Common.Utils;
 using Dprental.InventoryService.Domain.Entities;
@@ -51,12 +52,16 @@ public sealed class CalendarHttpIntegrationTests : IClassFixture<PostgresFixture
         var asset = InventoryAsset.Create(
             Guid.NewGuid(),
             ownerUserId,
-            orgId,
             Guid.NewGuid(),
+            "Sony FX3",
             1,
             "{}",
-            acceptingBookings,
             FixedNow).Value;
+
+        if (!acceptingBookings)
+        {
+            asset.DisableBookings("Suspended for test", FixedNow);
+        }
 
         db.Assets.Add(asset);
         await db.SaveChangesAsync();
@@ -104,12 +109,12 @@ public sealed class CalendarHttpIntegrationTests : IClassFixture<PostgresFixture
         // Kiểm tra Outbox event được tạo cùng lúc trong PostgreSQL với contract nghiêm ngặt
         await using (var db = CreateDbContext())
         {
-            var outboxMessages = await db.OutboxMessages.Where(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")).ToListAsync();
+            var outboxMessages = await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync();
             Assert.Single(outboxMessages);
             var outboxMsg = outboxMessages[0];
 
             Assert.Equal("inventory.asset.events.v1", outboxMsg.Topic);
-            Assert.Equal($"{orgId:D}:{asset.Id:D}", outboxMsg.KafkaKey);
+            Assert.Equal(asset.Id.ToString("D"), outboxMsg.KafkaKey);
             Assert.Equal(FixedNow, outboxMsg.CreatedAt);
 
             // Parse wire JSON của MessageEnvelope
@@ -118,7 +123,7 @@ public sealed class CalendarHttpIntegrationTests : IClassFixture<PostgresFixture
             Assert.Equal("InventoryAssetAvailabilityChanged", envelopeNode["messageType"]?.GetValue<string>());
             Assert.Equal(1, envelopeNode["version"]?.GetValue<int>());
             Assert.Equal(asset.Id.ToString("D"), envelopeNode["aggregateId"]?.GetValue<string>());
-            Assert.Equal(orgId.ToString("D"), envelopeNode["organizationId"]?.GetValue<string>());
+            Assert.Null(envelopeNode["organizationId"]);
             Assert.Equal(FixedNow.ToString("yyyy-MM-ddTHH:mm:sszzz", CultureInfo.InvariantCulture), envelopeNode["occurredAt"]?.GetValue<string>());
 
             // Kiểm tra Payload đúng 2 thuộc tính: assetId và changedAt, không lộ bất kỳ metadata nào khác
@@ -165,7 +170,7 @@ public sealed class CalendarHttpIntegrationTests : IClassFixture<PostgresFixture
         // Kiểm tra đúng 2 events (1 create, 1 delete)
         await using (var db = CreateDbContext())
         {
-            var totalOutbox = await db.OutboxMessages.Where(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")).ToListAsync();
+            var totalOutbox = await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync();
             Assert.Equal(2, totalOutbox.Count);
         }
 
@@ -175,7 +180,7 @@ public sealed class CalendarHttpIntegrationTests : IClassFixture<PostgresFixture
 
         await using (var db = CreateDbContext())
         {
-            var totalOutboxAfterFailedDel = await db.OutboxMessages.Where(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")).ToListAsync();
+            var totalOutboxAfterFailedDel = await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync();
             Assert.Equal(2, totalOutboxAfterFailedDel.Count);
         }
     }

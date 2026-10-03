@@ -1,13 +1,17 @@
+using Dprental.InventoryService.Application.Clients;
+using Dprental.InventoryService.Application.DTOs.Media;
+using Dprental.InventoryService.Application.IServices;
+using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 using Microsoft.Extensions.Options;
 
-namespace Dprental.InventoryService.Application.Media;
+namespace Dprental.InventoryService.Application.Services;
 
 /// <summary>
 /// Application service điều phối xác minh, công bố Public và dựng URL ổn định cho Media theo hợp đồng tích hợp.
 /// </summary>
-public sealed class InventoryMediaService
+public sealed class InventoryMediaService : IInventoryMediaService
 {
     private readonly IMediaServiceClient _mediaClient;
     private readonly MediaServiceOptions _options;

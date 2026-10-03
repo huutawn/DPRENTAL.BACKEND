@@ -17,7 +17,7 @@ Domain sở hữu entities, value objects, domain availability policy, repositor
 
 Hệ thống quản lý 6 bảng thực thể trong schema `inventory`:
 
-1. `InventoryAsset` (`inventory.assets`): Tài sản trong kho, thuộc sở hữu cá nhân (`OwnerUserId`), liên kết với loại thiết bị Catalog (`EquipmentTypeId`), quản lý phiên bản dynamic schema (`SchemaVersion`), thông số kỹ thuật (`SpecValues` lưu JSONB), và cờ nhận lịch (`AcceptingBookings`).
+1. `InventoryAsset` (`inventory.assets`): Tài sản trong kho, thuộc sở hữu cá nhân (`OwnerUserId`), liên kết với loại thiết bị Catalog (`EquipmentTypeId`), tên model (`Model`), số serial (`SerialNumber`), năm sản xuất (`ManufactureYear`), ảnh đại diện (`ThumbnailMediaId`), phiên bản dynamic schema (`SchemaVersion`), thông số kỹ thuật (`SpecValues` lưu JSONB), và cờ nhận lịch (`AcceptingBookings`). Thuộc tính `OrganizationId` đã được loại bỏ hoàn toàn khỏi entity và database schema.
 2. `AssetAllocation` (`inventory.asset_allocations`): Lượt phân bổ hoặc giữ chỗ lịch của tài sản, gồm nguồn (`SourceSystem`), mã tham chiếu (`ExternalReference`), khoảng thời gian (`RentalPeriod`), trạng thái (`AllocationStatus`: Held=1, Allocated=2, Cancelled=5, Released=6) và hạn giữ (`HoldExpiresAt`).
 3. `AllocationTransition` (`inventory.allocation_transitions`): Lịch sử chuyển đổi trạng thái của lượt phân bổ (append-only audit log), có thứ tự `Sequence` và `OperationKey` chống trùng lặp.
 4. `CalendarBlock` (`inventory.calendar_blocks`): Khoảng thời gian chặn lịch tài sản phục vụ bảo trì, kiểm định hoặc sử dụng nội bộ (tối đa chân trời 6 tháng).
@@ -74,6 +74,35 @@ Hệ thống áp dụng cơ chế: **PostgreSQL `READ COMMITTED` transaction + a
 - Commands: `inventory.allocation.commands.v1`
 - Events: `inventory.allocation.events.v1`, `inventory.asset.events.v1`
 - Mỗi topic đều có DLQ tương ứng `${topic}.dlq`.
+
+---
+
+## Quản lý tài sản (DPR-160: Inventory Asset Management MVP)
+
+### Hợp đồng API
+
+1. `POST /api/v1/inventory/assets`: Tạo mới tài sản (201 Created + Location header). Caller context bắt buộc authenticated human có permission `inventory.asset.manage` hoặc admin. Owner luôn lấy từ JWT `sub`. Chặn spoofed/unknown body fields (`ownerUserId`, `organizationId`).
+2. `GET /api/v1/inventory/assets`: Danh sách phân trang (`page`, `pageSize`). Chỉ chấp nhận hai query parameters này; query khác trả 400. Luôn lọc theo JWT `sub` của caller (kể cả admin).
+3. `GET /api/v1/inventory/assets/{id}`: Chi tiết tài sản. 404 nếu không tìm thấy, 403 nếu cross-user (Admin được bypass xem tài sản).
+4. `PATCH /api/v1/inventory/assets/{id}`: Cập nhật thông tin với presence tracking. Omitted giữ nguyên; explicit null cho phép clear `serialNumber`, `manufactureYear`, `thumbnailMediaId`. Null model/schema/spec hoặc empty patch trả 400. Chặn sửa identity, owner, hoặc booking flag.
+5. `PATCH /api/v1/inventory/assets/{id}/accepting-bookings`: Bật/tắt nhận lịch: `{ "acceptingBookings": bool, "reason": string? }`. Thuộc tính `acceptingBookings` bắt buộc ở JSON boundary. Bật lại tự động xóa reason. Chỉ khi đổi cờ mới phát sự kiện `InventoryAssetAvailabilityChanged` atomically qua Outbox.
+
+### Tích hợp Catalog & Media
+
+- **CatalogService**: Tra cứu Published equipment type qua typed client gọi `GET /api/v1/catalog/equipment-types/{id}`. Trạng thái Draft/Archived trả về 400; không tìm thấy trả về 400; lỗi mạng/timeout/ID mismatch/sai định dạng trả về 503. Canonical spec validation trả về rõ ràng `CatalogSpecValidationStatus.NotSupported` theo quyết định MVP và được chấp nhận ở application boundary sau khi đã kiểm tra cấu trúc JSON object hợp lệ.
+- **MediaService**: Tái sử dụng `PreparePublicAsync` kiểm tra trạng thái Ready và uploader khớp JWT sub trước khi chuyển Public. Không gọi Media khi clear thumbnail (`thumbnailMediaId: null`).
+
+### Kafka Event Key và Quy trình Cutover Rollout
+
+- **Kafka Key**: Sự kiện `InventoryAssetAvailabilityChanged` phát lên `inventory.asset.events.v1` sử dụng **Aggregate ID** (`assetId`) làm partition key thay vì `{orgId}:{assetId}`.
+- **Yêu cầu Cutover**:
+  1. Dừng writers gửi request ghi tới InventoryService.
+  2. Drain toàn bộ Outbox messages còn tồn đọng trong database.
+  3. **Quan trọng**: Consumer phía downstream phải xử lý hết toàn bộ backlog sự kiện cũ trước khi hệ thống mới bắt đầu phát sự kiện với partition key mới (`assetId`), do Kafka không bảo đảm thứ tự giữa hai partition keys khác nhau.
+  4. Chạy preflight script `scripts/complete-asset-management-preflight.sql` để tạo bảng staging `inventory.asset_model_backfill` và đối soát dữ liệu model (phải có model, năm sản xuất không vượt quá năm hiện tại tại Việt Nam).
+  5. Thực thi migration `20261002030000_CompleteInventoryAssetManagement` (tự động rollback toàn bộ nếu backfill thiếu hoặc không hợp lệ).
+  6. Thiết lập environment variable `CatalogService__BaseUrl` và khởi động binary mới. Rollback khẩn cấp thực hiện bằng cách restore database backup và binary cũ.
+
 
 ## Forward migration và maintenance cutover
 

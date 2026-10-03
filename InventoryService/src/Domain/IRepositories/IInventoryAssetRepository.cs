@@ -19,6 +19,11 @@ public interface IInventoryAssetRepository : IRepo<InventoryAsset, Guid>
     Task<IReadOnlyList<InventoryAsset>> ListByOwnerAsync(Guid ownerUserId, int skip, int take, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Đếm tổng số tài sản thuộc về một chủ sở hữu.
+    /// </summary>
+    Task<int> CountByOwnerAsync(Guid ownerUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Lấy danh sách toàn bộ tài sản trong hệ thống có phân trang (dành cho Admin).
     /// </summary>
     Task<IReadOnlyList<InventoryAsset>> ListAllAsync(int skip, int take, CancellationToken cancellationToken = default);
