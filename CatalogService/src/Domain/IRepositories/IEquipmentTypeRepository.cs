@@ -33,6 +33,7 @@ public interface IEquipmentTypeRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>Thêm mới EquipmentType ở trạng thái Draft cùng media references trong cùng transaction.</summary>
+    Task<EquipmentType?> GetWithSchemaAsync(Guid id, CancellationToken cancellationToken = default);
     Task<Result<EquipmentTypeDetailDto>> AddAsync(
         EquipmentType equipmentType,
         IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems,

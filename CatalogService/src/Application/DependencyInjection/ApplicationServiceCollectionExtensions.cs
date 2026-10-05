@@ -1,3 +1,5 @@
+using CatalogService.Application.IServices;
+using CatalogService.Application.Services;
 using Dprental.CatalogService.Application.IServices;
 using Dprental.CatalogService.Application.Options;
 using Dprental.CatalogService.Application.Services;
@@ -24,6 +26,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IEquipmentTypeService, EquipmentTypeService>();
         services.AddScoped<ICategoryRepository, CategoryRepository>();
         services.AddScoped<ICategoryService, CategoryService>();
+        services.AddScoped<ISchemaService, SchemaService>();
 
         return services;
     }

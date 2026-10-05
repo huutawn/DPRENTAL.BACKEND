@@ -270,7 +270,9 @@ public sealed class CatalogMigrationTests
                 await using var histCmd = new NpgsqlCommand(
                     "SELECT \"MigrationId\" FROM catalog.\"__EFMigrationsHistory\" ORDER BY \"MigrationId\";",
                     verifyConn);
+
                 var appliedMigrations = new List<string>();
+
                 await using (var histReader = await histCmd.ExecuteReaderAsync())
                 {
                     while (await histReader.ReadAsync())
@@ -278,12 +280,32 @@ public sealed class CatalogMigrationTests
                         appliedMigrations.Add(histReader.GetString(0));
                     }
                 }
-                Assert.Equal(5, appliedMigrations.Count);
-                Assert.Contains(appliedMigrations, m => m.EndsWith("_InitialCatalogSchema", StringComparison.Ordinal));
-                Assert.Contains(appliedMigrations, m => m.EndsWith("_InitCategoryTable", StringComparison.Ordinal));
-                Assert.Contains(appliedMigrations, m => m.EndsWith("_RefactorEquipmentToEquipmentType", StringComparison.Ordinal));
-                Assert.Contains(appliedMigrations, m => m.EndsWith("_AddCategoryImagesAndEquipmentTypeCategories", StringComparison.Ordinal));
-                Assert.Contains(appliedMigrations, m => m.EndsWith("_AddEquipmentTypeOrganizationId", StringComparison.Ordinal));
+
+                Assert.Equal(6, appliedMigrations.Count);
+
+                Assert.Contains(
+                    appliedMigrations,
+                    m => m.EndsWith("_InitialCatalogSchema", StringComparison.Ordinal));
+
+                Assert.Contains(
+                    appliedMigrations,
+                    m => m.EndsWith("_InitCategoryTable", StringComparison.Ordinal));
+
+                Assert.Contains(
+                    appliedMigrations,
+                    m => m.EndsWith("_RefactorEquipmentToEquipmentType", StringComparison.Ordinal));
+
+                Assert.Contains(
+                    appliedMigrations,
+                    m => m.EndsWith("_AddCategoryImagesAndEquipmentTypeCategories", StringComparison.Ordinal));
+
+                Assert.Contains(
+                    appliedMigrations,
+                    m => m.EndsWith("_AddEquipmentTypeOrganizationId", StringComparison.Ordinal));
+
+                Assert.Contains(
+                    appliedMigrations,
+                    m => m.EndsWith("_RefactorToCanonicalCatalog", StringComparison.Ordinal));
 
                 // Kiểm tra quan hệ nhiều-nhiều được copy đầy đủ từ CategoryId cũ (draftId, publishedId, hiddenId)
                 await using var checkCopyCmd = new NpgsqlCommand(

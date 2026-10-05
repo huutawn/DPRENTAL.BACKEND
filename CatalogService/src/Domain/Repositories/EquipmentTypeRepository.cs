@@ -111,6 +111,18 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
             .Include(e => e.Media)
             .FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
     }
+    public async Task<EquipmentType?> GetWithSchemaAsync(
+    Guid id,
+    CancellationToken cancellationToken = default)
+    {
+        return await dbContext.EquipmentTypes
+            .Include(e => e.Schema)
+                .ThenInclude(s => s!.Versions)
+                    .ThenInclude(v => v.Fields)
+                        .ThenInclude(f => f.Options)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
+    }
 
     public async Task<EquipmentTypeDetailDto?> GetDetailByIdAsync(
         Guid id,

@@ -17,6 +17,7 @@ namespace CatalogService.Domain.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
+                .HasDefaultSchema("catalog")
                 .HasAnnotation("ProductVersion", "10.0.12")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
@@ -66,6 +67,9 @@ namespace CatalogService.Domain.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ActiveSchemaVersionId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -104,6 +108,9 @@ namespace CatalogService.Domain.Migrations
                         .HasColumnName("xmin");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ActiveSchemaVersionId")
+                        .HasDatabaseName("IX_EquipmentTypes_ActiveSchemaVersionId");
 
                     b.HasIndex("Code")
                         .IsUnique()
@@ -158,6 +165,155 @@ namespace CatalogService.Domain.Migrations
                     b.ToTable("EquipmentTypeMedia", "catalog");
                 });
 
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SchemaVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("PublishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SpecSchemaId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("SpecSchemaId1")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("VersionNumber")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SpecSchemaId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SchemaVersions_OneDraftPerSchema")
+                        .HasFilter("\"Status\" = 'Draft'");
+
+                    b.HasIndex("SpecSchemaId1");
+
+                    b.HasIndex("SpecSchemaId", "VersionNumber")
+                        .IsUnique();
+
+                    b.ToTable("SchemaVersions", "catalog");
+                });
+
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SpecField", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DataType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsRequired")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<decimal?>("MaxValue")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<decimal?>("MinValue")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<Guid>("SchemaVersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("SchemaVersionId1")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SchemaVersionId1");
+
+                    b.HasIndex("SchemaVersionId", "DisplayOrder");
+
+                    b.HasIndex("SchemaVersionId", "Key")
+                        .IsUnique();
+
+                    b.ToTable("SpecFields", "catalog", t =>
+                        {
+                            t.HasCheckConstraint("CK_SpecFields_MinMax", "\"MinValue\" IS NULL OR \"MaxValue\" IS NULL OR \"MinValue\" <= \"MaxValue\"");
+                        });
+                });
+
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SpecOption", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("SpecFieldId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SpecFieldId", "Value")
+                        .IsUnique();
+
+                    b.ToTable("SpecOptions", "catalog");
+                });
+
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SpecSchema", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("EquipmentTypeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("EquipmentTypeId1")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EquipmentTypeId")
+                        .IsUnique();
+
+                    b.HasIndex("EquipmentTypeId1");
+
+                    b.ToTable("SpecSchemas", "catalog");
+                });
+
             modelBuilder.Entity("EquipmentTypeCategories", b =>
                 {
                     b.Property<Guid>("EquipmentTypeId")
@@ -175,6 +331,15 @@ namespace CatalogService.Domain.Migrations
                     b.ToTable("EquipmentTypeCategories", "catalog");
                 });
 
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentType", b =>
+                {
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.SchemaVersion", null)
+                        .WithMany()
+                        .HasForeignKey("ActiveSchemaVersionId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .HasConstraintName("FK_EquipmentTypes_SchemaVersions_ActiveSchemaVersionId");
+                });
+
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentTypeMedia", b =>
                 {
                     b.HasOne("Dprental.CatalogService.Domain.Entities.EquipmentType", "EquipmentType")
@@ -183,6 +348,58 @@ namespace CatalogService.Domain.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("FK_EquipmentTypeMedia_EquipmentTypes_EquipmentTypeId");
+
+                    b.Navigation("EquipmentType");
+                });
+
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SchemaVersion", b =>
+                {
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.SpecSchema", null)
+                        .WithMany("Versions")
+                        .HasForeignKey("SpecSchemaId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.SpecSchema", "SpecSchema")
+                        .WithMany("SchemaVersions")
+                        .HasForeignKey("SpecSchemaId1");
+
+                    b.Navigation("SpecSchema");
+                });
+
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SpecField", b =>
+                {
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.SchemaVersion", null)
+                        .WithMany("Fields")
+                        .HasForeignKey("SchemaVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.SchemaVersion", null)
+                        .WithMany("SpecFields")
+                        .HasForeignKey("SchemaVersionId1");
+                });
+
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SpecOption", b =>
+                {
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.SpecField", null)
+                        .WithMany("Options")
+                        .HasForeignKey("SpecFieldId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SpecSchema", b =>
+                {
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.EquipmentType", null)
+                        .WithOne("Schema")
+                        .HasForeignKey("Dprental.CatalogService.Domain.Entities.SpecSchema", "EquipmentTypeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.EquipmentType", "EquipmentType")
+                        .WithMany()
+                        .HasForeignKey("EquipmentTypeId1");
 
                     b.Navigation("EquipmentType");
                 });
@@ -207,6 +424,27 @@ namespace CatalogService.Domain.Migrations
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentType", b =>
                 {
                     b.Navigation("Media");
+
+                    b.Navigation("Schema");
+                });
+
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SchemaVersion", b =>
+                {
+                    b.Navigation("Fields");
+
+                    b.Navigation("SpecFields");
+                });
+
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SpecField", b =>
+                {
+                    b.Navigation("Options");
+                });
+
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SpecSchema", b =>
+                {
+                    b.Navigation("SchemaVersions");
+
+                    b.Navigation("Versions");
                 });
 #pragma warning restore 612, 618
         }
