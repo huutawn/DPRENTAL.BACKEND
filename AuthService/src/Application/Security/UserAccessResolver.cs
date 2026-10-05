@@ -36,12 +36,25 @@ public static class UserAccessResolver
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
-    /// <summary>Role đưa vào access token (claim <c>r</c>) và GET /me: role toàn cục cộng role organization đang có hiệu lực.</summary>
-    public static string[] EffectiveRoles(User user) =>
-        Roles(user)
-            .Concat(OrganizationRoles(user))
+    /// <summary>
+    /// Role đưa vào access token (claim <c>r</c>) và GET /me: role toàn cục cộng role organization đang có hiệu lực.
+    /// Khi có role organization thì role customer bị thay thế — chủ tổ chức đã duyệt chỉ còn Owner. Organization bị
+    /// khoá thì role customer tự quay lại vì dòng UserRoles không bị xoá.
+    /// </summary>
+    public static string[] EffectiveRoles(User user)
+    {
+        string[] organizationRoles = OrganizationRoles(user);
+        IEnumerable<string> globalRoles = Roles(user);
+        if (organizationRoles.Length > 0)
+        {
+            globalRoles = globalRoles.Where(role => role != SystemRoleCode.Customer);
+        }
+
+        return globalRoles
+            .Concat(organizationRoles)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+    }
 
     /// <summary>Permission từ role toàn cục cộng permission từ role của các membership Active.</summary>
     public static string[] Permissions(User user)
