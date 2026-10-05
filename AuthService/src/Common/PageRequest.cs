@@ -28,6 +28,11 @@ public sealed record PageRequest(int Page = PageRequest.DefaultPage, int PageSiz
             return Result.Failure(AuthErrors.Paging.InvalidPageSize);
         }
 
+        if ((long)(Page - 1) * PageSize > int.MaxValue)
+        {
+            return Result.Failure(AuthErrors.Paging.InvalidPage);
+        }
+
         if (Search?.Trim().Length > MaxSearchLength)
         {
             return Result.Failure(AuthErrors.Paging.InvalidSearch);

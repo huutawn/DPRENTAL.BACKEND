@@ -140,6 +140,7 @@ public sealed class OrganizationReviewService(
             Action = auditAction,
             Result = "Success",
             Reason = rejectionReason,
+            Status = org.Status,
             CorrelationId = correlationIdProvider.GetCorrelationId(),
             Timestamp = now
         }, cancellationToken);

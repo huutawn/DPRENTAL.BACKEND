@@ -403,4 +403,352 @@ public sealed partial class AdminOrganizationsEndpointsIntegrationTests
         Assert.Equal(HttpStatusCode.Unauthorized, anonRes.StatusCode);
     }
 
+    [Fact]
+    public async Task GetHistory_SearchAndFilters_IndividualAndCombinedWithAnd()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedDatabaseAsync(factory);
+
+        Guid adminId = Guid.NewGuid();
+        await SeedUserAsync(factory, adminId, "admin_hist@example.com", "Admin Hist", AdminRoleId);
+        Guid orgId = await SeedOrganizationAsync(factory, "Org Hist Test", "org-hist-test", OrganizationStatus.Active, DateTime.UtcNow);
+
+        DateTimeOffset baseTime = DateTimeOffset.UtcNow.AddMinutes(-60);
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            db.AuditLogs.AddRange(
+                new AuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    ActorId = adminId,
+                    Target = orgId.ToString(),
+                    Action = "Organization_Suspend",
+                    Status = OrganizationStatus.Suspended,
+                    Result = "Success",
+                    Reason = "Giấy phép kinh doanh hết hạn",
+                    Timestamp = baseTime.AddMinutes(10)
+                },
+                new AuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    ActorId = adminId,
+                    Target = orgId.ToString(),
+                    Action = "Organization_Activate",
+                    Status = OrganizationStatus.Active,
+                    Result = "Success",
+                    Reason = "Đã bổ sung giấy phép",
+                    Timestamp = baseTime.AddMinutes(20)
+                },
+                new AuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    ActorId = adminId,
+                    Target = orgId.ToString(),
+                    Action = "Organization_ProfileUpdate",
+                    Status = null,
+                    Result = "Success",
+                    Reason = null,
+                    Timestamp = baseTime.AddMinutes(30)
+                },
+                new AuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    ActorId = adminId,
+                    Target = orgId.ToString(),
+                    Action = "Organization_Suspend",
+                    Status = OrganizationStatus.Suspended,
+                    Result = "Failed",
+                    Reason = "Lỗi hệ thống khi khóa",
+                    Timestamp = baseTime.AddMinutes(40)
+                }
+            );
+            await db.SaveChangesAsync();
+        }
+
+        using HttpClient adminClient = CreateClientWithToken(factory, adminId, ["Admin"], [Permissions.Organizations.Read]);
+
+        // 1. Filter by action: exact match, case-insensitive
+        using HttpResponseMessage actionRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?action=organization_suspend");
+        Assert.Equal(HttpStatusCode.OK, actionRes.StatusCode);
+        PagedResult<OrganizationHistoryResponse>? actionPaged = await actionRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(actionPaged);
+        Assert.Equal(2, actionPaged.TotalCount);
+        Assert.All(actionPaged.Items, item => Assert.Equal("Organization_Suspend", item.Action));
+
+        // 2. Filter by status: exact match OrganizationStatus, null rows do not match
+        using HttpResponseMessage statusRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?status=Suspended");
+        Assert.Equal(HttpStatusCode.OK, statusRes.StatusCode);
+        PagedResult<OrganizationHistoryResponse>? statusPaged = await statusRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(statusPaged);
+        Assert.Equal(2, statusPaged.TotalCount);
+        Assert.All(statusPaged.Items, item => Assert.Equal(OrganizationStatus.Suspended, item.Status));
+
+        // 3. Filter by result: exact match, case-insensitive
+        using HttpResponseMessage resultRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?result=FAILED");
+        Assert.Equal(HttpStatusCode.OK, resultRes.StatusCode);
+        PagedResult<OrganizationHistoryResponse>? resultPaged = await resultRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(resultPaged);
+        Assert.Equal(1, resultPaged.TotalCount);
+        Assert.Equal("Failed", resultPaged.Items[0].Result);
+
+        // 4. Filter by reason: substring match, case-insensitive with Vietnamese
+        using HttpResponseMessage reasonRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?reason=giấy%20phép");
+        Assert.Equal(HttpStatusCode.OK, reasonRes.StatusCode);
+        PagedResult<OrganizationHistoryResponse>? reasonPaged = await reasonRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(reasonPaged);
+        Assert.Equal(2, reasonPaged.TotalCount);
+
+        // 5. AND combination matching prompt example: action=Organization_Suspend&status=Suspended&result=Success&reason=giấy phép
+        using HttpResponseMessage andRes = await adminClient.GetAsync(
+            $"/api/v1/auth/admin/organizations/{orgId}/history?action=Organization_Suspend&status=Suspended&result=Success&reason=giấy%20phép");
+        Assert.Equal(HttpStatusCode.OK, andRes.StatusCode);
+        PagedResult<OrganizationHistoryResponse>? andPaged = await andRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(andPaged);
+        Assert.Equal(1, andPaged.TotalCount);
+        Assert.Equal("Organization_Suspend", andPaged.Items[0].Action);
+        Assert.Equal(OrganizationStatus.Suspended, andPaged.Items[0].Status);
+        Assert.Equal("Success", andPaged.Items[0].Result);
+        Assert.Equal("Giấy phép kinh doanh hết hạn", andPaged.Items[0].Reason);
+
+        // 6. Whitespace trimming & blank treated as not filtered
+        using HttpResponseMessage trimRes = await adminClient.GetAsync(
+            $"/api/v1/auth/admin/organizations/{orgId}/history?action=%20Organization_Suspend%20&reason=%20%20");
+        Assert.Equal(HttpStatusCode.OK, trimRes.StatusCode);
+        PagedResult<OrganizationHistoryResponse>? trimPaged = await trimRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(trimPaged);
+        Assert.Equal(2, trimPaged.TotalCount);
+
+        // 7. No match returns empty result with TotalCount = 0
+        using HttpResponseMessage noMatchRes = await adminClient.GetAsync(
+            $"/api/v1/auth/admin/organizations/{orgId}/history?action=Organization_Suspend&status=Active");
+        Assert.Equal(HttpStatusCode.OK, noMatchRes.StatusCode);
+        PagedResult<OrganizationHistoryResponse>? noMatchPaged = await noMatchRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(noMatchPaged);
+        Assert.Equal(0, noMatchPaged.TotalCount);
+        Assert.Equal(0, noMatchPaged.TotalPages);
+        Assert.Empty(noMatchPaged.Items);
+    }
+
+    [Fact]
+    public async Task GetHistory_Search_OrCombinationAcrossFields_VietnameseAndSpecialCharacters()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedDatabaseAsync(factory);
+
+        Guid adminId = Guid.NewGuid();
+        await SeedUserAsync(factory, adminId, "admin_search@example.com", "Admin Search", AdminRoleId);
+        Guid orgId = await SeedOrganizationAsync(factory, "Org Search Test", "org-search-test", OrganizationStatus.Active, DateTime.UtcNow);
+
+        DateTimeOffset baseTime = DateTimeOffset.UtcNow.AddMinutes(-60);
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            db.AuditLogs.AddRange(
+                new AuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    ActorId = adminId,
+                    Target = orgId.ToString(),
+                    Action = "Organization_Suspend",
+                    Status = OrganizationStatus.Suspended,
+                    Result = "Success",
+                    Reason = @"Lỗi 100%_hợp\đồng",
+                    Timestamp = baseTime.AddMinutes(10)
+                },
+                new AuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    ActorId = adminId,
+                    Target = orgId.ToString(),
+                    Action = "Organization_Activate",
+                    Status = OrganizationStatus.Active,
+                    Result = "Success",
+                    Reason = "Kích hoạt lại bình thường",
+                    Timestamp = baseTime.AddMinutes(20)
+                },
+                new AuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    ActorId = adminId,
+                    Target = orgId.ToString(),
+                    Action = "Organization_Register",
+                    Status = OrganizationStatus.Pending,
+                    Result = "Success",
+                    Reason = "Đăng ký mới hồ sơ",
+                    Timestamp = baseTime.AddMinutes(30)
+                }
+            );
+            await db.SaveChangesAsync();
+        }
+
+        using HttpClient adminClient = CreateClientWithToken(factory, adminId, ["Admin"], [Permissions.Organizations.Read]);
+
+        // 1. Search by Action substring
+        using HttpResponseMessage searchActionRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?search=Suspend");
+        PagedResult<OrganizationHistoryResponse>? searchAction = await searchActionRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(searchAction);
+        Assert.Equal(1, searchAction.TotalCount);
+        Assert.Equal("Organization_Suspend", searchAction.Items[0].Action);
+
+        // 2. Search by Status enum name (matches Pending)
+        using HttpResponseMessage searchStatusRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?search=Pending");
+        PagedResult<OrganizationHistoryResponse>? searchStatus = await searchStatusRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(searchStatus);
+        Assert.Equal(1, searchStatus.TotalCount);
+        Assert.Equal(OrganizationStatus.Pending, searchStatus.Items[0].Status);
+
+        // 3. Search by Reason substring with Vietnamese
+        using HttpResponseMessage searchVnRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?search=kích%20hoạt");
+        PagedResult<OrganizationHistoryResponse>? searchVn = await searchVnRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(searchVn);
+        Assert.Equal(1, searchVn.TotalCount);
+        Assert.Equal("Organization_Activate", searchVn.Items[0].Action);
+
+        // 4. Search with special character '%' as literal (only matches 100%, not all rows)
+        using HttpResponseMessage searchPctRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?search=%25");
+        PagedResult<OrganizationHistoryResponse>? searchPct = await searchPctRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(searchPct);
+        Assert.Equal(1, searchPct.TotalCount);
+        Assert.Equal(@"Lỗi 100%_hợp\đồng", searchPct.Items[0].Reason);
+
+        // 5. Search with special character '_' as literal
+        using HttpResponseMessage searchUnderscoreRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?search=_");
+        PagedResult<OrganizationHistoryResponse>? searchUnderscore = await searchUnderscoreRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        // Note: Action has "Organization_" which also contains "_", so both Action and Reason match
+        Assert.NotNull(searchUnderscore);
+        Assert.Equal(3, searchUnderscore.TotalCount);
+
+        // 6. Reason filter with special character '_' as literal (only matches Reason containing '_')
+        using HttpResponseMessage reasonUnderscoreRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?reason=_");
+        PagedResult<OrganizationHistoryResponse>? reasonUnderscore = await reasonUnderscoreRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(reasonUnderscore);
+        Assert.Equal(1, reasonUnderscore.TotalCount);
+        Assert.Equal(@"Lỗi 100%_hợp\đồng", reasonUnderscore.Items[0].Reason);
+
+        // 7. Search with special character '\' as literal
+        using HttpResponseMessage searchBackslashRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?search=%5C");
+        PagedResult<OrganizationHistoryResponse>? searchBackslash = await searchBackslashRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(searchBackslash);
+        Assert.Equal(1, searchBackslash.TotalCount);
+        Assert.Equal(@"Lỗi 100%_hợp\đồng", searchBackslash.Items[0].Reason);
+    }
+
+    [Fact]
+    public async Task GetHistory_Paging_ValidationAndOverflow()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedDatabaseAsync(factory);
+
+        Guid adminId = Guid.NewGuid();
+        await SeedUserAsync(factory, adminId, "admin_paging@example.com", "Admin Paging", AdminRoleId);
+        Guid orgId = await SeedOrganizationAsync(factory, "Org Paging Test", "org-paging-test", OrganizationStatus.Active, DateTime.UtcNow);
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            AuthDbContext db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            for (int i = 0; i < 5; i++)
+            {
+                db.AuditLogs.Add(new AuditLog
+                {
+                    Id = Guid.NewGuid(),
+                    ActorId = adminId,
+                    Target = orgId.ToString(),
+                    Action = "Organization_ProfileUpdate",
+                    Status = OrganizationStatus.Active,
+                    Result = "Success",
+                    Timestamp = now.AddMinutes(i)
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+
+        using HttpClient adminClient = CreateClientWithToken(factory, adminId, ["Admin"], [Permissions.Organizations.Read]);
+
+        // 1. Invalid page <= 0 -> 400
+        using HttpResponseMessage pageZeroRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?page=0");
+        Assert.Equal(HttpStatusCode.BadRequest, pageZeroRes.StatusCode);
+
+        // 2. Invalid pageSize > 100 -> 400
+        using HttpResponseMessage pageSizeRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?pageSize=101");
+        Assert.Equal(HttpStatusCode.BadRequest, pageSizeRes.StatusCode);
+
+        // 3. Offset overflow: (page - 1) * pageSize > int.MaxValue -> 400 Bad Request
+        using HttpResponseMessage overflowRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?page={int.MaxValue}&pageSize=20");
+        Assert.Equal(HttpStatusCode.BadRequest, overflowRes.StatusCode);
+        string overflowBody = await overflowRes.Content.ReadAsStringAsync();
+        Assert.Contains(AuthErrorCode.Paging.InvalidPage, overflowBody);
+
+        // 4. Invalid status string -> 400 Bad Request
+        using HttpResponseMessage invalidStatusRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?status=NotAStatus");
+        Assert.Equal(HttpStatusCode.BadRequest, invalidStatusRes.StatusCode);
+
+        // 5. Overlong search > 200 chars -> 400 Bad Request
+        string overlong = new('a', 201);
+        using HttpResponseMessage overlongSearchRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?search={overlong}");
+        Assert.Equal(HttpStatusCode.BadRequest, overlongSearchRes.StatusCode);
+
+        // 6. Overlong reason > 200 chars -> 400 Bad Request
+        using HttpResponseMessage overlongReasonRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?reason={overlong}");
+        Assert.Equal(HttpStatusCode.BadRequest, overlongReasonRes.StatusCode);
+
+        // 7. Page beyond total results -> 200 OK, items empty, page & totalCount intact
+        using HttpResponseMessage beyondRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history?page=99&pageSize=10");
+        Assert.Equal(HttpStatusCode.OK, beyondRes.StatusCode);
+        PagedResult<OrganizationHistoryResponse>? beyond = await beyondRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(beyond);
+        Assert.Equal(5, beyond.TotalCount);
+        Assert.Equal(99, beyond.Page);
+        Assert.Empty(beyond.Items);
+    }
+
+    [Fact]
+    public async Task GetHistory_StatusSnapshot_RecordedAtEventTimeAndImmutableOnLaterChanges()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedDatabaseAsync(factory);
+
+        Guid adminId = Guid.NewGuid();
+        Guid ownerId = Guid.NewGuid();
+        await SeedUserAsync(factory, adminId, "admin_snap@example.com", "Admin Snap", AdminRoleId);
+        await SeedUserAsync(factory, ownerId, "owner_snap@example.com", "Owner Snap", CustomerRoleId);
+
+        Guid orgId = await SeedOrganizationAsync(factory, "Org Snap Test", "org-snap-test", OrganizationStatus.Active, DateTime.UtcNow, ownerId);
+
+        using HttpClient adminClient = CreateClientWithToken(factory, adminId, ["Admin"], [
+            Permissions.Organizations.Read,
+            Permissions.Organizations.Suspend,
+            Permissions.Organizations.Update
+        ]);
+
+        // Suspend org (transitions Active -> Suspended)
+        using HttpResponseMessage suspendRes = await adminClient.PostAsJsonAsync(
+            $"/api/v1/auth/admin/organizations/{orgId}/suspend",
+            new SuspendOrganizationRequest("Vi phạm lần 1"));
+        Assert.Equal(HttpStatusCode.NoContent, suspendRes.StatusCode);
+
+        // Activate org (transitions Suspended -> Active)
+        using HttpResponseMessage activateRes = await adminClient.PostAsync(
+            $"/api/v1/auth/admin/organizations/{orgId}/activate",
+            null);
+        Assert.Equal(HttpStatusCode.NoContent, activateRes.StatusCode);
+
+        // Verify history: newest first
+        using HttpResponseMessage histRes = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}/history");
+        Assert.Equal(HttpStatusCode.OK, histRes.StatusCode);
+        PagedResult<OrganizationHistoryResponse>? hist = await histRes.Content.ReadFromJsonAsync<PagedResult<OrganizationHistoryResponse>>();
+        Assert.NotNull(hist);
+
+        OrganizationHistoryResponse activateLog = Assert.Single(hist.Items, h => h.Action == "Organization_Activate");
+        Assert.Equal(OrganizationStatus.Active, activateLog.Status);
+
+        OrganizationHistoryResponse suspendLog = Assert.Single(hist.Items, h => h.Action == "Organization_Suspend");
+        Assert.Equal(OrganizationStatus.Suspended, suspendLog.Status);
+        Assert.Equal("Vi phạm lần 1", suspendLog.Reason);
+
+        // Even though org is currently Active, the suspendLog status is STILL Suspended (immutable snapshot)
+        Assert.Equal(OrganizationStatus.Suspended, suspendLog.Status);
+    }
+
 }

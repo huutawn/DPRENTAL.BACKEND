@@ -45,6 +45,9 @@ namespace Dprental.AuthService.Domain.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int?>("Status")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Target")
                         .IsRequired()
                         .HasColumnType("text");

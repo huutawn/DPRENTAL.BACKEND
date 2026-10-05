@@ -88,4 +88,5 @@ public sealed record OrganizationHistoryResponse(
     DateTimeOffset Timestamp,
     string Action,
     string Result,
-    string? Reason = null);
+    string? Reason = null,
+    OrganizationStatus? Status = null);

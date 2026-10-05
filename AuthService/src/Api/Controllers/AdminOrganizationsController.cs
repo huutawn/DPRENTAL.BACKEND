@@ -119,9 +119,13 @@ public sealed class AdminOrganizationsController(
         return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
 
-    /// <summary>Lấy nhật ký lịch sử của organization có phân trang, mới nhất trước.</summary>
+    /// <summary>Lấy nhật ký lịch sử của organization có phân trang và bộ lọc tìm kiếm dành cho Admin.</summary>
     /// <param name="id">Id của organization.</param>
-    /// <param name="request">Tham số phân trang (page, pageSize).</param>
+    /// <param name="request">Tham số phân trang và từ khóa tìm kiếm (page, pageSize, search).</param>
+    /// <param name="action">Lọc theo hành động (khớp chính xác, không phân biệt hoa thường).</param>
+    /// <param name="status">Lọc theo trạng thái tổ chức sau sự kiện (Pending, Active, Suspended, Rejected).</param>
+    /// <param name="result">Lọc theo kết quả (khớp chính xác, không phân biệt hoa thường).</param>
+    /// <param name="reason">Lọc theo lý do (tìm chuỗi con, không phân biệt hoa thường).</param>
     /// <param name="cancellationToken">Token hủy request.</param>
     [HttpGet("{id:guid}/history")]
     [Authorize(Policy = Permissions.Organizations.Read)]
@@ -133,12 +137,24 @@ public sealed class AdminOrganizationsController(
     public async Task<ActionResult<PagedResult<OrganizationHistoryResponse>>> GetHistory(
         Guid id,
         [FromQuery] PageRequest request,
-        CancellationToken cancellationToken)
+        [FromQuery] string? action = null,
+        [FromQuery] OrganizationStatus? status = null,
+        [FromQuery] string? result = null,
+        [FromQuery] string? reason = null,
+        CancellationToken cancellationToken = default)
     {
         if (User.GetJwtSub() is not Guid adminId) return Unauthorized();
 
-        Result<PagedResult<OrganizationHistoryResponse>> result = await organizationService.GetHistoryAsync(adminId, id, request, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+        Result<PagedResult<OrganizationHistoryResponse>> historyResult = await organizationService.GetHistoryAsync(
+            adminId,
+            id,
+            request,
+            action,
+            status,
+            result,
+            reason,
+            cancellationToken);
+        return historyResult.IsFailure ? this.ToProblem(historyResult.Error) : Ok(historyResult.Value);
     }
 
     /// <summary>Mở khóa (activate) một organization đang Suspended.</summary>

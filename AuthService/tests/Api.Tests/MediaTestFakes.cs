@@ -2,6 +2,8 @@ using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.Media;
 using Dprental.AuthService.Application.IServices;
 using Dprental.AuthService.Common;
+using Dprental.AuthService.Common.Enums;
+using Dprental.AuthService.Common.Utils;
 using Dprental.AuthService.Domain.Entities;
 using Dprental.AuthService.Domain.IRepositories;
 
@@ -170,15 +172,63 @@ public sealed class FakeAuditLogRepository : IAuditLogRepository
     public Task<PagedResult<AuditLog>> GetOrganizationHistoryAsync(
         Guid organizationId,
         PageRequest request,
+        string? action = null,
+        OrganizationStatus? status = null,
+        string? result = null,
+        string? reason = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         string target = organizationId.ToString();
-        List<AuditLog> list = Logs
-            .Where(l => l.Target == target && l.Action.StartsWith("Organization_", StringComparison.Ordinal))
+        IEnumerable<AuditLog> query = Logs
+            .Where(l => l.Target == target && l.Action.StartsWith("Organization_", StringComparison.Ordinal));
+
+        string? actionFilter = StringUtility.NullIfBlank(action);
+        string? resultFilter = StringUtility.NullIfBlank(result);
+        string? reasonFilter = StringUtility.NullIfBlank(reason);
+        string? searchTerm = request.GetSearchTerm();
+
+        if (actionFilter is not null)
+        {
+            query = query.Where(l => string.Equals(l.Action, actionFilter, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (status.HasValue)
+        {
+            query = query.Where(l => l.Status == status.Value);
+        }
+
+        if (resultFilter is not null)
+        {
+            query = query.Where(l => string.Equals(l.Result, resultFilter, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (reasonFilter is not null)
+        {
+            query = query.Where(l => l.Reason is not null && l.Reason.Contains(reasonFilter, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (searchTerm is not null)
+        {
+            List<OrganizationStatus> matchingStatuses = Enum.GetValues<OrganizationStatus>()
+                .Where(s => s.ToString().Contains(searchTerm, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            query = query.Where(l =>
+                l.Action.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                (l.Status.HasValue && matchingStatuses.Contains(l.Status.Value)) ||
+                l.Result.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                (l.Reason is not null && l.Reason.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        List<AuditLog> list = query
             .OrderByDescending(l => l.Timestamp)
             .ThenByDescending(l => l.Id)
             .ToList();
-        List<AuditLog> paged = list.Skip((request.Page - 1) * request.PageSize).Take(request.PageSize).ToList();
+
+        int skip = (request.Page - 1) * request.PageSize;
+        List<AuditLog> paged = list.Skip(skip).Take(request.PageSize).ToList();
         return Task.FromResult(new PagedResult<AuditLog>(paged, request.Page, request.PageSize, list.Count));
     }
 }

@@ -35,6 +35,27 @@ public sealed class PagingTests
     }
 
     [Theory]
+    [InlineData(int.MaxValue, 2)]
+    [InlineData(int.MaxValue, 100)]
+    [InlineData(1073741825, 2)]
+    public void PageRequestRejectsOffsetOverflow(int overflowPage, int pageSize)
+    {
+        PageRequest request = new(Page: overflowPage, PageSize: pageSize);
+        Result validation = request.Validate();
+        Assert.True(validation.IsFailure);
+        Assert.Equal(AuthErrors.Paging.InvalidPage, validation.Error);
+        Assert.Equal(AuthErrorCode.Paging.InvalidPage, validation.Error.Code);
+    }
+
+    [Fact]
+    public void PageRequestAcceptsMaxValidOffset()
+    {
+        // (21474837 - 1) * 100 = 2147483600 <= int.MaxValue
+        PageRequest valid = new(Page: 21474837, PageSize: 100);
+        Assert.True(valid.Validate().IsSuccess);
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(-5)]
     [InlineData(101)]

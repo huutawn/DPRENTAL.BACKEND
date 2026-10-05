@@ -708,12 +708,184 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         Assert.Null(await verifyDb.Organizations.SingleOrDefaultAsync(o => o.Slug == slug));
     }
 
+    [Fact]
+    public async Task PostgreSql_EfAuditLogRepository_SearchAndFiltering_SpecialCharactersAndDiacriticsAndStatus()
+    {
+        await using var db = CreateDbContext();
+        Guid orgId = Guid.NewGuid();
+        Guid otherOrgId = Guid.NewGuid();
+        Guid actorId = Guid.NewGuid();
+
+        db.Organizations.AddRange(
+            new Organization
+            {
+                Id = orgId,
+                Name = "Postgres Hist Org",
+                Slug = $"pg-hist-{Guid.NewGuid():N}",
+                Status = OrganizationStatus.Active,
+                CreatedAtUtc = DateTime.UtcNow
+            },
+            new Organization
+            {
+                Id = otherOrgId,
+                Name = "Other Org",
+                Slug = $"pg-other-{Guid.NewGuid():N}",
+                Status = OrganizationStatus.Active,
+                CreatedAtUtc = DateTime.UtcNow
+            }
+        );
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        AuditLog log1 = new()
+        {
+            Id = Guid.NewGuid(),
+            ActorId = actorId,
+            Target = orgId.ToString(),
+            Action = "Organization_Suspend",
+            Status = OrganizationStatus.Suspended,
+            Result = "Success",
+            Reason = @"Giấy phép 100%_hết\hạn",
+            Timestamp = now.AddMinutes(10)
+        };
+        AuditLog log2 = new()
+        {
+            Id = Guid.NewGuid(),
+            ActorId = actorId,
+            Target = orgId.ToString(),
+            Action = "Organization_Activate",
+            Status = OrganizationStatus.Active,
+            Result = "Success",
+            Reason = "Đã bổ sung giấy phép",
+            Timestamp = now.AddMinutes(20)
+        };
+        AuditLog log3 = new()
+        {
+            Id = Guid.NewGuid(),
+            ActorId = actorId,
+            Target = orgId.ToString(),
+            Action = "Organization_Register",
+            Status = OrganizationStatus.Pending,
+            Result = "Success",
+            Reason = "Đăng ký 50%",
+            Timestamp = now.AddMinutes(30)
+        };
+        AuditLog log4 = new()
+        {
+            Id = Guid.NewGuid(),
+            ActorId = actorId,
+            Target = orgId.ToString(),
+            Action = "Organization_ProfileUpdate",
+            Status = null,
+            Result = "Success",
+            Reason = null,
+            Timestamp = now.AddMinutes(40)
+        };
+        AuditLog logOtherOrg = new()
+        {
+            Id = Guid.NewGuid(),
+            ActorId = actorId,
+            Target = otherOrgId.ToString(),
+            Action = "Organization_Suspend",
+            Status = OrganizationStatus.Suspended,
+            Result = "Success",
+            Reason = @"Giấy phép 100%_hết\hạn",
+            Timestamp = now.AddMinutes(50)
+        };
+        AuditLog logNonOrgAction = new()
+        {
+            Id = Guid.NewGuid(),
+            ActorId = actorId,
+            Target = orgId.ToString(),
+            Action = "User_PasswordChange",
+            Status = null,
+            Result = "Success",
+            Reason = "100%",
+            Timestamp = now.AddMinutes(60)
+        };
+
+        db.AuditLogs.AddRange(log1, log2, log3, log4, logOtherOrg, logNonOrgAction);
+        await db.SaveChangesAsync();
+
+        EfAuditLogRepository repo = new(db);
+
+        // 1. Literal '%' search: matches log1 and log3 (100% and 50%), neither other org nor all logs
+        var pctResult = await repo.GetOrganizationHistoryAsync(orgId, new PageRequest(Search: "%"));
+        Assert.Equal(2, pctResult.TotalCount);
+        Assert.Contains(pctResult.Items, l => l.Id == log1.Id);
+        Assert.Contains(pctResult.Items, l => l.Id == log3.Id);
+
+        // 2. Reason filter with '_': matches only log1 (not non-matching or wildcards)
+        var underscoreResult = await repo.GetOrganizationHistoryAsync(orgId, new PageRequest(), reason: "_");
+        Assert.Equal(1, underscoreResult.TotalCount);
+        Assert.Equal(log1.Id, underscoreResult.Items[0].Id);
+
+        // 3. Search with '\': matches only log1
+        var backslashResult = await repo.GetOrganizationHistoryAsync(orgId, new PageRequest(Search: @"\"));
+        Assert.Equal(1, backslashResult.TotalCount);
+        Assert.Equal(log1.Id, backslashResult.Items[0].Id);
+
+        // 4. Vietnamese diacritics substring search: matches log1 and log2
+        var vnResult = await repo.GetOrganizationHistoryAsync(orgId, new PageRequest(Search: "giấy phép"));
+        Assert.Equal(2, vnResult.TotalCount);
+        Assert.Contains(vnResult.Items, l => l.Id == log1.Id);
+        Assert.Contains(vnResult.Items, l => l.Id == log2.Id);
+
+        // 5. Search by Status enum name: "Pending" matches log3
+        var statusSearch = await repo.GetOrganizationHistoryAsync(orgId, new PageRequest(Search: "Pending"));
+        Assert.Equal(1, statusSearch.TotalCount);
+        Assert.Equal(log3.Id, statusSearch.Items[0].Id);
+
+        // 6. Filter by Status exact: Suspended -> log1; null status (log4) is NOT matched
+        var statusFilter = await repo.GetOrganizationHistoryAsync(orgId, new PageRequest(), status: OrganizationStatus.Suspended);
+        Assert.Equal(1, statusFilter.TotalCount);
+        Assert.Equal(log1.Id, statusFilter.Items[0].Id);
+
+        // 7. Filter by action case-insensitive: "organization_suspend" -> log1
+        var actionFilter = await repo.GetOrganizationHistoryAsync(orgId, new PageRequest(), action: "organization_suspend");
+        Assert.Equal(1, actionFilter.TotalCount);
+        Assert.Equal(log1.Id, actionFilter.Items[0].Id);
+
+        // 8. Filter by result case-insensitive: "SUCCESS" -> all 4 org logs
+        var resultFilter = await repo.GetOrganizationHistoryAsync(orgId, new PageRequest(), result: "SUCCESS");
+        Assert.Equal(4, resultFilter.TotalCount);
+
+        // 9. Combined AND: action + status + result + reason
+        var andFilter = await repo.GetOrganizationHistoryAsync(
+            orgId,
+            new PageRequest(),
+            action: "Organization_Suspend",
+            status: OrganizationStatus.Suspended,
+            result: "Success",
+            reason: "100%");
+        Assert.Equal(1, andFilter.TotalCount);
+        Assert.Equal(log1.Id, andFilter.Items[0].Id);
+
+        // 10. Isolation: verify no logs from other org or non-Organization_ actions appear
+        var allLogs = await repo.GetOrganizationHistoryAsync(orgId, new PageRequest(PageSize: 100));
+        Assert.Equal(4, allLogs.TotalCount);
+        Assert.DoesNotContain(allLogs.Items, l => l.Target != orgId.ToString());
+        Assert.DoesNotContain(allLogs.Items, l => !l.Action.StartsWith("Organization_", StringComparison.Ordinal));
+
+        // 11. Pagination & Ordering: newest first (log4 > log3 > log2 > log1)
+        var page1 = await repo.GetOrganizationHistoryAsync(orgId, new PageRequest(Page: 1, PageSize: 2));
+        Assert.Equal(4, page1.TotalCount);
+        Assert.Equal(2, page1.TotalPages);
+        Assert.Equal(2, page1.Items.Count);
+        Assert.Equal(log4.Id, page1.Items[0].Id);
+        Assert.Equal(log3.Id, page1.Items[1].Id);
+
+        var page2 = await repo.GetOrganizationHistoryAsync(orgId, new PageRequest(Page: 2, PageSize: 2));
+        Assert.Equal(2, page2.Items.Count);
+        Assert.Equal(log2.Id, page2.Items[0].Id);
+        Assert.Equal(log1.Id, page2.Items[1].Id);
+    }
+
     private sealed class ThrowingAuditLogRepository : IAuditLogRepository
     {
         public Task AddAsync(AuditLog auditLog, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Simulated audit write failure for transaction rollback test.");
 
-        public Task<PagedResult<AuditLog>> GetOrganizationHistoryAsync(Guid organizationId, PageRequest request, CancellationToken cancellationToken = default) =>
+        public Task<PagedResult<AuditLog>> GetOrganizationHistoryAsync(Guid organizationId, PageRequest request, string? action = null, OrganizationStatus? status = null, string? result = null, string? reason = null, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Simulated audit read failure for transaction rollback test.");
     }
 

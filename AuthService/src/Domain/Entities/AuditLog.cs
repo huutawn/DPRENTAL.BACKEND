@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Dprental.AuthService.Common.Enums;
 
 namespace Dprental.AuthService.Domain.Entities;
 
@@ -18,5 +19,6 @@ public sealed class AuditLog
     public string Result { get; set; } = string.Empty;
     public string? Reason { get; set; }
     public string? CorrelationId { get; set; }
+    public OrganizationStatus? Status { get; set; }
     public DateTimeOffset Timestamp { get; set; }
 }
