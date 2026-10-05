@@ -406,7 +406,8 @@ public sealed partial class EquipmentTypeService(
                 .OrderBy(m => m.DisplayOrder)
                 .ThenBy(m => m.MediaId)
                 .Select(m => m with { Url = MediaUrlResolver.ResolvePublicUrl(m.MediaId) })
-                .ToList()
+                .ToList(),
+            PrimarySpecs = EquipmentTypeDetailDto.ExtractPrimarySpecs(detail.SpecSchema?.Definition)
         };
     }
 

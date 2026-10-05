@@ -26,13 +26,27 @@ public partial class EquipmentTypeRepository
             .ToListAsync(cancellationToken);
     }
 
+    public Task<EquipmentTypeSpecSchemaDto?> GetSpecSchemaAsync(
+        Guid equipmentTypeId,
+        int version,
+        CancellationToken cancellationToken = default) =>
+        GetSpecSchemaAsync(equipmentTypeId, version, publishedOnly: false, cancellationToken);
+
     public async Task<EquipmentTypeSpecSchemaDto?> GetSpecSchemaAsync(
         Guid equipmentTypeId,
         int version,
+        bool publishedOnly,
         CancellationToken cancellationToken = default)
     {
-        return await dbContext.EquipmentTypeSpecSchemas.AsNoTracking()
-            .Where(s => s.EquipmentTypeId == equipmentTypeId && s.Version == version)
+        var query = dbContext.EquipmentTypeSpecSchemas.AsNoTracking()
+            .Where(s => s.EquipmentTypeId == equipmentTypeId && s.Version == version);
+
+        if (publishedOnly)
+        {
+            query = query.Where(s => s.PublishedAt != null);
+        }
+
+        return await query
             .Select(s => new EquipmentTypeSpecSchemaDto(
                 s.Id,
                 s.EquipmentTypeId,

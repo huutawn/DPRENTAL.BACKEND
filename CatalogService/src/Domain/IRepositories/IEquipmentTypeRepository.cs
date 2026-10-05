@@ -21,6 +21,12 @@ public interface IEquipmentTypeRepository
         Guid id,
         CancellationToken cancellationToken = default);
 
+
+    /// <summary>Lấy metadata trạng thái và CurrentSchemaVersion của equipment type mà không tải quan hệ khác.</summary>
+    Task<EquipmentTypeMetadataDto?> GetMetadataByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<EquipmentTypeMetadataDto?>(null);
     /// <summary>Lấy chi tiết DTO theo Id cho mọi trạng thái.</summary>
     Task<EquipmentTypeDetailDto?> GetDetailByIdAsync(
         Guid id,
@@ -61,6 +67,13 @@ public interface IEquipmentTypeRepository
         int version,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Lấy chi tiết một phiên bản spec schema theo version, tùy chọn chỉ lọc bản đã publish tại database.</summary>
+    Task<EquipmentTypeSpecSchemaDto?> GetSpecSchemaAsync(
+        Guid equipmentTypeId,
+        int version,
+        bool publishedOnly,
+        CancellationToken cancellationToken = default) =>
+        GetSpecSchemaAsync(equipmentTypeId, version, cancellationToken);
     /// <summary>Lấy entity spec schema nháp hiện tại (PublishedAt == null) của equipment type nếu có.</summary>
     Task<EquipmentTypeSpecSchema?> GetDraftSpecSchemaEntityAsync(
         Guid equipmentTypeId,
