@@ -239,13 +239,13 @@ public sealed class ApiBoundaryResponseTests
     [InlineData(OrganizationType.Supplier, OrganizationStatus.Rejected, false)]
     [InlineData(OrganizationType.Supplier, OrganizationStatus.Suspended, false)]
     [InlineData(OrganizationType.Renter, OrganizationStatus.Active, true)]
-    public async Task Login_AddsOwnerRoleToTokenAndMe_OnlyWhenOrganizationIsApproved(
+    public async Task Login_ReplacesCustomerRoleWithOwnerInTokenAndMe_OnlyWhenOrganizationIsApproved(
         OrganizationType organizationType,
         OrganizationStatus organizationStatus,
         bool expectOwnerRole)
     {
-        // Đi qua luồng thật: role Owner của tổ chức phải vào claim "r" (alias "own") và GET /me cùng lúc,
-        // chỉ khi tổ chức đã được duyệt.
+        // Đi qua luồng thật: khi tổ chức đã được duyệt, role Owner (alias "own") thay cho role customer
+        // trong claim "r" và GET /me cùng lúc; chưa duyệt/bị khoá thì vẫn là customer.
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
         Guid userId = await SeedUserAsync(factory, "orgowner@example.com", "Password123!", isActive: true);
@@ -301,10 +301,10 @@ public sealed class ApiBoundaryResponseTests
 
         // Token dùng alias rút gọn, GET /me trả tên đầy đủ.
         string[] expectedTokenRoles = expectOwnerRole
-            ? [JwtClaimCatalog.RoleAliases.Customer, JwtClaimCatalog.RoleAliases.Owner]
+            ? [JwtClaimCatalog.RoleAliases.Owner]
             : [JwtClaimCatalog.RoleAliases.Customer];
         string[] expectedMeRoles = expectOwnerRole
-            ? [SystemRoleCode.Customer, SystemRoleCode.Owner]
+            ? [SystemRoleCode.Owner]
             : [SystemRoleCode.Customer];
         Assert.Equal(expectedTokenRoles, tokenRoles);
         Assert.Equal(expectedMeRoles, meRoles);
