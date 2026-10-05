@@ -109,10 +109,15 @@ public partial class EquipmentTypeRepository(CatalogServiceDbContext dbContext) 
         Guid id,
         CancellationToken cancellationToken = default)
     {
-        return await dbContext.EquipmentTypes.AsNoTracking()
+        var detail = await dbContext.EquipmentTypes.AsNoTracking()
             .Where(e => e.Id == id && e.Status == EquipmentTypeStatus.Published)
             .Select(DetailSelector)
             .FirstOrDefaultAsync(cancellationToken);
+
+        return detail is null ? null : detail with
+        {
+            PrimarySpecs = EquipmentTypeDetailDto.ExtractPrimarySpecs(detail.SpecSchema?.Definition)
+        };
     }
 
     public async Task<EquipmentType?> GetByIdAsync(
@@ -130,9 +135,24 @@ public partial class EquipmentTypeRepository(CatalogServiceDbContext dbContext) 
         Guid id,
         CancellationToken cancellationToken = default)
     {
-        return await dbContext.EquipmentTypes.AsNoTracking()
+        var detail = await dbContext.EquipmentTypes.AsNoTracking()
             .Where(e => e.Id == id)
             .Select(DetailSelector)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return detail is null ? null : detail with
+        {
+            PrimarySpecs = EquipmentTypeDetailDto.ExtractPrimarySpecs(detail.SpecSchema?.Definition)
+        };
+    }
+
+    public async Task<EquipmentTypeMetadataDto?> GetMetadataByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        return await dbContext.EquipmentTypes.AsNoTracking()
+            .Where(e => e.Id == id)
+            .Select(e => new EquipmentTypeMetadataDto(e.Id, e.Status, e.CurrentSchemaVersion))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -362,7 +382,8 @@ public partial class EquipmentTypeRepository(CatalogServiceDbContext dbContext) 
                 .Select(m => new EquipmentTypeMediaResponseDto(m.MediaId, null, m.DisplayOrder, m.IsThumbnail))
                 .ToList(),
             entity.CurrentSchemaVersion,
-            currentSpecSchema);
+            currentSpecSchema,
+            EquipmentTypeDetailDto.ExtractPrimarySpecs(currentSpecSchema?.Definition));
     }
 
     private static bool IsDuplicateCodeViolation(DbUpdateException ex)

@@ -12,7 +12,6 @@ namespace Dprental.CatalogService.Api.Controllers;
 [ApiController]
 [Route("equipment-types")]
 [Produces("application/json")]
-[Authorize(Policy = CatalogPolicies.EquipmentManage)]
 public sealed partial class EquipmentTypesController(IEquipmentTypeService service, ICatalogCallerContext caller) : ControllerBase
 {
     private static readonly HashSet<string> AllowedQueryKeys = new(StringComparer.OrdinalIgnoreCase)
@@ -57,6 +56,7 @@ public sealed partial class EquipmentTypesController(IEquipmentTypeService servi
 
     /// <summary>Tạo mới loại thiết bị ở trạng thái Draft.</summary>
     [HttpPost]
+    [Authorize(Policy = CatalogPolicies.EquipmentManage)]
     [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -72,6 +72,7 @@ public sealed partial class EquipmentTypesController(IEquipmentTypeService servi
 
     /// <summary>Cập nhật thông tin canonical và danh sách media của loại thiết bị.</summary>
     [HttpPatch("{id:guid}")]
+    [Authorize(Policy = CatalogPolicies.EquipmentManage)]
     [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -89,6 +90,7 @@ public sealed partial class EquipmentTypesController(IEquipmentTypeService servi
 
     /// <summary>Công khai loại thiết bị lên public catalog từ trạng thái Draft hoặc Disabled.</summary>
     [HttpPost("{id:guid}/publish")]
+    [Authorize(Policy = CatalogPolicies.EquipmentManage)]
     [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -105,6 +107,7 @@ public sealed partial class EquipmentTypesController(IEquipmentTypeService servi
 
     /// <summary>Vô hiệu hóa loại thiết bị đang công khai khỏi public catalog.</summary>
     [HttpPost("{id:guid}/disable")]
+    [Authorize(Policy = CatalogPolicies.EquipmentManage)]
     [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]

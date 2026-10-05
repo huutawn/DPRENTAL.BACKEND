@@ -57,4 +57,18 @@ public interface IEquipmentTypeService
         Guid equipmentTypeId,
         int version,
         CancellationToken cancellationToken = default);
+
+    Task<Result<EquipmentTypePublishedSchemaResponse>> GetCurrentPublishedSchemaAsync(
+        Guid equipmentTypeId,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<EquipmentTypePublishedSchemaResponse>> GetPublishedSchemaByVersionAsync(
+        Guid equipmentTypeId,
+        int version,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<SpecificationValidationResult>> ValidateSpecificationAsync(
+        Guid equipmentTypeId,
+        ValidateSpecificationRequest request,
+        CancellationToken cancellationToken = default);
 }
