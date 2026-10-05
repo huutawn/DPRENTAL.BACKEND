@@ -37,6 +37,9 @@ Catalog đọc nguyên các claim do AuthService phát hành, không tin header 
 | --- | --- |
 | `GET /categories`, `GET /categories/{id}` | Công khai |
 | `GET /equipment-types`, `GET /equipment-types/{id}` | Công khai |
+| `GET /equipment-types/{id}/schema` | Công khai (Type phải Published, trả schema tại `CurrentSchemaVersion`) |
+| `GET /equipment-types/{id}/schemas/{version}` | Công khai (Type Published hoặc Disabled; chỉ trả version đã publish) |
+| `POST /equipment-types/{id}/specifications/validate` | Authenticated (User JWT hoặc Service token; type Published, schema đã publish; Admin không được bypass) |
 | `POST /categories`, `PATCH /categories/{id}` | Policy `CatalogCategoryManage`: role `adm` |
 | `POST /equipment-types`, `PATCH /equipment-types/{id}` | Policy `CatalogEquipmentManage`: role `adm` |
 | `POST /equipment-types/{id}/publish`, `POST /equipment-types/{id}/disable` | Policy `CatalogEquipmentManage`: role `adm` |
@@ -44,7 +47,6 @@ Catalog đọc nguyên các claim do AuthService phát hành, không tin header 
 | `PUT /equipment-types/{id}/spec-schemas/{version}`, `POST /equipment-types/{id}/spec-schemas/{version}/publish` | Policy `CatalogEquipmentManage`: role `adm` |
 | `GET /equipment-types/{id}/spec-schemas/{version}` | Công khai (Admin đọc mọi trạng thái; public đọc bản published của type Published/Disabled) |
 | `GET /health/live`, `GET /health/ready` (không có tiền tố) | Công khai |
-
 API ghi trả `401` khi thiếu/token không hợp lệ, `403` khi token hợp lệ nhưng không đủ quyền. Các role `own`, `adp`, `mem`, `cus` và service token (`u = svc`) không cấp quyền quản lý catalog; tên `Admin`/`admin` không thay thế mã `adm` trong token.
 
 **Dữ liệu canonical và specification schema có version**:
@@ -52,6 +54,8 @@ API ghi trả `401` khi thiếu/token không hợp lệ, `403` khi token hợp l
 - Specification schema có vòng đời riêng theo version (`EquipmentTypeSpecSchema`), lưu định nghĩa `fields` bằng PostgreSQL `jsonb`.
 - Mỗi equipment type có tối đa một bản draft schema (`PublishedAt = null`).
 - Publish schema cập nhật `CurrentSchemaVersion` của equipment type. Equipment type chỉ được publish khi đã có schema được publish.
+- Response detail (`GET /equipment-types/{id}`) bổ sung `primarySpecs: [{ key, label, unit }]`, trích xuất các field `primary=true` của current schema và sắp xếp theo `displayOrder`, rồi `key` (ordinal).
+- Endpoint canonical validation `POST /equipment-types/{id}/specifications/validate` xác thực dữ liệu đặc tả kỹ thuật theo schema version đã publish, nhận `{ schemaVersion, specValues }` và trả `200 { valid, errors }` với cấu trúc lỗi `{ field, code, message }` (`REQUIRED`, `TYPE_MISMATCH`, `OUT_OF_RANGE`, `INVALID_ENUM_OPTION`, `UNKNOWN_FIELD`).
 ## Chạy hạ tầng cục bộ
 
 ```bash
