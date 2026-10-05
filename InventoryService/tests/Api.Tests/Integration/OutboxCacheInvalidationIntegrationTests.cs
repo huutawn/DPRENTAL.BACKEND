@@ -284,7 +284,7 @@ public sealed class OutboxCacheInvalidationIntegrationTests : IClassFixture<Post
 
         await using (var seedDb = CreateDbContext())
         {
-            var asset = InventoryAsset.Create(assetId, ownerId, Guid.NewGuid(), "MutationAsset", 1, "{}", FixedNow).Value;
+            var asset = InventoryAsset.Create(assetId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "MutationAsset", 1, "{}", FixedNow).Value;
             seedDb.Assets.Add(asset);
             await seedDb.SaveChangesAsync();
         }

@@ -10,6 +10,7 @@ public sealed record InventoryAssetResponse(
     [property: JsonPropertyName("id")] Guid Id,
     [property: JsonPropertyName("ownerUserId")] Guid OwnerUserId,
     [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
+    [property: JsonPropertyName("brandId")] Guid? BrandId,
     [property: JsonPropertyName("model")] string Model,
     [property: JsonPropertyName("serialNumber")] string? SerialNumber,
     [property: JsonPropertyName("manufactureYear")] int? ManufactureYear,

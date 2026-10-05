@@ -48,6 +48,7 @@ public sealed class AvailabilityHttpIntegrationTests : IClassFixture<PostgresFix
             Guid.NewGuid(),
             ownerUserId,
             Guid.NewGuid(),
+            Guid.NewGuid(),
             "Sony FX3",
             1,
             "{}",

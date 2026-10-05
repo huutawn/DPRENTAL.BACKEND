@@ -28,16 +28,17 @@ public sealed partial class AssetHttpIntegrationTests
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         var eqTypeId = Guid.NewGuid();
+        var brandId = Guid.NewGuid();
         var payload = new
         {
             equipmentTypeId = eqTypeId,
+            brandId = brandId,
             model = "Sony FX3 Cinema Line",
             schemaVersion = 1,
             specValues = new { resolution = "4K", fps = 120 },
             serialNumber = "SN-POST-01",
             manufactureYear = 2024
         };
-
         var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         var response = await client.PostAsync("api/v1/inventory/assets", content);
 
@@ -48,6 +49,7 @@ public sealed partial class AssetHttpIntegrationTests
         Assert.NotEqual(Guid.Empty, created.Id);
         Assert.Equal(ownerId, created.OwnerUserId);
         Assert.Equal(eqTypeId, created.EquipmentTypeId);
+        Assert.Equal(brandId, created.BrandId);
         Assert.Equal("Sony FX3 Cinema Line", created.Model);
         Assert.Equal("SN-POST-01", created.SerialNumber);
         Assert.Equal(2024, created.ManufactureYear);
@@ -64,6 +66,7 @@ public sealed partial class AssetHttpIntegrationTests
         var dbAsset = await db.Assets.SingleOrDefaultAsync(a => a.Id == created.Id);
         Assert.NotNull(dbAsset);
         Assert.Equal(ownerId, dbAsset.OwnerUserId);
+        Assert.Equal(brandId, dbAsset.BrandId);
         Assert.Equal("Sony FX3 Cinema Line", dbAsset.Model);
         Assert.Equal(2024, dbAsset.ManufactureYear);
         Assert.True(dbAsset.Version > 0);
@@ -165,6 +168,7 @@ public sealed partial class AssetHttpIntegrationTests
         var payload = new
         {
             equipmentTypeId = Guid.NewGuid(),
+            brandId = Guid.NewGuid(),
             model = "Sony FX3",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" }
@@ -199,6 +203,7 @@ public sealed partial class AssetHttpIntegrationTests
         var payload = new
         {
             equipmentTypeId = Guid.NewGuid(),
+            brandId = Guid.NewGuid(),
             model = "Sony FX3",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" }

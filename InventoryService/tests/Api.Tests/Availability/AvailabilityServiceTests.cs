@@ -374,6 +374,7 @@ public sealed class AvailabilityServiceTests
             id,
             Guid.NewGuid(),
             Guid.NewGuid(),
+            Guid.NewGuid(),
             "Sony FX3",
             1,
             "{}",

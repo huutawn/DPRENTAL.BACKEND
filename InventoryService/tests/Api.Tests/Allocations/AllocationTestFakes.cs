@@ -202,7 +202,7 @@ internal static class AllocationTestHelper
     public static InventoryAsset CreateAsset(Guid assetId, bool acceptingBookings = true)
     {
         var asset = InventoryAsset.Create(
-            assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", AllocationTestConstants.FixedNow).Value;
+            assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", AllocationTestConstants.FixedNow).Value;
         if (!acceptingBookings)
         {
             asset.DisableBookings("Suspended", AllocationTestConstants.FixedNow);

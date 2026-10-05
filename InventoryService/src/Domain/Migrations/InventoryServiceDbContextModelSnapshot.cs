@@ -318,6 +318,10 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("accepting_bookings");
 
+                    b.Property<Guid?>("BrandId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("brand_id");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -335,18 +339,19 @@ namespace InventoryService.Domain.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("model");
+
                     b.Property<Guid>("OwnerUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("owner_user_id");
+
+                    b.Property<int>("SchemaVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("schema_version");
 
                     b.Property<string>("SerialNumber")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("serial_number");
-
-                    b.Property<int>("SchemaVersion")
-                        .HasColumnType("integer")
-                        .HasColumnName("schema_version");
 
                     b.Property<string>("SpecValues")
                         .IsRequired()
@@ -357,10 +362,10 @@ namespace InventoryService.Domain.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
                         .HasColumnName("suspension_reason");
+
                     b.Property<Guid?>("ThumbnailMediaId")
                         .HasColumnType("uuid")
                         .HasColumnName("thumbnail_media_id");
-
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -382,6 +387,8 @@ namespace InventoryService.Domain.Migrations
 
                     b.ToTable("assets", "inventory", t =>
                         {
+                            t.HasCheckConstraint("ck_assets_brand_id", "brand_id IS NULL OR brand_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
                             t.HasCheckConstraint("ck_assets_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid");
 
                             t.HasCheckConstraint("ck_assets_manufacture_year", "manufacture_year IS NULL OR manufacture_year >= 1900");

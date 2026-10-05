@@ -29,8 +29,12 @@ public sealed class InventoryAssetsControllerTests
             Task.FromResult(Result.Success(new CatalogEquipmentTypeResponse(
                 equipmentTypeId, "EQ-FX3", "Sony FX3", null, 1, DateTime.UtcNow, null, null)));
 
-        public Task<Result<CatalogSpecValidationResult>> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success(CatalogSpecValidationResult.NotSupported()));
+        public Task<Result<CatalogBrandResponse>> GetBrandAsync(Guid brandId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(new CatalogBrandResponse(
+                brandId, "BR-SONY", "Sony", "Active")));
+
+        public Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success());
     }
 
     private sealed class StubMediaClient : IMediaServiceClient

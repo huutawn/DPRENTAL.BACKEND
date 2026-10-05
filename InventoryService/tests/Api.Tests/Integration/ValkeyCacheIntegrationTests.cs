@@ -58,7 +58,7 @@ public sealed class ValkeyCacheIntegrationTests : IClassFixture<PostgresFixture>
     {
         await using var db = CreateDbContext();
         var asset = InventoryAsset.Create(
-            assetId, Guid.NewGuid(), Guid.NewGuid(), "Camera", 1, "{}", FixedNow).Value;
+            assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Camera", 1, "{}", FixedNow).Value;
 
         asset.CalendarBlocks.Add(CalendarBlock.Create(
             Guid.NewGuid(), assetId, blockStart, blockEnd, CalendarBlockReason.Maintenance, "op", FixedNow, blockStart).Value);
@@ -211,7 +211,7 @@ public sealed class ValkeyCacheIntegrationTests : IClassFixture<PostgresFixture>
 
         await using (var db = CreateDbContext())
         {
-            var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "HoldTtlTest", 1, "{}", FixedNow).Value;
+            var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "HoldTtlTest", 1, "{}", FixedNow).Value;
             // Hold expires in 25 seconds (less than normal 60s TTL)
             asset.Allocations.Add(AssetAllocation.CreateHold(
                 Guid.NewGuid(), assetId, RentalPeriod.Create(new DateOnly(2026, 10, 10), new DateOnly(2026, 10, 12)).Value,

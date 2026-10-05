@@ -107,8 +107,10 @@ public sealed class InventoryAssetServiceTests
     private sealed class FakeCatalogClient : ICatalogServiceClient
     {
         public Func<Guid, Task<Result<CatalogEquipmentTypeResponse>>>? LookupHandler { get; set; }
-        public Func<Guid, int, string, Task<Result<CatalogSpecValidationResult>>>? SpecHandler { get; set; }
+        public Func<Guid, Task<Result<CatalogBrandResponse>>>? BrandHandler { get; set; }
+        public Func<Guid, int, string, Task<Result>>? SpecHandler { get; set; }
         public int LookupCalls { get; private set; }
+        public int BrandCalls { get; private set; }
         public int SpecCalls { get; private set; }
 
         public Task<Result<CatalogEquipmentTypeResponse>> GetPublishedEquipmentTypeAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default)
@@ -120,12 +122,21 @@ public sealed class InventoryAssetServiceTests
                     equipmentTypeId, "EQ-001", "Default Type", null, 1, DateTime.UtcNow, null, null)));
         }
 
-        public Task<Result<CatalogSpecValidationResult>> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default)
+        public Task<Result<CatalogBrandResponse>> GetBrandAsync(Guid brandId, CancellationToken cancellationToken = default)
+        {
+            BrandCalls++;
+            return BrandHandler is not null
+                ? BrandHandler(brandId)
+                : Task.FromResult(Result.Success(new CatalogBrandResponse(
+                    brandId, "BR-001", "Default Brand", "Active")));
+        }
+
+        public Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default)
         {
             SpecCalls++;
             return SpecHandler is not null
                 ? SpecHandler(equipmentTypeId, schemaVersion, specValues)
-                : Task.FromResult(Result.Success(CatalogSpecValidationResult.NotSupported()));
+                : Task.FromResult(Result.Success());
         }
     }
 
@@ -185,10 +196,12 @@ public sealed class InventoryAssetServiceTests
         var ownerId = Guid.NewGuid();
         var caller = new TestCaller(ownerId);
         var eqTypeId = Guid.NewGuid();
+        var brandId = Guid.NewGuid();
 
         using var specDoc = JsonDocument.Parse("{\"sensor\":\"Full-Frame\"}");
         var request = new CreateInventoryAssetRequest(
             EquipmentTypeId: eqTypeId,
+            BrandId: brandId,
             Model: "Sony FX3",
             SchemaVersion: 1,
             SpecValues: specDoc.RootElement.Clone(),
@@ -201,6 +214,7 @@ public sealed class InventoryAssetServiceTests
         var response = result.Value;
         Assert.Equal(ownerId, response.OwnerUserId);
         Assert.Equal(eqTypeId, response.EquipmentTypeId);
+        Assert.Equal(brandId, response.BrandId);
         Assert.Equal("Sony FX3", response.Model);
         Assert.Equal("SN-001", response.SerialNumber);
         Assert.Equal(2024, response.ManufactureYear);
@@ -210,6 +224,68 @@ public sealed class InventoryAssetServiceTests
 
         // Verify stored in repository
         Assert.True(_repo.Store.ContainsKey(response.Id));
+        Assert.Equal(brandId, _repo.Store[response.Id].BrandId);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task CreateAssetAsync_MissingOrEmptyBrandId_ReturnsValidation(string? brandGuidStr)
+    {
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+        Guid? brandId = brandGuidStr is null ? null : Guid.Parse(brandGuidStr);
+
+        using var doc = JsonDocument.Parse("{}");
+        var request = new CreateInventoryAssetRequest(
+            Guid.NewGuid(), brandId, "FX3", 1, doc.RootElement);
+
+        var result = await service.CreateAssetAsync(request, caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal("INVALID_BRAND_ID", result.Error.Code);
+        Assert.Equal(0, _catalogClient.BrandCalls);
+    }
+
+    [Fact]
+    public async Task CreateAssetAsync_BrandNotFound_ReturnsValidationError()
+    {
+        var service = CreateService();
+        var brandId = Guid.NewGuid();
+        _catalogClient.BrandHandler = _ => Task.FromResult(Result.Failure<CatalogBrandResponse>(
+            Error.Validation("Brand.NotFound", "Thương hiệu không tồn tại trong Catalog.")));
+
+        var caller = new TestCaller(Guid.NewGuid());
+        using var doc = JsonDocument.Parse("{}");
+        var request = new CreateInventoryAssetRequest(
+            Guid.NewGuid(), brandId, "FX3", 1, doc.RootElement);
+
+        var result = await service.CreateAssetAsync(request, caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Brand.NotFound", result.Error.Code);
+        Assert.Empty(_repo.Store);
+    }
+
+    [Fact]
+    public async Task CreateAssetAsync_BrandInactive_ReturnsValidationError()
+    {
+        var service = CreateService();
+        var brandId = Guid.NewGuid();
+        _catalogClient.BrandHandler = id => Task.FromResult(Result.Success(
+            new CatalogBrandResponse(id, "BR-OLD", "Inactive Brand", "Inactive")));
+
+        var caller = new TestCaller(Guid.NewGuid());
+        using var doc = JsonDocument.Parse("{}");
+        var request = new CreateInventoryAssetRequest(
+            Guid.NewGuid(), brandId, "FX3", 1, doc.RootElement);
+
+        var result = await service.CreateAssetAsync(request, caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Brand.Inactive", result.Error.Code);
+        Assert.Empty(_repo.Store);
     }
 
     [Fact]
@@ -219,7 +295,7 @@ public sealed class InventoryAssetServiceTests
         var caller = new TestCaller(Guid.NewGuid(), isAuthenticated: false);
 
         using var doc = JsonDocument.Parse("{}");
-        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), "FX3", 1, doc.RootElement);
+        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement);
 
         var result = await service.CreateAssetAsync(request, caller);
 
@@ -235,7 +311,7 @@ public sealed class InventoryAssetServiceTests
         var caller = new TestCaller(Guid.NewGuid(), permissions: new HashSet<string>());
 
         using var doc = JsonDocument.Parse("{}");
-        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), "FX3", 1, doc.RootElement);
+        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement);
 
         var result = await service.CreateAssetAsync(request, caller);
 
@@ -253,7 +329,7 @@ public sealed class InventoryAssetServiceTests
 
         var caller = new TestCaller(Guid.NewGuid());
         using var doc = JsonDocument.Parse("{}");
-        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), "FX3", 1, doc.RootElement);
+        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement);
 
         var result = await service.CreateAssetAsync(request, caller);
 
@@ -265,17 +341,18 @@ public sealed class InventoryAssetServiceTests
     public async Task CreateAssetAsync_CatalogSpecValidationFailure_RejectsCreation()
     {
         var service = CreateService();
-        _catalogClient.SpecHandler = (_, _, _) => Task.FromResult(Result.Success(
-            CatalogSpecValidationResult.Invalid("Cảm biến không đúng định dạng.")));
+        _catalogClient.SpecHandler = (_, _, _) => Task.FromResult(Result.Failure(
+            Error.Validation("EquipmentType.SpecRequired", "Trường 'sensor' là bắt buộc.")));
 
         var caller = new TestCaller(Guid.NewGuid());
         using var doc = JsonDocument.Parse("{}");
-        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), "FX3", 1, doc.RootElement);
+        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement);
 
         var result = await service.CreateAssetAsync(request, caller);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("INVALID_SPECIFICATION", result.Error.Code);
+        Assert.Equal("EquipmentType.SpecRequired", result.Error.Code);
+        Assert.Equal("Trường 'sensor' là bắt buộc.", result.Error.Message);
         Assert.Empty(_repo.Store);
     }
 
@@ -290,7 +367,7 @@ public sealed class InventoryAssetServiceTests
         _mediaClient.VerifyHandler = id => Task.FromResult(Result.Success(new MediaVerificationInfo(id, "Ready", ownerId.ToString("D"))));
 
         using var doc = JsonDocument.Parse("{}");
-        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), "FX3", 1, doc.RootElement, ThumbnailMediaId: thumbId);
+        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement, ThumbnailMediaId: thumbId);
 
         var result = await service.CreateAssetAsync(request, caller);
 
@@ -306,7 +383,7 @@ public sealed class InventoryAssetServiceTests
         var ownerA = Guid.NewGuid();
         var ownerB = Guid.NewGuid();
 
-        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerA, Guid.NewGuid(), "FX3", 1, "{}", FixedNow).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerA, Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, "{}", FixedNow).Value;
         _repo.Add(asset);
 
         // Caller B tries to access asset of A
@@ -324,7 +401,7 @@ public sealed class InventoryAssetServiceTests
         var ownerA = Guid.NewGuid();
         var admin = new TestCaller(Guid.NewGuid(), isAdmin: true);
 
-        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerA, Guid.NewGuid(), "FX3", 1, "{}", FixedNow).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerA, Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, "{}", FixedNow).Value;
         _repo.Add(asset);
 
         var result = await service.GetAssetByIdAsync(asset.Id, admin);
@@ -340,8 +417,8 @@ public sealed class InventoryAssetServiceTests
         var ownerA = Guid.NewGuid();
         var adminId = Guid.NewGuid();
 
-        var assetA = InventoryAsset.Create(Guid.NewGuid(), ownerA, Guid.NewGuid(), "FX3 A", 1, "{}", FixedNow).Value;
-        var assetAdmin = InventoryAsset.Create(Guid.NewGuid(), adminId, Guid.NewGuid(), "FX3 Admin", 1, "{}", FixedNow).Value;
+        var assetA = InventoryAsset.Create(Guid.NewGuid(), ownerA, Guid.NewGuid(), Guid.NewGuid(), "FX3 A", 1, "{}", FixedNow).Value;
+        var assetAdmin = InventoryAsset.Create(Guid.NewGuid(), adminId, Guid.NewGuid(), Guid.NewGuid(), "FX3 Admin", 1, "{}", FixedNow).Value;
         _repo.Add(assetA);
         _repo.Add(assetAdmin);
 
@@ -362,8 +439,9 @@ public sealed class InventoryAssetServiceTests
         var caller = new TestCaller(ownerId);
 
         var originalThumb = Guid.NewGuid();
+        var originalBrand = Guid.NewGuid();
         var asset = InventoryAsset.Create(
-            Guid.NewGuid(), ownerId, Guid.NewGuid(),
+            Guid.NewGuid(), ownerId, Guid.NewGuid(), originalBrand,
             "Original Model", 1, "{\"k\":\"v\"}", FixedNow,
             serialNumber: "SN-ORIG",
             manufactureYear: 2022,
@@ -376,6 +454,7 @@ public sealed class InventoryAssetServiceTests
             Model = "Updated Model",
             IsSerialNumberSpecified = true,
             SerialNumber = null // Explicit null: clear serial!
+            // brand omitted (keep originalBrand)
             // manufactureYear omitted (keep 2022)
             // thumbnail omitted (keep originalThumb)
             // schema/spec omitted (keep original)
@@ -385,10 +464,267 @@ public sealed class InventoryAssetServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal("Updated Model", result.Value.Model);
+        Assert.Equal(originalBrand, result.Value.BrandId);
         Assert.Null(result.Value.SerialNumber);
         Assert.Equal(2022, result.Value.ManufactureYear);
         Assert.Equal(originalThumb, result.Value.ThumbnailMediaId);
         Assert.Equal(0, _mediaClient.VerifyCalls); // No media call because thumbnail was not updated
+        Assert.Equal(0, _catalogClient.BrandCalls); // Brand was not specified, no catalog call
+        Assert.Equal(0, _catalogClient.SpecCalls); // Spec was not specified, no catalog call
+    }
+
+    [Fact]
+    public async Task PatchAssetAsync_BrandUpdate_SucceedsWhenActive()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = new TestCaller(ownerId);
+        var oldBrand = Guid.NewGuid();
+        var newBrand = Guid.NewGuid();
+
+        var asset = InventoryAsset.Create(
+            Guid.NewGuid(), ownerId, Guid.NewGuid(), oldBrand,
+            "FX3", 1, "{}", FixedNow).Value;
+        _repo.Add(asset);
+
+        var patch = new PatchInventoryAssetRequest
+        {
+            IsBrandIdSpecified = true,
+            BrandId = newBrand
+        };
+
+        var result = await service.PatchAssetAsync(asset.Id, patch, caller);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(newBrand, result.Value.BrandId);
+        Assert.Equal(1, _catalogClient.BrandCalls);
+        Assert.Equal(0, _catalogClient.SpecCalls);
+    }
+
+    [Fact]
+    public async Task PatchAssetAsync_BrandInactive_ReturnsValidationError()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = new TestCaller(ownerId);
+        var inactiveBrand = Guid.NewGuid();
+
+        _catalogClient.BrandHandler = id => Task.FromResult(Result.Success(
+            new CatalogBrandResponse(id, "BR-INACTIVE", "Inactive Brand", "Inactive")));
+
+        var asset = InventoryAsset.Create(
+            Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(),
+            "FX3", 1, "{}", FixedNow).Value;
+        _repo.Add(asset);
+
+        var patch = new PatchInventoryAssetRequest
+        {
+            IsBrandIdSpecified = true,
+            BrandId = inactiveBrand
+        };
+
+        var result = await service.PatchAssetAsync(asset.Id, patch, caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Brand.Inactive", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task PatchAssetAsync_CannotRemoveBrand_ReturnsValidationError()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = new TestCaller(ownerId);
+
+        var asset = InventoryAsset.Create(
+            Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(),
+            "FX3", 1, "{}", FixedNow).Value;
+        _repo.Add(asset);
+
+        var patch = new PatchInventoryAssetRequest
+        {
+            IsBrandIdSpecified = true,
+            BrandId = null
+        };
+
+        var result = await service.PatchAssetAsync(asset.Id, patch, caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("CANNOT_REMOVE_BRAND", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task PatchAssetAsync_EmptyGuidBrand_ReturnsValidationError()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = new TestCaller(ownerId);
+
+        var asset = InventoryAsset.Create(
+            Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(),
+            "FX3", 1, "{}", FixedNow).Value;
+        _repo.Add(asset);
+
+        var patch = new PatchInventoryAssetRequest
+        {
+            IsBrandIdSpecified = true,
+            BrandId = Guid.Empty
+        };
+
+        var result = await service.PatchAssetAsync(asset.Id, patch, caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_BRAND_ID", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task PatchAssetAsync_ModelOnly_DoesNotCallCatalog()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = new TestCaller(ownerId);
+
+        var asset = InventoryAsset.Create(
+            Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(),
+            "FX3", 1, "{}", FixedNow).Value;
+        _repo.Add(asset);
+
+        var patch = new PatchInventoryAssetRequest
+        {
+            IsModelSpecified = true,
+            Model = "FX3 Updated"
+        };
+
+        var result = await service.PatchAssetAsync(asset.Id, patch, caller);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(0, _catalogClient.LookupCalls);
+        Assert.Equal(0, _catalogClient.BrandCalls);
+        Assert.Equal(0, _catalogClient.SpecCalls);
+    }
+
+    [Fact]
+    public async Task PatchAssetAsync_SpecOnly_ValidatesWithCurrentSchemaVersion()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = new TestCaller(ownerId);
+
+        var asset = InventoryAsset.Create(
+            Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(),
+            "FX3", 2, "{\"color\":\"black\"}", FixedNow).Value;
+        _repo.Add(asset);
+
+        int validatedVersion = 0;
+        string? validatedSpecs = null;
+        _catalogClient.SpecHandler = (typeId, ver, specs) =>
+        {
+            validatedVersion = ver;
+            validatedSpecs = specs;
+            return Task.FromResult(Result.Success());
+        };
+
+        using var newSpecDoc = JsonDocument.Parse("{\"color\":\"silver\"}");
+        var patch = new PatchInventoryAssetRequest
+        {
+            IsSpecValuesSpecified = true,
+            SpecValues = newSpecDoc.RootElement.Clone()
+        };
+
+        var result = await service.PatchAssetAsync(asset.Id, patch, caller);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(2, validatedVersion); // Uses snapshot's schemaVersion = 2!
+        Assert.Equal("{\"color\":\"silver\"}", validatedSpecs);
+    }
+
+    [Fact]
+    public async Task PatchAssetAsync_SchemaOnly_ValidatesWithCurrentSpecValues()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = new TestCaller(ownerId);
+
+        var asset = InventoryAsset.Create(
+            Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(),
+            "FX3", 1, "{\"resolution\":\"4K\"}", FixedNow).Value;
+        _repo.Add(asset);
+
+        int validatedVersion = 0;
+        string? validatedSpecs = null;
+        _catalogClient.SpecHandler = (typeId, ver, specs) =>
+        {
+            validatedVersion = ver;
+            validatedSpecs = specs;
+            return Task.FromResult(Result.Success());
+        };
+
+        var patch = new PatchInventoryAssetRequest
+        {
+            IsSchemaVersionSpecified = true,
+            SchemaVersion = 3
+        };
+
+        var result = await service.PatchAssetAsync(asset.Id, patch, caller);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(3, validatedVersion); // Uses request's schemaVersion = 3!
+        Assert.Equal("{\"resolution\":\"4K\"}", validatedSpecs); // Uses snapshot's specs!
+    }
+
+    [Fact]
+    public async Task PatchAssetAsync_OldAssetNullBrand_PreservesNullWhenOmitted()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = new TestCaller(ownerId);
+
+        // Simulate pre-migration asset with null BrandId using reflection
+        var ctor = typeof(InventoryAsset).GetConstructors(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            .First(c => c.GetParameters().Length > 0);
+        var oldAsset = (InventoryAsset)ctor.Invoke([
+            Guid.NewGuid(), ownerId, Guid.NewGuid(), (Guid?)null, "Old Model", (string?)null, (int?)null, (Guid?)null, 1, "{}", true, (string?)null, FixedNow
+        ]);
+        _repo.Add(oldAsset);
+
+        var patch = new PatchInventoryAssetRequest
+        {
+            IsModelSpecified = true,
+            Model = "Updated Old Model"
+        };
+
+        var result = await service.PatchAssetAsync(oldAsset.Id, patch, caller);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.Value.BrandId); // Preserves null!
+        Assert.Equal("Updated Old Model", result.Value.Model);
+    }
+
+    [Fact]
+    public async Task PatchAssetAsync_OldAssetNullBrand_CanBeBackfilledWithValidBrand()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = new TestCaller(ownerId);
+        var brandId = Guid.NewGuid();
+
+        var ctor = typeof(InventoryAsset).GetConstructors(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            .First(c => c.GetParameters().Length > 0);
+        var oldAsset = (InventoryAsset)ctor.Invoke([
+            Guid.NewGuid(), ownerId, Guid.NewGuid(), (Guid?)null, "Old Model", (string?)null, (int?)null, (Guid?)null, 1, "{}", true, (string?)null, FixedNow
+        ]);
+        _repo.Add(oldAsset);
+
+        var patch = new PatchInventoryAssetRequest
+        {
+            IsBrandIdSpecified = true,
+            BrandId = brandId
+        };
+
+        var result = await service.PatchAssetAsync(oldAsset.Id, patch, caller);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(brandId, result.Value.BrandId); // Successfully backfilled!
     }
 
     [Fact]
@@ -410,7 +746,7 @@ public sealed class InventoryAssetServiceTests
         var ownerId = Guid.NewGuid();
         var caller = new TestCaller(ownerId);
 
-        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerId, Guid.NewGuid(), "M", 1, "{}", FixedNow).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(), "M", 1, "{}", FixedNow).Value;
         asset.Version = 100;
         _repo.Add(asset);
 
@@ -441,7 +777,7 @@ public sealed class InventoryAssetServiceTests
         var ownerId = Guid.NewGuid();
         var caller = new TestCaller(ownerId);
 
-        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerId, Guid.NewGuid(), "M", 1, "{}", FixedNow).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(), "M", 1, "{}", FixedNow).Value;
         asset.Version = 100;
         _repo.Add(asset);
 
@@ -479,11 +815,11 @@ public sealed class InventoryAssetServiceTests
         var caller = new TestCaller(ownerId);
         var newThumbId = Guid.NewGuid();
 
-        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerId, Guid.NewGuid(), "M", 1, "{}", FixedNow).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(), "M", 1, "{}", FixedNow).Value;
         _repo.Add(asset);
 
-        _catalogClient.SpecHandler = (_, _, _) => Task.FromResult(Result.Success(
-            CatalogSpecValidationResult.Invalid("Spec rejected by catalog")));
+        _catalogClient.SpecHandler = (_, _, _) => Task.FromResult(Result.Failure(
+            Error.Validation("EquipmentType.SpecRequired", "Spec rejected by catalog")));
 
         var service = CreateService();
 
@@ -499,7 +835,7 @@ public sealed class InventoryAssetServiceTests
         var result = await service.PatchAssetAsync(asset.Id, patch, caller);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("INVALID_SPECIFICATION", result.Error.Code);
+        Assert.Equal("EquipmentType.SpecRequired", result.Error.Code);
         Assert.Equal(0, _mediaClient.VerifyCalls); // Media preparation skipped when catalog spec fails
     }
 
@@ -514,7 +850,7 @@ public sealed class InventoryAssetServiceTests
 
         var ownerId = Guid.NewGuid();
         var caller = new TestCaller(ownerId);
-        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerId, Guid.NewGuid(), "M", 1, "{}", FixedNow).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(), "M", 1, "{}", FixedNow).Value;
         repo.Add(asset);
 
         Assert.True(asset.AcceptingBookings);
