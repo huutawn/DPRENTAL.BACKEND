@@ -59,6 +59,45 @@ public sealed class OrganizationReviewTests
         Assert.Single(f.Db.AuditLogs, log => log.Action == "Organization_Approve" && log.Target == f.OrgId.ToString());
     }
 
+    [Theory]
+    [InlineData(OrganizationStatus.Pending)]
+    [InlineData(OrganizationStatus.Rejected)]
+    [InlineData(OrganizationStatus.Suspended)]
+    public async Task AdminOwnerFilterExcludesUnapprovedOrSuspendedOrganizations(OrganizationStatus status)
+    {
+        await using Fixture f = await Fixture.CreateAsync(status);
+        var result = await new EfUserRepository(f.Db).GetUsersPagedAsync(0, 10, type: "Owner");
+        Assert.Empty(result.Items);
+        Assert.Equal(0, result.TotalCount);
+    }
+
+    [Fact]
+    public async Task ApprovalMakesOwnerVisibleInAdminUserRolesAndFilter()
+    {
+        await using Fixture f = await Fixture.CreateAsync();
+        EfUserRepository users = new(f.Db);
+
+        var pending = await users.GetUsersPagedAsync(0, 10, type: SystemRoleCode.Owner);
+        Assert.Empty(pending.Items);
+        User before = (await users.GetByIdWithAccessAsync(f.OwnerId))!;
+        Assert.DoesNotContain(SystemRoleCode.Owner,
+            Dprental.AuthService.Application.Security.UserAccessResolver.EffectiveRoles(before));
+
+        Assert.True((await f.Review.ApproveAsync(f.AdminId, f.OrgId)).IsSuccess);
+
+        var approved = await users.GetUsersPagedAsync(0, 10, type: "owner");
+        User owner = Assert.Single(approved.Items);
+        Assert.Equal(f.OwnerId, owner.Id);
+        Assert.Equal(1, approved.TotalCount);
+        Assert.Equal([SystemRoleCode.Owner],
+            Dprental.AuthService.Application.Security.UserAccessResolver.EffectiveRoles(owner));
+        Assert.Empty(owner.UserRoles);
+
+        User detail = (await users.GetByIdWithAccessAsync(f.OwnerId))!;
+        Assert.Contains(SystemRoleCode.Owner,
+            Dprental.AuthService.Application.Security.UserAccessResolver.EffectiveRoles(detail));
+    }
+
     [Fact]
     public async Task RejectPendingOrganizationStoresReason()
     {
