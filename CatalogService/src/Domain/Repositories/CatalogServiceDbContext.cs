@@ -15,6 +15,7 @@ public sealed class CatalogServiceDbContext : DbContext
     public DbSet<EquipmentTypeMedia> EquipmentTypeMedia { get; set; }
     public DbSet<Category> Categories { get; set; }
     public DbSet<EquipmentTypeSpecSchema> EquipmentTypeSpecSchemas { get; set; }
+    public DbSet<Brand> Brands { get; set; }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -183,6 +184,57 @@ public sealed class CatalogServiceDbContext : DbContext
                 .IsUnique()
                 .HasDatabaseName("UX_EquipmentTypeSpecSchemas_EquipmentTypeId_Draft")
                 .HasFilter("\"PublishedAt\" IS NULL");
+        });
+
+        modelBuilder.Entity<Brand>(entity =>
+        {
+            entity.ToTable("Brands", SchemaName);
+
+            entity.HasKey(b => b.Id);
+            entity.Property(b => b.Id).ValueGeneratedNever();
+
+            entity.Property(b => b.Code)
+                .IsRequired()
+                .HasMaxLength(50);
+
+            entity.Property(b => b.Name)
+                .IsRequired()
+                .HasMaxLength(200);
+
+            entity.Property(b => b.Slug)
+                .IsRequired()
+                .HasMaxLength(150);
+
+            entity.Property(b => b.LogoMediaId);
+
+            entity.Property(b => b.IsActive)
+                .IsRequired();
+
+            entity.Property(b => b.CreatedAt)
+                .HasColumnType("timestamp with time zone")
+                .IsRequired();
+
+            entity.Property(b => b.UpdatedAt)
+                .HasColumnType("timestamp with time zone");
+
+            entity.Property<uint>("xmin")
+                .HasColumnType("xid")
+                .ValueGeneratedOnAddOrUpdate()
+                .IsConcurrencyToken();
+
+            entity.HasIndex(b => b.Code)
+                .IsUnique()
+                .HasDatabaseName("IX_Brands_Code");
+
+            entity.HasIndex(b => b.Slug)
+                .IsUnique()
+                .HasDatabaseName("IX_Brands_Slug");
+
+            entity.HasIndex(b => b.CreatedAt)
+                .HasDatabaseName("IX_Brands_CreatedAt");
+
+            entity.HasIndex(b => b.IsActive)
+                .HasDatabaseName("IX_Brands_IsActive");
         });
     }
 }

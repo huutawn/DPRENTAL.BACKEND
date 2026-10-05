@@ -89,33 +89,14 @@ public partial class CategoryService : ICategoryService
         // Kiểm tra media nếu có ảnh
         if (request.ImageMediaId.HasValue)
         {
-            var verifyResult = await _mediaServiceClient.VerifyMediaAsync(request.ImageMediaId.Value, cancellationToken);
-            if (verifyResult.IsFailure)
+            var mediaResult = await MediaValidationHelper.ValidateAndPublishMediaAsync(
+                _mediaServiceClient,
+                request.ImageMediaId.Value,
+                operatorUserId,
+                cancellationToken);
+            if (mediaResult.IsFailure)
             {
-                return verifyResult.Error;
-            }
-
-            var media = verifyResult.Value;
-            if (!MediaValidationHelper.IsReady(media.Status))
-            {
-                return CatalogErrors.Media.NotReady;
-            }
-
-            if (!MediaValidationHelper.IsAllowedImageType(media.ContentType))
-            {
-                return CatalogErrors.Media.InvalidContentType;
-            }
-
-            if (!string.IsNullOrWhiteSpace(operatorUserId) &&
-                !string.Equals(media.UploadedByUserId?.Trim(), operatorUserId.Trim(), StringComparison.OrdinalIgnoreCase))
-            {
-                return CatalogErrors.Media.Forbidden;
-            }
-
-            var publicResult = await _mediaServiceClient.SetVisibilityAsync(request.ImageMediaId.Value, "public", cancellationToken);
-            if (publicResult.IsFailure)
-            {
-                return publicResult.Error;
+                return mediaResult.Error;
             }
         }
 
@@ -190,33 +171,14 @@ public partial class CategoryService : ICategoryService
             else if (category.ImageMediaId != request.ImageMediaId.Value)
             {
                 // Ảnh mới gắn: xác minh và public
-                var verifyResult = await _mediaServiceClient.VerifyMediaAsync(request.ImageMediaId.Value, cancellationToken);
-                if (verifyResult.IsFailure)
+                var mediaResult = await MediaValidationHelper.ValidateAndPublishMediaAsync(
+                    _mediaServiceClient,
+                    request.ImageMediaId.Value,
+                    operatorUserId,
+                    cancellationToken);
+                if (mediaResult.IsFailure)
                 {
-                    return verifyResult.Error;
-                }
-
-                var media = verifyResult.Value;
-                if (!MediaValidationHelper.IsReady(media.Status))
-                {
-                    return CatalogErrors.Media.NotReady;
-                }
-
-                if (!MediaValidationHelper.IsAllowedImageType(media.ContentType))
-                {
-                    return CatalogErrors.Media.InvalidContentType;
-                }
-
-                if (!string.IsNullOrWhiteSpace(operatorUserId) &&
-                    !string.Equals(media.UploadedByUserId?.Trim(), operatorUserId.Trim(), StringComparison.OrdinalIgnoreCase))
-                {
-                    return CatalogErrors.Media.Forbidden;
-                }
-
-                var publicResult = await _mediaServiceClient.SetVisibilityAsync(request.ImageMediaId.Value, "public", cancellationToken);
-                if (publicResult.IsFailure)
-                {
-                    return publicResult.Error;
+                    return mediaResult.Error;
                 }
 
                 category.ImageMediaId = request.ImageMediaId.Value;

@@ -26,6 +26,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
                 CatalogServiceDbContext.SchemaName)));
         services.AddScoped<IEquipmentTypeRepository, EquipmentTypeRepository>();
         services.AddScoped<ICategoryRepository, CategoryRepository>();
+        services.AddScoped<IBrandRepository, BrandRepository>();
         return services;
     }
 }

@@ -278,14 +278,14 @@ public sealed class CatalogMigrationTests
                         appliedMigrations.Add(histReader.GetString(0));
                     }
                 }
-                Assert.Equal(6, appliedMigrations.Count);
+                Assert.Equal(7, appliedMigrations.Count);
                 Assert.Contains(appliedMigrations, m => m.EndsWith("_InitialCatalogSchema", StringComparison.Ordinal));
                 Assert.Contains(appliedMigrations, m => m.EndsWith("_InitCategoryTable", StringComparison.Ordinal));
                 Assert.Contains(appliedMigrations, m => m.EndsWith("_RefactorEquipmentToEquipmentType", StringComparison.Ordinal));
                 Assert.Contains(appliedMigrations, m => m.EndsWith("_AddCategoryImagesAndEquipmentTypeCategories", StringComparison.Ordinal));
                 Assert.Contains(appliedMigrations, m => m.EndsWith("_AddEquipmentTypeOrganizationId", StringComparison.Ordinal));
                 Assert.Contains(appliedMigrations, m => m.EndsWith("_AddEquipmentTypeSpecSchemaAndDropOrganizationId", StringComparison.Ordinal));
-
+                Assert.Contains(appliedMigrations, m => m.EndsWith("_AddBrands", StringComparison.Ordinal));
                 // Kiểm tra quan hệ nhiều-nhiều được copy đầy đủ từ CategoryId cũ (draftId, publishedId, hiddenId)
                 await using var checkCopyCmd = new NpgsqlCommand(
                     "SELECT count(*) FROM catalog.\"EquipmentTypeCategories\" WHERE \"CategoryId\" = @catId;",
@@ -439,11 +439,26 @@ public sealed class CatalogMigrationTests
             };
             context.EquipmentTypes.Add(equipmentType);
 
+            var brand = new Brand
+            {
+                Id = Guid.NewGuid(),
+                Code = "SONY",
+                Name = "Sony Corporation",
+                Slug = "sony",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            context.Brands.Add(brand);
+
             await context.SaveChangesAsync();
 
             var loaded = await context.EquipmentTypes.FirstOrDefaultAsync(e => e.Id == equipmentType.Id);
             Assert.NotNull(loaded);
             Assert.Equal("FRESH-001", loaded.Code);
+            var loadedBrand = await context.Brands.FirstOrDefaultAsync(b => b.Id == brand.Id);
+            Assert.NotNull(loadedBrand);
+            Assert.Equal("SONY", loadedBrand.Code);
+            Assert.Equal("sony", loadedBrand.Slug);
         }
         finally
         {

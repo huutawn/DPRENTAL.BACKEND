@@ -59,7 +59,7 @@ public sealed class EquipmentTypeSpecSchemaEndpointTests : IAsyncLifetime
     {
         await dbContext.Database.MigrateAsync();
         await dbContext.Database.ExecuteSqlRawAsync(
-            "TRUNCATE TABLE \"catalog\".\"EquipmentTypeSpecSchemas\", \"catalog\".\"EquipmentTypeCategories\", \"catalog\".\"EquipmentTypeMedia\", \"catalog\".\"EquipmentTypes\", \"catalog\".\"Categories\" CASCADE;");
+            "TRUNCATE TABLE \"catalog\".\"EquipmentTypeSpecSchemas\", \"catalog\".\"EquipmentTypeCategories\", \"catalog\".\"EquipmentTypeMedia\", \"catalog\".\"EquipmentTypes\", \"catalog\".\"Categories\", \"catalog\".\"Brands\" CASCADE;");
     }
 
     public async Task DisposeAsync()

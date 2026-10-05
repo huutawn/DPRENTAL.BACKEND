@@ -18,19 +18,10 @@ public sealed class EquipmentTypeListQueryValidator(IOptions<CatalogDiscoveryOpt
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (request.Page <= 0)
+        Result pagingResult = PaginationValidationHelper.Validate(request.Page, request.PageSize);
+        if (pagingResult.IsFailure)
         {
-            return Result.Failure(CatalogErrors.Paging.InvalidPage);
-        }
-
-        if (request.PageSize is <= 0 or > PageRequest.MaxPageSize)
-        {
-            return Result.Failure(CatalogErrors.Paging.InvalidPageSize);
-        }
-
-        if ((long)(request.Page - 1) * request.PageSize > int.MaxValue)
-        {
-            return Result.Failure(CatalogErrors.Paging.Overflow);
+            return pagingResult;
         }
 
         int maxKeywordLength = options.Value.MaxKeywordLength;
