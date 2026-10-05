@@ -11,7 +11,7 @@ namespace Dprental.InventoryService.Api.Tests.Architecture;
 public sealed class ApplicationDependencyInjectionTests
 {
     [Fact]
-    public void AddInventoryApplication_RegistersAllThreeServiceInterfacesWithScopedLifetime()
+    public void AddInventoryApplication_RegistersAllFourServiceInterfacesWithScopedLifetime()
     {
         var services = new ServiceCollection();
         services.AddInventoryApplication();
@@ -30,6 +30,10 @@ public sealed class ApplicationDependencyInjectionTests
         Assert.NotNull(mediaDescriptor);
         Assert.Equal(typeof(InventoryMediaService), mediaDescriptor.ImplementationType);
         Assert.Equal(ServiceLifetime.Scoped, mediaDescriptor.Lifetime);
+        var allocationDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IInventoryAllocationService));
+        Assert.NotNull(allocationDescriptor);
+        Assert.Equal(typeof(InventoryAllocationService), allocationDescriptor.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, allocationDescriptor.Lifetime);
     }
 
     [Fact]
@@ -47,6 +51,9 @@ public sealed class ApplicationDependencyInjectionTests
 
         var mediaService = scope.ServiceProvider.GetService<IInventoryMediaService>();
         Assert.NotNull(mediaService);
+        var allocationService = scope.ServiceProvider.GetService<IInventoryAllocationService>();
+        Assert.NotNull(allocationService);
+
 
         // Khẳng định Controllers kích hoạt thành công phụ thuộc vào interfaces
         var assetController = ActivatorUtilities.CreateInstance<InventoryAssetsController>(scope.ServiceProvider);
@@ -54,5 +61,7 @@ public sealed class ApplicationDependencyInjectionTests
 
         var calendarController = ActivatorUtilities.CreateInstance<InventoryCalendarController>(scope.ServiceProvider);
         Assert.NotNull(calendarController);
+        var allocationController = ActivatorUtilities.CreateInstance<InventoryAllocationsController>(scope.ServiceProvider);
+        Assert.NotNull(allocationController);
     }
 }

@@ -2,6 +2,11 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dprental.InventoryService.Api.Controllers;
+using Dprental.InventoryService.Api.Tests.Security;
+using Dprental.InventoryService.Api.Routing;
+using Microsoft.AspNetCore.Mvc.ApplicationModels;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Routing;
 using Dprental.InventoryService.Api.Security;
 using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.Services;
@@ -27,8 +32,12 @@ namespace Dprental.InventoryService.Api.Tests.Media;
 public sealed class InventoryPrefixAndContractTests
 {
     [Fact]
-    public void AllBusinessControllers_UseStandardInventoryRoutePrefix()
+    public void AllBusinessControllers_UseStandardInventoryRoutePrefix_ViaGlobalConvention()
     {
+        Assert.Equal("api/v1/inventory", ApiRoutes.Prefix);
+
+        var convention = new ApiRoutePrefixConvention(ApiRoutes.Prefix);
+        var appModel = new ApplicationModel();
         var apiAssembly = typeof(InventoryCalendarController).Assembly;
         var controllerTypes = apiAssembly.GetTypes()
             .Where(t => typeof(ControllerBase).IsAssignableFrom(t) && !t.IsAbstract)
@@ -36,11 +45,49 @@ public sealed class InventoryPrefixAndContractTests
 
         Assert.NotEmpty(controllerTypes);
 
-        foreach (var controller in controllerTypes)
+        foreach (var type in controllerTypes)
         {
-            var routeAttr = controller.GetCustomAttribute<RouteAttribute>();
-            Assert.NotNull(routeAttr);
-            Assert.StartsWith("api/v1/inventory", routeAttr.Template, StringComparison.OrdinalIgnoreCase);
+            var controllerModel = new ControllerModel(type.GetTypeInfo(), type.GetCustomAttributes().ToList());
+            var routeAttr = type.GetCustomAttribute<RouteAttribute>();
+            controllerModel.Selectors.Add(new SelectorModel
+            {
+                AttributeRouteModel = routeAttr is not null ? new AttributeRouteModel(routeAttr) : null
+            });
+            appModel.Controllers.Add(controllerModel);
+        }
+
+        convention.Apply(appModel);
+
+        foreach (var controller in appModel.Controllers)
+        {
+            foreach (var selector in controller.Selectors)
+            {
+                Assert.NotNull(selector.AttributeRouteModel);
+                Assert.StartsWith("api/v1/inventory", selector.AttributeRouteModel.Template, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task AllBusinessEndpoints_UseStandardInventoryRoutePrefix_AtRuntime()
+    {
+        await using var factory = new InventorySecurityTestFactory();
+        var endpointDataSource = factory.Services.GetRequiredService<EndpointDataSource>();
+        var apiAssembly = typeof(InventoryCalendarController).Assembly;
+        var actionEndpoints = endpointDataSource.Endpoints
+            .OfType<RouteEndpoint>()
+            .Where(e =>
+            {
+                var descriptor = e.Metadata.GetMetadata<ControllerActionDescriptor>();
+                return descriptor is not null && descriptor.ControllerTypeInfo.Assembly == apiAssembly;
+            })
+            .ToList();
+
+        Assert.NotEmpty(actionEndpoints);
+
+        foreach (var endpoint in actionEndpoints)
+        {
+            Assert.StartsWith("api/v1/inventory", endpoint.RoutePattern.RawText, StringComparison.OrdinalIgnoreCase);
         }
     }
 

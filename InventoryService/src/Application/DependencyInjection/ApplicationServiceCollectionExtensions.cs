@@ -16,6 +16,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IInventoryAssetService, InventoryAssetService>();
         services.AddScoped<ICalendarService, CalendarService>();
         services.AddScoped<IInventoryMediaService, InventoryMediaService>();
+        services.AddScoped<IInventoryAllocationService, InventoryAllocationService>();
 
         return services;
     }
