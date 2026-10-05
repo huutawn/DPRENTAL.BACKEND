@@ -30,6 +30,11 @@ public sealed record PageRequest(
         {
             return Result.Failure(CatalogErrors.Paging.InvalidPageSize);
         }
+        if ((long)(Page - 1) * PageSize > int.MaxValue)
+        {
+            return Result.Failure(CatalogErrors.Paging.Overflow);
+        }
+
 
         if (Search?.Trim().Length > MaxSearchLength)
         {

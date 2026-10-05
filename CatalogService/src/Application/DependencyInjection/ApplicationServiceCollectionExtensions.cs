@@ -24,6 +24,11 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IEquipmentTypeService, EquipmentTypeService>();
         services.AddScoped<ICategoryRepository, CategoryRepository>();
         services.AddScoped<ICategoryService, CategoryService>();
+        services.AddScoped<BrandListQueryValidator>();
+        services.AddScoped<CreateBrandRequestValidator>();
+        services.AddScoped<UpdateBrandRequestValidator>();
+        services.AddScoped<IBrandRepository, BrandRepository>();
+        services.AddScoped<IBrandService, BrandService>();
 
         return services;
     }

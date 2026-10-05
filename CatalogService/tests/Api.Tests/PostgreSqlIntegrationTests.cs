@@ -26,7 +26,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
     public async Task InitializeAsync()
     {
         await dbContext.Database.MigrateAsync();
-        await dbContext.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"catalog\".\"EquipmentTypeCategories\", \"catalog\".\"EquipmentTypeMedia\", \"catalog\".\"EquipmentTypes\", \"catalog\".\"Categories\" CASCADE;");
+        await dbContext.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"catalog\".\"EquipmentTypeCategories\", \"catalog\".\"EquipmentTypeMedia\", \"catalog\".\"EquipmentTypes\", \"catalog\".\"Categories\", \"catalog\".\"Brands\" CASCADE;");
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
