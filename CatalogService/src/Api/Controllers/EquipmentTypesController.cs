@@ -13,7 +13,7 @@ namespace Dprental.CatalogService.Api.Controllers;
 [Route("equipment-types")]
 [Produces("application/json")]
 [Authorize(Policy = CatalogPolicies.EquipmentManage)]
-public sealed class EquipmentTypesController(IEquipmentTypeService service, ICatalogCallerContext caller) : ControllerBase
+public sealed partial class EquipmentTypesController(IEquipmentTypeService service, ICatalogCallerContext caller) : ControllerBase
 {
     private static readonly HashSet<string> AllowedQueryKeys = new(StringComparer.OrdinalIgnoreCase)
     {

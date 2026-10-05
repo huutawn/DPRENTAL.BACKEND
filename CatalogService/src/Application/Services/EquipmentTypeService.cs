@@ -92,11 +92,6 @@ public sealed partial class EquipmentTypeService(
             return validationResult.Error;
         }
 
-        Result<Guid?> organizationResult = ResolveOwningOrganization(request.OrganizationId);
-        if (organizationResult.IsFailure)
-        {
-            return organizationResult.Error;
-        }
 
         var categories = new List<Category>();
         foreach (var categoryId in request.CategoryIds)
@@ -170,7 +165,6 @@ public sealed partial class EquipmentTypeService(
         var equipmentType = new EquipmentType
         {
             Id = Guid.NewGuid(),
-            OrganizationId = organizationResult.Value,
             Code = trimmedCode,
             Name = request.Name.Trim(),
             Description = request.Description,
@@ -178,7 +172,7 @@ public sealed partial class EquipmentTypeService(
             Categories = categories
         };
 
-        var saveResult = await repository.AddAsync(equipmentType, request.Media, cancellationToken);
+        var saveResult = await repository.AddAsync(equipmentType, request.Media, request.SpecSchema, cancellationToken);
         if (saveResult.IsFailure)
         {
             return saveResult.Error;
@@ -205,10 +199,6 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.NotFound;
         }
 
-        if (!CanManage(entity))
-        {
-            return CatalogErrors.EquipmentType.OrganizationForbidden;
-        }
 
         if (request.IsCategoryIdsSpecified)
         {
@@ -334,9 +324,9 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.NotFound;
         }
 
-        if (!CanManage(entity))
+        if (!entity.CurrentSchemaVersion.HasValue)
         {
-            return CatalogErrors.EquipmentType.OrganizationForbidden;
+            return CatalogErrors.EquipmentType.SchemaRequired;
         }
 
         if (entity.Status == EquipmentTypeStatus.Published)
@@ -369,10 +359,6 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.NotFound;
         }
 
-        if (!CanManage(entity))
-        {
-            return CatalogErrors.EquipmentType.OrganizationForbidden;
-        }
 
         if (entity.Status != EquipmentTypeStatus.Published)
         {
@@ -389,38 +375,6 @@ public sealed partial class EquipmentTypeService(
         return EnrichDetail(saveResult.Value);
     }
 
-    /// <summary>
-    /// Xác định organization sở hữu bản ghi mới từ claim <c>o</c> đã được AuthService ký.
-    /// <paramref name="requestedOrganizationId"/> chỉ dùng để chọn một trong các organization của caller.
-    /// </summary>
-    private Result<Guid?> ResolveOwningOrganization(Guid? requestedOrganizationId)
-    {
-        if (caller.IsAdmin)
-        {
-            // Admin quản lý toàn bộ catalog: null là bản ghi dùng chung, không thuộc organization nào.
-            return Result.Success(requestedOrganizationId);
-        }
-
-        IReadOnlySet<Guid> organizationIds = caller.OrganizationIds;
-        if (requestedOrganizationId.HasValue)
-        {
-            return organizationIds.Contains(requestedOrganizationId.Value)
-                ? Result.Success(requestedOrganizationId)
-                : CatalogErrors.EquipmentType.OrganizationForbidden;
-        }
-
-        return organizationIds.Count switch
-        {
-            0 => CatalogErrors.EquipmentType.OrganizationForbidden,
-            1 => Result.Success<Guid?>(organizationIds.First()),
-            _ => CatalogErrors.EquipmentType.OrganizationRequired
-        };
-    }
-
-    /// <summary>Admin quản lý mọi bản ghi; người khác chỉ quản lý bản ghi thuộc organization của mình.</summary>
-    private bool CanManage(EquipmentType entity) =>
-        caller.IsAdmin
-        || (entity.OrganizationId.HasValue && caller.OrganizationIds.Contains(entity.OrganizationId.Value));
 
     private static PagedResult<EquipmentTypeListItemDto> EnrichList(PagedResult<EquipmentTypeListItemDto> paged)
     {

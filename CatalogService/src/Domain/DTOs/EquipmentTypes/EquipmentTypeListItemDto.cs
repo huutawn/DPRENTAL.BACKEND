@@ -7,4 +7,5 @@ public sealed record EquipmentTypeListItemDto(
     string? Description,
     IReadOnlyList<CategoryDto> Categories,
     Guid? ThumbnailMediaId,
-    string? ThumbnailUrl);
+    string? ThumbnailUrl,
+    int? CurrentSchemaVersion = null);
