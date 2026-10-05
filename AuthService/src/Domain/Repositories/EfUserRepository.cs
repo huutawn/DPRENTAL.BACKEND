@@ -183,18 +183,27 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
             {
                 var rolePattern = EscapeLike(roleName);
                 query = query.Where(u => u.UserRoles.Any(ur =>
-                    EF.Functions.ILike(ur.Role.Name, rolePattern)));
+                    EF.Functions.ILike(ur.Role.Name, rolePattern)) ||
+                    u.OrganizationMemberships.Any(m => m.Status == MembershipStatus.Active
+                        && m.Organization.Status == OrganizationStatus.Active
+                        && EF.Functions.ILike(m.Role.Name, rolePattern)));
             }
             else
             {
                 query = query.Where(u => u.UserRoles.Any(ur =>
                     (ur.Role != null && string.Equals(ur.Role.Name, roleName, StringComparison.OrdinalIgnoreCase)) ||
-                    (ur.Role == null && dbContext.Roles.Any(r => r.Id == ur.RoleId && string.Equals(r.Name, roleName, StringComparison.OrdinalIgnoreCase)))));
+                    (ur.Role == null && dbContext.Roles.Any(r => r.Id == ur.RoleId && string.Equals(r.Name, roleName, StringComparison.OrdinalIgnoreCase)))) ||
+                    u.OrganizationMemberships.Any(m => m.Status == MembershipStatus.Active
+                        && m.Organization.Status == OrganizationStatus.Active
+                        && string.Equals(m.Role.Name, roleName, StringComparison.OrdinalIgnoreCase)));
             }
         }
         var totalCount = await query.CountAsync(cancellationToken);
 
         var users = await query
+            .AsSplitQuery()
+            .Include(u => u.OrganizationMemberships).ThenInclude(m => m.Organization)
+            .Include(u => u.OrganizationMemberships).ThenInclude(m => m.Role)
             .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
             .OrderByDescending(u => u.CreatedAt)

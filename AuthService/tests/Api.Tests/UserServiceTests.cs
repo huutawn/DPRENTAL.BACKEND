@@ -279,6 +279,10 @@ public sealed class UserServiceTests
         Result<CurrentUserResponse> result = await service.GetCurrentUserProfileAsync(userId);
 
         Assert.True(result.IsSuccess);
+        var adminDetail = await service.GetUserByIdAsync(userId);
+        Assert.True(adminDetail.IsSuccess);
+        Assert.Equal(["Admin", SystemRoleCode.Owner], adminDetail.Value.GlobalRoles);
+
         CurrentUserResponse profile = result.Value;
         Assert.Equal(userId, profile.Id);
         Assert.Equal("tan.len@example.com", profile.Email);
