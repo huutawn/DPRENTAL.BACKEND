@@ -63,7 +63,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
     public async Task InitializeAsync()
     {
         await dbContext.Database.MigrateAsync();
-        await dbContext.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"catalog\".\"EquipmentTypeSpecSchemas\", \"catalog\".\"EquipmentTypeCategories\", \"catalog\".\"EquipmentTypeMedia\", \"catalog\".\"EquipmentTypes\", \"catalog\".\"Categories\" CASCADE;");
+        await dbContext.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"catalog\".\"EquipmentTypeSpecSchemas\", \"catalog\".\"EquipmentTypeCategories\", \"catalog\".\"EquipmentTypeMedia\", \"catalog\".\"EquipmentTypes\", \"catalog\".\"Categories\", \"catalog\".\"Brands\" CASCADE;");
         TestMediaClient.Reset();
     }
 

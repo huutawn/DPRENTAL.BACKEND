@@ -42,6 +42,23 @@ public static class CatalogErrorCode
         public const string InvalidName = "Category.InvalidName";
         public const string InvalidDescription = "Category.InvalidDescription";
     }
+
+    public static class Brand
+    {
+        public const string NotFound = "Brand.NotFound";
+        public const string InvalidKeyword = "Brand.InvalidKeyword";
+        public const string InvalidSort = "Brand.InvalidSort";
+        public const string InvalidQuery = "Brand.InvalidQuery";
+        public const string DuplicateCode = "Brand.DuplicateCode";
+        public const string DuplicateSlug = "Brand.DuplicateSlug";
+        public const string ConcurrencyConflict = "Brand.ConcurrencyConflict";
+        public const string InvalidPayload = "Brand.InvalidPayload";
+        public const string InvalidCode = "Brand.InvalidCode";
+        public const string InvalidName = "Brand.InvalidName";
+        public const string InvalidSlug = "Brand.InvalidSlug";
+        public const string InvalidLogo = "Brand.InvalidLogo";
+        public const string InvalidId = "Brand.InvalidId";
+    }
     public static class Media
     {
         public const string NotFound = "Media.NotFound";

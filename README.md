@@ -39,6 +39,11 @@ Catalog đọc nguyên các claim do AuthService phát hành, không tin header 
 | `GET /equipment-types`, `GET /equipment-types/{id}` | Công khai |
 | `GET /equipment-types/{id}/schema` | Công khai (Type phải Published, trả schema tại `CurrentSchemaVersion`) |
 | `GET /equipment-types/{id}/schemas/{version}` | Công khai (Type Published hoặc Disabled; chỉ trả version đã publish) |
+| `GET /brands`, `GET /brands/{id}` | Công khai (chỉ active; inactive hoặc không tồn tại trả `404`) |
+| `GET /admin/brands` | Policy `CatalogBrandManage`: role `adm` (active và inactive, lọc `isActive`) |
+| `GET /admin/brands/{id}` | Policy `CatalogBrandManage`: role `adm` (đọc mọi trạng thái) |
+| `POST /brands`, `PATCH /brands/{id}` | Policy `CatalogBrandManage`: role `adm` |
+| `POST /brands/{id}/disable`, `POST /brands/{id}/enable` | Policy `CatalogBrandManage`: role `adm` (idempotent) |
 | `POST /equipment-types/{id}/specifications/validate` | Authenticated (User JWT hoặc Service token; type Published, schema đã publish; Admin không được bypass) |
 | `POST /categories`, `PATCH /categories/{id}` | Policy `CatalogCategoryManage`: role `adm` |
 | `POST /equipment-types`, `PATCH /equipment-types/{id}` | Policy `CatalogEquipmentManage`: role `adm` |
@@ -56,6 +61,14 @@ API ghi trả `401` khi thiếu/token không hợp lệ, `403` khi token hợp l
 - Publish schema cập nhật `CurrentSchemaVersion` của equipment type. Equipment type chỉ được publish khi đã có schema được publish.
 - Response detail (`GET /equipment-types/{id}`) bổ sung `primarySpecs: [{ key, label, unit }]`, trích xuất các field `primary=true` của current schema và sắp xếp theo `displayOrder`, rồi `key` (ordinal).
 - Endpoint canonical validation `POST /equipment-types/{id}/specifications/validate` xác thực dữ liệu đặc tả kỹ thuật theo schema version đã publish, nhận `{ schemaVersion, specValues }` và trả `200 { valid, errors }` với cấu trúc lỗi `{ field, code, message }` (`REQUIRED`, `TYPE_MISMATCH`, `OUT_OF_RANGE`, `INVALID_ENUM_OPTION`, `UNKNOWN_FIELD`).
+
+**Dữ liệu canonical Brand**:
+- `Brand` là dữ liệu platform canonical dùng chung toàn platform, do Admin quản lý, không có Organization ownership. Request gửi `organizationId` bị từ chối `400 Bad Request`.
+- Bảng `catalog.Brands`: `Id` (UUID, sinh ở ứng dụng), `Code` (trim/uppercase, tối đa 50 ký tự), `Name` (Unicode NFC, trim/gom khoảng trắng, tối đa 200 ký tự), `Slug` (trim/lowercase, tối đa 150 ký tự dạng ASCII alphanumeric phân cách bằng dấu `-`), `LogoMediaId` (UUID, tùy chọn), `IsActive` (boolean, tạo mới mặc định active), `CreatedAt` (UTC), `UpdatedAt` (UTC).
+- Unique index `IX_Brands_Code` và `IX_Brands_Slug` áp dụng cho cả Brand inactive, trùng lặp trả về `409 Conflict`.
+- Concurrency token PostgreSQL `xmin` ngăn mất cập nhật khi ghi đồng thời, trả về `409 Conflict`.
+- Logo quản lý qua MediaService: verify Ready, MIME `image/jpeg`, `image/png`, `image/webp`, uploader khớp operator trước khi gọi `SetVisibilityAsync(..., "public")` và lưu Brand. Không verify lại khi PATCH giữ nguyên logo hoặc gỡ logo (`logoMediaId: null`). GET dựng URL qua `MediaUrlResolver` không gọi MediaService. Nếu database lưu thất bại sau khi đã public media, media asset vẫn giữ trạng thái public (đây là giới hạn chấp nhận được để tránh giữ transaction DB trong khi gọi external HTTP MediaService).
+- Disable/Enable có tính idempotent: gọi lại cùng trạng thái không thay đổi timestamp `UpdatedAt`.
 ## Chạy hạ tầng cục bộ
 
 ```bash
@@ -124,6 +137,19 @@ Do việc drop column `OrganizationId` và quản lý schema không thể hoàn 
    pg_restore -h <host> -p <port> -U <user> -d catalogservice --clean catalogservice_pre_specschema.dump
    ```
 3. Khởi động lại phiên bản API trước đó.
+
+## Quy trình Triển khai (AddBrands)
+
+Migration `AddBrands` bổ sung bảng `catalog.Brands` và các unique index đi kèm mà không ảnh hưởng tới dữ liệu của các bảng hiện có (`EquipmentTypes`, `Categories`, `EquipmentTypeMedia`, `EquipmentTypeSpecSchemas`).
+
+### 1. Chạy migration trước khi deploy
+Chạy forward migration:
+```bash
+dotnet ef database update --project CatalogService/src/Domain/CatalogService.Domain.csproj --startup-project CatalogService/src/Api/CatalogService.Api.csproj
+```
+
+### 2. Quy trình Rollback
+Phương thức `Down` của migration `AddBrands` ném `NotSupportedException` nhằm từ chối rollback phá hủy dữ liệu. Khi rollback phiên bản ứng dụng, bảng `catalog.Brands` được giữ nguyên trong cơ sở dữ liệu.
 ## Git hook
 
 Sau khi khởi tạo Git trong thư mục service, chạy `./scripts/setup-git-hooks.sh` (hoặc bản `.ps1` trên PowerShell). Hook kiểm tra branch nền `origin/catalog/develop`, rồi build và test trước khi push.

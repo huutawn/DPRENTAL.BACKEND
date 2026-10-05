@@ -69,3 +69,16 @@ Domain sở hữu repository contracts, EF Core DbContext và repository impleme
   pg_restore -h <host> -p <port> -U <user> -d catalogservice --clean catalogservice_pre_specschema.dump
   ```
 - Khởi động lại phiên bản API cũ.
+
+## Triển khai và Rollback (AddBrands)
+
+Migration `AddBrands` bổ sung bảng `catalog.Brands` và các unique index đi kèm mà không ảnh hưởng tới dữ liệu của các bảng hiện có.
+
+### 1. Migration
+Chạy migration trước khi deploy:
+```bash
+dotnet ef database update --project CatalogService/src/Domain/CatalogService.Domain.csproj --startup-project CatalogService/src/Api/CatalogService.Api.csproj
+```
+
+### 2. Rollback
+Phương thức `Down` của migration `AddBrands` ném `NotSupportedException` để từ chối rollback phá hủy dữ liệu. Khi rollback ứng dụng, bảng `catalog.Brands` được giữ nguyên trong cơ sở dữ liệu.

@@ -8,4 +8,7 @@ internal static class CatalogPolicies
 
     /// <summary>Quản lý category: chỉ Admin.</summary>
     public const string CategoryManage = "CatalogCategoryManage";
+
+    /// <summary>Quản lý brand: chỉ Admin (role adm).</summary>
+    public const string BrandManage = "CatalogBrandManage";
 }

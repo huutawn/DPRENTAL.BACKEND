@@ -125,40 +125,14 @@ public sealed partial class EquipmentTypeService(
 
         if (distinctMediaIds.Count > 0)
         {
-            foreach (var mediaId in distinctMediaIds)
+            var mediaResult = await MediaValidationHelper.ValidateAndPublishMediaListAsync(
+                mediaServiceClient,
+                distinctMediaIds,
+                operatorUserId,
+                cancellationToken);
+            if (mediaResult.IsFailure)
             {
-                var verifyResult = await mediaServiceClient.VerifyMediaAsync(mediaId, cancellationToken);
-                if (verifyResult.IsFailure)
-                {
-                    return verifyResult.Error;
-                }
-
-                var media = verifyResult.Value;
-                if (!MediaValidationHelper.IsReady(media.Status))
-                {
-                    return CatalogErrors.Media.NotReady;
-                }
-
-                if (!MediaValidationHelper.IsAllowedImageType(media.ContentType))
-                {
-                    return CatalogErrors.Media.InvalidContentType;
-                }
-
-                if (!string.IsNullOrWhiteSpace(operatorUserId) &&
-                    !string.Equals(media.UploadedByUserId?.Trim(), operatorUserId.Trim(), StringComparison.OrdinalIgnoreCase))
-                {
-                    return CatalogErrors.Media.Forbidden;
-                }
-            }
-
-            // Public tuần tự sau khi toàn bộ đã hợp lệ
-            foreach (var mediaId in distinctMediaIds)
-            {
-                var publicResult = await mediaServiceClient.SetVisibilityAsync(mediaId, "public", cancellationToken);
-                if (publicResult.IsFailure)
-                {
-                    return publicResult.Error;
-                }
+                return mediaResult.Error;
             }
         }
 
@@ -263,41 +237,14 @@ public sealed partial class EquipmentTypeService(
 
             if (newlyAddedMediaIds.Count > 0)
             {
-                // Xác minh media mới gắn
-                foreach (var mediaId in newlyAddedMediaIds)
+                var mediaResult = await MediaValidationHelper.ValidateAndPublishMediaListAsync(
+                    mediaServiceClient,
+                    newlyAddedMediaIds,
+                    operatorUserId,
+                    cancellationToken);
+                if (mediaResult.IsFailure)
                 {
-                    var verifyResult = await mediaServiceClient.VerifyMediaAsync(mediaId, cancellationToken);
-                    if (verifyResult.IsFailure)
-                    {
-                        return verifyResult.Error;
-                    }
-
-                    var media = verifyResult.Value;
-                    if (!MediaValidationHelper.IsReady(media.Status))
-                    {
-                        return CatalogErrors.Media.NotReady;
-                    }
-
-                    if (!MediaValidationHelper.IsAllowedImageType(media.ContentType))
-                    {
-                        return CatalogErrors.Media.InvalidContentType;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(operatorUserId) &&
-                        !string.Equals(media.UploadedByUserId?.Trim(), operatorUserId.Trim(), StringComparison.OrdinalIgnoreCase))
-                    {
-                        return CatalogErrors.Media.Forbidden;
-                    }
-                }
-
-                // Đổi visibility sang public cho media mới
-                foreach (var mediaId in newlyAddedMediaIds)
-                {
-                    var publicResult = await mediaServiceClient.SetVisibilityAsync(mediaId, "public", cancellationToken);
-                    if (publicResult.IsFailure)
-                    {
-                        return publicResult.Error;
-                    }
+                    return mediaResult.Error;
                 }
             }
         }

@@ -24,6 +24,7 @@ public sealed class CatalogSchemaTests
         Assert.Equal("EquipmentTypeMedia", Entity<EquipmentTypeMedia>(model).GetTableName());
         Assert.Equal("EquipmentTypeSpecSchemas", Entity<EquipmentTypeSpecSchema>(model).GetTableName());
         Assert.Equal("EquipmentTypeCategories", model.FindEntityType("EquipmentTypeCategories")?.GetTableName());
+        Assert.Equal("Brands", Entity<Brand>(model).GetTableName());
     }
 
     [Fact]
@@ -42,6 +43,47 @@ public sealed class CatalogSchemaTests
             nameof(EquipmentType.Code));
 
         Assert.True(index.IsUnique);
+    }
+
+    [Fact]
+    public void BrandCode_IsUnique()
+    {
+        IIndex index = SingleIndex(
+            Entity<Brand>(BuildModel()),
+            nameof(Brand.Code));
+
+        Assert.True(index.IsUnique);
+    }
+
+    [Fact]
+    public void BrandSlug_IsUnique()
+    {
+        IIndex index = SingleIndex(
+            Entity<Brand>(BuildModel()),
+            nameof(Brand.Slug));
+
+        Assert.True(index.IsUnique);
+    }
+
+    [Fact]
+    public void Brand_UsesXminConcurrencyToken()
+    {
+        IEntityType brand = Entity<Brand>(BuildModel());
+        IProperty? xmin = brand.FindProperty("xmin");
+
+        Assert.NotNull(xmin);
+        Assert.True(xmin.IsConcurrencyToken);
+        Assert.Equal(ValueGenerated.OnAddOrUpdate, xmin.ValueGenerated);
+    }
+
+    [Theory]
+    [InlineData(nameof(Brand.CreatedAt))]
+    [InlineData(nameof(Brand.IsActive))]
+    public void Brand_HasIndexOn(string propertyName)
+    {
+        IIndex index = SingleIndex(Entity<Brand>(BuildModel()), propertyName);
+
+        Assert.False(index.IsUnique);
     }
 
     [Theory]
@@ -98,6 +140,7 @@ public sealed class CatalogSchemaTests
     [InlineData(typeof(EquipmentType))]
     [InlineData(typeof(EquipmentTypeMedia))]
     [InlineData(typeof(EquipmentTypeSpecSchema))]
+    [InlineData(typeof(Brand))]
     public void Ids_AreAssignedByApplication(Type entityType)
     {
         IProperty id = BuildModel().FindEntityType(entityType)!.FindProperty("Id")!;

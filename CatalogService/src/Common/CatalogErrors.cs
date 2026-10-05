@@ -99,6 +99,49 @@ public static class CatalogErrors
         public static readonly Error InvalidImage =
             Error.Validation("Category.InvalidImage", "Ảnh đại diện danh mục không hợp lệ.");
     }
+
+    public static class Brand
+    {
+        public static readonly Error NotFound =
+            Error.NotFound(CatalogErrorCode.Brand.NotFound, "Thương hiệu không tồn tại hoặc chưa được kích hoạt.");
+
+        public static readonly Error AdminNotFound =
+            Error.NotFound(CatalogErrorCode.Brand.NotFound, "Thương hiệu không tồn tại.");
+
+        public static readonly Error InvalidKeyword =
+            Error.Validation(CatalogErrorCode.Brand.InvalidKeyword, "Từ khóa không được chứa ký tự không hợp lệ và tối đa 100 ký tự.");
+        public static readonly Error InvalidSort =
+            Error.Validation(CatalogErrorCode.Brand.InvalidSort, "sort chỉ nhận: newest, name_asc, name_desc.");
+
+        public static readonly Error InvalidQuery =
+            Error.Validation(CatalogErrorCode.Brand.InvalidQuery, "Tham số truy vấn không hợp lệ.");
+
+        public static readonly Error DuplicateCode =
+            Error.Conflict(CatalogErrorCode.Brand.DuplicateCode, "Mã thương hiệu đã tồn tại trong Catalog.");
+
+        public static readonly Error DuplicateSlug =
+            Error.Conflict(CatalogErrorCode.Brand.DuplicateSlug, "Slug thương hiệu đã tồn tại trong Catalog.");
+
+        public static readonly Error ConcurrencyConflict =
+            Error.Conflict(CatalogErrorCode.Brand.ConcurrencyConflict, "Dữ liệu đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại trang.");
+
+        public static readonly Error InvalidPayload =
+            Error.Validation(CatalogErrorCode.Brand.InvalidPayload, "Dữ liệu yêu cầu không hợp lệ.");
+
+        public static readonly Error InvalidCode =
+            Error.Validation(CatalogErrorCode.Brand.InvalidCode, "Mã thương hiệu không được để trống, không chứa ký tự không hợp lệ và tối đa 50 ký tự.");
+
+        public static readonly Error InvalidName =
+            Error.Validation(CatalogErrorCode.Brand.InvalidName, "Tên thương hiệu không được để trống, không chứa ký tự không hợp lệ và tối đa 200 ký tự.");
+        public static readonly Error InvalidSlug =
+            Error.Validation(CatalogErrorCode.Brand.InvalidSlug, "Slug thương hiệu không hợp lệ. Chỉ chấp nhận chữ cái thường, số ASCII phân cách bằng dấu gạch ngang và tối đa 150 ký tự.");
+
+        public static readonly Error InvalidLogo =
+            Error.Validation(CatalogErrorCode.Brand.InvalidLogo, "Logo thương hiệu không hợp lệ.");
+
+        public static readonly Error InvalidId =
+            Error.Validation(CatalogErrorCode.Brand.InvalidId, "ID thương hiệu không hợp lệ.");
+    }
     public static class Media
     {
         public static readonly Error NotFound =
