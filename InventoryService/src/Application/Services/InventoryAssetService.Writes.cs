@@ -77,7 +77,7 @@ public sealed partial class InventoryAssetService
             return brandLookup.Error;
         }
 
-        if (!string.Equals(brandLookup.Value.Status, "Active", StringComparison.OrdinalIgnoreCase))
+        if (!brandLookup.Value.IsActive)
         {
             return Error.Validation("Brand.Inactive", "Thương hiệu đang ở trạng thái không hoạt động.");
         }
@@ -221,7 +221,7 @@ public sealed partial class InventoryAssetService
                 return brandResult.Error;
             }
 
-            if (!string.Equals(brandResult.Value.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            if (!brandResult.Value.IsActive)
             {
                 return Error.Validation("Brand.Inactive", "Thương hiệu đang ở trạng thái không hoạt động.");
             }

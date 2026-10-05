@@ -7,5 +7,5 @@ public sealed record CatalogBrandResponse(
     Guid Id,
     string Code,
     string Name,
-    string Status
+    bool IsActive
 );

@@ -31,8 +31,7 @@ public sealed class InventoryAssetsControllerTests
 
         public Task<Result<CatalogBrandResponse>> GetBrandAsync(Guid brandId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new CatalogBrandResponse(
-                brandId, "BR-SONY", "Sony", "Active")));
-
+                brandId, "BR-SONY", "Sony", true)));
         public Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success());
     }

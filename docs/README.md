@@ -90,18 +90,19 @@ Hệ thống áp dụng cơ chế: **PostgreSQL `READ COMMITTED` transaction + a
 
 - **CatalogService**:
   - **Tra cứu Equipment Type**: `GET /api/v1/catalog/equipment-types/{id}` kiểm tra trạng thái `Published`.
-  - **Tra cứu Brand chuẩn**: `GET /api/v1/catalog/brands/{id}` trả `200 { id, code, name, status }` (`Active/Inactive`). Brand không tồn tại trả `404` với mã `Brand.NotFound`. Brand chỉ cần Active trên toàn Catalog; chưa thêm quan hệ Brand–EquipmentType.
-  - **Thẩm tra Specification**: `POST /api/v1/catalog/equipment-types/{id}/validate-specification` với body `{ schemaVersion, specValues }` (spec là JSON object). Hợp lệ trả `204 NoContent`; không hợp lệ trả `400` ProblemDetails với các mã contract:
-    - `EquipmentType.InvalidAssetSchemaVersion`: Schema version chưa được publish cho loại thiết bị này (không tái sử dụng mã publish `EquipmentType.InvalidSchemaVersion` đang trả `409`).
-    - `EquipmentType.SpecRequired`: Thiếu trường bắt buộc trong specification.
-    - `EquipmentType.SpecDatatype`: Sai kiểu dữ liệu trường specification.
-    - `EquipmentType.SpecRange`: Giá trị trường specification vượt ngoài khoảng cho phép.
-    - `EquipmentType.SpecEnum`: Giá trị trường specification không thuộc danh sách enum cho phép.
+  - **Tra cứu Brand chuẩn**: `GET /api/v1/catalog/brands/{id}` trả `200` với body JSON chứa `id`, `code`, `name`, `slug`, `logoMediaId`, `logoUrl`, `isActive` (`bool`). Brand không tồn tại hoặc inactive trên public Catalog trả `404` với mã `Brand.NotFound`. Response thiếu/null/sai kiểu `isActive` trả `503 Service Unavailable`; `isActive: false` được Inventory từ chối bằng `400 Brand.Inactive`. Brand chỉ cần Active trên toàn Catalog; chưa thêm quan hệ Brand–EquipmentType.
+  - **Đồng bộ contract Brand**: Implementation Brand hiện có trong Catalog local (chưa commit) sử dụng `bool isActive`. Trước cutover, phải xác nhận deployment Catalog được release có cùng contract và kiểm thử HTTP thực tế; mock/test server không thay thế bước này.
+  - **Thẩm tra Specification**: `POST /api/v1/catalog/equipment-types/{id}/specifications/validate` với body `{ schemaVersion, specValues }` (`specValues` là JSON object).
+    - **Xác thực & JWT Forwarding**: Chuyển tiếp JWT đã được Inventory xác thực (lấy từ authentication ticket qua `SaveToken = true` trong cấu hình JWT). Gắn header `Authorization: Bearer <token>` trên từng request validation. Không lưu token trong shared headers, không chuyển sang MediaService và giữ tắt auto-redirect. Thiếu token tại bước gọi validation trả lỗi dependency `503 Service Unavailable`; cancellation của caller tiếp tục được propagate; giữ timeout 10s, không thêm retry.
+    - **Contract Response**:
+      - Thành công chỉ khi Catalog trả HTTP `200`, `valid: true` và `errors: []`.
+      - Validation thất bại: Catalog trả HTTP `200`, `valid: false` và `errors: [{ field, code, message }]`. Inventory chuyển thành HTTP `400` ProblemDetails với `title = SPEC_VALIDATION_FAILED`, detail mô tả validation thất bại, extension `errors` giữ nguyên danh sách `{ field, code, message }` và thứ tự Catalog trả.
+      - Chấp nhận đủ 5 mã field chuẩn của Catalog: `REQUIRED`, `TYPE_MISMATCH`, `OUT_OF_RANGE`, `INVALID_ENUM_OPTION`, `UNKNOWN_FIELD`.
+      - Catalog trả HTTP `404` với `EquipmentType.SchemaNotFound` hoặc `EquipmentType.NotFound`, và HTTP `400` với `Catalog.InvalidRequest` được chuyển thành Inventory HTTP `400 BadRequest`, giữ nguyên `title` và `detail`.
   - **Chính sách ánh xạ lỗi**:
-    - Lỗi nghiệp vụ thuộc contract (`Brand.NotFound`, `Brand.Inactive`, các mã `EquipmentType.Spec*` và `InvalidAssetSchemaVersion`) được Inventory chuyển thành HTTP `400 BadRequest`, giữ nguyên `title` và `detail`.
-    - Lỗi mạng, timeout, response hỏng (malformed JSON/empty), status/mã lỗi lạ, upstream `401/403/5xx` hoặc endpoint chưa được triển khai (404/501) được ánh xạ thành HTTP `503 Service Unavailable`.
-    - Không bypass qua nhánh `NotSupported`.
-
+    - Lỗi nghiệp vụ thuộc contract (`Brand.NotFound`, `Brand.Inactive`, `EquipmentType.SchemaNotFound`, `EquipmentType.NotFound`, `Catalog.InvalidRequest`, và `SPEC_VALIDATION_FAILED` kèm `errors`) được Inventory chuyển thành HTTP `400 BadRequest`.
+    - Response thiếu trường, sai kiểu, mâu thuẫn (`valid: true` kèm `errors` không rỗng hoặc `valid: false` kèm `errors` rỗng), mã field lạ, lỗi mạng, timeout, response hỏng (malformed JSON/empty), upstream `401/403/5xx`, endpoint missing (404 ngoài contract) hoặc `204`/`501` đều được ánh xạ thành HTTP `503 Service Unavailable`.
+    - Không giữ endpoint fallback; `204` hoặc `501` tuyệt đối không được coi là valid.
 - **MediaService**: Tái sử dụng `PreparePublicAsync` khi tạo hoặc cập nhật thumbnail thành GUID mới. Clear thumbnail (`null`) không gọi MediaService.
 
 ### Write Flows & Invariants
@@ -135,15 +136,13 @@ Hệ thống áp dụng cơ chế: **PostgreSQL `READ COMMITTED` transaction + a
   FROM inventory.assets;
   ```
 - **Quy trình Cutover & Rollback**:
-  1. Triển khai và kiểm thử Catalog contract trước (Brand GET và EquipmentType specification validation endpoint).
+  1. Triển khai và kiểm thử Catalog contract trước (Brand GET với `bool isActive` và EquipmentType specification validation endpoint).
   2. Áp dụng migration `20261005050000_AddAssetBrandId` lên PostgreSQL.
   3. Drain toàn bộ Inventory writer cũ trước khi mở ghi bằng binary mới.
   4. **Quy tắc Rollback**: Tuyệt đối không phục hồi binary còn bypass `NotSupported`. Nếu chưa có binary tương thích để rollback, dừng ghi Asset trong lúc khắc phục sự cố; giữ nguyên cột `brand_id` và dữ liệu đã ghi.
   5. **Backfill**: Thực hiện qua API PATCH với đầy đủ authorization và Catalog validation. Inventory team sở hữu giai đoạn nullable.
   6. **Điều kiện kết thúc nullable**: `missing_brand_count = 0` (không còn Asset thiếu Brand) và không còn writer cũ. Migration `NOT NULL` thuộc đợt tiếp theo, phải kiểm thử từ chối dữ liệu chưa backfill và thành công sau backfill.
-  7. Kiểm thử với Catalog thật là điều kiện cutover tiên quyết; test server không được coi là bằng chứng Catalog đã hỗ trợ contract.
-
-### Kafka Event Key và Quy trình Cutover Rollout
+  7. Kiểm thử với Catalog thật đã release là điều kiện cutover tiên quyết; implementation local chưa commit và test server không được coi là bằng chứng Catalog production đã hỗ trợ contract.
 
 - **Kafka Key**: Sự kiện `InventoryAssetAvailabilityChanged` phát lên `inventory.asset.events.v1` sử dụng **Aggregate ID** (`assetId`) làm partition key thay vì `{orgId}:{assetId}`.
 ## Quản lý giữ chỗ và phân bổ tài sản (DPR-151: Asset Hold & Allocation Core)
