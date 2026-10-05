@@ -25,7 +25,7 @@ internal static class UserMappingExtensions
             user.Id,
             user.Email,
             user.FullName,
-            UserAccessResolver.Roles(user),
+            UserAccessResolver.EffectiveRoles(user),
             UserAccessResolver.Permissions(user),
             organizations,
             user.CreatedAt,

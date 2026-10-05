@@ -83,6 +83,7 @@ public static class OrganizationMappingExtensions
             log.Timestamp,
             log.Action,
             log.Result,
-            log.Reason);
+            log.Reason,
+            log.Status);
     }
 }

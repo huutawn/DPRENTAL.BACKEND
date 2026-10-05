@@ -288,6 +288,7 @@ public sealed class OrganizationService(
             Action = "Organization_ProfileUpdate",
             Result = "Success",
             Reason = null,
+            Status = org.Status,
             CorrelationId = _correlationIdProvider.GetCorrelationId(),
             Timestamp = _timeProvider.GetUtcNow()
         }, cancellationToken);
@@ -359,6 +360,7 @@ public sealed class OrganizationService(
             Action = "Organization_Suspend",
             Result = "Success",
             Reason = trimmedReason,
+            Status = org.Status,
             CorrelationId = _correlationIdProvider.GetCorrelationId(),
             Timestamp = _timeProvider.GetUtcNow()
         }, cancellationToken);
@@ -413,6 +415,7 @@ public sealed class OrganizationService(
             Action = "Organization_Activate",
             Result = "Success",
             Reason = null,
+            Status = org.Status,
             CorrelationId = _correlationIdProvider.GetCorrelationId(),
             Timestamp = _timeProvider.GetUtcNow()
         }, cancellationToken);
@@ -421,11 +424,15 @@ public sealed class OrganizationService(
         return Result.Success();
     }
 
-    /// <summary>Lấy nhật ký lịch sử của organization có phân trang dành cho Admin (GET /admin/organizations/{id}/history).</summary>
+    /// <summary>Lấy nhật ký lịch sử của organization có phân trang và bộ lọc tìm kiếm dành cho Admin (GET /admin/organizations/{id}/history).</summary>
     public async Task<Result<PagedResult<OrganizationHistoryResponse>>> GetHistoryAsync(
         Guid actorUserId,
         Guid organizationId,
         PageRequest request,
+        string? action = null,
+        OrganizationStatus? status = null,
+        string? result = null,
+        string? reason = null,
         CancellationToken cancellationToken = default)
     {
         if (!DtoValidator.TryValidateId(organizationId, nameof(organizationId), out _) ||
@@ -445,6 +452,26 @@ public sealed class OrganizationService(
             return Result.Failure<PagedResult<OrganizationHistoryResponse>>(validation.Error);
         }
 
+        if (status.HasValue && !DtoValidator.TryValidateEnum(status.Value, nameof(status), out Error? statusError))
+        {
+            return Result.Failure<PagedResult<OrganizationHistoryResponse>>(statusError);
+        }
+
+        if (action?.Trim().Length > PageRequest.MaxSearchLength)
+        {
+            return Result.Failure<PagedResult<OrganizationHistoryResponse>>(AuthErrors.Paging.InvalidSearch);
+        }
+
+        if (result?.Trim().Length > PageRequest.MaxSearchLength)
+        {
+            return Result.Failure<PagedResult<OrganizationHistoryResponse>>(AuthErrors.Paging.InvalidSearch);
+        }
+
+        if (reason?.Trim().Length > PageRequest.MaxSearchLength)
+        {
+            return Result.Failure<PagedResult<OrganizationHistoryResponse>>(AuthErrors.Paging.InvalidSearch);
+        }
+
         if (!await CanPlatformReadAsync(actorUserId, cancellationToken))
         {
             return Result.Failure<PagedResult<OrganizationHistoryResponse>>(AuthErrors.Organization.PlatformAdminRequired);
@@ -456,7 +483,14 @@ public sealed class OrganizationService(
             return Result.Failure<PagedResult<OrganizationHistoryResponse>>(AuthErrors.Organization.OrganizationNotFound);
         }
 
-        PagedResult<AuditLog> paged = await _auditLogRepository.GetOrganizationHistoryAsync(organizationId, request, cancellationToken);
+        PagedResult<AuditLog> paged = await _auditLogRepository.GetOrganizationHistoryAsync(
+            organizationId,
+            request,
+            action,
+            status,
+            result,
+            reason,
+            cancellationToken);
         var items = paged.Items.Select(l => l.ToHistoryResponse()).ToList();
         return Result.Success(new PagedResult<OrganizationHistoryResponse>(items, paged.Page, paged.PageSize, paged.TotalCount));
     }

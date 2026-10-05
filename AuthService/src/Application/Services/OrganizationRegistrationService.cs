@@ -170,6 +170,7 @@ public sealed class OrganizationRegistrationService(
             Action = "Organization_Register",
             Result = "Success",
             Reason = null,
+            Status = organization.Status,
             CorrelationId = correlationIdProvider.GetCorrelationId(),
             Timestamp = timeProvider.GetUtcNow()
         }, cancellationToken);
@@ -314,6 +315,7 @@ public sealed class OrganizationRegistrationService(
             Target = org.Id.ToString(),
             Action = resubmitted ? "Organization_Resubmit" : "Organization_ProfileUpdate",
             Result = "Success",
+            Status = org.Status,
             CorrelationId = correlationIdProvider.GetCorrelationId(),
             Timestamp = timeProvider.GetUtcNow()
         }, cancellationToken);
@@ -369,6 +371,7 @@ public sealed class OrganizationRegistrationService(
             Target = org.Id.ToString(),
             Action = "Organization_ReviewReminder",
             Result = "Success",
+            Status = org.Status,
             CorrelationId = correlationIdProvider.GetCorrelationId(),
             Timestamp = now
         }, cancellationToken);

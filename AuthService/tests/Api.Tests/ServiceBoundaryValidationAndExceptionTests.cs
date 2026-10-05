@@ -477,7 +477,7 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
             return Task.CompletedTask;
         }
 
-        public Task<PagedResult<AuditLog>> GetOrganizationHistoryAsync(Guid organizationId, PageRequest request, CancellationToken cancellationToken = default) =>
+        public Task<PagedResult<AuditLog>> GetOrganizationHistoryAsync(Guid organizationId, PageRequest request, string? action = null, Dprental.AuthService.Common.Enums.OrganizationStatus? status = null, string? result = null, string? reason = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(new PagedResult<AuditLog>([], 1, 20, 0));
     }
 

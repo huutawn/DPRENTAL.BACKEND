@@ -284,7 +284,7 @@ public sealed class UserServiceTests
         Assert.Equal("tan.len@example.com", profile.Email);
         Assert.Equal("Huynh Tan Len", profile.FullName);
         Assert.Equal(createdAt, profile.CreatedAt);
-        Assert.Equal(["Admin"], profile.Roles);
+        Assert.Equal(["Admin", SystemRoleCode.Owner], profile.Roles);
         Assert.Equal(["roles.assign", "roles.revoke"], profile.Permissions.Order(StringComparer.Ordinal));
         UserOrganizationResponse organization = Assert.Single(profile.Organizations);
         Assert.Equal(activeOrg.Id, organization.OrganizationId);
@@ -749,7 +749,7 @@ public sealed class UserServiceTests
     private sealed class FakeAuditLogRepo : IAuditLogRepository
     {
         public Task AddAsync(AuditLog auditLog, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<PagedResult<AuditLog>> GetOrganizationHistoryAsync(Guid organizationId, PageRequest request, CancellationToken cancellationToken = default) =>
+        public Task<PagedResult<AuditLog>> GetOrganizationHistoryAsync(Guid organizationId, PageRequest request, string? action = null, Dprental.AuthService.Common.Enums.OrganizationStatus? status = null, string? result = null, string? reason = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(new PagedResult<AuditLog>([], 1, 20, 0));
     }
     private sealed class FakeAuthSessionRepo : IAuthSessionRepository

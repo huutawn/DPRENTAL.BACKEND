@@ -38,8 +38,16 @@ public interface IOrganizationService
     /// <summary>Mở khóa organization dành cho Admin (POST /admin/organizations/{id}/activate).</summary>
     Task<Result> ActivateAsync(Guid actorUserId, Guid organizationId, CancellationToken cancellationToken = default);
 
-    /// <summary>Lấy nhật ký lịch sử của organization có phân trang dành cho Admin (GET /admin/organizations/{id}/history).</summary>
-    Task<Result<PagedResult<OrganizationHistoryResponse>>> GetHistoryAsync(Guid actorUserId, Guid organizationId, PageRequest request, CancellationToken cancellationToken = default);
+    /// <summary>Lấy nhật ký lịch sử của organization có phân trang và bộ lọc tìm kiếm dành cho Admin (GET /admin/organizations/{id}/history).</summary>
+    Task<Result<PagedResult<OrganizationHistoryResponse>>> GetHistoryAsync(
+        Guid actorUserId,
+        Guid organizationId,
+        PageRequest request,
+        string? action = null,
+        OrganizationStatus? status = null,
+        string? result = null,
+        string? reason = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>MVP: mỗi organization chỉ có Owner (người đăng ký), không có thành viên/lời mời.</summary>
     Task<Result<IReadOnlyList<MyOrganizationResponse>>> GetMyOrganizationsAsync(Guid userId, CancellationToken cancellationToken = default);
