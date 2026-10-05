@@ -37,6 +37,18 @@ public interface IInventoryAssetRepository : IRepo<InventoryAsset, Guid>
         DateOnly startDate,
         DateOnly endDate,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy snapshot hàng loạt tài sản cùng các khoảng chặn lịch (CalendarBlocks) và các lượt phân bổ ứng viên (Held/Allocated)
+    /// giao với cửa sổ ngày [startDate, endDate] phục vụ kiểm tra khả dụng (Availability) và tính toán busy ranges.
+    /// Tải assets, overlapping CalendarBlocks và Held/Allocated candidates bằng filtered EF split query (tối đa 3 SELECTs)
+    /// trong transaction đọc RepeatableRead.
+    /// </summary>
+    Task<IReadOnlyList<InventoryAsset>> GetAvailabilitySnapshotsAsync(
+        IReadOnlyList<Guid> assetIds,
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default);
     /// <summary>
     /// Đưa tài sản mới vào hàng đợi lưu trữ.
     /// </summary>

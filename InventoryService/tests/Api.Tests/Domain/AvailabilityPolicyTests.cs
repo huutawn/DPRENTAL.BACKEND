@@ -23,6 +23,7 @@ public sealed class AvailabilityPolicyTests
             _assetId,
             _ownerUserId,
             _equipmentTypeId,
+            Guid.NewGuid(),
             "Sony FX3",
             1,
             "{\"serial\":\"123\"}",

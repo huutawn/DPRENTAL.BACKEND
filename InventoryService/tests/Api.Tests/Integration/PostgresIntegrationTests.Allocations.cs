@@ -27,7 +27,7 @@ public sealed partial class PostgresIntegrationTests
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
         setupContext.Assets.Add(
-            InventoryAsset.Create(assetId, ownerId, Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value);
+            InventoryAsset.Create(assetId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value);
         await setupContext.SaveChangesAsync();
 
         const string sourceSystem = "rental_service";
@@ -79,7 +79,7 @@ public sealed partial class PostgresIntegrationTests
 
         Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        setupContext.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value);
+        setupContext.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value);
 
         var period = new RentalPeriod(new DateOnly(2026, 11, 20), new DateOnly(2026, 11, 25));
         var alloc = AssetAllocation.CreateManual(Guid.NewGuid(), assetId, period, now).Value;
@@ -118,7 +118,7 @@ public sealed partial class PostgresIntegrationTests
         await using var db = await CreateMigratedDbContextAsync();
         var assetId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
+        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
         db.Assets.Add(asset);
 
         // 1. Expired hold

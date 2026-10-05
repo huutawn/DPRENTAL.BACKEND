@@ -11,6 +11,10 @@ namespace Dprental.InventoryService.Application.DTOs.Assets;
 public sealed class PatchInventoryAssetRequest
 {
     [JsonIgnore]
+    public bool IsBrandIdSpecified { get; set; }
+    public Guid? BrandId { get; set; }
+
+    [JsonIgnore]
     public bool IsModelSpecified { get; set; }
     public string? Model { get; set; }
 
@@ -36,6 +40,7 @@ public sealed class PatchInventoryAssetRequest
 
     [JsonIgnore]
     public bool IsEmpty =>
+        !IsBrandIdSpecified &&
         !IsModelSpecified &&
         !IsSerialNumberSpecified &&
         !IsManufactureYearSpecified &&

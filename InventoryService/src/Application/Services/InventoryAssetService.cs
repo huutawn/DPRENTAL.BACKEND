@@ -108,25 +108,6 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
         return Result.Success(new PagedResponse<InventoryAssetResponse>(responseList, page, pageSize, totalCount, totalPages));
     }
 
-    private async Task<Result> ValidateCatalogSpecificationAsync(
-        Guid equipmentTypeId,
-        int schemaVersion,
-        string specValues,
-        CancellationToken cancellationToken)
-    {
-        var specResult = await _catalogClient.ValidateSpecificationAsync(equipmentTypeId, schemaVersion, specValues, cancellationToken);
-        if (specResult.IsFailure)
-        {
-            return specResult.Error;
-        }
-
-        return specResult.Value.Status switch
-        {
-            CatalogSpecValidationStatus.Valid or CatalogSpecValidationStatus.NotSupported => Result.Success(),
-            CatalogSpecValidationStatus.Invalid => Error.Validation("INVALID_SPECIFICATION", specResult.Value.Message ?? "Thông số kỹ thuật không hợp lệ."),
-            _ => Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "Trạng thái thẩm tra spec không hợp lệ.")
-        };
-    }
 
     private static Result CheckAuthenticatedHuman(IInventoryCallerContext caller)
     {

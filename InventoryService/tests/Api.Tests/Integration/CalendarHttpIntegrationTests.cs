@@ -53,6 +53,7 @@ public sealed class CalendarHttpIntegrationTests : IClassFixture<PostgresFixture
             Guid.NewGuid(),
             ownerUserId,
             Guid.NewGuid(),
+            Guid.NewGuid(),
             "Sony FX3",
             1,
             "{}",

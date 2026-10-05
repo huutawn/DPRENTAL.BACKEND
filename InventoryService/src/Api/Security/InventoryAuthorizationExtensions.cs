@@ -31,9 +31,9 @@ public static class InventoryAuthorizationExtensions
                 policy.RequireAuthenticatedUser()
                       .AddRequirements(new CalendarReadRequirement()));
 
-            options.AddPolicy(InventoryPolicies.SanitizedAvailability, policy =>
+            options.AddPolicy(InventoryPolicies.AvailabilityRead, policy =>
                 policy.RequireAuthenticatedUser()
-                      .AddRequirements(new SanitizedAvailabilityRequirement()));
+                      .AddRequirements(new AvailabilityReadRequirement()));
 
             options.AddPolicy(InventoryPolicies.AllocationWrite, policy =>
                 policy.RequireAuthenticatedUser()

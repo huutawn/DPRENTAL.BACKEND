@@ -55,6 +55,7 @@ public sealed class AllocationHttpIntegrationTests : IClassFixture<PostgresFixtu
             Guid.NewGuid(),
             ownerUserId,
             Guid.NewGuid(),
+            Guid.NewGuid(),
             "Sony FX3",
             1,
             "{}",

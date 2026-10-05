@@ -6,7 +6,7 @@ namespace Dprental.InventoryService.Api.Security;
 
 public sealed class AssetManageRequirement : IAuthorizationRequirement { }
 public sealed class CalendarReadRequirement : IAuthorizationRequirement { }
-public sealed class SanitizedAvailabilityRequirement : IAuthorizationRequirement { }
+public sealed class AvailabilityReadRequirement : IAuthorizationRequirement { }
 public sealed class AllocationWriteRequirement : IAuthorizationRequirement { }
 public sealed class ManualAllocationRequirement : IAuthorizationRequirement { }
 
@@ -37,8 +37,8 @@ public sealed class InventoryAuthorizationHandler : IAuthorizationHandler
                     HandleCalendarRead(context, calReq);
                     break;
 
-                case SanitizedAvailabilityRequirement availReq:
-                    HandleSanitizedAvailability(context, availReq);
+                case AvailabilityReadRequirement availReq:
+                    HandleAvailabilityRead(context, availReq);
                     break;
 
                 case AllocationWriteRequirement allocReq:
@@ -80,9 +80,9 @@ public sealed class InventoryAuthorizationHandler : IAuthorizationHandler
         }
     }
 
-    private void HandleSanitizedAvailability(AuthorizationHandlerContext context, SanitizedAvailabilityRequirement req)
+    private void HandleAvailabilityRead(AuthorizationHandlerContext context, AvailabilityReadRequirement req)
     {
-        if (InventoryAccessEvaluator.CanReadSanitizedAvailability(_caller))
+        if (InventoryAccessEvaluator.CanReadAvailability(_caller))
         {
             context.Succeed(req);
         }

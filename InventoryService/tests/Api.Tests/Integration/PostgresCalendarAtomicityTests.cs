@@ -56,6 +56,7 @@ public sealed class PostgresCalendarAtomicityTests : IClassFixture<PostgresFixtu
             Guid.NewGuid(),
             ownerUserId,
             Guid.NewGuid(),
+            Guid.NewGuid(),
             "Sony FX3",
             1,
             "{}",

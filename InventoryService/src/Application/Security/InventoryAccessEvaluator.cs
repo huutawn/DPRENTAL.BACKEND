@@ -8,7 +8,7 @@ public static class InventoryAccessEvaluator
 {
     public const string PermissionAssetManage = "inventory.asset.manage";
     public const string ScopeAllocationWrite = "inventory.allocation.write";
-    public const string ScopeCalendarRead = "inventory.calendar.read";
+    public const string ScopeAvailabilityRead = "inventory.availability.read";
 
     /// <summary>
     /// Kiểm tra quyền quản lý tài sản (Asset management):
@@ -70,11 +70,12 @@ public static class InventoryAccessEvaluator
     }
 
     /// <summary>
-    /// Kiểm tra quyền xem lịch khả dụng đã làm sạch (Sanitized availability):
+    /// Kiểm tra quyền xem lịch khả dụng (Availability Read):
     /// - Bất kỳ Human đã xác thực (kể cả Admin).
-    /// - Service có scope inventory.calendar.read.
+    /// - Service có scope inventory.availability.read.
+    /// - inventory.calendar.read hoặc inventory.allocation.write riêng lẻ không cấp quyền.
     /// </summary>
-    public static bool CanReadSanitizedAvailability(IInventoryCallerContext caller)
+    public static bool CanReadAvailability(IInventoryCallerContext caller)
     {
         ArgumentNullException.ThrowIfNull(caller);
 
@@ -85,7 +86,7 @@ public static class InventoryAccessEvaluator
 
         if (caller.IsService)
         {
-            return caller.Scopes.Contains(ScopeCalendarRead);
+            return caller.Scopes.Contains(ScopeAvailabilityRead);
         }
 
         // Bất kỳ human nào đã xác thực

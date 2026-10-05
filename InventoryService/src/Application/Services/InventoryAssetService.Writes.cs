@@ -28,9 +28,15 @@ public sealed partial class InventoryAssetService
             return authResult.Error;
         }
 
+        // 2. Local validation
         if (request.EquipmentTypeId == Guid.Empty)
         {
             return Error.Validation("INVALID_EQUIPMENT_TYPE_ID", "Equipment Type ID không được rỗng.");
+        }
+
+        if (!request.BrandId.HasValue || request.BrandId.Value == Guid.Empty)
+        {
+            return Error.Validation("INVALID_BRAND_ID", "Brand ID không được để trống hoặc rỗng.");
         }
 
         if (request.SpecValues.ValueKind != JsonValueKind.Object)
@@ -41,7 +47,6 @@ public sealed partial class InventoryAssetService
         var specValuesJson = request.SpecValues.GetRawText();
         var now = _timeProvider.GetUtcNow();
 
-        // 2. Domain validation tập trung trước khi gọi downstream
         var validation = InventoryAsset.ValidateDetails(
             request.Model,
             request.SerialNumber,
@@ -58,20 +63,32 @@ public sealed partial class InventoryAssetService
 
         var (validModel, validSerial, validYear, validThumb, validSchema, validSpecs) = validation.Value;
 
-        // 3. Catalog lookup và spec validation
+        // 3. Published EquipmentType check
         var catLookup = await _catalogClient.GetPublishedEquipmentTypeAsync(request.EquipmentTypeId, cancellationToken);
         if (catLookup.IsFailure)
         {
             return catLookup.Error;
         }
 
-        var specResult = await ValidateCatalogSpecificationAsync(request.EquipmentTypeId, validSchema, validSpecs, cancellationToken);
+        // 4. Active Brand check
+        var brandLookup = await _catalogClient.GetBrandAsync(request.BrandId.Value, cancellationToken);
+        if (brandLookup.IsFailure)
+        {
+            return brandLookup.Error;
+        }
+
+        if (!string.Equals(brandLookup.Value.Status, "Active", StringComparison.OrdinalIgnoreCase))
+        {
+            return Error.Validation("Brand.Inactive", "Thương hiệu đang ở trạng thái không hoạt động.");
+        }
+
+        // 5. Catalog spec validation
+        var specResult = await _catalogClient.ValidateSpecificationAsync(request.EquipmentTypeId, validSchema, validSpecs, cancellationToken);
         if (specResult.IsFailure)
         {
             return specResult.Error;
         }
-
-        // 4. Chuẩn bị Thumbnail Media
+        // 6. Chuẩn bị Thumbnail Media
         if (validThumb.HasValue)
         {
             var mediaResult = await _mediaService.PreparePublicAsync(validThumb.Value, caller, cancellationToken);
@@ -81,12 +98,13 @@ public sealed partial class InventoryAssetService
             }
         }
 
-        // 5. Write transaction
+        // 7. Write transaction
         var assetId = Guid.NewGuid();
         var assetResult = InventoryAsset.Create(
             assetId,
             caller.UserId!.Value,
             request.EquipmentTypeId,
+            request.BrandId.Value,
             validModel,
             validSchema,
             validSpecs,
@@ -116,7 +134,7 @@ public sealed partial class InventoryAssetService
 
     /// <summary>
     /// Cập nhật thông tin chi tiết tài sản theo chuẩn PATCH presence tracking.
-    /// Thứ tự: auth/ownership -> merge & domain validation -> catalog validation -> media preparation -> write transaction.
+    /// Thứ tự: auth/ownership -> merge & domain validation -> validate Brand nếu gửi -> validate schema/spec nếu gửi một trong hai -> media preparation -> write transaction.
     /// </summary>
     public async Task<Result<InventoryAssetResponse>> PatchAssetAsync(
         Guid assetId,
@@ -154,6 +172,7 @@ public sealed partial class InventoryAssetService
         var now = _timeProvider.GetUtcNow();
 
         // 2. Merge target values từ request và snapshot
+        var targetBrandId = request.IsBrandIdSpecified ? request.BrandId : snapshot.BrandId;
         var targetModel = request.IsModelSpecified ? (request.Model ?? string.Empty) : snapshot.Model;
         var targetSerial = request.IsSerialNumberSpecified ? request.SerialNumber : snapshot.SerialNumber;
         var targetYear = request.IsManufactureYearSpecified ? request.ManufactureYear : snapshot.ManufactureYear;
@@ -164,6 +183,19 @@ public sealed partial class InventoryAssetService
             : snapshot.SpecValues;
 
         // 3. Domain validation tập trung trước downstream
+        if (snapshot.BrandId.HasValue && !targetBrandId.HasValue)
+        {
+            return Error.Validation("CANNOT_REMOVE_BRAND", "Không thể xóa Brand của tài sản đã có Brand.");
+        }
+
+        if (request.IsBrandIdSpecified)
+        {
+            if (!targetBrandId.HasValue || targetBrandId.Value == Guid.Empty)
+            {
+                return Error.Validation("INVALID_BRAND_ID", "Brand ID không được rỗng.");
+            }
+        }
+
         var validation = InventoryAsset.ValidateDetails(
             targetModel,
             targetSerial,
@@ -180,22 +212,36 @@ public sealed partial class InventoryAssetService
 
         var (validModel, validSerial, validYear, validThumbResult, validSchema, validSpecs) = validation.Value;
 
-        // 4. Catalog validation nếu schemaVersion hoặc specValues thay đổi
+        // 4. Validate Brand nếu gửi
+        if (request.IsBrandIdSpecified)
+        {
+            var brandResult = await _catalogClient.GetBrandAsync(targetBrandId!.Value, cancellationToken);
+            if (brandResult.IsFailure)
+            {
+                return brandResult.Error;
+            }
+
+            if (!string.Equals(brandResult.Value.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            {
+                return Error.Validation("Brand.Inactive", "Thương hiệu đang ở trạng thái không hoạt động.");
+            }
+        }
+
+        // 5. Validate schema/spec nếu gửi một trong hai
         if (request.IsSchemaVersionSpecified || request.IsSpecValuesSpecified)
         {
-            var specResult = await ValidateCatalogSpecificationAsync(
+            var specResult = await _catalogClient.ValidateSpecificationAsync(
                 snapshot.EquipmentTypeId,
                 validSchema,
                 validSpecs,
                 cancellationToken);
-
             if (specResult.IsFailure)
             {
                 return specResult.Error;
             }
         }
 
-        // 5. Media preparation nếu thumbnail thay đổi sang một GUID mới khác snapshot
+        // 6. Media preparation nếu thumbnail thay đổi sang một GUID mới khác snapshot
         if (request.IsThumbnailMediaIdSpecified && validThumbResult.HasValue && validThumbResult.Value != snapshot.ThumbnailMediaId)
         {
             var mediaResult = await _mediaService.PreparePublicAsync(validThumbResult.Value, caller, cancellationToken);
@@ -205,7 +251,7 @@ public sealed partial class InventoryAssetService
             }
         }
 
-        // 6. Write transaction: advisory lock, xmin check, persist
+        // 7. Write transaction: advisory lock, xmin check, persist
         var txResult = await _writeTransaction.ExecuteAsync(assetId, async (ctx, ct) =>
         {
             var asset = await ctx.Assets.GetByIdAsync(assetId, ct);
@@ -226,6 +272,7 @@ public sealed partial class InventoryAssetService
 
             var txNow = _timeProvider.GetUtcNow();
             var updateResult = asset.UpdateDetails(
+                targetBrandId,
                 validModel,
                 validSerial,
                 validYear,

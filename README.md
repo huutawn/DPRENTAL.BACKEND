@@ -28,7 +28,7 @@ scripts/             # Scripts hỗ trợ, Git hooks và migration preflight
 - **Human Admin (`r=adm`)**: Được phép đọc/sửa tài sản xuyên người dùng trong quản lý tài sản (`AssetManage`).
 - **Danh sách tài sản (`GET /api/v1/inventory/assets`)**: Luôn chỉ trả tài sản thuộc sở hữu của người dùng hiện tại (`JWT.sub`), kể cả khi caller là Admin.
 - **Chi tiết lịch (`CalendarRead` / DPR-149)**: Giữ nghiêm ngặt owner-only (`asset.OwnerUserId == JWT.sub`), Admin không được bypass.
-- **Service Principal**: Bắt buộc `u=svc`, `aud=inventory-api` và scope tương ứng trong claim `s` (`inventory.allocation.write`, `inventory.calendar.read`). Bị từ chối trên các API quản lý tài sản của cá nhân.
+- **Service Principal**: Bắt buộc `u=svc`, `aud=inventory-api` và scope tương ứng trong claim `s` (`inventory.allocation.write`, `inventory.availability.read`). Bị từ chối trên các API quản lý tài sản của cá nhân.
 - **Loại bỏ OrganizationId**: Tài sản không còn thuộc tính `organization_id`. Danh tính người sở hữu duy nhất được lấy từ JWT `sub`.
 
 ## Chạy hạ tầng cục bộ
@@ -68,28 +68,72 @@ dotnet test InventoryService.sln
 
 | Method | Endpoint | Mô tả |
 |---|---|---|
-| `POST` | `/api/v1/inventory/assets` | Tạo mới tài sản (201 Created + Location header). Owner lấy từ JWT sub. |
-| `GET` | `/api/v1/inventory/assets` | Danh sách tài sản phân trang của current user (`page` default 1, `pageSize` default 20, max 100). Chặn query khác. |
-| `GET` | `/api/v1/inventory/assets/{id}` | Chi tiết tài sản (200 OK). 404 nếu không tìm thấy, 403 nếu cross-user (Admin bypass allowed). |
-| `PATCH` | `/api/v1/inventory/assets/{id}` | Cập nhật thông tin chi tiết với presence tracking. Omitted giữ nguyên; explicit null clear serial/year/thumbnail. |
+| `POST` | `/api/v1/inventory/assets` | Tạo mới tài sản (201 Created + Location header). Bắt buộc `brandId`, `equipmentTypeId`, `model`, `schemaVersion`, `specValues`. Owner lấy từ JWT sub. |
+| `GET` | `/api/v1/inventory/assets` | Danh sách tài sản phân trang của current user (`page` default 1, `pageSize` default 20, max 100). Chặn query khác. Trả `brandId` (nullable). |
+| `GET` | `/api/v1/inventory/assets/{id}` | Chi tiết tài sản (200 OK). 404 nếu không tìm thấy, 403 nếu cross-user (Admin bypass allowed). Trả `brandId` (nullable). |
+| `PATCH` | `/api/v1/inventory/assets/{id}` | Cập nhật thông tin chi tiết với presence tracking cho `brandId`, `model`, `serialNumber`, `manufactureYear`, `thumbnailMediaId`, `schemaVersion`, `specValues`. Omitted giữ nguyên; explicit null cho serial/year/thumbnail; `brandId` từ chối null; domain ngăn xóa Brand đã có. |
 | `PATCH` | `/api/v1/inventory/assets/{id}/accepting-bookings` | Bật/tắt nhận lịch: `{ "acceptingBookings": bool, "reason": string? }`. Đổi cờ phát sự kiện availability qua Outbox. |
 
 ### Tích hợp Catalog & Media
 
-- **CatalogService**: Tra cứu Published equipment type qua `GET /api/v1/catalog/equipment-types/{id}`. Canonical specification validation trả về rõ ràng `NotSupported` theo quyết định MVP và được chấp nhận sau khi kiểm tra cấu trúc JSON object tại Inventory.
+- **CatalogService**:
+  - **Tra cứu Equipment Type**: `GET /api/v1/catalog/equipment-types/{id}` kiểm tra trạng thái `Published`.
+  - **Tra cứu Brand chuẩn**: `GET /api/v1/catalog/brands/{id}` trả `200 { id, code, name, status }` (`Active/Inactive`). Brand không tồn tại trả `404` với mã `Brand.NotFound`. Brand chỉ cần Active trên toàn Catalog; chưa thêm quan hệ Brand–EquipmentType.
+  - **Thẩm tra Specification**: `POST /api/v1/catalog/equipment-types/{id}/validate-specification` với body `{ schemaVersion, specValues }` (spec là JSON object). Hợp lệ trả `204 NoContent`; không hợp lệ trả `400` ProblemDetails với các mã contract:
+    - `EquipmentType.InvalidAssetSchemaVersion`: Schema version chưa được publish cho loại thiết bị này (không tái sử dụng mã publish `EquipmentType.InvalidSchemaVersion` đang trả `409`).
+    - `EquipmentType.SpecRequired`: Thiếu trường bắt buộc trong specification.
+    - `EquipmentType.SpecDatatype`: Sai kiểu dữ liệu trường specification.
+    - `EquipmentType.SpecRange`: Giá trị trường specification vượt ngoài khoảng cho phép.
+    - `EquipmentType.SpecEnum`: Giá trị trường specification không thuộc danh sách enum cho phép.
+  - **Chính sách ánh xạ lỗi**:
+    - Lỗi nghiệp vụ thuộc contract (`Brand.NotFound`, `Brand.Inactive`, các mã `EquipmentType.Spec*` và `InvalidAssetSchemaVersion`) được Inventory chuyển thành HTTP `400 BadRequest`, giữ nguyên `title` và `detail`.
+    - Lỗi mạng, timeout, response hỏng (malformed JSON/empty), status/mã lỗi lạ, upstream `401/403/5xx` hoặc endpoint chưa được triển khai (404/501) được ánh xạ thành HTTP `503 Service Unavailable`.
+    - Không bypass qua nhánh `NotSupported`.
+
 - **MediaService**: Tái sử dụng `PreparePublicAsync` khi tạo hoặc cập nhật thumbnail thành GUID mới. Clear thumbnail (`null`) không gọi MediaService.
+
+### Write Flows & Invariants
+
+- **Create Asset**:
+  `Auth/Permission` → `Local validation` (từ chối missing/null/empty GUID `brandId`, kiểm tra format spec) → `Published EquipmentType` → `Active Brand` → `Catalog spec validation` → `Media preparation` → `Write transaction` (persist DB).
+  Validation thất bại dừng trước Media và ghi DB.
+- **PATCH Asset**:
+  `Auth/Ownership` → `Merge snapshot` → `Local domain validation` (từ chối null/empty `brandId`, ngăn xóa Brand đã có) → `Validate Brand nếu gửi` → `Validate schema/spec nếu gửi một trong hai` → `Media preparation nếu thumbnail đổi` → `Write transaction` (advisory lock, ownership recheck, xmin check).
+  - Schema-only PATCH: validate với spec hiện tại của snapshot.
+  - Spec-only PATCH: validate với version hiện tại của snapshot.
+  - Model-only PATCH: không gọi downstream Catalog.
+  - Asset cũ có `brand_id = null` giữ nguyên null khi PATCH không gửi `brandId`.
+  - EquipmentTypeId bất biến.
+
+### Giai đoạn Nullable, Migration & Rollout Runbook
+
+- **Forward Migration (`20261005050000_AddAssetBrandId`)**:
+  - Thêm cột `brand_id uuid NULL`, không default.
+  - Thêm constraint `ck_assets_brand_id CHECK (brand_id IS NULL OR brand_id <> '00000000-0000-0000-0000-000000000000'::uuid)`.
+  - `Down()` bị chặn bằng `NotSupportedException`; cấm rollback phá hủy schema Brand đã ghi.
+  - Không tạo foreign key sang cơ sở dữ liệu của CatalogService.
+  - Không thay đổi schema/spec, Calendar, Hold, Allocation hoặc Availability của Asset cũ.
+- **Audit Query (Kiểm tra số Asset thiếu Brand)**:
+  ```sql
+  SELECT
+      COUNT(*) AS total_assets,
+      COUNT(brand_id) AS assets_with_brand,
+      COUNT(CASE WHEN brand_id IS NULL THEN 1 END) AS missing_brand_count,
+      COUNT(CASE WHEN brand_id = '00000000-0000-0000-0000-000000000000'::uuid THEN 1 END) AS invalid_empty_brand_count
+  FROM inventory.assets;
+  ```
+- **Quy trình Cutover & Rollback**:
+  1. Triển khai và kiểm thử Catalog contract trước (Brand GET và EquipmentType specification validation endpoint).
+  2. Áp dụng migration `20261005050000_AddAssetBrandId` lên PostgreSQL.
+  3. Drain toàn bộ Inventory writer cũ trước khi mở ghi bằng binary mới.
+  4. **Quy tắc Rollback**: Tuyệt đối không phục hồi binary còn bypass `NotSupported`. Nếu chưa có binary tương thích để rollback, dừng ghi Asset trong lúc khắc phục sự cố; giữ nguyên cột `brand_id` và dữ liệu đã ghi.
+  5. **Backfill**: Thực hiện qua API PATCH với đầy đủ authorization và Catalog validation. Inventory team sở hữu giai đoạn nullable.
+  6. **Điều kiện kết thúc nullable**: `missing_brand_count = 0` (không còn Asset thiếu Brand) và không còn writer cũ. Migration `NOT NULL` thuộc đợt tiếp theo, phải kiểm thử từ chối dữ liệu chưa backfill và thành công sau backfill.
+  7. Kiểm thử với Catalog thật là điều kiện cutover tiên quyết; test server không được coi là bằng chứng Catalog đã hỗ trợ contract.
 
 ### Kafka Event Key & Cutover Rollout
 
 - Sự kiện `InventoryAssetAvailabilityChanged` phát lên topic `inventory.asset.events.v1` với Kafka partition key là **Aggregate ID** (`assetId`), payload `{ "assetId": Guid, "changedAt": DateTimeOffset }`.
-- **Quy trình Cutover**:
-  1. Dừng traffic ghi và drain publisher Outbox hiện có.
-  2. **Bắt buộc**: Consumer phải xử lý hết backlog sự kiện cũ trước khi hệ thống mới phát sự kiện với partition key mới (`assetId` thay vì `orgId:assetId`), vì Kafka không bảo đảm thứ tự giữa hai partition keys khác nhau.
-  3. Chạy preflight script `scripts/complete-asset-management-preflight.sql` và nạp dữ liệu staging vào `inventory.asset_model_backfill`.
-  4. Áp dụng migration `20261002030000_CompleteInventoryAssetManagement` (tự động rollback nếu backfill thiếu hoặc vi phạm year tương lai).
-  5. Cấu hình `CatalogService__BaseUrl` và khởi động binary mới.
-
-
 ## Quản lý giữ chỗ và phân bổ tài sản (Hold & Allocation Core - DPR-151)
 
 ### APIs
@@ -117,6 +161,23 @@ dotnet test InventoryService.sln
   4. Domain kiểm tra replay trước state/expiry: nếu `operationKey` đã được sử dụng thành công cho Allocate trước đó, trả về thành công (200 OK) mà không ghi thêm transition.
   5. Nếu key mới trên hold đã hết hạn hoặc trạng thái không phải Held (`HOLD_EXPIRED`, `INVALID_STATUS_TRANSITION`, `ALLOCATION_IN_TERMINAL_STATE`): Application service trực tiếp chuyển lỗi thành `Error.Conflict` (HTTP 409).
   6. Lưu thay đổi qua EF tracking, không query overlap lại, không kiểm tra `AcceptingBookings`, không phát sự kiện Outbox (khoảng thời gian chiếm lịch không đổi).
+
+## Truy vấn tính khả dụng và Valkey Read Cache (Availability Queries - DPR-150)
+
+### APIs
+
+| Method | Endpoint | Yêu cầu quyền | Mô tả |
+|---|---|---|---|
+| `POST` | `/api/v1/inventory/availability/check` | `AvailabilityRead` (Human authenticated hoặc Service `s=inventory.availability.read`) | Kiểm tra tính khả dụng hàng loạt tài sản. Luôn đọc trực tiếp từ PostgreSQL trong transaction `RepeatableRead` (tối đa 3 SELECTs). Giới hạn tối đa 500 ID trước khi gộp trùng. |
+| `GET` | `/api/v1/inventory/assets/{assetId}/busy-ranges?from=&to=` | `AvailabilityRead` (Human authenticated hoặc Service `s=inventory.availability.read`) | Đọc danh sách các khoảng bận đã làm sạch của tài sản. Luôn kiểm tra existence và `AcceptingBookings` từ PostgreSQL. Dùng Valkey month cache với TTL động. |
+
+### Đặc tả Valkey Read Cache & Invalidation
+
+- **Pin Dependency**: `StackExchange.Redis 3.3.1` trong `Directory.Packages.props`. Adapter đặt tại `Api/Caching`, thực thi interface `IInventoryAvailabilityCache`. Domain không phụ thuộc Redis.
+- **Cấu hình**: `ConnectionStrings:Redis`, cấu hình cache tắt mặc định (`InventoryCache:Enabled = false`), TTL 60s, timeout 500ms. Mất kết nối không ngăn cản startup hay readiness.
+- **Key Schema**: `inventory:asset:{assetId}:busy:{yyyyMM}`, index `inventory:asset:{assetId}:months` (ZSET). Payload chỉ chứa `ranges` và `expiresAtUtc`.
+- **TTL động**: `min(normal TTL deadline, nearest active Hold expiry) - current time`.
+- **Outbox Invalidation**: `OutboxPublisherWorker` invalidate cache cho asset khi claim sự kiện `InventoryAssetAvailabilityChanged` trước khi phát Kafka, ngoài DB transaction. Lỗi cache không chặn Kafka publish.
 ## Hợp đồng dùng chung và Concurrency Protocol
 
 - `Common/Result.cs`: Result và Result<T> cho lỗi dự kiến.

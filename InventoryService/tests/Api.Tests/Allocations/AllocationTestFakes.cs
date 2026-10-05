@@ -49,6 +49,9 @@ internal sealed class FakeAssetRepository : IInventoryAssetRepository
     public Task<InventoryAsset?> GetCalendarSnapshotAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
         Task.FromResult(Store.TryGetValue(assetId, out var a) ? a : null);
 
+    public Task<IReadOnlyList<InventoryAsset>> GetAvailabilitySnapshotsAsync(IReadOnlyList<Guid> assetIds, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<InventoryAsset>>(Store.Values.Where(a => assetIds.Contains(a.Id)).ToList());
+
     public void Add(InventoryAsset asset) => Store[asset.Id] = asset;
     public void Update(InventoryAsset asset) => Store[asset.Id] = asset;
 }
@@ -199,7 +202,7 @@ internal static class AllocationTestHelper
     public static InventoryAsset CreateAsset(Guid assetId, bool acceptingBookings = true)
     {
         var asset = InventoryAsset.Create(
-            assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", AllocationTestConstants.FixedNow).Value;
+            assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", AllocationTestConstants.FixedNow).Value;
         if (!acceptingBookings)
         {
             asset.DisableBookings("Suspended", AllocationTestConstants.FixedNow);

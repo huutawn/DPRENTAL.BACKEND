@@ -8,7 +8,7 @@ namespace Dprental.InventoryService.Domain.Entities;
 
 /// <summary>
 /// Thực thể đại diện cho tài sản trong kho Inventory, thuộc sở hữu của một cá nhân (OwnerUserId)
-/// và liên kết với loại thiết bị từ Catalog (EquipmentTypeId).
+/// và liên kết với loại thiết bị từ Catalog (EquipmentTypeId) cùng thương hiệu chuẩn (BrandId).
 /// </summary>
 [Table("assets", Schema = "inventory")]
 public sealed class InventoryAsset
@@ -25,6 +25,12 @@ public sealed class InventoryAsset
     /// </summary>
     [Column("owner_user_id")]
     public Guid OwnerUserId { get; private set; }
+
+    /// <summary>
+    /// Định danh thương hiệu từ Catalog Service (BrandId, giai đoạn chuyển tiếp nullable).
+    /// </summary>
+    [Column("brand_id")]
+    public Guid? BrandId { get; private set; }
 
     /// <summary>
     /// Tên model hoặc định danh thương mại của thiết bị.
@@ -51,6 +57,7 @@ public sealed class InventoryAsset
     /// </summary>
     [Column("thumbnail_media_id")]
     public Guid? ThumbnailMediaId { get; private set; }
+
     /// <summary>
     /// Định danh loại thiết bị trong Catalog Service (EquipmentTypeId).
     /// </summary>
@@ -122,6 +129,7 @@ public sealed class InventoryAsset
         Guid id,
         Guid ownerUserId,
         Guid equipmentTypeId,
+        Guid? brandId,
         string model,
         string? serialNumber,
         int? manufactureYear,
@@ -135,6 +143,7 @@ public sealed class InventoryAsset
         Id = id;
         OwnerUserId = ownerUserId;
         EquipmentTypeId = equipmentTypeId;
+        BrandId = brandId;
         Model = model;
         SerialNumber = serialNumber;
         ManufactureYear = manufactureYear;
@@ -149,11 +158,14 @@ public sealed class InventoryAsset
 
     /// <summary>
     /// Tạo mới một thực thể InventoryAsset với đầy đủ kiểm tra tính hợp lệ dữ liệu.
+    /// Create nhận Brand bắt buộc, từ chối missing/null/GUID rỗng.
+    /// Không thêm overload hoặc default Brand để duy trì create không hợp lệ.
     /// </summary>
     public static Result<InventoryAsset> Create(
         Guid id,
         Guid ownerUserId,
         Guid equipmentTypeId,
+        Guid brandId,
         string model,
         int schemaVersion,
         string specValues,
@@ -177,6 +189,11 @@ public sealed class InventoryAsset
             return Error.Validation("INVALID_EQUIPMENT_TYPE_ID", "Equipment Type ID không được rỗng.");
         }
 
+        if (brandId == Guid.Empty)
+        {
+            return Error.Validation("INVALID_BRAND_ID", "Brand ID không được rỗng.");
+        }
+
         var validation = ValidateDetails(model, serialNumber, manufactureYear, thumbnailMediaId, schemaVersion, specValues, now);
         if (validation.IsFailure)
         {
@@ -189,6 +206,7 @@ public sealed class InventoryAsset
             id,
             ownerUserId,
             equipmentTypeId,
+            brandId,
             validModel,
             validSerial,
             validYear,
@@ -202,9 +220,10 @@ public sealed class InventoryAsset
 
     /// <summary>
     /// Cập nhật thông tin chi tiết và thông số kỹ thuật của tài sản.
-    /// Toàn bộ giá trị được kiểm tra trước khi thay đổi trạng thái thực thể.
+    /// Domain ngăn chuyển Brand đã có thành null.
     /// </summary>
     public Result UpdateDetails(
+        Guid? brandId,
         string model,
         string? serialNumber,
         int? manufactureYear,
@@ -213,6 +232,16 @@ public sealed class InventoryAsset
         string specValues,
         DateTimeOffset now)
     {
+        if (BrandId.HasValue && !brandId.HasValue)
+        {
+            return Error.Validation("CANNOT_REMOVE_BRAND", "Không thể xóa Brand của tài sản đã có Brand.");
+        }
+
+        if (brandId.HasValue && brandId.Value == Guid.Empty)
+        {
+            return Error.Validation("INVALID_BRAND_ID", "Brand ID không được rỗng.");
+        }
+
         var validation = ValidateDetails(model, serialNumber, manufactureYear, thumbnailMediaId, schemaVersion, specValues, now);
         if (validation.IsFailure)
         {
@@ -220,6 +249,11 @@ public sealed class InventoryAsset
         }
 
         var (validModel, validSerial, validYear, validThumb, validSchema, validSpecs) = validation.Value;
+
+        if (brandId.HasValue)
+        {
+            BrandId = brandId.Value;
+        }
 
         Model = validModel;
         SerialNumber = validSerial;
@@ -333,5 +367,4 @@ public sealed class InventoryAsset
         UpdatedAt = now;
         return Result.Success();
     }
-
 }

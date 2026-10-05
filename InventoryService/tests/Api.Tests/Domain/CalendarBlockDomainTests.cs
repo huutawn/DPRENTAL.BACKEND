@@ -24,6 +24,7 @@ public sealed class CalendarBlockDomainTests
             _assetId,
             _ownerUserId,
             _equipmentTypeId,
+            Guid.NewGuid(),
             "Sony FX3",
             1,
             "{}",

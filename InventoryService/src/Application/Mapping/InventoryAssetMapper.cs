@@ -19,6 +19,7 @@ public static class InventoryAssetMapper
             asset.Id,
             asset.OwnerUserId,
             asset.EquipmentTypeId,
+            asset.BrandId,
             asset.Model,
             asset.SerialNumber,
             asset.ManufactureYear,
