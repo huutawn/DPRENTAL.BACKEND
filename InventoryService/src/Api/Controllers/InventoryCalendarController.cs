@@ -13,7 +13,7 @@ namespace Dprental.InventoryService.Api.Controllers;
 /// </summary>
 [ApiController]
 [Authorize]
-[Route("api/v1/inventory/assets/{assetId:guid}")]
+[Route("assets/{assetId:guid}")]
 public sealed class InventoryCalendarController : ControllerBase
 {
     private readonly ICalendarService _calendarService;

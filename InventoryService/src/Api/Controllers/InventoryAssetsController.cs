@@ -15,7 +15,7 @@ namespace Dprental.InventoryService.Api.Controllers;
 /// </summary>
 [ApiController]
 [Authorize]
-[Route("api/v1/inventory/assets")]
+[Route("assets")]
 public sealed class InventoryAssetsController : ControllerBase
 {
 

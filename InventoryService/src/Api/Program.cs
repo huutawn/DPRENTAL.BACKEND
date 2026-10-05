@@ -1,5 +1,6 @@
 using System.IO;
 using Dprental.InventoryService.Api.Clients;
+using Dprental.InventoryService.Api.Routing;
 using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Api.Exceptions;
 using Dprental.InventoryService.Application.DependencyInjection;
@@ -64,7 +65,8 @@ builder.Services.AddHealthChecks()
         failureStatus: HealthStatus.Unhealthy,
         tags: ["ready"]);
 
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+    options.Conventions.Add(new ApiRoutePrefixConvention(ApiRoutes.Prefix)));
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = context =>
     context.ProblemDetails.Extensions["traceId"] = context.HttpContext.TraceIdentifier);

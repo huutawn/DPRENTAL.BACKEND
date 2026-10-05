@@ -15,7 +15,7 @@ namespace Dprental.InventoryService.Api.Controllers;
 /// </summary>
 [ApiController]
 [Authorize(Policy = InventoryPolicies.AllocationWrite)]
-[Route("api/v1/inventory")]
+[Route("")]
 public sealed class InventoryAllocationsController : ControllerBase
 {
     private readonly IInventoryAllocationService _allocationService;
