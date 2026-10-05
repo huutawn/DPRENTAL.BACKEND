@@ -89,6 +89,34 @@ dotnet test InventoryService.sln
   4. Áp dụng migration `20261002030000_CompleteInventoryAssetManagement` (tự động rollback nếu backfill thiếu hoặc vi phạm year tương lai).
   5. Cấu hình `CatalogService__BaseUrl` và khởi động binary mới.
 
+
+## Quản lý giữ chỗ và phân bổ tài sản (Hold & Allocation Core - DPR-151)
+
+### APIs
+
+| Method | Endpoint | Yêu cầu quyền | Mô tả |
+|---|---|---|---|
+| `POST` | `/api/v1/inventory/assets/{assetId}/holds` | Service (`s=inventory.allocation.write`) | Tạo giữ chỗ tạm thời (201 Created khi mới; 200 OK khi replay đúng payload). |
+| `POST` | `/api/v1/inventory/allocations/{allocationId}/allocate` | Service (`s=inventory.allocation.write`) | Chuyển đổi trạng thái Held sang Allocated (200 OK, trả allocation hiện tại). |
+
+### Transaction Flow và Idempotency
+
+- **Create Hold**:
+  1. Bắt buộc Service Principal với scope `inventory.allocation.write` (Human/Admin bị từ chối 403).
+  2. Validate cấu trúc request DTO (từ chối unknown properties, kiểm tra ngày bắt buộc, `startDate <= endDate`, chuẩn hóa `holdExpiresAt` về microsecond UTC bằng `BusinessDateTime.NormalizeUtc`).
+  3. Mở transaction độc lập dưới PostgreSQL `pg_advisory_xact_lock` trên mức tài sản (`assetId`).
+  4. Đọc lại asset và lấy clock từ `TimeProvider` sau khi có advisory lock (404 nếu asset không tồn tại).
+  5. Tra cứu business key `(sourceSystem, externalReference)`. Nếu đã tồn tại: gọi `ValidateExternalRetry` đối chiếu asset, period, canonical expiry và notes. Replay đúng payload trả allocation hiện tại (200 OK, status có thể là `Held` hoặc `Allocated`) mà không thêm Outbox; khác payload trả 409 Conflict (`EXTERNAL_REFERENCE_REUSED`).
+  6. Với key mới: validate nghiệp vụ qua `CreateHold`, tải candidate allocations và calendar blocks, kiểm tra availability. Nếu tài sản tắt bookings trả 400 (`ASSET_NOT_ACCEPTING_BOOKINGS`); nếu trùng lặp trả 409 Conflict (`ASSET_BLOCKED` hoặc `ASSET_UNAVAILABLE`) với thông báo đã làm sạch, không để lộ thông tin lịch của đối tượng khác.
+  7. Stage thực thể Hold và phát đúng một sự kiện `InventoryAssetAvailabilityChanged` vào Outbox cùng transaction atomically.
+  8. Nếu vi phạm unique constraint do hai asset dùng cùng business key: sau rollback, thực hiện đối chiếu lại dưới cùng asset lock. Row tìm được qua `ValidateExternalRetry`, khác payload trả 409; không tìm được giữ lỗi ban đầu.
+- **Held → Allocated**:
+  1. Bắt buộc Service Principal với scope `inventory.allocation.write` và validate `operationKey` không rỗng.
+  2. Tra cứu allocation để lấy `AssetId` (404 nếu không tìm thấy).
+  3. Acquire advisory lock trên `AssetId` qua `ExecuteAsync`, đọc lại allocation cùng transitions, lấy clock mới.
+  4. Domain kiểm tra replay trước state/expiry: nếu `operationKey` đã được sử dụng thành công cho Allocate trước đó, trả về thành công (200 OK) mà không ghi thêm transition.
+  5. Nếu key mới trên hold đã hết hạn hoặc trạng thái không phải Held (`HOLD_EXPIRED`, `INVALID_STATUS_TRANSITION`, `ALLOCATION_IN_TERMINAL_STATE`): Application service trực tiếp chuyển lỗi thành `Error.Conflict` (HTTP 409).
+  6. Lưu thay đổi qua EF tracking, không query overlap lại, không kiểm tra `AcceptingBookings`, không phát sự kiện Outbox (khoảng thời gian chiếm lịch không đổi).
 ## Hợp đồng dùng chung và Concurrency Protocol
 
 - `Common/Result.cs`: Result và Result<T> cho lỗi dự kiến.
