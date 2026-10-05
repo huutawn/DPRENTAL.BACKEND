@@ -27,7 +27,7 @@ public sealed partial class PostgresIntegrationTests
         Guid typeId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        setupContext.Assets.Add(InventoryAsset.Create(assetId, ownerId, orgId, typeId, 1, "{}", true, now).Value);
+        setupContext.Assets.Add(InventoryAsset.Create(assetId, ownerId, typeId, "Sony FX3", 1, "{}", now).Value);
         await setupContext.SaveChangesAsync();
 
         var sharedPeriod = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
@@ -89,7 +89,7 @@ public sealed partial class PostgresIntegrationTests
         Guid typeId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        setupContext.Assets.Add(InventoryAsset.Create(assetId, ownerId, orgId, typeId, 1, "{}", true, now).Value);
+        setupContext.Assets.Add(InventoryAsset.Create(assetId, ownerId, typeId, "Sony FX3", 1, "{}", now).Value);
         await setupContext.SaveChangesAsync();
 
         var periodA = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
@@ -144,7 +144,7 @@ public sealed partial class PostgresIntegrationTests
 
         Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        setupContext.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value);
+        setupContext.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value);
         await setupContext.SaveChangesAsync();
 
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
@@ -176,7 +176,7 @@ public sealed partial class PostgresIntegrationTests
 
         Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        setup.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value);
+        setup.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value);
         await setup.SaveChangesAsync();
 
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
@@ -205,7 +205,7 @@ public sealed partial class PostgresIntegrationTests
 
         Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        setup.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value);
+        setup.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value);
         await setup.SaveChangesAsync();
 
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
@@ -284,7 +284,7 @@ public sealed partial class PostgresIntegrationTests
 
         Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        setup.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "{}", true, now).Value);
+        setup.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value);
 
         var period = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
         var hold = AssetAllocation.CreateHold(

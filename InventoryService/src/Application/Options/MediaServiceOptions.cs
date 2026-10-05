@@ -1,7 +1,8 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-namespace Dprental.InventoryService.Application.Media;
+namespace Dprental.InventoryService.Application.Options;
 
 /// <summary>
 /// Cấu hình kết nối và bảo mật tới MediaService.
@@ -42,29 +43,17 @@ public sealed class MediaServiceOptions : IValidatableObject
             (internalUri.Scheme != Uri.UriSchemeHttp && internalUri.Scheme != Uri.UriSchemeHttps))
         {
             yield return new ValidationResult(
-                "InternalBaseUrl phải là absolute HTTP/HTTPS URL hợp lệ.",
+                "InternalBaseUrl của MediaService phải là URL tuyệt đối hợp lệ với scheme http hoặc https.",
                 [nameof(InternalBaseUrl)]);
         }
         else
         {
-            if (!string.IsNullOrEmpty(internalUri.UserInfo))
+            if (!string.IsNullOrEmpty(internalUri.UserInfo) ||
+                !string.IsNullOrEmpty(internalUri.Query) ||
+                !string.IsNullOrEmpty(internalUri.Fragment))
             {
                 yield return new ValidationResult(
-                    "InternalBaseUrl không được chứa thông tin xác thực (credentials).",
-                    [nameof(InternalBaseUrl)]);
-            }
-
-            if (!string.IsNullOrEmpty(internalUri.Query))
-            {
-                yield return new ValidationResult(
-                    "InternalBaseUrl không được chứa query string.",
-                    [nameof(InternalBaseUrl)]);
-            }
-
-            if (!string.IsNullOrEmpty(internalUri.Fragment))
-            {
-                yield return new ValidationResult(
-                    "InternalBaseUrl không được chứa fragment.",
+                    "InternalBaseUrl của MediaService không được chứa credentials, query string hoặc fragment.",
                     [nameof(InternalBaseUrl)]);
             }
         }
@@ -75,37 +64,25 @@ public sealed class MediaServiceOptions : IValidatableObject
             (publicUri.Scheme != Uri.UriSchemeHttp && publicUri.Scheme != Uri.UriSchemeHttps))
         {
             yield return new ValidationResult(
-                "PublicGatewayUrl phải là absolute HTTP/HTTPS URL hợp lệ.",
+                "PublicGatewayUrl của MediaService phải là URL tuyệt đối hợp lệ với scheme http hoặc https.",
                 [nameof(PublicGatewayUrl)]);
         }
         else
         {
-            if (!string.IsNullOrEmpty(publicUri.UserInfo))
+            if (!string.IsNullOrEmpty(publicUri.UserInfo) ||
+                !string.IsNullOrEmpty(publicUri.Query) ||
+                !string.IsNullOrEmpty(publicUri.Fragment))
             {
                 yield return new ValidationResult(
-                    "PublicGatewayUrl không được chứa thông tin xác thực (credentials).",
+                    "PublicGatewayUrl của MediaService không được chứa credentials, query string hoặc fragment.",
                     [nameof(PublicGatewayUrl)]);
             }
 
-            if (!string.IsNullOrEmpty(publicUri.Query))
+            var env = validationContext?.GetService<IHostEnvironment>();
+            if (env != null && env.IsProduction() && publicUri.Scheme != Uri.UriSchemeHttps)
             {
                 yield return new ValidationResult(
-                    "PublicGatewayUrl không được chứa query string.",
-                    [nameof(PublicGatewayUrl)]);
-            }
-
-            if (!string.IsNullOrEmpty(publicUri.Fragment))
-            {
-                yield return new ValidationResult(
-                    "PublicGatewayUrl không được chứa fragment.",
-                    [nameof(PublicGatewayUrl)]);
-            }
-
-            var env = validationContext?.GetService(typeof(IHostEnvironment)) as IHostEnvironment;
-            if (env is not null && env.IsProduction() && publicUri.Scheme != Uri.UriSchemeHttps)
-            {
-                yield return new ValidationResult(
-                    "PublicGatewayUrl phải sử dụng HTTPS trong môi trường Production.",
+                    "PublicGatewayUrl của MediaService trong môi trường Production bắt buộc phải sử dụng giao thức HTTPS.",
                     [nameof(PublicGatewayUrl)]);
             }
         }
@@ -113,17 +90,13 @@ public sealed class MediaServiceOptions : IValidatableObject
         // 3. Kiểm tra ApiKey
         if (string.IsNullOrWhiteSpace(ApiKey))
         {
-            yield return new ValidationResult(
-                "ApiKey của MediaService không được để trống.",
-                [nameof(ApiKey)]);
+            yield return new ValidationResult("ApiKey của MediaService không được để trống.", [nameof(ApiKey)]);
         }
 
         // 4. Kiểm tra TimeoutSeconds
         if (TimeoutSeconds <= 0)
         {
-            yield return new ValidationResult(
-                "TimeoutSeconds phải lớn hơn 0.",
-                [nameof(TimeoutSeconds)]);
+            yield return new ValidationResult("TimeoutSeconds phải lớn hơn 0.", [nameof(TimeoutSeconds)]);
         }
     }
 }

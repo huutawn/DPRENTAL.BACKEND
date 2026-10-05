@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Dprental.InventoryService.Application.Media;
+using Dprental.InventoryService.Application.Clients;
+using Dprental.InventoryService.Application.DTOs.Media;
+using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Common;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;

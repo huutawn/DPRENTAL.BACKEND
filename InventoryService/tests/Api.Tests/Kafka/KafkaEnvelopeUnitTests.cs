@@ -21,10 +21,10 @@ public sealed class KafkaEnvelopeUnitTests
 
         var root = MessageEnvelope.CreateRoot(
             messageType: "equipment.hold.created",
-            organizationId: orgId,
             aggregateId: aggregateId,
             payload: payload,
-            version: 1);
+            version: 1,
+            organizationId: orgId);
 
         var json = KafkaEnvelopeSerializer.Serialize(root);
 
@@ -50,7 +50,65 @@ public sealed class KafkaEnvelopeUnitTests
         Assert.Equal(root.Producer, deserialized.Producer);
         Assert.Equal(root.Payload.ItemName, deserialized.Payload.ItemName);
         Assert.Equal(root.Payload.Quantity, deserialized.Payload.Quantity);
-        Assert.Equal($"{orgId:D}:{aggregateId}", deserialized.KafkaKey);
+        Assert.Equal(aggregateId, deserialized.KafkaKey);
+    }
+
+    [Fact]
+    public void MessageEnvelope_WithoutOrganizationId_SerializesAndValidatesSuccessfully()
+    {
+        var aggregateId = "ASSET-999";
+        var payload = new TestPayload("Sony FX3", 1);
+
+        var root = MessageEnvelope.CreateRoot(
+            messageType: "InventoryAssetAvailabilityChanged",
+            aggregateId: aggregateId,
+            payload: payload);
+
+        var json = KafkaEnvelopeSerializer.Serialize(root);
+
+        Assert.DoesNotContain("\"organizationId\"", json, StringComparison.Ordinal);
+        Assert.Equal(aggregateId, root.KafkaKey);
+
+        var deserialized = KafkaEnvelopeSerializer.Deserialize<TestPayload>(json);
+        Assert.Null(deserialized.OrganizationId);
+        Assert.Equal(aggregateId, deserialized.KafkaKey);
+
+        var metadata = KafkaEnvelopeSerializer.ExtractMetadata(json);
+        Assert.True(metadata.IsValid);
+        Assert.Null(metadata.OrganizationId);
+    }
+
+    [Fact]
+    public void MessageEnvelope_LegacyJsonWithOrganizationId_CanBeDeserialized()
+    {
+        var orgId = Guid.NewGuid();
+        var msgId = Guid.NewGuid();
+        var aggregateId = "ASSET-OLD-1";
+        var legacyJson = $$"""
+        {
+            "messageId": "{{msgId}}",
+            "messageType": "InventoryAssetAvailabilityChanged",
+            "version": 1,
+            "correlationId": "{{msgId}}",
+            "causationId": null,
+            "aggregateId": "{{aggregateId}}",
+            "organizationId": "{{orgId}}",
+            "occurredAt": "2026-10-02T10:00:00Z",
+            "producer": "InventoryService",
+            "payload": {
+                "itemName": "Legacy FX3",
+                "quantity": 1
+            }
+        }
+        """;
+
+        var deserialized = KafkaEnvelopeSerializer.Deserialize<TestPayload>(legacyJson);
+        Assert.Equal(orgId, deserialized.OrganizationId);
+        Assert.Equal(aggregateId, deserialized.KafkaKey);
+
+        var metadata = KafkaEnvelopeSerializer.ExtractMetadata(legacyJson);
+        Assert.True(metadata.IsValid);
+        Assert.Equal(orgId, metadata.OrganizationId);
     }
 
     [Theory]
@@ -113,9 +171,9 @@ public sealed class KafkaEnvelopeUnitTests
         // 1. Root message
         var root = MessageEnvelope.CreateRoot(
             messageType: "reservation.requested",
-            organizationId: orgId,
             aggregateId: "RES-101",
-            payload: new TestPayload("Drone DJI Mini 4 Pro", 1));
+            payload: new TestPayload("Drone DJI Mini 4 Pro", 1),
+            organizationId: orgId);
 
         Assert.NotEqual(Guid.Empty, root.MessageId);
         Assert.Equal(root.MessageId.ToString("D"), root.CorrelationId);
@@ -125,9 +183,9 @@ public sealed class KafkaEnvelopeUnitTests
         var continuation = MessageEnvelope.CreateContinuation(
             incoming: root,
             messageType: "reservation.confirmed",
-            organizationId: orgId,
             aggregateId: "RES-101",
-            payload: new TestPayload("Drone DJI Mini 4 Pro", 1));
+            payload: new TestPayload("Drone DJI Mini 4 Pro", 1),
+            organizationId: orgId);
 
         Assert.NotEqual(root.MessageId, continuation.MessageId);
         Assert.Equal(root.CorrelationId, continuation.CorrelationId); // Giữ nguyên CorrelationId
@@ -146,9 +204,9 @@ public sealed class KafkaEnvelopeUnitTests
         var orgId = Guid.NewGuid();
         var root = MessageEnvelope.CreateRoot(
             messageType: "equipment.registered",
-            organizationId: orgId,
             aggregateId: "EQ-999",
-            payload: new { Lens = "Sony 24-70 GM II", Serial = "SN123456" });
+            payload: new { Lens = "Sony 24-70 GM II", Serial = "SN123456" },
+            organizationId: orgId);
 
         var json = KafkaEnvelopeSerializer.Serialize(root);
         var metadata = KafkaEnvelopeSerializer.ExtractMetadata(json);
@@ -292,5 +350,26 @@ public sealed class KafkaEnvelopeUnitTests
         {
             return Task.FromResult(Dprental.InventoryService.Common.Result.Success());
         }
+    }
+
+    [Fact]
+    public void LegacyOutboxMessage_RetainsExactKafkaKeyAndPayload_WithoutMutation()
+    {
+        var legacyOrgId = Guid.NewGuid();
+        var legacyAssetId = Guid.NewGuid();
+        var legacyKafkaKey = $"{legacyOrgId:D}:{legacyAssetId:D}";
+        var legacyPayload = "{\"legacyField\":123,\"organizationId\":\"" + legacyOrgId.ToString("D") + "\"}";
+        var now = DateTimeOffset.UtcNow;
+
+        var outbox = OutboxMessage.Create(
+            id: Guid.NewGuid(),
+            topic: "legacy.inventory.events",
+            kafkaKey: legacyKafkaKey,
+            payload: legacyPayload,
+            now: now);
+
+        Assert.Equal(legacyKafkaKey, outbox.KafkaKey);
+        Assert.Equal(legacyPayload, outbox.Payload);
+        Assert.Equal("legacy.inventory.events", outbox.Topic);
     }
 }

@@ -1,6 +1,10 @@
 using System.Globalization;
+using Dprental.InventoryService.Application.DTOs.Calendar;
+using Dprental.InventoryService.Application.DTOs.Allocations;
+using Dprental.InventoryService.Application.IServices;
+using Dprental.InventoryService.Application.Kafka.Outbox;
+using Dprental.InventoryService.Application.Services;
 using Dprental.InventoryService.Api.Tests.Security;
-using Dprental.InventoryService.Application.Calendar;
 using Dprental.InventoryService.Application.Kafka.Contracts;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
@@ -40,6 +44,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         services.AddInventoryServiceDomainRepositories(_connectionString);
         services.AddSingleton(timeProvider ?? TimeProvider.System);
         services.AddScoped<CalendarService>();
+        services.AddScoped<IInventoryAllocationService, InventoryAllocationService>();
         return services.BuildServiceProvider();
     }
 
@@ -57,12 +62,16 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         var asset = InventoryAsset.Create(
             Guid.NewGuid(),
             ownerUserId,
-            orgId,
             Guid.NewGuid(),
+            "Sony FX3",
             1,
             "{}",
-            acceptingBookings,
             InitialNow).Value;
+
+        if (!acceptingBookings)
+        {
+            asset.DisableBookings("Suspended for test", InitialNow);
+        }
 
         db.Assets.Add(asset);
         await db.SaveChangesAsync();
@@ -109,6 +118,18 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         public IReadOnlySet<string> Roles => new HashSet<string>();
         public Guid? OrganizationId => orgId;
     }
+    private sealed class TestServiceCallerContext : IInventoryCallerContext
+    {
+        public bool IsAuthenticated => true;
+        public bool IsService => true;
+        public bool IsAdmin => false;
+        public Guid? UserId => null;
+        public IReadOnlySet<string> Permissions => new HashSet<string>();
+        public IReadOnlySet<string> Scopes => new HashSet<string> { InventoryAccessEvaluator.ScopeAllocationWrite };
+        public IReadOnlySet<string> Roles => new HashSet<string>();
+        public Guid? OrganizationId => null;
+    }
+
 
     private sealed class InterceptingWriteTransaction(
         IInventoryWriteTransaction inner,
@@ -189,7 +210,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         Assert.Single(blocks);
         Assert.Equal(CalendarBlockReason.Maintenance, blocks[0].Reason);
 
-        var outbox = await db.OutboxMessages.Where(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")).ToListAsync();
+        var outbox = await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync();
         Assert.Single(outbox);
     }
 
@@ -204,7 +225,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         var orgId = Guid.NewGuid();
         var asset = await SeedAssetAsync(ownerId, orgId);
         var caller = new TestCallerContext(ownerId, orgId);
-
+        var serviceCaller = new TestServiceCallerContext();
         var period = new RentalPeriod(InitialToday.AddDays(15), InitialToday.AddDays(18));
 
         var blockEnteredLock = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -218,7 +239,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         });
 
         var calendarService = new CalendarService(sp1.GetRequiredService<IInventoryAssetRepository>(), interceptingTx1, clock);
-        var holdExecutor = sp2.GetRequiredService<IInventoryWriteTransaction>();
+        var allocationService = sp2.GetRequiredService<IInventoryAllocationService>();
 
         var blockReq = new CreateCalendarBlockRequest { StartDate = period.StartDate, EndDate = period.EndDate, Reason = CalendarBlockReason.Maintenance };
 
@@ -226,27 +247,9 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         var blockTask = Task.Run(() => calendarService.CreateCalendarBlockAsync(asset.Id, blockReq, caller));
         await blockEnteredLock.Task.WaitAsync(TimeSpan.FromSeconds(15));
 
-        // 2. Hold chạy sau
-        var holdTask = Task.Run(async () =>
-        {
-            return await holdExecutor.ExecuteAsync<AssetAllocation>(asset.Id, async (ctx, ct) =>
-            {
-                var trackedAsset = await ctx.Assets.GetByIdAsync(asset.Id, ct);
-                Assert.NotNull(trackedAsset);
-
-                var candidates = await ctx.Allocations.GetActiveCandidatesAsync(asset.Id, period.StartDate, period.EndDate, ct);
-                var blocks = await ctx.CalendarBlocks.GetOverlappingBlocksAsync(asset.Id, period.StartDate, period.EndDate, ct);
-
-                var avail = AssetAvailabilityPolicy.CheckAvailability(trackedAsset, period, clock.GetUtcNow(), candidates, blocks);
-                if (avail.IsFailure) return avail.Error;
-
-                var hold = AssetAllocation.CreateHold(
-                    Guid.NewGuid(), asset.Id, period, clock.GetUtcNow().AddHours(2), clock.GetUtcNow(),
-                    "rental", "EXT-BLOCK-FIRST").Value;
-                ctx.Allocations.Add(hold);
-                return Result.Success(hold);
-            });
-        });
+        // 2. Hold chạy sau qua application flow thực tế
+        var holdReq = new CreateHoldRequest("rental", "EXT-BLOCK-FIRST", period.StartDate, period.EndDate, clock.GetUtcNow().AddHours(2));
+        var holdTask = Task.Run(() => allocationService.CreateHoldAsync(asset.Id, holdReq, serviceCaller));
 
         // 3. Quan sát pg_locks chứng minh Hold bị chặn bởi lock của Block
         await WaitForAdvisoryLockWaiterAsync(asset.Id, TimeSpan.FromSeconds(15));
@@ -264,7 +267,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         await using var db = CreateDbContext();
         Assert.Single(await db.CalendarBlocks.Where(b => b.AssetId == asset.Id).ToListAsync());
         Assert.Empty(await db.AssetAllocations.Where(a => a.AssetId == asset.Id).ToListAsync());
-        Assert.Single(await db.OutboxMessages.Where(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")).ToListAsync());
+        Assert.Single(await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync());
     }
 
     [Fact]
@@ -278,39 +281,24 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         var orgId = Guid.NewGuid();
         var asset = await SeedAssetAsync(ownerId, orgId);
         var caller = new TestCallerContext(ownerId, orgId);
-
+        var serviceCaller = new TestServiceCallerContext();
         var period = new RentalPeriod(InitialToday.AddDays(20), InitialToday.AddDays(24));
 
         var holdEnteredLock = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var allowHoldToProceed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        var holdExecutor = sp1.GetRequiredService<IInventoryWriteTransaction>();
+        var baseTx1 = sp1.GetRequiredService<IInventoryWriteTransaction>();
+        var interceptingTx1 = new InterceptingWriteTransaction(baseTx1, async (ctx, ct) =>
+        {
+            holdEnteredLock.SetResult(true);
+            await allowHoldToProceed.Task.WaitAsync(TimeSpan.FromSeconds(15), ct);
+        });
+        var allocationService1 = new InventoryAllocationService(sp1.GetRequiredService<IAssetAllocationRepository>(), interceptingTx1, clock);
         var calendarService = sp2.GetRequiredService<CalendarService>();
 
-        // 1. Hold chạy trước và lấy lock
-        var holdTask = Task.Run(async () =>
-        {
-            return await holdExecutor.ExecuteAsync<AssetAllocation>(asset.Id, async (ctx, ct) =>
-            {
-                var trackedAsset = await ctx.Assets.GetByIdAsync(asset.Id, ct);
-                Assert.NotNull(trackedAsset);
-
-                holdEnteredLock.SetResult(true);
-                await allowHoldToProceed.Task.WaitAsync(TimeSpan.FromSeconds(15), ct);
-
-                var candidates = await ctx.Allocations.GetActiveCandidatesAsync(asset.Id, period.StartDate, period.EndDate, ct);
-                var blocks = await ctx.CalendarBlocks.GetOverlappingBlocksAsync(asset.Id, period.StartDate, period.EndDate, ct);
-
-                var avail = AssetAvailabilityPolicy.CheckAvailability(trackedAsset, period, clock.GetUtcNow(), candidates, blocks);
-                if (avail.IsFailure) return avail.Error;
-
-                var hold = AssetAllocation.CreateHold(
-                    Guid.NewGuid(), asset.Id, period, clock.GetUtcNow().AddHours(2), clock.GetUtcNow(),
-                    "rental", "EXT-HOLD-FIRST").Value;
-                ctx.Allocations.Add(hold);
-                return Result.Success(hold);
-            });
-        });
+        // 1. Hold chạy trước và lấy lock qua application flow thực tế
+        var holdReq = new CreateHoldRequest("rental", "EXT-HOLD-FIRST", period.StartDate, period.EndDate, clock.GetUtcNow().AddHours(2));
+        var holdTask = Task.Run(() => allocationService1.CreateHoldAsync(asset.Id, holdReq, serviceCaller));
 
         await holdEnteredLock.Task.WaitAsync(TimeSpan.FromSeconds(15));
 
@@ -383,7 +371,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
 
         await using var db = CreateDbContext();
         Assert.Equal(2, await db.CalendarBlocks.CountAsync(b => b.AssetId == asset.Id));
-        Assert.Equal(2, await db.OutboxMessages.CountAsync(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")));
+        Assert.Equal(2, await db.OutboxMessages.CountAsync(m => m.KafkaKey == asset.Id.ToString("D")));
     }
 
     [Fact]
@@ -435,9 +423,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
                 ctx.CalendarBlocks.Add(block);
 
                 // Stage outbox
-                var payload = new InventoryAssetAvailabilityChangedPayload(asset.Id, InitialNow);
-                var envelope = MessageEnvelope.CreateRoot("InventoryAssetAvailabilityChanged", orgId, asset.Id.ToString("D"), payload);
-                var outboxMsg = OutboxMessage.Create(envelope.MessageId, KafkaTopics.InventoryAssetEventsV1, $"{orgId:D}:{asset.Id:D}", "{}", InitialNow);
+                var outboxMsg = InventoryAssetAvailabilityEvents.CreateAvailabilityChangedOutboxMessage(asset.Id, InitialNow);
                 ctx.StageOutbox(outboxMsg);
 
                 enteredLock.SetResult(true);
@@ -459,7 +445,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         await using (var db = CreateDbContext())
         {
             Assert.Empty(await db.CalendarBlocks.Where(b => b.AssetId == asset.Id).ToListAsync());
-            Assert.Empty(await db.OutboxMessages.Where(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")).ToListAsync());
+            Assert.Empty(await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync());
         }
 
         // Khẳng định 2: Transaction tiếp theo lấy được cùng lock ngay trong timeout
@@ -595,7 +581,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
 
         await using var dbFinal = CreateDbContext();
         Assert.Single(await dbFinal.CalendarBlocks.Where(b => b.AssetId == asset.Id).ToListAsync());
-        Assert.Single(await dbFinal.OutboxMessages.Where(m => EF.Functions.Like(m.KafkaKey, $"%:{asset.Id:D}")).ToListAsync());
+        Assert.Single(await dbFinal.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync());
     }
 
     [Fact]

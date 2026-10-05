@@ -1,5 +1,5 @@
 using System.ComponentModel.DataAnnotations;
-using Dprental.InventoryService.Application.Media;
+using Dprental.InventoryService.Application.Options;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Xunit;

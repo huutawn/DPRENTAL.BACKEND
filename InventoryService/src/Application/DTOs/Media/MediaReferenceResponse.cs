@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Dprental.InventoryService.Application.Media;
+namespace Dprental.InventoryService.Application.DTOs.Media;
 
 /// <summary>
 /// Đại diện cho tham chiếu media trả về phía client gồm ID và URL truy cập công khai ổn định.

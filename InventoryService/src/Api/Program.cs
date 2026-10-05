@@ -1,10 +1,12 @@
 using System.IO;
 using Dprental.InventoryService.Api.Clients;
+using Dprental.InventoryService.Api.Routing;
+using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Api.Exceptions;
+using Dprental.InventoryService.Application.DependencyInjection;
+using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Api.Security;
-using Dprental.InventoryService.Application.Calendar;
 using Dprental.InventoryService.Application.Kafka.DependencyInjection;
-using Dprental.InventoryService.Application.Media;
 using Dprental.InventoryService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -17,8 +19,8 @@ builder.Services.AddInventoryKafkaInfrastructure(builder.Configuration);
 // DPR-147: JWT Authentication & Authorization
 builder.Services.AddInventoryJwtAuthentication(builder.Configuration);
 builder.Services.AddInventoryAuthorization();
-// DPR-149: Calendar application service
-builder.Services.AddScoped<CalendarService>();
+// Clean Architecture: Application services (IInventoryAssetService, ICalendarService, IInventoryMediaService)
+builder.Services.AddInventoryApplication();
 
 // MediaService Integration: Options validation, typed HTTP client, and application service
 builder.Services.AddOptions<MediaServiceOptions>()
@@ -38,7 +40,24 @@ builder.Services.AddHttpClient<IMediaServiceClient, MediaServiceClient>((sp, cli
     AllowAutoRedirect = false
 });
 
-builder.Services.AddScoped<InventoryMediaService>();
+
+// CatalogService Integration: Options validation and typed HTTP client
+builder.Services.AddOptions<CatalogServiceOptions>()
+    .Bind(builder.Configuration.GetSection(CatalogServiceOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+builder.Services.AddHttpClient<ICatalogServiceClient, CatalogServiceClient>((sp, client) =>
+{
+    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<CatalogServiceOptions>>().Value;
+    client.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
+    client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+})
+.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    AllowAutoRedirect = false
+});
+
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<InventoryServiceDbContext>(
@@ -46,7 +65,8 @@ builder.Services.AddHealthChecks()
         failureStatus: HealthStatus.Unhealthy,
         tags: ["ready"]);
 
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+    options.Conventions.Add(new ApiRoutePrefixConvention(ApiRoutes.Prefix)));
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = context =>
     context.ProblemDetails.Extensions["traceId"] = context.HttpContext.TraceIdentifier);

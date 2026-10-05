@@ -17,7 +17,7 @@ Domain sở hữu entities, value objects, domain availability policy, repositor
 
 Hệ thống quản lý 6 bảng thực thể trong schema `inventory`:
 
-1. `InventoryAsset` (`inventory.assets`): Tài sản trong kho, thuộc sở hữu cá nhân (`OwnerUserId`), liên kết với loại thiết bị Catalog (`EquipmentTypeId`), quản lý phiên bản dynamic schema (`SchemaVersion`), thông số kỹ thuật (`SpecValues` lưu JSONB), và cờ nhận lịch (`AcceptingBookings`).
+1. `InventoryAsset` (`inventory.assets`): Tài sản trong kho, thuộc sở hữu cá nhân (`OwnerUserId`), liên kết với loại thiết bị Catalog (`EquipmentTypeId`), tên model (`Model`), số serial (`SerialNumber`), năm sản xuất (`ManufactureYear`), ảnh đại diện (`ThumbnailMediaId`), phiên bản dynamic schema (`SchemaVersion`), thông số kỹ thuật (`SpecValues` lưu JSONB), và cờ nhận lịch (`AcceptingBookings`). Thuộc tính `OrganizationId` đã được loại bỏ hoàn toàn khỏi entity và database schema.
 2. `AssetAllocation` (`inventory.asset_allocations`): Lượt phân bổ hoặc giữ chỗ lịch của tài sản, gồm nguồn (`SourceSystem`), mã tham chiếu (`ExternalReference`), khoảng thời gian (`RentalPeriod`), trạng thái (`AllocationStatus`: Held=1, Allocated=2, Cancelled=5, Released=6) và hạn giữ (`HoldExpiresAt`).
 3. `AllocationTransition` (`inventory.allocation_transitions`): Lịch sử chuyển đổi trạng thái của lượt phân bổ (append-only audit log), có thứ tự `Sequence` và `OperationKey` chống trùng lặp.
 4. `CalendarBlock` (`inventory.calendar_blocks`): Khoảng thời gian chặn lịch tài sản phục vụ bảo trì, kiểm định hoặc sử dụng nội bộ (tối đa chân trời 6 tháng).
@@ -51,7 +51,7 @@ Hệ thống áp dụng cơ chế: **PostgreSQL `READ COMMITTED` transaction + a
 1. Mở transaction độc lập trên context riêng của operation ở mức cô lập `READ COMMITTED`.
 2. Khóa độc quyền tài sản bằng số nguyên 64-bit bigint suy ra ổn định từ Asset ID (`AssetLockKey.FromAssetId`) thông qua `SELECT pg_advisory_xact_lock(@key)`. Không sử dụng `.NET GetHashCode()`.
 3. Sau khi có khóa, đọc lại toàn bộ dữ liệu tài sản, allocations, blocks và clock; không sử dụng aggregate đã load trước khi có khóa.
-4. Với Booking (Hold/Allocation): kiểm tra `AcceptingBookings`, xử lý các hold đã quá hạn, kiểm tra idempotency và kiểm tra trùng lặp lịch qua `AssetAvailabilityPolicy.CheckAvailability`.
+4. Với Booking (Hold): kiểm tra `AcceptingBookings`, kiểm tra idempotency qua `ValidateExternalRetry` và kiểm tra trùng lặp lịch qua `AssetAvailabilityPolicy.CheckAvailability` (các hold đã hết hạn thụ động không chiếm lịch theo `OccupiesCalendar`). Với Allocate: kiểm tra replay operation key, không kiểm tra `AcceptingBookings` hay overlap.
 5. Với Khóa vận hành (`CalendarBlock`): kiểm tra ownership của caller sau khóa, kiểm tra overlap qua `AssetAvailabilityPolicy.CheckCalendarOverlap` (không kiểm tra `AcceptingBookings`).
 6. Stage các thay đổi cho entity và outbox message (`InventoryAssetAvailabilityChanged` cho CalendarBlock) trong cùng một transaction.
 7. Gọi `SaveChangesAsync` đúng một lần và commit transaction; mọi lỗi hoặc cancellation sẽ tự động rollback toàn bộ và giải phóng khóa advisory lock.
@@ -74,6 +74,67 @@ Hệ thống áp dụng cơ chế: **PostgreSQL `READ COMMITTED` transaction + a
 - Commands: `inventory.allocation.commands.v1`
 - Events: `inventory.allocation.events.v1`, `inventory.asset.events.v1`
 - Mỗi topic đều có DLQ tương ứng `${topic}.dlq`.
+
+---
+
+## Quản lý tài sản (DPR-160: Inventory Asset Management MVP)
+
+### Hợp đồng API
+
+1. `POST /api/v1/inventory/assets`: Tạo mới tài sản (201 Created + Location header). Caller context bắt buộc authenticated human có permission `inventory.asset.manage` hoặc admin. Owner luôn lấy từ JWT `sub`. Chặn spoofed/unknown body fields (`ownerUserId`, `organizationId`).
+2. `GET /api/v1/inventory/assets`: Danh sách phân trang (`page`, `pageSize`). Chỉ chấp nhận hai query parameters này; query khác trả 400. Luôn lọc theo JWT `sub` của caller (kể cả admin).
+3. `GET /api/v1/inventory/assets/{id}`: Chi tiết tài sản. 404 nếu không tìm thấy, 403 nếu cross-user (Admin được bypass xem tài sản).
+4. `PATCH /api/v1/inventory/assets/{id}`: Cập nhật thông tin với presence tracking. Omitted giữ nguyên; explicit null cho phép clear `serialNumber`, `manufactureYear`, `thumbnailMediaId`. Null model/schema/spec hoặc empty patch trả 400. Chặn sửa identity, owner, hoặc booking flag.
+5. `PATCH /api/v1/inventory/assets/{id}/accepting-bookings`: Bật/tắt nhận lịch: `{ "acceptingBookings": bool, "reason": string? }`. Thuộc tính `acceptingBookings` bắt buộc ở JSON boundary. Bật lại tự động xóa reason. Chỉ khi đổi cờ mới phát sự kiện `InventoryAssetAvailabilityChanged` atomically qua Outbox.
+
+### Tích hợp Catalog & Media
+
+- **CatalogService**: Tra cứu Published equipment type qua typed client gọi `GET /api/v1/catalog/equipment-types/{id}`. Trạng thái Draft/Archived trả về 400; không tìm thấy trả về 400; lỗi mạng/timeout/ID mismatch/sai định dạng trả về 503. Canonical spec validation trả về rõ ràng `CatalogSpecValidationStatus.NotSupported` theo quyết định MVP và được chấp nhận ở application boundary sau khi đã kiểm tra cấu trúc JSON object hợp lệ.
+- **MediaService**: Tái sử dụng `PreparePublicAsync` kiểm tra trạng thái Ready và uploader khớp JWT sub trước khi chuyển Public. Không gọi Media khi clear thumbnail (`thumbnailMediaId: null`).
+
+### Kafka Event Key và Quy trình Cutover Rollout
+
+- **Kafka Key**: Sự kiện `InventoryAssetAvailabilityChanged` phát lên `inventory.asset.events.v1` sử dụng **Aggregate ID** (`assetId`) làm partition key thay vì `{orgId}:{assetId}`.
+- **Yêu cầu Cutover**:
+  1. Dừng writers gửi request ghi tới InventoryService.
+  2. Drain toàn bộ Outbox messages còn tồn đọng trong database.
+  3. **Quan trọng**: Consumer phía downstream phải xử lý hết toàn bộ backlog sự kiện cũ trước khi hệ thống mới bắt đầu phát sự kiện với partition key mới (`assetId`), do Kafka không bảo đảm thứ tự giữa hai partition keys khác nhau.
+  4. Chạy preflight script `scripts/complete-asset-management-preflight.sql` để tạo bảng staging `inventory.asset_model_backfill` và đối soát dữ liệu model (phải có model, năm sản xuất không vượt quá năm hiện tại tại Việt Nam).
+  5. Thực thi migration `20261002030000_CompleteInventoryAssetManagement` (tự động rollback toàn bộ nếu backfill thiếu hoặc không hợp lệ).
+  6. Thiết lập environment variable `CatalogService__BaseUrl` và khởi động binary mới. Rollback khẩn cấp thực hiện bằng cách restore database backup và binary cũ.
+
+## Quản lý giữ chỗ và phân bổ tài sản (DPR-151: Asset Hold & Allocation Core)
+
+### Hợp đồng API
+
+1. `POST /api/v1/inventory/assets/{assetId}/holds`:
+   - **Quyền**: Service Principal với scope `inventory.allocation.write`.
+   - **Request**: `sourceSystem`, `externalReference`, `startDate`, `endDate`, `holdExpiresAt`, optional `notes`.
+   - **Thành công**: `201 Created` khi tạo mới; `200 OK` khi idempotent replay đúng payload.
+   - **Response**: `AllocationResponse` (chứa các trường tối thiểu: `id`, `assetId`, `sourceSystem`, `externalReference`, `startDate`, `endDate`, `status` là chuỗi `"Held"` hoặc `"Allocated"`, `holdExpiresAt`, `notes`, `createdAt`, `updatedAt`; không để lộ navigation, owner, `xmin` hoặc transitions).
+2. `POST /api/v1/inventory/allocations/{allocationId}/allocate`:
+   - **Quyền**: Service Principal với scope `inventory.allocation.write`.
+   - **Request**: `operationKey` (bắt buộc).
+   - **Thành công**: `200 OK`, trả về `AllocationResponse` hiện tại (`status: "Allocated"`).
+
+### Quy trình giao dịch, đồng thời và tính lũy kế
+
+- **Create Hold**:
+  1. Validate cấu trúc request DTO (từ chối unknown properties qua `JsonUnmappedMemberHandling.Disallow`, kiểm tra trường bắt buộc, ngày mặc định, `startDate <= endDate`, chuẩn hóa `holdExpiresAt` về microsecond UTC bằng `BusinessDateTime.NormalizeUtc`).
+  2. Mở transaction độc lập dưới PostgreSQL `pg_advisory_xact_lock` trên `assetId`.
+  3. Đọc lại asset và lấy clock từ `TimeProvider` sau khi giành advisory lock (404 nếu asset không tồn tại).
+  4. Tra cứu business key `(sourceSystem, externalReference)`. Nếu đã tồn tại: gọi `ValidateExternalRetry` đối chiếu asset, period, canonical expiry và notes. Replay đúng payload trả allocation hiện tại trước mọi điều kiện tạo mới (kể cả hold đã hết hạn, đã Allocated hoặc bookings đã tắt; status là `Held` hoặc `Allocated`), không phát thêm Outbox; khác payload trả 409 Conflict (`EXTERNAL_REFERENCE_REUSED`).
+  5. Với key mới: validate bằng `CreateHold` với canonical expiry, tải candidate allocations và calendar blocks, gọi `CheckAvailability`. Nếu tài sản tắt bookings trả 400 (`ASSET_NOT_ACCEPTING_BOOKINGS`); nếu overlap trả 409 Conflict (`ASSET_BLOCKED` hoặc `ASSET_UNAVAILABLE`) với thông báo đã làm sạch tại application boundary (không tiết lộ chi tiết lịch hoặc metadata xung đột).
+  6. Stage thực thể `AssetAllocation` cùng transition `CreateHold`, stage sự kiện `InventoryAssetAvailabilityChanged` vào Outbox (Kafka key `assetId`), commit atomically.
+  7. Xử lý race condition: nếu vi phạm unique constraint do hai asset khác nhau dùng cùng business key, sau rollback thực hiện đúng một transaction đối chiếu lại dưới cùng asset lock. Row tìm được qua `ValidateExternalRetry`, khác payload trả 409; không tìm được giữ lỗi ban đầu, không retry insert.
+- **Held → Allocated**:
+  1. Sau authorization, đọc allocation để lấy riêng `AssetId` (404 nếu thiếu).
+  2. Acquire advisory lock trên `AssetId` qua `ExecuteAsync`, đọc lại allocation cùng transitions trong transaction, lấy clock mới.
+  3. Domain kiểm tra replay trước state/expiry: nếu `operationKey` đã được dùng thành công cho Allocate trước đó, trả về thành công mà không thêm transition.
+  4. Lưu thay đổi bằng aggregate đang được EF tracking; không gọi `Repository.Update` (tránh đánh dấu modified cho transitions cũ).
+  5. Không query overlap lại (Held còn hạn và Allocated chiếm cùng period).
+  6. Không kiểm tra `AcceptingBookings`. Key mới trên expired/Allocated/Released/Cancelled trả 409 Conflict (Application service trực tiếp chuyển lỗi `HOLD_EXPIRED` và `INVALID_STATUS_TRANSITION` thành `Error.Conflict`, giữ nguyên mã lỗi; controller chuyển trực tiếp qua `ToProblem(result.Error)`). Không phát sự kiện Outbox.
+
 
 ## Forward migration và maintenance cutover
 

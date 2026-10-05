@@ -52,17 +52,16 @@ public sealed class InventoryPolicyTests
         Assert.False(context.HasSucceeded);
     }
 
-    private InventoryAsset CreateTestAsset(InventorySecurityTestFactory factory, Guid ownerId, Guid? assetId = null)
+    private static InventoryAsset CreateTestAsset(InventorySecurityTestFactory factory, Guid ownerId, Guid? assetId = null)
     {
         var id = assetId ?? Guid.NewGuid();
         var asset = InventoryAsset.Create(
             id,
             ownerId,
-            _orgId,
             Guid.NewGuid(),
+            "Sony FX3",
             1,
             "{\"serial\":\"TEST\"}",
-            true,
             DateTimeOffset.UtcNow).Value;
         factory.TestAssets[id] = asset;
         return asset;

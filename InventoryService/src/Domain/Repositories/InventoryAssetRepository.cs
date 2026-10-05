@@ -38,10 +38,19 @@ public sealed class InventoryAssetRepository : IInventoryAssetRepository
             .AsNoTracking()
             .Where(a => a.OwnerUserId == ownerUserId)
             .OrderByDescending(a => a.CreatedAt)
+            .ThenByDescending(a => a.Id)
             .Skip(skip)
             .Take(take)
             .ToListAsync(cancellationToken);
     }
+    /// <inheritdoc />
+    public async Task<int> CountByOwnerAsync(Guid ownerUserId, CancellationToken cancellationToken = default)
+    {
+        return await _context.Assets
+            .Where(a => a.OwnerUserId == ownerUserId)
+            .CountAsync(cancellationToken);
+    }
+
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<InventoryAsset>> ListAllAsync(int skip, int take, CancellationToken cancellationToken = default)
@@ -49,6 +58,7 @@ public sealed class InventoryAssetRepository : IInventoryAssetRepository
         return await _context.Assets
             .AsNoTracking()
             .OrderByDescending(a => a.CreatedAt)
+            .ThenByDescending(a => a.Id)
             .Skip(skip)
             .Take(take)
             .ToListAsync(cancellationToken);
