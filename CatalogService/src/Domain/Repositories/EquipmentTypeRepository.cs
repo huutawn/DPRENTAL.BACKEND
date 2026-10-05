@@ -9,7 +9,7 @@ using Npgsql;
 
 namespace Dprental.CatalogService.Domain.Repositories;
 
-public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquipmentTypeRepository
+public partial class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquipmentTypeRepository
 {
     private static readonly Expression<Func<EquipmentType, EquipmentTypeDetailDto>> DetailSelector = e =>
         new EquipmentTypeDetailDto(
@@ -30,7 +30,19 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
                 .OrderBy(m => m.DisplayOrder)
                 .ThenBy(m => m.Id)
                 .Select(m => new EquipmentTypeMediaResponseDto(m.MediaId, null, m.DisplayOrder, m.IsThumbnail))
-                .ToList());
+                .ToList(),
+            e.CurrentSchemaVersion,
+            e.SpecSchemas
+                .Where(s => s.Version == e.CurrentSchemaVersion)
+                .Select(s => new EquipmentTypeSpecSchemaDto(
+                    s.Id,
+                    s.EquipmentTypeId,
+                    s.Version,
+                    s.PublishedAt == null ? "Draft" : "Published",
+                    s.CreatedAt,
+                    s.PublishedAt,
+                    s.Definition))
+                .FirstOrDefault());
 
     public async Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(
         GetEquipmentTypesRequest request,
@@ -85,7 +97,8 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
                     .ThenBy(m => m.Id)
                     .Select(m => (Guid?)m.MediaId)
                     .FirstOrDefault(),
-                null
+                null,
+                e.CurrentSchemaVersion
             ))
             .ToListAsync(cancellationToken);
 
@@ -109,6 +122,7 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
         return await dbContext.EquipmentTypes
             .Include(e => e.Categories)
             .Include(e => e.Media)
+            .Include(e => e.SpecSchemas)
             .FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
     }
 
@@ -134,6 +148,7 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
     public async Task<Result<EquipmentTypeDetailDto>> AddAsync(
         EquipmentType equipmentType,
         IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems,
+        EquipmentTypeSpecDefinition? initialSpecSchema = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(equipmentType);
@@ -152,6 +167,17 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
             dbContext.EquipmentTypes.Add(equipmentType);
             await dbContext.SaveChangesAsync(cancellationToken);
 
+            if (initialSpecSchema != null)
+            {
+                var schema = EquipmentTypeSpecSchema.CreateDraft(
+                    equipmentType.Id,
+                    1,
+                    initialSpecSchema,
+                    equipmentType.CreatedAt);
+                dbContext.EquipmentTypeSpecSchemas.Add(schema);
+                equipmentType.SpecSchemas.Add(schema);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
             if (mediaItems != null && mediaItems.Count > 0)
             {
                 foreach (var item in mediaItems)
@@ -305,6 +331,16 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
 
     private static EquipmentTypeDetailDto ToDetailDto(EquipmentType entity)
     {
+        EquipmentTypeSpecSchemaDto? currentSpecSchema = null;
+        if (entity.CurrentSchemaVersion.HasValue)
+        {
+            var currentSchemaEntity = entity.SpecSchemas.FirstOrDefault(s => s.Version == entity.CurrentSchemaVersion.Value);
+            if (currentSchemaEntity != null)
+            {
+                currentSpecSchema = ToSpecSchemaDto(currentSchemaEntity);
+            }
+        }
+
         return new EquipmentTypeDetailDto(
             entity.Id,
             entity.Code,
@@ -324,7 +360,9 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
                 .OrderBy(m => m.DisplayOrder)
                 .ThenBy(m => m.Id)
                 .Select(m => new EquipmentTypeMediaResponseDto(m.MediaId, null, m.DisplayOrder, m.IsThumbnail))
-                .ToList());
+                .ToList(),
+            entity.CurrentSchemaVersion,
+            currentSpecSchema);
     }
 
     private static bool IsDuplicateCodeViolation(DbUpdateException ex)

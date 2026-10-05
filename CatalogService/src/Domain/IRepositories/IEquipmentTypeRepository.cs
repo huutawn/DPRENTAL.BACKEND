@@ -32,10 +32,11 @@ public interface IEquipmentTypeRepository
         Guid? excludeId = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Thêm mới EquipmentType ở trạng thái Draft cùng media references trong cùng transaction.</summary>
+    /// <summary>Thêm mới EquipmentType ở trạng thái Draft cùng media và optional schema v1 trong cùng transaction.</summary>
     Task<Result<EquipmentTypeDetailDto>> AddAsync(
         EquipmentType equipmentType,
         IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems,
+        EquipmentTypeSpecDefinition? initialSpecSchema = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>Lưu các thay đổi canonical và danh sách media mong muốn của entity đã load.</summary>
@@ -47,5 +48,51 @@ public interface IEquipmentTypeRepository
     /// <summary>Lưu thay đổi trạng thái entity (Publish / Disable) và trả response từ aggregate in-memory.</summary>
     Task<Result<EquipmentTypeDetailDto>> SaveStateTransitionAsync(
         EquipmentType entity,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Lấy danh sách toàn bộ các phiên bản spec schema của equipment type, sắp xếp tăng dần theo Version.</summary>
+    Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(
+        Guid equipmentTypeId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Lấy chi tiết một phiên bản spec schema theo version.</summary>
+    Task<EquipmentTypeSpecSchemaDto?> GetSpecSchemaAsync(
+        Guid equipmentTypeId,
+        int version,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Lấy entity spec schema nháp hiện tại (PublishedAt == null) của equipment type nếu có.</summary>
+    Task<EquipmentTypeSpecSchema?> GetDraftSpecSchemaEntityAsync(
+        Guid equipmentTypeId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Lấy entity spec schema theo version để cập nhật hoặc publish.</summary>
+    Task<EquipmentTypeSpecSchema?> GetSpecSchemaEntityAsync(
+        Guid equipmentTypeId,
+        int version,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Lấy version lớn nhất hiện tại của equipment type.</summary>
+    Task<int> GetMaxSpecSchemaVersionAsync(
+        Guid equipmentTypeId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Tạo mới bản nháp schema kế tiếp, cập nhật UpdatedAt của parent trong cùng transaction.</summary>
+    Task<Result<EquipmentTypeSpecSchemaDto>> AddSpecSchemaDraftAsync(
+        EquipmentType parent,
+        EquipmentTypeSpecDefinition definition,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Cập nhật toàn bộ definition của bản nháp schema, cập nhật UpdatedAt của parent trong cùng transaction.</summary>
+    Task<Result<EquipmentTypeSpecSchemaDto>> UpdateSpecSchemaDraftAsync(
+        EquipmentType parent,
+        EquipmentTypeSpecSchema draftSchema,
+        EquipmentTypeSpecDefinition newDefinition,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Publish bản nháp schema và cập nhật CurrentSchemaVersion của parent trong cùng transaction.</summary>
+    Task<Result<EquipmentTypeSpecSchemaDto>> PublishSpecSchemaAsync(
+        EquipmentType parent,
+        EquipmentTypeSpecSchema draftSchema,
         CancellationToken cancellationToken = default);
 }

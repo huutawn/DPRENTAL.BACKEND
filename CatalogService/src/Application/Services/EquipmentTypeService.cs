@@ -18,6 +18,7 @@ public sealed partial class EquipmentTypeService(
     EquipmentTypeListQueryValidator listQueryValidator,
     CreateEquipmentTypeRequestValidator createValidator,
     UpdateEquipmentTypeRequestValidator updateValidator,
+    ICatalogCallerContext caller,
     ILogger<EquipmentTypeService> logger) : IEquipmentTypeService
 {
     public async Task<Result<PagedResult<EquipmentTypeListItemDto>>> SearchAsync(
@@ -90,6 +91,7 @@ public sealed partial class EquipmentTypeService(
         {
             return validationResult.Error;
         }
+
 
         var categories = new List<Category>();
         foreach (var categoryId in request.CategoryIds)
@@ -170,7 +172,7 @@ public sealed partial class EquipmentTypeService(
             Categories = categories
         };
 
-        var saveResult = await repository.AddAsync(equipmentType, request.Media, cancellationToken);
+        var saveResult = await repository.AddAsync(equipmentType, request.Media, request.SpecSchema, cancellationToken);
         if (saveResult.IsFailure)
         {
             return saveResult.Error;
@@ -196,6 +198,7 @@ public sealed partial class EquipmentTypeService(
         {
             return CatalogErrors.EquipmentType.NotFound;
         }
+
 
         if (request.IsCategoryIdsSpecified)
         {
@@ -321,6 +324,11 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.NotFound;
         }
 
+        if (!entity.CurrentSchemaVersion.HasValue)
+        {
+            return CatalogErrors.EquipmentType.SchemaRequired;
+        }
+
         if (entity.Status == EquipmentTypeStatus.Published)
         {
             return CatalogErrors.EquipmentType.InvalidStateTransition;
@@ -351,6 +359,7 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.NotFound;
         }
 
+
         if (entity.Status != EquipmentTypeStatus.Published)
         {
             return CatalogErrors.EquipmentType.InvalidStateTransition;
@@ -365,6 +374,7 @@ public sealed partial class EquipmentTypeService(
 
         return EnrichDetail(saveResult.Value);
     }
+
 
     private static PagedResult<EquipmentTypeListItemDto> EnrichList(PagedResult<EquipmentTypeListItemDto> paged)
     {

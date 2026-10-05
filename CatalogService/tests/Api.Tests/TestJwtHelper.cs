@@ -32,7 +32,9 @@ public static class TestJwtHelper
         RSA? signingRsa = null,
         DateTime? notBefore = null,
         DateTime? expires = null,
-        string? algorithm = SecurityAlgorithms.RsaSha256)
+        string? algorithm = SecurityAlgorithms.RsaSha256,
+        IEnumerable<Guid>? organizationIds = null,
+        IEnumerable<string>? permissions = null)
     {
         RSA rsa = signingRsa ?? RsaInstance;
         RsaSecurityKey securityKey = new(rsa)
@@ -61,6 +63,10 @@ public static class TestJwtHelper
         {
             claims.Add(new Claim("u", tokenUse));
         }
+
+        // AuthService phát mỗi organization/permission thành một claim riêng ("o", "p").
+        claims.AddRange((organizationIds ?? []).Select(id => new Claim("o", id.ToString("D"))));
+        claims.AddRange((permissions ?? []).Select(permission => new Claim("p", permission)));
 
         DateTime now = DateTime.UtcNow;
         JwtSecurityToken token = new(

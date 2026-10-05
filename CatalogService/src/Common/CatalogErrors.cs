@@ -63,6 +63,27 @@ public static class CatalogErrors
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidCategory, "CategoryId không hợp lệ.");
         public static readonly Error InvalidCategories =
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidCategories, "Danh sách categoryIds không hợp lệ.");
+
+        public static readonly Error SchemaNotFound =
+            Error.NotFound(CatalogErrorCode.EquipmentType.SchemaNotFound, "Specification schema không tồn tại.");
+
+        public static readonly Error DraftAlreadyExists =
+            Error.Conflict(CatalogErrorCode.EquipmentType.DraftAlreadyExists, "Loại thiết bị đã có một bản nháp schema. Vui lòng cập nhật hoặc publish bản nháp hiện tại.");
+
+        public static readonly Error SchemaAlreadyPublished =
+            Error.Conflict(CatalogErrorCode.EquipmentType.SchemaAlreadyPublished, "Schema đã được publish, không thể chỉnh sửa hoặc publish lại.");
+
+        public static readonly Error InvalidSchemaVersion =
+            Error.Conflict(CatalogErrorCode.EquipmentType.InvalidSchemaVersion, "Version publish phải lớn hơn version hiện tại.");
+
+        public static readonly Error SchemaRequired =
+            Error.Conflict(CatalogErrorCode.EquipmentType.SchemaRequired, "Loại thiết bị cần có specification schema đã publish trước khi publish.");
+
+        public static readonly Error InvalidSchemaDefinition =
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidSchemaDefinition, "Định nghĩa specification schema không hợp lệ.");
+
+        public static Error InvalidSchemaDefinitionWithDetail(string detail) =>
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidSchemaDefinition, detail);
     }
 
     public static class Category

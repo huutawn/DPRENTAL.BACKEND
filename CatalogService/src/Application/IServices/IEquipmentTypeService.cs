@@ -1,3 +1,4 @@
+using Dprental.CatalogService.Domain.Entities;
 using Dprental.CatalogService.Common;
 using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
 
@@ -30,5 +31,30 @@ public interface IEquipmentTypeService
 
     Task<Result<EquipmentTypeDetailDto>> DisableAsync(
         Guid id,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<IReadOnlyList<EquipmentTypeSpecSchemaDto>>> GetSpecSchemasAsync(
+        Guid equipmentTypeId,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<EquipmentTypeSpecSchemaDto>> GetSpecSchemaAsync(
+        Guid equipmentTypeId,
+        int version,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<EquipmentTypeSpecSchemaDto>> CreateSpecSchemaDraftAsync(
+        Guid equipmentTypeId,
+        EquipmentTypeSpecDefinition definition,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<EquipmentTypeSpecSchemaDto>> UpdateSpecSchemaDraftAsync(
+        Guid equipmentTypeId,
+        int version,
+        EquipmentTypeSpecDefinition definition,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<EquipmentTypeSpecSchemaDto>> PublishSpecSchemaAsync(
+        Guid equipmentTypeId,
+        int version,
         CancellationToken cancellationToken = default);
 }

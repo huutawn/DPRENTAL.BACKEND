@@ -40,8 +40,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
                 builder.UseSetting("ConnectionStrings:Postgres", PostgreSqlFixture.ConnectionString);
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
-                builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
-                builder.UseSetting("Auth:Jwt:Keys:0:PublicKeyPem", TestJwtHelper.PublicKeyPem);
+                builder.UseTestJwks();
                 builder.ConfigureTestServices(services =>
                 {
                     services.RemoveAll<IMediaServiceClient>();
@@ -64,7 +63,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
     public async Task InitializeAsync()
     {
         await dbContext.Database.MigrateAsync();
-        await dbContext.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"catalog\".\"EquipmentTypeCategories\", \"catalog\".\"EquipmentTypeMedia\", \"catalog\".\"EquipmentTypes\", \"catalog\".\"Categories\" CASCADE;");
+        await dbContext.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"catalog\".\"EquipmentTypeSpecSchemas\", \"catalog\".\"EquipmentTypeCategories\", \"catalog\".\"EquipmentTypeMedia\", \"catalog\".\"EquipmentTypes\", \"catalog\".\"Categories\" CASCADE;");
         TestMediaClient.Reset();
     }
 
@@ -86,6 +85,211 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
         sub: Guid.NewGuid().ToString(),
         sid: Guid.NewGuid().ToString(),
         role: "cus");
+
+    private static string OwnerToken(params Guid[] organizationIds) => TestJwtHelper.GenerateToken(
+        sub: Guid.NewGuid().ToString(),
+        sid: Guid.NewGuid().ToString(),
+        role: "own",
+        organizationIds: organizationIds);
+
+    private void Authenticate(string token) =>
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+    private async Task<Guid> SeedEquipmentTypeAsync(string code, bool withPublishedSchema = true)
+    {
+        Category category = await CreateCategoryAsync($"Category {code}", isActive: true);
+        EquipmentType equipmentType = new()
+        {
+            Id = Guid.NewGuid(),
+            Code = code,
+            Name = $"Thiết bị {code}",
+            CreatedAt = DateTime.UtcNow,
+            Categories = [category]
+        };
+        dbContext.EquipmentTypes.Add(equipmentType);
+        await dbContext.SaveChangesAsync();
+
+        if (withPublishedSchema)
+        {
+            var schema = EquipmentTypeSpecSchema.CreatePublished(
+                Guid.NewGuid(),
+                equipmentType.Id,
+                1,
+                new EquipmentTypeSpecDefinition { Fields = [] },
+                equipmentType.CreatedAt,
+                equipmentType.CreatedAt);
+            dbContext.EquipmentTypeSpecSchemas.Add(schema);
+            equipmentType.ApplyPublishedSchema(schema, equipmentType.CreatedAt);
+            await dbContext.SaveChangesAsync();
+        }
+        dbContext.ChangeTracker.Clear();
+        return equipmentType.Id;
+    }
+
+    private static StringContent PatchName(string name) =>
+        new(JsonSerializer.Serialize(new { name }), Encoding.UTF8, "application/json");
+
+    [Fact]
+    public async Task Admin_CanCreateEquipmentType_WithoutSchema()
+    {
+        Authenticate(AdminToken);
+        Category category = await CreateCategoryAsync("Admin Cat 1", isActive: true);
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types",
+            new CreateEquipmentTypeRequest { Code = "ADM-001", Name = "Loa sân khấu", CategoryIds = [category.Id] });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var detail = await response.Content.ReadFromJsonAsync<EquipmentTypeDetailDto>();
+        Assert.NotNull(detail);
+        Assert.Null(detail.CurrentSchemaVersion);
+        Assert.Null(detail.SpecSchema);
+    }
+
+    [Fact]
+    public async Task Admin_CanCreateEquipmentType_WithInitialSpecSchema()
+    {
+        Authenticate(AdminToken);
+        Category category = await CreateCategoryAsync("Admin Cat 2", isActive: true);
+
+        var specDef = new EquipmentTypeSpecDefinition
+        {
+            Fields = [new EquipmentTypeSpecField { Key = "power", Label = "Công suất", DataType = "number" }]
+        };
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types",
+            new CreateEquipmentTypeRequest("ADM-002", "Loa kéo", "Mô tả", [category.Id], [], specDef));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var detail = await response.Content.ReadFromJsonAsync<EquipmentTypeDetailDto>();
+        Assert.NotNull(detail);
+        Assert.Null(detail.CurrentSchemaVersion); // Draft schema does not set current version
+        Assert.Null(detail.SpecSchema); // Current is not published yet
+
+        // Admin can read draft schema v1 via spec schemas endpoint
+        var schemaRes = await client.GetAsync($"/api/v1/catalog/equipment-types/{detail.Id}/spec-schemas/1");
+        Assert.Equal(HttpStatusCode.OK, schemaRes.StatusCode);
+        var schema = await schemaRes.Content.ReadFromJsonAsync<EquipmentTypeSpecSchemaDto>();
+        Assert.NotNull(schema);
+        Assert.Equal(1, schema.Version);
+        Assert.Equal("Draft", schema.Status);
+    }
+
+    [Fact]
+    public async Task Request_WithOrganizationId_IsRejected_WithBadRequest400()
+    {
+        Authenticate(AdminToken);
+        Category category = await CreateCategoryAsync("Org Reject", isActive: true);
+
+        var payload = new
+        {
+            code = "ORG-REJ-01",
+            name = "Thiết bị test",
+            categoryIds = new[] { category.Id },
+            organizationId = Guid.NewGuid()
+        };
+
+        var response = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", payload);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("own")]
+    [InlineData("adp")]
+    [InlineData("mem")]
+    [InlineData("cus")]
+    public async Task WriteEndpoints_RejectNonAdminRoles_WithForbidden403(string role)
+    {
+        Guid id = await SeedEquipmentTypeAsync($"ROLE-{role}");
+        Authenticate(TestJwtHelper.GenerateToken(
+            sub: Guid.NewGuid().ToString(),
+            sid: Guid.NewGuid().ToString(),
+            role: role));
+
+        var createRes = await client.PostAsJsonAsync("/api/v1/catalog/equipment-types", new { code = $"NEW-{role}", name = "Loa" });
+        Assert.Equal(HttpStatusCode.Forbidden, createRes.StatusCode);
+
+        var patchRes = await client.PatchAsync($"/api/v1/catalog/equipment-types/{id}", PatchName("Sửa"));
+        Assert.Equal(HttpStatusCode.Forbidden, patchRes.StatusCode);
+
+        var pubRes = await client.PostAsync($"/api/v1/catalog/equipment-types/{id}/publish", null);
+        Assert.Equal(HttpStatusCode.Forbidden, pubRes.StatusCode);
+
+        var disRes = await client.PostAsync($"/api/v1/catalog/equipment-types/{id}/disable", null);
+        Assert.Equal(HttpStatusCode.Forbidden, disRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task ServiceToken_WriteEndpoints_ReturnsForbidden403()
+    {
+        Guid id = await SeedEquipmentTypeAsync("SVC-TEST");
+        Authenticate(TestJwtHelper.GenerateToken(
+            sub: Guid.NewGuid().ToString(),
+            sid: Guid.NewGuid().ToString(),
+            role: "adm",
+            tokenUse: "svc"));
+
+        var patchRes = await client.PatchAsync($"/api/v1/catalog/equipment-types/{id}", PatchName("Sửa"));
+        Assert.Equal(HttpStatusCode.Forbidden, patchRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task Publish_EquipmentType_WithoutSchema_ReturnsConflict409()
+    {
+        Guid id = await SeedEquipmentTypeAsync("NO-SCHEMA", withPublishedSchema: false);
+        Authenticate(AdminToken);
+
+        var publishRes = await client.PostAsync($"/api/v1/catalog/equipment-types/{id}/publish", null);
+        Assert.Equal(HttpStatusCode.Conflict, publishRes.StatusCode);
+        var problem = await publishRes.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(CatalogErrorCode.EquipmentType.SchemaRequired, problem.GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task Admin_CanManage_EquipmentType_Lifecycle()
+    {
+        Guid id = await SeedEquipmentTypeAsync("ADM-MGMT", withPublishedSchema: true);
+        Authenticate(AdminToken);
+
+        var patchRes = await client.PatchAsync($"/api/v1/catalog/equipment-types/{id}", PatchName("Admin sửa"));
+        Assert.Equal(HttpStatusCode.OK, patchRes.StatusCode);
+
+        var publishRes = await client.PostAsync($"/api/v1/catalog/equipment-types/{id}/publish", null);
+        Assert.Equal(HttpStatusCode.OK, publishRes.StatusCode);
+
+        var disableRes = await client.PostAsync($"/api/v1/catalog/equipment-types/{id}/disable", null);
+        Assert.Equal(HttpStatusCode.OK, disableRes.StatusCode);
+    }
+    [Theory]
+    [InlineData("mem", null)]
+    [InlineData("cus", null)]
+    [InlineData("own", "svc")]
+    public async Task EquipmentManage_RejectsNonOwnerRoles_AndServiceTokens(string role, string? tokenUse)
+    {
+        Guid id = await SeedEquipmentTypeAsync("ORG-ROLE");
+        Authenticate(TestJwtHelper.GenerateToken(
+            sub: Guid.NewGuid().ToString(),
+            sid: Guid.NewGuid().ToString(),
+            role: role,
+            tokenUse: tokenUse));
+
+        var patchRes = await client.PatchAsync($"/api/v1/catalog/equipment-types/{id}", PatchName("Không được"));
+
+        Assert.Equal(HttpStatusCode.Forbidden, patchRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task IdentityHeaders_DoNotGrantOrganizationAccess()
+    {
+        Guid id = await SeedEquipmentTypeAsync("ORG-HDR");
+        Authenticate(OwnerToken(Guid.NewGuid()));
+
+        using HttpRequestMessage request = new(HttpMethod.Post, $"/api/v1/catalog/equipment-types/{id}/publish");
+        request.Headers.Add("X-Organization-Id", Guid.NewGuid().ToString());
+        request.Headers.Add("X-Role", "adm");
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
 
     [Fact]
     public async Task WriteEndpoints_Anonymous_ReturnsUnauthorized401()
@@ -1069,7 +1273,8 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
         string code,
         string name,
         Guid categoryId,
-        string? description = null)
+        string? description = null,
+        bool withPublishedSchema = true)
     {
         var category = await dbContext.Categories.FindAsync(categoryId);
         EquipmentType eq = new()
@@ -1083,6 +1288,21 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
         };
         dbContext.EquipmentTypes.Add(eq);
         await dbContext.SaveChangesAsync();
+
+        if (withPublishedSchema)
+        {
+            var schema = EquipmentTypeSpecSchema.CreatePublished(
+                Guid.NewGuid(),
+                eq.Id,
+                1,
+                new EquipmentTypeSpecDefinition { Fields = [] },
+                eq.CreatedAt,
+                eq.CreatedAt);
+            dbContext.EquipmentTypeSpecSchemas.Add(schema);
+            eq.ApplyPublishedSchema(schema, eq.CreatedAt);
+            await dbContext.SaveChangesAsync();
+        }
+
         return eq;
     }
 

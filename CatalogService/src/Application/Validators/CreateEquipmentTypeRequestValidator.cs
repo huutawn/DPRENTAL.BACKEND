@@ -1,3 +1,4 @@
+using Dprental.CatalogService.Domain.Validation;
 using System.Diagnostics.CodeAnalysis;
 using Dprental.CatalogService.Common;
 using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
@@ -50,6 +51,14 @@ public sealed class CreateEquipmentTypeRequestValidator
         if (mediaResult.IsFailure)
         {
             return mediaResult;
+        }
+        if (request.SpecSchema != null)
+        {
+            var specResult = SpecSchemaDefinitionValidator.Validate(request.SpecSchema);
+            if (specResult.IsFailure)
+            {
+                return specResult;
+            }
         }
 
         return Result.Success();

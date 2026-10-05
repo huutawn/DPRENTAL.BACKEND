@@ -28,6 +28,12 @@ public static class CatalogErrorCode
         public const string InvalidDescription = "EquipmentType.InvalidDescription";
         public const string InvalidCategory = "EquipmentType.InvalidCategory";
         public const string InvalidCategories = "EquipmentType.InvalidCategories";
+        public const string SchemaNotFound = "EquipmentType.SchemaNotFound";
+        public const string DraftAlreadyExists = "EquipmentType.DraftAlreadyExists";
+        public const string SchemaAlreadyPublished = "EquipmentType.SchemaAlreadyPublished";
+        public const string InvalidSchemaVersion = "EquipmentType.InvalidSchemaVersion";
+        public const string SchemaRequired = "EquipmentType.SchemaRequired";
+        public const string InvalidSchemaDefinition = "EquipmentType.InvalidSchemaDefinition";
     }
 
     public static class Category

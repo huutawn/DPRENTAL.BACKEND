@@ -1,34 +1,51 @@
-using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Dprental.CatalogService.Api.Observability;
 using Dprental.CatalogService.Application.Options;
-using Dprental.CatalogService.Application.Security.Jwt;
 using Dprental.CatalogService.Common;
+using Dprental.CatalogService.Common.Security;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Dprental.CatalogService.Api.Security;
 
 /// <summary>Các extension đăng ký JWT Bearer authentication vào dependency injection container.</summary>
-internal static class JwtBearerServiceCollectionExtensions
+internal static partial class JwtBearerServiceCollectionExtensions
 {
+    /// <summary>Tên HttpClient dùng riêng để tải JWKS từ AuthService.</summary>
+    internal const string JwksHttpClientName = "auth-jwks";
+
     internal static IServiceCollection AddJwtBearerSecurity(this IServiceCollection services, IConfiguration configuration)
     {
-        JwtOptions jwtOptions = configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new();
-        RsaJwtKeyRing keyRing = new(jwtOptions);
+        services.AddSingleton<IValidateOptions<JwtOptions>, JwtOptionsValidator>();
+        services.AddOptions<JwtOptions>()
+            .Bind(configuration.GetSection(JwtOptions.SectionName))
+            .ValidateOnStart();
 
-        services.AddSingleton(keyRing);
-        services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
+        services.AddHttpClient(JwksHttpClientName, (serviceProvider, client) =>
+            client.Timeout = TimeSpan.FromSeconds(serviceProvider.GetRequiredService<IOptions<JwtOptions>>().Value.TimeoutSeconds));
+        services.AddSingleton(serviceProvider => new JwksConfigurationManager(
+            serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient(JwksHttpClientName),
+            serviceProvider.GetRequiredService<IOptions<JwtOptions>>().Value,
+            serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System));
 
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-            .AddJwtBearer(bearerOptions =>
+            .AddJwtBearer();
+
+        services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+            .Configure<JwksConfigurationManager, IOptions<JwtOptions>>((bearerOptions, jwksManager, jwtOptionsAccessor) =>
             {
+                JwtOptions jwtOptions = jwtOptionsAccessor.Value;
+
                 // Giữ tên claim nguyên bản (sub, r, sid, u)
                 bearerOptions.MapInboundClaims = false;
+                bearerOptions.ConfigurationManager = jwksManager;
                 bearerOptions.Events = new JwtBearerEvents
                 {
-                    OnMessageReceived = context =>
+                    OnMessageReceived = async context =>
                     {
                         // Ưu tiên Authorization header; fallback sang cookie accessToken
                         string? authHeader = context.Request.Headers.Authorization.FirstOrDefault();
@@ -36,24 +53,48 @@ internal static class JwtBearerServiceCollectionExtensions
                             authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
                         {
                             context.Token = authHeader["Bearer ".Length..].Trim();
-                            return Task.CompletedTask;
                         }
-
-                        if (string.IsNullOrWhiteSpace(context.Token) &&
+                        else if (string.IsNullOrWhiteSpace(context.Token) &&
                             context.Request.Cookies.TryGetValue("accessToken", out string? accessToken))
                         {
                             context.Token = accessToken;
                         }
 
-                        return Task.CompletedTask;
+                        if (string.IsNullOrWhiteSpace(context.Token))
+                        {
+                            return;
+                        }
+
+                        if (!new JsonWebTokenHandler().CanReadToken(context.Token))
+                        {
+                            context.Fail("Token không đúng định dạng JWT.");
+                            return;
+                        }
+
+                        try
+                        {
+                            // kid chưa xác thực chỉ dùng để chọn public key; claims vẫn chưa được tin cho tới khi verify chữ ký.
+                            string keyId = new JsonWebToken(context.Token).Kid;
+                            if (!await jwksManager.EnsureSigningKeyAsync(keyId, context.HttpContext.RequestAborted))
+                            {
+                                context.Fail("Token được ký bằng key không xác định.");
+                            }
+                        }
+                        catch (Exception ex) when (!context.HttpContext.RequestAborted.IsCancellationRequested)
+                        {
+                            // AuthService không truy cập được: từ chối token thay vì trả 500, endpoint anonymous vẫn phục vụ bình thường.
+                            LogJwksUnavailable(
+                                context.HttpContext.RequestServices.GetRequiredService<ILogger<JwksConfigurationManager>>(), ex);
+                            context.Fail("Signing key của AuthService hiện không khả dụng.");
+                        }
                     },
 
                     OnTokenValidated = context =>
                     {
                         // 1. Service token: u=svc, bỏ qua kiểm tra session, kiểm tra sub là GUID hợp lệ
-                        if (context.Principal?.HasClaim("u", "svc") == true)
+                        if (context.Principal?.HasClaim(CatalogClaims.Types.TokenUse, CatalogClaims.TokenUses.Service) == true)
                         {
-                            string? serviceSub = context.Principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+                            string? serviceSub = context.Principal.FindFirst(CatalogClaims.Types.Subject)?.Value;
                             if (string.IsNullOrWhiteSpace(serviceSub) || !Guid.TryParse(serviceSub, out Guid serviceId) || serviceId == Guid.Empty)
                             {
                                 context.Fail("Token thiếu hoặc chứa thông tin định danh service không hợp lệ.");
@@ -62,7 +103,7 @@ internal static class JwtBearerServiceCollectionExtensions
                         }
 
                         // 2. User token: kiểm tra sub là GUID hợp lệ
-                        string? userSub = context.Principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+                        string? userSub = context.Principal?.FindFirst(CatalogClaims.Types.Subject)?.Value;
                         if (string.IsNullOrWhiteSpace(userSub) || !Guid.TryParse(userSub, out Guid userId) || userId == Guid.Empty)
                         {
                             context.Fail("Token thiếu hoặc chứa thông tin định danh người dùng không hợp lệ.");
@@ -70,7 +111,7 @@ internal static class JwtBearerServiceCollectionExtensions
                         }
 
                         // 3. User token: cần sid là GUID hợp lệ
-                        string? sessionIdClaim = context.Principal?.FindFirst("sid")?.Value;
+                        string? sessionIdClaim = context.Principal?.FindFirst(CatalogClaims.Types.SessionId)?.Value;
                         if (string.IsNullOrWhiteSpace(sessionIdClaim) || !Guid.TryParse(sessionIdClaim, out Guid sessionId) || sessionId == Guid.Empty)
                         {
                             context.Fail("Token thiếu hoặc chứa thông tin phiên đăng nhập không hợp lệ.");
@@ -139,14 +180,15 @@ internal static class JwtBearerServiceCollectionExtensions
                     ValidateAudience = true,
                     ValidAudience = jwtOptions.Audience,
                     ValidateIssuerSigningKey = true,
-                    IssuerSigningKeyResolver = (_, _, keyId, _) => keyRing.ResolveVerificationKeys(keyId),
+                    // Chỉ dùng đúng key khớp kid trong JWKS, không thử lần lượt mọi key.
+                    TryAllIssuerSigningKeys = false,
                     ValidateLifetime = true,
                     RequireExpirationTime = true,
                     RequireSignedTokens = true,
                     ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
                     ClockSkew = TimeSpan.FromSeconds(30),
-                    NameClaimType = JwtRegisteredClaimNames.Sub,
-                    RoleClaimType = "r"
+                    NameClaimType = CatalogClaims.Types.Subject,
+                    RoleClaimType = CatalogClaims.Types.Role
                 };
             });
 
@@ -155,8 +197,22 @@ internal static class JwtBearerServiceCollectionExtensions
             options.FallbackPolicy = new AuthorizationPolicyBuilder()
                 .RequireAuthenticatedUser()
                 .Build();
+
+            options.AddPolicy(CatalogPolicies.CategoryManage, policy => policy
+                .RequireAssertion(context => IsUserInAnyRole(context.User, CatalogClaims.Roles.Admin)));
+            options.AddPolicy(CatalogPolicies.EquipmentManage, policy => policy
+                .RequireAssertion(context => IsUserInAnyRole(context.User, CatalogClaims.Roles.Admin)));
         });
 
         return services;
     }
+
+    /// <summary>Role chỉ có nghĩa với user token; service token (<c>u = svc</c>) không được quản lý catalog.</summary>
+    private static bool IsUserInAnyRole(ClaimsPrincipal user, params string[] roles) =>
+        user.Identity?.IsAuthenticated == true
+        && !user.HasClaim(CatalogClaims.Types.TokenUse, CatalogClaims.TokenUses.Service)
+        && roles.Any(user.IsInRole);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Không tải được JWKS từ AuthService để xác thực token.")]
+    private static partial void LogJwksUnavailable(ILogger logger, Exception exception);
 }

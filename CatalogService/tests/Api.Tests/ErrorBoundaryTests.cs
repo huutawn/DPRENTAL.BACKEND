@@ -115,8 +115,7 @@ public sealed class ErrorBoundaryTests
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
-                builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
-                builder.UseSetting("Auth:Jwt:Keys:0:PublicKeyPem", TestJwtHelper.PublicKeyPem);
+                builder.UseTestJwks();
 
                 builder.ConfigureTestServices(services =>
                 {
@@ -154,13 +153,37 @@ public sealed class ErrorBoundaryTests
         public Task<bool> ExistsByCodeAsync(string code, Guid? excludeId = null, CancellationToken cancellationToken = default) =>
             throw exception;
 
-        public Task<Result<EquipmentTypeDetailDto>> AddAsync(EquipmentType equipmentType, IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems, CancellationToken cancellationToken = default) =>
+        public Task<Result<EquipmentTypeDetailDto>> AddAsync(EquipmentType equipmentType, IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems, EquipmentTypeSpecDefinition? initialSpecSchema = null, CancellationToken cancellationToken = default) =>
             throw exception;
 
         public Task<Result<EquipmentTypeDetailDto>> SaveAsync(EquipmentType entity, IReadOnlyList<EquipmentTypeMediaItemDto?>? desiredMedia, CancellationToken cancellationToken = default) =>
             throw exception;
 
         public Task<Result<EquipmentTypeDetailDto>> SaveStateTransitionAsync(EquipmentType entity, CancellationToken cancellationToken = default) =>
+            throw exception;
+
+        public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+            throw exception;
+
+        public Task<EquipmentTypeSpecSchemaDto?> GetSpecSchemaAsync(Guid equipmentTypeId, int version, CancellationToken cancellationToken = default) =>
+            throw exception;
+
+        public Task<EquipmentTypeSpecSchema?> GetDraftSpecSchemaEntityAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+            throw exception;
+
+        public Task<EquipmentTypeSpecSchema?> GetSpecSchemaEntityAsync(Guid equipmentTypeId, int version, CancellationToken cancellationToken = default) =>
+            throw exception;
+
+        public Task<int> GetMaxSpecSchemaVersionAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+            throw exception;
+
+        public Task<Result<EquipmentTypeSpecSchemaDto>> AddSpecSchemaDraftAsync(EquipmentType parent, EquipmentTypeSpecDefinition definition, CancellationToken cancellationToken = default) =>
+            throw exception;
+
+        public Task<Result<EquipmentTypeSpecSchemaDto>> UpdateSpecSchemaDraftAsync(EquipmentType parent, EquipmentTypeSpecSchema draftSchema, EquipmentTypeSpecDefinition newDefinition, CancellationToken cancellationToken = default) =>
+            throw exception;
+
+        public Task<Result<EquipmentTypeSpecSchemaDto>> PublishSpecSchemaAsync(EquipmentType parent, EquipmentTypeSpecSchema draftSchema, CancellationToken cancellationToken = default) =>
             throw exception;
     }
 }

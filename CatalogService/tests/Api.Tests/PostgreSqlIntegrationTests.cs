@@ -93,23 +93,31 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
             Code = "MULTI-001",
             Name = "Multi 1",
             Categories = [cat1, cat2, cat3],
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
         };
-        eq1.Publish(DateTime.UtcNow);
-
         var eq2 = new EquipmentType
         {
             Id = Guid.NewGuid(),
             Code = "MULTI-002",
             Name = "Multi 2",
             Categories = [cat1, cat2],
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
         };
-        eq2.Publish(DateTime.UtcNow);
-
         dbContext.EquipmentTypes.AddRange(eq1, eq2);
         await dbContext.SaveChangesAsync();
 
+        var schema1 = EquipmentTypeSpecSchema.CreatePublished(
+            Guid.NewGuid(), eq1.Id, 1, new EquipmentTypeSpecDefinition { Fields = [] }, eq1.CreatedAt, eq1.CreatedAt);
+        var schema2 = EquipmentTypeSpecSchema.CreatePublished(
+            Guid.NewGuid(), eq2.Id, 1, new EquipmentTypeSpecDefinition { Fields = [] }, eq2.CreatedAt, eq2.CreatedAt);
+        dbContext.EquipmentTypeSpecSchemas.AddRange(schema1, schema2);
+        eq1.ApplyPublishedSchema(schema1, eq1.CreatedAt);
+        eq2.ApplyPublishedSchema(schema2, eq2.CreatedAt);
+        await dbContext.SaveChangesAsync();
+
+        eq1.Publish(DateTime.UtcNow);
+        eq2.Publish(DateTime.UtcNow);
+        await dbContext.SaveChangesAsync();
         // 1. Search Category 1 -> Phải trả về đúng 2 equipment, không trùng lặp row
         var result = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { CategoryId = cat1.Id, Page = 1, PageSize = 10 });
         Assert.Equal(2, result.TotalCount);
@@ -187,8 +195,6 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
             Categories = [cat],
             CreatedAt = sharedTime
         };
-        item1.Publish(sharedTime);
-
         var item2 = new EquipmentType
         {
             Id = id2,
@@ -197,9 +203,20 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
             Categories = [cat],
             CreatedAt = sharedTime
         };
-        item2.Publish(sharedTime);
-
         dbContext.EquipmentTypes.AddRange(item1, item2);
+        await dbContext.SaveChangesAsync();
+
+        var s1 = EquipmentTypeSpecSchema.CreatePublished(
+            Guid.NewGuid(), id1, 1, new EquipmentTypeSpecDefinition { Fields = [] }, sharedTime, sharedTime);
+        var s2 = EquipmentTypeSpecSchema.CreatePublished(
+            Guid.NewGuid(), id2, 1, new EquipmentTypeSpecDefinition { Fields = [] }, sharedTime, sharedTime);
+        dbContext.EquipmentTypeSpecSchemas.AddRange(s1, s2);
+        item1.ApplyPublishedSchema(s1, sharedTime);
+        item2.ApplyPublishedSchema(s2, sharedTime);
+        await dbContext.SaveChangesAsync();
+
+        item1.Publish(sharedTime);
+        item2.Publish(sharedTime);
         await dbContext.SaveChangesAsync();
 
         // Sort theo name_asc: Name giống nhau -> tie-breaker Id tăng dần
@@ -435,7 +452,11 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
     {
         Category cat = await CreateCategoryAsync("Race Lifecycle");
         var eq = await CreateEquipmentTypeAsync("RACE-LIFE-001", "Draft Eq", cat.Id, EquipmentTypeStatus.Draft);
-
+        var raceSchema = EquipmentTypeSpecSchema.CreatePublished(
+            Guid.NewGuid(), eq.Id, 1, new EquipmentTypeSpecDefinition { Fields = [] }, eq.CreatedAt, eq.CreatedAt);
+        dbContext.EquipmentTypeSpecSchemas.Add(raceSchema);
+        eq.ApplyPublishedSchema(raceSchema, eq.CreatedAt);
+        await dbContext.SaveChangesAsync();
         using var ctx1 = new CatalogServiceDbContext(CreateContextOptions());
         using var ctx2 = new CatalogServiceDbContext(CreateContextOptions());
 
@@ -590,20 +611,30 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
             CreatedAt = DateTime.UtcNow,
             Categories = category != null ? [category] : []
         };
-
-        DateTime now = DateTime.UtcNow;
-        if (status == EquipmentTypeStatus.Published)
-        {
-            eq.Publish(now);
-        }
-        else if (status == EquipmentTypeStatus.Disabled)
-        {
-            eq.Publish(now);
-            eq.Disable(now.AddSeconds(1));
-        }
-
         dbContext.EquipmentTypes.Add(eq);
         await dbContext.SaveChangesAsync();
+
+        if (status != EquipmentTypeStatus.Draft)
+        {
+            var schema = EquipmentTypeSpecSchema.CreatePublished(
+                Guid.NewGuid(), eq.Id, 1, new EquipmentTypeSpecDefinition { Fields = [] }, eq.CreatedAt, eq.CreatedAt);
+            dbContext.EquipmentTypeSpecSchemas.Add(schema);
+            eq.ApplyPublishedSchema(schema, eq.CreatedAt);
+            await dbContext.SaveChangesAsync();
+
+            DateTime now = DateTime.UtcNow;
+            if (status == EquipmentTypeStatus.Published)
+            {
+                eq.Publish(now);
+            }
+            else if (status == EquipmentTypeStatus.Disabled)
+            {
+                eq.Publish(now);
+                eq.Disable(now.AddSeconds(1));
+            }
+            await dbContext.SaveChangesAsync();
+        }
+
         return eq;
     }
 }

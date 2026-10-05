@@ -1,4 +1,5 @@
 using Dprental.CatalogService.Api.Filters;
+using Dprental.CatalogService.Api.Security;
 using Dprental.CatalogService.Application.IServices;
 using Dprental.CatalogService.Common;
 using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
@@ -11,8 +12,8 @@ namespace Dprental.CatalogService.Api.Controllers;
 [ApiController]
 [Route("equipment-types")]
 [Produces("application/json")]
-[Authorize(Roles = "adm")]
-public sealed class EquipmentTypesController(IEquipmentTypeService service) : ControllerBase
+[Authorize(Policy = CatalogPolicies.EquipmentManage)]
+public sealed partial class EquipmentTypesController(IEquipmentTypeService service, ICatalogCallerContext caller) : ControllerBase
 {
     private static readonly HashSet<string> AllowedQueryKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -118,8 +119,5 @@ public sealed class EquipmentTypesController(IEquipmentTypeService service) : Co
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
-    private string GetOperatorUserId() =>
-        User.FindFirst("sub")?.Value
-        ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-        ?? string.Empty;
+    private string GetOperatorUserId() => caller.UserId?.ToString() ?? string.Empty;
 }

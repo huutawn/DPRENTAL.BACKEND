@@ -8,6 +8,11 @@ public class EquipmentType
     /// <summary>Id do ứng dụng tự gán.</summary>
     public Guid Id { get; set; }
 
+    /// <summary>Phiên bản schema đặc tả kỹ thuật đang được áp dụng. Chỉ gán qua <see cref="ApplyPublishedSchema"/>.</summary>
+    public int? CurrentSchemaVersion { get; private set; }
+    /// <summary>Danh sách các phiên bản specification schema của equipment type.</summary>
+    public ICollection<EquipmentTypeSpecSchema> SpecSchemas { get; set; } = new List<EquipmentTypeSpecSchema>();
+
     /// <summary>Danh sách category mà equipment type này thuộc về.</summary>
     public ICollection<Category> Categories { get; set; } = new List<Category>();
     /// <summary>Mã thiết bị duy nhất trong toàn bộ Catalog.</summary>
@@ -37,6 +42,11 @@ public class EquipmentType
             throw new InvalidOperationException("EquipmentType đang ở trạng thái Published.");
         }
 
+        if (!CurrentSchemaVersion.HasValue)
+        {
+            throw new InvalidOperationException("EquipmentType cần có specification schema đã công khai trước khi publish.");
+        }
+
         utcNow = AsUtc(utcNow);
         Status = EquipmentTypeStatus.Published;
         PublishedAt = utcNow;
@@ -52,6 +62,38 @@ public class EquipmentType
         }
 
         Status = EquipmentTypeStatus.Disabled;
+        UpdatedAt = AsUtc(utcNow);
+    }
+    /// <summary>Cập nhật thời điểm sửa đổi của equipment type.</summary>
+    public void Touch(DateTime utcNow)
+    {
+        UpdatedAt = AsUtc(utcNow);
+    }
+
+    /// <summary>
+    /// Áp dụng phiên bản schema đã công khai cho equipment type.
+    /// Invariant: schema phải thuộc type này, đã Published và có version lớn hơn version hiện tại.
+    /// </summary>
+    public void ApplyPublishedSchema(EquipmentTypeSpecSchema schema, DateTime utcNow)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+
+        if (schema.EquipmentTypeId != Id)
+        {
+            throw new InvalidOperationException("Schema không thuộc loại thiết bị này.");
+        }
+
+        if (!schema.PublishedAt.HasValue)
+        {
+            throw new InvalidOperationException("Chỉ có thể áp dụng schema đã được công khai.");
+        }
+
+        if (CurrentSchemaVersion.HasValue && schema.Version <= CurrentSchemaVersion.Value)
+        {
+            throw new InvalidOperationException("Phiên bản schema mới phải lớn hơn phiên bản hiện tại.");
+        }
+
+        CurrentSchemaVersion = schema.Version;
         UpdatedAt = AsUtc(utcNow);
     }
 

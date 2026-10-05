@@ -10,7 +10,6 @@ using System.Text.Json;
 using Dprental.CatalogService.Api.Observability;
 using Dprental.CatalogService.Api.Security;
 using Dprental.CatalogService.Application.Options;
-using Dprental.CatalogService.Application.Security.Jwt;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -24,116 +23,64 @@ namespace Dprental.CatalogService.Api.Tests;
 public sealed class StartupAndConfigurationTests
 {
     [Fact]
-    public void Jwt_MissingIssuer_Throws()
+    public void Jwt_ValidOptions_Pass()
     {
-        JwtOptions options = new()
-        {
-            Issuer = "",
-            Audience = "dprental-clients",
-            Keys = [new JwtKeyOptions { KeyId = "k1", PublicKeyPem = TestJwtHelper.PublicKeyPem }]
-        };
-
-        Assert.Throws<ArgumentException>(() => new RsaJwtKeyRing(options));
+        Assert.True(new JwtOptionsValidator().Validate(null, ValidJwtOptions()).Succeeded);
     }
 
     [Fact]
-    public void Jwt_MissingAudience_Throws()
+    public void Jwt_MissingIssuer_Fails()
     {
-        JwtOptions options = new()
-        {
-            Issuer = "dprental-authservice",
-            Audience = "",
-            Keys = [new JwtKeyOptions { KeyId = "k1", PublicKeyPem = TestJwtHelper.PublicKeyPem }]
-        };
+        JwtOptions options = ValidJwtOptions();
+        options.Issuer = "";
 
-        Assert.Throws<ArgumentException>(() => new RsaJwtKeyRing(options));
+        Assert.True(new JwtOptionsValidator().Validate(null, options).Failed);
     }
 
     [Fact]
-    public void Jwt_EmptyKeysList_Throws()
+    public void Jwt_MissingAudience_Fails()
     {
-        JwtOptions options = new()
-        {
-            Issuer = "dprental-authservice",
-            Audience = "dprental-clients",
-            Keys = []
-        };
+        JwtOptions options = ValidJwtOptions();
+        options.Audience = "";
 
-        Assert.Throws<ArgumentException>(() => new RsaJwtKeyRing(options));
+        Assert.True(new JwtOptionsValidator().Validate(null, options).Failed);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("/.well-known/jwks.json")]
+    [InlineData("ftp://auth-service/.well-known/jwks.json")]
+    public void Jwt_InvalidJwksUri_Fails(string jwksUri)
+    {
+        JwtOptions options = ValidJwtOptions();
+        options.JwksUri = jwksUri;
+
+        Assert.True(new JwtOptionsValidator().Validate(null, options).Failed);
     }
 
     [Fact]
-    public void Jwt_MissingKeyId_Throws()
+    public void Jwt_MaxStaleShorterThanCacheDuration_Fails()
     {
-        JwtOptions options = new()
-        {
-            Issuer = "dprental-authservice",
-            Audience = "dprental-clients",
-            Keys = [new JwtKeyOptions { KeyId = "", PublicKeyPem = TestJwtHelper.PublicKeyPem }]
-        };
+        JwtOptions options = ValidJwtOptions();
+        options.CacheDurationMinutes = 10;
+        options.MaxStaleMinutes = 5;
 
-        Assert.Throws<ArgumentException>(() => new RsaJwtKeyRing(options));
+        Assert.True(new JwtOptionsValidator().Validate(null, options).Failed);
     }
 
     [Fact]
-    public void Jwt_DuplicateKeyId_Throws()
+    public void Jwt_MissingJwksUri_FailsStartup()
     {
-        JwtOptions options = new()
-        {
-            Issuer = "dprental-authservice",
-            Audience = "dprental-clients",
-            Keys =
-            [
-                new JwtKeyOptions { KeyId = "dup-key", PublicKeyPem = TestJwtHelper.PublicKeyPem },
-                new JwtKeyOptions { KeyId = "dup-key", PublicKeyPem = TestJwtHelper.PublicKeyPem }
-            ]
-        };
+        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
+                builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
+                builder.UseSetting("Auth:Jwt:JwksUri", "");
+            });
 
-        Assert.Throws<ArgumentException>(() => new RsaJwtKeyRing(options));
-    }
-
-    [Fact]
-    public void Jwt_InvalidPemContent_Throws()
-    {
-        JwtOptions options = new()
-        {
-            Issuer = "dprental-authservice",
-            Audience = "dprental-clients",
-            Keys = [new JwtKeyOptions { KeyId = "k1", PublicKeyPem = "-----BEGIN PUBLIC KEY-----\nNOT_VALID_BASE64\n-----END PUBLIC KEY-----" }]
-        };
-
-        Assert.Throws<ArgumentException>(() => new RsaJwtKeyRing(options));
-    }
-
-    [Fact]
-    public void Jwt_PrivateKeyPem_IsRejected()
-    {
-        JwtOptions options = new()
-        {
-            Issuer = "dprental-authservice",
-            Audience = "dprental-clients",
-            Keys = [new JwtKeyOptions { KeyId = "k1", PublicKeyPem = TestJwtHelper.PrivateKeyPem }]
-        };
-
-        var ex = Assert.Throws<ArgumentException>(() => new RsaJwtKeyRing(options));
-        Assert.Contains("must not contain a private key", ex.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Jwt_WeakRsaKey_LessThan2048Bits_Throws()
-    {
-        using RSA weakRsa = RSA.Create(1024);
-        string weakPem = weakRsa.ExportRSAPublicKeyPem();
-
-        JwtOptions options = new()
-        {
-            Issuer = "dprental-authservice",
-            Audience = "dprental-clients",
-            Keys = [new JwtKeyOptions { KeyId = "k-weak", PublicKeyPem = weakPem }]
-        };
-
-        var ex = Assert.Throws<ArgumentException>(() => new RsaJwtKeyRing(options));
-        Assert.Contains("2048 bits", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
     }
 
     [Theory]
@@ -176,8 +123,7 @@ public sealed class StartupAndConfigurationTests
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
-                builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
-                builder.UseSetting("Auth:Jwt:Keys:0:PublicKeyPem", TestJwtHelper.PublicKeyPem);
+                builder.UseTestJwks();
 
                 builder.UseSetting("Auth:ForwardedHeaders:Enabled", "true");
             });
@@ -194,8 +140,7 @@ public sealed class StartupAndConfigurationTests
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
-                builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
-                builder.UseSetting("Auth:Jwt:Keys:0:PublicKeyPem", TestJwtHelper.PublicKeyPem);
+                builder.UseTestJwks();
 
                 builder.UseSetting("Auth:ForwardedHeaders:Enabled", "true");
                 builder.UseSetting("Auth:ForwardedHeaders:KnownNetworks:0", "999.999.999.999/24");
@@ -214,8 +159,7 @@ public sealed class StartupAndConfigurationTests
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
-                builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
-                builder.UseSetting("Auth:Jwt:Keys:0:PublicKeyPem", TestJwtHelper.PublicKeyPem);
+                builder.UseTestJwks();
             });
 
         using HttpClient client = factory.CreateClient();
@@ -251,8 +195,7 @@ public sealed class StartupAndConfigurationTests
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
-                builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
-                builder.UseSetting("Auth:Jwt:Keys:0:PublicKeyPem", TestJwtHelper.PublicKeyPem);
+                builder.UseTestJwks();
             });
 
         using HttpClient client = factory.CreateClient();
@@ -275,12 +218,11 @@ public sealed class StartupAndConfigurationTests
             }
         }
 
-        Assert.Equal(6, equipmentTypeEndpointsCount);
+        Assert.Equal(11, equipmentTypeEndpointsCount);
         Assert.DoesNotContain("/api/v1/catalog/equipments", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("dailyPrice", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("regionId", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("specifications", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("organizationId", json, StringComparison.OrdinalIgnoreCase);
     }
     [Fact]
     public async Task SwaggerDocument_AssertsExactPatchContract_AndSerializesSuccessfully()
@@ -292,8 +234,7 @@ public sealed class StartupAndConfigurationTests
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
-                builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
-                builder.UseSetting("Auth:Jwt:Keys:0:PublicKeyPem", TestJwtHelper.PublicKeyPem);
+                builder.UseTestJwks();
                 builder.ConfigureTestServices(services =>
                 {
                     services.RemoveAll<IEquipmentTypeRepository>();
@@ -370,8 +311,7 @@ public sealed class StartupAndConfigurationTests
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
-                builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
-                builder.UseSetting("Auth:Jwt:Keys:0:PublicKeyPem", TestJwtHelper.PublicKeyPem);
+                builder.UseTestJwks();
             });
 
         using HttpClient client = factory.CreateClient();
@@ -396,8 +336,7 @@ public sealed class StartupAndConfigurationTests
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
                 builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
                 builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
-                builder.UseSetting("Auth:Jwt:Keys:0:KeyId", TestJwtHelper.DefaultKeyId);
-                builder.UseSetting("Auth:Jwt:Keys:0:PublicKeyPem", TestJwtHelper.PublicKeyPem);
+                builder.UseTestJwks();
             });
 
         using HttpClient client = factory.CreateClient();
@@ -409,6 +348,13 @@ public sealed class StartupAndConfigurationTests
 
         Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
     }
+    private static JwtOptions ValidJwtOptions() => new()
+    {
+        Issuer = "dprental-authservice",
+        Audience = "dprental-clients",
+        JwksUri = TestJwks.Uri
+    };
+
     private sealed class DummyEmptyEquipmentTypeRepository : IEquipmentTypeRepository
     {
         public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(GetEquipmentTypesRequest request, CancellationToken cancellationToken = default) =>
@@ -426,13 +372,37 @@ public sealed class StartupAndConfigurationTests
         public Task<bool> ExistsByCodeAsync(string code, Guid? excludeId = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(false);
 
-        public Task<Result<EquipmentTypeDetailDto>> AddAsync(EquipmentType equipmentType, IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems, CancellationToken cancellationToken = default) =>
+        public Task<Result<EquipmentTypeDetailDto>> AddAsync(EquipmentType equipmentType, IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems, EquipmentTypeSpecDefinition? initialSpecSchema = null, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
 
         public Task<Result<EquipmentTypeDetailDto>> SaveAsync(EquipmentType entity, IReadOnlyList<EquipmentTypeMediaItemDto?>? desiredMedia, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
 
         public Task<Result<EquipmentTypeDetailDto>> SaveStateTransitionAsync(EquipmentType entity, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<EquipmentTypeSpecSchemaDto>>([]);
+
+        public Task<EquipmentTypeSpecSchemaDto?> GetSpecSchemaAsync(Guid equipmentTypeId, int version, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeSpecSchemaDto?>(null);
+
+        public Task<EquipmentTypeSpecSchema?> GetDraftSpecSchemaEntityAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeSpecSchema?>(null);
+
+        public Task<EquipmentTypeSpecSchema?> GetSpecSchemaEntityAsync(Guid equipmentTypeId, int version, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeSpecSchema?>(null);
+
+        public Task<int> GetMaxSpecSchemaVersionAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
+
+        public Task<Result<EquipmentTypeSpecSchemaDto>> AddSpecSchemaDraftAsync(EquipmentType parent, EquipmentTypeSpecDefinition definition, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<Result<EquipmentTypeSpecSchemaDto>> UpdateSpecSchemaDraftAsync(EquipmentType parent, EquipmentTypeSpecSchema draftSchema, EquipmentTypeSpecDefinition newDefinition, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<Result<EquipmentTypeSpecSchemaDto>> PublishSpecSchemaAsync(EquipmentType parent, EquipmentTypeSpecSchema draftSchema, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
     }
 }

@@ -74,6 +74,9 @@ namespace CatalogService.Domain.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int?>("CurrentSchemaVersion")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Description")
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
@@ -115,6 +118,8 @@ namespace CatalogService.Domain.Migrations
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_EquipmentTypes_Status");
 
+                    b.HasIndex("Id", "CurrentSchemaVersion");
+
                     b.ToTable("EquipmentTypes", "catalog", t =>
                         {
                             t.HasCheckConstraint("CK_EquipmentTypes_Status_Canonical", "\"Status\" IN ('Draft', 'Published', 'Disabled')");
@@ -152,6 +157,43 @@ namespace CatalogService.Domain.Migrations
                     b.ToTable("EquipmentTypeMedia", "catalog");
                 });
 
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentTypeSpecSchema", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Definition")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid>("EquipmentTypeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("EquipmentTypeId", "Version")
+                        .HasName("AK_EquipmentTypeSpecSchemas_EquipmentTypeId_Version");
+
+                    b.HasIndex("EquipmentTypeId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_EquipmentTypeSpecSchemas_EquipmentTypeId_Draft")
+                        .HasFilter("\"PublishedAt\" IS NULL");
+
+                    b.ToTable("EquipmentTypeSpecSchemas", "catalog", t =>
+                        {
+                            t.HasCheckConstraint("CK_EquipmentTypeSpecSchemas_Version_Positive", "\"Version\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("EquipmentTypeCategories", b =>
                 {
                     b.Property<Guid>("EquipmentTypeId")
@@ -169,6 +211,16 @@ namespace CatalogService.Domain.Migrations
                     b.ToTable("EquipmentTypeCategories", "catalog");
                 });
 
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentType", b =>
+                {
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.EquipmentTypeSpecSchema", null)
+                        .WithMany()
+                        .HasForeignKey("Id", "CurrentSchemaVersion")
+                        .HasPrincipalKey("EquipmentTypeId", "Version")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_EquipmentTypes_EquipmentTypeSpecSchemas_CurrentSchema");
+                });
+
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentTypeMedia", b =>
                 {
                     b.HasOne("Dprental.CatalogService.Domain.Entities.EquipmentType", "EquipmentType")
@@ -177,6 +229,18 @@ namespace CatalogService.Domain.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("FK_EquipmentTypeMedia_EquipmentTypes_EquipmentTypeId");
+
+                    b.Navigation("EquipmentType");
+                });
+
+            modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentTypeSpecSchema", b =>
+                {
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.EquipmentType", "EquipmentType")
+                        .WithMany("SpecSchemas")
+                        .HasForeignKey("EquipmentTypeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("FK_EquipmentTypeSpecSchemas_EquipmentTypes_EquipmentTypeId");
 
                     b.Navigation("EquipmentType");
                 });
@@ -201,6 +265,8 @@ namespace CatalogService.Domain.Migrations
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.EquipmentType", b =>
                 {
                     b.Navigation("Media");
+
+                    b.Navigation("SpecSchemas");
                 });
 #pragma warning restore 612, 618
         }
