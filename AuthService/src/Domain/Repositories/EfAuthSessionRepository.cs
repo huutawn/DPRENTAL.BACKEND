@@ -252,7 +252,14 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
                 m.Organization.Status == Dprental.AuthService.Common.Enums.OrganizationStatus.Active)
             .ToArray() ?? [];
         // Role trong organization (vd Owner) vào claim "r" cùng role toàn cục, chỉ khi organization đã Active.
-        string[] roles = globalRoles.Concat(activeMemberships.Select(m => m.Role.Name))
+        // Khi đó role customer bị thay thế: chủ tổ chức đã duyệt chỉ còn "own", không còn "cus".
+        string[] organizationRoles = activeMemberships.Select(m => m.Role.Name).ToArray();
+        if (organizationRoles.Length > 0)
+        {
+            globalRoles = globalRoles.Where(name => name != Dprental.AuthService.Common.Enums.SystemRoleCode.Customer);
+        }
+
+        string[] roles = globalRoles.Concat(organizationRoles)
             .Where(name => !string.IsNullOrEmpty(name))
             .Distinct()
             .ToArray();
