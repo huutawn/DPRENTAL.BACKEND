@@ -12,4 +12,6 @@ public sealed record EquipmentTypeDetailDto(
     DateTime? UpdatedAt,
     DateTime? PublishedAt,
     IReadOnlyList<CategoryDto> Categories,
-    IReadOnlyList<EquipmentTypeMediaResponseDto> Media);
+    IReadOnlyList<EquipmentTypeMediaResponseDto> Media,
+    int? CurrentSchemaVersion = null,
+    EquipmentTypeSpecSchemaDto? SpecSchema = null);

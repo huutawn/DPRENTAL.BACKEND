@@ -1,3 +1,4 @@
+using Dprental.CatalogService.Domain.Entities;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -12,12 +13,8 @@ public sealed class CreateEquipmentTypeRequest
     public IReadOnlyList<Guid> CategoryIds { get; init; } = [];
     public IReadOnlyList<EquipmentTypeMediaItemDto?>? Media { get; init; } = [];
 
-    /// <summary>
-    /// Organization sẽ sở hữu equipment type. Chỉ là lựa chọn trong các organization của caller:
-    /// service luôn đối chiếu với claim <c>o</c>, không tin giá trị này một mình.
-    /// </summary>
-    public Guid? OrganizationId { get; init; }
-
+    /// <summary>Đặc tả kỹ thuật (tùy chọn) được tạo ở version 1 Draft cùng transaction.</summary>
+    public EquipmentTypeSpecDefinition? SpecSchema { get; init; }
     [JsonIgnore]
     public bool IsMediaSpecified { get; init; }
 
@@ -31,6 +28,7 @@ public sealed class CreateEquipmentTypeRequest
         string? description,
         IReadOnlyList<Guid> categoryIds,
         IReadOnlyList<EquipmentTypeMediaItemDto?>? media,
+        EquipmentTypeSpecDefinition? specSchema = null,
         bool isMediaSpecified = true)
     {
         Code = code;
@@ -38,6 +36,7 @@ public sealed class CreateEquipmentTypeRequest
         Description = description;
         CategoryIds = categoryIds ?? [];
         Media = media ?? [];
+        SpecSchema = specSchema;
         IsMediaSpecified = isMediaSpecified || media != null;
     }
 }
@@ -57,8 +56,7 @@ public sealed class CreateEquipmentTypeRequestJsonConverter : JsonConverter<Crea
         IReadOnlyList<Guid> categoryIds = [];
         bool isMediaSpecified = false;
         IReadOnlyList<EquipmentTypeMediaItemDto?>? media = [];
-        Guid? organizationId = null;
-
+        EquipmentTypeSpecDefinition? specSchema = null;
         while (reader.Read())
         {
             if (reader.TokenType == JsonTokenType.EndObject)
@@ -70,7 +68,7 @@ public sealed class CreateEquipmentTypeRequestJsonConverter : JsonConverter<Crea
                     Description = description,
                     CategoryIds = categoryIds,
                     Media = media,
-                    OrganizationId = organizationId,
+                    SpecSchema = specSchema,
                     IsMediaSpecified = isMediaSpecified
                 };
             }
@@ -122,19 +120,19 @@ public sealed class CreateEquipmentTypeRequestJsonConverter : JsonConverter<Crea
                     throw new JsonException("CategoryIds must be an array.");
                 }
             }
-            else if (string.Equals(propName, "organizationId", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(propName, "specSchema", StringComparison.OrdinalIgnoreCase))
             {
                 if (reader.TokenType == JsonTokenType.Null)
                 {
-                    organizationId = null;
+                    specSchema = null;
                 }
-                else if (reader.TokenType == JsonTokenType.String && Guid.TryParse(reader.GetString(), out var parsedOrganizationId))
+                else if (reader.TokenType == JsonTokenType.StartObject)
                 {
-                    organizationId = parsedOrganizationId;
+                    specSchema = JsonSerializer.Deserialize<EquipmentTypeSpecDefinition>(ref reader, options);
                 }
                 else
                 {
-                    throw new JsonException("OrganizationId must be a valid GUID string.");
+                    throw new JsonException("specSchema must be an object or null.");
                 }
             }
             else if (string.Equals(propName, "media", StringComparison.OrdinalIgnoreCase))
@@ -197,9 +195,10 @@ public sealed class CreateEquipmentTypeRequestJsonConverter : JsonConverter<Crea
             JsonSerializer.Serialize(writer, value.Media, options);
         }
 
-        if (value.OrganizationId.HasValue)
+        if (value.SpecSchema != null)
         {
-            writer.WriteString("organizationId", value.OrganizationId.Value);
+            writer.WritePropertyName("specSchema");
+            JsonSerializer.Serialize(writer, value.SpecSchema, options);
         }
         writer.WriteEndObject();
     }

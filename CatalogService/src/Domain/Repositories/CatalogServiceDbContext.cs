@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Dprental.CatalogService.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,6 +14,12 @@ public sealed class CatalogServiceDbContext : DbContext
     public DbSet<EquipmentType> EquipmentTypes { get; set; }
     public DbSet<EquipmentTypeMedia> EquipmentTypeMedia { get; set; }
     public DbSet<Category> Categories { get; set; }
+    public DbSet<EquipmentTypeSpecSchema> EquipmentTypeSpecSchemas { get; set; }
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
 
     public CatalogServiceDbContext(DbContextOptions<CatalogServiceDbContext> options) : base(options)
     {
@@ -59,6 +66,7 @@ public sealed class CatalogServiceDbContext : DbContext
             entity.Property(e => e.PublishedAt)
                 .HasColumnType("timestamp with time zone");
 
+            entity.Property(e => e.CurrentSchemaVersion);
             entity.Property<uint>("xmin")
                 .HasColumnType("xid")
                 .ValueGeneratedOnAddOrUpdate()
@@ -70,9 +78,6 @@ public sealed class CatalogServiceDbContext : DbContext
 
             entity.HasIndex(e => e.Status)
                 .HasDatabaseName("IX_EquipmentTypes_Status");
-
-            entity.HasIndex(e => e.OrganizationId)
-                .HasDatabaseName("IX_EquipmentTypes_OrganizationId");
 
             entity.HasIndex(e => e.CreatedAt)
                 .HasDatabaseName("IX_EquipmentTypes_CreatedAt");
@@ -106,6 +111,14 @@ public sealed class CatalogServiceDbContext : DbContext
                 .HasForeignKey(m => m.EquipmentTypeId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .HasConstraintName("FK_EquipmentTypeMedia_EquipmentTypes_EquipmentTypeId");
+
+            entity.HasOne<EquipmentTypeSpecSchema>()
+                .WithMany()
+                .HasForeignKey(e => new { e.Id, e.CurrentSchemaVersion })
+                .HasPrincipalKey(s => new { s.EquipmentTypeId, s.Version })
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false)
+                .HasConstraintName("FK_EquipmentTypes_EquipmentTypeSpecSchemas_CurrentSchema");
         });
 
         modelBuilder.Entity<EquipmentTypeMedia>(entity =>
@@ -128,6 +141,48 @@ public sealed class CatalogServiceDbContext : DbContext
                 .IsUnique()
                 .HasDatabaseName("UX_EquipmentTypeMedia_EquipmentTypeId_Thumbnail")
                 .HasFilter("\"IsThumbnail\" = TRUE");
+        });
+
+        modelBuilder.Entity<EquipmentTypeSpecSchema>(entity =>
+        {
+            entity.ToTable("EquipmentTypeSpecSchemas", SchemaName, table =>
+            {
+                table.HasCheckConstraint("CK_EquipmentTypeSpecSchemas_Version_Positive", "\"Version\" > 0");
+            });
+
+            entity.HasKey(s => s.Id);
+            entity.Property(s => s.Id).ValueGeneratedNever();
+
+            entity.Property(s => s.EquipmentTypeId).IsRequired();
+            entity.Property(s => s.Version).IsRequired();
+
+            entity.Property(s => s.Definition)
+                .HasColumnType("jsonb")
+                .IsRequired()
+                .HasConversion(
+                    v => JsonSerializer.Serialize(v, JsonOptions),
+                    v => JsonSerializer.Deserialize<EquipmentTypeSpecDefinition>(v, JsonOptions)!);
+
+            entity.Property(s => s.CreatedAt)
+                .HasColumnType("timestamp with time zone")
+                .IsRequired();
+
+            entity.Property(s => s.PublishedAt)
+                .HasColumnType("timestamp with time zone");
+
+            entity.HasOne(s => s.EquipmentType)
+                .WithMany(e => e.SpecSchemas)
+                .HasForeignKey(s => s.EquipmentTypeId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_EquipmentTypeSpecSchemas_EquipmentTypes_EquipmentTypeId");
+
+            entity.HasAlternateKey(s => new { s.EquipmentTypeId, s.Version })
+                .HasName("AK_EquipmentTypeSpecSchemas_EquipmentTypeId_Version");
+
+            entity.HasIndex(s => s.EquipmentTypeId)
+                .IsUnique()
+                .HasDatabaseName("UX_EquipmentTypeSpecSchemas_EquipmentTypeId_Draft")
+                .HasFilter("\"PublishedAt\" IS NULL");
         });
     }
 }

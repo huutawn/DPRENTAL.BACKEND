@@ -201,7 +201,7 @@ internal static partial class JwtBearerServiceCollectionExtensions
             options.AddPolicy(CatalogPolicies.CategoryManage, policy => policy
                 .RequireAssertion(context => IsUserInAnyRole(context.User, CatalogClaims.Roles.Admin)));
             options.AddPolicy(CatalogPolicies.EquipmentManage, policy => policy
-                .RequireAssertion(context => IsUserInAnyRole(context.User, CatalogClaims.Roles.Admin, CatalogClaims.Roles.Owner)));
+                .RequireAssertion(context => IsUserInAnyRole(context.User, CatalogClaims.Roles.Admin)));
         });
 
         return services;
