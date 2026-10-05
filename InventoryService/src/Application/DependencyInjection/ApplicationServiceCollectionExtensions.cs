@@ -1,6 +1,8 @@
+using Dprental.InventoryService.Application.Caching;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Dprental.InventoryService.Application.DependencyInjection;
 
@@ -17,6 +19,9 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<ICalendarService, CalendarService>();
         services.AddScoped<IInventoryMediaService, InventoryMediaService>();
         services.AddScoped<IInventoryAllocationService, InventoryAllocationService>();
+        services.AddOptions<InventoryCacheOptions>();
+        services.TryAddSingleton<IInventoryAvailabilityCache>(NoOpInventoryAvailabilityCache.Instance);
+        services.AddScoped<IInventoryAvailabilityService, InventoryAvailabilityService>();
 
         return services;
     }

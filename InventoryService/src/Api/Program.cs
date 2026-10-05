@@ -1,8 +1,9 @@
 using System.IO;
+using Dprental.InventoryService.Api.Caching;
 using Dprental.InventoryService.Api.Clients;
+using Dprental.InventoryService.Api.Exceptions;
 using Dprental.InventoryService.Api.Routing;
 using Dprental.InventoryService.Application.Clients;
-using Dprental.InventoryService.Api.Exceptions;
 using Dprental.InventoryService.Application.DependencyInjection;
 using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Api.Security;
@@ -19,9 +20,10 @@ builder.Services.AddInventoryKafkaInfrastructure(builder.Configuration);
 // DPR-147: JWT Authentication & Authorization
 builder.Services.AddInventoryJwtAuthentication(builder.Configuration);
 builder.Services.AddInventoryAuthorization();
-// Clean Architecture: Application services (IInventoryAssetService, ICalendarService, IInventoryMediaService)
+// Clean Architecture: Application services (IInventoryAssetService, ICalendarService, IInventoryMediaService, IInventoryAvailabilityService)
 builder.Services.AddInventoryApplication();
-
+// DPR-150: Valkey Read Cache
+builder.Services.AddInventoryValkeyCache(builder.Configuration);
 // MediaService Integration: Options validation, typed HTTP client, and application service
 builder.Services.AddOptions<MediaServiceOptions>()
     .Bind(builder.Configuration.GetSection(MediaServiceOptions.SectionName))

@@ -16,9 +16,9 @@ public static class InventoryPolicies
     public const string CalendarRead = "InventoryCalendarRead";
 
     /// <summary>
-    /// Quyền đọc lịch khả dụng đã làm sạch (Sanitized Availability): Bất kỳ Human đã xác thực, Admin r=adm, hoặc Service s=inventory.calendar.read.
+    /// Quyền đọc lịch khả dụng (Availability Read): Bất kỳ Human đã xác thực, hoặc Service u=svc có scope s=inventory.availability.read.
     /// </summary>
-    public const string SanitizedAvailability = "InventorySanitizedAvailability";
+    public const string AvailabilityRead = "InventoryAvailabilityRead";
 
     /// <summary>
     /// Quyền gọi các lệnh phân bổ/hold (Hold/Allocation commands): Service s=inventory.allocation.write. Human bị từ chối hoàn toàn (kể cả Admin).

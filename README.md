@@ -28,7 +28,7 @@ scripts/             # Scripts hỗ trợ, Git hooks và migration preflight
 - **Human Admin (`r=adm`)**: Được phép đọc/sửa tài sản xuyên người dùng trong quản lý tài sản (`AssetManage`).
 - **Danh sách tài sản (`GET /api/v1/inventory/assets`)**: Luôn chỉ trả tài sản thuộc sở hữu của người dùng hiện tại (`JWT.sub`), kể cả khi caller là Admin.
 - **Chi tiết lịch (`CalendarRead` / DPR-149)**: Giữ nghiêm ngặt owner-only (`asset.OwnerUserId == JWT.sub`), Admin không được bypass.
-- **Service Principal**: Bắt buộc `u=svc`, `aud=inventory-api` và scope tương ứng trong claim `s` (`inventory.allocation.write`, `inventory.calendar.read`). Bị từ chối trên các API quản lý tài sản của cá nhân.
+- **Service Principal**: Bắt buộc `u=svc`, `aud=inventory-api` và scope tương ứng trong claim `s` (`inventory.allocation.write`, `inventory.availability.read`). Bị từ chối trên các API quản lý tài sản của cá nhân.
 - **Loại bỏ OrganizationId**: Tài sản không còn thuộc tính `organization_id`. Danh tính người sở hữu duy nhất được lấy từ JWT `sub`.
 
 ## Chạy hạ tầng cục bộ
@@ -117,6 +117,23 @@ dotnet test InventoryService.sln
   4. Domain kiểm tra replay trước state/expiry: nếu `operationKey` đã được sử dụng thành công cho Allocate trước đó, trả về thành công (200 OK) mà không ghi thêm transition.
   5. Nếu key mới trên hold đã hết hạn hoặc trạng thái không phải Held (`HOLD_EXPIRED`, `INVALID_STATUS_TRANSITION`, `ALLOCATION_IN_TERMINAL_STATE`): Application service trực tiếp chuyển lỗi thành `Error.Conflict` (HTTP 409).
   6. Lưu thay đổi qua EF tracking, không query overlap lại, không kiểm tra `AcceptingBookings`, không phát sự kiện Outbox (khoảng thời gian chiếm lịch không đổi).
+
+## Truy vấn tính khả dụng và Valkey Read Cache (Availability Queries - DPR-150)
+
+### APIs
+
+| Method | Endpoint | Yêu cầu quyền | Mô tả |
+|---|---|---|---|
+| `POST` | `/api/v1/inventory/availability/check` | `AvailabilityRead` (Human authenticated hoặc Service `s=inventory.availability.read`) | Kiểm tra tính khả dụng hàng loạt tài sản. Luôn đọc trực tiếp từ PostgreSQL trong transaction `RepeatableRead` (tối đa 3 SELECTs). Giới hạn tối đa 500 ID trước khi gộp trùng. |
+| `GET` | `/api/v1/inventory/assets/{assetId}/busy-ranges?from=&to=` | `AvailabilityRead` (Human authenticated hoặc Service `s=inventory.availability.read`) | Đọc danh sách các khoảng bận đã làm sạch của tài sản. Luôn kiểm tra existence và `AcceptingBookings` từ PostgreSQL. Dùng Valkey month cache với TTL động. |
+
+### Đặc tả Valkey Read Cache & Invalidation
+
+- **Pin Dependency**: `StackExchange.Redis 3.3.1` trong `Directory.Packages.props`. Adapter đặt tại `Api/Caching`, thực thi interface `IInventoryAvailabilityCache`. Domain không phụ thuộc Redis.
+- **Cấu hình**: `ConnectionStrings:Redis`, cấu hình cache tắt mặc định (`InventoryCache:Enabled = false`), TTL 60s, timeout 500ms. Mất kết nối không ngăn cản startup hay readiness.
+- **Key Schema**: `inventory:asset:{assetId}:busy:{yyyyMM}`, index `inventory:asset:{assetId}:months` (ZSET). Payload chỉ chứa `ranges` và `expiresAtUtc`.
+- **TTL động**: `min(normal TTL deadline, nearest active Hold expiry) - current time`.
+- **Outbox Invalidation**: `OutboxPublisherWorker` invalidate cache cho asset khi claim sự kiện `InventoryAssetAvailabilityChanged` trước khi phát Kafka, ngoài DB transaction. Lỗi cache không chặn Kafka publish.
 ## Hợp đồng dùng chung và Concurrency Protocol
 
 - `Common/Result.cs`: Result và Result<T> cho lỗi dự kiến.

@@ -49,8 +49,8 @@ public sealed class PolicyProbeController : ControllerBase
     }
 
     [HttpGet("availability/sanitized")]
-    [Authorize(Policy = InventoryPolicies.SanitizedAvailability)]
-    public IActionResult ProbeSanitizedAvailability()
+    [Authorize(Policy = InventoryPolicies.AvailabilityRead)]
+    public IActionResult ProbeAvailabilityRead()
     {
         return Ok(new { availability = "sanitized" });
     }
