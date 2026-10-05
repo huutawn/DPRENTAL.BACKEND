@@ -31,7 +31,8 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
     private sealed class StubCatalogClient : ICatalogServiceClient
     {
         public Func<Guid, Task<Result<CatalogEquipmentTypeResponse>>>? LookupHandler { get; set; }
-        public Func<Guid, int, string, Task<Result<CatalogSpecValidationResult>>>? SpecHandler { get; set; }
+        public Func<Guid, Task<Result<CatalogBrandResponse>>>? BrandHandler { get; set; }
+        public Func<Guid, int, string, Task<Result>>? SpecHandler { get; set; }
 
         public Task<Result<CatalogEquipmentTypeResponse>> GetPublishedEquipmentTypeAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default)
         {
@@ -41,11 +42,19 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
                     equipmentTypeId, "EQ-FX3", "Sony FX3 Cinema Line", null, 1, DateTime.UtcNow, null, null)));
         }
 
-        public Task<Result<CatalogSpecValidationResult>> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default)
+        public Task<Result<CatalogBrandResponse>> GetBrandAsync(Guid brandId, CancellationToken cancellationToken = default)
+        {
+            return BrandHandler is not null
+                ? BrandHandler(brandId)
+                : Task.FromResult(Result.Success(new CatalogBrandResponse(
+                    brandId, "BR-SONY", "Sony", "Active")));
+        }
+
+        public Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default)
         {
             return SpecHandler is not null
                 ? SpecHandler(equipmentTypeId, schemaVersion, specValues)
-                : Task.FromResult(Result.Success(CatalogSpecValidationResult.NotSupported()));
+                : Task.FromResult(Result.Success());
         }
     }
 
@@ -123,13 +132,14 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
         return new InventoryServiceDbContext(options);
     }
 
-    private async Task<InventoryAsset> SeedAssetAsync(Guid ownerUserId, string model = "Sony FX3", string? serial = null, int? year = null, Guid? thumb = null)
+    private async Task<InventoryAsset> SeedAssetAsync(Guid ownerUserId, string model = "Sony FX3", string? serial = null, int? year = null, Guid? thumb = null, Guid? brandId = null)
     {
         await using var db = CreateDbContext();
         var asset = InventoryAsset.Create(
             Guid.NewGuid(),
             ownerUserId,
             Guid.NewGuid(),
+            brandId ?? Guid.NewGuid(),
             model,
             1,
             "{\"sensor\":\"Full-Frame\"}",
@@ -137,7 +147,6 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
             serial,
             year,
             thumb).Value;
-
         db.Assets.Add(asset);
         await db.SaveChangesAsync();
         return asset;

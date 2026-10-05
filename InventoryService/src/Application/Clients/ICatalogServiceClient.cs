@@ -15,8 +15,12 @@ public interface ICatalogServiceClient
     Task<Result<CatalogEquipmentTypeResponse>> GetPublishedEquipmentTypeAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Thẩm tra specification động theo schema version từ CatalogService.
-    /// Hiện tại CatalogService chưa hỗ trợ và trả về kết quả NotSupported.
+    /// Tra cứu thương hiệu theo ID từ CatalogService.
     /// </summary>
-    Task<Result<CatalogSpecValidationResult>> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default);
+    Task<Result<CatalogBrandResponse>> GetBrandAsync(Guid brandId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Thẩm tra specification động theo schema version từ CatalogService.
+    /// </summary>
+    Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default);
 }

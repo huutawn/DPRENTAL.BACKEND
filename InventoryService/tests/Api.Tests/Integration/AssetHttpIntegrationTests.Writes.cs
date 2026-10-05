@@ -5,8 +5,11 @@ using System.Text;
 using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Application.DTOs.Assets;
+using Dprental.InventoryService.Application.DTOs.Catalog;
 using Dprental.InventoryService.Application.Security;
+using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Enums;
+using System.Text.Json;
 using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Domain.IRepositories;
 using Dprental.InventoryService.Domain.Repositories;
@@ -286,5 +289,417 @@ public sealed partial class AssetHttpIntegrationTests
             await using var dropCmd = new NpgsqlCommand(dropTriggerSql, connection);
             await dropCmd.ExecuteNonQueryAsync();
         }
+    }
+
+    [Fact]
+    public async Task Post_BrandNotFound_Returns400ProblemDetails()
+    {
+        var stubCatalog = new StubCatalogClient
+        {
+            BrandHandler = _ => Task.FromResult(Result.Failure<CatalogBrandResponse>(
+                Error.Validation("Brand.NotFound", "Brand không tồn tại trong Catalog.")))
+        };
+
+        var (app, secFactory) = CreateFactory(catalogClient: stubCatalog);
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
+
+        var payload = new
+        {
+            equipmentTypeId = Guid.NewGuid(),
+            brandId = Guid.NewGuid(),
+            model = "Sony FX3",
+            schemaVersion = 1,
+            specValues = new { sensor = "Full-Frame" }
+        };
+
+        var response = await client.PostAsync("api/v1/inventory/assets",
+            new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Brand.NotFound", body);
+
+        // Verify no asset written
+        await using var db = CreateDbContext();
+        Assert.Null(await db.Assets.SingleOrDefaultAsync(a => a.OwnerUserId == owner));
+    }
+
+    [Fact]
+    public async Task Post_BrandInactive_Returns400ProblemDetails()
+    {
+        var stubCatalog = new StubCatalogClient
+        {
+            BrandHandler = id => Task.FromResult(Result.Success(
+                new CatalogBrandResponse(id, "BR-OLD", "Old Brand", "Inactive")))
+        };
+
+        var (app, secFactory) = CreateFactory(catalogClient: stubCatalog);
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
+
+        var payload = new
+        {
+            equipmentTypeId = Guid.NewGuid(),
+            brandId = Guid.NewGuid(),
+            model = "Sony FX3",
+            schemaVersion = 1,
+            specValues = new { sensor = "Full-Frame" }
+        };
+
+        var response = await client.PostAsync("api/v1/inventory/assets",
+            new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Brand.Inactive", body);
+    }
+
+    [Theory]
+    [InlineData("{\"equipmentTypeId\":\"" + "11111111-1111-1111-1111-111111111111" + "\",\"model\":\"Sony FX3\",\"schemaVersion\":1,\"specValues\":{}}")]
+    [InlineData("{\"equipmentTypeId\":\"" + "11111111-1111-1111-1111-111111111111" + "\",\"brandId\":null,\"model\":\"Sony FX3\",\"schemaVersion\":1,\"specValues\":{}}")]
+    [InlineData("{\"equipmentTypeId\":\"" + "11111111-1111-1111-1111-111111111111" + "\",\"brandId\":\"00000000-0000-0000-0000-000000000000\",\"model\":\"Sony FX3\",\"schemaVersion\":1,\"specValues\":{}}")]
+    public async Task Post_MissingOrNullOrEmptyBrandId_Returns400(string payloadJson)
+    {
+        var (app, secFactory) = CreateFactory();
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
+
+        var response = await client.PostAsync("api/v1/inventory/assets",
+            new StringContent(payloadJson, Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Post_CatalogSpecValidationFailure_PreservesContractCodeAndDetail_AndDoesNotWriteAsset()
+    {
+        var stubCatalog = new StubCatalogClient
+        {
+            SpecHandler = (_, _, _) => Task.FromResult(Result.Failure(
+                Error.Validation("EquipmentType.SpecRequired", "Trường 'resolution' là bắt buộc.")))
+        };
+
+        var (app, secFactory) = CreateFactory(catalogClient: stubCatalog);
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
+
+        var payload = new
+        {
+            equipmentTypeId = Guid.NewGuid(),
+            brandId = Guid.NewGuid(),
+            model = "Sony FX3",
+            schemaVersion = 1,
+            specValues = new { sensor = "Full-Frame" }
+        };
+
+        var response = await client.PostAsync("api/v1/inventory/assets",
+            new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+        Assert.NotNull(problem);
+        Assert.Equal("EquipmentType.SpecRequired", problem.Title);
+        Assert.Equal("Trường 'resolution' là bắt buộc.", problem.Detail);
+
+        // Database has NO record written
+        await using var db = CreateDbContext();
+        Assert.Null(await db.Assets.SingleOrDefaultAsync(a => a.OwnerUserId == owner));
+    }
+
+    [Fact]
+    public async Task Patch_Brand_Success200_UpdatesBrandInDatabase()
+    {
+        var (app, secFactory) = CreateFactory();
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        var oldBrand = Guid.NewGuid();
+        var newBrand = Guid.NewGuid();
+        var asset = await SeedAssetAsync(owner, brandId: oldBrand);
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
+
+        var patchJson = $"{{\"brandId\":\"{newBrand}\"}}";
+        var response = await client.PatchAsync($"api/v1/inventory/assets/{asset.Id:D}",
+            new StringContent(patchJson, Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var updated = await response.Content.ReadFromJsonAsync<InventoryAssetResponse>();
+        Assert.NotNull(updated);
+        Assert.Equal(newBrand, updated.BrandId);
+
+        // Verify in PostgreSQL
+        await using var db = CreateDbContext();
+        var reloaded = await db.Assets.SingleAsync(a => a.Id == asset.Id);
+        Assert.Equal(newBrand, reloaded.BrandId);
+    }
+
+    [Fact]
+    public async Task Patch_BrandInactive_Returns400ProblemDetails()
+    {
+        var inactiveBrand = Guid.NewGuid();
+        var stubCatalog = new StubCatalogClient
+        {
+            BrandHandler = id => Task.FromResult(Result.Success(
+                new CatalogBrandResponse(id, "BR-INACTIVE", "Inactive Brand", "Inactive")))
+        };
+
+        var (app, secFactory) = CreateFactory(catalogClient: stubCatalog);
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        var asset = await SeedAssetAsync(owner);
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
+
+        var patchJson = $"{{\"brandId\":\"{inactiveBrand}\"}}";
+        var response = await client.PatchAsync($"api/v1/inventory/assets/{asset.Id:D}",
+            new StringContent(patchJson, Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Brand.Inactive", body);
+    }
+
+    [Fact]
+    public async Task Patch_CannotRemoveBrand_Returns400()
+    {
+        var (app, secFactory) = CreateFactory();
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        var asset = await SeedAssetAsync(owner);
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
+
+        // Sending null for brandId is rejected by converter with 400
+        var patchJson = "{\"brandId\":null}";
+        var response = await client.PatchAsync($"api/v1/inventory/assets/{asset.Id:D}",
+            new StringContent(patchJson, Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Patch_ModelOnly_DoesNotCallCatalog()
+    {
+        bool catalogCalled = false;
+        var stubCatalog = new StubCatalogClient
+        {
+            LookupHandler = _ => { catalogCalled = true; return Task.FromResult(Result.Success(new CatalogEquipmentTypeResponse(Guid.NewGuid(), "C", "N", null, 1, DateTime.UtcNow, null, null))); },
+            BrandHandler = _ => { catalogCalled = true; return Task.FromResult(Result.Success(new CatalogBrandResponse(Guid.NewGuid(), "C", "N", "Active"))); },
+            SpecHandler = (_, _, _) => { catalogCalled = true; return Task.FromResult(Result.Success()); }
+        };
+
+        var (app, secFactory) = CreateFactory(catalogClient: stubCatalog);
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        var asset = await SeedAssetAsync(owner, model: "Model Before");
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
+
+        var patchJson = "{\"model\":\"Model After\"}";
+        var response = await client.PatchAsync($"api/v1/inventory/assets/{asset.Id:D}",
+            new StringContent(patchJson, Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(catalogCalled);
+
+        await using var db = CreateDbContext();
+        var reloaded = await db.Assets.SingleAsync(a => a.Id == asset.Id);
+        Assert.Equal("Model After", reloaded.Model);
+    }
+
+    [Fact]
+    public async Task Patch_OldAssetNullBrand_PreservesNullWhenOmitted_AndUpdatesWhenSent()
+    {
+        var (app, secFactory) = CreateFactory();
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        var assetId = Guid.NewGuid();
+
+        // Insert directly in PostgreSQL an asset with brand_id = NULL (simulating pre-migration asset)
+        await using (var db = CreateDbContext())
+        {
+            var eqId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($$"""
+                INSERT INTO inventory.assets (id, owner_user_id, equipment_type_id, brand_id, model, schema_version, spec_values, accepting_bookings, created_at, updated_at)
+                VALUES ({{assetId}}, {{owner}}, {{eqId}}, NULL, 'Legacy Camera', 1, '{"res":"1080p"}'::jsonb, true, {{FixedNow}}, {{FixedNow}});
+            """);
+        }
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
+
+        // 1. PATCH model only -> preserves brand_id = null
+        var patch1 = "{\"model\":\"Legacy Camera Renamed\"}";
+        var resp1 = await client.PatchAsync($"api/v1/inventory/assets/{assetId:D}",
+            new StringContent(patch1, Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, resp1.StatusCode);
+        var assetDto1 = await resp1.Content.ReadFromJsonAsync<InventoryAssetResponse>();
+        Assert.NotNull(assetDto1);
+        Assert.Null(assetDto1.BrandId);
+
+        // 2. PATCH with valid brand -> backfills brand_id
+        var newBrand = Guid.NewGuid();
+        var patch2 = $"{{\"brandId\":\"{newBrand}\"}}";
+        var resp2 = await client.PatchAsync($"api/v1/inventory/assets/{assetId:D}",
+            new StringContent(patch2, Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, resp2.StatusCode);
+        var assetDto2 = await resp2.Content.ReadFromJsonAsync<InventoryAssetResponse>();
+        Assert.NotNull(assetDto2);
+        Assert.Equal(newBrand, assetDto2.BrandId);
+
+        // Verify in PostgreSQL
+        await using (var db = CreateDbContext())
+        {
+            var reloaded = await db.Assets.SingleAsync(a => a.Id == assetId);
+            Assert.Equal(newBrand, reloaded.BrandId);
+        }
+    }
+
+    [Fact]
+    public async Task Post_TypeAWithoutVersion_TypeBWithVersion_TypeAStillRejectedWith400()
+    {
+        var typeA = Guid.NewGuid();
+        var typeB = Guid.NewGuid();
+        const int version2 = 2;
+
+        var stubCatalog = new StubCatalogClient
+        {
+            SpecHandler = (eqId, ver, _) =>
+            {
+                if (eqId == typeA && ver == version2)
+                {
+                    return Task.FromResult(Result.Failure(
+                        Error.Validation("EquipmentType.InvalidAssetSchemaVersion", "Schema version 2 chưa được publish cho loại thiết bị Type A.")));
+                }
+                if (eqId == typeB && ver == version2)
+                {
+                    return Task.FromResult(Result.Success());
+                }
+                return Task.FromResult(Result.Success());
+            }
+        };
+
+        var (app, secFactory) = CreateFactory(catalogClient: stubCatalog);
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
+
+        // Post for Type A with version 2
+        var payloadA = new
+        {
+            equipmentTypeId = typeA,
+            brandId = Guid.NewGuid(),
+            model = "Camera A",
+            schemaVersion = version2,
+            specValues = new { res = "4K" }
+        };
+
+        var responseA = await client.PostAsync("api/v1/inventory/assets",
+            new StringContent(JsonSerializer.Serialize(payloadA), Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, responseA.StatusCode);
+        var problemA = await responseA.Content.ReadFromJsonAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+        Assert.NotNull(problemA);
+        Assert.Equal("EquipmentType.InvalidAssetSchemaVersion", problemA.Title);
+        Assert.Equal("Schema version 2 chưa được publish cho loại thiết bị Type A.", problemA.Detail);
+    }
+
+    [Fact]
+    public async Task Patch_SpecOnDisabledEquipmentType_UsingPublishedOldSchema_Succeeds()
+    {
+        var disabledEquipmentTypeId = Guid.NewGuid();
+        const int oldPublishedVersion = 1;
+
+        // Catalog specification validation validates against the old published schema (even if equipment type is now Disabled)
+        var stubCatalog = new StubCatalogClient
+        {
+            SpecHandler = (eqId, ver, _) =>
+            {
+                Assert.Equal(disabledEquipmentTypeId, eqId);
+                Assert.Equal(oldPublishedVersion, ver);
+                return Task.FromResult(Result.Success());
+            }
+        };
+
+        var (app, secFactory) = CreateFactory(catalogClient: stubCatalog);
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        var assetId = Guid.NewGuid();
+        var brandId = Guid.NewGuid();
+
+        // Seed existing asset with Disabled equipment type and old published schema version 1
+        await using (var db = CreateDbContext())
+        {
+            var asset = InventoryAsset.Create(
+                assetId, owner, disabledEquipmentTypeId, brandId,
+                "Legacy Camera", oldPublishedVersion, "{\"codec\":\"H264\"}", FixedNow).Value;
+            db.Assets.Add(asset);
+            await db.SaveChangesAsync();
+        }
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
+
+        // Patch spec values (uses existing schemaVersion = 1, does NOT re-query equipment type published status)
+        var patchJson = "{\"specValues\":{\"codec\":\"ProRes\"}}";
+        var response = await client.PatchAsync($"api/v1/inventory/assets/{assetId:D}",
+            new StringContent(patchJson, Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var updated = await response.Content.ReadFromJsonAsync<InventoryAssetResponse>();
+        Assert.NotNull(updated);
+        Assert.Equal(oldPublishedVersion, updated.SchemaVersion);
+
+        // Verify persisted in PostgreSQL
+        await using var verifyDb = CreateDbContext();
+        var reloaded = await verifyDb.Assets.SingleAsync(a => a.Id == assetId);
+        Assert.Contains("ProRes", reloaded.SpecValues);
     }
 }

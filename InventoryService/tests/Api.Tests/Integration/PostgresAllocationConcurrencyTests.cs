@@ -72,6 +72,7 @@ public sealed class PostgresAllocationConcurrencyTests : IClassFixture<PostgresF
             Guid.NewGuid(),
             ownerUserId,
             Guid.NewGuid(),
+            Guid.NewGuid(),
             "Sony FX3",
             1,
             "{}",

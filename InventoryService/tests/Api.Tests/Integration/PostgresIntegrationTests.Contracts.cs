@@ -19,7 +19,7 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var owner = Guid.NewGuid();
-        var asset = InventoryAsset.Create(Guid.NewGuid(), owner, Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), owner, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
         setup.Assets.Add(asset);
         await setup.SaveChangesAsync();
         var result = await services.GetRequiredService<IInventoryWriteTransaction>().ExecuteAsync<bool>(asset.Id, async (ctx, ct) =>
@@ -40,8 +40,8 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var a = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
-        var b = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
+        var a = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
+        var b = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
         var day = BusinessDateTime.ToVietnamDate(now).AddDays(1);
         var allocation = AssetAllocation.CreateManual(Guid.NewGuid(), a.Id, new RentalPeriod(day, day), now).Value;
         setup.Assets.AddRange(a, b);
@@ -65,7 +65,7 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
         setup.Assets.Add(asset);
         await setup.SaveChangesAsync();
         var transaction = services.GetRequiredService<IInventoryWriteTransaction>();
@@ -92,7 +92,7 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
         setup.Assets.Add(asset);
         await setup.SaveChangesAsync();
         await using var concurrent = await CreateMigratedDbContextAsync();
@@ -131,7 +131,7 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = BusinessDateTime.NormalizeUtc(DateTimeOffset.UtcNow);
-        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
         var start = BusinessDateTime.ToVietnamDate(now).AddDays(1);
         var hold = AssetAllocation.CreateHold(
             Guid.NewGuid(), asset.Id, new RentalPeriod(start, start), now.AddSeconds(-20), now.AddMinutes(-2),
@@ -171,8 +171,8 @@ public sealed partial class PostgresIntegrationTests
         var equipmentTypeId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
 
-        var asset1 = InventoryAsset.Create(Guid.NewGuid(), ownerId, equipmentTypeId, "Sony FX3", 1, "{\"lens\":\"24-70mm\",\"sn\":\"SN001\"}", now).Value;
-        var asset2 = InventoryAsset.Create(Guid.NewGuid(), ownerId, equipmentTypeId, "Sony A7S III", 2, "{\"lens\":\"70-200mm\",\"sn\":\"SN002\"}", now).Value;
+        var asset1 = InventoryAsset.Create(Guid.NewGuid(), ownerId, equipmentTypeId, Guid.NewGuid(), "Sony FX3", 1, "{\"lens\":\"24-70mm\",\"sn\":\"SN001\"}", now).Value;
+        var asset2 = InventoryAsset.Create(Guid.NewGuid(), ownerId, equipmentTypeId, Guid.NewGuid(), "Sony A7S III", 2, "{\"lens\":\"70-200mm\",\"sn\":\"SN002\"}", now).Value;
 
         db.Assets.AddRange(asset1, asset2);
         await db.SaveChangesAsync();
@@ -195,8 +195,8 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var asset1 = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
-        var asset2 = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
+        var asset1 = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
+        var asset2 = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
         setup.Assets.AddRange(asset1, asset2);
         await setup.SaveChangesAsync();
 
@@ -240,7 +240,7 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
         setup.Assets.Add(asset);
         await setup.SaveChangesAsync();
 
@@ -269,5 +269,73 @@ public sealed partial class PostgresIntegrationTests
 
         Assert.True(conflictResult.IsFailure);
         Assert.Equal("IDEMPOTENCY_KEY_REUSED", conflictResult.Error.Code);
+    }
+
+    [Fact]
+    public async Task Asset_BrandId_JsonbSpecValues_Version_RoundtripAndConcurrencyRace_Succeeds()
+    {
+        using var services = BuildServiceProvider();
+        await using var setup = await CreateMigratedDbContextAsync();
+        var now = DateTimeOffset.UtcNow;
+        var brandId = Guid.NewGuid();
+        var asset = InventoryAsset.Create(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), brandId,
+            "Sony FX3", 1, "{\"resolution\":\"4K\",\"fps\":120}", now).Value;
+        setup.Assets.Add(asset);
+        await setup.SaveChangesAsync();
+
+        // 1. Reload from fresh DbContext to verify persistence and PostgreSQL jsonb querying
+        await using var verifyDb = await CreateMigratedDbContextAsync();
+        var reloaded = await verifyDb.Assets.SingleAsync(a => a.Id == asset.Id);
+        Assert.Equal(brandId, reloaded.BrandId);
+        Assert.Equal(1, reloaded.SchemaVersion);
+        Assert.Contains("\"4K\"", reloaded.SpecValues);
+        Assert.True(reloaded.Version > 0);
+
+        // Query directly via PostgreSQL JSONB operator
+        var jsonbResolution = await verifyDb.Database.SqlQuery<string>($"""
+            SELECT spec_values->>'resolution' AS "Value" FROM inventory.assets WHERE id = {asset.Id}
+        """).SingleAsync();
+        Assert.Equal("4K", jsonbResolution);
+
+        // 2. Concurrency token check (xmin): simulate concurrent update
+        var initialVersion = reloaded.Version;
+        var newBrandId = Guid.NewGuid();
+        var updateTime = now.AddMinutes(5);
+
+        var executor = services.GetRequiredService<IInventoryWriteTransaction>();
+
+        // First update succeeds
+        var updateResult1 = await executor.ExecuteAsync<bool>(asset.Id, async (ctx, ct) =>
+        {
+            var dbAsset = await ctx.Assets.GetByIdAsync(asset.Id, ct);
+            Assert.NotNull(dbAsset);
+            dbAsset.UpdateDetails(newBrandId, "Sony FX3 V2", null, null, null, 2, "{\"resolution\":\"8K\"}", updateTime);
+            ctx.Assets.Update(dbAsset);
+            return Result.Success(true);
+        });
+        Assert.True(updateResult1.IsSuccess);
+
+        // Reload: version must have changed
+        await using var verifyDb2 = await CreateMigratedDbContextAsync();
+        var reloaded2 = await verifyDb2.Assets.SingleAsync(a => a.Id == asset.Id);
+        Assert.Equal(newBrandId, reloaded2.BrandId);
+        Assert.Equal(2, reloaded2.SchemaVersion);
+        Assert.Contains("\"8K\"", reloaded2.SpecValues);
+        Assert.NotEqual(initialVersion, reloaded2.Version);
+
+        // Second update trying to use stale snapshot version fails with concurrency conflict
+        var staleUpdateResult = await executor.ExecuteAsync<bool>(asset.Id, async (ctx, ct) =>
+        {
+            var dbAsset = await ctx.Assets.GetByIdAsync(asset.Id, ct);
+            Assert.NotNull(dbAsset);
+            if (dbAsset.Version != initialVersion)
+            {
+                return Error.Conflict("CONCURRENCY_CONFLICT", "Tài sản đã bị thay đổi bởi thao tác khác (xmin conflict).");
+            }
+            return Result.Success(true);
+        });
+        Assert.True(staleUpdateResult.IsFailure);
+        Assert.Equal("CONCURRENCY_CONFLICT", staleUpdateResult.Error.Code);
     }
 }

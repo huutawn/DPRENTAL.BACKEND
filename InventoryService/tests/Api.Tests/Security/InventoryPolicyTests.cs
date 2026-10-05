@@ -59,6 +59,7 @@ public sealed class InventoryPolicyTests
             id,
             ownerId,
             Guid.NewGuid(),
+            Guid.NewGuid(),
             "Sony FX3",
             1,
             "{\"serial\":\"TEST\"}",

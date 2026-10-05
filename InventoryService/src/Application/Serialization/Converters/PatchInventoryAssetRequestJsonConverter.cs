@@ -12,6 +12,7 @@ public sealed class PatchInventoryAssetRequestJsonConverter : JsonConverter<Patc
 {
     private static readonly HashSet<string> AllowedProperties = new(StringComparer.OrdinalIgnoreCase)
     {
+        "brandId",
         "model",
         "serialNumber",
         "manufactureYear",
@@ -58,7 +59,24 @@ public sealed class PatchInventoryAssetRequestJsonConverter : JsonConverter<Patc
                 throw new JsonException("Nội dung JSON bị kết thúc bất thường.");
             }
 
-            if (string.Equals(propName, "model", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(propName, "brandId", StringComparison.OrdinalIgnoreCase))
+            {
+                if (reader.TokenType == JsonTokenType.Null)
+                {
+                    throw new JsonException("Trường 'brandId' không được null.");
+                }
+
+                if (reader.TokenType == JsonTokenType.String && reader.TryGetGuid(out var brandId))
+                {
+                    request.IsBrandIdSpecified = true;
+                    request.BrandId = brandId;
+                }
+                else
+                {
+                    throw new JsonException("Trường 'brandId' phải là GUID hợp lệ.");
+                }
+            }
+            else if (string.Equals(propName, "model", StringComparison.OrdinalIgnoreCase))
             {
                 if (reader.TokenType == JsonTokenType.Null)
                 {
@@ -166,6 +184,18 @@ public sealed class PatchInventoryAssetRequestJsonConverter : JsonConverter<Patc
     {
         writer.WriteStartObject();
 
+        if (value.IsBrandIdSpecified)
+        {
+            if (value.BrandId.HasValue)
+            {
+                writer.WriteString("brandId", value.BrandId.Value);
+            }
+            else
+            {
+                writer.WriteNull("brandId");
+            }
+        }
+
         if (value.IsModelSpecified)
         {
             writer.WriteString("model", value.Model);
@@ -173,34 +203,50 @@ public sealed class PatchInventoryAssetRequestJsonConverter : JsonConverter<Patc
 
         if (value.IsSerialNumberSpecified)
         {
-            if (value.SerialNumber is null)
-                writer.WriteNull("serialNumber");
-            else
+            if (value.SerialNumber is not null)
+            {
                 writer.WriteString("serialNumber", value.SerialNumber);
+            }
+            else
+            {
+                writer.WriteNull("serialNumber");
+            }
         }
 
         if (value.IsManufactureYearSpecified)
         {
-            if (value.ManufactureYear is null)
-                writer.WriteNull("manufactureYear");
-            else
+            if (value.ManufactureYear.HasValue)
+            {
                 writer.WriteNumber("manufactureYear", value.ManufactureYear.Value);
+            }
+            else
+            {
+                writer.WriteNull("manufactureYear");
+            }
         }
 
         if (value.IsThumbnailMediaIdSpecified)
         {
-            if (value.ThumbnailMediaId is null)
-                writer.WriteNull("thumbnailMediaId");
-            else
+            if (value.ThumbnailMediaId.HasValue)
+            {
                 writer.WriteString("thumbnailMediaId", value.ThumbnailMediaId.Value);
+            }
+            else
+            {
+                writer.WriteNull("thumbnailMediaId");
+            }
         }
 
         if (value.IsSchemaVersionSpecified)
         {
             if (value.SchemaVersion.HasValue)
+            {
                 writer.WriteNumber("schemaVersion", value.SchemaVersion.Value);
+            }
             else
+            {
                 writer.WriteNull("schemaVersion");
+            }
         }
 
         if (value.IsSpecValuesSpecified)

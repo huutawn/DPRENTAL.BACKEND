@@ -98,7 +98,7 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
         for (int i = 0; i < 5; i++)
         {
             var asset = InventoryAsset.Create(
-                Guid.NewGuid(), ownerUserId, Guid.NewGuid(), $"Camera {i}", 1, "{}", InitialNow).Value;
+                Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), $"Camera {i}", 1, "{}", InitialNow).Value;
 
             asset.CalendarBlocks.Add(CalendarBlock.Create(
                 Guid.NewGuid(), asset.Id, new DateOnly(2026, 10, 10), new DateOnly(2026, 10, 12),
@@ -151,7 +151,7 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
     {
         var ownerUserId = Guid.NewGuid();
         var asset = InventoryAsset.Create(
-            Guid.NewGuid(), ownerUserId, Guid.NewGuid(), "RepeatableReadTest", 1, "{}", InitialNow).Value;
+            Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "RepeatableReadTest", 1, "{}", InitialNow).Value;
 
         await using (var seedDb = CreateDbContext())
         {
@@ -190,26 +190,26 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
         var windowEnd = new DateOnly(2026, 10, 15);
 
         // 1. Free asset
-        var freeAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), "Free", 1, "{}", InitialNow).Value;
+        var freeAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Free", 1, "{}", InitialNow).Value;
 
         // 2. Disabled bookings
-        var disabledAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), "Disabled", 1, "{}", InitialNow).Value;
+        var disabledAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Disabled", 1, "{}", InitialNow).Value;
         disabledAsset.DisableBookings("Disabled", InitialNow);
 
         // 3. Blocked
-        var blockedAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), "Blocked", 1, "{}", InitialNow).Value;
+        var blockedAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Blocked", 1, "{}", InitialNow).Value;
         blockedAsset.CalendarBlocks.Add(CalendarBlock.Create(
             Guid.NewGuid(), blockedAsset.Id, windowStart, windowEnd,
             CalendarBlockReason.Maintenance, "op", InitialNow, windowStart).Value);
 
         // 4. Active Hold
-        var heldAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), "Held", 1, "{}", InitialNow).Value;
+        var heldAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Held", 1, "{}", InitialNow).Value;
         heldAsset.Allocations.Add(AssetAllocation.CreateHold(
             Guid.NewGuid(), heldAsset.Id, RentalPeriod.Create(windowStart, windowEnd).Value,
             InitialNow.AddHours(2), InitialNow, "SYS", $"REF-{Guid.NewGuid():N}").Value);
 
         // 5. Expired Hold
-        var expiredAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), "Expired", 1, "{}", InitialNow).Value;
+        var expiredAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Expired", 1, "{}", InitialNow).Value;
         expiredAsset.Allocations.Add(AssetAllocation.CreateHold(
             Guid.NewGuid(), expiredAsset.Id, RentalPeriod.Create(windowStart, windowEnd).Value,
             InitialNow.AddHours(-1), InitialNow.AddHours(-2), "SYS", $"REF-{Guid.NewGuid():N}").Value);
@@ -242,7 +242,7 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
     public async Task GetBusyRanges_PostgresReal_CorrectRangesAndNoFakeRange()
     {
         var ownerUserId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), "RangesTest", 1, "{}", InitialNow).Value;
+        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "RangesTest", 1, "{}", InitialNow).Value;
 
         // Block from 2026-10-05 to 2026-10-08
         asset.CalendarBlocks.Add(CalendarBlock.Create(

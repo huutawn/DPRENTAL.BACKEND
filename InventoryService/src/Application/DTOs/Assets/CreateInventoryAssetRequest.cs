@@ -9,6 +9,7 @@ namespace Dprental.InventoryService.Application.DTOs.Assets;
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record CreateInventoryAssetRequest(
     [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
+    [property: JsonPropertyName("brandId")] Guid? BrandId,
     [property: JsonPropertyName("model")] string Model,
     [property: JsonPropertyName("schemaVersion")] int SchemaVersion,
     [property: JsonPropertyName("specValues")] JsonElement SpecValues,

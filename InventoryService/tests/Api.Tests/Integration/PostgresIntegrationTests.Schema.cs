@@ -94,7 +94,7 @@ public sealed partial class PostgresIntegrationTests
         await using var context = await CreateMigratedDbContextAsync();
 
         var asset = InventoryAsset.Create(
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
             "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
         context.Assets.Add(asset);
 
@@ -120,7 +120,7 @@ public sealed partial class PostgresIntegrationTests
         await using var context = await CreateMigratedDbContextAsync();
 
         var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
+        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
         context.Assets.Add(asset);
         await context.SaveChangesAsync();
 
@@ -144,7 +144,7 @@ public sealed partial class PostgresIntegrationTests
         await using var context = await CreateMigratedDbContextAsync();
 
         var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
+        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
         context.Assets.Add(asset);
         await context.SaveChangesAsync();
 
@@ -168,7 +168,7 @@ public sealed partial class PostgresIntegrationTests
         await using var context = await CreateMigratedDbContextAsync();
 
         var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
+        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
         context.Assets.Add(asset);
         await context.SaveChangesAsync();
 
@@ -198,7 +198,7 @@ public sealed partial class PostgresIntegrationTests
         await using var context2 = await CreateMigratedDbContextAsync();
 
         var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
+        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
         context1.Assets.Add(asset);
         await context1.SaveChangesAsync();
 
@@ -227,8 +227,8 @@ public sealed partial class PostgresIntegrationTests
         var type = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
 
-        var assetA = InventoryAsset.Create(Guid.NewGuid(), ownerA, type, "Sony FX3", 1, "{}", now).Value;
-        var assetB = InventoryAsset.Create(Guid.NewGuid(), ownerB, type, "Sony A7S III", 1, "{}", now).Value;
+        var assetA = InventoryAsset.Create(Guid.NewGuid(), ownerA, type, Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
+        var assetB = InventoryAsset.Create(Guid.NewGuid(), ownerB, type, Guid.NewGuid(), "Sony A7S III", 1, "{}", now).Value;
         db.Assets.AddRange(assetA, assetB);
         await db.SaveChangesAsync();
 

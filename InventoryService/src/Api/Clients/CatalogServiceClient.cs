@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 namespace Dprental.InventoryService.Api.Clients;
 
 /// <summary>
-/// HTTP client tích hợp với CatalogService cho việc tra cứu loại thiết bị và thẩm tra spec.
+/// HTTP client tích hợp với CatalogService cho việc tra cứu loại thiết bị, thương hiệu và thẩm tra spec.
 /// </summary>
 public sealed class CatalogServiceClient : ICatalogServiceClient
 {
@@ -28,6 +28,21 @@ public sealed class CatalogServiceClient : ICatalogServiceClient
 
     private static readonly Action<ILogger, Guid, string, Exception?> LogNetworkError =
         LoggerMessage.Define<Guid, string>(LogLevel.Warning, new EventId(3, "CatalogServiceNetworkError"), "Lỗi kết nối tới CatalogService cho equipment type {EquipmentTypeId} khi {Action}.");
+
+    private static readonly Action<ILogger, string, string, Exception?> LogTimeoutResource =
+        LoggerMessage.Define<string, string>(LogLevel.Warning, new EventId(4, "CatalogServiceResourceTimeout"), "Timeout khi gọi CatalogService cho {Resource} khi {Action}.");
+
+    private static readonly Action<ILogger, string, string, Exception?> LogNetworkErrorResource =
+        LoggerMessage.Define<string, string>(LogLevel.Warning, new EventId(5, "CatalogServiceResourceNetworkError"), "Lỗi kết nối tới CatalogService cho {Resource} khi {Action}.");
+
+    private static readonly HashSet<string> ContractSpecErrorCodes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "EquipmentType.InvalidAssetSchemaVersion",
+        "EquipmentType.SpecRequired",
+        "EquipmentType.SpecDatatype",
+        "EquipmentType.SpecRange",
+        "EquipmentType.SpecEnum"
+    };
 
     private readonly HttpClient _httpClient;
     private readonly CatalogServiceOptions _options;
@@ -53,6 +68,19 @@ public sealed class CatalogServiceClient : ICatalogServiceClient
         DateTime CreatedAt,
         DateTime? UpdatedAt,
         DateTime? PublishedAt
+    );
+
+    private sealed record RemoteBrandResponse(
+        Guid Id,
+        string Code,
+        string Name,
+        string Status
+    );
+
+    private sealed record RemoteProblemDetails(
+        string? Title,
+        string? Detail,
+        int? Status
     );
 
     /// <inheritdoc />
@@ -151,6 +179,7 @@ public sealed class CatalogServiceClient : ICatalogServiceClient
                 {
                     return Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "Trạng thái loại thiết bị từ CatalogService không hợp lệ hoặc không thuộc contract.");
                 }
+
                 return Result.Success(new CatalogEquipmentTypeResponse(
                     parsed.Id,
                     parsed.Code,
@@ -181,14 +210,213 @@ public sealed class CatalogServiceClient : ICatalogServiceClient
     }
 
     /// <inheritdoc />
-    public Task<Result<CatalogSpecValidationResult>> ValidateSpecificationAsync(
+    public async Task<Result<CatalogBrandResponse>> GetBrandAsync(
+        Guid brandId,
+        CancellationToken cancellationToken = default)
+    {
+        if (brandId == Guid.Empty)
+        {
+            return Error.Validation("INVALID_BRAND_ID", "Brand ID không được rỗng.");
+        }
+
+        string relativeUri = $"api/v1/catalog/brands/{brandId:D}";
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, relativeUri);
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                var content = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!string.IsNullOrWhiteSpace(content))
+                {
+                    try
+                    {
+                        var problem = JsonSerializer.Deserialize<RemoteProblemDetails>(content, JsonOptions);
+                        if (problem is not null && !string.IsNullOrWhiteSpace(problem.Title) && string.Equals(problem.Title, "Brand.NotFound", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return Error.Validation(problem.Title, problem.Detail ?? "Thương hiệu không tồn tại trong Catalog.");
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                        // Endpoint missing hoặc non-contract 404 response
+                    }
+                }
+
+                return Error.Unavailable("CATALOG_SERVICE_ERROR", "CatalogService trả về mã lỗi HTTP 404.");
+            }
+
+            if (response.StatusCode == HttpStatusCode.OK)
+            {
+                var content = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    return Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "CatalogService trả về nội dung rỗng.");
+                }
+
+                RemoteBrandResponse? parsed;
+                try
+                {
+                    parsed = JsonSerializer.Deserialize<RemoteBrandResponse>(content, JsonOptions);
+                }
+                catch (JsonException ex)
+                {
+                    if (_logger is not null) LogJsonError(_logger, "get-brand", ex);
+                    return Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "Phản hồi từ CatalogService không đúng định dạng JSON.");
+                }
+
+                if (parsed is null || parsed.Id == Guid.Empty || string.IsNullOrWhiteSpace(parsed.Code) || string.IsNullOrWhiteSpace(parsed.Name) || string.IsNullOrWhiteSpace(parsed.Status))
+                {
+                    return Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "Phản hồi từ CatalogService thiếu các trường dữ liệu bắt buộc.");
+                }
+
+                if (parsed.Id != brandId)
+                {
+                    return Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "ID của thương hiệu phản hồi không khớp với yêu cầu.");
+                }
+
+                if (!string.Equals(parsed.Status, "Active", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(parsed.Status, "Inactive", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "Trạng thái thương hiệu từ CatalogService không hợp lệ hoặc không thuộc contract.");
+                }
+
+                return Result.Success(new CatalogBrandResponse(
+                    parsed.Id,
+                    parsed.Code,
+                    parsed.Name,
+                    parsed.Status));
+            }
+
+            return Error.Unavailable("CATALOG_SERVICE_ERROR", $"CatalogService trả về mã lỗi HTTP {(int)response.StatusCode}.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            if (_logger is not null) LogTimeoutResource(_logger, brandId.ToString("D"), "get-brand", ex);
+            return Error.Unavailable("CATALOG_SERVICE_TIMEOUT", "Hết thời gian chờ phản hồi từ CatalogService.");
+        }
+        catch (HttpRequestException ex)
+        {
+            if (_logger is not null) LogNetworkErrorResource(_logger, brandId.ToString("D"), "get-brand", ex);
+            return Error.Unavailable("CATALOG_SERVICE_NETWORK_ERROR", "Không thể kết nối tới CatalogService.");
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> ValidateSpecificationAsync(
         Guid equipmentTypeId,
         int schemaVersion,
         string specValues,
         CancellationToken cancellationToken = default)
     {
-        // Theo quyết định MVP đã chốt: CatalogService chưa hỗ trợ canonical spec validation.
-        // Trả về rõ ràng NotSupported, không gọi endpoint giả định.
-        return Task.FromResult(Result.Success(CatalogSpecValidationResult.NotSupported()));
+        if (equipmentTypeId == Guid.Empty)
+        {
+            return Error.Validation("INVALID_EQUIPMENT_TYPE_ID", "Equipment Type ID không được rỗng.");
+        }
+
+        if (schemaVersion < 1)
+        {
+            return Error.Validation("INVALID_SCHEMA_VERSION", "Schema Version phải là số nguyên dương lớn hơn hoặc bằng 1.");
+        }
+
+        if (string.IsNullOrWhiteSpace(specValues))
+        {
+            return Error.Validation("INVALID_SPEC_VALUES", "Spec values không được để trống.");
+        }
+
+        JsonDocument specDoc;
+        try
+        {
+            specDoc = JsonDocument.Parse(specValues);
+        }
+        catch (JsonException)
+        {
+            return Error.Validation("INVALID_SPEC_VALUES", "Spec values không đúng định dạng JSON.");
+        }
+
+        string relativeUri = $"api/v1/catalog/equipment-types/{equipmentTypeId:D}/validate-specification";
+
+        try
+        {
+            using (specDoc)
+            {
+                if (specDoc.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    return Error.Validation("INVALID_SPEC_VALUES", "Spec values phải là JSON object.");
+                }
+                using var request = new HttpRequestMessage(HttpMethod.Post, relativeUri);
+                var payload = new
+                {
+                    schemaVersion,
+                    specValues = specDoc.RootElement
+                };
+
+                request.Content = new StringContent(
+                    JsonSerializer.Serialize(payload, JsonOptions),
+                    System.Text.Encoding.UTF8,
+                    "application/json");
+
+                using var response = await _httpClient.SendAsync(request, cancellationToken);
+
+                if (response.StatusCode == HttpStatusCode.NoContent)
+                {
+                    return Result.Success();
+                }
+
+                if (response.StatusCode == HttpStatusCode.BadRequest)
+                {
+                    var content = await response.Content.ReadAsStringAsync(cancellationToken);
+                    if (string.IsNullOrWhiteSpace(content))
+                    {
+                        return Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "CatalogService trả về nội dung rỗng.");
+                    }
+
+                    RemoteProblemDetails? problem;
+                    try
+                    {
+                        problem = JsonSerializer.Deserialize<RemoteProblemDetails>(content, JsonOptions);
+                    }
+                    catch (JsonException ex)
+                    {
+                        if (_logger is not null) LogJsonError(_logger, "validate-specification", ex);
+                        return Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "Phản hồi lỗi từ CatalogService không đúng định dạng JSON.");
+                    }
+
+                    if (problem is null || string.IsNullOrWhiteSpace(problem.Title))
+                    {
+                        return Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "Phản hồi lỗi từ CatalogService thiếu tiêu đề hoặc mã lỗi.");
+                    }
+
+                    if (ContractSpecErrorCodes.Contains(problem.Title))
+                    {
+                        return Error.Validation(problem.Title, problem.Detail ?? problem.Title);
+                    }
+
+                    return Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", $"Mã lỗi '{problem.Title}' từ CatalogService không thuộc contract specification validation.");
+                }
+
+                return Error.Unavailable("CATALOG_SERVICE_ERROR", $"CatalogService trả về mã lỗi HTTP {(int)response.StatusCode}.");
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            if (_logger is not null) LogTimeoutResource(_logger, equipmentTypeId.ToString("D"), "validate-specification", ex);
+            return Error.Unavailable("CATALOG_SERVICE_TIMEOUT", "Hết thời gian chờ phản hồi từ CatalogService.");
+        }
+        catch (HttpRequestException ex)
+        {
+            if (_logger is not null) LogNetworkErrorResource(_logger, equipmentTypeId.ToString("D"), "validate-specification", ex);
+            return Error.Unavailable("CATALOG_SERVICE_NETWORK_ERROR", "Không thể kết nối tới CatalogService.");
+        }
     }
 }
