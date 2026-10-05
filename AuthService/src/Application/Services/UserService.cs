@@ -440,7 +440,7 @@ public sealed class UserService(
             avatarUrl,
             user.IsActive,
             user.CreatedAt,
-            UserAccessResolver.Roles(user),
+            UserAccessResolver.EffectiveRoles(user),
             user.DateOfBirth,
             user.CitizenId
         );
@@ -482,7 +482,7 @@ public sealed class UserService(
             u.FullName,
             u.IsActive,
             u.CreatedAt,
-            u.UserRoles?.Select(ur => ur.Role.Name).ToList() ?? [] // <-- Trích xuất danh sách Role
+            UserAccessResolver.EffectiveRoles(u).ToList()
         )).ToList();
 
         return Result.Success(new PagedResult<AdminUserListItemDto>(items, request.Page, request.PageSize, totalCount, totalPages));
