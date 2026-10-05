@@ -13,7 +13,7 @@ public static class ExpectedErrorFilterExtensions
         if (error == Error.None)
             throw new ArgumentException("Không thể chuyển Error.None thành HTTP error.", nameof(error));
 
-        return controller.Problem(statusCode: error.Type switch
+        var problemResult = controller.Problem(statusCode: error.Type switch
         {
             ErrorType.Validation => StatusCodes.Status400BadRequest,
             ErrorType.Unauthorized => StatusCodes.Status401Unauthorized,
@@ -25,5 +25,12 @@ public static class ExpectedErrorFilterExtensions
             ErrorType.Unavailable => StatusCodes.Status503ServiceUnavailable,
             _ => StatusCodes.Status500InternalServerError
         }, title: error.Code, detail: error.Message);
+
+        if (error.Errors is { Count: > 0 } && problemResult.Value is ProblemDetails problemDetails)
+        {
+            problemDetails.Extensions["errors"] = error.Errors;
+        }
+
+        return problemResult;
     }
 }

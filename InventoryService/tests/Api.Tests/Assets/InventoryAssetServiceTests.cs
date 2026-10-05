@@ -128,7 +128,7 @@ public sealed class InventoryAssetServiceTests
             return BrandHandler is not null
                 ? BrandHandler(brandId)
                 : Task.FromResult(Result.Success(new CatalogBrandResponse(
-                    brandId, "BR-001", "Default Brand", "Active")));
+                    brandId, "BR-001", "Default Brand", true)));
         }
 
         public Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default)
@@ -274,7 +274,7 @@ public sealed class InventoryAssetServiceTests
         var service = CreateService();
         var brandId = Guid.NewGuid();
         _catalogClient.BrandHandler = id => Task.FromResult(Result.Success(
-            new CatalogBrandResponse(id, "BR-OLD", "Inactive Brand", "Inactive")));
+            new CatalogBrandResponse(id, "BR-OLD", "Inactive Brand", false)));
 
         var caller = new TestCaller(Guid.NewGuid());
         using var doc = JsonDocument.Parse("{}");
@@ -342,7 +342,8 @@ public sealed class InventoryAssetServiceTests
     {
         var service = CreateService();
         _catalogClient.SpecHandler = (_, _, _) => Task.FromResult(Result.Failure(
-            Error.Validation("EquipmentType.SpecRequired", "Trường 'sensor' là bắt buộc.")));
+            Error.Validation("SPEC_VALIDATION_FAILED", "Dữ liệu specification không hợp lệ theo schema version đã công khai.",
+                [new ValidationError("sensor", "REQUIRED", "Trường 'sensor' là bắt buộc.")])));
 
         var caller = new TestCaller(Guid.NewGuid());
         using var doc = JsonDocument.Parse("{}");
@@ -351,8 +352,12 @@ public sealed class InventoryAssetServiceTests
         var result = await service.CreateAssetAsync(request, caller);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("EquipmentType.SpecRequired", result.Error.Code);
-        Assert.Equal("Trường 'sensor' là bắt buộc.", result.Error.Message);
+        Assert.Equal("SPEC_VALIDATION_FAILED", result.Error.Code);
+        Assert.Equal("Dữ liệu specification không hợp lệ theo schema version đã công khai.", result.Error.Message);
+        Assert.NotNull(result.Error.Errors);
+        var err = Assert.Single(result.Error.Errors);
+        Assert.Equal("sensor", err.Field);
+        Assert.Equal("REQUIRED", err.Code);
         Assert.Empty(_repo.Store);
     }
 
@@ -510,7 +515,7 @@ public sealed class InventoryAssetServiceTests
         var inactiveBrand = Guid.NewGuid();
 
         _catalogClient.BrandHandler = id => Task.FromResult(Result.Success(
-            new CatalogBrandResponse(id, "BR-INACTIVE", "Inactive Brand", "Inactive")));
+            new CatalogBrandResponse(id, "BR-INACTIVE", "Inactive Brand", false)));
 
         var asset = InventoryAsset.Create(
             Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(),
@@ -819,7 +824,8 @@ public sealed class InventoryAssetServiceTests
         _repo.Add(asset);
 
         _catalogClient.SpecHandler = (_, _, _) => Task.FromResult(Result.Failure(
-            Error.Validation("EquipmentType.SpecRequired", "Spec rejected by catalog")));
+            Error.Validation("SPEC_VALIDATION_FAILED", "Spec rejected by catalog",
+                [new ValidationError("k", "REQUIRED", "Trường 'k' là bắt buộc.")])));
 
         var service = CreateService();
 
@@ -835,7 +841,11 @@ public sealed class InventoryAssetServiceTests
         var result = await service.PatchAssetAsync(asset.Id, patch, caller);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("EquipmentType.SpecRequired", result.Error.Code);
+        Assert.Equal("SPEC_VALIDATION_FAILED", result.Error.Code);
+        Assert.NotNull(result.Error.Errors);
+        var patchErr = Assert.Single(result.Error.Errors);
+        Assert.Equal("k", patchErr.Field);
+        Assert.Equal("REQUIRED", patchErr.Code);
         Assert.Equal(0, _mediaClient.VerifyCalls); // Media preparation skipped when catalog spec fails
     }
 

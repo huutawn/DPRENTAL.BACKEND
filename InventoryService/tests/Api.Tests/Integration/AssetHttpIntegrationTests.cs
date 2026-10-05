@@ -47,7 +47,7 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
             return BrandHandler is not null
                 ? BrandHandler(brandId)
                 : Task.FromResult(Result.Success(new CatalogBrandResponse(
-                    brandId, "BR-SONY", "Sony", "Active")));
+                    brandId, "BR-SONY", "Sony", true)));
         }
 
         public Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default)
