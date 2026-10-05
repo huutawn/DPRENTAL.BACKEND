@@ -63,9 +63,8 @@ Hệ thống áp dụng cơ chế: **PostgreSQL `READ COMMITTED` transaction + a
 |---|---|---|---|
 | Quản lý tài sản (`AssetManage`) | `p=inventory.asset.manage` + own asset (`OwnerUserId == sub`) | Cho phép xuyên user | Từ chối |
 | Chi tiết lịch (`CalendarRead` / DPR-149) | Human own asset (`OwnerUserId == sub`, không cần `p`) | Được phép khi là owner (`OwnerUserId == sub`), không bypass | Từ chối |
-| Lịch khả dụng làm sạch (`SanitizedAvailability`) | Bất kỳ Human đã xác thực | Cho phép | `s=inventory.calendar.read` |
+| Lịch khả dụng làm sạch (`AvailabilityRead` / DPR-150) | Bất kỳ Human đã xác thực | Cho phép | `s=inventory.availability.read` (`u=svc`) |
 | Lệnh phân bổ/hold (`AllocationWrite`) | Từ chối | Từ chối | `s=inventory.allocation.write` |
-| Phân bổ thủ công (`ManualAllocation`) | `p=inventory.asset.manage` + own asset (`OwnerUserId == sub`) | Cho phép xuyên user | Từ chối |
 
 ---
 
@@ -135,6 +134,32 @@ Hệ thống áp dụng cơ chế: **PostgreSQL `READ COMMITTED` transaction + a
   5. Không query overlap lại (Held còn hạn và Allocated chiếm cùng period).
   6. Không kiểm tra `AcceptingBookings`. Key mới trên expired/Allocated/Released/Cancelled trả 409 Conflict (Application service trực tiếp chuyển lỗi `HOLD_EXPIRED` và `INVALID_STATUS_TRANSITION` thành `Error.Conflict`, giữ nguyên mã lỗi; controller chuyển trực tiếp qua `ToProblem(result.Error)`). Không phát sự kiện Outbox.
 
+
+## Truy vấn tính khả dụng và Valkey Read Cache (DPR-150: Asset Availability Queries)
+
+### APIs
+
+| Method | Endpoint | Yêu cầu quyền | Mô tả |
+|---|---|---|---|
+| `POST` | `/api/v1/inventory/availability/check` | `AvailabilityRead` (Human authenticated hoặc Service `s=inventory.availability.read`) | Kiểm tra tính khả dụng hàng loạt tài sản. Luôn đọc trực tiếp từ PostgreSQL trong transaction `RepeatableRead` (tối đa 3 SELECTs). Giới hạn tối đa 500 ID trước khi gộp trùng. |
+| `GET` | `/api/v1/inventory/assets/{assetId}/busy-ranges?from=&to=` | `AvailabilityRead` (Human authenticated hoặc Service `s=inventory.availability.read`) | Đọc danh sách các khoảng bận đã làm sạch của tài sản. Luôn kiểm tra existence và `AcceptingBookings` từ PostgreSQL. Dùng Valkey month cache với TTL động. |
+
+### Kiến trúc Valkey Read Cache & Invalidation
+
+1. **Cấu hình & Adapter**:
+   - Pin `StackExchange.Redis 3.3.1` trong `Directory.Packages.props`. Adapter đặt tại `Api/Caching`, thực thi interface `IInventoryAvailabilityCache` do Application sở hữu. Domain không phụ thuộc Redis.
+   - Tái sử dụng `ConnectionStrings:Redis`, cấu hình cache tắt mặc định (`InventoryCache:Enabled = false`), TTL 60s, timeout 500ms.
+   - `AbortOnConnectFail = false`: Mất kết nối Redis không chặn khởi động hay readiness của ứng dụng; tự động fallback đọc PostgreSQL.
+2. **Key Schema & Payload**:
+   - Month keys: `inventory:asset:{assetId}:busy:{yyyyMM}`.
+   - Metadata index: `inventory:asset:{assetId}:months` (Sorted Set lưu score = expiry timestamp).
+   - Payload chỉ chứa sanitized ranges (`BusyRangeDto`) và mốc hết hạn nội bộ; không serialize private fields.
+3. **TTL động & Fill Race**:
+   - TTL tính từ snapshot: `min(normal TTL deadline, nearest active Hold expiry) - current time`.
+   - Tự động bỏ ghi cache nếu deadline đã qua.
+4. **Outbox Invalidation**:
+   - Mở rộng `OutboxPublisherWorker`: khi claim được sự kiện `InventoryAssetAvailabilityChanged` đã commit trong DB, thực hiện invalidate toàn bộ month keys của tài sản qua script Lua atomic trước khi publish Kafka, ngoài database transaction.
+   - Lỗi invalidation chỉ log cảnh báo, không chặn publication hay rollback mutation.
 
 ## Forward migration và maintenance cutover
 

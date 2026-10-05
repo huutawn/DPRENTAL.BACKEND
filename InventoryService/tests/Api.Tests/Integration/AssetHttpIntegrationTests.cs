@@ -88,6 +88,9 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
         public Task<InventoryAsset?> GetCalendarSnapshotAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
             inner.GetCalendarSnapshotAsync(assetId, startDate, endDate, cancellationToken);
 
+        public Task<IReadOnlyList<InventoryAsset>> GetAvailabilitySnapshotsAsync(IReadOnlyList<Guid> assetIds, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
+            inner.GetAvailabilitySnapshotsAsync(assetIds, startDate, endDate, cancellationToken);
+
         public void Add(InventoryAsset asset) => inner.Add(asset);
         public void Update(InventoryAsset asset) => inner.Update(asset);
     }

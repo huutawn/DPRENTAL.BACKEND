@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Dprental.InventoryService.Application.Caching;
 using Dprental.InventoryService.Application.Kafka.Contracts;
 using Dprental.InventoryService.Common.Utils;
 using Dprental.InventoryService.Domain.Entities;
@@ -23,8 +24,8 @@ public sealed class OutboxPublisherWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IKafkaProducer _producer;
+    private readonly IInventoryAvailabilityCache _cache;
     private readonly ILogger<OutboxPublisherWorker>? _logger;
-
     public int BatchSize { get; set; } = 20;
     public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromSeconds(30);
     public TimeSpan IdleDelay { get; set; } = TimeSpan.FromMilliseconds(100);
@@ -32,10 +33,12 @@ public sealed class OutboxPublisherWorker : BackgroundService
     public OutboxPublisherWorker(
         IServiceScopeFactory scopeFactory,
         IKafkaProducer producer,
+        IInventoryAvailabilityCache? cache = null,
         ILogger<OutboxPublisherWorker>? logger = null)
     {
-        _scopeFactory = scopeFactory;
-        _producer = producer;
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+        _producer = producer ?? throw new ArgumentNullException(nameof(producer));
+        _cache = cache ?? NoOpInventoryAvailabilityCache.Instance;
         _logger = logger;
     }
 
@@ -141,6 +144,27 @@ public sealed class OutboxPublisherWorker : BackgroundService
                 }
             }
 
+            // DPR-150: Invalidate cache của tài sản ngoài transaction trước khi publish ra Kafka
+            if (TryExtractAvailabilityChangedAssetId(message, out var assetId))
+            {
+                try
+                {
+                    await _cache.InvalidateAssetAsync(assetId, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(
+                        ex,
+                        "Lỗi invalidate cache cho tài sản {AssetId} trước khi publish Outbox message {MessageId}; tiếp tục xuất bản.",
+                        assetId,
+                        message.Id);
+                }
+            }
+
             // Publish ngoài transaction lên Kafka broker và chờ ACK
             await _producer.ProduceRawAsync(
                 message.Topic,
@@ -191,5 +215,39 @@ public sealed class OutboxPublisherWorker : BackgroundService
                 null,
                 cancellationToken);
         }
+    }
+
+    private static bool TryExtractAvailabilityChangedAssetId(OutboxMessage message, out Guid assetId)
+    {
+        assetId = Guid.Empty;
+        if (message.Topic != KafkaTopics.InventoryAssetEventsV1)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(message.Payload);
+            if (doc.RootElement.TryGetProperty("messageType", out var typeElem) &&
+                typeElem.ValueEquals(InventoryAssetAvailabilityEvents.MessageType))
+            {
+                if (doc.RootElement.TryGetProperty("aggregateId", out var aggElem) &&
+                    Guid.TryParse(aggElem.GetString(), out assetId))
+                {
+                    return true;
+                }
+
+                if (Guid.TryParse(message.KafkaKey, out assetId))
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            // Payload parse failure bỏ qua
+        }
+
+        return false;
     }
 }
