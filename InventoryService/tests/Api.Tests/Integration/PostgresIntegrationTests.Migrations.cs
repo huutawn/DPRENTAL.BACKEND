@@ -371,7 +371,7 @@ public sealed partial class PostgresIntegrationTests
                 """);
 
             // Thực hiện forward migration sang CompleteInventoryAssetManagement
-            await db.Database.MigrateAsync();
+            await db.Database.MigrateAsync("20261002030000_CompleteInventoryAssetManagement");
 
             // Kiểm tra kết quả migration:
             var row = await db.Database.SqlQuery<string>($"""
@@ -615,7 +615,7 @@ public sealed partial class PostgresIntegrationTests
             """);
 
             // Forward migrate to AddAssetBrandId
-            await db.Database.MigrateAsync();
+            await db.Database.MigrateAsync("20261005050000_AddAssetBrandId");
 
             // Asset still exists with brand_id = NULL and all original fields intact
             var brandIdVal = await db.Database.SqlQuery<Guid?>($"""
@@ -692,86 +692,109 @@ public sealed partial class PostgresIntegrationTests
     [Fact]
     public async Task AddAssetBrandId_Downgrade_EmptyDb_ThrowsNotSupportedException_AndPreservesSchemaAndHistory()
     {
-        await using var db = await CreateMigratedDbContextAsync();
+        var fixture = new PostgresFixture { TargetMigration = "20261005050000_AddAssetBrandId" };
+        await fixture.InitializeAsync();
+        try
+        {
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
+                .UseNpgsql(fixture.ConnectionString, o => o.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
+                .Options;
+            await using var db = new InventoryServiceDbContext(options);
 
-        // Attempt to downgrade to previous migration
-        var ex = await Assert.ThrowsAsync<NotSupportedException>(() =>
-            db.Database.MigrateAsync("20261002030000_CompleteInventoryAssetManagement"));
-        Assert.Contains("AddAssetBrandId retains brand_id column and constraint", ex.Message);
+            // Attempt to downgrade to previous migration
+            var ex = await Assert.ThrowsAsync<NotSupportedException>(() =>
+                db.Database.MigrateAsync("20261002030000_CompleteInventoryAssetManagement"));
+            Assert.Contains("AddAssetBrandId retains brand_id column and constraint", ex.Message);
 
-        // Verify column brand_id still exists
-        var colExists = await db.Database.SqlQueryRaw<bool>("""
-            SELECT EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = 'inventory' AND table_name = 'assets' AND column_name = 'brand_id'
-            ) AS "Value"
-        """).SingleAsync();
-        Assert.True(colExists);
+            // Verify column brand_id still exists
+            var colExists = await db.Database.SqlQueryRaw<bool>("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'inventory' AND table_name = 'assets' AND column_name = 'brand_id'
+                ) AS "Value"
+            """).SingleAsync();
+            Assert.True(colExists);
 
-        // Verify constraint ck_assets_brand_id still exists
-        var constraintExists = await db.Database.SqlQueryRaw<bool>("""
-            SELECT EXISTS (
-                SELECT 1 FROM information_schema.check_constraints
-                WHERE constraint_schema = 'inventory' AND constraint_name = 'ck_assets_brand_id'
-            ) AS "Value"
-        """).SingleAsync();
-        Assert.True(constraintExists);
+            // Verify constraint ck_assets_brand_id still exists
+            var constraintExists = await db.Database.SqlQueryRaw<bool>("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.check_constraints
+                    WHERE constraint_schema = 'inventory' AND constraint_name = 'ck_assets_brand_id'
+                ) AS "Value"
+            """).SingleAsync();
+            Assert.True(constraintExists);
 
-        // Verify migration history still records AddAssetBrandId
-        var historyExists = await db.Database.SqlQueryRaw<bool>("""
-            SELECT EXISTS (
-                SELECT 1 FROM inventory."__EFMigrationsHistory"
-                WHERE "MigrationId" = '20261005050000_AddAssetBrandId'
-            ) AS "Value"
-        """).SingleAsync();
-        Assert.True(historyExists);
+            // Verify migration history still records AddAssetBrandId
+            var historyExists = await db.Database.SqlQueryRaw<bool>("""
+                SELECT EXISTS (
+                    SELECT 1 FROM inventory."__EFMigrationsHistory"
+                    WHERE "MigrationId" = '20261005050000_AddAssetBrandId'
+                ) AS "Value"
+            """).SingleAsync();
+            Assert.True(historyExists);
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
     }
 
     [Fact]
     public async Task AddAssetBrandId_Downgrade_DbWithBrandData_ThrowsNotSupportedException_AndPreservesBrandData()
     {
-        await using var db = await CreateMigratedDbContextAsync();
-        var assetId = Guid.NewGuid();
-        var ownerId = Guid.NewGuid();
-        var eqId = Guid.NewGuid();
-        var brandId = Guid.NewGuid();
-        var now = DateTimeOffset.UtcNow;
+        var fixture = new PostgresFixture { TargetMigration = "20261005050000_AddAssetBrandId" };
+        await fixture.InitializeAsync();
+        try
+        {
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
+                .UseNpgsql(fixture.ConnectionString, o => o.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
+                .Options;
+            await using var db = new InventoryServiceDbContext(options);
+            var assetId = Guid.NewGuid();
+            var ownerId = Guid.NewGuid();
+            var eqId = Guid.NewGuid();
+            var brandId = Guid.NewGuid();
+            var now = DateTimeOffset.UtcNow;
 
-        await db.Database.ExecuteSqlInterpolatedAsync($$"""
-            INSERT INTO inventory.assets (id, owner_user_id, equipment_type_id, brand_id, model, schema_version, spec_values, accepting_bookings, created_at, updated_at)
-            VALUES ({{assetId}}, {{ownerId}}, {{eqId}}, {{brandId}}, 'Test Camera', 1, '{"res":"4K"}'::jsonb, true, {{now}}, {{now}});
-        """);
+            await db.Database.ExecuteSqlInterpolatedAsync($$"""
+                INSERT INTO inventory.assets (id, owner_user_id, equipment_type_id, brand_id, model, schema_version, spec_values, accepting_bookings, created_at, updated_at)
+                VALUES ({{assetId}}, {{ownerId}}, {{eqId}}, {{brandId}}, 'Test Camera', 1, '{"res":"4K"}'::jsonb, true, {{now}}, {{now}});
+            """);
 
-        // Attempt downgrade
-        var ex = await Assert.ThrowsAsync<NotSupportedException>(() =>
-            db.Database.MigrateAsync("20261002030000_CompleteInventoryAssetManagement"));
-        Assert.Contains("AddAssetBrandId retains brand_id column and constraint", ex.Message);
+            // Attempt downgrade
+            var ex = await Assert.ThrowsAsync<NotSupportedException>(() =>
+                db.Database.MigrateAsync("20261002030000_CompleteInventoryAssetManagement"));
+            Assert.Contains("AddAssetBrandId retains brand_id column and constraint", ex.Message);
 
-        // Verify data intact
-        var reloadedBrand = await db.Database.SqlQuery<Guid?>($"""
-            SELECT brand_id AS "Value" FROM inventory.assets WHERE id = {assetId}
-        """).SingleAsync();
-        Assert.Equal(brandId, reloadedBrand);
+            // Verify data intact
+            var reloadedBrand = await db.Database.SqlQuery<Guid?>($"""
+                SELECT brand_id AS "Value" FROM inventory.assets WHERE id = {assetId}
+            """).SingleAsync();
+            Assert.Equal(brandId, reloadedBrand);
 
-        // Verify constraint intact
-        var constraintExists = await db.Database.SqlQueryRaw<bool>("""
-            SELECT EXISTS (
-                SELECT 1 FROM information_schema.check_constraints
-                WHERE constraint_schema = 'inventory' AND constraint_name = 'ck_assets_brand_id'
-            ) AS "Value"
-        """).SingleAsync();
-        Assert.True(constraintExists);
+            // Verify constraint intact
+            var constraintExists = await db.Database.SqlQueryRaw<bool>("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.check_constraints
+                    WHERE constraint_schema = 'inventory' AND constraint_name = 'ck_assets_brand_id'
+                ) AS "Value"
+            """).SingleAsync();
+            Assert.True(constraintExists);
 
-        // Verify history intact
-        var historyExists = await db.Database.SqlQueryRaw<bool>("""
-            SELECT EXISTS (
-                SELECT 1 FROM inventory."__EFMigrationsHistory"
-                WHERE "MigrationId" = '20261005050000_AddAssetBrandId'
-            ) AS "Value"
-        """).SingleAsync();
-        Assert.True(historyExists);
+            // Verify history intact
+            var historyExists = await db.Database.SqlQueryRaw<bool>("""
+                SELECT EXISTS (
+                    SELECT 1 FROM inventory."__EFMigrationsHistory"
+                    WHERE "MigrationId" = '20261005050000_AddAssetBrandId'
+                ) AS "Value"
+            """).SingleAsync();
+            Assert.True(historyExists);
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
     }
-
     [Fact]
     public async Task ModelSnapshot_HasNoPendingModelChanges()
     {

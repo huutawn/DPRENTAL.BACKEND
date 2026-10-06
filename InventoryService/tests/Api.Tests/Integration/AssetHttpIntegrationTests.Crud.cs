@@ -38,7 +38,8 @@ public sealed partial class AssetHttpIntegrationTests
             schemaVersion = 1,
             specValues = new { resolution = "4K", fps = 120 },
             serialNumber = "SN-POST-01",
-            manufactureYear = 2024
+            manufactureYear = 2024,
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
         var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         var response = await client.PostAsync("api/v1/inventory/assets", content);
@@ -172,7 +173,8 @@ public sealed partial class AssetHttpIntegrationTests
             brandId = Guid.NewGuid(),
             model = "Sony FX3",
             schemaVersion = 1,
-            specValues = new { sensor = "Full-Frame" }
+            specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
         var response = await client.PostAsync("api/v1/inventory/assets",
@@ -207,7 +209,8 @@ public sealed partial class AssetHttpIntegrationTests
             brandId = Guid.NewGuid(),
             model = "Sony FX3",
             schemaVersion = 1,
-            specValues = new { sensor = "Full-Frame" }
+            specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
         var response = await client.PostAsync("api/v1/inventory/assets",

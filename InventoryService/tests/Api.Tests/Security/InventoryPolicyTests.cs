@@ -55,6 +55,8 @@ public sealed class InventoryPolicyTests
     private static InventoryAsset CreateTestAsset(InventorySecurityTestFactory factory, Guid ownerId, Guid? assetId = null)
     {
         var id = assetId ?? Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var rate = AssetRentalRate.Create(id, 100_000m, null, null, "VND", now).Value;
         var asset = InventoryAsset.Create(
             id,
             ownerId,
@@ -63,7 +65,8 @@ public sealed class InventoryPolicyTests
             "Sony FX3",
             1,
             "{\"serial\":\"TEST\"}",
-            DateTimeOffset.UtcNow).Value;
+            now,
+            rate).Value;
         factory.TestAssets[id] = asset;
         return asset;
     }

@@ -15,6 +15,10 @@ public static class InventoryAssetMapper
         ArgumentNullException.ThrowIfNull(asset);
 
         using var doc = JsonDocument.Parse(asset.SpecValues);
+        var rentalRateDto = asset.RentalRate != null
+            ? new AssetRentalRateDto(asset.RentalRate.DailyRate, asset.RentalRate.WeeklyRate, asset.RentalRate.MonthlyRate, asset.RentalRate.Currency)
+            : null!;
+
         return new InventoryAssetResponse(
             asset.Id,
             asset.OwnerUserId,
@@ -26,6 +30,7 @@ public static class InventoryAssetMapper
             asset.ThumbnailMediaId,
             asset.SchemaVersion,
             doc.RootElement.Clone(),
+            rentalRateDto,
             asset.AcceptingBookings,
             asset.SuspensionReason,
             asset.CreatedAt,

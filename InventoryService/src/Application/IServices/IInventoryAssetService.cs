@@ -36,4 +36,10 @@ public interface IInventoryAssetService
         ToggleAcceptingBookingsRequest request,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);
+
+    Task<Result<AssetRentalRateDto>> UpdateRentalRateAsync(
+        Guid assetId,
+        AssetRentalRateDto request,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default);
 }

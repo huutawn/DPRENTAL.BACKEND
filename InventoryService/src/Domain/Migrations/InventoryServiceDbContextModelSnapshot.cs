@@ -189,6 +189,58 @@ namespace InventoryService.Domain.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AssetRentalRate", b =>
+                {
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("asset_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("currency");
+
+                    b.Property<decimal>("DailyRate")
+                        .HasColumnType("numeric(18,0)")
+                        .HasColumnName("daily_rate");
+
+                    b.Property<decimal?>("MonthlyRate")
+                        .HasColumnType("numeric(18,0)")
+                        .HasColumnName("monthly_rate");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<decimal?>("WeeklyRate")
+                        .HasColumnType("numeric(18,0)")
+                        .HasColumnName("weekly_rate");
+
+                    b.HasKey("AssetId")
+                        .HasName("pk_asset_rental_rates");
+
+                    b.HasIndex("DailyRate")
+                        .HasDatabaseName("ix_asset_rental_rates_daily_rate");
+
+                    b.ToTable("asset_rental_rates", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_asset_rental_rates_asset_id", "asset_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_asset_rental_rates_currency", "currency = 'VND'");
+
+                            t.HasCheckConstraint("ck_asset_rental_rates_daily_rate", "daily_rate >= 1 AND daily_rate <= 999999999999999999 AND trunc(daily_rate) = daily_rate");
+
+                            t.HasCheckConstraint("ck_asset_rental_rates_monthly_rate", "monthly_rate IS NULL OR (monthly_rate >= 1 AND monthly_rate <= 999999999999999999 AND trunc(monthly_rate) = monthly_rate)");
+
+                            t.HasCheckConstraint("ck_asset_rental_rates_weekly_rate", "weekly_rate IS NULL OR (weekly_rate >= 1 AND weekly_rate <= 999999999999999999 AND trunc(weekly_rate) = weekly_rate)");
+                        });
+                });
+
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.CalendarBlock", b =>
                 {
                     b.Property<Guid>("Id")
@@ -506,6 +558,17 @@ namespace InventoryService.Domain.Migrations
                     b.Navigation("Asset");
                 });
 
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AssetRentalRate", b =>
+                {
+                    b.HasOne("Dprental.InventoryService.Domain.Entities.InventoryAsset", "Asset")
+                        .WithOne("RentalRate")
+                        .HasForeignKey("Dprental.InventoryService.Domain.Entities.AssetRentalRate", "AssetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Asset");
+                });
+
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AssetAllocation", b =>
                 {
                     b.Navigation("Transitions");
@@ -516,6 +579,9 @@ namespace InventoryService.Domain.Migrations
                     b.Navigation("Allocations");
 
                     b.Navigation("CalendarBlocks");
+
+                    b.Navigation("RentalRate")
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

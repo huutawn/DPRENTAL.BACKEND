@@ -17,6 +17,7 @@ public sealed record InventoryAssetResponse(
     [property: JsonPropertyName("thumbnailMediaId")] Guid? ThumbnailMediaId,
     [property: JsonPropertyName("schemaVersion")] int SchemaVersion,
     [property: JsonPropertyName("specValues")] JsonElement SpecValues,
+    [property: JsonPropertyName("rentalRate")] AssetRentalRateDto RentalRate,
     [property: JsonPropertyName("acceptingBookings")] bool AcceptingBookings,
     [property: JsonPropertyName("suspensionReason")] string? SuspensionReason,
     [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt,

@@ -13,6 +13,7 @@ public sealed record CreateInventoryAssetRequest(
     [property: JsonPropertyName("model")] string Model,
     [property: JsonPropertyName("schemaVersion")] int SchemaVersion,
     [property: JsonPropertyName("specValues")] JsonElement SpecValues,
+    [property: JsonPropertyName("rentalRate")] AssetRentalRateDto? RentalRate = null,
     [property: JsonPropertyName("serialNumber")] string? SerialNumber = null,
     [property: JsonPropertyName("manufactureYear")] int? ManufactureYear = null,
     [property: JsonPropertyName("thumbnailMediaId")] Guid? ThumbnailMediaId = null

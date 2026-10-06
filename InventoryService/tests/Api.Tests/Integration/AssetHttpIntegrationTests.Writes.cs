@@ -317,7 +317,8 @@ public sealed partial class AssetHttpIntegrationTests
             brandId = Guid.NewGuid(),
             model = "Sony FX3",
             schemaVersion = 1,
-            specValues = new { sensor = "Full-Frame" }
+            specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
         var response = await client.PostAsync("api/v1/inventory/assets",
@@ -356,7 +357,8 @@ public sealed partial class AssetHttpIntegrationTests
             brandId = Guid.NewGuid(),
             model = "Sony FX3",
             schemaVersion = 1,
-            specValues = new { sensor = "Full-Frame" }
+            specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
         var response = await client.PostAsync("api/v1/inventory/assets",
@@ -368,9 +370,9 @@ public sealed partial class AssetHttpIntegrationTests
     }
 
     [Theory]
-    [InlineData("{\"equipmentTypeId\":\"" + "11111111-1111-1111-1111-111111111111" + "\",\"model\":\"Sony FX3\",\"schemaVersion\":1,\"specValues\":{}}")]
-    [InlineData("{\"equipmentTypeId\":\"" + "11111111-1111-1111-1111-111111111111" + "\",\"brandId\":null,\"model\":\"Sony FX3\",\"schemaVersion\":1,\"specValues\":{}}")]
-    [InlineData("{\"equipmentTypeId\":\"" + "11111111-1111-1111-1111-111111111111" + "\",\"brandId\":\"00000000-0000-0000-0000-000000000000\",\"model\":\"Sony FX3\",\"schemaVersion\":1,\"specValues\":{}}")]
+    [InlineData("{\"equipmentTypeId\":\"" + "11111111-1111-1111-1111-111111111111" + "\",\"model\":\"Sony FX3\",\"schemaVersion\":1,\"specValues\":{},\"rentalRate\":{\"dailyRate\":100000,\"currency\":\"VND\"}}")]
+    [InlineData("{\"equipmentTypeId\":\"" + "11111111-1111-1111-1111-111111111111" + "\",\"brandId\":null,\"model\":\"Sony FX3\",\"schemaVersion\":1,\"specValues\":{},\"rentalRate\":{\"dailyRate\":100000,\"currency\":\"VND\"}}")]
+    [InlineData("{\"equipmentTypeId\":\"" + "11111111-1111-1111-1111-111111111111" + "\",\"brandId\":\"00000000-0000-0000-0000-000000000000\",\"model\":\"Sony FX3\",\"schemaVersion\":1,\"specValues\":{},\"rentalRate\":{\"dailyRate\":100000,\"currency\":\"VND\"}}")]
     public async Task Post_MissingOrNullOrEmptyBrandId_Returns400(string payloadJson)
     {
         var (app, secFactory) = CreateFactory();
@@ -413,7 +415,8 @@ public sealed partial class AssetHttpIntegrationTests
             brandId = Guid.NewGuid(),
             model = "Sony FX3",
             schemaVersion = 1,
-            specValues = new { sensor = "Full-Frame" }
+            specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
         var response = await client.PostAsync("api/v1/inventory/assets",
@@ -642,7 +645,8 @@ public sealed partial class AssetHttpIntegrationTests
             brandId = Guid.NewGuid(),
             model = "Camera A",
             schemaVersion = version2,
-            specValues = new { res = "4K" }
+            specValues = new { res = "4K" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
         var responseA = await client.PostAsync("api/v1/inventory/assets",
@@ -684,9 +688,10 @@ public sealed partial class AssetHttpIntegrationTests
         // Seed existing asset with Disabled equipment type and old published schema version 1
         await using (var db = CreateDbContext())
         {
+            var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
             var asset = InventoryAsset.Create(
                 assetId, owner, disabledEquipmentTypeId, brandId,
-                "Legacy Camera", oldPublishedVersion, "{\"codec\":\"H264\"}", FixedNow).Value;
+                "Legacy Camera", oldPublishedVersion, "{\"codec\":\"H264\"}", FixedNow, rate).Value;
             db.Assets.Add(asset);
             await db.SaveChangesAsync();
         }

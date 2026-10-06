@@ -97,8 +97,10 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
         await using var seedDb = CreateDbContext();
         for (int i = 0; i < 5; i++)
         {
+            var id = Guid.NewGuid();
+            var rate = AssetRentalRate.Create(id, 100_000m, null, null, "VND", InitialNow).Value;
             var asset = InventoryAsset.Create(
-                Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), $"Camera {i}", 1, "{}", InitialNow).Value;
+                id, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), $"Camera {i}", 1, "{}", InitialNow, rate).Value;
 
             asset.CalendarBlocks.Add(CalendarBlock.Create(
                 Guid.NewGuid(), asset.Id, new DateOnly(2026, 10, 10), new DateOnly(2026, 10, 12),
@@ -150,8 +152,10 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
     public async Task GetAvailabilitySnapshotsAsync_RepeatableRead_SnapshotConsistencyUnderConcurrentWrites()
     {
         var ownerUserId = Guid.NewGuid();
+        var assetId = Guid.NewGuid();
+        var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", InitialNow).Value;
         var asset = InventoryAsset.Create(
-            Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "RepeatableReadTest", 1, "{}", InitialNow).Value;
+            assetId, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "RepeatableReadTest", 1, "{}", InitialNow, rate).Value;
 
         await using (var seedDb = CreateDbContext())
         {
@@ -190,26 +194,31 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
         var windowEnd = new DateOnly(2026, 10, 15);
 
         // 1. Free asset
-        var freeAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Free", 1, "{}", InitialNow).Value;
+        var freeId = Guid.NewGuid();
+        var freeAsset = InventoryAsset.Create(freeId, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Free", 1, "{}", InitialNow, AssetRentalRate.Create(freeId, 100_000m, null, null, "VND", InitialNow).Value).Value;
 
         // 2. Disabled bookings
-        var disabledAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Disabled", 1, "{}", InitialNow).Value;
+        var disabledId = Guid.NewGuid();
+        var disabledAsset = InventoryAsset.Create(disabledId, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Disabled", 1, "{}", InitialNow, AssetRentalRate.Create(disabledId, 100_000m, null, null, "VND", InitialNow).Value).Value;
         disabledAsset.DisableBookings("Disabled", InitialNow);
 
         // 3. Blocked
-        var blockedAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Blocked", 1, "{}", InitialNow).Value;
+        var blockedId = Guid.NewGuid();
+        var blockedAsset = InventoryAsset.Create(blockedId, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Blocked", 1, "{}", InitialNow, AssetRentalRate.Create(blockedId, 100_000m, null, null, "VND", InitialNow).Value).Value;
         blockedAsset.CalendarBlocks.Add(CalendarBlock.Create(
             Guid.NewGuid(), blockedAsset.Id, windowStart, windowEnd,
             CalendarBlockReason.Maintenance, "op", InitialNow, windowStart).Value);
 
         // 4. Active Hold
-        var heldAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Held", 1, "{}", InitialNow).Value;
+        var heldId = Guid.NewGuid();
+        var heldAsset = InventoryAsset.Create(heldId, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Held", 1, "{}", InitialNow, AssetRentalRate.Create(heldId, 100_000m, null, null, "VND", InitialNow).Value).Value;
         heldAsset.Allocations.Add(AssetAllocation.CreateHold(
             Guid.NewGuid(), heldAsset.Id, RentalPeriod.Create(windowStart, windowEnd).Value,
             InitialNow.AddHours(2), InitialNow, "SYS", $"REF-{Guid.NewGuid():N}").Value);
 
         // 5. Expired Hold
-        var expiredAsset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Expired", 1, "{}", InitialNow).Value;
+        var expiredId = Guid.NewGuid();
+        var expiredAsset = InventoryAsset.Create(expiredId, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Expired", 1, "{}", InitialNow, AssetRentalRate.Create(expiredId, 100_000m, null, null, "VND", InitialNow).Value).Value;
         expiredAsset.Allocations.Add(AssetAllocation.CreateHold(
             Guid.NewGuid(), expiredAsset.Id, RentalPeriod.Create(windowStart, windowEnd).Value,
             InitialNow.AddHours(-1), InitialNow.AddHours(-2), "SYS", $"REF-{Guid.NewGuid():N}").Value);
@@ -242,7 +251,8 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
     public async Task GetBusyRanges_PostgresReal_CorrectRangesAndNoFakeRange()
     {
         var ownerUserId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "RangesTest", 1, "{}", InitialNow).Value;
+        var busyAssetId = Guid.NewGuid();
+        var asset = InventoryAsset.Create(busyAssetId, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "RangesTest", 1, "{}", InitialNow, AssetRentalRate.Create(busyAssetId, 100_000m, null, null, "VND", InitialNow).Value).Value;
 
         // Block from 2026-10-05 to 2026-10-08
         asset.CalendarBlocks.Add(CalendarBlock.Create(
