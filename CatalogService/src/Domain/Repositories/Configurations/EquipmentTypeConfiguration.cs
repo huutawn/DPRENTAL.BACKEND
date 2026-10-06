@@ -33,6 +33,7 @@ public sealed class EquipmentTypeConfiguration : IEntityTypeConfiguration<Equipm
         builder.Property(e => e.CreatedAt).HasColumnType("timestamp with time zone").IsRequired();
         builder.Property(e => e.UpdatedAt).HasColumnType("timestamp with time zone");
         builder.Property(e => e.PublishedAt).HasColumnType("timestamp with time zone");
+        builder.Property(e => e.NormalizedName).IsRequired().HasMaxLength(200);
 
         builder.Property<uint>("xmin")
             .HasColumnType("xid")
@@ -45,6 +46,7 @@ public sealed class EquipmentTypeConfiguration : IEntityTypeConfiguration<Equipm
         builder.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_EquipmentTypes_CreatedAt");
         builder.HasIndex(e => e.PublishedAt).HasDatabaseName("IX_EquipmentTypes_PublishedAt");
         builder.HasIndex(e => e.ActiveSchemaVersionId).HasDatabaseName("IX_EquipmentTypes_ActiveSchemaVersionId");
+        builder.HasIndex(e => e.NormalizedName).HasDatabaseName("IX_EquipmentTypes_NormalizedName");
 
         builder.HasMany(e => e.Categories)
             .WithMany(c => c.EquipmentTypes)

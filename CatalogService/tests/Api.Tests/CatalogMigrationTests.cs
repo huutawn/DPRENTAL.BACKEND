@@ -281,7 +281,7 @@ public sealed class CatalogMigrationTests
                     }
                 }
 
-                Assert.Equal(6, appliedMigrations.Count);
+                Assert.Equal(7, appliedMigrations.Count);
 
                 Assert.Contains(
                     appliedMigrations,

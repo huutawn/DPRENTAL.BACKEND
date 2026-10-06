@@ -23,10 +23,14 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<EquipmentTypeListQueryValidator>();
         services.AddScoped<CreateEquipmentTypeRequestValidator>();
         services.AddScoped<UpdateEquipmentTypeRequestValidator>();
-        services.AddScoped<IEquipmentTypeService, EquipmentTypeService>();
         services.AddScoped<ICategoryRepository, CategoryRepository>();
         services.AddScoped<ICategoryService, CategoryService>();
         services.AddScoped<ISchemaService, SchemaService>();
+        services.AddScoped<IEquipmentTypeSchemaRepository, EquipmentTypeSchemaRepository>();
+        services.AddScoped<ISchemaQueryService, SchemaQueryService>();
+        services.AddScoped<CanonicalEquipmentTypeRules>();
+        services.AddScoped<IEquipmentTypeService, EquipmentTypeService>();
+
 
         return services;
     }

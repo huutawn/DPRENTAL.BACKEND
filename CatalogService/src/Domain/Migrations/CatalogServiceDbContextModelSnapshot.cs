@@ -87,6 +87,11 @@ namespace CatalogService.Domain.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<Guid?>("OrganizationId")
                         .HasColumnType("uuid");
 
@@ -118,6 +123,9 @@ namespace CatalogService.Domain.Migrations
 
                     b.HasIndex("CreatedAt")
                         .HasDatabaseName("IX_EquipmentTypes_CreatedAt");
+
+                    b.HasIndex("NormalizedName")
+                        .HasDatabaseName("IX_EquipmentTypes_NormalizedName");
 
                     b.HasIndex("OrganizationId")
                         .HasDatabaseName("IX_EquipmentTypes_OrganizationId");
@@ -173,6 +181,9 @@ namespace CatalogService.Domain.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("DeprecatedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -205,7 +216,10 @@ namespace CatalogService.Domain.Migrations
                     b.HasIndex("SpecSchemaId", "VersionNumber")
                         .IsUnique();
 
-                    b.ToTable("SchemaVersions", "catalog");
+                    b.ToTable("SchemaVersions", "catalog", t =>
+                        {
+                            t.HasCheckConstraint("CK_SchemaVersions_Status", "\"Status\" IN ('Draft', 'Published', 'Deprecated')");
+                        });
                 });
 
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SpecField", b =>
@@ -245,16 +259,11 @@ namespace CatalogService.Domain.Migrations
                     b.Property<Guid>("SchemaVersionId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("SchemaVersionId1")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("Unit")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("SchemaVersionId1");
 
                     b.HasIndex("SchemaVersionId", "DisplayOrder");
 
@@ -354,13 +363,13 @@ namespace CatalogService.Domain.Migrations
 
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SchemaVersion", b =>
                 {
-                    b.HasOne("Dprental.CatalogService.Domain.Entities.SpecSchema", null)
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.SpecSchema", "SpecSchema")
                         .WithMany("Versions")
                         .HasForeignKey("SpecSchemaId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Dprental.CatalogService.Domain.Entities.SpecSchema", "SpecSchema")
+                    b.HasOne("Dprental.CatalogService.Domain.Entities.SpecSchema", null)
                         .WithMany("SchemaVersions")
                         .HasForeignKey("SpecSchemaId1");
 
@@ -370,14 +379,10 @@ namespace CatalogService.Domain.Migrations
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SpecField", b =>
                 {
                     b.HasOne("Dprental.CatalogService.Domain.Entities.SchemaVersion", null)
-                        .WithMany("Fields")
+                        .WithMany("SpecFields")
                         .HasForeignKey("SchemaVersionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.HasOne("Dprental.CatalogService.Domain.Entities.SchemaVersion", null)
-                        .WithMany("SpecFields")
-                        .HasForeignKey("SchemaVersionId1");
                 });
 
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SpecOption", b =>
@@ -430,8 +435,6 @@ namespace CatalogService.Domain.Migrations
 
             modelBuilder.Entity("Dprental.CatalogService.Domain.Entities.SchemaVersion", b =>
                 {
-                    b.Navigation("Fields");
-
                     b.Navigation("SpecFields");
                 });
 

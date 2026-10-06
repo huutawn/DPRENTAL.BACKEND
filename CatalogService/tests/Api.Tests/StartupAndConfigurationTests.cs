@@ -218,7 +218,7 @@ public sealed class StartupAndConfigurationTests
             }
         }
 
-        Assert.Equal(6, equipmentTypeEndpointsCount);
+        Assert.Equal(9, equipmentTypeEndpointsCount);
         Assert.DoesNotContain("/api/v1/catalog/equipments", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("dailyPrice", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("regionId", json, StringComparison.OrdinalIgnoreCase);

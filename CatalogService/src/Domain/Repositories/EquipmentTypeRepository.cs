@@ -118,7 +118,7 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
         return await dbContext.EquipmentTypes
             .Include(e => e.Schema)
                 .ThenInclude(s => s!.Versions)
-                    .ThenInclude(v => v.Fields)
+                    .ThenInclude(v => v.SpecFields)
                         .ThenInclude(f => f.Options)
             .AsSplitQuery()
             .FirstOrDefaultAsync(e => e.Id == id, cancellationToken);

@@ -26,7 +26,7 @@ public sealed class SpecFieldConfiguration : IEntityTypeConfiguration<SpecField>
         builder.HasIndex(x => new { x.SchemaVersionId, x.DisplayOrder });
 
         builder.HasOne<SchemaVersion>()
-            .WithMany(version => version.Fields)
+            .WithMany(version => version.SpecFields)
             .HasForeignKey(x => x.SchemaVersionId)
             .OnDelete(DeleteBehavior.Cascade);
     }

@@ -5,7 +5,7 @@ namespace Dprental.CatalogService.Domain.Entities;
 
 public sealed class SchemaVersion
 {
-    private readonly List<SpecField> _fields = [];
+    private readonly List<SpecField> _specFields = [];
 
     private SchemaVersion()
     {
@@ -17,10 +17,10 @@ public sealed class SchemaVersion
     public SchemaVersionStatus Status { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? PublishedAt { get; set; }
-    public IReadOnlyCollection<SpecField> Fields => _fields;
-    public ICollection<SpecField> SpecFields { get; set; } = new List<SpecField>();
+    public IReadOnlyCollection<SpecField> SpecFields => _specFields;
     public SpecSchema? SpecSchema { get; set; }
     public DateTime? PublishedAtUtc { get; set; }
+    public DateTime? DeprecatedAt { get; set; }
 
     internal static SchemaVersion CreateDraft(Guid specSchemaId, int versionNumber, DateTime utcNow) =>
         new()
@@ -38,22 +38,52 @@ public sealed class SchemaVersion
         ArgumentNullException.ThrowIfNull(draft);
 
         string key = draft.Key.Trim();
-        if (_fields.Any(field => string.Equals(field.Key, key, StringComparison.Ordinal)))
+        if (_specFields.Any(field => string.Equals(field.Key, key, StringComparison.Ordinal)))
         {
             throw new InvalidOperationException($"Field '{key}' đã tồn tại trong version này.");
         }
 
-        int displayOrder = _fields.Count == 0 ? 1 : _fields.Max(field => field.DisplayOrder) + 1;
+        int displayOrder = _specFields.Count == 0 ? 1 : _specFields.Max(field => field.DisplayOrder) + 1;
         SpecField field = SpecField.Create(Id, draft, displayOrder);
-        _fields.Add(field);
+        _specFields.Add(field);
         return field;
+    }
+    public SpecField UpdateField(Guid fieldId, SpecFieldDraft draft)
+    {
+        EnsureDraft();
+        ArgumentNullException.ThrowIfNull(draft);
+
+        SpecField field = _specFields.SingleOrDefault(item => item.Id == fieldId)
+            ?? throw new KeyNotFoundException("Field không thuộc version này.");
+
+        string key = draft.Key.Trim();
+
+        if (_specFields.Any(item =>
+            item.Id != fieldId &&
+            string.Equals(item.Key, key, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException(
+                $"Field '{key}' đã tồn tại trong version này.");
+        }
+
+        field.Update(draft);
+
+        return field;
+    }
+    public void RemoveField(Guid fieldId)
+    {
+        EnsureDraft();
+
+        SpecField field = _specFields.SingleOrDefault(item => item.Id == fieldId)
+            ?? throw new KeyNotFoundException("Field không thuộc version này.");
+        _specFields.Remove(field);
     }
 
     /// <summary>Sau khi publish, version bất biến vì các tài sản của Supplier tham chiếu tới nó.</summary>
     public void Publish(DateTime utcNow)
     {
         EnsureDraft();
-        if (_fields.Count == 0)
+        if (_specFields.Count == 0)
         {
             throw new InvalidOperationException("Không thể publish version chưa có field nào.");
         }

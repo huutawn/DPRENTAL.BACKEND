@@ -1,4 +1,5 @@
-﻿using Dprental.CatalogService.Domain.Entities;
+﻿using CatalogService.Application.DTOs.Schemas;
+using Dprental.CatalogService.Domain.Entities;
 
 namespace CatalogService.Application.IServices;
 
@@ -12,4 +13,8 @@ public interface ISchemaService
 
     // Cập nhật thông tin một trường (chỉ cho phép sửa khi là Draft)
     Task UpdateSpecFieldAsync(Guid versionId, Guid fieldId, SpecField updateData);
+    Task<SpecFieldDto> AddFieldAsync(
+    Guid versionId, AddSpecFieldRequest request, CancellationToken cancellationToken = default);
+
+    Task RemoveFieldAsync(Guid versionId, Guid fieldId, CancellationToken cancellationToken = default);
 }

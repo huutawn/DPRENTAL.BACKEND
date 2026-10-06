@@ -21,7 +21,19 @@ public class EquipmentType
     /// <summary>Mã thiết bị duy nhất trong toàn bộ Catalog.</summary>
     public string Code { get; set; } = string.Empty;
 
-    public string Name { get; set; } = string.Empty;
+    private string _name = string.Empty;
+
+    public string Name
+    {
+        get => _name;
+        set
+        {
+            _name = value;
+            NormalizedName = CatalogNormalizer.NormalizeName(value);
+        }
+    }
+    /// <summary>Tên đã chuẩn hóa dùng để chống trùng canonical. Luôn đồng bộ với Name.</summary>
+    public string NormalizedName { get; private set; } = string.Empty;
     public string? Description { get; set; }
 
     /// <summary>Trạng thái vòng đời, lưu dạng chuỗi và chỉ thay đổi qua <see cref="Publish"/> và <see cref="Disable"/>.</summary>

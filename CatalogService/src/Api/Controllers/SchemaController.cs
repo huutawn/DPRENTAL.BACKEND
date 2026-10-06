@@ -1,4 +1,5 @@
-﻿using CatalogService.Application.IServices;
+﻿using CatalogService.Application.DTOs.Schemas;
+using CatalogService.Application.IServices;
 using Dprental.CatalogService.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -52,6 +53,56 @@ public class SchemaController : ControllerBase
         catch (KeyNotFoundException ex)
         {
             return NotFound(new { Error = ex.Message });
+        }
+    }
+    /// <summary>Thêm một Field vào version đang Draft</summary>
+    [HttpPost("versions/{versionId:guid}/fields")]
+    [ProducesResponseType(typeof(SpecFieldDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> AddSpecField(
+        Guid versionId, [FromBody] AddSpecFieldRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            SpecFieldDto field = await _schemaService.AddFieldAsync(versionId, request, cancellationToken);
+            return StatusCode(StatusCodes.Status201Created, field);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { Error = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { Error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { Error = ex.Message });
+        }
+    }
+
+    /// <summary>Xóa một Field khỏi version đang Draft</summary>
+    [HttpDelete("versions/{versionId:guid}/fields/{fieldId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RemoveSpecField(
+        Guid versionId, Guid fieldId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _schemaService.RemoveFieldAsync(versionId, fieldId, cancellationToken);
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { Error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { Error = ex.Message });
         }
     }
 

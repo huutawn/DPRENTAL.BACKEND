@@ -166,7 +166,12 @@ public sealed class CatalogPagingAndValidationTests
     public async Task Service_DoesNotCallRepository_WhenValidationFails()
     {
         var repoMock = new TrackingEquipmentTypeRepository();
+
         var validator = CreateValidator();
+
+        var canonicalRepository = new FakeEquipmentTypeSchemaRepository();
+        var canonicalRules = new CanonicalEquipmentTypeRules(canonicalRepository);
+
         var service = new EquipmentTypeService(
             repoMock,
             new FakeCategoryRepository(),
@@ -174,15 +179,61 @@ public sealed class CatalogPagingAndValidationTests
             validator,
             new CreateEquipmentTypeRequestValidator(),
             new UpdateEquipmentTypeRequestValidator(),
-            new Dprental.CatalogService.Api.Security.CatalogCallerContext((System.Security.Claims.ClaimsPrincipal?)null),
+            canonicalRules,
+            new Dprental.CatalogService.Api.Security.CatalogCallerContext(
+                (System.Security.Claims.ClaimsPrincipal?)null),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<EquipmentTypeService>.Instance);
 
         var badRequest = new GetEquipmentTypesRequest { Page = 0 };
-        Result<PagedResult<EquipmentTypeListItemDto>> result = await service.SearchAsync(badRequest);
+
+        Result<PagedResult<EquipmentTypeListItemDto>> result =
+            await service.SearchAsync(badRequest);
 
         Assert.True(result.IsFailure);
-        Assert.Equal(CatalogErrorCode.Paging.InvalidPage, result.Error.Code);
+        Assert.Equal(
+            CatalogErrorCode.Paging.InvalidPage,
+            result.Error.Code);
+
         Assert.Equal(0, repoMock.SearchCallCount);
+    }
+    private sealed class FakeEquipmentTypeSchemaRepository
+    : IEquipmentTypeSchemaRepository
+    {
+        public Task<EquipmentType?> GetWithSchemaAsync(
+            Guid id,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<EquipmentType?>(null);
+
+        public Task<EquipmentType?> GetBySchemaIdAsync(
+            Guid specSchemaId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<EquipmentType?>(null);
+
+        public Task<EquipmentType?> GetByVersionIdAsync(
+            Guid versionId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<EquipmentType?>(null);
+
+        public Task<bool> TrySaveChangesAsync(
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
+
+        public Task<EquipmentType?> GetWithSchemaReadOnlyAsync(
+            Guid id,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<EquipmentType?>(null);
+
+        public Task<IReadOnlyList<Category>> GetCategoriesAsync(
+            IReadOnlyCollection<Guid> ids,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<Category>>([]);
+
+        public Task<bool> ExistsCanonicalDuplicateAsync(
+            string normalizedName,
+            IReadOnlyCollection<Guid> categoryIds,
+            Guid? excludeId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(false);
     }
 
     [Fact]

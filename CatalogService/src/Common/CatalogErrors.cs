@@ -43,6 +43,15 @@ public static class CatalogErrors
 
         public static readonly Error CategoryInactive =
             Error.Validation(CatalogErrorCode.EquipmentType.CategoryInactive, "Danh mục đang ở trạng thái không hoạt động.");
+        public static readonly Error CategoryRequired =
+    Error.Validation(
+        CatalogErrorCode.EquipmentType.CategoryRequired,
+        "Loại thiết bị phải có ít nhất một danh mục.");
+
+        public static readonly Error DuplicateCanonicalName =
+            Error.Conflict(
+                CatalogErrorCode.EquipmentType.DuplicateCanonicalName,
+                "Tên loại thiết bị đã tồn tại trong cùng nhóm danh mục.");
 
         public static readonly Error InvalidMedia =
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidMedia, "Danh sách media không hợp lệ.");

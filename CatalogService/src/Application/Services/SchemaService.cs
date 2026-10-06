@@ -1,4 +1,6 @@
-﻿using CatalogService.Application.IServices;
+﻿using CatalogService.Application.DTOs.Schemas;
+using CatalogService.Application.IServices;
+using CatalogService.Application.Mapping;
 using Dprental.CatalogService.Domain.Entities;
 using Dprental.CatalogService.Domain.Repositories;
 using Dprental.CatalogService.Domain.ValueObjects;
@@ -19,7 +21,7 @@ public class SchemaService : ISchemaService
     {
         SpecSchema? schema = await _context.SpecSchemas
             .Include(s => s.Versions)
-                .ThenInclude(v => v.Fields)
+                .ThenInclude(v => v.SpecFields)
             .FirstOrDefaultAsync(s => s.Id == specSchemaId);
 
         if (schema == null) throw new KeyNotFoundException("SpecSchema không tồn tại.");
@@ -40,7 +42,7 @@ public class SchemaService : ISchemaService
         // Clone (Copy) toàn bộ SpecFields cũ sang bản Draft mới
         if (lastPublishedVersion != null)
         {
-            foreach (SpecField field in lastPublishedVersion.Fields.OrderBy(field => field.DisplayOrder))
+            foreach (SpecField field in lastPublishedVersion.SpecFields.OrderBy(field => field.DisplayOrder))
             {
                 newDraft.AddField(new SpecFieldDraft(
                     field.Key,
@@ -115,4 +117,75 @@ public class SchemaService : ISchemaService
 
         await _context.SaveChangesAsync();
     }
+    public async Task<SpecFieldDto> AddFieldAsync(
+    Guid versionId,
+    AddSpecFieldRequest request,
+    CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (!SpecDataTypeMapper.TryParse(request.DataType, out SpecDataType dataType))
+        {
+            throw new ArgumentException(
+                "dataType chỉ nhận: number, integer, boolean, enum, text.");
+        }
+
+        SchemaVersion? version = await _context.SchemaVersions
+            .Include(v => v.SpecFields)
+                .ThenInclude(f => f.Options)
+            .FirstOrDefaultAsync(
+                v => v.Id == versionId,
+                cancellationToken);
+
+        if (version == null)
+            throw new KeyNotFoundException("Version không tồn tại.");
+
+        if (version.Status != SchemaVersionStatus.Draft)
+            throw new InvalidOperationException(
+                "Chỉ có thể thêm field vào Schema Version đang ở trạng thái Draft.");
+
+        SpecField field = version.AddField(
+            new SpecFieldDraft(
+                request.Key,
+                request.Label,
+                dataType,
+                request.IsRequired,
+                request.Unit,
+                request.MinValue,
+                request.MaxValue,
+                request.Options?
+                    .Select(option =>
+                        new SpecOptionDraft(
+                            option.Value,
+                            option.Label))
+                    .ToList()));
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return SchemaVersionMapper.ToFieldDto(field);
+    }
+
+    public async Task RemoveFieldAsync(
+        Guid versionId,
+        Guid fieldId,
+        CancellationToken cancellationToken = default)
+    {
+        SchemaVersion? version = await _context.SchemaVersions
+            .Include(v => v.SpecFields)
+            .FirstOrDefaultAsync(
+                v => v.Id == versionId,
+                cancellationToken);
+
+        if (version == null)
+            throw new KeyNotFoundException("Version không tồn tại.");
+
+        if (version.Status != SchemaVersionStatus.Draft)
+            throw new InvalidOperationException(
+                "Chỉ có thể xóa field của Schema Version đang ở trạng thái Draft.");
+
+        version.RemoveField(fieldId);
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
 }
