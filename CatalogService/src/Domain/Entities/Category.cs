@@ -37,4 +37,45 @@ public class Category
     public DateTime? UpdatedAtUtc { get; set; }
 
     public ICollection<EquipmentType> EquipmentTypes { get; set; } = new List<EquipmentType>();
+
+    /// <summary>
+    /// Chuyển đổi trạng thái hoạt động của category. Có tính idempotent:
+    /// nếu trạng thái không thay đổi thì không cập nhật UpdatedAtUtc và trả về false.
+    /// </summary>
+    public bool TransitionStatus(bool targetActive, DateTime utcNow)
+    {
+        if (IsActive == targetActive)
+        {
+            return false;
+        }
+
+        IsActive = targetActive;
+        UpdatedAtUtc = AsUtc(utcNow);
+        return true;
+    }
+
+    /// <summary>
+    /// Vô hiệu hóa category. Có tính idempotent: nếu đã inactive thì không thay đổi UpdatedAtUtc.
+    /// Trả về true nếu trạng thái thực sự thay đổi.
+    /// </summary>
+    public bool Disable(DateTime utcNow) => TransitionStatus(false, utcNow);
+
+    /// <summary>
+    /// Kích hoạt category. Có tính idempotent: nếu đã active thì không thay đổi UpdatedAtUtc.
+    /// Trả về true nếu trạng thái thực sự thay đổi.
+    /// </summary>
+    public bool Enable(DateTime utcNow) => TransitionStatus(true, utcNow);
+
+    /// <summary>
+    /// Cập nhật thời điểm sửa đổi của category theo chuẩn UTC.
+    /// </summary>
+    public void Touch(DateTime utcNow)
+    {
+        UpdatedAtUtc = AsUtc(utcNow);
+    }
+
+    private static DateTime AsUtc(DateTime value) =>
+        value.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(value, DateTimeKind.Utc)
+            : value.ToUniversalTime();
 }

@@ -14,15 +14,18 @@ public partial class CategoryService : ICategoryService
 {
     private readonly ICategoryRepository _repository;
     private readonly IMediaServiceClient _mediaServiceClient;
+    private readonly CategoryListQueryValidator _listQueryValidator;
     private readonly ILogger<CategoryService> _logger;
 
     public CategoryService(
         ICategoryRepository repository,
         IMediaServiceClient mediaServiceClient,
+        CategoryListQueryValidator listQueryValidator,
         ILogger<CategoryService> logger)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _mediaServiceClient = mediaServiceClient ?? throw new ArgumentNullException(nameof(mediaServiceClient));
+        _listQueryValidator = listQueryValidator ?? throw new ArgumentNullException(nameof(listQueryValidator));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -55,6 +58,11 @@ public partial class CategoryService : ICategoryService
 
     public async Task<Result<CategoryDetailResponse>> GetActiveCategoryByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        if (id == Guid.Empty)
+        {
+            return CatalogErrors.Category.InvalidId;
+        }
+
         var category = await _repository.GetByIdAsync(id, cancellationToken);
         if (category == null || !category.IsActive)
         {
@@ -64,6 +72,104 @@ public partial class CategoryService : ICategoryService
         return ToResponse(category);
     }
 
+    public async Task<Result<PagedResult<CategoryDetailResponse>>> SearchAdminAsync(
+        GetAdminCategoriesRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var validationResult = _listQueryValidator.Validate(request.Page, request.PageSize, request.Keyword, request.Sort);
+        if (validationResult.IsFailure)
+        {
+            return validationResult.Error;
+        }
+
+        var query = new CategorySearchQuery
+        {
+            Keyword = string.IsNullOrWhiteSpace(request.Keyword) ? null : request.Keyword.Trim(),
+            IsActive = request.IsActive,
+            Page = request.Page,
+            PageSize = request.PageSize,
+            Sort = request.Sort
+        };
+
+        var pagedEntities = await _repository.SearchAsync(query, cancellationToken);
+        var dtos = pagedEntities.Items.Select(ToResponse).ToList();
+
+        return new PagedResult<CategoryDetailResponse>(dtos, pagedEntities.Page, pagedEntities.PageSize, pagedEntities.TotalCount);
+    }
+
+    public async Task<Result<CategoryDetailResponse>> GetAdminByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        if (id == Guid.Empty)
+        {
+            return CatalogErrors.Category.InvalidId;
+        }
+
+        var category = await _repository.GetByIdAsync(id, cancellationToken);
+        if (category == null)
+        {
+            return CatalogErrors.Category.AdminNotFound;
+        }
+
+        return ToResponse(category);
+    }
+
+    public async Task<Result<CategoryDetailResponse>> DisableAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return Logged("Disable", id, await DisableCoreAsync(id, cancellationToken));
+    }
+
+    public async Task<Result<CategoryDetailResponse>> EnableAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return Logged("Enable", id, await EnableCoreAsync(id, cancellationToken));
+    }
+
+    private async Task<Result<CategoryDetailResponse>> DisableCoreAsync(Guid id, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty)
+        {
+            return CatalogErrors.Category.InvalidId;
+        }
+
+        var category = await _repository.GetByIdAsync(id, cancellationToken);
+        if (category == null)
+        {
+            return CatalogErrors.Category.AdminNotFound;
+        }
+
+        // Idempotent: nếu đã inactive thì không thay đổi UpdatedAtUtc và không gọi DB update
+        if (!category.Disable(DateTime.UtcNow))
+        {
+            return ToResponse(category);
+        }
+
+        await _repository.UpdateAsync(category, cancellationToken);
+        return ToResponse(category);
+    }
+
+    private async Task<Result<CategoryDetailResponse>> EnableCoreAsync(Guid id, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty)
+        {
+            return CatalogErrors.Category.InvalidId;
+        }
+
+        var category = await _repository.GetByIdAsync(id, cancellationToken);
+        if (category == null)
+        {
+            return CatalogErrors.Category.AdminNotFound;
+        }
+
+        // Idempotent: nếu đã active thì không thay đổi UpdatedAtUtc và không gọi DB update
+        if (!category.Enable(DateTime.UtcNow))
+        {
+            return ToResponse(category);
+        }
+
+        await _repository.UpdateAsync(category, cancellationToken);
+        return ToResponse(category);
+    }
     private async Task<Result<CategoryDetailResponse>> CreateCoreAsync(
         CreateCategoryRequest request,
         string operatorUserId,
@@ -132,6 +238,11 @@ public partial class CategoryService : ICategoryService
         string operatorUserId,
         CancellationToken cancellationToken)
     {
+        if (id == Guid.Empty)
+        {
+            return CatalogErrors.Category.InvalidId;
+        }
+
         if (request.IsNameSpecified && request.Name != null)
         {
             Result nameResult = CategoryValidationRules.ValidateName(request.Name);
@@ -161,12 +272,18 @@ public partial class CategoryService : ICategoryService
             return CatalogErrors.Category.NotFound;
         }
 
+        bool hasOtherChanges = false;
+
         if (request.IsImageMediaIdSpecified)
         {
             if (!request.ImageMediaId.HasValue)
             {
                 // Gỡ ảnh
-                category.ImageMediaId = null;
+                if (category.ImageMediaId != null)
+                {
+                    category.ImageMediaId = null;
+                    hasOtherChanges = true;
+                }
             }
             else if (category.ImageMediaId != request.ImageMediaId.Value)
             {
@@ -182,15 +299,46 @@ public partial class CategoryService : ICategoryService
                 }
 
                 category.ImageMediaId = request.ImageMediaId.Value;
+                hasOtherChanges = true;
             }
         }
 
-        if (request.IsNameSpecified && request.Name != null) category.Name = request.Name.Trim();
-        if (request.IsDescriptionSpecified) category.Description = request.Description;
-        if (request.IsActiveSpecified && request.IsActive.HasValue) category.IsActive = request.IsActive.Value;
-        category.UpdatedAtUtc = DateTime.UtcNow;
+        if (request.IsNameSpecified && request.Name != null)
+        {
+            var trimmedName = request.Name.Trim();
+            if (!string.Equals(category.Name, trimmedName, StringComparison.Ordinal))
+            {
+                category.Name = trimmedName;
+                hasOtherChanges = true;
+            }
+        }
 
-        await _repository.UpdateAsync(category, cancellationToken);
+        if (request.IsDescriptionSpecified)
+        {
+            if (!string.Equals(category.Description, request.Description, StringComparison.Ordinal))
+            {
+                category.Description = request.Description;
+                hasOtherChanges = true;
+            }
+        }
+
+        DateTime now = DateTime.UtcNow;
+        bool statusChanged = false;
+
+        if (request.IsActiveSpecified && request.IsActive.HasValue)
+        {
+            statusChanged = category.TransitionStatus(request.IsActive.Value, now);
+        }
+
+        if (hasOtherChanges)
+        {
+            category.Touch(now);
+            await _repository.UpdateAsync(category, cancellationToken);
+        }
+        else if (statusChanged)
+        {
+            await _repository.UpdateAsync(category, cancellationToken);
+        }
 
         return ToResponse(category);
     }
