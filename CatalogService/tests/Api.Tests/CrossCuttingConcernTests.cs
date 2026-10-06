@@ -259,6 +259,25 @@ public sealed class CrossCuttingConcernTests
     {
         private readonly ConcurrentDictionary<Guid, Category> _items = new();
 
+        public Task<PagedResult<Category>> SearchAsync(CategorySearchQuery query, CancellationToken cancellationToken = default)
+        {
+            var filtered = _items.Values.AsEnumerable();
+            if (query.IsActive.HasValue)
+            {
+                filtered = filtered.Where(c => c.IsActive == query.IsActive.Value);
+            }
+            if (!string.IsNullOrWhiteSpace(query.Keyword))
+            {
+                var kw = query.Keyword.Trim();
+                filtered = filtered.Where(c =>
+                    c.Name.Contains(kw, StringComparison.OrdinalIgnoreCase) ||
+                    c.Slug.Contains(kw, StringComparison.OrdinalIgnoreCase));
+            }
+            var list = filtered.ToList();
+            var items = list.Skip((query.Page - 1) * query.PageSize).Take(query.PageSize).ToList();
+            return Task.FromResult(new PagedResult<Category>(items, query.Page, query.PageSize, list.Count));
+        }
+
         public Task<Category?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(_items.GetValueOrDefault(id));
 

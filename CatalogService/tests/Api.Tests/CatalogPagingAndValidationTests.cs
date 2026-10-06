@@ -280,6 +280,9 @@ public sealed class CatalogPagingAndValidationTests
 
     private sealed class FakeCategoryRepository : ICategoryRepository
     {
+        public Task<PagedResult<Category>> SearchAsync(CategorySearchQuery query, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PagedResult<Category>([], query.Page, query.PageSize, 0));
+
         public Task<Category?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult<Category?>(null);
 

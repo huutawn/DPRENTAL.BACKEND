@@ -39,8 +39,13 @@ public static class CatalogErrorCode
     public static class Category
     {
         public const string NotFound = "Category.NotFound";
+        public const string InvalidKeyword = "Category.InvalidKeyword";
+        public const string InvalidSort = "Category.InvalidSort";
+        public const string InvalidQuery = "Category.InvalidQuery";
+        public const string InvalidId = "Category.InvalidId";
         public const string InvalidName = "Category.InvalidName";
         public const string InvalidDescription = "Category.InvalidDescription";
+        public const string InvalidImage = "Category.InvalidImage";
     }
 
     public static class Brand

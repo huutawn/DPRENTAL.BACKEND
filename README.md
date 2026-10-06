@@ -35,7 +35,9 @@ Catalog đọc nguyên các claim do AuthService phát hành, không tin header 
 
 | API (tiền tố `/api/v1/catalog`) | Quyền |
 | --- | --- |
-| `GET /categories`, `GET /categories/{id}` | Công khai |
+| `GET /categories`, `GET /categories/{id}` | Công khai (chỉ active; inactive hoặc không tồn tại trả `404`) |
+| `GET /admin/categories` | Policy `CatalogCategoryManage`: role `adm` (active và inactive, lọc `isActive`) |
+| `GET /admin/categories/{id}` | Policy `CatalogCategoryManage`: role `adm` (đọc mọi trạng thái) |
 | `GET /equipment-types`, `GET /equipment-types/{id}` | Công khai |
 | `GET /equipment-types/{id}/schema` | Công khai (Type phải Published, trả schema tại `CurrentSchemaVersion`) |
 | `GET /equipment-types/{id}/schemas/{version}` | Công khai (Type Published hoặc Disabled; chỉ trả version đã publish) |
@@ -47,6 +49,7 @@ Catalog đọc nguyên các claim do AuthService phát hành, không tin header 
 | `POST /brands/{id}/disable`, `POST /brands/{id}/enable` | Policy `CatalogBrandManage`: role `adm` (idempotent) |
 | `POST /equipment-types/{id}/specifications/validate` | Authenticated (User JWT hoặc Service token; type Published, schema đã publish; Admin không được bypass) |
 | `POST /categories`, `PATCH /categories/{id}` | Policy `CatalogCategoryManage`: role `adm` |
+| `POST /categories/{id}/disable`, `POST /categories/{id}/enable` | Policy `CatalogCategoryManage`: role `adm` (idempotent) |
 | `POST /equipment-types`, `PATCH /equipment-types/{id}` | Policy `CatalogEquipmentManage`: role `adm` |
 | `POST /equipment-types/{id}/publish`, `POST /equipment-types/{id}/disable` | Policy `CatalogEquipmentManage`: role `adm` |
 | `GET /equipment-types/{id}/spec-schemas`, `POST /equipment-types/{id}/spec-schemas` | Policy `CatalogEquipmentManage`: role `adm` |
