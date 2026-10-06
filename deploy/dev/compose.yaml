@@ -52,6 +52,10 @@ services:
       Routes__12__DownstreamHostAndPorts__0__Port: 8080
       Routes__13__DownstreamHostAndPorts__0__Host: catalog-service
       Routes__13__DownstreamHostAndPorts__0__Port: 8080
+      Routes__14__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__14__DownstreamHostAndPorts__0__Port: 8080
+      Routes__15__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__15__DownstreamHostAndPorts__0__Port: 8080
       GlobalConfiguration__BaseUrl: https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
       Gateway__Security__Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:?Set CORS_ALLOWED_ORIGIN_0 in .env}
       Gateway__Security__ForwardedHeaders__KnownNetworks__0: ${EDGE_NETWORK_CIDR:-172.30.0.0/24}
