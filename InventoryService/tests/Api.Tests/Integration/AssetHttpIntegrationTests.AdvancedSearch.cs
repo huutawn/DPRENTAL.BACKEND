@@ -376,4 +376,57 @@ public sealed partial class AssetHttpIntegrationTests
         // Batch catalog call MUST be called exactly once
         Assert.Equal(1, catalogBatchCallCount);
     }
+
+    [Fact]
+    public async Task GetAssets_OwnerSchemaVersionLookup_ExcludesAssetsFilteredOutByAcceptingBookings()
+    {
+        var eqTypeId = Guid.NewGuid();
+        IReadOnlyList<int>? requestedVersions = null;
+
+        var stubCatalog = new StubCatalogClient
+        {
+            BatchSchemasHandler = (id, versions) =>
+            {
+                requestedVersions = versions;
+                return Task.FromResult(Dprental.InventoryService.Common.Result.Success(new CatalogBatchSchemasResponse(
+                    id,
+                    2,
+                    [
+                        new CatalogBatchSchemaItemResponse(2, [
+                            new CatalogBatchFieldResponse("power", "Power", "number", true, true, false, 0, 0, 1000, null, "kW", null)
+                        ])
+                    ])));
+            }
+        };
+
+        var (app, secFactory) = CreateFactory(catalogClient: stubCatalog);
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var ownerId = Guid.NewGuid();
+        var token = secFactory.CreateHumanToken(ownerId, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        // Asset 1: acceptingBookings = false, schemaVersion = 1
+        var a1 = await SeedAssetAsync(ownerId, model: "Disabled V1", eqTypeId: eqTypeId, schemaVersion: 1, specValues: "{\"power\": 50}");
+        await using (var db = CreateDbContext())
+        {
+            var tracked = await db.Assets.FindAsync(a1.Id);
+            tracked!.DisableBookings("Maintenance", FixedNow);
+            await db.SaveChangesAsync();
+        }
+
+        // Asset 2: acceptingBookings = true, schemaVersion = 2
+        await SeedAssetAsync(ownerId, model: "Active V2", eqTypeId: eqTypeId, schemaVersion: 2, specValues: "{\"power\": 50}");
+
+        var filterJson = Uri.EscapeDataString("[{\"field\":\"power\",\"operator\":\"gte\",\"value\":40}]");
+        var resp = await client.GetAsync($"api/v1/inventory/assets?equipmentTypeId={eqTypeId:D}&acceptingBookings=true&filters={filterJson}");
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.NotNull(requestedVersions);
+        // Only version 2 must be requested to Catalog! Version 1 (from disabled asset) is excluded by acceptingBookings=true!
+        var v = Assert.Single(requestedVersions);
+        Assert.Equal(2, v);
+    }
 }

@@ -35,6 +35,7 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
         public Func<Guid, Task<Result<CatalogBrandResponse>>>? BrandHandler { get; set; }
         public Func<Guid, int, string, Task<Result>>? SpecHandler { get; set; }
         public Func<Guid, IReadOnlyList<int>, Task<Result<CatalogBatchSchemasResponse>>>? BatchSchemasHandler { get; set; }
+        public int BatchCalls { get; set; }
 
         public Task<Result<CatalogEquipmentTypeResponse>> GetPublishedEquipmentTypeAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default)
         {
@@ -61,6 +62,7 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
 
         public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default)
         {
+            BatchCalls++;
             return BatchSchemasHandler is not null
                 ? BatchSchemasHandler(equipmentTypeId, versions)
                 : Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
@@ -73,9 +75,11 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
     private sealed class StubMediaClient : IMediaServiceClient
     {
         public Func<Guid, Task<Result<MediaVerificationInfo>>>? VerifyHandler { get; set; }
+        public int VerifyCalls { get; set; }
 
         public Task<Result<MediaVerificationInfo>> VerifyAsync(Guid mediaId, CancellationToken cancellationToken = default)
         {
+            VerifyCalls++;
             return VerifyHandler is not null
                 ? VerifyHandler(mediaId)
                 : Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"))));
@@ -117,15 +121,23 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
         public Task<InventoryAsset?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default) =>
             inner.GetByIdForOwnerAsync(id, ownerUserId, cancellationToken);
 
-        public Task<IReadOnlyList<InventoryAsset>> SearchAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
-            inner.SearchAsync(criteria, cancellationToken);
+        public Task<IReadOnlyList<InventoryAsset>> SearchForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+            inner.SearchForOwnerAsync(criteria, cancellationToken);
 
-        public Task<int> CountAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
-            inner.CountAsync(criteria, cancellationToken);
+        public Task<int> CountForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+            inner.CountForOwnerAsync(criteria, cancellationToken);
 
-        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
-            inner.GetDistinctSchemaVersionsAsync(criteria, cancellationToken);
+        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+            inner.GetDistinctSchemaVersionsForOwnerAsync(criteria, cancellationToken);
 
+        public Task<InventoryAsset?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            inner.GetPublicByIdAsync(id, cancellationToken);
+
+        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsPublicAsync(AssetSearchFilters filters, CancellationToken cancellationToken = default) =>
+            inner.GetDistinctSchemaVersionsPublicAsync(filters, cancellationToken);
+
+        public Task<PublicAssetSearchResult> SearchPublicAsync(PublicAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+            inner.SearchPublicAsync(criteria, cancellationToken);
         public Task<InventoryAsset?> GetCalendarSnapshotAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
             inner.GetCalendarSnapshotAsync(assetId, startDate, endDate, cancellationToken);
 
@@ -201,11 +213,13 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
         Guid? brandId = null,
         Guid? eqTypeId = null,
         int schemaVersion = 1,
-        string specValues = "{\"sensor\":\"Full-Frame\"}")
+        string specValues = "{\"sensor\":\"Full-Frame\"}",
+        DateTimeOffset? createdAt = null)
     {
+        var actualNow = createdAt ?? FixedNow;
         await using var db = CreateDbContext();
         var id = Guid.NewGuid();
-        var rate = AssetRentalRate.Create(id, 100_000m, null, null, "VND", FixedNow).Value;
+        var rate = AssetRentalRate.Create(id, 100_000m, null, null, "VND", actualNow).Value;
         var asset = InventoryAsset.Create(
             id,
             ownerUserId,
@@ -214,7 +228,7 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
             model,
             schemaVersion,
             specValues,
-            FixedNow,
+            actualNow,
             rate,
             serial,
             year,

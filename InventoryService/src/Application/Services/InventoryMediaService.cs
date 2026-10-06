@@ -2,6 +2,7 @@ using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Application.DTOs.Media;
 using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.IServices;
+using Dprental.InventoryService.Application.Mapping;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 using Microsoft.Extensions.Options;
@@ -102,8 +103,7 @@ public sealed class InventoryMediaService : IInventoryMediaService
         }
 
         // 9. Dựng URL ổn định từ PublicGatewayUrl và trả { id, url }
-        var baseUrl = _options.PublicGatewayUrl.TrimEnd('/');
-        var url = $"{baseUrl}/api/v1/media/{mediaId.Value:D}/content";
+        var url = MediaContentUrlBuilder.Build(_options.PublicGatewayUrl, mediaId.Value)!;
 
         return Result.Success<MediaReferenceResponse?>(new MediaReferenceResponse(mediaId.Value, url));
     }

@@ -1,4 +1,5 @@
 using Dprental.InventoryService.Application;
+using Dprental.InventoryService.Application.DTOs.Assets;
 using System.Reflection;
 using Dprental.InventoryService.Application.Kafka.Contracts;
 using Dprental.InventoryService.Common;
@@ -97,5 +98,18 @@ public sealed class ArchitectureContractTests
         Assert.False(
             ns.StartsWith("Confluent.Kafka", StringComparison.OrdinalIgnoreCase),
             $"Public member '{memberName}' on '{declaringType.Name}' exposes Confluent.Kafka type '{t.FullName}'.");
+    }
+
+    [Fact]
+    public void PublicAssetContracts_DoNotExpose_InternalOrOwnerFields()
+    {
+        var publicProps = typeof(PublicInventoryAssetResponse).GetProperties().Select(p => p.Name).ToList();
+        Assert.DoesNotContain("OwnerUserId", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("SerialNumber", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("SuspensionReason", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Version", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Xmin", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DisplayName", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ThumbnailMediaId", publicProps, StringComparer.OrdinalIgnoreCase);
     }
 }

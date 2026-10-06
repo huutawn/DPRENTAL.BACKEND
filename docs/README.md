@@ -245,3 +245,30 @@ Root Compose dùng `inventory-migrate` chạy một lần trước Inventory run
 ## JWT/JWKS behavior
 
 JWT RS256 lấy keys trực tiếp từ Auth; timeout/cache/maximum usable age configurable. Cache age được tính từ lần fetch thành công, không được kéo dài bởi outage. Unknown kid được refresh bất đồng bộ trước validation của request hiện tại; forced refresh và outage retry được giới hạn 10 giây để coalesce concurrent requests. Token có kid vẫn không tồn tại bị 401; không thử ký bằng tất cả keys. Request cancellation được propagate. Health endpoints anonymous; endpoint không khai báo policy vẫn yêu cầu authentication theo fallback policy. Resource policies chỉ được gọi với resource đã load phía server; không lấy OwnerUserId từ request làm authorization resource. Tạo asset và validate organization metadata thuộc DPR-148.
+
+## Đọc và Khám phá tài sản công khai (DPR-166: Public Asset Read & Discovery)
+
+1. **Phân tách phạm vi (Scope Separation)**:
+   - Tách biệt rõ ràng giữa luồng đọc Owner (`IInventoryAssetService`, `OwnerAssetSearchCriteria`, `SearchForOwnerAsync`) và luồng công khai (`IPublicInventoryAssetService`, `PublicAssetSearchCriteria`, `SearchPublicAsync`).
+   - Owner search: Bắt buộc `OwnerUserId`, tìm kiếm Model OR SerialNumber, không có date availability filter.
+   - Public search: Không có caller context hay owner predicate; bắt buộc cờ hiển thị `accepting_bookings = TRUE`; tìm kiếm Model-only; hỗ trợ availability filter trước phân trang.
+   - Loại bỏ hoàn toàn model gộp `AssetSearchCriteria` cũ.
+
+2. **Tái sử dụng bộ lọc dùng chung (Shared Filter Architecture)**:
+   - `AssetSearchQueryValidator`: Chuẩn hóa và xác thực keyword, metadata (`equipmentTypeId`, `brandId`, `manufactureYear`), `sort` và pagination bounds cho cả 2 luồng.
+   - `AssetSearchFilterResolver`: Xử lý phân giải dynamic filters JSONB, tra cứu batch schemas từ CatalogService một lần duy nhất, kiểm tra tính tương thích lịch sử.
+   - `PublicAssetDataPolicy`: Quản lý danh sách các thuộc tính nội bộ bảo lưu (owner identity, serial number, suspension reason, scheduling/allocation details, concurrency, audit). Tự động loại bỏ khỏi `specValues` công khai và từ chối các dynamic filter nhắm vào thuộc tính bảo lưu trước khi gọi Catalog hay DB.
+
+3. **Tính toán khả dụng tương đương Domain Policy (Availability SQL Parity)**:
+   - Triển khai availability predicates trực tiếp dưới PostgreSQL bằng anti-joins:
+     - Anti-join bảng `calendar_blocks` với điều kiện overlap: `start_date <= to AND end_date >= from`.
+     - Anti-join bảng `asset_allocations` với điều kiện overlap và trạng thái: `status = Allocated` HOẶC `(status = Held AND hold_expires_at > evaluationNowUtc)`.
+   - Áp dụng trước `ORDER BY`, `LIMIT` và `OFFSET` đảm bảo trang kết quả luôn đầy đủ và `totalCount` phản ánh chính xác số lượng tài sản thực tế có thể đặt.
+   - Parity test đối chiếu 1:1 kết quả SQL với domain policy `AssetAvailabilityPolicy.CheckAvailability` tại cùng một evaluation timestamp.
+
+4. **Hiệu năng & Ngăn chặn N+1 (Performance & No-N+1 Invariants)**:
+   - Public Detail: Đúng 1 truy vấn PostgreSQL (SELECT asset JOIN rental_rate), 0 Catalog HTTP, 0 Media HTTP.
+   - Public List không dynamic filter: Đúng 2 truy vấn PostgreSQL (1 COUNT + 1 PAGE read trong RepeatableRead transaction), 0 Catalog HTTP, 0 Media HTTP.
+   - Public List có dynamic filter: Đúng 3 truy vấn PostgreSQL (1 DISTINCT schema versions + 1 COUNT + 1 PAGE read), đúng 1 Catalog batch HTTP request, 0 Media HTTP.
+   - Số lượng truy vấn hoàn toàn độc lập với kích thước trang (`pageSize` 1, 20 hay 100).
+   - Thumbnail URL được format cục bộ thông qua `MediaContentUrlBuilder` và `PublicGatewayUrl`.
