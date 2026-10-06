@@ -1,13 +1,11 @@
-using Dprental.InventoryService.Api.Infrastructure.DependencyInjection;
 using System.Data;
-using Dprental.InventoryService.Api.Caching;
-using Dprental.InventoryService.Application.Caching;
+using Dprental.InventoryService.Domain.Caching;
 using Dprental.InventoryService.Application.DTOs.Availability;
 using Dprental.InventoryService.Application.DTOs.Calendar;
-using Dprental.InventoryService.Application.Kafka.Contracts;
-using Dprental.InventoryService.Application.Kafka.Options;
-using Dprental.InventoryService.Application.Kafka.Outbox;
-using Dprental.InventoryService.Application.Kafka.Transport;
+using Dprental.InventoryService.Domain.Kafka.Contracts;
+using Dprental.InventoryService.Domain.Kafka.Options;
+using Dprental.InventoryService.Domain.Kafka.Outbox;
+using Dprental.InventoryService.Domain.Kafka.Transport;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Application.Services;
 using Dprental.InventoryService.Common.Enums;
@@ -51,7 +49,6 @@ public sealed class OutboxCacheInvalidationIntegrationTests : IClassFixture<Post
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddInventoryServiceDomainRepositories(_postgresConn);
-        services.AddInventoryApiRepositories();
         var sp = services.BuildServiceProvider();
         return sp.GetRequiredService<IServiceScopeFactory>();
     }

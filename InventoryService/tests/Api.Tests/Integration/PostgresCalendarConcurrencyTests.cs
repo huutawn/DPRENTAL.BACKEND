@@ -1,12 +1,11 @@
-using Dprental.InventoryService.Api.Infrastructure.DependencyInjection;
 using System.Globalization;
 using Dprental.InventoryService.Application.DTOs.Calendar;
 using Dprental.InventoryService.Application.DTOs.Allocations;
 using Dprental.InventoryService.Application.IServices;
-using Dprental.InventoryService.Application.Kafka.Outbox;
+using Dprental.InventoryService.Domain.Kafka.Outbox;
 using Dprental.InventoryService.Application.Services;
 using Dprental.InventoryService.Api.Tests.Security;
-using Dprental.InventoryService.Application.Kafka.Contracts;
+using Dprental.InventoryService.Domain.Kafka.Contracts;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Enums;
@@ -43,7 +42,6 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddInventoryServiceDomainRepositories(_connectionString);
-        services.AddInventoryApiRepositories();
         services.AddSingleton(timeProvider ?? TimeProvider.System);
         services.AddScoped<CalendarService>();
         services.AddScoped<IInventoryAllocationService, InventoryAllocationService>();

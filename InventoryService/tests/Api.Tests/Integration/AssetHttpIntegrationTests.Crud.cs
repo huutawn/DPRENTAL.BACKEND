@@ -4,7 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Dprental.InventoryService.Application.DTOs.Assets;
-using Dprental.InventoryService.Application.DTOs.Catalog;
+using Dprental.InventoryService.Domain.Clients.Catalog;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;

@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Dprental.InventoryService.Application.DTOs.Assets;
-using Dprental.InventoryService.Application.Kafka.Outbox;
+using Dprental.InventoryService.Domain.Kafka.Outbox;
 using Dprental.InventoryService.Application.Mapping;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;

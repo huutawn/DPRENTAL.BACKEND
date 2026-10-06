@@ -1,4 +1,4 @@
-using Dprental.InventoryService.Api.Infrastructure.Repositories;
+using Dprental.InventoryService.Domain.Repositories;
 using System.Data;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Enums;
@@ -6,7 +6,6 @@ using Dprental.InventoryService.Common.Utils;
 using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Domain.IRepositories;
 using Dprental.InventoryService.Domain.Policies;
-using Dprental.InventoryService.Domain.Repositories;
 using Dprental.InventoryService.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

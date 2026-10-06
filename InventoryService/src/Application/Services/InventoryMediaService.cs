@@ -1,7 +1,5 @@
-using Dprental.InventoryService.Application.Clients;
-using Dprental.InventoryService.Application.DTOs.Media;
+using Dprental.InventoryService.Domain.Clients.Media;
 using Dprental.InventoryService.Application.IServices;
-using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 using Microsoft.Extensions.Options;

@@ -1,4 +1,3 @@
-using Dprental.InventoryService.Api.Infrastructure.DependencyInjection;
 using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.DTOs.Calendar;
 using Dprental.InventoryService.Application.IServices;
@@ -37,7 +36,6 @@ public sealed class PostgresCalendarAtomicityTests : IClassFixture<PostgresFixtu
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddInventoryServiceDomainRepositories(_connectionString);
-        services.AddInventoryApiRepositories();
         services.AddSingleton(timeProvider ?? new TestTimeProvider(FixedNow));
         services.AddScoped<CalendarService>();
         return services.BuildServiceProvider();

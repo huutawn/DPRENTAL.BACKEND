@@ -1,5 +1,6 @@
+using Dprental.InventoryService.Application;
 using System.Reflection;
-using Dprental.InventoryService.Application.Kafka.Contracts;
+using Dprental.InventoryService.Domain.Kafka.Contracts;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Domain.Entities;
 using Xunit;
@@ -9,16 +10,37 @@ namespace Dprental.InventoryService.Api.Tests.Architecture;
 public sealed class ArchitectureContractTests
 {
     [Fact]
-    public void DomainAndCommon_DoNotReference_ConfluentKafka()
+    public void Domain_DoesNotReference_ApplicationOrApi()
     {
         var domainAssembly = typeof(OutboxMessage).Assembly;
+        var referencedAssemblies = domainAssembly.GetReferencedAssemblies();
+
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Application", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Api", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
+    public void Application_DoesNotReference_TechnicalVendorSdks()
+    {
+        var applicationAssembly = typeof(ApplicationAssemblyMarker).Assembly;
+        var referencedAssemblies = applicationAssembly.GetReferencedAssemblies();
+
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Microsoft.EntityFrameworkCore", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Confluent.Kafka", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("StackExchange.Redis", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
+    public void Common_DoesNotReference_TechnicalVendorSdks()
+    {
         var commonAssembly = typeof(Result).Assembly;
+        var referencedAssemblies = commonAssembly.GetReferencedAssemblies();
 
-        var domainReferencedAssemblies = domainAssembly.GetReferencedAssemblies();
-        var commonReferencedAssemblies = commonAssembly.GetReferencedAssemblies();
-
-        Assert.DoesNotContain(domainReferencedAssemblies, a => a.Name?.Contains("Confluent.Kafka", StringComparison.OrdinalIgnoreCase) == true);
-        Assert.DoesNotContain(commonReferencedAssemblies, a => a.Name?.Contains("Confluent.Kafka", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Microsoft.EntityFrameworkCore", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Confluent.Kafka", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("StackExchange.Redis", StringComparison.OrdinalIgnoreCase) == true);
     }
 
     [Fact]

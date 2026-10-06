@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text.Json;
-using Dprental.InventoryService.Api.Clients;
-using Dprental.InventoryService.Application.Options;
+using Dprental.InventoryService.Domain.Clients.Catalog;
+using Dprental.InventoryService.Domain.Clients.Media;
 using Dprental.InventoryService.Common;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;

@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Domain.Caching;
 using System.Text.Json.Serialization;
 
 namespace Dprental.InventoryService.Application.DTOs.Availability;

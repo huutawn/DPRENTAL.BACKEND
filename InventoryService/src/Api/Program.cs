@@ -1,17 +1,14 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Dprental.InventoryService.Api.Controllers;
-using Dprental.InventoryService.Api.Infrastructure.DependencyInjection;
 using System.IO;
-using Dprental.InventoryService.Api.Caching;
-using Dprental.InventoryService.Api.Clients;
 using Dprental.InventoryService.Api.Exceptions;
 using Dprental.InventoryService.Api.Routing;
-using Dprental.InventoryService.Application.Clients;
-using Dprental.InventoryService.Application.DependencyInjection;
-using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Api.Security;
-using Dprental.InventoryService.Application.Kafka.DependencyInjection;
+using Dprental.InventoryService.Application.DependencyInjection;
+using Dprental.InventoryService.Domain.Caching;
+using Dprental.InventoryService.Domain.Clients;
+using Dprental.InventoryService.Domain.Kafka.DependencyInjection;
 using Dprental.InventoryService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -19,7 +16,6 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddInventoryServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
-builder.Services.AddInventoryApiRepositories();
 builder.Services.AddInventoryKafkaInfrastructure(builder.Configuration);
 
 // DPR-147: JWT Authentication & Authorization
@@ -29,42 +25,8 @@ builder.Services.AddInventoryAuthorization();
 builder.Services.AddInventoryApplication();
 // DPR-150: Valkey Read Cache
 builder.Services.AddInventoryValkeyCache(builder.Configuration);
-// MediaService Integration: Options validation, typed HTTP client, and application service
-builder.Services.AddOptions<MediaServiceOptions>()
-    .Bind(builder.Configuration.GetSection(MediaServiceOptions.SectionName))
-    .ValidateDataAnnotations()
-    .ValidateOnStart();
-
-builder.Services.AddHttpClient<IMediaServiceClient, MediaServiceClient>((sp, client) =>
-{
-    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<MediaServiceOptions>>().Value;
-    client.BaseAddress = new Uri(options.InternalBaseUrl.TrimEnd('/') + "/");
-    client.DefaultRequestHeaders.Add("X-Api-Key", options.ApiKey);
-    client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
-})
-.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
-{
-    AllowAutoRedirect = false
-});
-
-
-// CatalogService Integration: Options validation and typed HTTP client
-builder.Services.AddOptions<CatalogServiceOptions>()
-    .Bind(builder.Configuration.GetSection(CatalogServiceOptions.SectionName))
-    .ValidateDataAnnotations()
-    .ValidateOnStart();
-
-builder.Services.AddHttpClient<ICatalogServiceClient, CatalogServiceClient>((sp, client) =>
-{
-    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<CatalogServiceOptions>>().Value;
-    client.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
-    client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
-})
-.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
-{
-    AllowAutoRedirect = false
-});
-
+// Domain clients (MediaService & CatalogService): Options validation and typed HTTP clients
+builder.Services.AddInventoryClients(builder.Configuration);
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<InventoryServiceDbContext>(

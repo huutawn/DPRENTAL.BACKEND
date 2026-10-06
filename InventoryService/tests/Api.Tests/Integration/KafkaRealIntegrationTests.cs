@@ -1,10 +1,9 @@
-using Dprental.InventoryService.Api.Infrastructure.DependencyInjection;
 using System.Text.Json;
 using Confluent.Kafka;
-using Dprental.InventoryService.Application.Kafka.Contracts;
-using Dprental.InventoryService.Application.Kafka.Options;
-using Dprental.InventoryService.Application.Kafka.Outbox;
-using Dprental.InventoryService.Application.Kafka.Transport;
+using Dprental.InventoryService.Domain.Kafka.Contracts;
+using Dprental.InventoryService.Domain.Kafka.Options;
+using Dprental.InventoryService.Domain.Kafka.Outbox;
+using Dprental.InventoryService.Domain.Kafka.Transport;
 using Dprental.InventoryService.Common;
 using AppError = Dprental.InventoryService.Common.Error;
 using Dprental.InventoryService.Common.Enums;
@@ -47,7 +46,6 @@ public sealed class KafkaRealIntegrationTests : IAsyncLifetime
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddInventoryServiceDomainRepositories(_fixture.ConnectionString);
-        services.AddInventoryApiRepositories();
 
         services.Configure<KafkaOptions>(opt =>
         {

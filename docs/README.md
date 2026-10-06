@@ -5,11 +5,11 @@
 | Lớp | Trách nhiệm | Không được chứa |
 | --- | --- | --- |
 | `Common` | Kiểu dữ liệu và concern dùng chung (`Result`, `Error`, enums, utility) | Nghiệp vụ đặc thù domain khác |
-| `Domain` | Entities, Value Objects, policies, repository contracts, EF Core DbContext và repositories | HTTP pipeline, controller |
-| `Application` | DTOs, Kafka transport, Security Access Evaluator và policies | Controller, HTTP pipeline, DbContext |
-| `Api` | Controllers, JWT Bearer Authentication, JWKS manager, Authorization handlers và DI | Business logic trực tiếp |
+| `Domain` | Entities, Value Objects, policies, repository contracts, EF Core persistence, Clients, Caching, Kafka | HTTP pipeline, controller, use cases |
+| `Application` | Use case services, IServices, API DTOs, Mapping, Security Access Evaluator | EF Core, Npgsql, Confluent.Kafka, StackExchange.Redis SDK |
+| `Api` | Controllers, JWT Bearer Authentication, JWKS manager, Authorization handlers, Routing và DI composition | Business logic trực tiếp |
 
-Domain sở hữu entities, value objects, domain availability policy, repository contracts, EF Core DbContext và repository implementations. API đăng ký persistence qua `AddInventoryServiceDomainRepositories`.
+Domain sở hữu entities, value objects, domain policies, repository contracts, EF Core DbContext/repositories, HTTP clients (Catalog/Media), Valkey cache adapter và Kafka infrastructure. API tham chiếu Domain để đăng ký DI composition root.
 
 ---
 

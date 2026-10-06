@@ -8,9 +8,9 @@ Dịch vụ InventoryService cho hệ sinh thái DPRENTAL, được xây dựng 
 InventoryService/
   src/
     Common/          # Kiểu dùng chung, Result/Error, AllocationStatus và utility
-    Domain/          # Entities (Asset, Allocation, Block), repository contracts và EF Core persistence
-    Application/     # DTOs, Kafka transport, Security evaluators & policies
-    Api/             # Controllers, Filters, JWT Authentication, Authorization handlers, HTTP composition root
+    Domain/          # Entities, Policies, ValueObjects, IRepositories, Repositories, Migrations, Clients, Caching, Kafka
+    Application/     # Services, IServices, API DTOs, Mapping, Validation
+    Api/             # Controllers, Security, Filters, Routing, Program
   tests/             # Unit, Integration, Migration & Security Tests
 Directory.Build.props
 Directory.Packages.props

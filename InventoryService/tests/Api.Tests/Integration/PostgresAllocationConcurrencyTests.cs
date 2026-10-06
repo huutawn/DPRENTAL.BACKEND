@@ -1,4 +1,3 @@
-using Dprental.InventoryService.Api.Infrastructure.DependencyInjection;
 using System.Globalization;
 using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.DTOs.Allocations;
@@ -42,7 +41,6 @@ public sealed class PostgresAllocationConcurrencyTests : IClassFixture<PostgresF
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddInventoryServiceDomainRepositories(_connectionString);
-        services.AddInventoryApiRepositories();
         services.AddSingleton(timeProvider ?? new TestTimeProvider(InitialNow));
         if (decorateAllocations is not null)
         {

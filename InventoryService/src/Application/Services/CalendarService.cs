@@ -1,6 +1,6 @@
 using Dprental.InventoryService.Application.DTOs.Calendar;
 using Dprental.InventoryService.Application.IServices;
-using Dprental.InventoryService.Application.Kafka.Outbox;
+using Dprental.InventoryService.Domain.Kafka.Outbox;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Enums;

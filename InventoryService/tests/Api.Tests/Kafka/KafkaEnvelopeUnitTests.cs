@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Dprental.InventoryService.Domain.Entities;
-using Dprental.InventoryService.Application.Kafka.Contracts;
-using Dprental.InventoryService.Application.Kafka.Transport;
+using Dprental.InventoryService.Domain.Kafka.Contracts;
+using Dprental.InventoryService.Domain.Kafka.Transport;
 using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Common.Utils;
 using Xunit;

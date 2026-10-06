@@ -21,6 +21,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
 
         services.AddDbContext<InventoryServiceDbContext>(options => options.UseNpgsql(connectionString, npgsql => npgsql.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName)));
 
+        services.AddScoped<IInventoryAssetRepository, InventoryAssetRepository>();
         services.AddScoped<IAssetAllocationRepository, AssetAllocationRepository>();
         services.AddScoped<ICalendarBlockRepository, CalendarBlockRepository>();
 

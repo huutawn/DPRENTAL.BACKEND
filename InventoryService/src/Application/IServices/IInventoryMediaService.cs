@@ -1,4 +1,4 @@
-using Dprental.InventoryService.Application.DTOs.Media;
+using Dprental.InventoryService.Domain.Clients.Media;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 
