@@ -42,7 +42,6 @@ public sealed class EquipmentTypeConfiguration : IEntityTypeConfiguration<Equipm
 
         builder.HasIndex(e => e.Code).IsUnique().HasDatabaseName("IX_EquipmentTypes_Code");
         builder.HasIndex(e => e.Status).HasDatabaseName("IX_EquipmentTypes_Status");
-        builder.HasIndex(e => e.OrganizationId).HasDatabaseName("IX_EquipmentTypes_OrganizationId");
         builder.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_EquipmentTypes_CreatedAt");
         builder.HasIndex(e => e.PublishedAt).HasDatabaseName("IX_EquipmentTypes_PublishedAt");
         builder.HasIndex(e => e.ActiveSchemaVersionId).HasDatabaseName("IX_EquipmentTypes_ActiveSchemaVersionId");

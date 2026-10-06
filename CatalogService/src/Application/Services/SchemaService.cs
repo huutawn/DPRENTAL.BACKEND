@@ -1,191 +1,188 @@
-﻿using CatalogService.Application.DTOs.Schemas;
+using CatalogService.Application.DTOs.Schemas;
 using CatalogService.Application.IServices;
 using CatalogService.Application.Mapping;
+using Dprental.CatalogService.Common;
 using Dprental.CatalogService.Domain.Entities;
-using Dprental.CatalogService.Domain.Repositories;
+using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
+using Dprental.CatalogService.Domain.IRepositories;
 using Dprental.CatalogService.Domain.ValueObjects;
-using Microsoft.EntityFrameworkCore;
 
 namespace CatalogService.Application.Services;
 
-public class SchemaService : ISchemaService
+/// <summary>Compatibility adapter for the original field endpoints over EquipmentTypeSpecSchema.</summary>
+public sealed class SchemaService(IEquipmentTypeRepository repository) : ISchemaService
 {
-    private readonly CatalogServiceDbContext _context;
-
-    public SchemaService(CatalogServiceDbContext context)
+    public async Task<SchemaVersionDto> CreateNewDraftVersionAsync(Guid specSchemaId)
     {
-        _context = context;
-    }
-
-    public async Task<SchemaVersion> CreateNewDraftVersionAsync(Guid specSchemaId)
-    {
-        SpecSchema? schema = await _context.SpecSchemas
-            .Include(s => s.Versions)
-                .ThenInclude(v => v.SpecFields)
-            .FirstOrDefaultAsync(s => s.Id == specSchemaId);
-
-        if (schema == null) throw new KeyNotFoundException("SpecSchema không tồn tại.");
-
-        // Lấy version lớn nhất hiện tại, nếu chưa có thì bắt đầu từ 0
-        var latestVersionNumber = schema.Versions.Count > 0
-            ? schema.Versions.Max(v => v.VersionNumber)
-            : 0;
-
-        // Lấy version Published gần nhất để copy các trường sang bản mới
-        SchemaVersion? lastPublishedVersion = schema.Versions
-            .Where(v => v.Status == SchemaVersionStatus.Published)
-            .OrderByDescending(v => v.VersionNumber)
-            .FirstOrDefault();
-
-        SchemaVersion newDraft = schema.CreateDraftVersion(DateTime.UtcNow);
-
-        // Clone (Copy) toàn bộ SpecFields cũ sang bản Draft mới
-        if (lastPublishedVersion != null)
+        // The compatibility API uses the equipment type id as its stable schema id.
+        EquipmentType? parent = await repository.GetByIdAsync(specSchemaId);
+        if (parent is null)
         {
-            foreach (SpecField field in lastPublishedVersion.SpecFields.OrderBy(field => field.DisplayOrder))
-            {
-                newDraft.AddField(new SpecFieldDraft(
-                    field.Key,
-                    field.Label,
-                    field.DataType,
-                    field.IsRequired,
-                    field.Unit,
-                    field.MinValue,
-                    field.MaxValue,
-                    field.Options.Select(option => new SpecOptionDraft(option.Value, option.Label)).ToList()));
-            }
+            throw new KeyNotFoundException("SpecSchema không tồn tại.");
         }
 
-        await _context.SaveChangesAsync();
+        if (await repository.GetDraftSpecSchemaEntityAsync(parent.Id) is not null)
+        {
+            throw new InvalidOperationException("Đã có một version Draft. Hãy publish trước khi tạo bản mới.");
+        }
 
-        return newDraft;
+        IReadOnlyList<EquipmentTypeSpecSchemaDto> versions = await repository.GetSpecSchemasAsync(parent.Id);
+        EquipmentTypeSpecDefinition definition = versions
+            .Where(s => s.PublishedAt.HasValue)
+            .OrderByDescending(s => s.Version)
+            .Select(s => s.Definition)
+            .FirstOrDefault() ?? new EquipmentTypeSpecDefinition();
+
+        Result<EquipmentTypeSpecSchemaDto> addResult =
+            await repository.AddSpecSchemaDraftAsync(parent, definition);
+        if (addResult.IsFailure)
+        {
+            throw new InvalidOperationException(addResult.Error.Message);
+        }
+
+        EquipmentTypeSpecSchema? draft = await repository.GetSpecSchemaEntityByIdAsync(addResult.Value.Id);
+        if (draft is null)
+        {
+            throw new InvalidOperationException("Không thể đọc lại version Draft vừa tạo.");
+        }
+
+        return SchemaCompatibilityMapper.ToDto(draft, parent.CurrentSchemaVersion);
     }
 
     public async Task PublishSchemaVersionAsync(Guid versionId)
     {
-        var versionToPublish = await _context.SchemaVersions
-            .Include(v => v.SpecSchema)
-                .ThenInclude(s => s!.SchemaVersions)
-            .Include(v => v.SpecSchema)
-                .ThenInclude(s => s!.EquipmentType)
-            .FirstOrDefaultAsync(v => v.Id == versionId);
-
-        if (versionToPublish == null)
-            throw new KeyNotFoundException("Schema Version không tồn tại.");
-
-        if (versionToPublish.Status != SchemaVersionStatus.Draft)
-            throw new InvalidOperationException("Chỉ có thể Publish version đang ở trạng thái Draft.");
-
-        var currentActiveVersion = versionToPublish.SpecSchema!.SchemaVersions
-            .FirstOrDefault(v => v.Status == SchemaVersionStatus.Published);
-
-        if (currentActiveVersion != null)
+        (EquipmentType parent, EquipmentTypeSpecSchema schema) = await GetDraftAsync(versionId);
+        Result<EquipmentTypeSpecSchemaDto> result = await repository.PublishSpecSchemaAsync(parent, schema);
+        if (result.IsFailure)
         {
-            currentActiveVersion.Status = SchemaVersionStatus.Deprecated;
+            throw new InvalidOperationException(result.Error.Message);
         }
-
-        versionToPublish.Status = SchemaVersionStatus.Published;
-        versionToPublish.PublishedAtUtc = DateTime.UtcNow;
-
-        versionToPublish.SpecSchema!.EquipmentType!.ActiveSchemaVersionId = versionToPublish.Id;
-
-        await _context.SaveChangesAsync();
     }
 
     public async Task UpdateSpecFieldAsync(Guid versionId, Guid fieldId, SpecField updateData)
     {
-        var version = await _context.SchemaVersions
-            .Include(v => v.SpecFields)
-            .FirstOrDefaultAsync(v => v.Id == versionId);
-
-        if (version == null) throw new KeyNotFoundException("Version không tồn tại.");
-
-        if (version.Status == SchemaVersionStatus.Published)
-            throw new InvalidOperationException("Không thể sửa Schema đã Published.");
-
-        if (version.Status == SchemaVersionStatus.Deprecated)
-            throw new InvalidOperationException("Không thể sửa Schema đã Deprecated.");
-
-        // Dùng fieldId truyền vào từ URL để tìm kiếm
-        var existingField = version.SpecFields.FirstOrDefault(f => f.Id == fieldId);
-        if (existingField != null)
+        ArgumentNullException.ThrowIfNull(updateData);
+        (EquipmentType parent, EquipmentTypeSpecSchema schema) = await GetDraftAsync(versionId);
+        var fields = schema.Definition.Fields.ToList();
+        int index = fields.FindIndex(f => SchemaCompatibilityMapper.StableId(schema.Id, f.Key) == fieldId);
+        if (index < 0)
         {
-            existingField.Label = updateData.Label;
-            existingField.IsRequired = updateData.IsRequired;
-            // Cập nhật các trường khác...
+            return;
         }
 
-        await _context.SaveChangesAsync();
+        fields[index] = ToDefinitionField(
+            updateData.Key,
+            updateData.Label,
+            SpecDataTypeMapper.ToContract(updateData.DataType),
+            updateData.IsRequired,
+            updateData.Unit,
+            updateData.MinValue,
+            updateData.MaxValue,
+            fields[index].DisplayOrder,
+            updateData.Options.Select(o => new EquipmentTypeSpecOption { Value = o.Value, Label = o.Label }).ToList());
+        await SaveDefinitionAsync(parent, schema, fields);
     }
+
     public async Task<SpecFieldDto> AddFieldAsync(
-    Guid versionId,
-    AddSpecFieldRequest request,
-    CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        if (!SpecDataTypeMapper.TryParse(request.DataType, out SpecDataType dataType))
-        {
-            throw new ArgumentException(
-                "dataType chỉ nhận: number, integer, boolean, enum, text.");
-        }
-
-        SchemaVersion? version = await _context.SchemaVersions
-            .Include(v => v.SpecFields)
-                .ThenInclude(f => f.Options)
-            .FirstOrDefaultAsync(
-                v => v.Id == versionId,
-                cancellationToken);
-
-        if (version == null)
-            throw new KeyNotFoundException("Version không tồn tại.");
-
-        if (version.Status != SchemaVersionStatus.Draft)
-            throw new InvalidOperationException(
-                "Chỉ có thể thêm field vào Schema Version đang ở trạng thái Draft.");
-
-        SpecField field = version.AddField(
-            new SpecFieldDraft(
-                request.Key,
-                request.Label,
-                dataType,
-                request.IsRequired,
-                request.Unit,
-                request.MinValue,
-                request.MaxValue,
-                request.Options?
-                    .Select(option =>
-                        new SpecOptionDraft(
-                            option.Value,
-                            option.Label))
-                    .ToList()));
-
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return SchemaVersionMapper.ToFieldDto(field);
-    }
-
-    public async Task RemoveFieldAsync(
         Guid versionId,
-        Guid fieldId,
+        AddSpecFieldRequest request,
         CancellationToken cancellationToken = default)
     {
-        SchemaVersion? version = await _context.SchemaVersions
-            .Include(v => v.SpecFields)
-            .FirstOrDefaultAsync(
-                v => v.Id == versionId,
-                cancellationToken);
+        ArgumentNullException.ThrowIfNull(request);
+        if (!SpecDataTypeMapper.TryParse(request.DataType, out SpecDataType dataType))
+        {
+            throw new ArgumentException("dataType chỉ nhận: number, integer, boolean, enum, text.");
+        }
 
-        if (version == null)
-            throw new KeyNotFoundException("Version không tồn tại.");
-
-        if (version.Status != SchemaVersionStatus.Draft)
-            throw new InvalidOperationException(
-                "Chỉ có thể xóa field của Schema Version đang ở trạng thái Draft.");
-
-        version.RemoveField(fieldId);
-
-        await _context.SaveChangesAsync(cancellationToken);
+        (EquipmentType parent, EquipmentTypeSpecSchema schema) = await GetDraftAsync(versionId, cancellationToken);
+        var fields = schema.Definition.Fields.ToList();
+        EquipmentTypeSpecField field = ToDefinitionField(
+            request.Key,
+            request.Label,
+            SpecDataTypeMapper.ToContract(dataType),
+            request.IsRequired,
+            request.Unit,
+            request.MinValue,
+            request.MaxValue,
+            fields.Count == 0 ? 1 : fields.Max(f => f.DisplayOrder) + 1,
+            request.Options?.Select(o => new EquipmentTypeSpecOption { Value = o.Value, Label = o.Label }).ToList());
+        fields.Add(field);
+        await SaveDefinitionAsync(parent, schema, fields, cancellationToken);
+        return SchemaCompatibilityMapper.ToFieldDto(schema.Id, field);
     }
 
+    public async Task RemoveFieldAsync(Guid versionId, Guid fieldId, CancellationToken cancellationToken = default)
+    {
+        (EquipmentType parent, EquipmentTypeSpecSchema schema) = await GetDraftAsync(versionId, cancellationToken);
+        var fields = schema.Definition.Fields
+            .Where(f => SchemaCompatibilityMapper.StableId(schema.Id, f.Key) != fieldId)
+            .ToList();
+        if (fields.Count == schema.Definition.Fields.Count)
+        {
+            throw new KeyNotFoundException("Field không thuộc version này.");
+        }
+
+        await SaveDefinitionAsync(parent, schema, fields, cancellationToken);
+    }
+
+    private async Task<(EquipmentType Parent, EquipmentTypeSpecSchema Schema)> GetDraftAsync(
+        Guid versionId,
+        CancellationToken cancellationToken = default)
+    {
+        EquipmentTypeSpecSchema? schema = await repository.GetSpecSchemaEntityByIdAsync(versionId, cancellationToken);
+        if (schema is null)
+        {
+            throw new KeyNotFoundException("Schema Version không tồn tại.");
+        }
+
+        if (schema.PublishedAt.HasValue)
+        {
+            throw new InvalidOperationException("Không thể sửa Schema đã Published.");
+        }
+
+        EquipmentType? parent = await repository.GetByIdAsync(schema.EquipmentTypeId, cancellationToken);
+        if (parent is null)
+        {
+            throw new KeyNotFoundException("EquipmentType không tồn tại.");
+        }
+
+        return (parent, schema);
+    }
+
+    private async Task SaveDefinitionAsync(
+        EquipmentType parent,
+        EquipmentTypeSpecSchema schema,
+        IReadOnlyList<EquipmentTypeSpecField> fields,
+        CancellationToken cancellationToken = default)
+    {
+        var definition = new EquipmentTypeSpecDefinition { Fields = fields };
+        Result<EquipmentTypeSpecSchemaDto> result =
+            await repository.UpdateSpecSchemaDraftAsync(parent, schema, definition, cancellationToken);
+        if (result.IsFailure)
+        {
+            throw new InvalidOperationException(result.Error.Message);
+        }
+    }
+
+    private static EquipmentTypeSpecField ToDefinitionField(
+        string key,
+        string label,
+        string dataType,
+        bool required,
+        string? unit,
+        decimal? min,
+        decimal? max,
+        int displayOrder,
+        IReadOnlyList<EquipmentTypeSpecOption>? options) => new()
+        {
+            Key = key,
+            Label = label,
+            DataType = dataType,
+            Required = required,
+            Unit = unit,
+            Min = min,
+            Max = max,
+            DisplayOrder = displayOrder,
+            Options = options
+        };
 }

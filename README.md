@@ -35,17 +35,46 @@ Catalog đọc nguyên các claim do AuthService phát hành, không tin header 
 
 | API (tiền tố `/api/v1/catalog`) | Quyền |
 | --- | --- |
-| `GET /categories`, `GET /categories/{id}` | Công khai |
+| `GET /categories`, `GET /categories/{id}` | Công khai (chỉ active; inactive hoặc không tồn tại trả `404`) |
+| `GET /admin/categories` | Policy `CatalogCategoryManage`: role `adm` (active và inactive, lọc `isActive`) |
+| `GET /admin/categories/{id}` | Policy `CatalogCategoryManage`: role `adm` (đọc mọi trạng thái) |
 | `GET /equipment-types`, `GET /equipment-types/{id}` | Công khai |
+| `GET /equipment-types/{id}/schema` | Công khai (Type phải Published, trả schema tại `CurrentSchemaVersion`) |
+| `GET /equipment-types/{id}/schemas/{version}` | Công khai (Type Published hoặc Disabled; chỉ trả version đã publish) |
+| `POST /equipment-types/{id}/schemas/batch` | Công khai (Type Published hoặc Disabled; body `{ "versions": [1, 2] }`, trả `equipmentTypeId`, `currentSchemaVersion`, `schemas: [{ version, fields }]`; luôn kèm current schema; không trả draft; version không hợp lệ trả 400; không tồn tại trả 404) |
+| `GET /brands`, `GET /brands/{id}` | Công khai (chỉ active; inactive hoặc không tồn tại trả `404`) |
+| `GET /admin/brands` | Policy `CatalogBrandManage`: role `adm` (active và inactive, lọc `isActive`) |
+| `GET /admin/brands/{id}` | Policy `CatalogBrandManage`: role `adm` (đọc mọi trạng thái) |
+| `POST /brands`, `PATCH /brands/{id}` | Policy `CatalogBrandManage`: role `adm` |
+| `POST /brands/{id}/disable`, `POST /brands/{id}/enable` | Policy `CatalogBrandManage`: role `adm` (idempotent) |
+| `POST /equipment-types/{id}/specifications/validate` | Authenticated (User JWT hoặc Service token; type Published, schema đã publish; Admin không được bypass) |
 | `POST /categories`, `PATCH /categories/{id}` | Policy `CatalogCategoryManage`: role `adm` |
-| `POST /equipment-types`, `PATCH /equipment-types/{id}` | Policy `CatalogEquipmentManage`: role `adm` hoặc `own` |
-| `POST /equipment-types/{id}/publish`, `POST /equipment-types/{id}/disable` | Policy `CatalogEquipmentManage`: role `adm` hoặc `own` |
+| `POST /categories/{id}/disable`, `POST /categories/{id}/enable` | Policy `CatalogCategoryManage`: role `adm` (idempotent) |
+| `GET /admin/equipment-types` | Policy `CatalogEquipmentManage`: role `adm`. Danh sách phân trang ở mọi trạng thái; lọc `status` (`Draft`, `Published`, `Disabled`, lặp lại tham số để lấy nhiều trạng thái), `keyword`, `categoryId`, `sort`, `page`, `pageSize` |
+| `GET /admin/equipment-types/{id}` | Policy `CatalogEquipmentManage`: role `adm`. Chi tiết ở mọi trạng thái, kể cả Draft và Disabled |
+| `POST /equipment-types`, `PATCH /equipment-types/{id}` | Policy `CatalogEquipmentManage`: role `adm` |
+| `POST /equipment-types/{id}/publish`, `POST /equipment-types/{id}/disable` | Policy `CatalogEquipmentManage`: role `adm` |
+| `GET /equipment-types/{id}/spec-schemas`, `POST /equipment-types/{id}/spec-schemas` | Policy `CatalogEquipmentManage`: role `adm` |
+| `PUT /equipment-types/{id}/spec-schemas/{version}`, `POST /equipment-types/{id}/spec-schemas/{version}/publish` | Policy `CatalogEquipmentManage`: role `adm` |
+| `GET /equipment-types/{id}/spec-schemas/{version}` | Công khai (Admin đọc mọi trạng thái; public đọc bản published của type Published/Disabled) |
 | `GET /health/live`, `GET /health/ready` (không có tiền tố) | Công khai |
+API ghi trả `401` khi thiếu/token không hợp lệ, `403` khi token hợp lệ nhưng không đủ quyền. Các role `own`, `adp`, `mem`, `cus` và service token (`u = svc`) không cấp quyền quản lý catalog; tên `Admin`/`admin` không thay thế mã `adm` trong token.
 
-API ghi trả `401` khi thiếu/token không hợp lệ, `403` khi token hợp lệ nhưng không đủ quyền. Các role `adp`, `mem`, `cus` và service token (`u = svc`) không cấp quyền quản lý catalog; tên `Admin`/`admin` không thay thế mã `adm` trong token.
+**Dữ liệu canonical và specification schema có version**:
+- `EquipmentType` là dữ liệu platform canonical dùng chung, không còn thuộc tính `OrganizationId` hay logic ownership theo organization. Request gửi `organizationId` bị từ chối `400 Bad Request`.
+- Specification schema có vòng đời riêng theo version (`EquipmentTypeSpecSchema`), lưu định nghĩa `fields` bằng PostgreSQL `jsonb`.
+- Mỗi equipment type có tối đa một bản draft schema (`PublishedAt = null`).
+- Publish schema cập nhật `CurrentSchemaVersion` của equipment type. Equipment type chỉ được publish khi đã có schema được publish.
+- Response detail (`GET /equipment-types/{id}`) bổ sung `primarySpecs: [{ key, label, unit }]`, trích xuất các field `primary=true` của current schema và sắp xếp theo `displayOrder`, rồi `key` (ordinal).
+- Endpoint canonical validation `POST /equipment-types/{id}/specifications/validate` xác thực dữ liệu đặc tả kỹ thuật theo schema version đã publish, nhận `{ schemaVersion, specValues }` và trả `200 { valid, errors }` với cấu trúc lỗi `{ field, code, message }` (`REQUIRED`, `TYPE_MISMATCH`, `OUT_OF_RANGE`, `INVALID_ENUM_OPTION`, `UNKNOWN_FIELD`).
 
-**Phạm vi organization của equipment type**: mỗi bản ghi có `OrganizationId` (null là bản ghi dùng chung, chỉ `adm` quản lý). Owner chỉ sửa/publish/disable bản ghi thuộc organization có trong claim `o` của mình, ngược lại nhận `403 EquipmentType.OrganizationForbidden`. Khi tạo mới, organization lấy từ claim `o`; nếu token có nhiều organization thì body phải gửi `organizationId` là một trong số đó (`400 EquipmentType.OrganizationRequired` nếu thiếu, `403` nếu không thuộc token). `adm` quản lý mọi bản ghi.
-
+**Dữ liệu canonical Brand**:
+- `Brand` là dữ liệu platform canonical dùng chung toàn platform, do Admin quản lý, không có Organization ownership. Request gửi `organizationId` bị từ chối `400 Bad Request`.
+- Bảng `catalog.Brands`: `Id` (UUID, sinh ở ứng dụng), `Code` (trim/uppercase, tối đa 50 ký tự), `Name` (Unicode NFC, trim/gom khoảng trắng, tối đa 200 ký tự), `Slug` (trim/lowercase, tối đa 150 ký tự dạng ASCII alphanumeric phân cách bằng dấu `-`), `LogoMediaId` (UUID, tùy chọn), `IsActive` (boolean, tạo mới mặc định active), `CreatedAt` (UTC), `UpdatedAt` (UTC).
+- Unique index `IX_Brands_Code` và `IX_Brands_Slug` áp dụng cho cả Brand inactive, trùng lặp trả về `409 Conflict`.
+- Concurrency token PostgreSQL `xmin` ngăn mất cập nhật khi ghi đồng thời, trả về `409 Conflict`.
+- Logo quản lý qua MediaService: verify Ready, MIME `image/jpeg`, `image/png`, `image/webp`, uploader khớp operator trước khi gọi `SetVisibilityAsync(..., "public")` và lưu Brand. Không verify lại khi PATCH giữ nguyên logo hoặc gỡ logo (`logoMediaId: null`). GET dựng URL qua `MediaUrlResolver` không gọi MediaService. Nếu database lưu thất bại sau khi đã public media, media asset vẫn giữ trạng thái public (đây là giới hạn chấp nhận được để tránh giữ transaction DB trong khi gọi external HTTP MediaService).
+- Disable/Enable có tính idempotent: gọi lại cùng trạng thái không thay đổi timestamp `UpdatedAt`.
 ## Chạy hạ tầng cục bộ
 
 ```bash
@@ -77,21 +106,24 @@ dotnet build CatalogService.sln
 dotnet test CatalogService.sln
 ```
 
-## Quy trình Triển khai và Rollback (RefactorEquipmentToEquipmentType)
+## Quy trình Triển khai và Rollback (AddEquipmentTypeSpecSchemaAndDropOrganizationId)
 
-Migration `RefactorEquipmentToEquipmentType` thực hiện refactor cấu trúc từ `Equipment` sang `EquipmentType`, loại bỏ các cột supplier (`OrganizationId`, `Brand`, `DailyPrice`, `RegionId`, `Specifications`).
+Migration `AddEquipmentTypeSpecSchemaAndDropOrganizationId` chuyển `EquipmentType` thành canonical platform data, loại bỏ cột ownership `OrganizationId` và bổ sung hệ thống specification schema có versioning (`EquipmentTypeSpecSchema`, `CurrentSchemaVersion`).
 
 ### 1. Khoảng dừng ghi và Backup
-1. **Khoảng dừng ghi**: Chuyển API sang chế độ bảo trì hoặc tạm dừng tiếp nhận các tác vụ ghi (write pause) trên CatalogService trước khi chạy migration. Không chạy phiên bản API cũ trên schema mới.
+1. **Khoảng dừng ghi**: Chuyển API sang chế độ bảo trì hoặc tạm dừng tiếp nhận các tác vụ ghi trên CatalogService trước khi chạy migration. Dừng phiên bản API cũ trong cửa sổ triển khai vì không tương thích với việc drop column `OrganizationId`.
 2. **Sao lưu đầy đủ**: Tạo bản sao lưu toàn vẹn cơ sở dữ liệu trước khi thực hiện:
    ```bash
-   pg_dump -h <host> -p <port> -U <user> -Fc -d catalogservice > catalogservice_pre_refactor.dump
+   pg_dump -h <host> -p <port> -U <user> -Fc -d catalogservice > catalogservice_pre_specschema.dump
    ```
 
-### 2. Preflight và Chạy Migration
-Migration chạy trong một transaction khóa ghi `ACCESS EXCLUSIVE` trên các bảng liên quan và tự động kiểm tra trùng `Code` (duplicate-Code preflight). Nếu phát hiện `Code` bị trùng:
-- Migration lập tức dừng lại với ngoại lệ `Cannot refactor Equipments to EquipmentTypes: duplicate Code values found: ...`.
-- Transaction tự động rollback; cấu trúc schema và dữ liệu hiện tại được bảo toàn nguyên vẹn.
+### 2. Migration và Backfill
+Migration thực hiện trong cùng một transaction:
+1. Tạo bảng `EquipmentTypeSpecSchemas` và partial unique index bảo đảm tối đa một draft cho mỗi equipment type.
+2. Thêm cột `CurrentSchemaVersion` vào `EquipmentTypes`.
+3. Tự động backfill mỗi `EquipmentType` hiện có một **published v1** với `{"fields":[]}` và cập nhật `CurrentSchemaVersion=1`. Timestamps schema lấy thời điểm migration (`NOW()`), bảo toàn nguyên vẹn ID, Code, Status, timestamps của type, Category và Media.
+4. Drop index `IX_EquipmentTypes_OrganizationId` và drop column `OrganizationId`.
+5. Thiết lập composite foreign key `FK_EquipmentTypes_EquipmentTypeSpecSchemas_CurrentSchema` trên `(Id, CurrentSchemaVersion)`.
 
 Chạy migration:
 ```bash
@@ -99,19 +131,31 @@ dotnet ef database update --project CatalogService/src/Domain/CatalogService.Dom
 ```
 
 ### 3. Deploy và Mở ghi
-1. Khởi động phiên bản API mới với base route `/api/v1/catalog/equipment-types`.
-2. Chạy smoke test xác thực các endpoint public và admin.
+1. Khởi động phiên bản API mới.
+2. Chạy smoke test xác thực các endpoint public, admin CRUD và spec-schema endpoints.
 3. Mở lại luồng ghi cho hệ thống.
 
 ### 4. Quy trình Rollback
-Do các cột supplier bị drop vĩnh viễn không thể khôi phục qua reverse migration, phương thức `Down` ném `NotSupportedException`. Khi cần rollback:
+Do việc drop column `OrganizationId` và quản lý schema không thể hoàn nguyên tự động, phương thức `Down` ném `NotSupportedException`. Khi cần rollback:
 1. Dừng tiến trình API mới.
 2. Khôi phục cơ sở dữ liệu từ bản sao lưu:
    ```bash
-   pg_restore -h <host> -p <port> -U <user> -d catalogservice --clean catalogservice_pre_refactor.dump
+   pg_restore -h <host> -p <port> -U <user> -d catalogservice --clean catalogservice_pre_specschema.dump
    ```
 3. Khởi động lại phiên bản API trước đó.
 
+## Quy trình Triển khai (AddBrands)
+
+Migration `AddBrands` bổ sung bảng `catalog.Brands` và các unique index đi kèm mà không ảnh hưởng tới dữ liệu của các bảng hiện có (`EquipmentTypes`, `Categories`, `EquipmentTypeMedia`, `EquipmentTypeSpecSchemas`).
+
+### 1. Chạy migration trước khi deploy
+Chạy forward migration:
+```bash
+dotnet ef database update --project CatalogService/src/Domain/CatalogService.Domain.csproj --startup-project CatalogService/src/Api/CatalogService.Api.csproj
+```
+
+### 2. Quy trình Rollback
+Phương thức `Down` của migration `AddBrands` ném `NotSupportedException` nhằm từ chối rollback phá hủy dữ liệu. Khi rollback phiên bản ứng dụng, bảng `catalog.Brands` được giữ nguyên trong cơ sở dữ liệu.
 ## Git hook
 
 Sau khi khởi tạo Git trong thư mục service, chạy `./scripts/setup-git-hooks.sh` (hoặc bản `.ps1` trên PowerShell). Hook kiểm tra branch nền `origin/catalog/develop`, rồi build và test trước khi push.

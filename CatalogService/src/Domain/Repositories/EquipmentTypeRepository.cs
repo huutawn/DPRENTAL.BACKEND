@@ -9,7 +9,7 @@ using Npgsql;
 
 namespace Dprental.CatalogService.Domain.Repositories;
 
-public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquipmentTypeRepository
+public partial class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquipmentTypeRepository
 {
     private static readonly Expression<Func<EquipmentType, EquipmentTypeDetailDto>> DetailSelector = e =>
         new EquipmentTypeDetailDto(
@@ -30,7 +30,19 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
                 .OrderBy(m => m.DisplayOrder)
                 .ThenBy(m => m.Id)
                 .Select(m => new EquipmentTypeMediaResponseDto(m.MediaId, null, m.DisplayOrder, m.IsThumbnail))
-                .ToList());
+                .ToList(),
+            e.CurrentSchemaVersion,
+            e.SpecSchemas
+                .Where(s => s.Version == e.CurrentSchemaVersion)
+                .Select(s => new EquipmentTypeSpecSchemaDto(
+                    s.Id,
+                    s.EquipmentTypeId,
+                    s.Version,
+                    s.PublishedAt == null ? "Draft" : "Published",
+                    s.CreatedAt,
+                    s.PublishedAt,
+                    s.Definition))
+                .FirstOrDefault());
 
     public async Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(
         GetEquipmentTypesRequest request,
@@ -38,35 +50,15 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var query = dbContext.EquipmentTypes.AsNoTracking()
-            .Where(e => e.Status == EquipmentTypeStatus.Published);
-
-        if (!string.IsNullOrWhiteSpace(request.Keyword))
-        {
-            var keyword = request.Keyword.Trim();
-            query = query.Where(e =>
-                EF.Functions.ILike(e.Code, $"%{keyword}%") ||
-                EF.Functions.ILike(e.Name, $"%{keyword}%") ||
-                (e.Description != null && EF.Functions.ILike(e.Description, $"%{keyword}%")));
-        }
-
-        if (request.CategoryId.HasValue)
-        {
-            query = query.Where(e => e.Categories.Any(c => c.Id == request.CategoryId.Value));
-        }
+        var query = ApplyFilters(
+            dbContext.EquipmentTypes.AsNoTracking().Where(e => e.Status == EquipmentTypeStatus.Published),
+            request.Keyword,
+            request.CategoryId);
 
         var totalCount = await query.CountAsync(cancellationToken);
 
-        string sort = request.Sort?.Trim().ToLowerInvariant() ?? string.Empty;
-        query = sort switch
-        {
-            "name_asc" => query.OrderBy(e => e.Name).ThenBy(e => e.Id),
-            "name_desc" => query.OrderByDescending(e => e.Name).ThenBy(e => e.Id),
-            _ => query.OrderByDescending(e => e.CreatedAt).ThenBy(e => e.Id)
-        };
-
         var skip = (request.Page - 1) * request.PageSize;
-        var items = await query
+        var items = await ApplySort(query, request.Sort)
             .Skip(skip)
             .Take(request.PageSize)
             .Select(e => new EquipmentTypeListItemDto(
@@ -85,21 +77,102 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
                     .ThenBy(m => m.Id)
                     .Select(m => (Guid?)m.MediaId)
                     .FirstOrDefault(),
-                null
+                null,
+                e.CurrentSchemaVersion
             ))
             .ToListAsync(cancellationToken);
 
         return new PagedResult<EquipmentTypeListItemDto>(items, request.Page, request.PageSize, totalCount);
     }
 
+    public async Task<PagedResult<EquipmentTypeAdminListItemDto>> SearchAdminAsync(
+        GetAdminEquipmentTypesRequest request,
+        IReadOnlyList<EquipmentTypeStatus> statuses,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(statuses);
+
+        var query = ApplyFilters(dbContext.EquipmentTypes.AsNoTracking(), request.Keyword, request.CategoryId);
+        if (statuses.Count > 0)
+        {
+            query = query.Where(e => statuses.Contains(e.Status));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var skip = (request.Page - 1) * request.PageSize;
+        var items = await ApplySort(query, request.Sort)
+            .Skip(skip)
+            .Take(request.PageSize)
+            .Select(e => new EquipmentTypeAdminListItemDto(
+                e.Id,
+                e.Code,
+                e.Name,
+                e.Description,
+                e.Status,
+                e.CreatedAt,
+                e.UpdatedAt,
+                e.PublishedAt,
+                e.Categories
+                    .OrderBy(c => c.Name)
+                    .ThenBy(c => c.Id)
+                    .Select(c => new CategoryDto(c.Id, c.Name, c.ImageMediaId, null))
+                    .ToList(),
+                e.Media
+                    .OrderByDescending(m => m.IsThumbnail)
+                    .ThenBy(m => m.DisplayOrder)
+                    .ThenBy(m => m.Id)
+                    .Select(m => (Guid?)m.MediaId)
+                    .FirstOrDefault(),
+                null,
+                e.CurrentSchemaVersion
+            ))
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<EquipmentTypeAdminListItemDto>(items, request.Page, request.PageSize, totalCount);
+    }
+
+    private static IQueryable<EquipmentType> ApplyFilters(IQueryable<EquipmentType> query, string? keyword, Guid? categoryId)
+    {
+        if (!string.IsNullOrWhiteSpace(keyword))
+        {
+            var trimmedKeyword = keyword.Trim();
+            query = query.Where(e =>
+                EF.Functions.ILike(e.Code, $"%{trimmedKeyword}%") ||
+                EF.Functions.ILike(e.Name, $"%{trimmedKeyword}%") ||
+                (e.Description != null && EF.Functions.ILike(e.Description, $"%{trimmedKeyword}%")));
+        }
+
+        if (categoryId.HasValue)
+        {
+            query = query.Where(e => e.Categories.Any(c => c.Id == categoryId.Value));
+        }
+
+        return query;
+    }
+
+    private static IQueryable<EquipmentType> ApplySort(IQueryable<EquipmentType> query, string? sort) =>
+        (sort?.Trim().ToLowerInvariant() ?? string.Empty) switch
+        {
+            "name_asc" => query.OrderBy(e => e.Name).ThenBy(e => e.Id),
+            "name_desc" => query.OrderByDescending(e => e.Name).ThenBy(e => e.Id),
+            _ => query.OrderByDescending(e => e.CreatedAt).ThenBy(e => e.Id)
+        };
+
     public async Task<EquipmentTypeDetailDto?> GetPublishedByIdAsync(
         Guid id,
         CancellationToken cancellationToken = default)
     {
-        return await dbContext.EquipmentTypes.AsNoTracking()
+        var detail = await dbContext.EquipmentTypes.AsNoTracking()
             .Where(e => e.Id == id && e.Status == EquipmentTypeStatus.Published)
             .Select(DetailSelector)
             .FirstOrDefaultAsync(cancellationToken);
+
+        return detail is null ? null : detail with
+        {
+            PrimarySpecs = EquipmentTypeDetailDto.ExtractPrimarySpecs(detail.SpecSchema?.Definition)
+        };
     }
 
     public async Task<EquipmentType?> GetByIdAsync(
@@ -109,6 +182,7 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
         return await dbContext.EquipmentTypes
             .Include(e => e.Categories)
             .Include(e => e.Media)
+            .Include(e => e.SpecSchemas)
             .FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
     }
     public async Task<EquipmentType?> GetWithSchemaAsync(
@@ -116,10 +190,7 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
     CancellationToken cancellationToken = default)
     {
         return await dbContext.EquipmentTypes
-            .Include(e => e.Schema)
-                .ThenInclude(s => s!.Versions)
-                    .ThenInclude(v => v.SpecFields)
-                        .ThenInclude(f => f.Options)
+            .Include(e => e.SpecSchemas)
             .AsSplitQuery()
             .FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
     }
@@ -128,9 +199,24 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
         Guid id,
         CancellationToken cancellationToken = default)
     {
-        return await dbContext.EquipmentTypes.AsNoTracking()
+        var detail = await dbContext.EquipmentTypes.AsNoTracking()
             .Where(e => e.Id == id)
             .Select(DetailSelector)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return detail is null ? null : detail with
+        {
+            PrimarySpecs = EquipmentTypeDetailDto.ExtractPrimarySpecs(detail.SpecSchema?.Definition)
+        };
+    }
+
+    public async Task<EquipmentTypeMetadataDto?> GetMetadataByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        return await dbContext.EquipmentTypes.AsNoTracking()
+            .Where(e => e.Id == id)
+            .Select(e => new EquipmentTypeMetadataDto(e.Id, e.Status, e.CurrentSchemaVersion))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -146,6 +232,7 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
     public async Task<Result<EquipmentTypeDetailDto>> AddAsync(
         EquipmentType equipmentType,
         IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems,
+        EquipmentTypeSpecDefinition? initialSpecSchema = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(equipmentType);
@@ -164,6 +251,17 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
             dbContext.EquipmentTypes.Add(equipmentType);
             await dbContext.SaveChangesAsync(cancellationToken);
 
+            if (initialSpecSchema != null)
+            {
+                var schema = EquipmentTypeSpecSchema.CreateDraft(
+                    equipmentType.Id,
+                    1,
+                    initialSpecSchema,
+                    equipmentType.CreatedAt);
+                dbContext.EquipmentTypeSpecSchemas.Add(schema);
+                equipmentType.SpecSchemas.Add(schema);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
             if (mediaItems != null && mediaItems.Count > 0)
             {
                 foreach (var item in mediaItems)
@@ -317,6 +415,16 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
 
     private static EquipmentTypeDetailDto ToDetailDto(EquipmentType entity)
     {
+        EquipmentTypeSpecSchemaDto? currentSpecSchema = null;
+        if (entity.CurrentSchemaVersion.HasValue)
+        {
+            var currentSchemaEntity = entity.SpecSchemas.FirstOrDefault(s => s.Version == entity.CurrentSchemaVersion.Value);
+            if (currentSchemaEntity != null)
+            {
+                currentSpecSchema = ToSpecSchemaDto(currentSchemaEntity);
+            }
+        }
+
         return new EquipmentTypeDetailDto(
             entity.Id,
             entity.Code,
@@ -336,7 +444,10 @@ public class EquipmentTypeRepository(CatalogServiceDbContext dbContext) : IEquip
                 .OrderBy(m => m.DisplayOrder)
                 .ThenBy(m => m.Id)
                 .Select(m => new EquipmentTypeMediaResponseDto(m.MediaId, null, m.DisplayOrder, m.IsThumbnail))
-                .ToList());
+                .ToList(),
+            entity.CurrentSchemaVersion,
+            currentSpecSchema,
+            EquipmentTypeDetailDto.ExtractPrimarySpecs(currentSpecSchema?.Definition));
     }
 
     private static bool IsDuplicateCodeViolation(DbUpdateException ex)

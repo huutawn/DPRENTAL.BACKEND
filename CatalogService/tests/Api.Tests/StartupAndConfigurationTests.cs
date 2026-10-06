@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Dprental.CatalogService.Common;
 using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
 using Dprental.CatalogService.Domain.Entities;
@@ -176,13 +176,48 @@ public sealed class StartupAndConfigurationTests
         Assert.Equal("http", bearerScheme.GetProperty("type").GetString());
         Assert.Equal("bearer", bearerScheme.GetProperty("scheme").GetString());
 
-        // Thiếu security requirement trên operation thì Swagger UI không gửi token dù đã Authorize.
+        // Thiáº¿u security requirement trÃªn operation thÃ¬ Swagger UI khÃ´ng gá»­i token dÃ¹ Ä‘Ã£ Authorize.
         JsonElement equipmentTypes = doc.RootElement.GetProperty("paths").GetProperty("/api/v1/catalog/equipment-types");
         JsonElement postSecurity = equipmentTypes.GetProperty("post").GetProperty("security");
         Assert.Contains(postSecurity.EnumerateArray(), requirement => requirement.TryGetProperty("Bearer", out _));
         Assert.False(
             equipmentTypes.GetProperty("get").TryGetProperty("security", out JsonElement getSecurity)
             && getSecurity.GetArrayLength() > 0);
+    }
+
+    [Fact]
+    public async Task SwaggerDocument_AdminEquipmentTypeStatusFilter_ListsAllowedValues()
+    {
+        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
+                builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
+                builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
+                builder.UseTestJwks();
+            });
+
+        using HttpClient client = factory.CreateClient();
+        using HttpResponseMessage response = await client.GetAsync("/swagger/v1/swagger.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        JsonElement statusSchema = doc.RootElement
+            .GetProperty("paths")
+            .GetProperty("/api/v1/catalog/admin/equipment-types")
+            .GetProperty("get")
+            .GetProperty("parameters")
+            .EnumerateArray()
+            .Single(parameter => string.Equals(parameter.GetProperty("name").GetString(), "status", StringComparison.OrdinalIgnoreCase))
+            .GetProperty("schema");
+
+        // Enum Ä‘Æ¡n (khÃ´ng pháº£i array) Ä‘á»ƒ Swagger UI hiá»‡n dropdown thay vÃ¬ há»™p chá»n nhiá»u dÃ²ng.
+        Assert.Equal("string", statusSchema.GetProperty("type").GetString());
+        Assert.Equal(
+            ["Draft", "Published", "Disabled"],
+            statusSchema.GetProperty("enum").EnumerateArray().Select(value => value.GetString()));
     }
 
     [Fact]
@@ -219,10 +254,14 @@ public sealed class StartupAndConfigurationTests
         }
 
         Assert.Equal(9, equipmentTypeEndpointsCount);
+Assert.Equal(17, equipmentTypeEndpointsCount);
         Assert.DoesNotContain("/api/v1/catalog/equipments", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("dailyPrice", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("regionId", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("specifications", json, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("/api/v1/catalog/equipment-types/{equipmentTypeId}/schema", json, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("/api/v1/catalog/equipment-types/{equipmentTypeId}/schemas/{version}", json, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("/api/v1/catalog/equipment-types/{equipmentTypeId}/specifications/validate", json, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("/api/v1/catalog/equipment-types/{id}/schemas/batch", json, StringComparison.OrdinalIgnoreCase);
     }
     [Fact]
     public async Task SwaggerDocument_AssertsExactPatchContract_AndSerializesSuccessfully()
@@ -274,11 +313,11 @@ public sealed class StartupAndConfigurationTests
             bool isNullable = prop.Value.TryGetProperty("nullable", out JsonElement nullProp) && nullProp.GetBoolean();
             if (string.Equals(prop.Name, "description", StringComparison.OrdinalIgnoreCase))
             {
-                Assert.True(isNullable, "description phải nullable");
+                Assert.True(isNullable, "description pháº£i nullable");
             }
             else
             {
-                Assert.False(isNullable, $"{prop.Name} không được nullable");
+                Assert.False(isNullable, $"{prop.Name} khÃ´ng Ä‘Æ°á»£c nullable");
             }
         }
 
@@ -372,7 +411,7 @@ public sealed class StartupAndConfigurationTests
         public Task<bool> ExistsByCodeAsync(string code, Guid? excludeId = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(false);
 
-        public Task<Result<EquipmentTypeDetailDto>> AddAsync(EquipmentType equipmentType, IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems, CancellationToken cancellationToken = default) =>
+        public Task<Result<EquipmentTypeDetailDto>> AddAsync(EquipmentType equipmentType, IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems, EquipmentTypeSpecDefinition? initialSpecSchema = null, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
 
         public Task<Result<EquipmentTypeDetailDto>> SaveAsync(EquipmentType entity, IReadOnlyList<EquipmentTypeMediaItemDto?>? desiredMedia, CancellationToken cancellationToken = default) =>
@@ -382,5 +421,28 @@ public sealed class StartupAndConfigurationTests
             throw new NotImplementedException();
         public Task<EquipmentType?> GetWithSchemaAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult<EquipmentType?>(null);
+public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<EquipmentTypeSpecSchemaDto>>([]);
+
+        public Task<EquipmentTypeSpecSchemaDto?> GetSpecSchemaAsync(Guid equipmentTypeId, int version, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeSpecSchemaDto?>(null);
+
+        public Task<EquipmentTypeSpecSchema?> GetDraftSpecSchemaEntityAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeSpecSchema?>(null);
+
+        public Task<EquipmentTypeSpecSchema?> GetSpecSchemaEntityAsync(Guid equipmentTypeId, int version, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeSpecSchema?>(null);
+
+        public Task<int> GetMaxSpecSchemaVersionAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
+
+        public Task<Result<EquipmentTypeSpecSchemaDto>> AddSpecSchemaDraftAsync(EquipmentType parent, EquipmentTypeSpecDefinition definition, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<Result<EquipmentTypeSpecSchemaDto>> UpdateSpecSchemaDraftAsync(EquipmentType parent, EquipmentTypeSpecSchema draftSchema, EquipmentTypeSpecDefinition newDefinition, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<Result<EquipmentTypeSpecSchemaDto>> PublishSpecSchemaAsync(EquipmentType parent, EquipmentTypeSpecSchema draftSchema, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
     }
 }

@@ -1,4 +1,4 @@
-using CatalogService.Application.Services;
+﻿using CatalogService.Application.Services;
 using Dprental.CatalogService.Application.Clients;
 using Dprental.CatalogService.Application.Common;
 using Dprental.CatalogService.Application.IServices;
@@ -38,6 +38,47 @@ public sealed partial class EquipmentTypeService(
 
         PagedResult<EquipmentTypeListItemDto> pagedResult = await repository.SearchPublishedAsync(request, cancellationToken);
         return EnrichList(pagedResult);
+    }
+
+    public async Task<Result<PagedResult<EquipmentTypeAdminListItemDto>>> SearchAdminAsync(
+        GetAdminEquipmentTypesRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        Result<IReadOnlyList<EquipmentTypeStatus>> statusesResult = listQueryValidator.Validate(request);
+        if (statusesResult.IsFailure)
+        {
+            return statusesResult.Error;
+        }
+
+        PagedResult<EquipmentTypeAdminListItemDto> paged =
+            await repository.SearchAdminAsync(request, statusesResult.Value, cancellationToken);
+
+        var enrichedItems = paged.Items
+            .Select(item => item with
+            {
+                ThumbnailUrl = MediaUrlResolver.ResolvePublicUrl(item.ThumbnailMediaId),
+                Categories = item.Categories
+                    .Select(c => c with { ImageUrl = MediaUrlResolver.ResolvePublicUrl(c.ImageMediaId) })
+                    .ToList()
+            })
+            .ToList();
+
+        return new PagedResult<EquipmentTypeAdminListItemDto>(enrichedItems, paged.Page, paged.PageSize, paged.TotalCount);
+    }
+
+    public async Task<Result<EquipmentTypeDetailDto>> GetAdminDetailAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        EquipmentTypeDetailDto? detail = await repository.GetDetailByIdAsync(id, cancellationToken);
+        if (detail is null)
+        {
+            return CatalogErrors.EquipmentType.NotFound;
+        }
+
+        return EnrichDetail(detail);
     }
 
     public async Task<Result<EquipmentTypeDetailDto>> GetPublishedDetailAsync(
@@ -105,11 +146,7 @@ public sealed partial class EquipmentTypeService(
             return MapCanonicalError(canonicalCheck);
         }
 
-        Result<Guid?> organizationResult = ResolveOwningOrganization(request.OrganizationId);
-        if (organizationResult.IsFailure)
-        {
-            return organizationResult.Error;
-        }
+
 
         var categories = new List<Category>();
         foreach (var categoryId in request.CategoryIds)
@@ -134,7 +171,7 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.DuplicateCode;
         }
 
-        // Xác minh toàn bộ media trước khi public
+        // XÃ¡c minh toÃ n bá»™ media trÆ°á»›c khi public
         var distinctMediaIds = request.Media?
             .Where(m => m != null)
             .Select(m => m!.MediaId)
@@ -143,47 +180,20 @@ public sealed partial class EquipmentTypeService(
 
         if (distinctMediaIds.Count > 0)
         {
-            foreach (var mediaId in distinctMediaIds)
+            var mediaResult = await MediaValidationHelper.ValidateAndPublishMediaListAsync(
+                mediaServiceClient,
+                distinctMediaIds,
+                operatorUserId,
+                cancellationToken);
+            if (mediaResult.IsFailure)
             {
-                var verifyResult = await mediaServiceClient.VerifyMediaAsync(mediaId, cancellationToken);
-                if (verifyResult.IsFailure)
-                {
-                    return verifyResult.Error;
-                }
-
-                var media = verifyResult.Value;
-                if (!MediaValidationHelper.IsReady(media.Status))
-                {
-                    return CatalogErrors.Media.NotReady;
-                }
-
-                if (!MediaValidationHelper.IsAllowedImageType(media.ContentType))
-                {
-                    return CatalogErrors.Media.InvalidContentType;
-                }
-
-                if (!string.IsNullOrWhiteSpace(operatorUserId) &&
-                    !string.Equals(media.UploadedByUserId?.Trim(), operatorUserId.Trim(), StringComparison.OrdinalIgnoreCase))
-                {
-                    return CatalogErrors.Media.Forbidden;
-                }
-            }
-
-            // Public tuần tự sau khi toàn bộ đã hợp lệ
-            foreach (var mediaId in distinctMediaIds)
-            {
-                var publicResult = await mediaServiceClient.SetVisibilityAsync(mediaId, "public", cancellationToken);
-                if (publicResult.IsFailure)
-                {
-                    return publicResult.Error;
-                }
+                return mediaResult.Error;
             }
         }
 
         var equipmentType = new EquipmentType
         {
             Id = Guid.NewGuid(),
-            OrganizationId = organizationResult.Value,
             Code = trimmedCode,
             Name = request.Name.Trim(),
             Description = request.Description,
@@ -191,7 +201,7 @@ public sealed partial class EquipmentTypeService(
             Categories = categories
         };
 
-        var saveResult = await repository.AddAsync(equipmentType, request.Media, cancellationToken);
+        var saveResult = await repository.AddAsync(equipmentType, request.Media, request.SpecSchema, cancellationToken);
         if (saveResult.IsFailure)
         {
             return saveResult.Error;
@@ -221,12 +231,9 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.NotFound;
         }
 
-        if (!CanManage(entity))
-        {
-            return CatalogErrors.EquipmentType.OrganizationForbidden;
-        }
+
         // ------------------------------------------------------------
-        // Xác định Name + Categories sau khi update
+        // XÃ¡c Ä‘á»‹nh Name + Categories sau khi update
         // ------------------------------------------------------------
         string effectiveName = request.IsNameSpecified
             ? request.Name!.Trim()
@@ -248,6 +255,7 @@ public sealed partial class EquipmentTypeService(
                 excludeId: id,
                 existingCategoryIds: existingCategoryIds,
                 cancellationToken);
+
 
         if (canonicalCheck != CanonicalCheck.Ok)
         {
@@ -324,7 +332,7 @@ public sealed partial class EquipmentTypeService(
 
         if (request.IsMediaSpecified)
         {
-            // Validator đã reject null.
+            // Validator Ä‘Ã£ reject null.
             IReadOnlyList<EquipmentTypeMediaItemDto> desiredMedia =
                 request.Media!
                     .Where(m => m is not null)
@@ -344,54 +352,17 @@ public sealed partial class EquipmentTypeService(
                 .Where(mediaId => !existingMediaIds.Contains(mediaId))
                 .ToList();
 
-            // Verify media mới
-            foreach (Guid mediaId in newlyAddedMediaIds)
+            // Verify media má»›i
+            if (newlyAddedMediaIds.Count > 0)
             {
-                var verifyResult =
-                    await mediaServiceClient.VerifyMediaAsync(
-                        mediaId,
-                        cancellationToken);
-
-                if (verifyResult.IsFailure)
+                var mediaResult = await MediaValidationHelper.ValidateAndPublishMediaListAsync(
+                    mediaServiceClient,
+                    newlyAddedMediaIds,
+                    operatorUserId,
+                    cancellationToken);
+                if (mediaResult.IsFailure)
                 {
-                    return verifyResult.Error;
-                }
-
-                var media = verifyResult.Value;
-
-                if (!MediaValidationHelper.IsReady(media.Status))
-                {
-                    return CatalogErrors.Media.NotReady;
-                }
-
-                if (!MediaValidationHelper.IsAllowedImageType(
-                        media.ContentType))
-                {
-                    return CatalogErrors.Media.InvalidContentType;
-                }
-
-                if (!string.IsNullOrWhiteSpace(operatorUserId) &&
-                    !string.Equals(
-                        media.UploadedByUserId?.Trim(),
-                        operatorUserId.Trim(),
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    return CatalogErrors.Media.Forbidden;
-                }
-            }
-
-            // Set public cho media mới
-            foreach (Guid mediaId in newlyAddedMediaIds)
-            {
-                var publicResult =
-                    await mediaServiceClient.SetVisibilityAsync(
-                        mediaId,
-                        "public",
-                        cancellationToken);
-
-                if (publicResult.IsFailure)
-                {
-                    return publicResult.Error;
+                    return mediaResult.Error;
                 }
             }
         }
@@ -464,9 +435,10 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.NotFound;
         }
 
-        if (!CanManage(entity))
+
+        if (!entity.CurrentSchemaVersion.HasValue)
         {
-            return CatalogErrors.EquipmentType.OrganizationForbidden;
+            return CatalogErrors.EquipmentType.SchemaRequired;
         }
 
         if (entity.Status == EquipmentTypeStatus.Published)
@@ -499,10 +471,7 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.NotFound;
         }
 
-        if (!CanManage(entity))
-        {
-            return CatalogErrors.EquipmentType.OrganizationForbidden;
-        }
+
 
         if (entity.Status != EquipmentTypeStatus.Published)
         {
@@ -519,38 +488,6 @@ public sealed partial class EquipmentTypeService(
         return EnrichDetail(saveResult.Value);
     }
 
-    /// <summary>
-    /// Xác định organization sở hữu bản ghi mới từ claim <c>o</c> đã được AuthService ký.
-    /// <paramref name="requestedOrganizationId"/> chỉ dùng để chọn một trong các organization của caller.
-    /// </summary>
-    private Result<Guid?> ResolveOwningOrganization(Guid? requestedOrganizationId)
-    {
-        if (caller.IsAdmin)
-        {
-            // Admin quản lý toàn bộ catalog: null là bản ghi dùng chung, không thuộc organization nào.
-            return Result.Success(requestedOrganizationId);
-        }
-
-        IReadOnlySet<Guid> organizationIds = caller.OrganizationIds;
-        if (requestedOrganizationId.HasValue)
-        {
-            return organizationIds.Contains(requestedOrganizationId.Value)
-                ? Result.Success(requestedOrganizationId)
-                : CatalogErrors.EquipmentType.OrganizationForbidden;
-        }
-
-        return organizationIds.Count switch
-        {
-            0 => CatalogErrors.EquipmentType.OrganizationForbidden,
-            1 => Result.Success<Guid?>(organizationIds.First()),
-            _ => CatalogErrors.EquipmentType.OrganizationRequired
-        };
-    }
-
-    /// <summary>Admin quản lý mọi bản ghi; người khác chỉ quản lý bản ghi thuộc organization của mình.</summary>
-    private bool CanManage(EquipmentType entity) =>
-        caller.IsAdmin
-        || (entity.OrganizationId.HasValue && caller.OrganizationIds.Contains(entity.OrganizationId.Value));
 
     private static PagedResult<EquipmentTypeListItemDto> EnrichList(PagedResult<EquipmentTypeListItemDto> paged)
     {
@@ -582,7 +519,8 @@ public sealed partial class EquipmentTypeService(
                 .OrderBy(m => m.DisplayOrder)
                 .ThenBy(m => m.MediaId)
                 .Select(m => m with { Url = MediaUrlResolver.ResolvePublicUrl(m.MediaId) })
-                .ToList()
+                .ToList(),
+            PrimarySpecs = EquipmentTypeDetailDto.ExtractPrimarySpecs(detail.SpecSchema?.Definition)
         };
     }
 

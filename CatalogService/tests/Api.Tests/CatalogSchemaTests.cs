@@ -22,7 +22,9 @@ public sealed class CatalogSchemaTests
         Assert.Equal("Categories", Entity<Category>(model).GetTableName());
         Assert.Equal("EquipmentTypes", Entity<EquipmentType>(model).GetTableName());
         Assert.Equal("EquipmentTypeMedia", Entity<EquipmentTypeMedia>(model).GetTableName());
+        Assert.Equal("EquipmentTypeSpecSchemas", Entity<EquipmentTypeSpecSchema>(model).GetTableName());
         Assert.Equal("EquipmentTypeCategories", model.FindEntityType("EquipmentTypeCategories")?.GetTableName());
+        Assert.Equal("Brands", Entity<Brand>(model).GetTableName());
     }
 
     [Fact]
@@ -41,6 +43,47 @@ public sealed class CatalogSchemaTests
             nameof(EquipmentType.Code));
 
         Assert.True(index.IsUnique);
+    }
+
+    [Fact]
+    public void BrandCode_IsUnique()
+    {
+        IIndex index = SingleIndex(
+            Entity<Brand>(BuildModel()),
+            nameof(Brand.Code));
+
+        Assert.True(index.IsUnique);
+    }
+
+    [Fact]
+    public void BrandSlug_IsUnique()
+    {
+        IIndex index = SingleIndex(
+            Entity<Brand>(BuildModel()),
+            nameof(Brand.Slug));
+
+        Assert.True(index.IsUnique);
+    }
+
+    [Fact]
+    public void Brand_UsesXminConcurrencyToken()
+    {
+        IEntityType brand = Entity<Brand>(BuildModel());
+        IProperty? xmin = brand.FindProperty("xmin");
+
+        Assert.NotNull(xmin);
+        Assert.True(xmin.IsConcurrencyToken);
+        Assert.Equal(ValueGenerated.OnAddOrUpdate, xmin.ValueGenerated);
+    }
+
+    [Theory]
+    [InlineData(nameof(Brand.CreatedAt))]
+    [InlineData(nameof(Brand.IsActive))]
+    public void Brand_HasIndexOn(string propertyName)
+    {
+        IIndex index = SingleIndex(Entity<Brand>(BuildModel()), propertyName);
+
+        Assert.False(index.IsUnique);
     }
 
     [Theory]
@@ -96,6 +139,8 @@ public sealed class CatalogSchemaTests
     [InlineData(typeof(Category))]
     [InlineData(typeof(EquipmentType))]
     [InlineData(typeof(EquipmentTypeMedia))]
+    [InlineData(typeof(EquipmentTypeSpecSchema))]
+    [InlineData(typeof(Brand))]
     public void Ids_AreAssignedByApplication(Type entityType)
     {
         IProperty id = BuildModel().FindEntityType(entityType)!.FindProperty("Id")!;
@@ -135,6 +180,46 @@ public sealed class CatalogSchemaTests
         IIndex pair = SingleIndex(media, nameof(EquipmentTypeMedia.EquipmentTypeId), nameof(EquipmentTypeMedia.MediaId));
         Assert.True(pair.IsUnique);
     }
+    [Fact]
+    public void EquipmentTypeSpecSchema_ConfiguresConstraintsAndIndexesCorrectly()
+    {
+        IEntityType schemaEntity = Entity<EquipmentTypeSpecSchema>(BuildModel());
+
+        // Alternate key (EquipmentTypeId, Version)
+        Assert.Contains(schemaEntity.GetKeys(), key =>
+            key.Properties.Select(p => p.Name).SequenceEqual([nameof(EquipmentTypeSpecSchema.EquipmentTypeId), nameof(EquipmentTypeSpecSchema.Version)]));
+
+        // Check constraint Version > 0
+        Assert.Contains(schemaEntity.GetCheckConstraints(), c => c.Name == "CK_EquipmentTypeSpecSchemas_Version_Positive");
+
+        // Partial unique index draft
+        IIndex draftIndex = SingleIndex(schemaEntity, nameof(EquipmentTypeSpecSchema.EquipmentTypeId));
+        Assert.True(draftIndex.IsUnique);
+        Assert.Equal("\"PublishedAt\" IS NULL", draftIndex.GetFilter());
+
+        // Cascade delete from EquipmentType
+        IForeignKey parentFk = Assert.Single(schemaEntity.GetForeignKeys(), fk => fk.PrincipalEntityType.ClrType == typeof(EquipmentType));
+        Assert.Equal(DeleteBehavior.Cascade, parentFk.DeleteBehavior);
+    }
+
+    [Fact]
+    public void EquipmentType_ConfiguresCompositeForeignKey_ToCurrentSchema()
+    {
+        IEntityType equipmentType = Entity<EquipmentType>(BuildModel());
+
+        IForeignKey currentSchemaFk = Assert.Single(
+            equipmentType.GetForeignKeys(),
+            fk => fk.PrincipalEntityType.ClrType == typeof(EquipmentTypeSpecSchema));
+
+        Assert.Equal(DeleteBehavior.Restrict, currentSchemaFk.DeleteBehavior);
+        Assert.False(currentSchemaFk.IsRequired);
+        Assert.Equal(
+            ["Id", "CurrentSchemaVersion"],
+            currentSchemaFk.Properties.Select(p => p.Name));
+        Assert.Equal(
+            ["EquipmentTypeId", "Version"],
+            currentSchemaFk.PrincipalKey.Properties.Select(p => p.Name));
+    }
 
     [Fact]
     public void Model_HasNoPendingChangesAgainstMigrations()
@@ -144,7 +229,7 @@ public sealed class CatalogSchemaTests
         Assert.False(context.Database.HasPendingModelChanges());
         Assert.Contains(
             context.GetService<IMigrationsAssembly>().Migrations.Keys,
-            id => id.EndsWith("_AddCategoryImagesAndEquipmentTypeCategories", StringComparison.Ordinal));
+            id => id.EndsWith("_AddEquipmentTypeSpecSchemaAndDropOrganizationId", StringComparison.Ordinal));
     }
 
     private static IEntityType Entity<TEntity>(IModel model) => model.FindEntityType(typeof(TEntity))!;

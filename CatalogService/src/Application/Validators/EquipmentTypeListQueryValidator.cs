@@ -1,5 +1,6 @@
 using Dprental.CatalogService.Application.Options;
 using Dprental.CatalogService.Common;
+using Dprental.CatalogService.Common.Enums;
 using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
 using Microsoft.Extensions.Options;
 
@@ -18,28 +19,50 @@ public sealed class EquipmentTypeListQueryValidator(IOptions<CatalogDiscoveryOpt
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (request.Page <= 0)
+        return Validate(request.Page, request.PageSize, request.Keyword, request.Sort);
+    }
+
+    /// <summary>Kiểm tra truy vấn danh sách quản trị và trả về tập trạng thái cần lọc (rỗng nghĩa là mọi trạng thái).</summary>
+    public Result<IReadOnlyList<EquipmentTypeStatus>> Validate(GetAdminEquipmentTypesRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        Result commonResult = Validate(request.Page, request.PageSize, request.Keyword, request.Sort);
+        if (commonResult.IsFailure)
         {
-            return Result.Failure(CatalogErrors.Paging.InvalidPage);
+            return commonResult.Error;
         }
 
-        if (request.PageSize is <= 0 or > PageRequest.MaxPageSize)
+        HashSet<EquipmentTypeStatus> statuses = [];
+        foreach (string? value in request.Status ?? [])
         {
-            return Result.Failure(CatalogErrors.Paging.InvalidPageSize);
+            // Enum.TryParse nhận cả tên lẫn số, nên cần IsDefined để loại số ngoài enum (vd "7").
+            if (!Enum.TryParse(value?.Trim(), ignoreCase: true, out EquipmentTypeStatus status) || !Enum.IsDefined(status))
+            {
+                return CatalogErrors.EquipmentType.InvalidStatus;
+            }
+
+            statuses.Add(status);
         }
 
-        if ((long)(request.Page - 1) * request.PageSize > int.MaxValue)
+        return statuses.ToList();
+    }
+
+    private Result Validate(int page, int pageSize, string? keyword, string? sort)
+    {
+        Result pagingResult = PaginationValidationHelper.Validate(page, pageSize);
+        if (pagingResult.IsFailure)
         {
-            return Result.Failure(CatalogErrors.Paging.Overflow);
+            return pagingResult;
         }
 
         int maxKeywordLength = options.Value.MaxKeywordLength;
-        if (request.Keyword?.Trim().Length > maxKeywordLength)
+        if (keyword?.Trim().Length > maxKeywordLength)
         {
             return Result.Failure(CatalogErrors.EquipmentType.InvalidKeyword);
         }
 
-        if (!string.IsNullOrWhiteSpace(request.Sort) && !AllowedSorts.Contains(request.Sort.Trim()))
+        if (!string.IsNullOrWhiteSpace(sort) && !AllowedSorts.Contains(sort.Trim()))
         {
             return Result.Failure(CatalogErrors.EquipmentType.InvalidSort);
         }

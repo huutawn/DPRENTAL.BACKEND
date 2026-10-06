@@ -1,5 +1,6 @@
 using Dprental.CatalogService.Common.Enums;
 using Dprental.CatalogService.Domain.ValueObjects;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Dprental.CatalogService.Domain.Entities;
 
@@ -9,11 +10,10 @@ public class EquipmentType
     /// <summary>Id do ứng dụng tự gán.</summary>
     public Guid Id { get; set; }
 
-    /// <summary>
-    /// Organization sở hữu equipment type, lấy từ claim <c>o</c> của người tạo.
-    /// Null với bản ghi dùng chung do Admin quản lý (gồm dữ liệu có trước khi thêm cột này).
-    /// </summary>
-    public Guid? OrganizationId { get; set; }
+    /// <summary>Phiên bản schema đặc tả kỹ thuật đang được áp dụng. Chỉ gán qua <see cref="ApplyPublishedSchema"/>.</summary>
+    public int? CurrentSchemaVersion { get; private set; }
+    /// <summary>Danh sách các phiên bản specification schema của equipment type.</summary>
+    public ICollection<EquipmentTypeSpecSchema> SpecSchemas { get; set; } = new List<EquipmentTypeSpecSchema>();
 
     /// <summary>Danh sách category mà equipment type này thuộc về.</summary>
     public ICollection<Category> Categories { get; set; } = new List<Category>();
@@ -40,6 +40,7 @@ public class EquipmentType
     public EquipmentTypeStatus Status { get; private set; } = EquipmentTypeStatus.Draft;
 
     /// <summary>Version schema hiện hành, Supplier khai tài sản mới theo version này. Null khi chưa có version nào được kích hoạt.</summary>
+    [NotMapped]
     public Guid? ActiveSchemaVersionId { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -52,6 +53,7 @@ public class EquipmentType
     public ICollection<EquipmentTypeMedia> Media { get; set; } = new List<EquipmentTypeMedia>();
 
     /// <summary>Schema thông số của loại thiết bị. Cần Include khi truy vấn, nếu không sẽ là null.</summary>
+    [NotMapped]
     public SpecSchema? Schema { get; private set; }
 
     /// <summary>Tạo schema nếu chưa có. Gọi sau khi đã gán <see cref="Id"/>.</summary>
@@ -85,6 +87,11 @@ public class EquipmentType
             throw new InvalidOperationException("EquipmentType đang ở trạng thái Published.");
         }
 
+        if (!CurrentSchemaVersion.HasValue)
+        {
+            throw new InvalidOperationException("EquipmentType cần có specification schema đã công khai trước khi publish.");
+        }
+
         utcNow = AsUtc(utcNow);
         Status = EquipmentTypeStatus.Published;
         PublishedAt = utcNow;
@@ -100,6 +107,38 @@ public class EquipmentType
         }
 
         Status = EquipmentTypeStatus.Disabled;
+        UpdatedAt = AsUtc(utcNow);
+    }
+    /// <summary>Cập nhật thời điểm sửa đổi của equipment type.</summary>
+    public void Touch(DateTime utcNow)
+    {
+        UpdatedAt = AsUtc(utcNow);
+    }
+
+    /// <summary>
+    /// Áp dụng phiên bản schema đã công khai cho equipment type.
+    /// Invariant: schema phải thuộc type này, đã Published và có version lớn hơn version hiện tại.
+    /// </summary>
+    public void ApplyPublishedSchema(EquipmentTypeSpecSchema schema, DateTime utcNow)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+
+        if (schema.EquipmentTypeId != Id)
+        {
+            throw new InvalidOperationException("Schema không thuộc loại thiết bị này.");
+        }
+
+        if (!schema.PublishedAt.HasValue)
+        {
+            throw new InvalidOperationException("Chỉ có thể áp dụng schema đã được công khai.");
+        }
+
+        if (CurrentSchemaVersion.HasValue && schema.Version <= CurrentSchemaVersion.Value)
+        {
+            throw new InvalidOperationException("Phiên bản schema mới phải lớn hơn phiên bản hiện tại.");
+        }
+
+        CurrentSchemaVersion = schema.Version;
         UpdatedAt = AsUtc(utcNow);
     }
 

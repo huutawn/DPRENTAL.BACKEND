@@ -8,18 +8,19 @@ namespace Dprental.CatalogService.Domain.Repositories;
 public class EquipmentTypeSchemaRepository(CatalogServiceDbContext dbContext) : IEquipmentTypeSchemaRepository
 {
     public Task<EquipmentType?> GetWithSchemaAsync(Guid id, CancellationToken cancellationToken = default) =>
-        WithSchemaGraph().FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
+        dbContext.EquipmentTypes.Include(e => e.SpecSchemas)
+            .AsSplitQuery().FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
 
     public Task<EquipmentType?> GetBySchemaIdAsync(Guid specSchemaId, CancellationToken cancellationToken = default) =>
-        WithSchemaGraph().FirstOrDefaultAsync(
-            e => e.Schema != null && e.Schema.Id == specSchemaId, cancellationToken);
+        GetWithSchemaAsync(specSchemaId, cancellationToken);
 
     public Task<EquipmentType?> GetByVersionIdAsync(Guid versionId, CancellationToken cancellationToken = default) =>
-        WithSchemaGraph().FirstOrDefaultAsync(
-            e => e.Schema != null && e.Schema.Versions.Any(v => v.Id == versionId), cancellationToken);
+        dbContext.EquipmentTypes.Include(e => e.SpecSchemas)
+            .AsSplitQuery().FirstOrDefaultAsync(e => e.SpecSchemas.Any(s => s.Id == versionId), cancellationToken);
 
     public Task<EquipmentType?> GetWithSchemaReadOnlyAsync(Guid id, CancellationToken cancellationToken = default) =>
-        WithSchemaGraph().AsNoTracking().FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
+        dbContext.EquipmentTypes.Include(e => e.SpecSchemas).AsNoTracking()
+            .AsSplitQuery().FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
 
     public async Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
     {
@@ -67,11 +68,4 @@ public class EquipmentTypeSchemaRepository(CatalogServiceDbContext dbContext) : 
                 cancellationToken);
     }
 
-    private IQueryable<EquipmentType> WithSchemaGraph() =>
-        dbContext.EquipmentTypes
-            .Include(e => e.Schema)
-                .ThenInclude(s => s!.Versions)
-                    .ThenInclude(v => v.SpecFields)
-                        .ThenInclude(f => f.Options)
-            .AsSplitQuery();
 }

@@ -1,4 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using Dprental.CatalogService.Domain.Entities;
 using Dprental.CatalogService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -28,10 +28,10 @@ public sealed class CatalogMigrationTests
 
             var migrator = context.GetService<IMigrator>();
 
-            // 1. Áp dụng 2 migration lịch sử
+            // 1. Ãp dá»¥ng 2 migration lá»‹ch sá»­
             await migrator.MigrateAsync("20261001080359_InitCategoryTable");
 
-            // 2. Seed dữ liệu cũ với đủ 3 status và các supplier columns
+            // 2. Seed dá»¯ liá»‡u cÅ© vá»›i Ä‘á»§ 3 status vÃ  cÃ¡c supplier columns
             Guid categoryId = Guid.NewGuid();
             Guid orgId1 = Guid.NewGuid();
             Guid orgId2 = Guid.NewGuid();
@@ -124,15 +124,15 @@ public sealed class CatalogMigrationTests
                 await mediaCmd.ExecuteNonQueryAsync();
             }
 
-            // 3. Chạy forward migration RefactorEquipmentToEquipmentType
+            // 3. Cháº¡y forward migration RefactorEquipmentToEquipmentType
             await context.Database.MigrateAsync();
 
-            // 4. Kiểm tra schema và dữ liệu sau migration
+            // 4. Kiá»ƒm tra schema vÃ  dá»¯ liá»‡u sau migration
             await using (var verifyConn = new NpgsqlConnection(dbConnString))
             {
                 await verifyConn.OpenAsync();
 
-                // Kiểm tra bảng cũ không còn tồn tại
+                // Kiá»ƒm tra báº£ng cÅ© khÃ´ng cÃ²n tá»“n táº¡i
                 await using var oldTableCmd = new NpgsqlCommand(
                     """
                     SELECT count(*) FROM information_schema.tables
@@ -141,7 +141,7 @@ public sealed class CatalogMigrationTests
                 var oldTableCount = (long)(await oldTableCmd.ExecuteScalarAsync())!;
                 Assert.Equal(0, oldTableCount);
 
-                // Kiểm tra bảng mới tồn tại
+                // Kiá»ƒm tra báº£ng má»›i tá»“n táº¡i
                 await using var newTableCmd = new NpgsqlCommand(
                     """
                     SELECT count(*) FROM information_schema.tables
@@ -150,23 +150,23 @@ public sealed class CatalogMigrationTests
                 var newTableCount = (long)(await newTableCmd.ExecuteScalarAsync())!;
                 Assert.Equal(2, newTableCount);
 
-                // Kiểm tra các supplier columns đã bị xóa hoàn toàn
+                // Kiá»ƒm tra cÃ¡c supplier columns Ä‘Ã£ bá»‹ xÃ³a hoÃ n toÃ n
                 await using var droppedColsCmd = new NpgsqlCommand(
                     """
                     SELECT column_name FROM information_schema.columns
                     WHERE table_schema = 'catalog' AND table_name = 'EquipmentTypes'
-                      AND column_name IN ('Brand', 'DailyPrice', 'RegionId', 'Specifications', 'CreatedAtUtc', 'UpdatedAtUtc', 'PublishedAtUtc');
+                      AND column_name IN ('Brand', 'DailyPrice', 'RegionId', 'Specifications', 'CreatedAtUtc', 'UpdatedAtUtc', 'PublishedAtUtc', 'OrganizationId');
                     """, verifyConn);
                 await using var reader = await droppedColsCmd.ExecuteReaderAsync();
-                Assert.False(await reader.ReadAsync(), "Các supplier columns hoặc timestamp cũ vẫn còn tồn tại!");
+                Assert.False(await reader.ReadAsync(), "CÃ¡c supplier columns hoáº·c timestamp cÅ© váº«n cÃ²n tá»“n táº¡i!");
                 await reader.CloseAsync();
 
-                // Kiểm tra các canonical columns mới tồn tại
+                // Kiá»ƒm tra cÃ¡c canonical columns má»›i tá»“n táº¡i
                 await using var canonicalColsCmd = new NpgsqlCommand(
                     """
                     SELECT column_name FROM information_schema.columns
                     WHERE table_schema = 'catalog' AND table_name = 'EquipmentTypes'
-                      AND column_name IN ('CreatedAt', 'UpdatedAt', 'PublishedAt');
+                      AND column_name IN ('CreatedAt', 'UpdatedAt', 'PublishedAt', 'CurrentSchemaVersion');
                     """, verifyConn);
                 var colList = new List<string>();
                 await using (var colReader = await canonicalColsCmd.ExecuteReaderAsync())
@@ -176,9 +176,9 @@ public sealed class CatalogMigrationTests
                         colList.Add(colReader.GetString(0));
                     }
                 }
-                Assert.Equal(3, colList.Count);
+                Assert.Equal(4, colList.Count);
 
-                // Kiểm tra dữ liệu: Hidden -> Disabled, các trường canonical được bảo toàn
+                // Kiá»ƒm tra dá»¯ liá»‡u: Hidden -> Disabled, cÃ¡c trÆ°á»ng canonical Ä‘Æ°á»£c báº£o toÃ n
                 await using var hiddenVerifyCmd = new NpgsqlCommand(
                     "SELECT \"Code\", \"Name\", \"Description\", \"Status\", \"PublishedAt\" FROM catalog.\"EquipmentTypes\" WHERE \"Id\" = @id;",
                     verifyConn);
@@ -193,7 +193,7 @@ public sealed class CatalogMigrationTests
                     Assert.Equal(tPublished, hReader.GetDateTime(4));
                 }
 
-                // Kiểm tra dữ liệu: Published giữ nguyên
+                // Kiá»ƒm tra dá»¯ liá»‡u: Published giá»¯ nguyÃªn
                 await using var pubVerifyCmd = new NpgsqlCommand(
                     "SELECT \"Code\", \"Name\", \"Status\", \"PublishedAt\" FROM catalog.\"EquipmentTypes\" WHERE \"Id\" = @id;",
                     verifyConn);
@@ -207,7 +207,7 @@ public sealed class CatalogMigrationTests
                     Assert.Equal(tPublished, pReader.GetDateTime(3));
                 }
 
-                // Kiểm tra media identities/metadata
+                // Kiá»ƒm tra media identities/metadata
                 await using var mediaDetailsCmd = new NpgsqlCommand(
                     "SELECT \"Id\", \"EquipmentTypeId\", \"MediaId\", \"DisplayOrder\", \"IsThumbnail\" FROM catalog.\"EquipmentTypeMedia\" WHERE \"EquipmentTypeId\" = @id ORDER BY \"DisplayOrder\";",
                     verifyConn);
@@ -229,7 +229,7 @@ public sealed class CatalogMigrationTests
                     Assert.False(mReader.GetBoolean(4));
                 }
 
-                // Kiểm tra Foreign Keys
+                // Kiá»ƒm tra Foreign Keys
                 await using var fkCmd = new NpgsqlCommand(
                     """
                     SELECT constraint_name FROM information_schema.table_constraints
@@ -247,7 +247,7 @@ public sealed class CatalogMigrationTests
                 Assert.Contains("FK_EquipmentTypeCategories_Categories_CategoryId", fks);
                 Assert.Contains("FK_EquipmentTypeCategories_EquipmentTypes_EquipmentTypeId", fks);
                 Assert.Contains("FK_EquipmentTypeMedia_EquipmentTypes_EquipmentTypeId", fks);
-                // Kiểm tra Indexes
+                // Kiá»ƒm tra Indexes
                 await using var idxCmd = new NpgsqlCommand(
                     """
                     SELECT indexname FROM pg_indexes
@@ -266,7 +266,7 @@ public sealed class CatalogMigrationTests
                 Assert.Contains("IX_EquipmentTypeCategories_CategoryId", indexes);
                 Assert.Contains("IX_EquipmentTypeMedia_EquipmentTypeId_MediaId", indexes);
                 Assert.Contains("UX_EquipmentTypeMedia_EquipmentTypeId_Thumbnail", indexes);
-                // Kiểm tra migration history đủ cả 3 migrations trong catalog.__EFMigrationsHistory
+                // Kiá»ƒm tra migration history Ä‘á»§ cáº£ 3 migrations trong catalog.__EFMigrationsHistory
                 await using var histCmd = new NpgsqlCommand(
                     "SELECT \"MigrationId\" FROM catalog.\"__EFMigrationsHistory\" ORDER BY \"MigrationId\";",
                     verifyConn);
@@ -281,7 +281,7 @@ public sealed class CatalogMigrationTests
                     }
                 }
 
-                Assert.Equal(7, appliedMigrations.Count);
+                Assert.Equal(10, appliedMigrations.Count);
 
                 Assert.Contains(
                     appliedMigrations,
@@ -306,8 +306,11 @@ public sealed class CatalogMigrationTests
                 Assert.Contains(
                     appliedMigrations,
                     m => m.EndsWith("_RefactorToCanonicalCatalog", StringComparison.Ordinal));
-
-                // Kiểm tra quan hệ nhiều-nhiều được copy đầy đủ từ CategoryId cũ (draftId, publishedId, hiddenId)
+                Assert.Contains(appliedMigrations, m => m.EndsWith("_AddEquipmentTypeSpecSchemaAndDropOrganizationId", StringComparison.Ordinal));
+                Assert.Contains(appliedMigrations, m => m.EndsWith("_AddBrands", StringComparison.Ordinal));
+                Assert.Contains(appliedMigrations, m => m.EndsWith("_CanonicalRulesAndSchemaLifecycle", StringComparison.Ordinal));
+                Assert.Contains(appliedMigrations, m => m.EndsWith("_UseEquipmentTypeSpecSchemasOnly", StringComparison.Ordinal));
+                // Kiá»ƒm tra quan há»‡ nhiá»u-nhiá»u Ä‘Æ°á»£c copy Ä‘áº§y Ä‘á»§ tá»« CategoryId cÅ© (draftId, publishedId, hiddenId)
                 await using var checkCopyCmd = new NpgsqlCommand(
                     "SELECT count(*) FROM catalog.\"EquipmentTypeCategories\" WHERE \"CategoryId\" = @catId;",
                     verifyConn);
@@ -335,10 +338,10 @@ public sealed class CatalogMigrationTests
 
             var migrator = context.GetService<IMigrator>();
 
-            // 1. Áp dụng 2 migration lịch sử
+            // 1. Ãp dá»¥ng 2 migration lá»‹ch sá»­
             await migrator.MigrateAsync("20261001080359_InitCategoryTable");
 
-            // 2. Seed 2 equipments có cùng Code dưới 2 Organization khác nhau
+            // 2. Seed 2 equipments cÃ³ cÃ¹ng Code dÆ°á»›i 2 Organization khÃ¡c nhau
             Guid categoryId = Guid.NewGuid();
             Guid eq1Id = Guid.NewGuid();
             Guid eq2Id = Guid.NewGuid();
@@ -377,12 +380,12 @@ public sealed class CatalogMigrationTests
                 await cmd2.ExecuteNonQueryAsync();
             }
 
-            // 3. Chạy forward migration phải thất bại với lỗi báo duplicate code rõ ràng
+            // 3. Cháº¡y forward migration pháº£i tháº¥t báº¡i vá»›i lá»—i bÃ¡o duplicate code rÃµ rÃ ng
             var ex = await Assert.ThrowsAsync<PostgresException>(() => context.Database.MigrateAsync());
             Assert.Contains("duplicate Code values found", ex.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("DUPLICATE-CODE", ex.Message, StringComparison.OrdinalIgnoreCase);
 
-            // 4. Kiểm tra schema và data không bị thay đổi (Equipments vẫn còn, EquipmentTypes không được tạo)
+            // 4. Kiá»ƒm tra schema vÃ  data khÃ´ng bá»‹ thay Ä‘á»•i (Equipments váº«n cÃ²n, EquipmentTypes khÃ´ng Ä‘Æ°á»£c táº¡o)
             await using (var verifyConn = new NpgsqlConnection(dbConnString))
             {
                 await verifyConn.OpenAsync();
@@ -403,7 +406,7 @@ public sealed class CatalogMigrationTests
                 var newTableCount = (long)(await checkNewTableCmd.ExecuteScalarAsync())!;
                 Assert.Equal(0, newTableCount);
 
-                // Dữ liệu cũ còn nguyên vẹn cả 2 rows
+                // Dá»¯ liá»‡u cÅ© cÃ²n nguyÃªn váº¹n cáº£ 2 rows
                 await using var countRowsCmd = new NpgsqlCommand(
                     "SELECT \"Id\", \"OrganizationId\", \"Code\" FROM catalog.\"Equipments\" ORDER BY \"Id\";", verifyConn);
                 var loadedRows = new List<(Guid id, Guid org, string code)>();
@@ -435,12 +438,12 @@ public sealed class CatalogMigrationTests
             string dbConnString = GetConnectionString(dbName);
             using var context = CreateContext(dbConnString);
 
-            // Chạy toàn bộ migrations từ đầu
+            // Cháº¡y toÃ n bá»™ migrations tá»« Ä‘áº§u
             await context.Database.MigrateAsync();
 
             Assert.False(context.Database.HasPendingModelChanges());
 
-            // Thử chèn Category và EquipmentType trên schema mới
+            // Thá»­ chÃ¨n Category vÃ  EquipmentType trÃªn schema má»›i
             var category = new Category
             {
                 Id = Guid.NewGuid(),
@@ -460,11 +463,26 @@ public sealed class CatalogMigrationTests
             };
             context.EquipmentTypes.Add(equipmentType);
 
+            var brand = new Brand
+            {
+                Id = Guid.NewGuid(),
+                Code = "SONY",
+                Name = "Sony Corporation",
+                Slug = "sony",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            context.Brands.Add(brand);
+
             await context.SaveChangesAsync();
 
             var loaded = await context.EquipmentTypes.FirstOrDefaultAsync(e => e.Id == equipmentType.Id);
             Assert.NotNull(loaded);
             Assert.Equal("FRESH-001", loaded.Code);
+            var loadedBrand = await context.Brands.FirstOrDefaultAsync(b => b.Id == brand.Id);
+            Assert.NotNull(loadedBrand);
+            Assert.Equal("SONY", loadedBrand.Code);
+            Assert.Equal("sony", loadedBrand.Slug);
         }
         finally
         {
@@ -472,6 +490,198 @@ public sealed class CatalogMigrationTests
         }
     }
 
+    [Fact]
+    public async Task UpgradeMigration_FromOwnership_BackfillsSpecSchema_AndPreservesCategoryAndMedia()
+    {
+        string dbName = $"catalog_mig_ownership_upgrade_{Guid.NewGuid():N}";
+        await CreateDatabaseAsync(dbName);
+
+        try
+        {
+            string dbConnString = GetConnectionString(dbName);
+            using var context = CreateContext(dbConnString);
+            var migrator = context.GetService<IMigrator>();
+
+            // 1. Ãp dá»¥ng Ä‘áº¿n migration ownership gáº§n nháº¥t
+            await migrator.MigrateAsync("20261002100634_AddEquipmentTypeOrganizationId");
+
+            Guid cat1Id = Guid.NewGuid();
+            Guid cat2Id = Guid.NewGuid();
+            Guid org1 = Guid.NewGuid();
+            Guid org2 = Guid.NewGuid();
+
+            Guid draftId = Guid.NewGuid();
+            Guid pubId = Guid.NewGuid();
+            Guid disId = Guid.NewGuid();
+
+            Guid media1Id = Guid.NewGuid();
+            Guid media2Id = Guid.NewGuid();
+
+            DateTime tCreated = new(2026, 10, 2, 8, 0, 0, DateTimeKind.Utc);
+            DateTime tPublished = new(2026, 10, 2, 9, 0, 0, DateTimeKind.Utc);
+            DateTime tUpdated = new(2026, 10, 2, 9, 30, 0, DateTimeKind.Utc);
+
+            // Seed categories, equipment types vá»›i organization_id vÃ  media
+            await using (var seedConn = new NpgsqlConnection(dbConnString))
+            {
+                await seedConn.OpenAsync();
+
+                // Categories
+                await using var catCmd = new NpgsqlCommand(
+                    """
+                    INSERT INTO catalog."Categories" ("Id", "Name", "Slug", "IsActive", "CreatedAtUtc") VALUES
+                    (@cat1, 'Camera Pro', 'camera-pro', TRUE, NOW()),
+                    (@cat2, 'Lenses Pro', 'lenses-pro', TRUE, NOW());
+                    """, seedConn);
+                catCmd.Parameters.AddWithValue("cat1", cat1Id);
+                catCmd.Parameters.AddWithValue("cat2", cat2Id);
+                await catCmd.ExecuteNonQueryAsync();
+
+                // EquipmentTypes cÃ³ OrganizationId
+                await using var eqCmd = new NpgsqlCommand(
+                    """
+                    INSERT INTO catalog."EquipmentTypes"
+                    ("Id", "Code", "Name", "Description", "Status", "CreatedAt", "UpdatedAt", "PublishedAt", "OrganizationId") VALUES
+                    (@draftId, 'EQ-DRAFT', 'Draft Eq', 'Desc Draft', 'Draft', @tCreated, NULL, NULL, @org1),
+                    (@pubId, 'EQ-PUB', 'Published Eq', 'Desc Pub', 'Published', @tCreated, @tUpdated, @tPublished, @org2),
+                    (@disId, 'EQ-DIS', 'Disabled Eq', 'Desc Dis', 'Disabled', @tCreated, @tUpdated, @tPublished, NULL);
+                    """, seedConn);
+                eqCmd.Parameters.AddWithValue("draftId", draftId);
+                eqCmd.Parameters.AddWithValue("pubId", pubId);
+                eqCmd.Parameters.AddWithValue("disId", disId);
+                eqCmd.Parameters.AddWithValue("org1", org1);
+                eqCmd.Parameters.AddWithValue("org2", org2);
+                eqCmd.Parameters.AddWithValue("tCreated", tCreated);
+                eqCmd.Parameters.AddWithValue("tPublished", tPublished);
+                eqCmd.Parameters.AddWithValue("tUpdated", tUpdated);
+                await eqCmd.ExecuteNonQueryAsync();
+
+                // Join Categories
+                await using var joinCmd = new NpgsqlCommand(
+                    """
+                    INSERT INTO catalog."EquipmentTypeCategories" ("EquipmentTypeId", "CategoryId") VALUES
+                    (@draftId, @cat1),
+                    (@draftId, @cat2),
+                    (@pubId, @cat1),
+                    (@disId, @cat2);
+                    """, seedConn);
+                joinCmd.Parameters.AddWithValue("draftId", draftId);
+                joinCmd.Parameters.AddWithValue("pubId", pubId);
+                joinCmd.Parameters.AddWithValue("disId", disId);
+                joinCmd.Parameters.AddWithValue("cat1", cat1Id);
+                joinCmd.Parameters.AddWithValue("cat2", cat2Id);
+                await joinCmd.ExecuteNonQueryAsync();
+
+                // Media
+                await using var mediaCmd = new NpgsqlCommand(
+                    """
+                    INSERT INTO catalog."EquipmentTypeMedia" ("Id", "EquipmentTypeId", "MediaId", "DisplayOrder", "IsThumbnail") VALUES
+                    (gen_random_uuid(), @draftId, @m1, 0, TRUE),
+                    (gen_random_uuid(), @pubId, @m2, 0, TRUE);
+                    """, seedConn);
+                mediaCmd.Parameters.AddWithValue("draftId", draftId);
+                mediaCmd.Parameters.AddWithValue("pubId", pubId);
+                mediaCmd.Parameters.AddWithValue("m1", media1Id);
+                mediaCmd.Parameters.AddWithValue("m2", media2Id);
+                await mediaCmd.ExecuteNonQueryAsync();
+            }
+
+            // 2. Cháº¡y upgrade migration lÃªn má»›i nháº¥t
+            await context.Database.MigrateAsync();
+
+            Assert.False(context.Database.HasPendingModelChanges());
+
+            // 3. XÃ¡c thá»±c cÆ¡ sá»Ÿ dá»¯ liá»‡u sau migration
+            await using (var verifyConn = new NpgsqlConnection(dbConnString))
+            {
+                await verifyConn.OpenAsync();
+
+                // XÃ¡c nháº­n cá»™t OrganizationId Ä‘Ã£ bá»‹ drop
+                await using var orgColCmd = new NpgsqlCommand(
+                    """
+                    SELECT count(*) FROM information_schema.columns
+                    WHERE table_schema = 'catalog' AND table_name = 'EquipmentTypes' AND column_name = 'OrganizationId';
+                    """, verifyConn);
+                long orgColCount = (long)(await orgColCmd.ExecuteScalarAsync())!;
+                Assert.Equal(0, orgColCount);
+
+                // XÃ¡c nháº­n index OrganizationId Ä‘Ã£ bá»‹ drop
+                await using var orgIdxCmd = new NpgsqlCommand(
+                    """
+                    SELECT count(*) FROM pg_indexes
+                    WHERE schemaname = 'catalog' AND tablename = 'EquipmentTypes' AND indexname = 'IX_EquipmentTypes_OrganizationId';
+                    """, verifyConn);
+                long orgIdxCount = (long)(await orgIdxCmd.ExecuteScalarAsync())!;
+                Assert.Equal(0, orgIdxCount);
+
+                // XÃ¡c nháº­n toÃ n bá»™ 3 báº£n ghi Ä‘á»u cÃ³ CurrentSchemaVersion = 1 vÃ  giá»¯ nguyÃªn dá»¯ liá»‡u gá»‘c
+                await using var eqVerifyCmd = new NpgsqlCommand(
+                    """
+                    SELECT "Id", "Code", "Name", "Status", "CurrentSchemaVersion", "CreatedAt", "PublishedAt"
+                    FROM catalog."EquipmentTypes" ORDER BY "Code";
+                    """, verifyConn);
+                await using (var reader = await eqVerifyCmd.ExecuteReaderAsync())
+                {
+                    Assert.True(await reader.ReadAsync());
+                    Assert.Equal(disId, reader.GetGuid(0));
+                    Assert.Equal("EQ-DIS", reader.GetString(1));
+                    Assert.Equal("Disabled", reader.GetString(3));
+                    Assert.Equal(1, reader.GetInt32(4));
+
+                    Assert.True(await reader.ReadAsync());
+                    Assert.Equal(draftId, reader.GetGuid(0));
+                    Assert.Equal("EQ-DRAFT", reader.GetString(1));
+                    Assert.Equal("Draft", reader.GetString(3));
+                    Assert.Equal(1, reader.GetInt32(4));
+
+                    Assert.True(await reader.ReadAsync());
+                    Assert.Equal(pubId, reader.GetGuid(0));
+                    Assert.Equal("EQ-PUB", reader.GetString(1));
+                    Assert.Equal("Published", reader.GetString(3));
+                    Assert.Equal(1, reader.GetInt32(4));
+                    Assert.False(await reader.ReadAsync());
+                }
+
+                // XÃ¡c nháº­n backfill spec schemas v1: Ä‘Ãºng 3 báº£n ghi, definition = {"fields": []}, published_at NOT NULL
+                await using var schemaVerifyCmd = new NpgsqlCommand(
+                    """
+                    SELECT "EquipmentTypeId", "Version", "Definition", "PublishedAt"
+                    FROM catalog."EquipmentTypeSpecSchemas" ORDER BY "Version";
+                    """, verifyConn);
+                await using (var sReader = await schemaVerifyCmd.ExecuteReaderAsync())
+                {
+                    int schemaCount = 0;
+                    while (await sReader.ReadAsync())
+                    {
+                        schemaCount++;
+                        Assert.Equal(1, sReader.GetInt32(1));
+                        string defJson = sReader.GetString(2);
+                        Assert.Contains("\"fields\"", defJson);
+                        Assert.False(await sReader.IsDBNullAsync(3)); // PublishedAt NOT NULL
+                    }
+                    Assert.Equal(3, schemaCount);
+                }
+
+                // XÃ¡c nháº­n Categories Ä‘Æ°á»£c báº£o toÃ n nguyÃªn váº¹n
+                await using var catVerifyCmd = new NpgsqlCommand(
+                    """SELECT count(*) FROM catalog."EquipmentTypeCategories";""", verifyConn);
+                Assert.Equal(4, (long)(await catVerifyCmd.ExecuteScalarAsync())!);
+
+                // XÃ¡c nháº­n Media Ä‘Æ°á»£c báº£o toÃ n nguyÃªn váº¹n
+                await using var mediaVerifyCmd = new NpgsqlCommand(
+                    """SELECT count(*) FROM catalog."EquipmentTypeMedia";""", verifyConn);
+                Assert.Equal(2, (long)(await mediaVerifyCmd.ExecuteScalarAsync())!);
+            }
+
+            // 4. XÃ¡c nháº­n Down migration nÃ©m NotSupportedException
+            await Assert.ThrowsAsync<NotSupportedException>(() =>
+                migrator.MigrateAsync("20261002100634_AddEquipmentTypeOrganizationId"));
+        }
+        finally
+        {
+            await DropDatabaseAsync(dbName);
+        }
+    }
     private static string GetConnectionString(string dbName) =>
         $"Host=localhost;Port=5436;Database={dbName};Username=postgres;Password=postgres;Include Error Detail=true";
 

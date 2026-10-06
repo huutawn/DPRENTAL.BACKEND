@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -42,7 +42,7 @@ public sealed class RsaJwtAuthTests
         }
 
         // Invalid JSON proves an authorized role reaches model binding without invoking persistence.
-        // adm quản lý cả category lẫn equipment type; own chỉ qua được policy của equipment type.
+        // adm quáº£n lÃ½ cáº£ category láº«n equipment type; cÃ¡c role khÃ¡c (ká»ƒ cáº£ own) bá»‹ 403 Forbidden.
         string id = Guid.NewGuid().ToString();
         (HttpMethod Method, string Path)[] endpoints =
         [
@@ -59,7 +59,7 @@ public sealed class RsaJwtAuthTests
             using HttpRequestMessage request = new(method, $"/api/v1/catalog/{path}");
             request.Content = new StringContent("{", System.Text.Encoding.UTF8, "application/json");
             using HttpResponseMessage response = await client.SendAsync(request);
-            bool isAuthorized = role == "adm" || (role == "own" && path.StartsWith("equipment-types", StringComparison.Ordinal));
+            bool isAuthorized = role == "adm";
             bool isStateTransition = path.EndsWith("/publish", StringComparison.Ordinal) || path.EndsWith("/disable", StringComparison.Ordinal);
             HttpStatusCode expected = !isAuthorized
                 ? expectedStatus
@@ -359,7 +359,7 @@ public sealed class RsaJwtAuthTests
         public Task<bool> ExistsByCodeAsync(string code, Guid? excludeId = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(false);
 
-        public Task<Result<EquipmentTypeDetailDto>> AddAsync(EquipmentType equipmentType, IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems, CancellationToken cancellationToken = default) =>
+        public Task<Result<EquipmentTypeDetailDto>> AddAsync(EquipmentType equipmentType, IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems, EquipmentTypeSpecDefinition? initialSpecSchema = null, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
 
         public Task<Result<EquipmentTypeDetailDto>> SaveAsync(EquipmentType entity, IReadOnlyList<EquipmentTypeMediaItemDto?>? desiredMedia, CancellationToken cancellationToken = default) =>
@@ -369,10 +369,33 @@ public sealed class RsaJwtAuthTests
             throw new NotImplementedException();
         public Task<EquipmentType?> GetWithSchemaAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult<EquipmentType?>(null);
+public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<EquipmentTypeSpecSchemaDto>>([]);
+
+        public Task<EquipmentTypeSpecSchemaDto?> GetSpecSchemaAsync(Guid equipmentTypeId, int version, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeSpecSchemaDto?>(null);
+
+        public Task<EquipmentTypeSpecSchema?> GetDraftSpecSchemaEntityAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeSpecSchema?>(null);
+
+        public Task<EquipmentTypeSpecSchema?> GetSpecSchemaEntityAsync(Guid equipmentTypeId, int version, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentTypeSpecSchema?>(null);
+
+        public Task<int> GetMaxSpecSchemaVersionAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
+
+        public Task<Result<EquipmentTypeSpecSchemaDto>> AddSpecSchemaDraftAsync(EquipmentType parent, EquipmentTypeSpecDefinition definition, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<Result<EquipmentTypeSpecSchemaDto>> UpdateSpecSchemaDraftAsync(EquipmentType parent, EquipmentTypeSpecSchema draftSchema, EquipmentTypeSpecDefinition newDefinition, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<Result<EquipmentTypeSpecSchemaDto>> PublishSpecSchemaAsync(EquipmentType parent, EquipmentTypeSpecSchema draftSchema, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
     }
 }
 
-/// <summary>Endpoint chỉ có trong test để kiểm thử hành vi bảo vệ xác thực mặc định.</summary>
+/// <summary>Endpoint chá»‰ cÃ³ trong test Ä‘á»ƒ kiá»ƒm thá»­ hÃ nh vi báº£o vá»‡ xÃ¡c thá»±c máº·c Ä‘á»‹nh.</summary>
 [ApiController]
 [Route("test-protected")]
 public sealed class TestProtectedController : ControllerBase

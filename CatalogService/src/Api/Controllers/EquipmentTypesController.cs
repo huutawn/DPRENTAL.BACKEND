@@ -1,4 +1,5 @@
 using Dprental.CatalogService.Api.Filters;
+using Dprental.CatalogService.Api.Routing;
 using Dprental.CatalogService.Api.Security;
 using Dprental.CatalogService.Application.IServices;
 using Dprental.CatalogService.Common;
@@ -12,8 +13,7 @@ namespace Dprental.CatalogService.Api.Controllers;
 [ApiController]
 [Route("equipment-types")]
 [Produces("application/json")]
-[Authorize(Policy = CatalogPolicies.EquipmentManage)]
-public sealed class EquipmentTypesController(IEquipmentTypeService service, ICatalogCallerContext caller) : ControllerBase
+public sealed partial class EquipmentTypesController(IEquipmentTypeService service, ICatalogCallerContext caller) : ControllerBase
 {
     private static readonly HashSet<string> AllowedQueryKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -22,6 +22,11 @@ public sealed class EquipmentTypesController(IEquipmentTypeService service, ICat
         "page",
         "pageSize",
         "sort"
+    };
+
+    private static readonly HashSet<string> AdminAllowedQueryKeys = new(AllowedQueryKeys, StringComparer.OrdinalIgnoreCase)
+    {
+        "status"
     };
 
     /// <summary>Tìm kiếm và phân trang loại thiết bị đã công khai.</summary>
@@ -42,6 +47,44 @@ public sealed class EquipmentTypesController(IEquipmentTypeService service, ICat
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
+    /// <summary>
+    /// Quản trị viên tìm kiếm và phân trang loại thiết bị ở mọi trạng thái (Draft, Published, Disabled).
+    /// Lọc bằng <c>status</c>, lặp lại tham số để lấy nhiều trạng thái.
+    /// </summary>
+    [HttpGet($"/{ApiRoutes.Prefix}/admin/equipment-types")]
+    [Authorize(Policy = CatalogPolicies.EquipmentManage)]
+    [ProducesResponseType<PagedResult<EquipmentTypeAdminListItemDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<PagedResult<EquipmentTypeAdminListItemDto>>> SearchAdmin(
+        [FromQuery] GetAdminEquipmentTypesRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (Request.Query.Keys.Any(k => !AdminAllowedQueryKeys.Contains(k)))
+        {
+            return this.ToProblem(CatalogErrors.EquipmentType.InvalidQuery);
+        }
+
+        Result<PagedResult<EquipmentTypeAdminListItemDto>> result = await service.SearchAdminAsync(request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Quản trị viên đọc chi tiết loại thiết bị theo ID ở mọi trạng thái.</summary>
+    [HttpGet($"/{ApiRoutes.Prefix}/admin/equipment-types/{{id:guid}}")]
+    [Authorize(Policy = CatalogPolicies.EquipmentManage)]
+    [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EquipmentTypeDetailDto>> GetAdminById(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        Result<EquipmentTypeDetailDto> result = await service.GetAdminDetailAsync(id, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
     /// <summary>Lấy chi tiết loại thiết bị theo ID nếu đã công khai.</summary>
     [AllowAnonymous]
     [HttpGet("{id:guid}")]
@@ -57,6 +100,7 @@ public sealed class EquipmentTypesController(IEquipmentTypeService service, ICat
 
     /// <summary>Tạo mới loại thiết bị ở trạng thái Draft.</summary>
     [HttpPost]
+    [Authorize(Policy = CatalogPolicies.EquipmentManage)]
     [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -72,6 +116,7 @@ public sealed class EquipmentTypesController(IEquipmentTypeService service, ICat
 
     /// <summary>Cập nhật thông tin canonical và danh sách media của loại thiết bị.</summary>
     [HttpPatch("{id:guid}")]
+    [Authorize(Policy = CatalogPolicies.EquipmentManage)]
     [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -89,6 +134,7 @@ public sealed class EquipmentTypesController(IEquipmentTypeService service, ICat
 
     /// <summary>Công khai loại thiết bị lên public catalog từ trạng thái Draft hoặc Disabled.</summary>
     [HttpPost("{id:guid}/publish")]
+    [Authorize(Policy = CatalogPolicies.EquipmentManage)]
     [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -105,6 +151,7 @@ public sealed class EquipmentTypesController(IEquipmentTypeService service, ICat
 
     /// <summary>Vô hiệu hóa loại thiết bị đang công khai khỏi public catalog.</summary>
     [HttpPost("{id:guid}/disable")]
+    [Authorize(Policy = CatalogPolicies.EquipmentManage)]
     [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]

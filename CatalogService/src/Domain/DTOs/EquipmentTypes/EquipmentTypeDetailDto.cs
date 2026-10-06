@@ -12,4 +12,31 @@ public sealed record EquipmentTypeDetailDto(
     DateTime? UpdatedAt,
     DateTime? PublishedAt,
     IReadOnlyList<CategoryDto> Categories,
-    IReadOnlyList<EquipmentTypeMediaResponseDto> Media);
+    IReadOnlyList<EquipmentTypeMediaResponseDto> Media,
+    int? CurrentSchemaVersion = null,
+    EquipmentTypeSpecSchemaDto? SpecSchema = null,
+    IReadOnlyList<EquipmentTypePrimarySpecDto>? PrimarySpecs = null)
+{
+    private readonly IReadOnlyList<EquipmentTypePrimarySpecDto> primarySpecs = PrimarySpecs ?? [];
+
+    public IReadOnlyList<EquipmentTypePrimarySpecDto> PrimarySpecs
+    {
+        get => primarySpecs;
+        init => primarySpecs = value ?? [];
+    }
+
+    public static IReadOnlyList<EquipmentTypePrimarySpecDto> ExtractPrimarySpecs(Entities.EquipmentTypeSpecDefinition? definition)
+    {
+        if (definition?.Fields is null || definition.Fields.Count == 0)
+        {
+            return [];
+        }
+
+        return definition.Fields
+            .Where(f => f.Primary)
+            .OrderBy(f => f.DisplayOrder)
+            .ThenBy(f => f.Key, StringComparer.Ordinal)
+            .Select(f => new EquipmentTypePrimarySpecDto(f.Key, f.Label, f.Unit))
+            .ToList();
+    }
+}

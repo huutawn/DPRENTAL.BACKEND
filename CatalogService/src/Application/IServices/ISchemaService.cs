@@ -6,7 +6,7 @@ namespace CatalogService.Application.IServices;
 public interface ISchemaService
 {
     // Tạo bản nháp (Draft) mới từ phiên bản hiện tại (v1 -> v2)
-    Task<SchemaVersion> CreateNewDraftVersionAsync(Guid specSchemaId);
+    Task<SchemaVersionDto> CreateNewDraftVersionAsync(Guid specSchemaId);
 
     // Đăng bố (Publish) một bản Draft thành phiên bản chính thức
     Task PublishSchemaVersionAsync(Guid versionId);

@@ -16,6 +16,7 @@ public static class CatalogErrorCode
         public const string InvalidKeyword = "EquipmentType.InvalidKeyword";
         public const string InvalidSort = "EquipmentType.InvalidSort";
         public const string InvalidQuery = "EquipmentType.InvalidQuery";
+        public const string InvalidStatus = "EquipmentType.InvalidStatus";
         public const string DuplicateCode = "EquipmentType.DuplicateCode";
         public const string InvalidStateTransition = "EquipmentType.InvalidStateTransition";
         public const string ConcurrencyConflict = "EquipmentType.ConcurrencyConflict";
@@ -32,15 +33,41 @@ public static class CatalogErrorCode
         public const string InvalidDescription = "EquipmentType.InvalidDescription";
         public const string InvalidCategory = "EquipmentType.InvalidCategory";
         public const string InvalidCategories = "EquipmentType.InvalidCategories";
-        public const string OrganizationRequired = "EquipmentType.OrganizationRequired";
-        public const string OrganizationForbidden = "EquipmentType.OrganizationForbidden";
+        public const string SchemaNotFound = "EquipmentType.SchemaNotFound";
+        public const string DraftAlreadyExists = "EquipmentType.DraftAlreadyExists";
+        public const string SchemaAlreadyPublished = "EquipmentType.SchemaAlreadyPublished";
+        public const string InvalidSchemaVersion = "EquipmentType.InvalidSchemaVersion";
+        public const string SchemaRequired = "EquipmentType.SchemaRequired";
+        public const string InvalidSchemaDefinition = "EquipmentType.InvalidSchemaDefinition";
     }
 
     public static class Category
     {
         public const string NotFound = "Category.NotFound";
+        public const string InvalidKeyword = "Category.InvalidKeyword";
+        public const string InvalidSort = "Category.InvalidSort";
+        public const string InvalidQuery = "Category.InvalidQuery";
+        public const string InvalidId = "Category.InvalidId";
         public const string InvalidName = "Category.InvalidName";
         public const string InvalidDescription = "Category.InvalidDescription";
+        public const string InvalidImage = "Category.InvalidImage";
+    }
+
+    public static class Brand
+    {
+        public const string NotFound = "Brand.NotFound";
+        public const string InvalidKeyword = "Brand.InvalidKeyword";
+        public const string InvalidSort = "Brand.InvalidSort";
+        public const string InvalidQuery = "Brand.InvalidQuery";
+        public const string DuplicateCode = "Brand.DuplicateCode";
+        public const string DuplicateSlug = "Brand.DuplicateSlug";
+        public const string ConcurrencyConflict = "Brand.ConcurrencyConflict";
+        public const string InvalidPayload = "Brand.InvalidPayload";
+        public const string InvalidCode = "Brand.InvalidCode";
+        public const string InvalidName = "Brand.InvalidName";
+        public const string InvalidSlug = "Brand.InvalidSlug";
+        public const string InvalidLogo = "Brand.InvalidLogo";
+        public const string InvalidId = "Brand.InvalidId";
     }
     public static class Media
     {

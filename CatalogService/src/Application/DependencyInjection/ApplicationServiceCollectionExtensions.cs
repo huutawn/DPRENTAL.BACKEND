@@ -1,4 +1,4 @@
-using CatalogService.Application.IServices;
+﻿using CatalogService.Application.IServices;
 using CatalogService.Application.Services;
 using Dprental.CatalogService.Application.IServices;
 using Dprental.CatalogService.Application.Options;
@@ -24,13 +24,18 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<CreateEquipmentTypeRequestValidator>();
         services.AddScoped<UpdateEquipmentTypeRequestValidator>();
         services.AddScoped<ICategoryRepository, CategoryRepository>();
+        services.AddScoped<CategoryListQueryValidator>();
         services.AddScoped<ICategoryService, CategoryService>();
         services.AddScoped<ISchemaService, SchemaService>();
         services.AddScoped<IEquipmentTypeSchemaRepository, EquipmentTypeSchemaRepository>();
         services.AddScoped<ISchemaQueryService, SchemaQueryService>();
         services.AddScoped<CanonicalEquipmentTypeRules>();
         services.AddScoped<IEquipmentTypeService, EquipmentTypeService>();
-
+        services.AddScoped<BrandListQueryValidator>();
+        services.AddScoped<CreateBrandRequestValidator>();
+        services.AddScoped<UpdateBrandRequestValidator>();
+        services.AddScoped<IBrandRepository, BrandRepository>();
+        services.AddScoped<IBrandService, BrandService>();
 
         return services;
     }

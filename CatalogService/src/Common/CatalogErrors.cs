@@ -29,6 +29,9 @@ public static class CatalogErrors
         public static readonly Error InvalidQuery =
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidQuery, "Tham số truy vấn không hợp lệ.");
 
+        public static readonly Error InvalidStatus =
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidStatus, "status chỉ nhận: Draft, Published, Disabled.");
+
         public static readonly Error DuplicateCode =
             Error.Conflict(CatalogErrorCode.EquipmentType.DuplicateCode, "Mã thiết bị đã tồn tại trong Catalog.");
 
@@ -73,11 +76,26 @@ public static class CatalogErrors
         public static readonly Error InvalidCategories =
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidCategories, "Danh sách categoryIds không hợp lệ.");
 
-        public static readonly Error OrganizationRequired =
-            Error.Validation(CatalogErrorCode.EquipmentType.OrganizationRequired, "Tài khoản thuộc nhiều organization, cần chỉ định organizationId.");
+        public static readonly Error SchemaNotFound =
+            Error.NotFound(CatalogErrorCode.EquipmentType.SchemaNotFound, "Specification schema không tồn tại.");
 
-        public static readonly Error OrganizationForbidden =
-            Error.Forbidden(CatalogErrorCode.EquipmentType.OrganizationForbidden, "Bạn không có quyền quản lý thiết bị của organization này.");
+        public static readonly Error DraftAlreadyExists =
+            Error.Conflict(CatalogErrorCode.EquipmentType.DraftAlreadyExists, "Loại thiết bị đã có một bản nháp schema. Vui lòng cập nhật hoặc publish bản nháp hiện tại.");
+
+        public static readonly Error SchemaAlreadyPublished =
+            Error.Conflict(CatalogErrorCode.EquipmentType.SchemaAlreadyPublished, "Schema đã được publish, không thể chỉnh sửa hoặc publish lại.");
+
+        public static readonly Error InvalidSchemaVersion =
+            Error.Conflict(CatalogErrorCode.EquipmentType.InvalidSchemaVersion, "Version publish phải lớn hơn version hiện tại.");
+
+        public static readonly Error SchemaRequired =
+            Error.Conflict(CatalogErrorCode.EquipmentType.SchemaRequired, "Loại thiết bị cần có specification schema đã publish trước khi publish.");
+
+        public static readonly Error InvalidSchemaDefinition =
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidSchemaDefinition, "Định nghĩa specification schema không hợp lệ.");
+
+        public static Error InvalidSchemaDefinitionWithDetail(string detail) =>
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidSchemaDefinition, detail);
     }
 
     public static class Category
@@ -85,13 +103,72 @@ public static class CatalogErrors
         public static readonly Error NotFound =
             Error.NotFound(CatalogErrorCode.Category.NotFound, "Danh mục không tồn tại hoặc đang ở trạng thái không hoạt động.");
 
+        public static readonly Error AdminNotFound =
+            Error.NotFound(CatalogErrorCode.Category.NotFound, "Danh mục không tồn tại.");
+
+        public static readonly Error InvalidKeyword =
+            Error.Validation(CatalogErrorCode.Category.InvalidKeyword, "Từ khóa không được chứa ký tự không hợp lệ và tối đa 100 ký tự.");
+
+        public static readonly Error InvalidSort =
+            Error.Validation(CatalogErrorCode.Category.InvalidSort, "sort chỉ nhận: newest, name_asc, name_desc.");
+
+        public static readonly Error InvalidQuery =
+            Error.Validation(CatalogErrorCode.Category.InvalidQuery, "Tham số truy vấn không hợp lệ.");
+
+        public static readonly Error InvalidId =
+            Error.Validation(CatalogErrorCode.Category.InvalidId, "ID danh mục không hợp lệ.");
+
         public static readonly Error InvalidName =
             Error.Validation(CatalogErrorCode.Category.InvalidName, "Tên danh mục không được để trống và tối đa 150 ký tự.");
 
         public static readonly Error InvalidDescription =
             Error.Validation(CatalogErrorCode.Category.InvalidDescription, "Mô tả danh mục tối đa 1000 ký tự.");
+
         public static readonly Error InvalidImage =
-            Error.Validation("Category.InvalidImage", "Ảnh đại diện danh mục không hợp lệ.");
+            Error.Validation(CatalogErrorCode.Category.InvalidImage, "Ảnh đại diện danh mục không hợp lệ.");
+    }
+
+    public static class Brand
+    {
+        public static readonly Error NotFound =
+            Error.NotFound(CatalogErrorCode.Brand.NotFound, "Thương hiệu không tồn tại hoặc chưa được kích hoạt.");
+
+        public static readonly Error AdminNotFound =
+            Error.NotFound(CatalogErrorCode.Brand.NotFound, "Thương hiệu không tồn tại.");
+
+        public static readonly Error InvalidKeyword =
+            Error.Validation(CatalogErrorCode.Brand.InvalidKeyword, "Từ khóa không được chứa ký tự không hợp lệ và tối đa 100 ký tự.");
+        public static readonly Error InvalidSort =
+            Error.Validation(CatalogErrorCode.Brand.InvalidSort, "sort chỉ nhận: newest, name_asc, name_desc.");
+
+        public static readonly Error InvalidQuery =
+            Error.Validation(CatalogErrorCode.Brand.InvalidQuery, "Tham số truy vấn không hợp lệ.");
+
+        public static readonly Error DuplicateCode =
+            Error.Conflict(CatalogErrorCode.Brand.DuplicateCode, "Mã thương hiệu đã tồn tại trong Catalog.");
+
+        public static readonly Error DuplicateSlug =
+            Error.Conflict(CatalogErrorCode.Brand.DuplicateSlug, "Slug thương hiệu đã tồn tại trong Catalog.");
+
+        public static readonly Error ConcurrencyConflict =
+            Error.Conflict(CatalogErrorCode.Brand.ConcurrencyConflict, "Dữ liệu đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại trang.");
+
+        public static readonly Error InvalidPayload =
+            Error.Validation(CatalogErrorCode.Brand.InvalidPayload, "Dữ liệu yêu cầu không hợp lệ.");
+
+        public static readonly Error InvalidCode =
+            Error.Validation(CatalogErrorCode.Brand.InvalidCode, "Mã thương hiệu không được để trống, không chứa ký tự không hợp lệ và tối đa 50 ký tự.");
+
+        public static readonly Error InvalidName =
+            Error.Validation(CatalogErrorCode.Brand.InvalidName, "Tên thương hiệu không được để trống, không chứa ký tự không hợp lệ và tối đa 200 ký tự.");
+        public static readonly Error InvalidSlug =
+            Error.Validation(CatalogErrorCode.Brand.InvalidSlug, "Slug thương hiệu không hợp lệ. Chỉ chấp nhận chữ cái thường, số ASCII phân cách bằng dấu gạch ngang và tối đa 150 ký tự.");
+
+        public static readonly Error InvalidLogo =
+            Error.Validation(CatalogErrorCode.Brand.InvalidLogo, "Logo thương hiệu không hợp lệ.");
+
+        public static readonly Error InvalidId =
+            Error.Validation(CatalogErrorCode.Brand.InvalidId, "ID thương hiệu không hợp lệ.");
     }
     public static class Media
     {
