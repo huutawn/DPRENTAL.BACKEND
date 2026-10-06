@@ -23,6 +23,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<UpdateEquipmentTypeRequestValidator>();
         services.AddScoped<IEquipmentTypeService, EquipmentTypeService>();
         services.AddScoped<ICategoryRepository, CategoryRepository>();
+        services.AddScoped<CategoryListQueryValidator>();
         services.AddScoped<ICategoryService, CategoryService>();
         services.AddScoped<BrandListQueryValidator>();
         services.AddScoped<CreateBrandRequestValidator>();

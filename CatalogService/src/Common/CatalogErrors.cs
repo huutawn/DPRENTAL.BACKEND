@@ -91,13 +91,29 @@ public static class CatalogErrors
         public static readonly Error NotFound =
             Error.NotFound(CatalogErrorCode.Category.NotFound, "Danh mục không tồn tại hoặc đang ở trạng thái không hoạt động.");
 
+        public static readonly Error AdminNotFound =
+            Error.NotFound(CatalogErrorCode.Category.NotFound, "Danh mục không tồn tại.");
+
+        public static readonly Error InvalidKeyword =
+            Error.Validation(CatalogErrorCode.Category.InvalidKeyword, "Từ khóa không được chứa ký tự không hợp lệ và tối đa 100 ký tự.");
+
+        public static readonly Error InvalidSort =
+            Error.Validation(CatalogErrorCode.Category.InvalidSort, "sort chỉ nhận: newest, name_asc, name_desc.");
+
+        public static readonly Error InvalidQuery =
+            Error.Validation(CatalogErrorCode.Category.InvalidQuery, "Tham số truy vấn không hợp lệ.");
+
+        public static readonly Error InvalidId =
+            Error.Validation(CatalogErrorCode.Category.InvalidId, "ID danh mục không hợp lệ.");
+
         public static readonly Error InvalidName =
             Error.Validation(CatalogErrorCode.Category.InvalidName, "Tên danh mục không được để trống và tối đa 150 ký tự.");
 
         public static readonly Error InvalidDescription =
             Error.Validation(CatalogErrorCode.Category.InvalidDescription, "Mô tả danh mục tối đa 1000 ký tự.");
+
         public static readonly Error InvalidImage =
-            Error.Validation("Category.InvalidImage", "Ảnh đại diện danh mục không hợp lệ.");
+            Error.Validation(CatalogErrorCode.Category.InvalidImage, "Ảnh đại diện danh mục không hợp lệ.");
     }
 
     public static class Brand
