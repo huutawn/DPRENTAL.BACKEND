@@ -1,5 +1,7 @@
-using Dprental.InventoryService.Domain.Clients.Catalog;
-using Dprental.InventoryService.Domain.Clients.Media;
+using Dprental.InventoryService.Application.Clients;
+using Dprental.InventoryService.Application.DTOs.Catalog;
+using Dprental.InventoryService.Application.DTOs.Media;
+using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Services;
 using Dprental.InventoryService.Application.Security;

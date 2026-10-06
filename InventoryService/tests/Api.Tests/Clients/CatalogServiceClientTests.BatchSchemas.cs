@@ -1,7 +1,8 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using Dprental.InventoryService.Domain.Clients.Catalog;
+using Dprental.InventoryService.Application.Clients;
+using Dprental.InventoryService.Application.DTOs.Catalog;
 using Dprental.InventoryService.Common;
 using Xunit;
 

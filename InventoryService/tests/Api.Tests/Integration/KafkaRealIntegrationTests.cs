@@ -1,9 +1,9 @@
 using System.Text.Json;
 using Confluent.Kafka;
-using Dprental.InventoryService.Domain.Kafka.Contracts;
-using Dprental.InventoryService.Domain.Kafka.Options;
-using Dprental.InventoryService.Domain.Kafka.Outbox;
-using Dprental.InventoryService.Domain.Kafka.Transport;
+using Dprental.InventoryService.Application.Kafka.Contracts;
+using Dprental.InventoryService.Application.Kafka.Options;
+using Dprental.InventoryService.Application.Kafka.Outbox;
+using Dprental.InventoryService.Application.Kafka.Transport;
 using Dprental.InventoryService.Common;
 using AppError = Dprental.InventoryService.Common.Error;
 using Dprental.InventoryService.Common.Enums;

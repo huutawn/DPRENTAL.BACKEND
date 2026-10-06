@@ -1,11 +1,11 @@
 using System.Data;
-using Dprental.InventoryService.Domain.Caching;
+using Dprental.InventoryService.Application.Caching;
 using Dprental.InventoryService.Application.DTOs.Availability;
 using Dprental.InventoryService.Application.DTOs.Calendar;
-using Dprental.InventoryService.Domain.Kafka.Contracts;
-using Dprental.InventoryService.Domain.Kafka.Options;
-using Dprental.InventoryService.Domain.Kafka.Outbox;
-using Dprental.InventoryService.Domain.Kafka.Transport;
+using Dprental.InventoryService.Application.Kafka.Contracts;
+using Dprental.InventoryService.Application.Kafka.Options;
+using Dprental.InventoryService.Application.Kafka.Outbox;
+using Dprental.InventoryService.Application.Kafka.Transport;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Application.Services;
 using Dprental.InventoryService.Common.Enums;

@@ -1,7 +1,7 @@
 using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.DTOs.Allocations;
-using Dprental.InventoryService.Domain.Kafka.Contracts;
-using Dprental.InventoryService.Domain.Kafka.Outbox;
+using Dprental.InventoryService.Application.Kafka.Contracts;
+using Dprental.InventoryService.Application.Kafka.Outbox;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Application.Services;
 using Dprental.InventoryService.Common;

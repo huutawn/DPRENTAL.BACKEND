@@ -1,8 +1,8 @@
 using Dprental.InventoryService.Domain.Repositories;
 using System.Data.Common;
-using Dprental.InventoryService.Domain.Caching;
-using Dprental.InventoryService.Api.Tests.Security;
+using Dprental.InventoryService.Application.Caching;
 using Dprental.InventoryService.Application.DTOs.Availability;
+using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.Services;
 using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Domain.Entities;

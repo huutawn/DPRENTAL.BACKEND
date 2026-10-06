@@ -24,6 +24,12 @@ public sealed class OutboxStore : IOutboxStore
     }
 
     /// <inheritdoc />
+    public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task<OutboxMessage?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         return await _context.OutboxMessages.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, cancellationToken);
