@@ -2,9 +2,9 @@ using Dprental.InventoryService.Application.Caching;
 using Dprental.InventoryService.Application.DTOs.Availability;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Services;
+using Dprental.InventoryService.Application.Validation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-
 namespace Dprental.InventoryService.Application.DependencyInjection;
 
 public static class ApplicationServiceCollectionExtensions
@@ -16,7 +16,10 @@ public static class ApplicationServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.AddSingleton<AssetSearchQueryValidator>();
+        services.AddScoped<AssetSearchFilterResolver>();
         services.AddScoped<IInventoryAssetService, InventoryAssetService>();
+        services.AddScoped<IPublicInventoryAssetService, PublicInventoryAssetService>();
         services.AddScoped<ICalendarService, CalendarService>();
         services.AddScoped<IInventoryMediaService, InventoryMediaService>();
         services.AddScoped<IInventoryAllocationService, InventoryAllocationService>();

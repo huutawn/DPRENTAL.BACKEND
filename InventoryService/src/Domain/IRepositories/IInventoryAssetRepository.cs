@@ -16,17 +16,32 @@ public interface IInventoryAssetRepository : IRepo<InventoryAsset, Guid>
     /// <summary>
     /// Tìm kiếm danh sách tài sản theo criteria phân trang, giới hạn bắt buộc theo OwnerUserId.
     /// </summary>
-    Task<IReadOnlyList<InventoryAsset>> SearchAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<InventoryAsset>> SearchForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Đếm tổng số tài sản khớp với criteria, giới hạn bắt buộc theo OwnerUserId.
     /// </summary>
-    Task<int> CountAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default);
+    Task<int> CountForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Lấy danh sách các distinct schema_version của tài sản thuộc owner thỏa mãn các bộ lọc metadata.
     /// </summary>
-    Task<IReadOnlyList<int>> GetDistinctSchemaVersionsAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<int>> GetDistinctSchemaVersionsForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy thông tin tài sản công khai theo ID (chỉ tài sản AcceptingBookings = true).
+    /// </summary>
+    Task<InventoryAsset?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy danh sách các distinct schema_version của tài sản công khai thỏa mãn các bộ lọc metadata.
+    /// </summary>
+    Task<IReadOnlyList<int>> GetDistinctSchemaVersionsPublicAsync(AssetSearchFilters filters, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tìm kiếm và phân trang tài sản công khai trong một transaction đọc RepeatableRead duy nhất.
+    /// </summary>
+    Task<PublicAssetSearchResult> SearchPublicAsync(PublicAssetSearchCriteria criteria, CancellationToken cancellationToken = default);
     /// <summary>
     /// Lấy snapshot tài sản cùng các khoảng chặn lịch (CalendarBlocks) và các lượt phân bổ ứng viên (Held/Allocated)
     /// giao với cửa sổ ngày [startDate, endDate] phục vụ đọc lịch tổng hợp (Calendar Read) trong một single query snapshot.

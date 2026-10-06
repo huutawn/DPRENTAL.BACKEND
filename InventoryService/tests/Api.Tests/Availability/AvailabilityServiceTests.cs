@@ -407,15 +407,23 @@ public sealed class AvailabilityServiceTests
         public Task<InventoryAsset?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default) =>
             _inner.GetByIdForOwnerAsync(id, ownerUserId, cancellationToken);
 
-        public Task<IReadOnlyList<InventoryAsset>> SearchAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
-            _inner.SearchAsync(criteria, cancellationToken);
+        public Task<IReadOnlyList<InventoryAsset>> SearchForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+            _inner.SearchForOwnerAsync(criteria, cancellationToken);
 
-        public Task<int> CountAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
-            _inner.CountAsync(criteria, cancellationToken);
+        public Task<int> CountForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+            _inner.CountForOwnerAsync(criteria, cancellationToken);
 
-        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
-            _inner.GetDistinctSchemaVersionsAsync(criteria, cancellationToken);
+        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+            _inner.GetDistinctSchemaVersionsForOwnerAsync(criteria, cancellationToken);
 
+        public Task<InventoryAsset?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            _inner.GetPublicByIdAsync(id, cancellationToken);
+
+        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsPublicAsync(AssetSearchFilters filters, CancellationToken cancellationToken = default) =>
+            _inner.GetDistinctSchemaVersionsPublicAsync(filters, cancellationToken);
+
+        public Task<PublicAssetSearchResult> SearchPublicAsync(PublicAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+            _inner.SearchPublicAsync(criteria, cancellationToken);
         public Task<InventoryAsset?> GetCalendarSnapshotAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
             _inner.GetCalendarSnapshotAsync(assetId, startDate, endDate, cancellationToken);
 
@@ -489,15 +497,27 @@ public sealed class AvailabilityServiceTests
         public Task<InventoryAsset?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(id, out var a) && a.OwnerUserId == ownerUserId ? a : null);
 
-        public Task<IReadOnlyList<InventoryAsset>> SearchAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<InventoryAsset>> SearchForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<InventoryAsset>>(Store.Values.Where(a => a.OwnerUserId == criteria.OwnerUserId).Skip(criteria.Skip).Take(criteria.Take).ToList());
 
-        public Task<int> CountAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+        public Task<int> CountForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.Values.Count(a => a.OwnerUserId == criteria.OwnerUserId));
 
-        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<int>>(Store.Values.Where(a => a.OwnerUserId == criteria.OwnerUserId).Select(a => a.SchemaVersion).Distinct().OrderBy(v => v).ToList());
 
+        public Task<InventoryAsset?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Store.TryGetValue(id, out var a) && a.AcceptingBookings ? a : null);
+
+        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsPublicAsync(AssetSearchFilters filters, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<int>>(Store.Values.Where(a => a.AcceptingBookings).Select(a => a.SchemaVersion).Distinct().OrderBy(v => v).ToList());
+
+        public Task<PublicAssetSearchResult> SearchPublicAsync(PublicAssetSearchCriteria criteria, CancellationToken cancellationToken = default)
+        {
+            var matching = Store.Values.Where(a => a.AcceptingBookings).ToList();
+            var paged = matching.Skip(criteria.Skip).Take(criteria.Take).ToList();
+            return Task.FromResult(new PublicAssetSearchResult(paged, matching.Count));
+        }
         public Task<InventoryAsset?> GetCalendarSnapshotAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(assetId, out var a) ? a : null);
 

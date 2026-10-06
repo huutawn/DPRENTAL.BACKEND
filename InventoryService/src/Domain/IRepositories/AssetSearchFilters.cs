@@ -23,22 +23,14 @@ public sealed record AssetDynamicFilterCriterion(
     string DataType);
 
 /// <summary>
-/// Tiêu chí tìm kiếm và phân trang tài sản, bắt buộc chỉ định OwnerUserId.
+/// Các bộ lọc tìm kiếm tài sản dùng chung không gắn với phạm vi người dùng (scope-free).
 /// </summary>
-public sealed record AssetSearchCriteria(
-    Guid OwnerUserId,
+public sealed record AssetSearchFilters(
     string? SearchKeyword = null,
     Guid? EquipmentTypeId = null,
     Guid? BrandId = null,
-    bool? AcceptingBookings = null,
     int? ManufactureYearFrom = null,
     int? ManufactureYearTo = null,
     AssetSortOption Sort = AssetSortOption.CreatedDesc,
     IReadOnlyList<int>? CompatibleSchemaVersions = null,
-    IReadOnlyList<AssetDynamicFilterCriterion>? DynamicFilters = null,
-    int Skip = 0,
-    int Take = 20)
-{
-    public static AssetSearchCriteria ForOwner(Guid ownerUserId, int skip, int take) =>
-        new(ownerUserId, Skip: skip, Take: take);
-}
+    IReadOnlyList<AssetDynamicFilterCriterion>? DynamicFilters = null);

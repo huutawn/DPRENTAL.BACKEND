@@ -75,6 +75,56 @@ dotnet test InventoryService.sln
 | `GET` | `/api/v1/inventory/assets/{id}` | Chi tiết tài sản (200 OK). 404 nếu không tìm thấy, 403 nếu cross-user (Admin bypass allowed). Trả `brandId` (nullable). |
 | `PATCH` | `/api/v1/inventory/assets/{id}` | Cập nhật thông tin chi tiết với presence tracking cho `brandId`, `model`, `serialNumber`, `manufactureYear`, `thumbnailMediaId`, `schemaVersion`, `specValues`. Omitted giữ nguyên; explicit null cho serial/year/thumbnail; `brandId` từ chối null; domain ngăn xóa Brand đã có. |
 | `PATCH` | `/api/v1/inventory/assets/{id}/accepting-bookings` | Bật/tắt nhận lịch: `{ "acceptingBookings": bool, "reason": string? }`. Đổi cờ phát sự kiện availability qua Outbox. |
+## Khám phá và Đọc tài sản công khai (Public Asset Discovery - DPR-166)
+
+### APIs Công khai (AllowAnonymous)
+
+| Method | Endpoint | Mô tả |
+|---|---|---|
+| `GET` | `/api/v1/inventory/public/assets` | Khám phá và tìm kiếm danh sách tài sản công khai phân trang. Tự động áp dụng cờ hiển thị `acceptingBookings = true`, hỗ trợ lọc khả dụng (`from`, `to`), từ khóa Model, metadata và dynamic filters. |
+| `GET` | `/api/v1/inventory/public/assets/{assetId}` | Đọc chi tiết tài sản công khai đã làm sạch bảo mật (200 OK). Trả về 404 `ASSET_NOT_FOUND` nếu không tồn tại hoặc tài sản tắt nhận lịch (`acceptingBookings = false`). |
+
+### Đặc tả Contract & Bảo vệ dữ liệu
+
+- **Truy cập ẩn danh**: Endpoint hỗ trợ `[AllowAnonymous]` trực tiếp tại InventoryService và được cấu hình proxy công khai qua Gateway với ưu tiên (Priority 10) trước catch-all đã xác thực.
+- **Giả định hiển thị (Visibility Gate)**: Toàn bộ truy xuất công khai bắt buộc lọc `accepting_bookings = TRUE`. Tài sản tắt booking hoàn toàn không xuất hiện trên danh sách và trả về 404 không thể phân biệt trên API chi tiết.
+- **Hợp đồng DTO công khai (`PublicInventoryAssetResponse`)**:
+  - Loại bỏ hoàn toàn các trường nhạy cảm: `ownerUserId`, `serialNumber`, `suspensionReason`, `displayName`, `thumbnailMediaId`, `version`, `xmin`, timestamps audit (`createdAt`, `updatedAt`), thông tin phân bổ và quyền sở hữu.
+  - Làm sạch đệ quy `specValues`: loại bỏ triệt để các thuộc tính bảo lưu (kể cả trong object lồng nhau) trước khi trả về client.
+  - Trả về `rentalRate` dạng `PublicAssetRentalRateResponse`: trả đúng giá niêm yết đã lưu (`dailyRate`, `weeklyRate`, `monthlyRate`, `currency = "VND"`), không tính toán giá thương mại hay tự động sinh giá 0.
+  - `thumbnailUrl`: được dựng cục bộ dạng `{PublicGatewayUrl}/api/v1/media/{mediaId:D}/content`, không phát sinh cuộc gọi HTTP sang MediaService.
+- **Tìm kiếm từ khóa an toàn (`q`)**: Chỉ tìm kiếm substring không phân biệt hoa/thường trên trường **Model** (không tìm kiếm trên SerialNumber như API owner).
+- **Lọc khả dụng trước phân trang (`from`, `to`)**:
+  - Yêu cầu cung cấp đồng thời cả `from` và `to` (định dạng `yyyy-MM-dd`), chân trời tối đa 6 tháng qua `AvailabilityDateValidator`.
+  - Lọc trực tiếp dưới PostgreSQL bằng anti-joins trước `ORDER BY`, `LIMIT` và `OFFSET`.
+  - Đảm bảo `totalCount` và các trang kết quả luôn phản ánh chính xác số lượng tài sản thực tế khả dụng.
+
+### Ví dụ Response DTO công khai
+
+```json
+{
+  "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "equipmentTypeId": "7ca64731-9721-4f1d-93cb-ef268719bc42",
+  "brandId": "e11894d0-42d7-4632-a9b0-9b6d8591ef14",
+  "model": "8FD25",
+  "manufactureYear": 2023,
+  "schemaVersion": 2,
+  "specValues": {
+    "capacityKg": 2500,
+    "liftHeightM": 4.5,
+    "fuelType": "diesel"
+  },
+  "rentalRate": {
+    "dailyRate": 850000,
+    "weeklyRate": 5000000,
+    "monthlyRate": 15000000,
+    "currency": "VND"
+  },
+  "thumbnailUrl": "https://gateway.example/api/v1/media/58d51fa9-7c15-4fa8-bfb1-9cb68fa2ec33/content",
+  "acceptingBookings": true
+}
+```
+
 
 ### Tìm kiếm và lọc nâng cao My Assets (`GET /api/v1/inventory/assets`)
 
