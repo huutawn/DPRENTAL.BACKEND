@@ -60,6 +60,14 @@ services:
       - Routes__13__DownstreamHostAndPorts__0__Host=${CATALOG_SERVICE_HOST:-catalog-service}
       - Routes__13__DownstreamHostAndPorts__0__Port=${CATALOG_SERVICE_PORT:-8080}
 
+      # Inventory public routes 14..15
+      - Routes__14__DownstreamScheme=${INVENTORY_SERVICE_SCHEME:-http}
+      - Routes__14__DownstreamHostAndPorts__0__Host=${INVENTORY_SERVICE_HOST:-inventory-service}
+      - Routes__14__DownstreamHostAndPorts__0__Port=${INVENTORY_SERVICE_PORT:-8080}
+      - Routes__15__DownstreamScheme=${INVENTORY_SERVICE_SCHEME:-http}
+      - Routes__15__DownstreamHostAndPorts__0__Host=${INVENTORY_SERVICE_HOST:-inventory-service}
+      - Routes__15__DownstreamHostAndPorts__0__Port=${INVENTORY_SERVICE_PORT:-8080}
+
       # Cấu hình Bảo mật CORS & Kích thước Payload
       - Gateway__Security__Cors__AllowedOrigins__0=${CORS_ALLOWED_ORIGIN_0:-http://localhost:3000}
       - Gateway__Security__Cors__AllowedOrigins__1=${CORS_ALLOWED_ORIGIN_1:-http://localhost:5173}
