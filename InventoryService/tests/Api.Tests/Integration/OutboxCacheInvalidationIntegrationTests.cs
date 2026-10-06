@@ -1,5 +1,4 @@
 using System.Data;
-using Dprental.InventoryService.Api.Caching;
 using Dprental.InventoryService.Application.Caching;
 using Dprental.InventoryService.Application.DTOs.Availability;
 using Dprental.InventoryService.Application.DTOs.Calendar;

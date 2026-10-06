@@ -14,20 +14,19 @@ public interface IInventoryAssetRepository : IRepo<InventoryAsset, Guid>
     Task<InventoryAsset?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Lấy danh sách tài sản thuộc về một chủ sở hữu có phân trang.
+    /// Tìm kiếm danh sách tài sản theo criteria phân trang, giới hạn bắt buộc theo OwnerUserId.
     /// </summary>
-    Task<IReadOnlyList<InventoryAsset>> ListByOwnerAsync(Guid ownerUserId, int skip, int take, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<InventoryAsset>> SearchAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Đếm tổng số tài sản thuộc về một chủ sở hữu.
+    /// Đếm tổng số tài sản khớp với criteria, giới hạn bắt buộc theo OwnerUserId.
     /// </summary>
-    Task<int> CountByOwnerAsync(Guid ownerUserId, CancellationToken cancellationToken = default);
+    Task<int> CountAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Lấy danh sách toàn bộ tài sản trong hệ thống có phân trang (dành cho Admin).
+    /// Lấy danh sách các distinct schema_version của tài sản thuộc owner thỏa mãn các bộ lọc metadata.
     /// </summary>
-    Task<IReadOnlyList<InventoryAsset>> ListAllAsync(int skip, int take, CancellationToken cancellationToken = default);
-
+    Task<IReadOnlyList<int>> GetDistinctSchemaVersionsAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default);
     /// <summary>
     /// Lấy snapshot tài sản cùng các khoảng chặn lịch (CalendarBlocks) và các lượt phân bổ ứng viên (Held/Allocated)
     /// giao với cửa sổ ngày [startDate, endDate] phục vụ đọc lịch tổng hợp (Calendar Read) trong một single query snapshot.

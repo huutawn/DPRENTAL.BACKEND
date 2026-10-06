@@ -21,8 +21,7 @@ public interface IInventoryAssetService
         CancellationToken cancellationToken = default);
 
     Task<Result<PagedResponse<InventoryAssetResponse>>> ListAssetsAsync(
-        int page,
-        int pageSize,
+        ListAssetsRequest request,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);
 

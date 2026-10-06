@@ -37,14 +37,14 @@ internal sealed class FakeAssetRepository : IInventoryAssetRepository
     public Task<InventoryAsset?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Store.TryGetValue(id, out var a) && a.OwnerUserId == ownerUserId ? a : null);
 
-    public Task<IReadOnlyList<InventoryAsset>> ListByOwnerAsync(Guid ownerUserId, int skip, int take, CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<InventoryAsset>>(Store.Values.Where(a => a.OwnerUserId == ownerUserId).ToList());
+    public Task<IReadOnlyList<InventoryAsset>> SearchAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<InventoryAsset>>(Store.Values.Where(a => a.OwnerUserId == criteria.OwnerUserId).Skip(criteria.Skip).Take(criteria.Take).ToList());
 
-    public Task<int> CountByOwnerAsync(Guid ownerUserId, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Store.Values.Count(a => a.OwnerUserId == ownerUserId));
+    public Task<int> CountAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Store.Values.Count(a => a.OwnerUserId == criteria.OwnerUserId));
 
-    public Task<IReadOnlyList<InventoryAsset>> ListAllAsync(int skip, int take, CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<InventoryAsset>>(Store.Values.ToList());
+    public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<int>>(Store.Values.Where(a => a.OwnerUserId == criteria.OwnerUserId).Select(a => a.SchemaVersion).Distinct().OrderBy(v => v).ToList());
 
     public Task<InventoryAsset?> GetCalendarSnapshotAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
         Task.FromResult(Store.TryGetValue(assetId, out var a) ? a : null);

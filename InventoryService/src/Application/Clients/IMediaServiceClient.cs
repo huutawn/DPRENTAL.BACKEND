@@ -1,20 +1,21 @@
+using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.DTOs.Media;
 using Dprental.InventoryService.Common;
 
 namespace Dprental.InventoryService.Application.Clients;
 
 /// <summary>
-/// Hợp đồng client gọi tới MediaService nội bộ theo chuẩn Server-to-Server.
+/// Client tích hợp với MediaService cho việc xác thực và công khai media.
 /// </summary>
 public interface IMediaServiceClient
 {
     /// <summary>
-    /// Xác minh thông tin media (ID, status, uploader) trước khi liên kết với entity nghiệp vụ.
+    /// Thẩm tra trạng thái sẵn sàng của media asset tại MediaService.
     /// </summary>
     Task<Result<MediaVerificationInfo>> VerifyAsync(Guid mediaId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Đặt trạng thái visibility của media thành Public.
+    /// Đánh dấu media asset là Public sau khi nghiệp vụ hoàn tất thành công.
     /// </summary>
     Task<Result<MediaVisibilityInfo>> SetPublicAsync(Guid mediaId, CancellationToken cancellationToken = default);
 }

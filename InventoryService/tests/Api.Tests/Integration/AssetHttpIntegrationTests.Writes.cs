@@ -1,18 +1,20 @@
+using Dprental.InventoryService.Domain.Repositories;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.Clients;
-using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Catalog;
+using Dprental.InventoryService.Application.DTOs.Media;
+using Dprental.InventoryService.Application.Options;
+using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Enums;
 using System.Text.Json;
 using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Domain.IRepositories;
-using Dprental.InventoryService.Domain.Repositories;
 using Dprental.InventoryService.Domain.ValueObjects;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
@@ -336,7 +338,7 @@ public sealed partial class AssetHttpIntegrationTests
         var stubCatalog = new StubCatalogClient
         {
             BrandHandler = id => Task.FromResult(Result.Success(
-                new CatalogBrandResponse(id, "BR-OLD", "Old Brand", "Inactive")))
+                new CatalogBrandResponse(id, "BR-OLD", "Old Brand", false)))
         };
 
         var (app, secFactory) = CreateFactory(catalogClient: stubCatalog);
@@ -392,7 +394,8 @@ public sealed partial class AssetHttpIntegrationTests
         var stubCatalog = new StubCatalogClient
         {
             SpecHandler = (_, _, _) => Task.FromResult(Result.Failure(
-                Error.Validation("EquipmentType.SpecRequired", "Trường 'resolution' là bắt buộc.")))
+                Error.Validation("SPEC_VALIDATION_FAILED", "Dữ liệu specification không hợp lệ theo schema version đã công khai.",
+                    [new ValidationError("resolution", "REQUIRED", "Trường 'resolution' là bắt buộc.")])))
         };
 
         var (app, secFactory) = CreateFactory(catalogClient: stubCatalog);
@@ -419,8 +422,12 @@ public sealed partial class AssetHttpIntegrationTests
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await response.Content.ReadFromJsonAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
         Assert.NotNull(problem);
-        Assert.Equal("EquipmentType.SpecRequired", problem.Title);
-        Assert.Equal("Trường 'resolution' là bắt buộc.", problem.Detail);
+        Assert.Equal("SPEC_VALIDATION_FAILED", problem.Title);
+        Assert.Equal("Dữ liệu specification không hợp lệ theo schema version đã công khai.", problem.Detail);
+        Assert.True(problem.Extensions.ContainsKey("errors"));
+        var errorsJson = ((JsonElement)problem.Extensions["errors"]!).GetRawText();
+        Assert.Contains("\"field\":\"resolution\"", errorsJson);
+        Assert.Contains("\"code\":\"REQUIRED\"", errorsJson);
 
         // Database has NO record written
         await using var db = CreateDbContext();
@@ -465,7 +472,7 @@ public sealed partial class AssetHttpIntegrationTests
         var stubCatalog = new StubCatalogClient
         {
             BrandHandler = id => Task.FromResult(Result.Success(
-                new CatalogBrandResponse(id, "BR-INACTIVE", "Inactive Brand", "Inactive")))
+                new CatalogBrandResponse(id, "BR-INACTIVE", "Inactive Brand", false)))
         };
 
         var (app, secFactory) = CreateFactory(catalogClient: stubCatalog);
@@ -517,7 +524,7 @@ public sealed partial class AssetHttpIntegrationTests
         var stubCatalog = new StubCatalogClient
         {
             LookupHandler = _ => { catalogCalled = true; return Task.FromResult(Result.Success(new CatalogEquipmentTypeResponse(Guid.NewGuid(), "C", "N", null, 1, DateTime.UtcNow, null, null))); },
-            BrandHandler = _ => { catalogCalled = true; return Task.FromResult(Result.Success(new CatalogBrandResponse(Guid.NewGuid(), "C", "N", "Active"))); },
+            BrandHandler = _ => { catalogCalled = true; return Task.FromResult(Result.Success(new CatalogBrandResponse(Guid.NewGuid(), "C", "N", true))); },
             SpecHandler = (_, _, _) => { catalogCalled = true; return Task.FromResult(Result.Success()); }
         };
 

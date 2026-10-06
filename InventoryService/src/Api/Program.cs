@@ -1,12 +1,13 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Dprental.InventoryService.Api.Controllers;
 using System.IO;
-using Dprental.InventoryService.Api.Caching;
-using Dprental.InventoryService.Api.Clients;
 using Dprental.InventoryService.Api.Exceptions;
 using Dprental.InventoryService.Api.Routing;
-using Dprental.InventoryService.Application.Clients;
-using Dprental.InventoryService.Application.DependencyInjection;
-using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Api.Security;
+using Dprental.InventoryService.Application.DependencyInjection;
+using Dprental.InventoryService.Application.Caching;
+using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Application.Kafka.DependencyInjection;
 using Dprental.InventoryService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -24,42 +25,8 @@ builder.Services.AddInventoryAuthorization();
 builder.Services.AddInventoryApplication();
 // DPR-150: Valkey Read Cache
 builder.Services.AddInventoryValkeyCache(builder.Configuration);
-// MediaService Integration: Options validation, typed HTTP client, and application service
-builder.Services.AddOptions<MediaServiceOptions>()
-    .Bind(builder.Configuration.GetSection(MediaServiceOptions.SectionName))
-    .ValidateDataAnnotations()
-    .ValidateOnStart();
-
-builder.Services.AddHttpClient<IMediaServiceClient, MediaServiceClient>((sp, client) =>
-{
-    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<MediaServiceOptions>>().Value;
-    client.BaseAddress = new Uri(options.InternalBaseUrl.TrimEnd('/') + "/");
-    client.DefaultRequestHeaders.Add("X-Api-Key", options.ApiKey);
-    client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
-})
-.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
-{
-    AllowAutoRedirect = false
-});
-
-
-// CatalogService Integration: Options validation and typed HTTP client
-builder.Services.AddOptions<CatalogServiceOptions>()
-    .Bind(builder.Configuration.GetSection(CatalogServiceOptions.SectionName))
-    .ValidateDataAnnotations()
-    .ValidateOnStart();
-
-builder.Services.AddHttpClient<ICatalogServiceClient, CatalogServiceClient>((sp, client) =>
-{
-    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<CatalogServiceOptions>>().Value;
-    client.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
-    client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
-})
-.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
-{
-    AllowAutoRedirect = false
-});
-
+// Domain clients (MediaService & CatalogService): Options validation and typed HTTP clients
+builder.Services.AddInventoryClients(builder.Configuration);
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<InventoryServiceDbContext>(
@@ -69,6 +36,41 @@ builder.Services.AddHealthChecks()
 
 builder.Services.AddControllers(options =>
     options.Conventions.Add(new ApiRoutePrefixConvention(ApiRoutes.Prefix)));
+
+builder.Services.Configure<ApiBehaviorOptions>(options =>
+{
+    var defaultFactory = options.InvalidModelStateResponseFactory;
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var actionDesc = context.ActionDescriptor as ControllerActionDescriptor;
+        if (actionDesc != null &&
+            string.Equals(actionDesc.ControllerName, "InventoryAssets", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(actionDesc.ActionName, nameof(InventoryAssetsController.List), StringComparison.OrdinalIgnoreCase) &&
+            HttpMethods.IsGet(context.HttpContext.Request.Method))
+        {
+            var firstError = context.ModelState.Values
+                .SelectMany(v => v.Errors)
+                .Select(e => e.ErrorMessage)
+                .FirstOrDefault(msg => !string.IsNullOrWhiteSpace(msg)) ?? "Giá trị query parameter không hợp lệ.";
+
+            var problem = new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "INVALID_QUERY_PARAMETER",
+                Detail = firstError,
+                Type = "https://tools.ietf.org/html/rfc9110#section-15.5.1"
+            };
+            problem.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+
+            return new BadRequestObjectResult(problem)
+            {
+                ContentTypes = { "application/problem+json" }
+            };
+        }
+
+        return defaultFactory(context);
+    };
+});
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = context =>
     context.ProblemDetails.Extensions["traceId"] = context.HttpContext.TraceIdentifier);

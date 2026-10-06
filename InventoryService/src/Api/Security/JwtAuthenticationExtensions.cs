@@ -53,7 +53,7 @@ public static class JwtAuthenticationExtensions
                 bearerOptions.MapInboundClaims = false;
                 bearerOptions.ConfigurationManager = configManager;
                 bearerOptions.RefreshOnIssuerKeyNotFound = true;
-
+                bearerOptions.SaveToken = true;
                 bearerOptions.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,

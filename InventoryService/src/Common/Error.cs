@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization;
 
 namespace Dprental.InventoryService.Common;
 
@@ -54,10 +56,23 @@ public enum ErrorType
 }
 
 /// <summary>
-/// Đại diện cho một lỗi nghiệp vụ với mã lỗi, thông điệp và phân loại lỗi.
+/// Đại diện cho một lỗi validation chi tiết ở cấp trường (Field-level validation error).
+/// Type trung lập độc lập với DTO Catalog và HTTP boundary.
+/// </summary>
+public sealed record ValidationError(
+    [property: JsonPropertyName("field")] string Field,
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("message")] string Message);
+
+/// <summary>
+/// Đại diện cho một lỗi nghiệp vụ với mã lỗi, thông điệp, phân loại lỗi và danh sách lỗi validation tùy chọn.
 /// </summary>
 [SuppressMessage("Naming", "CA1716:Identifiers should not match keywords", Justification = "Consumed only from C#.")]
-public sealed record Error(string Code, string Message, ErrorType Type = ErrorType.Validation)
+public sealed record Error(
+    string Code,
+    string Message,
+    ErrorType Type = ErrorType.Validation,
+    IReadOnlyList<ValidationError>? Errors = null)
 {
     /// <summary>
     /// Đối tượng lỗi rỗng đại diện cho trạng thái không có lỗi.
@@ -67,9 +82,8 @@ public sealed record Error(string Code, string Message, ErrorType Type = ErrorTy
     /// <summary>
     /// Tạo lỗi validation dữ liệu đầu vào.
     /// </summary>
-    public static Error Validation(string code, string message) =>
-        new(code, message, ErrorType.Validation);
-
+    public static Error Validation(string code, string message, IReadOnlyList<ValidationError>? errors = null) =>
+        new(code, message, ErrorType.Validation, errors);
     /// <summary>
     /// Tạo lỗi chưa xác thực tài khoản.
     /// </summary>

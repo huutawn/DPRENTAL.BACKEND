@@ -1,13 +1,16 @@
+using Dprental.InventoryService.Application.DTOs.Catalog;
+using Dprental.InventoryService.Application.DTOs.Media;
+using Dprental.InventoryService.Application.DTOs.Availability;
+using Dprental.InventoryService.Application.Options;
+using Dprental.InventoryService.Application.Clients;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Dprental.InventoryService.Application.Caching;
-using Dprental.InventoryService.Application.DTOs.Availability;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 
-namespace Dprental.InventoryService.Api.Caching;
+namespace Dprental.InventoryService.Application.Caching;
 
 /// <summary>
 /// Triển khai IInventoryAvailabilityCache sử dụng Valkey/Redis với StackExchange.Redis theo DPR-150.
@@ -261,7 +264,6 @@ return 1";
     {
         monthStart = default;
         monthEnd = default;
-
         if (string.IsNullOrWhiteSpace(monthKey) || monthKey.Length != 6)
         {
             return false;

@@ -1,4 +1,5 @@
 using Dprental.InventoryService.Application.Caching;
+using Dprental.InventoryService.Application.DTOs.Availability;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Services;
 using Microsoft.Extensions.DependencyInjection;
