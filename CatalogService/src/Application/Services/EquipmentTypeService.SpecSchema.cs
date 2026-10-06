@@ -220,6 +220,97 @@ public sealed partial class EquipmentTypeService
             sortedFields);
     }
 
+    public async Task<Result<EquipmentTypeBatchSchemasResponse>> GetSchemasBatchAsync(
+        Guid equipmentTypeId,
+        EquipmentTypeBatchSchemasRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request is null || request.Versions is null)
+        {
+            return CatalogErrors.Catalog.InvalidRequest;
+        }
+
+        if (request.Versions.Any(v => v <= 0))
+        {
+            return CatalogErrors.Catalog.InvalidRequest;
+        }
+
+        var metadata = await repository.GetMetadataByIdAsync(equipmentTypeId, cancellationToken);
+        if (metadata is null)
+        {
+            return CatalogErrors.EquipmentType.NotFound;
+        }
+
+        if (metadata.Status != EquipmentTypeStatus.Published && metadata.Status != EquipmentTypeStatus.Disabled)
+        {
+            return CatalogErrors.EquipmentType.NotFound;
+        }
+
+        if (!metadata.CurrentSchemaVersion.HasValue)
+        {
+            return CatalogErrors.EquipmentType.SchemaNotFound;
+        }
+
+        int currentVersion = metadata.CurrentSchemaVersion.Value;
+        var requestedVersions = request.Versions.Distinct().ToList();
+        var allVersionsToFetch = requestedVersions.Append(currentVersion).Distinct().ToList();
+
+        IReadOnlyList<EquipmentTypeSpecSchemaDto> schemas;
+        try
+        {
+            schemas = await repository.GetSpecSchemasByVersionsAsync(
+                equipmentTypeId,
+                allVersionsToFetch,
+                publishedOnly: true,
+                cancellationToken);
+        }
+        catch (JsonException ex)
+        {
+            LogSchemaCorrupted(logger, equipmentTypeId, currentVersion, ex.Message);
+            return CatalogErrors.Catalog.Uncategorized;
+        }
+
+        var schemaDict = schemas.ToDictionary(s => s.Version);
+
+        if (!schemaDict.TryGetValue(currentVersion, out var currentSchema))
+        {
+            return CatalogErrors.EquipmentType.SchemaNotFound;
+        }
+
+        foreach (int v in requestedVersions)
+        {
+            if (!schemaDict.ContainsKey(v))
+            {
+                return CatalogErrors.EquipmentType.SchemaNotFound;
+            }
+        }
+
+        foreach (var schema in schemas)
+        {
+            var defValidation = SpecSchemaDefinitionValidator.Validate(schema.Definition);
+            if (defValidation.IsFailure)
+            {
+                LogSchemaCorrupted(logger, equipmentTypeId, schema.Version, defValidation.Error.Message);
+                return CatalogErrors.Catalog.Uncategorized;
+            }
+        }
+
+        var resultItems = schemas
+            .OrderBy(s => s.Version)
+            .Select(s => new EquipmentTypeBatchSchemaItemDto(
+                s.Version,
+                s.Definition.Fields
+                    .OrderBy(f => f.DisplayOrder)
+                    .ThenBy(f => f.Key, StringComparer.Ordinal)
+                    .ToList()))
+            .ToList();
+
+        return Result.Success(new EquipmentTypeBatchSchemasResponse(
+            equipmentTypeId,
+            currentVersion,
+            resultItems));
+    }
+
     public async Task<Result<SpecificationValidationResult>> ValidateSpecificationAsync(
         Guid equipmentTypeId,
         ValidateSpecificationRequest request,

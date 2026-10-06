@@ -67,6 +67,11 @@ public interface IEquipmentTypeService
         int version,
         CancellationToken cancellationToken = default);
 
+
+    Task<Result<EquipmentTypeBatchSchemasResponse>> GetSchemasBatchAsync(
+        Guid equipmentTypeId,
+        EquipmentTypeBatchSchemasRequest request,
+        CancellationToken cancellationToken = default);
     Task<Result<SpecificationValidationResult>> ValidateSpecificationAsync(
         Guid equipmentTypeId,
         ValidateSpecificationRequest request,
