@@ -2,13 +2,13 @@ using System.Text.Json;
 using Dprental.InventoryService.Application.Kafka.Contracts;
 using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.Clients;
-using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Catalog;
 using Dprental.InventoryService.Application.DTOs.Media;
+using Dprental.InventoryService.Application.Options;
+using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Kafka.Outbox;
-using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.Services;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
@@ -33,23 +33,120 @@ public sealed class InventoryAssetServiceTests
         public Task<InventoryAsset?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(id, out var a) && a.OwnerUserId == ownerUserId ? a : null);
 
-        public Task<IReadOnlyList<InventoryAsset>> ListByOwnerAsync(Guid ownerUserId, int skip, int take, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<InventoryAsset>> SearchAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default)
         {
-            var list = Store.Values
-                .Where(a => a.OwnerUserId == ownerUserId)
+            var query = Store.Values.Where(a => a.OwnerUserId == criteria.OwnerUserId);
+
+            if (!string.IsNullOrWhiteSpace(criteria.SearchKeyword))
+            {
+                query = query.Where(a => a.Model.Contains(criteria.SearchKeyword, StringComparison.OrdinalIgnoreCase) ||
+                                         (a.SerialNumber != null && a.SerialNumber.Contains(criteria.SearchKeyword, StringComparison.OrdinalIgnoreCase)));
+            }
+
+            if (criteria.EquipmentTypeId.HasValue)
+            {
+                query = query.Where(a => a.EquipmentTypeId == criteria.EquipmentTypeId.Value);
+            }
+
+            if (criteria.BrandId.HasValue)
+            {
+                query = query.Where(a => a.BrandId == criteria.BrandId.Value);
+            }
+
+            if (criteria.AcceptingBookings.HasValue)
+            {
+                query = query.Where(a => a.AcceptingBookings == criteria.AcceptingBookings.Value);
+            }
+
+            if (criteria.ManufactureYearFrom.HasValue)
+            {
+                query = query.Where(a => a.ManufactureYear.HasValue && a.ManufactureYear.Value >= criteria.ManufactureYearFrom.Value);
+            }
+
+            if (criteria.ManufactureYearTo.HasValue)
+            {
+                query = query.Where(a => a.ManufactureYear.HasValue && a.ManufactureYear.Value <= criteria.ManufactureYearTo.Value);
+            }
+
+            if (criteria.DynamicFilters != null && criteria.DynamicFilters.Count > 0)
+            {
+                if (criteria.CompatibleSchemaVersions == null || criteria.CompatibleSchemaVersions.Count == 0)
+                {
+                    return Task.FromResult<IReadOnlyList<InventoryAsset>>(Array.Empty<InventoryAsset>());
+                }
+
+                query = query.Where(a => criteria.CompatibleSchemaVersions.Contains(a.SchemaVersion));
+            }
+
+            var list = query
                 .OrderByDescending(a => a.CreatedAt)
                 .ThenByDescending(a => a.Id)
-                .Skip(skip)
-                .Take(take)
+                .Skip(criteria.Skip)
+                .Take(criteria.Take)
                 .ToList();
+
             return Task.FromResult<IReadOnlyList<InventoryAsset>>(list);
         }
 
-        public Task<int> CountByOwnerAsync(Guid ownerUserId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Store.Values.Count(a => a.OwnerUserId == ownerUserId));
+        public Task<int> CountAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default)
+        {
+            var query = Store.Values.Where(a => a.OwnerUserId == criteria.OwnerUserId);
 
-        public Task<IReadOnlyList<InventoryAsset>> ListAllAsync(int skip, int take, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<InventoryAsset>>(Store.Values.OrderByDescending(a => a.CreatedAt).ThenByDescending(a => a.Id).Skip(skip).Take(take).ToList());
+            if (!string.IsNullOrWhiteSpace(criteria.SearchKeyword))
+            {
+                query = query.Where(a => a.Model.Contains(criteria.SearchKeyword, StringComparison.OrdinalIgnoreCase) ||
+                                         (a.SerialNumber != null && a.SerialNumber.Contains(criteria.SearchKeyword, StringComparison.OrdinalIgnoreCase)));
+            }
+
+            if (criteria.EquipmentTypeId.HasValue)
+            {
+                query = query.Where(a => a.EquipmentTypeId == criteria.EquipmentTypeId.Value);
+            }
+
+            if (criteria.BrandId.HasValue)
+            {
+                query = query.Where(a => a.BrandId == criteria.BrandId.Value);
+            }
+
+            if (criteria.AcceptingBookings.HasValue)
+            {
+                query = query.Where(a => a.AcceptingBookings == criteria.AcceptingBookings.Value);
+            }
+
+            if (criteria.ManufactureYearFrom.HasValue)
+            {
+                query = query.Where(a => a.ManufactureYear.HasValue && a.ManufactureYear.Value >= criteria.ManufactureYearFrom.Value);
+            }
+
+            if (criteria.ManufactureYearTo.HasValue)
+            {
+                query = query.Where(a => a.ManufactureYear.HasValue && a.ManufactureYear.Value <= criteria.ManufactureYearTo.Value);
+            }
+
+            if (criteria.DynamicFilters != null && criteria.DynamicFilters.Count > 0)
+            {
+                if (criteria.CompatibleSchemaVersions == null || criteria.CompatibleSchemaVersions.Count == 0)
+                {
+                    return Task.FromResult(0);
+                }
+
+                query = query.Where(a => criteria.CompatibleSchemaVersions.Contains(a.SchemaVersion));
+            }
+
+            return Task.FromResult(query.Count());
+        }
+
+        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default)
+        {
+            var query = Store.Values.Where(a => a.OwnerUserId == criteria.OwnerUserId);
+
+            if (criteria.EquipmentTypeId.HasValue)
+            {
+                query = query.Where(a => a.EquipmentTypeId == criteria.EquipmentTypeId.Value);
+            }
+
+            return Task.FromResult<IReadOnlyList<int>>(query.Select(a => a.SchemaVersion).Distinct().OrderBy(v => v).ToList());
+        }
 
         public Task<InventoryAsset?> GetCalendarSnapshotAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(assetId, out var a) ? a : null);
@@ -109,9 +206,11 @@ public sealed class InventoryAssetServiceTests
         public Func<Guid, Task<Result<CatalogEquipmentTypeResponse>>>? LookupHandler { get; set; }
         public Func<Guid, Task<Result<CatalogBrandResponse>>>? BrandHandler { get; set; }
         public Func<Guid, int, string, Task<Result>>? SpecHandler { get; set; }
+        public Func<Guid, IReadOnlyList<int>, Task<Result<CatalogBatchSchemasResponse>>>? BatchSchemasHandler { get; set; }
         public int LookupCalls { get; private set; }
         public int BrandCalls { get; private set; }
         public int SpecCalls { get; private set; }
+        public int BatchSchemasCalls { get; private set; }
 
         public Task<Result<CatalogEquipmentTypeResponse>> GetPublishedEquipmentTypeAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default)
         {
@@ -137,6 +236,17 @@ public sealed class InventoryAssetServiceTests
             return SpecHandler is not null
                 ? SpecHandler(equipmentTypeId, schemaVersion, specValues)
                 : Task.FromResult(Result.Success());
+        }
+
+        public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default)
+        {
+            BatchSchemasCalls++;
+            return BatchSchemasHandler is not null
+                ? BatchSchemasHandler(equipmentTypeId, versions)
+                : Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+                    equipmentTypeId,
+                    1,
+                    [new CatalogBatchSchemaItemResponse(1, [])])));
         }
     }
 
@@ -428,7 +538,7 @@ public sealed class InventoryAssetServiceTests
         _repo.Add(assetAdmin);
 
         var adminCaller = new TestCaller(adminId, isAdmin: true);
-        var result = await service.ListAssetsAsync(page: 1, pageSize: 20, adminCaller);
+        var result = await service.ListAssetsAsync(new ListAssetsRequest(Page: 1, PageSize: 20), adminCaller);
 
         Assert.True(result.IsSuccess);
         // Only admin's asset returned, not assetA!
@@ -806,7 +916,7 @@ public sealed class InventoryAssetServiceTests
         var service = CreateService();
         var caller = new TestCaller(Guid.NewGuid());
 
-        var result = await service.ListAssetsAsync(page: int.MaxValue, pageSize: 100, caller);
+        var result = await service.ListAssetsAsync(new ListAssetsRequest(Page: int.MaxValue, PageSize: 100), caller);
 
         Assert.True(result.IsFailure);
         Assert.Equal(ErrorType.Validation, result.Error.Type);
@@ -883,5 +993,287 @@ public sealed class InventoryAssetServiceTests
         var toggleAgain = await service.ToggleAcceptingBookingsAsync(asset.Id, toggleReq, caller);
         Assert.True(toggleAgain.IsSuccess);
         Assert.Single(writeTx.StagedOutbox); // Still 1!
+    }
+
+    [Fact]
+    public async Task ListAssetsAsync_WithoutDynamicFilters_DoesNotCallCatalog()
+    {
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+
+        var result = await service.ListAssetsAsync(new ListAssetsRequest(), caller);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(0, _catalogClient.BatchSchemasCalls);
+    }
+
+    [Fact]
+    public async Task ListAssetsAsync_EmptyFiltersStringOrArray_DoesNotCallCatalog()
+    {
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+
+        var r1 = await service.ListAssetsAsync(new ListAssetsRequest(Filters: ""), caller);
+        var r2 = await service.ListAssetsAsync(new ListAssetsRequest(Filters: "[]"), caller);
+
+        Assert.True(r1.IsSuccess);
+        Assert.True(r2.IsSuccess);
+        Assert.Equal(0, _catalogClient.BatchSchemasCalls);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("not-a-json")]
+    [InlineData("{\"field\":\"x\"}")] // Not an array
+    public async Task ListAssetsAsync_MalformedFiltersJson_Returns400(string malformed)
+    {
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+
+        var result = await service.ListAssetsAsync(new ListAssetsRequest(Filters: malformed), caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+    }
+
+    [Fact]
+    public async Task ListAssetsAsync_DynamicFiltersWithoutEquipmentTypeId_Returns400()
+    {
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+
+        var filters = "[{\"field\":\"capacityKg\",\"operator\":\"gte\",\"value\":2500}]";
+        var result = await service.ListAssetsAsync(new ListAssetsRequest(Filters: filters, EquipmentTypeId: null), caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+    }
+
+    [Fact]
+    public async Task ListAssetsAsync_DynamicFiltersExceeding20Conditions_Returns400()
+    {
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+
+        var filterItems = Enumerable.Range(1, 21)
+            .Select(i => $"{{\"field\":\"f{i}\",\"operator\":\"eq\",\"value\":\"val\"}}");
+        var filters = $"[{string.Join(",", filterItems)}]";
+
+        var result = await service.ListAssetsAsync(new ListAssetsRequest(Filters: filters, EquipmentTypeId: Guid.NewGuid()), caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+    }
+
+    [Theory]
+    [InlineData("[{\"field\":\"c\",\"operator\":\"eq\",\"value\":1,\"extra\":true}]")] // Unknown property
+    [InlineData("[{\"field\":\"c\",\"operator\":\"eq\"}]")] // Missing value
+    [InlineData("[{\"operator\":\"eq\",\"value\":1}]")] // Missing field
+    [InlineData("[{\"field\":\"\",\"operator\":\"eq\",\"value\":1}]")] // Empty field
+    [InlineData("[{\"field\":\"c\",\"operator\":\"\",\"value\":1}]")] // Empty operator
+    [InlineData("[{\"field\":\"c\",\"operator\":\"invalid_op\",\"value\":1}]")] // Disallowed operator
+    public async Task ListAssetsAsync_InvalidFilterObjectStructure_Returns400(string badFilterJson)
+    {
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+
+        var result = await service.ListAssetsAsync(new ListAssetsRequest(Filters: badFilterJson, EquipmentTypeId: Guid.NewGuid()), caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+    }
+
+    [Fact]
+    public async Task ListAssetsAsync_SearchKeywordExceeds200Chars_Returns400()
+    {
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+
+        var longKeyword = new string('a', 201);
+        var result = await service.ListAssetsAsync(new ListAssetsRequest(Q: longKeyword), caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+    }
+
+    [Fact]
+    public async Task ListAssetsAsync_EmptyUuid_Returns400()
+    {
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+
+        var r1 = await service.ListAssetsAsync(new ListAssetsRequest(EquipmentTypeId: Guid.Empty), caller);
+        var r2 = await service.ListAssetsAsync(new ListAssetsRequest(BrandId: Guid.Empty), caller);
+
+        Assert.True(r1.IsFailure);
+        Assert.True(r2.IsFailure);
+    }
+
+    [Theory]
+    [InlineData(1899, 2024)]
+    [InlineData(2024, 2050)]
+    [InlineData(2025, 2020)] // From > To
+    public async Task ListAssetsAsync_InvalidManufactureYears_Returns400(int from, int to)
+    {
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+
+        var result = await service.ListAssetsAsync(new ListAssetsRequest(ManufactureYearFrom: from, ManufactureYearTo: to), caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+    }
+
+    [Theory]
+    [InlineData("invalid_sort")]
+    [InlineData("date_desc")]
+    public async Task ListAssetsAsync_InvalidSortOption_Returns400(string sort)
+    {
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+
+        var result = await service.ListAssetsAsync(new ListAssetsRequest(Sort: sort), caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+    }
+
+    [Fact]
+    public async Task ListAssetsAsync_FieldMissingOrNotFilterableInCurrentSchema_Returns400()
+    {
+        var eqId = Guid.NewGuid();
+        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+            id,
+            1,
+            [
+                new CatalogBatchSchemaItemResponse(1, [
+                    new CatalogBatchFieldResponse("allowed", "Allowed", "text", true, false, false, 0, null, null, null, null, null) // filterable = false!
+                ])
+            ])));
+
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+
+        // 1. Missing field
+        var r1 = await service.ListAssetsAsync(new ListAssetsRequest(EquipmentTypeId: eqId, Filters: "[{\"field\":\"missing\",\"operator\":\"eq\",\"value\":\"x\"}]"), caller);
+        Assert.True(r1.IsFailure);
+        Assert.Equal(ErrorType.Validation, r1.Error.Type);
+
+        // 2. Field not filterable
+        var r2 = await service.ListAssetsAsync(new ListAssetsRequest(EquipmentTypeId: eqId, Filters: "[{\"field\":\"allowed\",\"operator\":\"eq\",\"value\":\"x\"}]"), caller);
+        Assert.True(r2.IsFailure);
+        Assert.Equal(ErrorType.Validation, r2.Error.Type);
+    }
+
+    [Fact]
+    public async Task ListAssetsAsync_EnumFilterWithInvalidOption_Returns400()
+    {
+        var eqId = Guid.NewGuid();
+        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+            id,
+            1,
+            [
+                new CatalogBatchSchemaItemResponse(1, [
+                    new CatalogBatchFieldResponse("fuelType", "Fuel", "enum", true, true, false, 0, null, null,
+                        [new CatalogBatchOptionResponse("diesel", "Diesel"), new CatalogBatchOptionResponse("electric", "Electric")],
+                        null, null)
+                ])
+            ])));
+
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+
+        var result = await service.ListAssetsAsync(new ListAssetsRequest(EquipmentTypeId: eqId, Filters: "[{\"field\":\"fuelType\",\"operator\":\"eq\",\"value\":\"gasoline\"}]"), caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+    }
+
+    [Fact]
+    public async Task ListAssetsAsync_HistoricalVersionIncompatible_ExcludedFromSearch()
+    {
+        var ownerId = Guid.NewGuid();
+        var eqId = Guid.NewGuid();
+
+        // Asset 1 has schema_version 1 (incompatible: unit differs)
+        var asset1 = InventoryAsset.Create(Guid.NewGuid(), ownerId, eqId, Guid.NewGuid(), "Model V1", 1, "{\"capacity\": 3000}", FixedNow).Value;
+        // Asset 2 has schema_version 2 (compatible)
+        var asset2 = InventoryAsset.Create(Guid.NewGuid(), ownerId, eqId, Guid.NewGuid(), "Model V2", 2, "{\"capacity\": 3000}", FixedNow).Value;
+        _repo.Add(asset1);
+        _repo.Add(asset2);
+
+        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+            id,
+            2,
+            [
+                new CatalogBatchSchemaItemResponse(1, [
+                    new CatalogBatchFieldResponse("capacity", "Cap", "number", true, true, false, 0, 0, 10000, null, "lbs", null) // unit lbs!
+                ]),
+                new CatalogBatchSchemaItemResponse(2, [
+                    new CatalogBatchFieldResponse("capacity", "Cap", "number", true, true, false, 0, 0, 10000, null, "kg", null) // unit kg!
+                ])
+            ])));
+
+        var service = CreateService();
+        var caller = new TestCaller(ownerId);
+
+        var result = await service.ListAssetsAsync(new ListAssetsRequest(
+            EquipmentTypeId: eqId,
+            Filters: "[{\"field\":\"capacity\",\"operator\":\"gte\",\"value\":2500}]"), caller);
+
+        Assert.True(result.IsSuccess);
+        // Only asset2 matched because v1 was incompatible!
+        Assert.Single(result.Value.Items);
+        Assert.Equal(asset2.Id, result.Value.Items[0].Id);
+    }
+
+    [Theory]
+    [InlineData("1e100")]
+    [InlineData("-1e100")]
+    [InlineData("1e309")]
+    public async Task ListAssetsAsync_NumberFilter_DecimalOverflow_Returns400(string overflowNumber)
+    {
+        var eqId = Guid.NewGuid();
+        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+            id,
+            1,
+            [
+                new CatalogBatchSchemaItemResponse(1, [
+                    new CatalogBatchFieldResponse("capacity", "Cap", "number", true, true, false, 0, null, null, null, null, null)
+                ])
+            ])));
+
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+
+        var filterJson = $"[{{\"field\":\"capacity\",\"operator\":\"gte\",\"value\":{overflowNumber}}}]";
+        var result = await service.ListAssetsAsync(new ListAssetsRequest(EquipmentTypeId: eqId, Filters: filterJson), caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal("INVALID_QUERY_PARAMETER", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task ListAssetsAsync_NumberFilter_ValidDecimalBoundaries_Succeeds()
+    {
+        var eqId = Guid.NewGuid();
+        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+            id,
+            1,
+            [
+                new CatalogBatchSchemaItemResponse(1, [
+                    new CatalogBatchFieldResponse("capacity", "Cap", "number", true, true, false, 0, null, null, null, null, null)
+                ])
+            ])));
+
+        var service = CreateService();
+        var caller = new TestCaller(Guid.NewGuid());
+
+        // decimal.MaxValue = 79228162514264337593543950335
+        var filterJson = "[{\"field\":\"capacity\",\"operator\":\"lte\",\"value\":79228162514264337593543950335}]";
+        var result = await service.ListAssetsAsync(new ListAssetsRequest(EquipmentTypeId: eqId, Filters: filterJson), caller);
+
+        Assert.True(result.IsSuccess);
     }
 }

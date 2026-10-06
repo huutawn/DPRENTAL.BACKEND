@@ -1,11 +1,11 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using Dprental.InventoryService.Api.Clients;
-using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.Clients;
+using Dprental.InventoryService.Application.DTOs.Catalog;
 using Dprental.InventoryService.Application.DTOs.Media;
 using Dprental.InventoryService.Application.Options;
+using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Domain.Repositories;
 using Microsoft.AspNetCore.Mvc.Testing;

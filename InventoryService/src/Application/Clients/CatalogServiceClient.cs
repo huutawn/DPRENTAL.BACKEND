@@ -1,22 +1,25 @@
+using Dprental.InventoryService.Application.DTOs.Catalog;
+using Dprental.InventoryService.Application.DTOs.Media;
+using Dprental.InventoryService.Application.DTOs.Availability;
+using Dprental.InventoryService.Application.Options;
+using Dprental.InventoryService.Application.Clients;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Dprental.InventoryService.Application.Clients;
-using Dprental.InventoryService.Application.DTOs.Catalog;
-using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Common;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Dprental.InventoryService.Api.Clients;
+namespace Dprental.InventoryService.Application.Clients;
 
 /// <summary>
 /// HTTP client tích hợp với CatalogService cho việc tra cứu loại thiết bị, thương hiệu và thẩm tra spec.
 /// </summary>
-public sealed class CatalogServiceClient : ICatalogServiceClient
+public sealed partial class CatalogServiceClient : ICatalogServiceClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -73,7 +76,7 @@ public sealed class CatalogServiceClient : ICatalogServiceClient
             return null;
         }
 
-        var authFeature = httpContext.Features.Get<Microsoft.AspNetCore.Authentication.IAuthenticateResultFeature>();
+        var authFeature = httpContext.Features.Get<IAuthenticateResultFeature>();
         if (authFeature?.AuthenticateResult is { Succeeded: true } authenticateResult &&
             authenticateResult.Properties is { } props)
         {
@@ -97,7 +100,6 @@ public sealed class CatalogServiceClient : ICatalogServiceClient
         DateTime? UpdatedAt,
         DateTime? PublishedAt
     );
-
 
     private sealed record RemoteProblemDetails(
         string? Title,
@@ -416,7 +418,7 @@ public sealed class CatalogServiceClient : ICatalogServiceClient
 
                 request.Content = new StringContent(
                     JsonSerializer.Serialize(payload, JsonOptions),
-                    System.Text.Encoding.UTF8,
+                    Encoding.UTF8,
                     "application/json");
 
                 using var response = await _httpClient.SendAsync(request, cancellationToken);

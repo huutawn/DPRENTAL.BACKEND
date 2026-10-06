@@ -2,7 +2,6 @@ namespace Dprental.InventoryService.Application.Caching;
 
 /// <summary>
 /// Cấu hình Valkey read cache cho Inventory Service theo DPR-150.
-/// Thuộc Application layer để các use cases có thể sử dụng cấu hình tập trung.
 /// </summary>
 public sealed class InventoryCacheOptions
 {

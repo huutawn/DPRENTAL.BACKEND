@@ -1,5 +1,4 @@
 using Dprental.InventoryService.Application.DTOs.Availability;
-
 namespace Dprental.InventoryService.Application.Caching;
 
 /// <summary>

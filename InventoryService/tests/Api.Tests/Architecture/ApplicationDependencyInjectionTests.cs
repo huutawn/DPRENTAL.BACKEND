@@ -1,3 +1,5 @@
+using Dprental.InventoryService.Domain.IRepositories;
+using Dprental.InventoryService.Domain.Repositories;
 using Dprental.InventoryService.Api.Controllers;
 using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.DependencyInjection;
@@ -63,5 +65,27 @@ public sealed class ApplicationDependencyInjectionTests
         Assert.NotNull(calendarController);
         var allocationController = ActivatorUtilities.CreateInstance<InventoryAllocationsController>(scope.ServiceProvider);
         Assert.NotNull(allocationController);
+    }
+
+    [Fact]
+    public void DomainRepositories_RegisteredWithExpectedScopedLifetime()
+    {
+        var services = new ServiceCollection();
+        services.AddInventoryServiceDomainRepositories("Host=localhost;Database=test;Username=test;Password=test");
+
+        var assetRepoDesc = services.SingleOrDefault(d => d.ServiceType == typeof(IInventoryAssetRepository));
+        Assert.NotNull(assetRepoDesc);
+        Assert.Equal(typeof(InventoryAssetRepository), assetRepoDesc.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, assetRepoDesc.Lifetime);
+
+        var allocRepoDesc = services.SingleOrDefault(d => d.ServiceType == typeof(IAssetAllocationRepository));
+        Assert.NotNull(allocRepoDesc);
+        Assert.Equal(typeof(AssetAllocationRepository), allocRepoDesc.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, allocRepoDesc.Lifetime);
+
+        var calRepoDesc = services.SingleOrDefault(d => d.ServiceType == typeof(ICalendarBlockRepository));
+        Assert.NotNull(calRepoDesc);
+        Assert.Equal(typeof(CalendarBlockRepository), calRepoDesc.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, calRepoDesc.Lifetime);
     }
 }

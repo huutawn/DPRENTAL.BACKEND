@@ -5,11 +5,11 @@
 | Lớp | Trách nhiệm | Không được chứa |
 | --- | --- | --- |
 | `Common` | Kiểu dữ liệu và concern dùng chung (`Result`, `Error`, enums, utility) | Nghiệp vụ đặc thù domain khác |
-| `Domain` | Entities, Value Objects, policies, repository contracts, EF Core DbContext và repositories | HTTP pipeline, controller |
-| `Application` | DTOs, Kafka transport, Security Access Evaluator và policies | Controller, HTTP pipeline, DbContext |
-| `Api` | Controllers, JWT Bearer Authentication, JWKS manager, Authorization handlers và DI | Business logic trực tiếp |
+| `Domain` | Entities, Value Objects, policies, repository contracts, EF Core persistence, Clients, Caching, Kafka | HTTP pipeline, controller, use cases |
+| `Application` | Use case services, IServices, API DTOs, Mapping, Security Access Evaluator | EF Core, Npgsql, Confluent.Kafka, StackExchange.Redis SDK |
+| `Api` | Controllers, JWT Bearer Authentication, JWKS manager, Authorization handlers, Routing và DI composition | Business logic trực tiếp |
 
-Domain sở hữu entities, value objects, domain availability policy, repository contracts, EF Core DbContext và repository implementations. API đăng ký persistence qua `AddInventoryServiceDomainRepositories`.
+Domain sở hữu entities, value objects, domain policies, repository contracts, EF Core DbContext/repositories, HTTP clients (Catalog/Media), Valkey cache adapter và Kafka infrastructure. API tham chiếu Domain để đăng ký DI composition root.
 
 ---
 
@@ -81,7 +81,7 @@ Hệ thống áp dụng cơ chế: **PostgreSQL `READ COMMITTED` transaction + a
 ### Hợp đồng API
 
 1. `POST /api/v1/inventory/assets`: Tạo mới tài sản (201 Created + Location header). Caller context bắt buộc authenticated human có permission `inventory.asset.manage` hoặc admin. Owner luôn lấy từ JWT `sub`. Bắt buộc `brandId`, `equipmentTypeId`, `model`, `schemaVersion`, `specValues`. Chặn spoofed/unknown body fields (`ownerUserId`, `organizationId`).
-2. `GET /api/v1/inventory/assets`: Danh sách phân trang (`page`, `pageSize`). Chỉ chấp nhận hai query parameters này; query khác trả 400. Luôn lọc theo JWT `sub` của caller (kể cả admin). Trả `brandId` (nullable).
+2. `GET /api/v1/inventory/assets`: Danh sách phân trang (`page`, `pageSize`, default 1 và 20, max 100). Hỗ trợ tìm kiếm substring `q` (Model/SerialNumber, ký tự `%`, `_`, `\` được xử lý literal), metadata filters (`equipmentTypeId`, `brandId`, `acceptingBookings`, `manufactureYearFrom`, `manufactureYearTo`), `sort` whitelist (`created_asc/desc`, `model_asc/desc`, `manufacture_year_asc/desc`, year null luôn ở cuối), và dynamic filters (`filters` dạng JSON array URL-encoded, tối đa 20 điều kiện). Chặn query ngoài whitelist (bao gồm `ownerUserId`) và tham số lặp lại (trả 400). Luôn cố định `OwnerUserId = JWT sub` (kể cả admin). Trả `brandId` (nullable).
 3. `GET /api/v1/inventory/assets/{id}`: Chi tiết tài sản. 404 nếu không tìm thấy, 403 nếu cross-user (Admin được bypass xem tài sản). Trả `brandId` (nullable).
 4. `PATCH /api/v1/inventory/assets/{id}`: Cập nhật thông tin với presence tracking cho `brandId`, `model`, `serialNumber`, `manufactureYear`, `thumbnailMediaId`, `schemaVersion`, `specValues`. Omitted giữ nguyên; explicit null cho phép clear `serialNumber`, `manufactureYear`, `thumbnailMediaId`. `brandId` từ chối null; domain ngăn xóa Brand đã có. Null model/schema/spec hoặc empty patch trả 400. Chặn sửa identity, owner, hoặc booking flag.
 5. `PATCH /api/v1/inventory/assets/{id}/accepting-bookings`: Bật/tắt nhận lịch: `{ "acceptingBookings": bool, "reason": string? }`. Thuộc tính `acceptingBookings` bắt buộc ở JSON boundary. Bật lại tự động xóa reason. Chỉ khi đổi cờ mới phát sự kiện `InventoryAssetAvailabilityChanged` atomically qua Outbox.

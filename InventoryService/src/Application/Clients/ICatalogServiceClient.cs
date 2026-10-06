@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.DTOs.Catalog;
 using Dprental.InventoryService.Common;
 
@@ -23,4 +24,9 @@ public interface ICatalogServiceClient
     /// Thẩm tra specification động theo schema version từ CatalogService.
     /// </summary>
     Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy batch specification schemas của loại thiết bị từ CatalogService (gồm current schema và các version được yêu cầu).
+    /// </summary>
+    Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default);
 }

@@ -1,14 +1,16 @@
+using Dprental.InventoryService.Application.DTOs.Catalog;
+using Dprental.InventoryService.Application.DTOs.Media;
+using Dprental.InventoryService.Application.DTOs.Availability;
+using Dprental.InventoryService.Application.Options;
+using Dprental.InventoryService.Application.Clients;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Dprental.InventoryService.Application.Clients;
-using Dprental.InventoryService.Application.DTOs.Media;
-using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Common;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Dprental.InventoryService.Api.Clients;
+namespace Dprental.InventoryService.Application.Clients;
 
 /// <summary>
 /// HTTP client gọi tới MediaService nội bộ bằng API key.
@@ -127,7 +129,6 @@ public sealed class MediaServiceClient : IMediaServiceClient
             request.Headers.TryAddWithoutValidation("X-Api-Key", _options.ApiKey);
             using var response = await _httpClient.SendAsync(request, cancellationToken);
 
-            // Chỉ coi 200 OK là thành công; không chấp nhận 202 Accepted
             if (response.StatusCode == HttpStatusCode.OK)
             {
                 var content = await response.Content.ReadAsStringAsync(cancellationToken);

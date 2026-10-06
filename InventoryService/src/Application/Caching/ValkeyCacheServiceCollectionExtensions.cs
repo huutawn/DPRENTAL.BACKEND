@@ -1,10 +1,10 @@
-using Dprental.InventoryService.Application.Caching;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 
-namespace Dprental.InventoryService.Api.Caching;
+namespace Dprental.InventoryService.Application.Caching;
 
 /// <summary>
 /// Mở rộng IServiceCollection đăng ký cấu hình và adapter cho Valkey Read Cache theo DPR-150.
