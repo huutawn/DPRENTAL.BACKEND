@@ -34,6 +34,11 @@ public sealed class InventoryAssetsControllerTests
                 brandId, "BR-SONY", "Sony", true)));
         public Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success());
+        public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+                equipmentTypeId,
+                1,
+                [new CatalogBatchSchemaItemResponse(1, [])])));
     }
 
     private sealed class StubMediaClient : IMediaServiceClient
@@ -222,5 +227,93 @@ public sealed class InventoryAssetsControllerTests
 
         using var response = await client.SendAsync(request);
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("?page=1&page=2")]
+    [InlineData("?q=first&q=second")]
+    [InlineData("?sort=created_asc&sort=model_desc")]
+    [InlineData("?equipmentTypeId=3fa85f64-5717-4562-b3fc-2c963f66afa6&equipmentTypeId=3fa85f64-5717-4562-b3fc-2c963f66afa6")]
+    [InlineData("?filters=[]&filters=[]")]
+    public async Task RepeatedQueryParameters_List_Returns400(string queryString)
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        var token = factory.CreateHumanToken(Guid.NewGuid(), permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"api/v1/inventory/assets{queryString}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("INVALID_QUERY_PARAMETER", body);
+    }
+
+    [Fact]
+    public async Task ServicePrincipal_List_Returns403()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        var serviceToken = factory.CreateServiceToken(Guid.NewGuid());
+        using var request = new HttpRequestMessage(HttpMethod.Get, "api/v1/inventory/assets");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
+
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task HumanWithoutManagePermission_List_Returns403()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        var humanToken = factory.CreateHumanToken(Guid.NewGuid(), permissions: []);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "api/v1/inventory/assets");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", humanToken);
+
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Admin_UsingOwnerUserIdInQuery_StillRejectedWith400()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        var adminToken = factory.CreateAdminToken(Guid.NewGuid());
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"api/v1/inventory/assets?ownerUserId={Guid.NewGuid():D}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("INVALID_QUERY_PARAMETER", body);
+    }
+
+    [Theory]
+    [InlineData("?page=bad")]
+    [InlineData("?pageSize=abc")]
+    [InlineData("?equipmentTypeId=not-a-guid")]
+    [InlineData("?page=bad&page=2")]
+    [InlineData("?ownerUserId=else&page=bad")]
+    [InlineData("?Page=1&page=2")] // casing difference duplicate
+    [InlineData("?PAGE=1&page=2")]
+    public async Task BindingErrorAndMixedQueryErrors_List_Returns400WithInvalidQueryParameter(string queryString)
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        var token = factory.CreateHumanToken(Guid.NewGuid(), permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"api/v1/inventory/assets{queryString}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("INVALID_QUERY_PARAMETER", body);
     }
 }

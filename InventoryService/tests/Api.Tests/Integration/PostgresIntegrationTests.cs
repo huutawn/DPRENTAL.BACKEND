@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Api.Infrastructure.Repositories;
 using System.Data;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Enums;
@@ -30,6 +31,7 @@ public sealed partial class PostgresIntegrationTests : IClassFixture<PostgresFix
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddInventoryServiceDomainRepositories(_connectionString);
+        services.AddScoped<IInventoryAssetRepository, InventoryAssetRepository>();
         return services.BuildServiceProvider();
     }
 

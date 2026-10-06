@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Api.Infrastructure.DependencyInjection;
 using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.DTOs.Allocations;
 using Dprental.InventoryService.Application.IServices;
@@ -35,6 +36,7 @@ public sealed class PostgresAllocationAtomicityTests : IClassFixture<PostgresFix
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddInventoryServiceDomainRepositories(_connectionString);
+        services.AddInventoryApiRepositories();
         services.AddSingleton(timeProvider ?? new TestTimeProvider(FixedNow));
         services.AddScoped<IInventoryAllocationService, InventoryAllocationService>();
         return services.BuildServiceProvider();

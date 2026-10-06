@@ -1,3 +1,4 @@
+using System.Text;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -16,7 +17,7 @@ namespace Dprental.InventoryService.Api.Clients;
 /// <summary>
 /// HTTP client tích hợp với CatalogService cho việc tra cứu loại thiết bị, thương hiệu và thẩm tra spec.
 /// </summary>
-public sealed class CatalogServiceClient : ICatalogServiceClient
+public sealed partial class CatalogServiceClient : ICatalogServiceClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Api.Infrastructure.DependencyInjection;
 using System.Text.Json;
 using Confluent.Kafka;
 using Dprental.InventoryService.Application.Kafka.Contracts;
@@ -46,6 +47,7 @@ public sealed class KafkaRealIntegrationTests : IAsyncLifetime
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddInventoryServiceDomainRepositories(_fixture.ConnectionString);
+        services.AddInventoryApiRepositories();
 
         services.Configure<KafkaOptions>(opt =>
         {

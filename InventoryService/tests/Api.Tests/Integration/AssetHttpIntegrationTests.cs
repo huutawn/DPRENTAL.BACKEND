@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Api.Infrastructure.Repositories;
 using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Application.DTOs.Catalog;
@@ -33,6 +34,7 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
         public Func<Guid, Task<Result<CatalogEquipmentTypeResponse>>>? LookupHandler { get; set; }
         public Func<Guid, Task<Result<CatalogBrandResponse>>>? BrandHandler { get; set; }
         public Func<Guid, int, string, Task<Result>>? SpecHandler { get; set; }
+        public Func<Guid, IReadOnlyList<int>, Task<Result<CatalogBatchSchemasResponse>>>? BatchSchemasHandler { get; set; }
 
         public Task<Result<CatalogEquipmentTypeResponse>> GetPublishedEquipmentTypeAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default)
         {
@@ -55,6 +57,16 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
             return SpecHandler is not null
                 ? SpecHandler(equipmentTypeId, schemaVersion, specValues)
                 : Task.FromResult(Result.Success());
+        }
+
+        public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default)
+        {
+            return BatchSchemasHandler is not null
+                ? BatchSchemasHandler(equipmentTypeId, versions)
+                : Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+                    equipmentTypeId,
+                    1,
+                    [new CatalogBatchSchemaItemResponse(1, [])])));
         }
     }
 
@@ -85,14 +97,14 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
         public Task<InventoryAsset?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default) =>
             inner.GetByIdForOwnerAsync(id, ownerUserId, cancellationToken);
 
-        public Task<IReadOnlyList<InventoryAsset>> ListByOwnerAsync(Guid ownerUserId, int skip, int take, CancellationToken cancellationToken = default) =>
-            inner.ListByOwnerAsync(ownerUserId, skip, take, cancellationToken);
+        public Task<IReadOnlyList<InventoryAsset>> SearchAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+            inner.SearchAsync(criteria, cancellationToken);
 
-        public Task<int> CountByOwnerAsync(Guid ownerUserId, CancellationToken cancellationToken = default) =>
-            inner.CountByOwnerAsync(ownerUserId, cancellationToken);
+        public Task<int> CountAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+            inner.CountAsync(criteria, cancellationToken);
 
-        public Task<IReadOnlyList<InventoryAsset>> ListAllAsync(int skip, int take, CancellationToken cancellationToken = default) =>
-            inner.ListAllAsync(skip, take, cancellationToken);
+        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsAsync(AssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+            inner.GetDistinctSchemaVersionsAsync(criteria, cancellationToken);
 
         public Task<InventoryAsset?> GetCalendarSnapshotAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
             inner.GetCalendarSnapshotAsync(assetId, startDate, endDate, cancellationToken);
@@ -132,17 +144,26 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
         return new InventoryServiceDbContext(options);
     }
 
-    private async Task<InventoryAsset> SeedAssetAsync(Guid ownerUserId, string model = "Sony FX3", string? serial = null, int? year = null, Guid? thumb = null, Guid? brandId = null)
+    private async Task<InventoryAsset> SeedAssetAsync(
+        Guid ownerUserId,
+        string model = "Sony FX3",
+        string? serial = null,
+        int? year = null,
+        Guid? thumb = null,
+        Guid? brandId = null,
+        Guid? eqTypeId = null,
+        int schemaVersion = 1,
+        string specValues = "{\"sensor\":\"Full-Frame\"}")
     {
         await using var db = CreateDbContext();
         var asset = InventoryAsset.Create(
             Guid.NewGuid(),
             ownerUserId,
-            Guid.NewGuid(),
+            eqTypeId ?? Guid.NewGuid(),
             brandId ?? Guid.NewGuid(),
             model,
-            1,
-            "{\"sensor\":\"Full-Frame\"}",
+            schemaVersion,
+            specValues,
             FixedNow,
             serial,
             year,

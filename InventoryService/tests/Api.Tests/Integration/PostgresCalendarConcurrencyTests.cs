@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Api.Infrastructure.DependencyInjection;
 using System.Globalization;
 using Dprental.InventoryService.Application.DTOs.Calendar;
 using Dprental.InventoryService.Application.DTOs.Allocations;
@@ -42,6 +43,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddInventoryServiceDomainRepositories(_connectionString);
+        services.AddInventoryApiRepositories();
         services.AddSingleton(timeProvider ?? TimeProvider.System);
         services.AddScoped<CalendarService>();
         services.AddScoped<IInventoryAllocationService, InventoryAllocationService>();

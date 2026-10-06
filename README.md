@@ -69,11 +69,55 @@ dotnet test InventoryService.sln
 | Method | Endpoint | Mô tả |
 |---|---|---|
 | `POST` | `/api/v1/inventory/assets` | Tạo mới tài sản (201 Created + Location header). Bắt buộc `brandId`, `equipmentTypeId`, `model`, `schemaVersion`, `specValues`. Owner lấy từ JWT sub. |
-| `GET` | `/api/v1/inventory/assets` | Danh sách tài sản phân trang của current user (`page` default 1, `pageSize` default 20, max 100). Chặn query khác. Trả `brandId` (nullable). |
+| `GET` | `/api/v1/inventory/assets` | Danh sách tài sản phân trang của current user (`page` default 1, `pageSize` default 20, max 100). Hỗ trợ tìm kiếm `q`, metadata filters (`equipmentTypeId`, `brandId`, `acceptingBookings`, `manufactureYearFrom`, `manufactureYearTo`), `sort` whitelist, và dynamic filters qua `filters`. Owner luôn cố định `JWT.sub`. |
 | `GET` | `/api/v1/inventory/assets/{id}` | Chi tiết tài sản (200 OK). 404 nếu không tìm thấy, 403 nếu cross-user (Admin bypass allowed). Trả `brandId` (nullable). |
 | `PATCH` | `/api/v1/inventory/assets/{id}` | Cập nhật thông tin chi tiết với presence tracking cho `brandId`, `model`, `serialNumber`, `manufactureYear`, `thumbnailMediaId`, `schemaVersion`, `specValues`. Omitted giữ nguyên; explicit null cho serial/year/thumbnail; `brandId` từ chối null; domain ngăn xóa Brand đã có. |
 | `PATCH` | `/api/v1/inventory/assets/{id}/accepting-bookings` | Bật/tắt nhận lịch: `{ "acceptingBookings": bool, "reason": string? }`. Đổi cờ phát sự kiện availability qua Outbox. |
 
+### Tìm kiếm và lọc nâng cao My Assets (`GET /api/v1/inventory/assets`)
+
+- **Phạm vi bảo vệ và Ownership**:
+  - Luôn luôn giới hạn `OwnerUserId = JWT sub`, kể cả caller là Admin.
+  - Chặn triệt để query parameter ngoài whitelist, bao gồm `ownerUserId` (trả `400 INVALID_QUERY_PARAMETER`).
+  - Từ chối tham số lặp lại (duplicate query keys) để tránh binding mơ hồ.
+  - Whitelist query parameters: `q`, `equipmentTypeId`, `brandId`, `acceptingBookings`, `manufactureYearFrom`, `manufactureYearTo`, `sort`, `filters`, `page`, `pageSize`.
+- **Tìm kiếm từ khóa (`q`)**:
+  - Tự động `trim()`, chuỗi trắng tương đương không search, tối đa 200 ký tự.
+  - Substring matching không phân biệt hoa/thường trên `Model OR SerialNumber`.
+  - Ký tự đặc biệt `%`, `_`, `\` được escape và xử lý như ký tự literal.
+- **Bộ lọc Metadata**:
+  - Nối điều kiện dạng `AND`.
+  - `equipmentTypeId` và `brandId`: UUID hợp lệ, không được rỗng (`Guid.Empty`).
+  - `manufactureYearFrom` và `manufactureYearTo`: Trong khoảng từ 1900 đến năm hiện tại theo múi giờ Việt Nam (`Asia/Ho_Chi_Minh`), `From <= To`. Phạm vi inclusive; tài sản có `manufacture_year` null sẽ không match khi có year filter.
+- **Sắp xếp (`sort`)**:
+  - Whitelist: `created_desc` (mặc định), `created_asc`, `model_desc`, `model_asc`, `manufacture_year_desc`, `manufacture_year_asc`.
+  - Mọi sort khác thêm `Id` cùng chiều làm tie-breaker.
+  - Sắp xếp theo năm sản xuất (`manufacture_year`) luôn đưa các bản ghi null về cuối cùng (`NULLS LAST`).
+- **Bộ lọc thuộc tính động (`filters`)**:
+  - Truyền qua query parameter `filters` dưới dạng URL-encoded JSON array (tối đa 20 điều kiện, nối `AND`):
+    ```json
+    [
+      {"field":"capacityKg","operator":"gte","value":2500},
+      {"field":"fuelType","operator":"eq","value":"diesel"}
+    ]
+    ```
+  - `filters=[]` tương đương không áp dụng dynamic filter.
+  - Bắt buộc phải có `equipmentTypeId` khi `filters` có điều kiện.
+  - Whitelist operators:
+    - `number`: `eq`, `gt`, `gte`, `lt`, `lte`. Value phải là JSON number.
+    - `text`: `eq`. Value phải là JSON string.
+    - `enum`: `eq`. Value phải là JSON string và là option hợp lệ trong schema.
+    - `boolean`: `eq`. Value phải là JSON boolean (`true`/`false`).
+  - Field key và giá trị text/enum so sánh chính xác, phân biệt hoa/thường.
+  - JSON không hợp lệ, null, sai cấu trúc hoặc có thuộc tính ngoài `field/operator/value` trả về `400`.
+- **Tương thích Schema và Tích hợp Catalog**:
+  - Yêu cầu không có dynamic filter sẽ **không gọi CatalogService**.
+  - Khi có dynamic filter: PostgreSQL truy vấn distinct `schema_version` của các tài sản thỏa mãn metadata filter trước pagination (không giữ transaction DB khi gọi HTTP).
+  - Inventory gọi Catalog batch schemas: `POST /api/v1/catalog/equipment-types/{id}/schemas/batch` với `{ "versions": [...] }`.
+  - Current schema quyết định field được phép filter; field thiếu hoặc `filterable=false` ở current trả Inventory `400`.
+  - Historical version chỉ match khi mọi field có `filterable=true`, cùng data type và unit với current; enum phải chứa option đang filter. Version không tương thích bị loại.
+  - Lỗi nghiệp vụ từ Catalog (404/400) được map sang `400`; timeout, lỗi mạng hoặc response hỏng/thiếu schema map sang `503 Service Unavailable`.
+  - Toàn bộ metadata và JSONB predicates thực hiện dưới PostgreSQL trước `ORDER BY` và `LIMIT/OFFSET`.
 ### Tích hợp Catalog & Media
 
 - **CatalogService**:

@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Api.Infrastructure.DependencyInjection;
 using Dprental.InventoryService.Application.Kafka.Contracts;
 using Dprental.InventoryService.Application.Kafka.Options;
 using Dprental.InventoryService.Application.Kafka.Outbox;
@@ -28,6 +29,7 @@ public sealed class PostgresKafkaFoundationIntegrationTests : IAsyncLifetime
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddInventoryServiceDomainRepositories(_fixture.ConnectionString);
+        services.AddInventoryApiRepositories();
 
         // Đăng ký Kafka options & registry
         services.Configure<KafkaOptions>(opt =>

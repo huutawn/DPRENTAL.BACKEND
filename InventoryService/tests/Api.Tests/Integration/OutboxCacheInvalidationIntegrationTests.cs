@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Api.Infrastructure.DependencyInjection;
 using System.Data;
 using Dprental.InventoryService.Api.Caching;
 using Dprental.InventoryService.Application.Caching;
@@ -50,6 +51,7 @@ public sealed class OutboxCacheInvalidationIntegrationTests : IClassFixture<Post
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddInventoryServiceDomainRepositories(_postgresConn);
+        services.AddInventoryApiRepositories();
         var sp = services.BuildServiceProvider();
         return sp.GetRequiredService<IServiceScopeFactory>();
     }

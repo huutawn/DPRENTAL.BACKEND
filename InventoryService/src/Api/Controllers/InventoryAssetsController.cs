@@ -18,6 +18,19 @@ namespace Dprental.InventoryService.Api.Controllers;
 [Route("assets")]
 public sealed class InventoryAssetsController : ControllerBase
 {
+    private static readonly HashSet<string> AllowedListQueryKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "q",
+        "equipmentTypeId",
+        "brandId",
+        "acceptingBookings",
+        "manufactureYearFrom",
+        "manufactureYearTo",
+        "sort",
+        "filters",
+        "page",
+        "pageSize"
+    };
 
     private readonly IInventoryAssetService _assetService;
     private readonly IInventoryCallerContext _callerContext;
@@ -60,8 +73,7 @@ public sealed class InventoryAssetsController : ControllerBase
     /// <summary>
     /// Lấy danh sách tài sản phân trang của người dùng hiện tại (JWT sub).
     /// </summary>
-    /// <param name="page">Số trang (mặc định: 1, >= 1).</param>
-    /// <param name="pageSize">Kích thước trang (mặc định: 20, 1 - 100).</param>
+    /// <param name="request">Yêu cầu tìm kiếm và lọc danh sách tài sản.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <returns>Danh sách tài sản phân trang.</returns>
     [HttpGet]
@@ -70,24 +82,34 @@ public sealed class InventoryAssetsController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> List(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20,
+        [FromQuery] ListAssetsRequest request,
         CancellationToken cancellationToken = default)
     {
-        // List chỉ chấp nhận page và pageSize; query khác trả 400
+        // Từ chối parameter lặp để tránh binding mơ hồ
+        foreach (var key in Request.Query.Keys)
+        {
+            if (Request.Query[key].Count > 1)
+            {
+                return this.ToProblem(Error.Validation(
+                    "INVALID_QUERY_PARAMETER",
+                    $"Query parameter '{key}' bị lặp lại. Endpoint không chấp nhận tham số trùng lặp."));
+            }
+        }
+
+        // Trả 400 cho query parameter ngoài whitelist, bao gồm ownerUserId
         var invalidQueryKeys = Request.Query.Keys
-            .Where(k => !string.Equals(k, "page", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(k, "pageSize", StringComparison.OrdinalIgnoreCase))
+            .Where(k => !AllowedListQueryKeys.Contains(k))
             .ToList();
 
         if (invalidQueryKeys.Count > 0)
         {
             return this.ToProblem(Error.Validation(
                 "INVALID_QUERY_PARAMETER",
-                $"Query parameter '{invalidQueryKeys[0]}' không được hỗ trợ. Endpoint danh sách chỉ chấp nhận 'page' và 'pageSize'."));
+                $"Query parameter '{invalidQueryKeys[0]}' không được hỗ trợ. Endpoint danh sách chỉ chấp nhận: q, equipmentTypeId, brandId, acceptingBookings, manufactureYearFrom, manufactureYearTo, sort, filters, page, pageSize."));
         }
 
-        var result = await _assetService.ListAssetsAsync(page, pageSize, _callerContext, cancellationToken);
+
+        var result = await _assetService.ListAssetsAsync(request, _callerContext, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);

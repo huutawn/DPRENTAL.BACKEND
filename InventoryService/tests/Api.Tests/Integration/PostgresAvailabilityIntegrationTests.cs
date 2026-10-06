@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Api.Infrastructure.Repositories;
 using System.Data.Common;
 using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.Caching;

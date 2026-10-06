@@ -1,3 +1,7 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Dprental.InventoryService.Api.Controllers;
+using Dprental.InventoryService.Api.Infrastructure.DependencyInjection;
 using System.IO;
 using Dprental.InventoryService.Api.Caching;
 using Dprental.InventoryService.Api.Clients;
@@ -15,6 +19,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddInventoryServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddInventoryApiRepositories();
 builder.Services.AddInventoryKafkaInfrastructure(builder.Configuration);
 
 // DPR-147: JWT Authentication & Authorization
@@ -69,6 +74,41 @@ builder.Services.AddHealthChecks()
 
 builder.Services.AddControllers(options =>
     options.Conventions.Add(new ApiRoutePrefixConvention(ApiRoutes.Prefix)));
+
+builder.Services.Configure<ApiBehaviorOptions>(options =>
+{
+    var defaultFactory = options.InvalidModelStateResponseFactory;
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var actionDesc = context.ActionDescriptor as ControllerActionDescriptor;
+        if (actionDesc != null &&
+            string.Equals(actionDesc.ControllerName, "InventoryAssets", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(actionDesc.ActionName, nameof(InventoryAssetsController.List), StringComparison.OrdinalIgnoreCase) &&
+            HttpMethods.IsGet(context.HttpContext.Request.Method))
+        {
+            var firstError = context.ModelState.Values
+                .SelectMany(v => v.Errors)
+                .Select(e => e.ErrorMessage)
+                .FirstOrDefault(msg => !string.IsNullOrWhiteSpace(msg)) ?? "Giá trị query parameter không hợp lệ.";
+
+            var problem = new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "INVALID_QUERY_PARAMETER",
+                Detail = firstError,
+                Type = "https://tools.ietf.org/html/rfc9110#section-15.5.1"
+            };
+            problem.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+
+            return new BadRequestObjectResult(problem)
+            {
+                ContentTypes = { "application/problem+json" }
+            };
+        }
+
+        return defaultFactory(context);
+    };
+});
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = context =>
     context.ProblemDetails.Extensions["traceId"] = context.HttpContext.TraceIdentifier);
