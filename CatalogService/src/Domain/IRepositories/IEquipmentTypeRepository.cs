@@ -74,6 +74,13 @@ public interface IEquipmentTypeRepository
         bool publishedOnly,
         CancellationToken cancellationToken = default) =>
         GetSpecSchemaAsync(equipmentTypeId, version, cancellationToken);
+    /// <summary>Lấy danh sách các phiên bản spec schema theo danh sách versions, tùy chọn chỉ lọc bản đã publish.</summary>
+    Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasByVersionsAsync(
+        Guid equipmentTypeId,
+        IEnumerable<int> versions,
+        bool publishedOnly,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<EquipmentTypeSpecSchemaDto>>(Array.Empty<EquipmentTypeSpecSchemaDto>());
     /// <summary>Lấy entity spec schema nháp hiện tại (PublishedAt == null) của equipment type nếu có.</summary>
     Task<EquipmentTypeSpecSchema?> GetDraftSpecSchemaEntityAsync(
         Guid equipmentTypeId,

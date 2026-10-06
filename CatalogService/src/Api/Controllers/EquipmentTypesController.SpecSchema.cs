@@ -123,6 +123,22 @@ public sealed partial class EquipmentTypesController
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
+    /// <summary>Lấy thông tin specification schemas theo batch (chỉ đọc, gồm current schema và các published version được yêu cầu).</summary>
+    [AllowAnonymous]
+    [HttpPost("{id:guid}/schemas/batch")]
+    [ProducesResponseType<EquipmentTypeBatchSchemasResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<EquipmentTypeBatchSchemasResponse>> GetSchemasBatch(
+        Guid id,
+        [FromBody] EquipmentTypeBatchSchemasRequest request,
+        CancellationToken cancellationToken)
+    {
+        Result<EquipmentTypeBatchSchemasResponse> result = await service.GetSchemasBatchAsync(id, request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
     /// <summary>Kiểm tra tính hợp lệ của specification values canonical theo schema version đã publish.</summary>
     [Authorize]
     [HttpPost("{equipmentTypeId:guid}/specifications/validate")]

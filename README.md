@@ -39,6 +39,7 @@ Catalog đọc nguyên các claim do AuthService phát hành, không tin header 
 | `GET /equipment-types`, `GET /equipment-types/{id}` | Công khai |
 | `GET /equipment-types/{id}/schema` | Công khai (Type phải Published, trả schema tại `CurrentSchemaVersion`) |
 | `GET /equipment-types/{id}/schemas/{version}` | Công khai (Type Published hoặc Disabled; chỉ trả version đã publish) |
+| `POST /equipment-types/{id}/schemas/batch` | Công khai (Type Published hoặc Disabled; body `{ "versions": [1, 2] }`, trả `equipmentTypeId`, `currentSchemaVersion`, `schemas: [{ version, fields }]`; luôn kèm current schema; không trả draft; version không hợp lệ trả 400; không tồn tại trả 404) |
 | `GET /brands`, `GET /brands/{id}` | Công khai (chỉ active; inactive hoặc không tồn tại trả `404`) |
 | `GET /admin/brands` | Policy `CatalogBrandManage`: role `adm` (active và inactive, lọc `isActive`) |
 | `GET /admin/brands/{id}` | Policy `CatalogBrandManage`: role `adm` (đọc mọi trạng thái) |

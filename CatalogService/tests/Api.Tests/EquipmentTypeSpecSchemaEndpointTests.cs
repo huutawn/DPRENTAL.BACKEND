@@ -1166,4 +1166,179 @@ public sealed class EquipmentTypeSpecSchemaEndpointTests : IAsyncLifetime
         var svcRes = await client.SendAsync(svcReq);
         Assert.Equal(HttpStatusCode.Forbidden, svcRes.StatusCode);
     }
+
+    [Fact]
+    public async Task GetSchemasBatch_PublishedEquipmentType_ReturnsCurrentAndRequestedVersions_200()
+    {
+        ClearAuthentication();
+        var eq = await CreateEquipmentTypeAsync("BATCH-PUB-1", withPublishedSchema: true);
+        eq.Publish(DateTime.UtcNow);
+        await dbContext.SaveChangesAsync();
+        // Add a second published schema version (version 2)
+        var schemaV2 = EquipmentTypeSpecSchema.CreatePublished(
+            Guid.NewGuid(),
+            eq.Id,
+            2,
+            new EquipmentTypeSpecDefinition
+            {
+                Fields =
+                [
+                    new EquipmentTypeSpecField { Key = "defaultField", Label = "Mặc định", DataType = "text", Filterable = true },
+                    new EquipmentTypeSpecField { Key = "capacityKg", Label = "Tải trọng", DataType = "number", Filterable = true }
+                ]
+            },
+            DateTime.UtcNow,
+            DateTime.UtcNow);
+        dbContext.EquipmentTypeSpecSchemas.Add(schemaV2);
+        eq.ApplyPublishedSchema(schemaV2, DateTime.UtcNow);
+        await dbContext.SaveChangesAsync();
+
+        // Request version 1 while current is version 2
+        var requestPayload = new { versions = new[] { 1 } };
+        var response = await client.PostAsJsonAsync($"api/v1/catalog/equipment-types/{eq.Id}/schemas/batch", requestPayload);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var content = await response.Content.ReadFromJsonAsync<EquipmentTypeBatchSchemasResponse>();
+        Assert.NotNull(content);
+        Assert.Equal(eq.Id, content.EquipmentTypeId);
+        Assert.Equal(2, content.CurrentSchemaVersion);
+        Assert.Equal(2, content.Schemas.Count);
+        Assert.Contains(content.Schemas, s => s.Version == 1);
+        Assert.Contains(content.Schemas, s => s.Version == 2);
+    }
+
+    [Fact]
+    public async Task GetSchemasBatch_EmptyVersionsArray_ReturnsOnlyCurrentSchema_200()
+    {
+        ClearAuthentication();
+        var eq = await CreateEquipmentTypeAsync("BATCH-EMPTY-VERSIONS", withPublishedSchema: true);
+        eq.Publish(DateTime.UtcNow);
+        await dbContext.SaveChangesAsync();
+        var requestPayload = new { versions = Array.Empty<int>() };
+        var response = await client.PostAsJsonAsync($"api/v1/catalog/equipment-types/{eq.Id}/schemas/batch", requestPayload);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var content = await response.Content.ReadFromJsonAsync<EquipmentTypeBatchSchemasResponse>();
+        Assert.NotNull(content);
+        Assert.Equal(eq.Id, content.EquipmentTypeId);
+        Assert.Equal(1, content.CurrentSchemaVersion);
+        Assert.Single(content.Schemas);
+        Assert.Equal(1, content.Schemas[0].Version);
+    }
+
+    [Fact]
+    public async Task GetSchemasBatch_DraftSchemaRequested_Returns404_NeverExposesDraft()
+    {
+        ClearAuthentication();
+        var eq = await CreateEquipmentTypeAsync("BATCH-DRAFT-REQ", withPublishedSchema: true);
+
+        // Add draft schema (version 2)
+        var draft = EquipmentTypeSpecSchema.CreateDraft(
+            eq.Id,
+            2,
+            new EquipmentTypeSpecDefinition
+            {
+                Fields = [new EquipmentTypeSpecField { Key = "draftField", Label = "Nháp", DataType = "text" }]
+            },
+            DateTime.UtcNow);
+        dbContext.EquipmentTypeSpecSchemas.Add(draft);
+        await dbContext.SaveChangesAsync();
+
+        // Requesting version 2 (draft) must return 404
+        var requestPayload = new { versions = new[] { 2 } };
+        var response = await client.PostAsJsonAsync($"api/v1/catalog/equipment-types/{eq.Id}/schemas/batch", requestPayload);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetSchemasBatch_DisabledEquipmentType_ReturnsSchemas_200()
+    {
+        ClearAuthentication();
+        var eq = await CreateEquipmentTypeAsync("BATCH-DISABLED-TYPE", withPublishedSchema: true);
+        eq.Publish(DateTime.UtcNow);
+        eq.Disable(DateTime.UtcNow);
+        await dbContext.SaveChangesAsync();
+
+        var requestPayload = new { versions = new[] { 1 } };
+        var response = await client.PostAsJsonAsync($"api/v1/catalog/equipment-types/{eq.Id}/schemas/batch", requestPayload);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var content = await response.Content.ReadFromJsonAsync<EquipmentTypeBatchSchemasResponse>();
+        Assert.NotNull(content);
+        Assert.Equal(eq.Id, content.EquipmentTypeId);
+        Assert.Single(content.Schemas);
+    }
+
+    [Fact]
+    public async Task GetSchemasBatch_DraftEquipmentType_Returns404()
+    {
+        ClearAuthentication();
+        var eq = await CreateEquipmentTypeAsync("BATCH-DRAFT-TYPE", withPublishedSchema: false);
+
+        var requestPayload = new { versions = new[] { 1 } };
+        var response = await client.PostAsJsonAsync($"api/v1/catalog/equipment-types/{eq.Id}/schemas/batch", requestPayload);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetSchemasBatch_NonExistentEquipmentType_Returns404()
+    {
+        ClearAuthentication();
+        var requestPayload = new { versions = new[] { 1 } };
+        var response = await client.PostAsJsonAsync($"api/v1/catalog/equipment-types/{Guid.NewGuid()}/schemas/batch", requestPayload);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetSchemasBatch_NonExistentVersion_Returns404()
+    {
+        ClearAuthentication();
+        var eq = await CreateEquipmentTypeAsync("BATCH-NONEXISTENT-V", withPublishedSchema: true);
+
+        var requestPayload = new { versions = new[] { 99 } };
+        var response = await client.PostAsJsonAsync($"api/v1/catalog/equipment-types/{eq.Id}/schemas/batch", requestPayload);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(-100)]
+    public async Task GetSchemasBatch_InvalidVersion_Returns400(int invalidVersion)
+    {
+        ClearAuthentication();
+        var eq = await CreateEquipmentTypeAsync($"BATCH-INVALID-V-{invalidVersion}", withPublishedSchema: true);
+
+        var requestPayload = new { versions = new[] { invalidVersion } };
+        var response = await client.PostAsJsonAsync($"api/v1/catalog/equipment-types/{eq.Id}/schemas/batch", requestPayload);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetSchemasBatch_AdminCaller_StillNeverExposesDraft_Returns404()
+    {
+        Authenticate(AdminToken);
+        var eq = await CreateEquipmentTypeAsync("BATCH-ADMIN-DRAFT", withPublishedSchema: true);
+
+        var draft = EquipmentTypeSpecSchema.CreateDraft(
+            eq.Id,
+            2,
+            new EquipmentTypeSpecDefinition
+            {
+                Fields = [new EquipmentTypeSpecField { Key = "draftField", Label = "Nháp", DataType = "text" }]
+            },
+            DateTime.UtcNow);
+        dbContext.EquipmentTypeSpecSchemas.Add(draft);
+        await dbContext.SaveChangesAsync();
+
+        var requestPayload = new { versions = new[] { 2 } };
+        var response = await client.PostAsJsonAsync($"api/v1/catalog/equipment-types/{eq.Id}/schemas/batch", requestPayload);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
 }
