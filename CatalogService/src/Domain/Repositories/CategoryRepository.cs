@@ -1,4 +1,5 @@
-﻿using Dprental.CatalogService.Domain.Entities;
+﻿using Dprental.CatalogService.Common;
+using Dprental.CatalogService.Domain.Entities;
 using Dprental.CatalogService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,6 +14,43 @@ public class CategoryRepository : ICategoryRepository
         _dbContext = dbContext;
     }
 
+    public async Task<PagedResult<Category>> SearchAsync(CategorySearchQuery query, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var dbQuery = _dbContext.Categories.AsNoTracking();
+
+        if (query.IsActive.HasValue)
+        {
+            dbQuery = dbQuery.Where(c => c.IsActive == query.IsActive.Value);
+        }
+
+        var trimmedKeyword = query.Keyword?.Trim();
+        if (!string.IsNullOrWhiteSpace(trimmedKeyword))
+        {
+            dbQuery = dbQuery.Where(c =>
+                EF.Functions.ILike(c.Name, $"%{trimmedKeyword}%") ||
+                EF.Functions.ILike(c.Slug, $"%{trimmedKeyword}%"));
+        }
+
+        var totalCount = await dbQuery.CountAsync(cancellationToken);
+
+        string sort = query.Sort?.Trim().ToLowerInvariant() ?? string.Empty;
+        dbQuery = sort switch
+        {
+            "name_asc" => dbQuery.OrderBy(c => c.Name).ThenBy(c => c.Id),
+            "name_desc" => dbQuery.OrderByDescending(c => c.Name).ThenBy(c => c.Id),
+            _ => dbQuery.OrderByDescending(c => c.CreatedAtUtc).ThenBy(c => c.Id)
+        };
+
+        var skip = (query.Page - 1) * query.PageSize;
+        var items = await dbQuery
+            .Skip(skip)
+            .Take(query.PageSize)
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<Category>(items, query.Page, query.PageSize, totalCount);
+    }
     public async Task<Category?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         // Chú ý: Không dùng AsNoTracking() ở đây vì ta cần update entity này
