@@ -1,4 +1,5 @@
 using Dprental.CatalogService.Common;
+using Dprental.CatalogService.Common.Enums;
 using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
 using Dprental.CatalogService.Domain.Entities;
 
@@ -10,6 +11,16 @@ public interface IEquipmentTypeRepository
     Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(
         GetEquipmentTypesRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Danh sách quản trị: đọc mọi trạng thái, hoặc chỉ các trạng thái trong <paramref name="statuses"/> nếu khác rỗng.
+    /// Filter, sort ổn định, phân trang và projection đều ở database.
+    /// </summary>
+    Task<PagedResult<EquipmentTypeAdminListItemDto>> SearchAdminAsync(
+        GetAdminEquipmentTypesRequest request,
+        IReadOnlyList<EquipmentTypeStatus> statuses,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new PagedResult<EquipmentTypeAdminListItemDto>([], request.Page, request.PageSize, 0));
 
     /// <summary>Trả null nếu không tồn tại hoặc không Published (Draft/Disabled không lộ ra khi đoán id).</summary>
     Task<EquipmentTypeDetailDto?> GetPublishedByIdAsync(

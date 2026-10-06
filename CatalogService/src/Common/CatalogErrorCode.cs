@@ -16,6 +16,7 @@ public static class CatalogErrorCode
         public const string InvalidKeyword = "EquipmentType.InvalidKeyword";
         public const string InvalidSort = "EquipmentType.InvalidSort";
         public const string InvalidQuery = "EquipmentType.InvalidQuery";
+        public const string InvalidStatus = "EquipmentType.InvalidStatus";
         public const string DuplicateCode = "EquipmentType.DuplicateCode";
         public const string InvalidStateTransition = "EquipmentType.InvalidStateTransition";
         public const string ConcurrencyConflict = "EquipmentType.ConcurrencyConflict";

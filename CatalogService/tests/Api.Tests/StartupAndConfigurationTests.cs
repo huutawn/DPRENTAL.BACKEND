@@ -186,6 +186,41 @@ public sealed class StartupAndConfigurationTests
     }
 
     [Fact]
+    public async Task SwaggerDocument_AdminEquipmentTypeStatusFilter_ListsAllowedValues()
+    {
+        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
+                builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("Auth:Jwt:Issuer", TestJwtHelper.DefaultIssuer);
+                builder.UseSetting("Auth:Jwt:Audience", TestJwtHelper.DefaultAudience);
+                builder.UseTestJwks();
+            });
+
+        using HttpClient client = factory.CreateClient();
+        using HttpResponseMessage response = await client.GetAsync("/swagger/v1/swagger.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        JsonElement statusSchema = doc.RootElement
+            .GetProperty("paths")
+            .GetProperty("/api/v1/catalog/admin/equipment-types")
+            .GetProperty("get")
+            .GetProperty("parameters")
+            .EnumerateArray()
+            .Single(parameter => string.Equals(parameter.GetProperty("name").GetString(), "status", StringComparison.OrdinalIgnoreCase))
+            .GetProperty("schema");
+
+        // Enum đơn (không phải array) để Swagger UI hiện dropdown thay vì hộp chọn nhiều dòng.
+        Assert.Equal("string", statusSchema.GetProperty("type").GetString());
+        Assert.Equal(
+            ["Draft", "Published", "Disabled"],
+            statusSchema.GetProperty("enum").EnumerateArray().Select(value => value.GetString()));
+    }
+
+    [Fact]
     public async Task SwaggerDocument_ContainsSixEquipmentTypeEndpoints_AndNoLegacyEquipments()
     {
         using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
@@ -217,7 +252,7 @@ public sealed class StartupAndConfigurationTests
                 }
             }
         }
-        Assert.Equal(15, equipmentTypeEndpointsCount);
+        Assert.Equal(17, equipmentTypeEndpointsCount);
         Assert.DoesNotContain("/api/v1/catalog/equipments", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("dailyPrice", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("regionId", json, StringComparison.OrdinalIgnoreCase);

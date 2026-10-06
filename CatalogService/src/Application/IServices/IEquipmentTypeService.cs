@@ -10,6 +10,16 @@ public interface IEquipmentTypeService
         GetEquipmentTypesRequest request,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Danh sách quản trị ở mọi trạng thái, có lọc theo status.</summary>
+    Task<Result<PagedResult<EquipmentTypeAdminListItemDto>>> SearchAdminAsync(
+        GetAdminEquipmentTypesRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Chi tiết cho quản trị ở mọi trạng thái, kể cả Draft và Disabled.</summary>
+    Task<Result<EquipmentTypeDetailDto>> GetAdminDetailAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
+
     Task<Result<EquipmentTypeDetailDto>> GetPublishedDetailAsync(
         Guid id,
         CancellationToken cancellationToken = default);

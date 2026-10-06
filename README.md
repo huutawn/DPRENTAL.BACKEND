@@ -47,6 +47,8 @@ Catalog đọc nguyên các claim do AuthService phát hành, không tin header 
 | `POST /brands/{id}/disable`, `POST /brands/{id}/enable` | Policy `CatalogBrandManage`: role `adm` (idempotent) |
 | `POST /equipment-types/{id}/specifications/validate` | Authenticated (User JWT hoặc Service token; type Published, schema đã publish; Admin không được bypass) |
 | `POST /categories`, `PATCH /categories/{id}` | Policy `CatalogCategoryManage`: role `adm` |
+| `GET /admin/equipment-types` | Policy `CatalogEquipmentManage`: role `adm`. Danh sách phân trang ở mọi trạng thái; lọc `status` (`Draft`, `Published`, `Disabled`, lặp lại tham số để lấy nhiều trạng thái), `keyword`, `categoryId`, `sort`, `page`, `pageSize` |
+| `GET /admin/equipment-types/{id}` | Policy `CatalogEquipmentManage`: role `adm`. Chi tiết ở mọi trạng thái, kể cả Draft và Disabled |
 | `POST /equipment-types`, `PATCH /equipment-types/{id}` | Policy `CatalogEquipmentManage`: role `adm` |
 | `POST /equipment-types/{id}/publish`, `POST /equipment-types/{id}/disable` | Policy `CatalogEquipmentManage`: role `adm` |
 | `GET /equipment-types/{id}/spec-schemas`, `POST /equipment-types/{id}/spec-schemas` | Policy `CatalogEquipmentManage`: role `adm` |
