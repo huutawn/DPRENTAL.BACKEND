@@ -50,35 +50,15 @@ public partial class EquipmentTypeRepository(CatalogServiceDbContext dbContext) 
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var query = dbContext.EquipmentTypes.AsNoTracking()
-            .Where(e => e.Status == EquipmentTypeStatus.Published);
-
-        if (!string.IsNullOrWhiteSpace(request.Keyword))
-        {
-            var keyword = request.Keyword.Trim();
-            query = query.Where(e =>
-                EF.Functions.ILike(e.Code, $"%{keyword}%") ||
-                EF.Functions.ILike(e.Name, $"%{keyword}%") ||
-                (e.Description != null && EF.Functions.ILike(e.Description, $"%{keyword}%")));
-        }
-
-        if (request.CategoryId.HasValue)
-        {
-            query = query.Where(e => e.Categories.Any(c => c.Id == request.CategoryId.Value));
-        }
+        var query = ApplyFilters(
+            dbContext.EquipmentTypes.AsNoTracking().Where(e => e.Status == EquipmentTypeStatus.Published),
+            request.Keyword,
+            request.CategoryId);
 
         var totalCount = await query.CountAsync(cancellationToken);
 
-        string sort = request.Sort?.Trim().ToLowerInvariant() ?? string.Empty;
-        query = sort switch
-        {
-            "name_asc" => query.OrderBy(e => e.Name).ThenBy(e => e.Id),
-            "name_desc" => query.OrderByDescending(e => e.Name).ThenBy(e => e.Id),
-            _ => query.OrderByDescending(e => e.CreatedAt).ThenBy(e => e.Id)
-        };
-
         var skip = (request.Page - 1) * request.PageSize;
-        var items = await query
+        var items = await ApplySort(query, request.Sort)
             .Skip(skip)
             .Take(request.PageSize)
             .Select(e => new EquipmentTypeListItemDto(
@@ -104,6 +84,81 @@ public partial class EquipmentTypeRepository(CatalogServiceDbContext dbContext) 
 
         return new PagedResult<EquipmentTypeListItemDto>(items, request.Page, request.PageSize, totalCount);
     }
+
+    public async Task<PagedResult<EquipmentTypeAdminListItemDto>> SearchAdminAsync(
+        GetAdminEquipmentTypesRequest request,
+        IReadOnlyList<EquipmentTypeStatus> statuses,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(statuses);
+
+        var query = ApplyFilters(dbContext.EquipmentTypes.AsNoTracking(), request.Keyword, request.CategoryId);
+        if (statuses.Count > 0)
+        {
+            query = query.Where(e => statuses.Contains(e.Status));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var skip = (request.Page - 1) * request.PageSize;
+        var items = await ApplySort(query, request.Sort)
+            .Skip(skip)
+            .Take(request.PageSize)
+            .Select(e => new EquipmentTypeAdminListItemDto(
+                e.Id,
+                e.Code,
+                e.Name,
+                e.Description,
+                e.Status,
+                e.CreatedAt,
+                e.UpdatedAt,
+                e.PublishedAt,
+                e.Categories
+                    .OrderBy(c => c.Name)
+                    .ThenBy(c => c.Id)
+                    .Select(c => new CategoryDto(c.Id, c.Name, c.ImageMediaId, null))
+                    .ToList(),
+                e.Media
+                    .OrderByDescending(m => m.IsThumbnail)
+                    .ThenBy(m => m.DisplayOrder)
+                    .ThenBy(m => m.Id)
+                    .Select(m => (Guid?)m.MediaId)
+                    .FirstOrDefault(),
+                null,
+                e.CurrentSchemaVersion
+            ))
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<EquipmentTypeAdminListItemDto>(items, request.Page, request.PageSize, totalCount);
+    }
+
+    private static IQueryable<EquipmentType> ApplyFilters(IQueryable<EquipmentType> query, string? keyword, Guid? categoryId)
+    {
+        if (!string.IsNullOrWhiteSpace(keyword))
+        {
+            var trimmedKeyword = keyword.Trim();
+            query = query.Where(e =>
+                EF.Functions.ILike(e.Code, $"%{trimmedKeyword}%") ||
+                EF.Functions.ILike(e.Name, $"%{trimmedKeyword}%") ||
+                (e.Description != null && EF.Functions.ILike(e.Description, $"%{trimmedKeyword}%")));
+        }
+
+        if (categoryId.HasValue)
+        {
+            query = query.Where(e => e.Categories.Any(c => c.Id == categoryId.Value));
+        }
+
+        return query;
+    }
+
+    private static IQueryable<EquipmentType> ApplySort(IQueryable<EquipmentType> query, string? sort) =>
+        (sort?.Trim().ToLowerInvariant() ?? string.Empty) switch
+        {
+            "name_asc" => query.OrderBy(e => e.Name).ThenBy(e => e.Id),
+            "name_desc" => query.OrderByDescending(e => e.Name).ThenBy(e => e.Id),
+            _ => query.OrderByDescending(e => e.CreatedAt).ThenBy(e => e.Id)
+        };
 
     public async Task<EquipmentTypeDetailDto?> GetPublishedByIdAsync(
         Guid id,

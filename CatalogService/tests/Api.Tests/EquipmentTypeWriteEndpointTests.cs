@@ -277,6 +277,219 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
         Assert.Equal(HttpStatusCode.Forbidden, patchRes.StatusCode);
     }
 
+    private const string AdminListUrl = "/api/v1/catalog/admin/equipment-types";
+
+    /// <summary>Tạo ba loại thiết bị ở ba trạng thái Draft, Published, Disabled qua đúng luồng publish/disable.</summary>
+    private async Task<(Guid Draft, Guid Published, Guid Disabled)> SeedOneOfEachStatusAsync()
+    {
+        Guid draft = await SeedEquipmentTypeAsync("LIST-DRAFT");
+        Guid published = await SeedEquipmentTypeAsync("LIST-PUBLISHED");
+        Guid disabled = await SeedEquipmentTypeAsync("LIST-DISABLED");
+
+        Authenticate(AdminToken);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/v1/catalog/equipment-types/{published}/publish", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/v1/catalog/equipment-types/{disabled}/publish", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/v1/catalog/equipment-types/{disabled}/disable", null)).StatusCode);
+
+        return (draft, published, disabled);
+    }
+
+    private async Task<PagedResult<EquipmentTypeAdminListItemDto>> GetAdminListAsync(string query = "")
+    {
+        var response = await client.GetAsync(AdminListUrl + query);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var page = await response.Content.ReadFromJsonAsync<PagedResult<EquipmentTypeAdminListItemDto>>();
+        Assert.NotNull(page);
+        return page;
+    }
+
+    [Fact]
+    public async Task AdminList_Anonymous_Returns401()
+    {
+        var response = await client.GetAsync(AdminListUrl);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("own", null)]
+    [InlineData("mem", null)]
+    [InlineData("cus", null)]
+    [InlineData("adm", "svc")]
+    public async Task AdminList_RejectsNonAdminRoles_AndServiceTokens(string role, string? tokenUse)
+    {
+        Authenticate(TestJwtHelper.GenerateToken(
+            sub: Guid.NewGuid().ToString(),
+            sid: Guid.NewGuid().ToString(),
+            role: role,
+            tokenUse: tokenUse));
+
+        var response = await client.GetAsync(AdminListUrl);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AdminList_WithoutStatusFilter_ReturnsEveryStatus_WithLifecycleFields()
+    {
+        var ids = await SeedOneOfEachStatusAsync();
+
+        PagedResult<EquipmentTypeAdminListItemDto> page = await GetAdminListAsync();
+
+        Assert.Equal(3, page.TotalCount);
+        Assert.Equal(EquipmentTypeStatus.Draft, page.Items.Single(i => i.Id == ids.Draft).Status);
+        Assert.Null(page.Items.Single(i => i.Id == ids.Draft).PublishedAt);
+
+        EquipmentTypeAdminListItemDto published = page.Items.Single(i => i.Id == ids.Published);
+        Assert.Equal(EquipmentTypeStatus.Published, published.Status);
+        Assert.NotNull(published.PublishedAt);
+        Assert.Equal("LIST-PUBLISHED", published.Code);
+        Assert.Single(published.Categories);
+
+        Assert.Equal(EquipmentTypeStatus.Disabled, page.Items.Single(i => i.Id == ids.Disabled).Status);
+    }
+
+    [Theory]
+    [InlineData("?status=Draft", "LIST-DRAFT")]
+    [InlineData("?status=Published", "LIST-PUBLISHED")]
+    [InlineData("?status=Disabled", "LIST-DISABLED")]
+    [InlineData("?status=disabled", "LIST-DISABLED")]
+    [InlineData("?status=2", "LIST-DISABLED")]
+    [InlineData("?status=Published&status=Disabled", "LIST-DISABLED,LIST-PUBLISHED")]
+    [InlineData("?status=Draft&status=Published&status=Disabled", "LIST-DISABLED,LIST-DRAFT,LIST-PUBLISHED")]
+    public async Task AdminList_FiltersByStatus(string query, string expectedCodes)
+    {
+        await SeedOneOfEachStatusAsync();
+
+        PagedResult<EquipmentTypeAdminListItemDto> page = await GetAdminListAsync(query);
+
+        Assert.Equal(expectedCodes.Split(','), page.Items.Select(i => i.Code).Order());
+        Assert.Equal(page.Items.Count, page.TotalCount);
+    }
+
+    [Fact]
+    public async Task AdminList_CombinesStatusWithKeywordAndPaging()
+    {
+        await SeedOneOfEachStatusAsync();
+
+        PagedResult<EquipmentTypeAdminListItemDto> byKeyword = await GetAdminListAsync("?status=Published&status=Disabled&keyword=LIST-PUB");
+        Assert.Equal("LIST-PUBLISHED", Assert.Single(byKeyword.Items).Code);
+
+        PagedResult<EquipmentTypeAdminListItemDto> firstPage = await GetAdminListAsync("?pageSize=2&sort=name_asc");
+        Assert.Equal(3, firstPage.TotalCount);
+        Assert.Equal(2, firstPage.TotalPages);
+        Assert.Equal(2, firstPage.Items.Count);
+
+        PagedResult<EquipmentTypeAdminListItemDto> secondPage = await GetAdminListAsync("?pageSize=2&sort=name_asc&page=2");
+        Assert.Single(secondPage.Items);
+        Assert.DoesNotContain(secondPage.Items[0].Id, firstPage.Items.Select(i => i.Id));
+    }
+
+    [Theory]
+    [InlineData("?status=Hidden", CatalogErrorCode.EquipmentType.InvalidStatus)]
+    [InlineData("?status=7", CatalogErrorCode.EquipmentType.InvalidStatus)]
+    [InlineData("?status=", CatalogErrorCode.EquipmentType.InvalidStatus)]
+    [InlineData("?status=Published&status=Hidden", CatalogErrorCode.EquipmentType.InvalidStatus)]
+    [InlineData("?isActive=true", CatalogErrorCode.EquipmentType.InvalidQuery)]
+    [InlineData("?sort=random", CatalogErrorCode.EquipmentType.InvalidSort)]
+    [InlineData("?pageSize=101", CatalogErrorCode.Paging.InvalidPageSize)]
+    [InlineData("?page=0", CatalogErrorCode.Paging.InvalidPage)]
+    public async Task AdminList_RejectsInvalidQuery_With400(string query, string expectedErrorCode)
+    {
+        Authenticate(AdminToken);
+
+        var response = await client.GetAsync(AdminListUrl + query);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(expectedErrorCode, problem.GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task AdminDetail_Anonymous_Returns401()
+    {
+        var response = await client.GetAsync($"{AdminListUrl}/{Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("own", null)]
+    [InlineData("mem", null)]
+    [InlineData("cus", null)]
+    [InlineData("adm", "svc")]
+    public async Task AdminDetail_RejectsNonAdminRoles_AndServiceTokens(string role, string? tokenUse)
+    {
+        Guid id = await SeedEquipmentTypeAsync("DETAIL-ROLE");
+        Authenticate(TestJwtHelper.GenerateToken(
+            sub: Guid.NewGuid().ToString(),
+            sid: Guid.NewGuid().ToString(),
+            role: role,
+            tokenUse: tokenUse));
+
+        var response = await client.GetAsync($"{AdminListUrl}/{id}");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AdminDetail_ReturnsEveryStatus_WhilePublicDetailHidesDraftAndDisabled()
+    {
+        var ids = await SeedOneOfEachStatusAsync();
+        (Guid Id, EquipmentTypeStatus Status)[] expected =
+        [
+            (ids.Draft, EquipmentTypeStatus.Draft),
+            (ids.Published, EquipmentTypeStatus.Published),
+            (ids.Disabled, EquipmentTypeStatus.Disabled)
+        ];
+
+        foreach (var (id, status) in expected)
+        {
+            var response = await client.GetAsync($"{AdminListUrl}/{id}");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var detail = await response.Content.ReadFromJsonAsync<EquipmentTypeDetailDto>();
+            Assert.Equal(id, detail!.Id);
+            Assert.Equal(status, detail.Status);
+            Assert.Single(detail.Categories);
+            Assert.Equal(1, detail.CurrentSchemaVersion);
+        }
+
+        client.DefaultRequestHeaders.Authorization = null;
+        foreach (var (id, status) in expected)
+        {
+            var response = await client.GetAsync($"/api/v1/catalog/equipment-types/{id}");
+            Assert.Equal(
+                status == EquipmentTypeStatus.Published ? HttpStatusCode.OK : HttpStatusCode.NotFound,
+                response.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task AdminDetail_UnknownId_Returns404()
+    {
+        Authenticate(AdminToken);
+
+        var response = await client.GetAsync($"{AdminListUrl}/{Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(CatalogErrorCode.EquipmentType.NotFound, problem.GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task PublicList_StillReturnsOnlyPublished_AndRejectsStatusFilter()
+    {
+        var ids = await SeedOneOfEachStatusAsync();
+        client.DefaultRequestHeaders.Authorization = null;
+
+        var publicResponse = await client.GetAsync("/api/v1/catalog/equipment-types");
+        var publicPage = await publicResponse.Content.ReadFromJsonAsync<PagedResult<EquipmentTypeListItemDto>>();
+        Assert.Equal(ids.Published, Assert.Single(publicPage!.Items).Id);
+
+        var filtered = await client.GetAsync("/api/v1/catalog/equipment-types?status=Draft");
+        Assert.Equal(HttpStatusCode.BadRequest, filtered.StatusCode);
+    }
+
     [Fact]
     public async Task IdentityHeaders_DoNotGrantOrganizationAccess()
     {

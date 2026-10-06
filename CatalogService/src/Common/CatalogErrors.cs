@@ -29,6 +29,9 @@ public static class CatalogErrors
         public static readonly Error InvalidQuery =
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidQuery, "Tham số truy vấn không hợp lệ.");
 
+        public static readonly Error InvalidStatus =
+            Error.Validation(CatalogErrorCode.EquipmentType.InvalidStatus, "status chỉ nhận: Draft, Published, Disabled.");
+
         public static readonly Error DuplicateCode =
             Error.Conflict(CatalogErrorCode.EquipmentType.DuplicateCode, "Mã thiết bị đã tồn tại trong Catalog.");
 

@@ -1,4 +1,5 @@
 using Dprental.CatalogService.Api.Filters;
+using Dprental.CatalogService.Api.Routing;
 using Dprental.CatalogService.Api.Security;
 using Dprental.CatalogService.Application.IServices;
 using Dprental.CatalogService.Common;
@@ -23,6 +24,11 @@ public sealed partial class EquipmentTypesController(IEquipmentTypeService servi
         "sort"
     };
 
+    private static readonly HashSet<string> AdminAllowedQueryKeys = new(AllowedQueryKeys, StringComparer.OrdinalIgnoreCase)
+    {
+        "status"
+    };
+
     /// <summary>Tìm kiếm và phân trang loại thiết bị đã công khai.</summary>
     [AllowAnonymous]
     [HttpGet]
@@ -38,6 +44,44 @@ public sealed partial class EquipmentTypesController(IEquipmentTypeService servi
         }
 
         Result<PagedResult<EquipmentTypeListItemDto>> result = await service.SearchAsync(request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>
+    /// Quản trị viên tìm kiếm và phân trang loại thiết bị ở mọi trạng thái (Draft, Published, Disabled).
+    /// Lọc bằng <c>status</c>, lặp lại tham số để lấy nhiều trạng thái.
+    /// </summary>
+    [HttpGet($"/{ApiRoutes.Prefix}/admin/equipment-types")]
+    [Authorize(Policy = CatalogPolicies.EquipmentManage)]
+    [ProducesResponseType<PagedResult<EquipmentTypeAdminListItemDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<PagedResult<EquipmentTypeAdminListItemDto>>> SearchAdmin(
+        [FromQuery] GetAdminEquipmentTypesRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (Request.Query.Keys.Any(k => !AdminAllowedQueryKeys.Contains(k)))
+        {
+            return this.ToProblem(CatalogErrors.EquipmentType.InvalidQuery);
+        }
+
+        Result<PagedResult<EquipmentTypeAdminListItemDto>> result = await service.SearchAdminAsync(request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Quản trị viên đọc chi tiết loại thiết bị theo ID ở mọi trạng thái.</summary>
+    [HttpGet($"/{ApiRoutes.Prefix}/admin/equipment-types/{{id:guid}}")]
+    [Authorize(Policy = CatalogPolicies.EquipmentManage)]
+    [ProducesResponseType<EquipmentTypeDetailDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EquipmentTypeDetailDto>> GetAdminById(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        Result<EquipmentTypeDetailDto> result = await service.GetAdminDetailAsync(id, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
