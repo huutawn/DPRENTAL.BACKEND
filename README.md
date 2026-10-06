@@ -30,6 +30,8 @@ scripts/             # Scripts hỗ trợ, Git hooks và migration preflight
 - **Chi tiết lịch (`CalendarRead` / DPR-149)**: Giữ nghiêm ngặt owner-only (`asset.OwnerUserId == JWT.sub`), Admin không được bypass.
 - **Service Principal**: Bắt buộc `u=svc`, `aud=inventory-api` và scope tương ứng trong claim `s` (`inventory.allocation.write`, `inventory.availability.read`). Bị từ chối trên các API quản lý tài sản của cá nhân.
 - **Loại bỏ OrganizationId**: Tài sản không còn thuộc tính `organization_id`. Danh tính người sở hữu duy nhất được lấy từ JWT `sub`.
+- **Đổi giá thuê niêm yết (DPR-169)**: API `PUT /api/v1/inventory/assets/{assetId}/rental-rate` chỉ yêu cầu Human Owner (JWT sub khớp `asset.OwnerUserId`) hoặc Human Admin (`r=adm`), không cần permission `inventory.asset.manage`. Service principal và user khác bị từ chối.
+- **Ranh giới giá với RentalService**: Inventory sở hữu giá niêm yết hiện tại; RentalService đọc/revalidate và lưu `PriceSnapshot` khi tạo đơn thuê (`RentalOrder`). Thay đổi giá trên Inventory không sửa đơn hàng cũ.
 
 ## Chạy hạ tầng cục bộ
 

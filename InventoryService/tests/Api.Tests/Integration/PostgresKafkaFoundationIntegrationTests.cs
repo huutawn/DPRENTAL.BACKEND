@@ -59,7 +59,8 @@ public sealed class PostgresKafkaFoundationIntegrationTests : IAsyncLifetime
         var orgId = Guid.NewGuid();
         var typeId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var asset = InventoryAsset.Create(assetId, ownerId, typeId, Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
+        var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", now).Value;
+        var asset = InventoryAsset.Create(assetId, ownerId, typeId, Guid.NewGuid(), "Sony FX3", 1, "{}", now, rate).Value;
         db.Assets.Add(asset);
         await db.SaveChangesAsync();
 

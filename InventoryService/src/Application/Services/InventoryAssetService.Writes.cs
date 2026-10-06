@@ -39,6 +39,17 @@ public sealed partial class InventoryAssetService
             return Error.Validation("INVALID_BRAND_ID", "Brand ID không được để trống hoặc rỗng.");
         }
 
+        if (request.RentalRate is null)
+        {
+            return Error.Validation("RENTAL_RATE_REQUIRED", "Thông tin giá thuê (rentalRate) là bắt buộc.");
+        }
+
+        var rateValidation = request.RentalRate.Validate();
+        if (rateValidation.IsFailure)
+        {
+            return rateValidation.Error;
+        }
+
         if (request.SpecValues.ValueKind != JsonValueKind.Object)
         {
             return Error.Validation("INVALID_SPEC_VALUES", "Spec values phải là JSON object.");
@@ -100,6 +111,19 @@ public sealed partial class InventoryAssetService
 
         // 7. Write transaction
         var assetId = Guid.NewGuid();
+        var rateResult = AssetRentalRate.Create(
+            assetId,
+            request.RentalRate.DailyRate!.Value,
+            request.RentalRate.WeeklyRate,
+            request.RentalRate.MonthlyRate,
+            request.RentalRate.Currency!,
+            now);
+
+        if (rateResult.IsFailure)
+        {
+            return rateResult.Error;
+        }
+
         var assetResult = InventoryAsset.Create(
             assetId,
             caller.UserId!.Value,
@@ -109,6 +133,7 @@ public sealed partial class InventoryAssetService
             validSchema,
             validSpecs,
             now,
+            rateResult.Value,
             validSerial,
             validYear,
             validThumb);
@@ -380,5 +405,90 @@ public sealed partial class InventoryAssetService
         }
 
         return Result.Success(InventoryAssetMapper.ToResponse(txResult.Value));
+    }
+
+    /// <summary>
+    /// Cập nhật giá thuê niêm yết của tài sản (thay thế toàn bộ).
+    /// </summary>
+    public async Task<Result<AssetRentalRateDto>> UpdateRentalRateAsync(
+        Guid assetId,
+        AssetRentalRateDto request,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(caller);
+
+        var callerCheck = CheckAuthenticatedHuman(caller);
+        if (callerCheck.IsFailure)
+        {
+            return callerCheck.Error;
+        }
+
+        var validationResult = request.Validate();
+        if (validationResult.IsFailure)
+        {
+            return validationResult.Error;
+        }
+
+        var snapshot = await _assetRepository.GetByIdAsync(assetId, cancellationToken);
+        if (snapshot is null)
+        {
+            return Error.NotFound("ASSET_NOT_FOUND", "Tài sản không tồn tại.");
+        }
+
+        if (!InventoryAccessEvaluator.CanUpdateRentalRate(caller, snapshot.OwnerUserId))
+        {
+            return Error.Forbidden("FORBIDDEN", "Không có quyền thay đổi giá thuê của tài sản này.");
+        }
+
+        var snapshotVersion = snapshot.Version;
+
+        var txResult = await _writeTransaction.ExecuteAsync(assetId, async (ctx, ct) =>
+        {
+            var asset = await ctx.Assets.GetByIdAsync(assetId, ct);
+            if (asset is null)
+            {
+                return Error.NotFound("ASSET_NOT_FOUND", "Tài sản không tồn tại.");
+            }
+
+            if (!InventoryAccessEvaluator.CanUpdateRentalRate(caller, asset.OwnerUserId))
+            {
+                return Error.Forbidden("FORBIDDEN", "Không có quyền thay đổi giá thuê của tài sản này.");
+            }
+
+            if (asset.Version != snapshotVersion)
+            {
+                return Error.Conflict("CONCURRENCY_CONFLICT", "Tài sản đã bị thay đổi bởi thao tác khác (xmin conflict).");
+            }
+
+            var now = _timeProvider.GetUtcNow();
+            var updateResult = asset.UpdateRentalRate(
+                request.DailyRate!.Value,
+                request.WeeklyRate,
+                request.MonthlyRate,
+                request.Currency!,
+                now);
+
+            if (updateResult.IsFailure)
+            {
+                return updateResult.Error;
+            }
+
+            ctx.Assets.Update(asset);
+            return Result.Success(asset.RentalRate);
+        }, cancellationToken);
+
+        if (txResult.IsFailure)
+        {
+            return txResult.Error;
+        }
+
+        var savedRate = txResult.Value;
+        return Result.Success(new AssetRentalRateDto(
+            savedRate.DailyRate,
+            savedRate.WeeklyRate,
+            savedRate.MonthlyRate,
+            savedRate.Currency));
     }
 }

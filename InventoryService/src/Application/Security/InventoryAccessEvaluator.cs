@@ -40,6 +40,35 @@ public static class InventoryAccessEvaluator
     }
 
     /// <summary>
+    /// Kiểm tra quyền cập nhật giá thuê niêm yết của tài sản (Update Rental Rate):
+    /// - Chỉ Human Owner (JWT sub == assetOwnerUserId) hoặc Human Admin (r=adm) được phép.
+    /// - Không yêu cầu permission 'inventory.asset.manage'.
+    /// - Service principal và người dùng khác bị từ chối.
+    /// - Thiếu caller.UserId hoặc assetOwnerUserId phải fail closed.
+    /// </summary>
+    public static bool CanUpdateRentalRate(IInventoryCallerContext caller, Guid? assetOwnerUserId)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated || caller.IsService)
+        {
+            return false;
+        }
+
+        if (assetOwnerUserId is null || assetOwnerUserId == Guid.Empty)
+        {
+            return false;
+        }
+
+        if (caller.IsAdmin)
+        {
+            return true;
+        }
+
+        return caller.UserId.HasValue && caller.UserId.Value == assetOwnerUserId.Value;
+    }
+
+    /// <summary>
     /// Kiểm tra quyền truy cập lịch của tài sản (Calendar access cho đọc/tạo/xóa block theo DPR-149):
     /// - Chỉ Human có JWT sub == asset.OwnerUserId được phép.
     /// - Không yêu cầu permission 'p'.

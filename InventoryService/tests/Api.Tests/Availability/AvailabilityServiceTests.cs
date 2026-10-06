@@ -370,6 +370,7 @@ public sealed class AvailabilityServiceTests
 
     private static InventoryAsset CreateAsset(Guid id, bool acceptingBookings)
     {
+        var rate = AssetRentalRate.Create(id, 100_000m, null, null, "VND", FixedNow).Value;
         var asset = InventoryAsset.Create(
             id,
             Guid.NewGuid(),
@@ -378,7 +379,8 @@ public sealed class AvailabilityServiceTests
             "Sony FX3",
             1,
             "{}",
-            FixedNow).Value;
+            FixedNow,
+            rate).Value;
 
         if (!acceptingBookings)
         {

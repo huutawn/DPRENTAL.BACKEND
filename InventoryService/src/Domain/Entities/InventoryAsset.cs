@@ -119,6 +119,11 @@ public sealed class InventoryAsset
     public ICollection<CalendarBlock> CalendarBlocks { get; private set; } = new List<CalendarBlock>();
 
     /// <summary>
+    /// Giá thuê niêm yết của tài sản (quan hệ 1:1, aggregate root quản lý).
+    /// </summary>
+    public AssetRentalRate RentalRate { get; private set; } = null!;
+
+    /// <summary>
     /// Khởi tạo rỗng phục vụ EF Core.
     /// </summary>
     private InventoryAsset()
@@ -138,6 +143,7 @@ public sealed class InventoryAsset
         string specValues,
         bool acceptingBookings,
         string? suspensionReason,
+        AssetRentalRate rentalRate,
         DateTimeOffset now)
     {
         Id = id;
@@ -152,6 +158,7 @@ public sealed class InventoryAsset
         SpecValues = specValues;
         AcceptingBookings = acceptingBookings;
         SuspensionReason = suspensionReason;
+        RentalRate = rentalRate;
         CreatedAt = now;
         UpdatedAt = now;
     }
@@ -170,6 +177,7 @@ public sealed class InventoryAsset
         int schemaVersion,
         string specValues,
         DateTimeOffset now,
+        AssetRentalRate rentalRate,
         string? serialNumber = null,
         int? manufactureYear = null,
         Guid? thumbnailMediaId = null)
@@ -194,6 +202,16 @@ public sealed class InventoryAsset
             return Error.Validation("INVALID_BRAND_ID", "Brand ID không được rỗng.");
         }
 
+        if (rentalRate is null)
+        {
+            return Error.Validation("RENTAL_RATE_REQUIRED", "Giá thuê tài sản là bắt buộc.");
+        }
+
+        if (rentalRate.AssetId != id)
+        {
+            return Error.Validation("RENTAL_RATE_ASSET_MISMATCH", "Asset ID của giá thuê không khớp với tài sản.");
+        }
+
         var validation = ValidateDetails(model, serialNumber, manufactureYear, thumbnailMediaId, schemaVersion, specValues, now);
         if (validation.IsFailure)
         {
@@ -215,6 +233,7 @@ public sealed class InventoryAsset
             validSpecs,
             acceptingBookings: true,
             suspensionReason: null,
+            rentalRate,
             now);
     }
 
@@ -364,6 +383,31 @@ public sealed class InventoryAsset
 
         AcceptingBookings = false;
         SuspensionReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+        UpdatedAt = now;
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Cập nhật thông tin giá thuê niêm yết của tài sản (thay thế toàn bộ).
+    /// </summary>
+    public Result UpdateRentalRate(
+        decimal dailyRate,
+        decimal? weeklyRate,
+        decimal? monthlyRate,
+        string currency,
+        DateTimeOffset now)
+    {
+        if (RentalRate is null)
+        {
+            return Error.Validation("RENTAL_RATE_REQUIRED", "Tài sản chưa có bản ghi giá thuê.");
+        }
+
+        var updateResult = RentalRate.UpdateRates(dailyRate, weeklyRate, monthlyRate, currency, now);
+        if (updateResult.IsFailure)
+        {
+            return updateResult.Error;
+        }
+
         UpdatedAt = now;
         return Result.Success();
     }

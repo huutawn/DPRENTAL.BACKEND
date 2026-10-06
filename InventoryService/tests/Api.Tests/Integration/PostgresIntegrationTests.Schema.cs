@@ -93,9 +93,10 @@ public sealed partial class PostgresIntegrationTests
     {
         await using var context = await CreateMigratedDbContextAsync();
 
+        var assetId1 = Guid.NewGuid();
         var asset = InventoryAsset.Create(
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-            "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
+            assetId1, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            "Sony FX3", 1, "{}", DateTimeOffset.UtcNow, AssetRentalRate.Create(assetId1, 100_000m, null, null, "VND", DateTimeOffset.UtcNow).Value).Value;
         context.Assets.Add(asset);
 
         var period = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
@@ -120,7 +121,7 @@ public sealed partial class PostgresIntegrationTests
         await using var context = await CreateMigratedDbContextAsync();
 
         var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
+        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow, AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", DateTimeOffset.UtcNow).Value).Value;
         context.Assets.Add(asset);
         await context.SaveChangesAsync();
 
@@ -144,7 +145,7 @@ public sealed partial class PostgresIntegrationTests
         await using var context = await CreateMigratedDbContextAsync();
 
         var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
+        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow, AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", DateTimeOffset.UtcNow).Value).Value;
         context.Assets.Add(asset);
         await context.SaveChangesAsync();
 
@@ -168,7 +169,7 @@ public sealed partial class PostgresIntegrationTests
         await using var context = await CreateMigratedDbContextAsync();
 
         var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
+        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow, AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", DateTimeOffset.UtcNow).Value).Value;
         context.Assets.Add(asset);
         await context.SaveChangesAsync();
 
@@ -198,7 +199,7 @@ public sealed partial class PostgresIntegrationTests
         await using var context2 = await CreateMigratedDbContextAsync();
 
         var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
+        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow, AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", DateTimeOffset.UtcNow).Value).Value;
         context1.Assets.Add(asset);
         await context1.SaveChangesAsync();
 
@@ -227,8 +228,10 @@ public sealed partial class PostgresIntegrationTests
         var type = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
 
-        var assetA = InventoryAsset.Create(Guid.NewGuid(), ownerA, type, Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
-        var assetB = InventoryAsset.Create(Guid.NewGuid(), ownerB, type, Guid.NewGuid(), "Sony A7S III", 1, "{}", now).Value;
+        var aId = Guid.NewGuid();
+        var bId = Guid.NewGuid();
+        var assetA = InventoryAsset.Create(aId, ownerA, type, Guid.NewGuid(), "Sony FX3", 1, "{}", now, AssetRentalRate.Create(aId, 100_000m, null, null, "VND", now).Value).Value;
+        var assetB = InventoryAsset.Create(bId, ownerB, type, Guid.NewGuid(), "Sony A7S III", 1, "{}", now, AssetRentalRate.Create(bId, 100_000m, null, null, "VND", now).Value).Value;
         db.Assets.AddRange(assetA, assetB);
         await db.SaveChangesAsync();
 

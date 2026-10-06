@@ -62,6 +62,7 @@ public sealed class InventoryAssetsControllerTests
     [InlineData("GET", "api/v1/inventory/assets/3fa85f64-5717-4562-b3fc-2c963f66afa6")]
     [InlineData("PATCH", "api/v1/inventory/assets/3fa85f64-5717-4562-b3fc-2c963f66afa6")]
     [InlineData("PATCH", "api/v1/inventory/assets/3fa85f64-5717-4562-b3fc-2c963f66afa6/accepting-bookings")]
+    [InlineData("PUT", "api/v1/inventory/assets/3fa85f64-5717-4562-b3fc-2c963f66afa6/rental-rate")]
     public async Task MissingToken_AllEndpointsReturn401(string method, string url)
     {
         await using var factory = CreateFactory();

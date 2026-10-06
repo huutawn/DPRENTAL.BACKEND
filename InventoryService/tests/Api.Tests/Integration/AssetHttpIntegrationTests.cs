@@ -85,12 +85,32 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
             Task.FromResult(Result.Success(new MediaVisibilityInfo(mediaId, "Public")));
     }
 
-    private sealed class RaceInterceptingAssetRepository(IInventoryAssetRepository inner, Action onGetById) : IInventoryAssetRepository
+    private sealed class RaceInterceptingAssetRepository(
+        IInventoryAssetRepository inner,
+        InventoryServiceDbContext? db = null,
+        Func<InventoryAsset?, Task>? onAfterSnapshotRead = null,
+        Action? onInsideLockRead = null,
+        Action? onGetById = null) : IInventoryAssetRepository
     {
+        public RaceInterceptingAssetRepository(IInventoryAssetRepository inner, Action onGetById)
+            : this(inner, null, null, null, onGetById)
+        {
+        }
+
         public async Task<InventoryAsset?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
         {
             var res = await inner.GetByIdAsync(id, cancellationToken);
-            onGetById();
+            onGetById?.Invoke();
+
+            if (db != null && db.Database.CurrentTransaction != null)
+            {
+                onInsideLockRead?.Invoke();
+            }
+            else if (onAfterSnapshotRead != null)
+            {
+                await onAfterSnapshotRead(res);
+            }
+
             return res;
         }
 
@@ -116,10 +136,32 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
         public void Update(InventoryAsset asset) => inner.Update(asset);
     }
 
+    private sealed class ConcurrencySnapshotBarrier(int count = 2, TimeSpan? timeout = null)
+    {
+        private readonly TaskCompletionSource<bool>[] _arrivals = Enumerable.Range(0, count)
+            .Select(_ => new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously))
+            .ToArray();
+        private int _index;
+        private readonly TimeSpan _timeout = timeout ?? TimeSpan.FromSeconds(5);
+
+        public async Task ArriveAndAwaitAsync()
+        {
+            int current = Interlocked.Increment(ref _index) - 1;
+            if (current < _arrivals.Length)
+            {
+                _arrivals[current].TrySetResult(true);
+            }
+
+            var allArrived = Task.WhenAll(_arrivals.Select(a => a.Task));
+            await allArrived.WaitAsync(_timeout);
+        }
+    }
+
     private (WebApplicationFactory<Program> App, InventorySecurityTestFactory SecFactory) CreateFactory(
         ICatalogServiceClient? catalogClient = null,
         IMediaServiceClient? mediaClient = null,
-        TestTimeProvider? clock = null)
+        TestTimeProvider? clock = null,
+        Func<IServiceProvider, IInventoryAssetRepository>? assetRepoFactory = null)
     {
         var secFactory = new InventorySecurityTestFactory(_fixture.ConnectionString, clock ?? new TestTimeProvider(FixedNow));
         var app = secFactory.WithWebHostBuilder(builder =>
@@ -131,6 +173,12 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
 
                 services.RemoveAll<IMediaServiceClient>();
                 services.AddSingleton(mediaClient ?? new StubMediaClient());
+
+                if (assetRepoFactory != null)
+                {
+                    services.RemoveAll<IInventoryAssetRepository>();
+                    services.AddScoped(assetRepoFactory);
+                }
             });
         });
         return (app, secFactory);
@@ -156,8 +204,10 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
         string specValues = "{\"sensor\":\"Full-Frame\"}")
     {
         await using var db = CreateDbContext();
+        var id = Guid.NewGuid();
+        var rate = AssetRentalRate.Create(id, 100_000m, null, null, "VND", FixedNow).Value;
         var asset = InventoryAsset.Create(
-            Guid.NewGuid(),
+            id,
             ownerUserId,
             eqTypeId ?? Guid.NewGuid(),
             brandId ?? Guid.NewGuid(),
@@ -165,6 +215,7 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
             schemaVersion,
             specValues,
             FixedNow,
+            rate,
             serial,
             year,
             thumb).Value;

@@ -80,6 +80,7 @@ public sealed partial class CatalogHttpIntegrationTests
             model = "Sony FX3 Cinema Line",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame", resolution = "4K" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" },
             serialNumber = "SN-12345",
             manufactureYear = 2024
         };
@@ -142,9 +143,10 @@ public sealed partial class CatalogHttpIntegrationTests
 
         await using (var db = CreateDbContext())
         {
+            var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
             var asset = InventoryAsset.Create(
                 assetId, ownerId, eqTypeId, oldBrandId,
-                "Old Camera", 1, "{\"lens\":\"24-70\"}", FixedNow).Value;
+                "Old Camera", 1, "{\"lens\":\"24-70\"}", FixedNow, rate).Value;
             db.Assets.Add(asset);
             await db.SaveChangesAsync();
         }
@@ -277,6 +279,7 @@ public sealed partial class CatalogHttpIntegrationTests
             model = "Sony FX3",
             schemaVersion = 1,
             specValues = new { },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" },
             thumbnailMediaId = Guid.NewGuid()
         };
 
@@ -373,7 +376,8 @@ public sealed partial class CatalogHttpIntegrationTests
             brandId = brandId,
             model = "Sony FX3",
             schemaVersion = 1,
-            specValues = new { sensor = "Full-Frame" }
+            specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
         var response = await client.PostAsync("api/v1/inventory/assets",
@@ -461,7 +465,8 @@ public sealed partial class CatalogHttpIntegrationTests
             brandId = brandId,
             model = "Sony FX3",
             schemaVersion = 1,
-            specValues = new { resolution = 123 }
+            specValues = new { resolution = 123 },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
         var response = await client.PostAsync("api/v1/inventory/assets",
@@ -495,9 +500,10 @@ public sealed partial class CatalogHttpIntegrationTests
 
         await using (var db = CreateDbContext())
         {
+            var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
             var asset = InventoryAsset.Create(
                 assetId, ownerId, eqTypeId, brandId,
-                "Model Original", 1, "{\"lens\":\"24-70\"}", FixedNow).Value;
+                "Model Original", 1, "{\"lens\":\"24-70\"}", FixedNow, rate).Value;
             db.Assets.Add(asset);
             await db.SaveChangesAsync();
         }
@@ -595,6 +601,7 @@ public sealed partial class CatalogHttpIntegrationTests
             model = "Sony FX3",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" },
             thumbnailMediaId = Guid.NewGuid()
         };
 
@@ -666,6 +673,7 @@ public sealed partial class CatalogHttpIntegrationTests
             model = "Sony FX3",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" },
             thumbnailMediaId = Guid.NewGuid()
         };
 
@@ -734,7 +742,8 @@ public sealed partial class CatalogHttpIntegrationTests
             brandId = brandId,
             model = "Sony FX3",
             schemaVersion = 1,
-            specValues = new { sensor = "Full-Frame" }
+            specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
         var response = await client.PostAsync("api/v1/inventory/assets",
@@ -799,7 +808,8 @@ public sealed partial class CatalogHttpIntegrationTests
             brandId = brandId,
             model = "Sony FX3",
             schemaVersion = 1,
-            specValues = new { sensor = "Full-Frame" }
+            specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
         var response = await client.PostAsync("api/v1/inventory/assets",
@@ -873,7 +883,8 @@ public sealed partial class CatalogHttpIntegrationTests
             brandId = brandId,
             model = "Sony FX3",
             schemaVersion = 3,
-            specValues = new { sensor = "Full-Frame" }
+            specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
         var response = await client.PostAsync("api/v1/inventory/assets",
@@ -947,7 +958,8 @@ public sealed partial class CatalogHttpIntegrationTests
             brandId = brandId,
             model = "Sony FX3",
             schemaVersion = 1,
-            specValues = new { sensor = "Full-Frame" }
+            specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
         var response = await client.PostAsync("api/v1/inventory/assets",
@@ -975,9 +987,10 @@ public sealed partial class CatalogHttpIntegrationTests
 
         await using (var db = CreateDbContext())
         {
+            var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
             var asset = InventoryAsset.Create(
                 assetId, ownerId, Guid.NewGuid(), brandId,
-                "Model Before", 1, "{}", FixedNow).Value;
+                "Model Before", 1, "{}", FixedNow, rate).Value;
             db.Assets.Add(asset);
             await db.SaveChangesAsync();
         }
@@ -1021,9 +1034,10 @@ public sealed partial class CatalogHttpIntegrationTests
 
         await using (var db = CreateDbContext())
         {
+            var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
             var asset = InventoryAsset.Create(
                 assetId, ownerId, eqTypeId, brandId,
-                "Model V1", 1, "{\"field\":\"value\"}", FixedNow).Value;
+                "Model V1", 1, "{\"field\":\"value\"}", FixedNow, rate).Value;
             db.Assets.Add(asset);
             await db.SaveChangesAsync();
         }
