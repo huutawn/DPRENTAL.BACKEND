@@ -37,6 +37,47 @@ public sealed partial class EquipmentTypeService(
         return EnrichList(pagedResult);
     }
 
+    public async Task<Result<PagedResult<EquipmentTypeAdminListItemDto>>> SearchAdminAsync(
+        GetAdminEquipmentTypesRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        Result<IReadOnlyList<EquipmentTypeStatus>> statusesResult = listQueryValidator.Validate(request);
+        if (statusesResult.IsFailure)
+        {
+            return statusesResult.Error;
+        }
+
+        PagedResult<EquipmentTypeAdminListItemDto> paged =
+            await repository.SearchAdminAsync(request, statusesResult.Value, cancellationToken);
+
+        var enrichedItems = paged.Items
+            .Select(item => item with
+            {
+                ThumbnailUrl = MediaUrlResolver.ResolvePublicUrl(item.ThumbnailMediaId),
+                Categories = item.Categories
+                    .Select(c => c with { ImageUrl = MediaUrlResolver.ResolvePublicUrl(c.ImageMediaId) })
+                    .ToList()
+            })
+            .ToList();
+
+        return new PagedResult<EquipmentTypeAdminListItemDto>(enrichedItems, paged.Page, paged.PageSize, paged.TotalCount);
+    }
+
+    public async Task<Result<EquipmentTypeDetailDto>> GetAdminDetailAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        EquipmentTypeDetailDto? detail = await repository.GetDetailByIdAsync(id, cancellationToken);
+        if (detail is null)
+        {
+            return CatalogErrors.EquipmentType.NotFound;
+        }
+
+        return EnrichDetail(detail);
+    }
+
     public async Task<Result<EquipmentTypeDetailDto>> GetPublishedDetailAsync(
         Guid id,
         CancellationToken cancellationToken = default)

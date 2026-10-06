@@ -122,6 +122,7 @@ builder.Services.AddSwaggerGen(options =>
     }
     options.SchemaFilter<UpdateEquipmentTypeRequestSchemaFilter>();
     options.OperationFilter<BearerSecurityRequirementOperationFilter>();
+    options.ParameterFilter<EquipmentTypeStatusParameterFilter>();
 });
 
 builder.Services.AddHealthChecks()
