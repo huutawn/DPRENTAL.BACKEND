@@ -217,13 +217,14 @@ public sealed class StartupAndConfigurationTests
                 }
             }
         }
-        Assert.Equal(14, equipmentTypeEndpointsCount);
+        Assert.Equal(15, equipmentTypeEndpointsCount);
         Assert.DoesNotContain("/api/v1/catalog/equipments", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("dailyPrice", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("regionId", json, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("/api/v1/catalog/equipment-types/{equipmentTypeId}/schema", json, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("/api/v1/catalog/equipment-types/{equipmentTypeId}/schemas/{version}", json, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("/api/v1/catalog/equipment-types/{equipmentTypeId}/specifications/validate", json, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("/api/v1/catalog/equipment-types/{id}/schemas/batch", json, StringComparison.OrdinalIgnoreCase);
     }
     [Fact]
     public async Task SwaggerDocument_AssertsExactPatchContract_AndSerializesSuccessfully()

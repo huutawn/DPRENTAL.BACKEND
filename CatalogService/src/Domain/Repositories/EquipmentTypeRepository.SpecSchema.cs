@@ -58,6 +58,39 @@ public partial class EquipmentTypeRepository
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasByVersionsAsync(
+        Guid equipmentTypeId,
+        IEnumerable<int> versions,
+        bool publishedOnly,
+        CancellationToken cancellationToken = default)
+    {
+        var versionList = versions.Distinct().ToList();
+        if (versionList.Count == 0)
+        {
+            return Array.Empty<EquipmentTypeSpecSchemaDto>();
+        }
+
+        var query = dbContext.EquipmentTypeSpecSchemas.AsNoTracking()
+            .Where(s => s.EquipmentTypeId == equipmentTypeId && versionList.Contains(s.Version));
+
+        if (publishedOnly)
+        {
+            query = query.Where(s => s.PublishedAt != null);
+        }
+
+        return await query
+            .OrderBy(s => s.Version)
+            .Select(s => new EquipmentTypeSpecSchemaDto(
+                s.Id,
+                s.EquipmentTypeId,
+                s.Version,
+                s.PublishedAt == null ? "Draft" : "Published",
+                s.CreatedAt,
+                s.PublishedAt,
+                s.Definition))
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<EquipmentTypeSpecSchema?> GetDraftSpecSchemaEntityAsync(
         Guid equipmentTypeId,
         CancellationToken cancellationToken = default)
