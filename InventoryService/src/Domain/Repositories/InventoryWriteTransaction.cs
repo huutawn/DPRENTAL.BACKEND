@@ -209,13 +209,23 @@ public sealed class InventoryWriteTransaction : IInventoryWriteTransaction
                 InventoryAsset asset => asset.Id,
                 AssetAllocation allocation => allocation.AssetId,
                 CalendarBlock block => block.AssetId,
+                AssetRentalRate rate => rate.AssetId,
                 _ => null
             };
-
             if (entry.State is EntityState.Modified or EntityState.Deleted &&
                 entry.Entity is AssetAllocation or CalendarBlock &&
                 entry.Property(nameof(AssetAllocation.AssetId)).OriginalValue is Guid originalAssetId && originalAssetId != assetId)
                 return Error.Conflict("ASSET_LOCK_MISMATCH", "Dữ liệu ghi không thuộc tài sản đang giữ khóa.");
+
+            if (entry.State is EntityState.Modified or EntityState.Deleted &&
+                entry.Entity is AssetRentalRate &&
+                entry.Property(nameof(AssetRentalRate.AssetId)).OriginalValue is Guid originalRateAssetId && originalRateAssetId != assetId)
+                return Error.Conflict("ASSET_LOCK_MISMATCH", "Dữ liệu ghi không thuộc tài sản đang giữ khóa.");
+
+            if (entry.Entity is AssetRentalRate && entry.State == EntityState.Modified &&
+                entry.Properties.Any(p => p.IsModified && p.OriginalValue is Guid orig && p.CurrentValue is Guid curr && orig != curr &&
+                    p.Metadata.Name == nameof(AssetRentalRate.AssetId)))
+                return Error.Conflict("ASSET_IDENTITY_IMMUTABLE", "Không được đổi AssetId của giá thuê.");
 
             if (entry.Entity is InventoryAsset && entry.State == EntityState.Modified &&
                 entry.Properties.Any(p => p.IsModified && p.OriginalValue is Guid original &&

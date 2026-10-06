@@ -19,6 +19,7 @@ public sealed class AvailabilityPolicyTests
 
     private InventoryAsset CreateActiveAsset(bool acceptingBookings = true)
     {
+        var rate = AssetRentalRate.Create(_assetId, 100_000m, null, null, "VND", _now).Value;
         var asset = InventoryAsset.Create(
             _assetId,
             _ownerUserId,
@@ -27,7 +28,8 @@ public sealed class AvailabilityPolicyTests
             "Sony FX3",
             1,
             "{\"serial\":\"123\"}",
-            _now).Value;
+            _now,
+            rate).Value;
 
         if (!acceptingBookings)
         {

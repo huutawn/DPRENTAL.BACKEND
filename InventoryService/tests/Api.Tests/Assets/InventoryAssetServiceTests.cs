@@ -298,6 +298,39 @@ public sealed class InventoryAssetServiceTests
 
         return new InventoryAssetService(_repo, writeTx, _catalogClient, mediaService, _clock);
     }
+    private static readonly AssetRentalRateDto DefaultRateDto = new(100_000m, null, null, "VND");
+
+    private static InventoryAsset CreateAssetWithRate(
+        Guid? id = null,
+        Guid? ownerUserId = null,
+        Guid? eqTypeId = null,
+        Guid? brandId = null,
+        string model = "FX3",
+        int schemaVersion = 1,
+        string specValues = "{}",
+        DateTimeOffset? now = null,
+        string? serialNumber = null,
+        int? manufactureYear = null,
+        Guid? thumbnailMediaId = null)
+    {
+        var actualId = id ?? Guid.NewGuid();
+        var actualNow = now ?? FixedNow;
+        var rate = AssetRentalRate.Create(actualId, 100_000m, null, null, "VND", actualNow).Value;
+        return InventoryAsset.Create(
+            actualId,
+            ownerUserId ?? Guid.NewGuid(),
+            eqTypeId ?? Guid.NewGuid(),
+            brandId ?? Guid.NewGuid(),
+            model,
+            schemaVersion,
+            specValues,
+            actualNow,
+            rate,
+            serialNumber,
+            manufactureYear,
+            thumbnailMediaId).Value;
+    }
+
 
     [Fact]
     public async Task CreateAssetAsync_ValidRequest_CreatesAssetAndReturns201Model()
@@ -315,9 +348,9 @@ public sealed class InventoryAssetServiceTests
             Model: "Sony FX3",
             SchemaVersion: 1,
             SpecValues: specDoc.RootElement.Clone(),
+            RentalRate: new AssetRentalRateDto(500_000m, 3_000_000m, 10_000_000m, "VND"),
             SerialNumber: "SN-001",
             ManufactureYear: 2024);
-
         var result = await service.CreateAssetAsync(request, caller);
 
         Assert.True(result.IsSuccess);
@@ -332,6 +365,11 @@ public sealed class InventoryAssetServiceTests
         Assert.Null(response.SuspensionReason);
         Assert.Equal(FixedNow, response.CreatedAt);
 
+        Assert.NotNull(response.RentalRate);
+        Assert.Equal(500_000m, response.RentalRate.DailyRate);
+        Assert.Equal(3_000_000m, response.RentalRate.WeeklyRate);
+        Assert.Equal(10_000_000m, response.RentalRate.MonthlyRate);
+        Assert.Equal("VND", response.RentalRate.Currency);
         // Verify stored in repository
         Assert.True(_repo.Store.ContainsKey(response.Id));
         Assert.Equal(brandId, _repo.Store[response.Id].BrandId);
@@ -348,8 +386,7 @@ public sealed class InventoryAssetServiceTests
 
         using var doc = JsonDocument.Parse("{}");
         var request = new CreateInventoryAssetRequest(
-            Guid.NewGuid(), brandId, "FX3", 1, doc.RootElement);
-
+            Guid.NewGuid(), brandId, "FX3", 1, doc.RootElement, RentalRate: DefaultRateDto);
         var result = await service.CreateAssetAsync(request, caller);
 
         Assert.True(result.IsFailure);
@@ -369,8 +406,7 @@ public sealed class InventoryAssetServiceTests
         var caller = new TestCaller(Guid.NewGuid());
         using var doc = JsonDocument.Parse("{}");
         var request = new CreateInventoryAssetRequest(
-            Guid.NewGuid(), brandId, "FX3", 1, doc.RootElement);
-
+            Guid.NewGuid(), brandId, "FX3", 1, doc.RootElement, RentalRate: DefaultRateDto);
         var result = await service.CreateAssetAsync(request, caller);
 
         Assert.True(result.IsFailure);
@@ -389,8 +425,7 @@ public sealed class InventoryAssetServiceTests
         var caller = new TestCaller(Guid.NewGuid());
         using var doc = JsonDocument.Parse("{}");
         var request = new CreateInventoryAssetRequest(
-            Guid.NewGuid(), brandId, "FX3", 1, doc.RootElement);
-
+            Guid.NewGuid(), brandId, "FX3", 1, doc.RootElement, RentalRate: DefaultRateDto);
         var result = await service.CreateAssetAsync(request, caller);
 
         Assert.True(result.IsFailure);
@@ -405,7 +440,7 @@ public sealed class InventoryAssetServiceTests
         var caller = new TestCaller(Guid.NewGuid(), isAuthenticated: false);
 
         using var doc = JsonDocument.Parse("{}");
-        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement);
+        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement, RentalRate: DefaultRateDto);
 
         var result = await service.CreateAssetAsync(request, caller);
 
@@ -421,7 +456,7 @@ public sealed class InventoryAssetServiceTests
         var caller = new TestCaller(Guid.NewGuid(), permissions: new HashSet<string>());
 
         using var doc = JsonDocument.Parse("{}");
-        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement);
+        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement, RentalRate: DefaultRateDto);
 
         var result = await service.CreateAssetAsync(request, caller);
 
@@ -439,7 +474,7 @@ public sealed class InventoryAssetServiceTests
 
         var caller = new TestCaller(Guid.NewGuid());
         using var doc = JsonDocument.Parse("{}");
-        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement);
+        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement, RentalRate: DefaultRateDto);
 
         var result = await service.CreateAssetAsync(request, caller);
 
@@ -457,7 +492,7 @@ public sealed class InventoryAssetServiceTests
 
         var caller = new TestCaller(Guid.NewGuid());
         using var doc = JsonDocument.Parse("{}");
-        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement);
+        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement, RentalRate: DefaultRateDto);
 
         var result = await service.CreateAssetAsync(request, caller);
 
@@ -482,7 +517,7 @@ public sealed class InventoryAssetServiceTests
         _mediaClient.VerifyHandler = id => Task.FromResult(Result.Success(new MediaVerificationInfo(id, "Ready", ownerId.ToString("D"))));
 
         using var doc = JsonDocument.Parse("{}");
-        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement, ThumbnailMediaId: thumbId);
+        var request = new CreateInventoryAssetRequest(Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, doc.RootElement, RentalRate: DefaultRateDto, ThumbnailMediaId: thumbId);
 
         var result = await service.CreateAssetAsync(request, caller);
 
@@ -498,7 +533,7 @@ public sealed class InventoryAssetServiceTests
         var ownerA = Guid.NewGuid();
         var ownerB = Guid.NewGuid();
 
-        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerA, Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, "{}", FixedNow).Value;
+        var asset = CreateAssetWithRate(ownerUserId: ownerA);
         _repo.Add(asset);
 
         // Caller B tries to access asset of A
@@ -516,7 +551,7 @@ public sealed class InventoryAssetServiceTests
         var ownerA = Guid.NewGuid();
         var admin = new TestCaller(Guid.NewGuid(), isAdmin: true);
 
-        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerA, Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, "{}", FixedNow).Value;
+        var asset = CreateAssetWithRate(ownerUserId: ownerA);
         _repo.Add(asset);
 
         var result = await service.GetAssetByIdAsync(asset.Id, admin);
@@ -532,8 +567,8 @@ public sealed class InventoryAssetServiceTests
         var ownerA = Guid.NewGuid();
         var adminId = Guid.NewGuid();
 
-        var assetA = InventoryAsset.Create(Guid.NewGuid(), ownerA, Guid.NewGuid(), Guid.NewGuid(), "FX3 A", 1, "{}", FixedNow).Value;
-        var assetAdmin = InventoryAsset.Create(Guid.NewGuid(), adminId, Guid.NewGuid(), Guid.NewGuid(), "FX3 Admin", 1, "{}", FixedNow).Value;
+        var assetA = CreateAssetWithRate(ownerUserId: ownerA, model: "FX3 A");
+        var assetAdmin = CreateAssetWithRate(ownerUserId: adminId, model: "FX3 Admin");
         _repo.Add(assetA);
         _repo.Add(assetAdmin);
 
@@ -555,14 +590,13 @@ public sealed class InventoryAssetServiceTests
 
         var originalThumb = Guid.NewGuid();
         var originalBrand = Guid.NewGuid();
-        var asset = InventoryAsset.Create(
-            Guid.NewGuid(), ownerId, Guid.NewGuid(), originalBrand,
-            "Original Model", 1, "{\"k\":\"v\"}", FixedNow,
+        var asset = CreateAssetWithRate(
+            ownerUserId: ownerId, brandId: originalBrand,
+            model: "Original Model", schemaVersion: 1, specValues: "{\"k\":\"v\"}",
             serialNumber: "SN-ORIG",
             manufactureYear: 2022,
-            thumbnailMediaId: originalThumb).Value;
+            thumbnailMediaId: originalThumb);
         _repo.Add(asset);
-
         var patch = new PatchInventoryAssetRequest
         {
             IsModelSpecified = true,
@@ -597,9 +631,7 @@ public sealed class InventoryAssetServiceTests
         var oldBrand = Guid.NewGuid();
         var newBrand = Guid.NewGuid();
 
-        var asset = InventoryAsset.Create(
-            Guid.NewGuid(), ownerId, Guid.NewGuid(), oldBrand,
-            "FX3", 1, "{}", FixedNow).Value;
+        var asset = CreateAssetWithRate(ownerUserId: ownerId, brandId: oldBrand, model: "FX3");
         _repo.Add(asset);
 
         var patch = new PatchInventoryAssetRequest
@@ -627,9 +659,7 @@ public sealed class InventoryAssetServiceTests
         _catalogClient.BrandHandler = id => Task.FromResult(Result.Success(
             new CatalogBrandResponse(id, "BR-INACTIVE", "Inactive Brand", false)));
 
-        var asset = InventoryAsset.Create(
-            Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(),
-            "FX3", 1, "{}", FixedNow).Value;
+        var asset = CreateAssetWithRate(ownerUserId: ownerId, model: "FX3");
         _repo.Add(asset);
 
         var patch = new PatchInventoryAssetRequest
@@ -651,9 +681,7 @@ public sealed class InventoryAssetServiceTests
         var ownerId = Guid.NewGuid();
         var caller = new TestCaller(ownerId);
 
-        var asset = InventoryAsset.Create(
-            Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(),
-            "FX3", 1, "{}", FixedNow).Value;
+        var asset = CreateAssetWithRate(ownerUserId: ownerId, model: "FX3");
         _repo.Add(asset);
 
         var patch = new PatchInventoryAssetRequest
@@ -675,9 +703,7 @@ public sealed class InventoryAssetServiceTests
         var ownerId = Guid.NewGuid();
         var caller = new TestCaller(ownerId);
 
-        var asset = InventoryAsset.Create(
-            Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(),
-            "FX3", 1, "{}", FixedNow).Value;
+        var asset = CreateAssetWithRate(ownerUserId: ownerId, model: "FX3");
         _repo.Add(asset);
 
         var patch = new PatchInventoryAssetRequest
@@ -699,9 +725,7 @@ public sealed class InventoryAssetServiceTests
         var ownerId = Guid.NewGuid();
         var caller = new TestCaller(ownerId);
 
-        var asset = InventoryAsset.Create(
-            Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(),
-            "FX3", 1, "{}", FixedNow).Value;
+        var asset = CreateAssetWithRate(ownerUserId: ownerId, model: "FX3");
         _repo.Add(asset);
 
         var patch = new PatchInventoryAssetRequest
@@ -725,9 +749,7 @@ public sealed class InventoryAssetServiceTests
         var ownerId = Guid.NewGuid();
         var caller = new TestCaller(ownerId);
 
-        var asset = InventoryAsset.Create(
-            Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(),
-            "FX3", 2, "{\"color\":\"black\"}", FixedNow).Value;
+        var asset = CreateAssetWithRate(ownerUserId: ownerId, model: "FX3", schemaVersion: 2, specValues: "{\"color\":\"black\"}");
         _repo.Add(asset);
 
         int validatedVersion = 0;
@@ -760,9 +782,7 @@ public sealed class InventoryAssetServiceTests
         var ownerId = Guid.NewGuid();
         var caller = new TestCaller(ownerId);
 
-        var asset = InventoryAsset.Create(
-            Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(),
-            "FX3", 1, "{\"resolution\":\"4K\"}", FixedNow).Value;
+        var asset = CreateAssetWithRate(ownerUserId: ownerId, model: "FX3", schemaVersion: 1, specValues: "{\"resolution\":\"4K\"}");
         _repo.Add(asset);
 
         int validatedVersion = 0;
@@ -797,8 +817,10 @@ public sealed class InventoryAssetServiceTests
         // Simulate pre-migration asset with null BrandId using reflection
         var ctor = typeof(InventoryAsset).GetConstructors(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
             .First(c => c.GetParameters().Length > 0);
+        var oldAssetId = Guid.NewGuid();
+        var oldRate = AssetRentalRate.Create(oldAssetId, 100_000m, null, null, "VND", FixedNow).Value;
         var oldAsset = (InventoryAsset)ctor.Invoke([
-            Guid.NewGuid(), ownerId, Guid.NewGuid(), (Guid?)null, "Old Model", (string?)null, (int?)null, (Guid?)null, 1, "{}", true, (string?)null, FixedNow
+            oldAssetId, ownerId, Guid.NewGuid(), (Guid?)null, "Old Model", (string?)null, (int?)null, (Guid?)null, 1, "{}", true, (string?)null, oldRate, FixedNow
         ]);
         _repo.Add(oldAsset);
 
@@ -825,11 +847,12 @@ public sealed class InventoryAssetServiceTests
 
         var ctor = typeof(InventoryAsset).GetConstructors(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
             .First(c => c.GetParameters().Length > 0);
+        var oldAssetId = Guid.NewGuid();
+        var oldRate = AssetRentalRate.Create(oldAssetId, 100_000m, null, null, "VND", FixedNow).Value;
         var oldAsset = (InventoryAsset)ctor.Invoke([
-            Guid.NewGuid(), ownerId, Guid.NewGuid(), (Guid?)null, "Old Model", (string?)null, (int?)null, (Guid?)null, 1, "{}", true, (string?)null, FixedNow
+            oldAssetId, ownerId, Guid.NewGuid(), (Guid?)null, "Old Model", (string?)null, (int?)null, (Guid?)null, 1, "{}", true, (string?)null, oldRate, FixedNow
         ]);
         _repo.Add(oldAsset);
-
         var patch = new PatchInventoryAssetRequest
         {
             IsBrandIdSpecified = true,
@@ -861,7 +884,7 @@ public sealed class InventoryAssetServiceTests
         var ownerId = Guid.NewGuid();
         var caller = new TestCaller(ownerId);
 
-        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(), "M", 1, "{}", FixedNow).Value;
+        var asset = CreateAssetWithRate(ownerUserId: ownerId, model: "M");
         asset.Version = 100;
         _repo.Add(asset);
 
@@ -892,7 +915,7 @@ public sealed class InventoryAssetServiceTests
         var ownerId = Guid.NewGuid();
         var caller = new TestCaller(ownerId);
 
-        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(), "M", 1, "{}", FixedNow).Value;
+        var asset = CreateAssetWithRate(ownerUserId: ownerId, model: "M");
         asset.Version = 100;
         _repo.Add(asset);
 
@@ -930,7 +953,7 @@ public sealed class InventoryAssetServiceTests
         var caller = new TestCaller(ownerId);
         var newThumbId = Guid.NewGuid();
 
-        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(), "M", 1, "{}", FixedNow).Value;
+        var asset = CreateAssetWithRate(ownerUserId: ownerId, model: "M");
         _repo.Add(asset);
 
         _catalogClient.SpecHandler = (_, _, _) => Task.FromResult(Result.Failure(
@@ -970,7 +993,7 @@ public sealed class InventoryAssetServiceTests
 
         var ownerId = Guid.NewGuid();
         var caller = new TestCaller(ownerId);
-        var asset = InventoryAsset.Create(Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(), "M", 1, "{}", FixedNow).Value;
+        var asset = CreateAssetWithRate(ownerUserId: ownerId, model: "M");
         repo.Add(asset);
 
         Assert.True(asset.AcceptingBookings);
@@ -1196,9 +1219,8 @@ public sealed class InventoryAssetServiceTests
         var eqId = Guid.NewGuid();
 
         // Asset 1 has schema_version 1 (incompatible: unit differs)
-        var asset1 = InventoryAsset.Create(Guid.NewGuid(), ownerId, eqId, Guid.NewGuid(), "Model V1", 1, "{\"capacity\": 3000}", FixedNow).Value;
-        // Asset 2 has schema_version 2 (compatible)
-        var asset2 = InventoryAsset.Create(Guid.NewGuid(), ownerId, eqId, Guid.NewGuid(), "Model V2", 2, "{\"capacity\": 3000}", FixedNow).Value;
+        var asset1 = CreateAssetWithRate(ownerUserId: ownerId, eqTypeId: eqId, model: "Model V1", schemaVersion: 1, specValues: "{\"capacity\": 3000}");
+        var asset2 = CreateAssetWithRate(ownerUserId: ownerId, eqTypeId: eqId, model: "Model V2", schemaVersion: 2, specValues: "{\"capacity\": 3000}");
         _repo.Add(asset1);
         _repo.Add(asset2);
 

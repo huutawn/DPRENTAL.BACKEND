@@ -12,6 +12,9 @@ public sealed class InventoryAssetDomainTests
     private static readonly Guid TestEquipmentTypeId = Guid.NewGuid();
     private static readonly Guid TestBrandId = Guid.NewGuid();
 
+    private static AssetRentalRate CreateValidRate(Guid assetId) =>
+        AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
+
     [Fact]
     public void Create_ValidMinimalFields_DefaultsAcceptingBookingsAndNullReason()
     {
@@ -24,7 +27,8 @@ public sealed class InventoryAssetDomainTests
             "Sony FX3 Cinema Line",
             1,
             "{\"resolution\":\"4K\"}",
-            FixedNow);
+            FixedNow,
+            CreateValidRate(id));
 
         Assert.True(result.IsSuccess);
         var asset = result.Value;
@@ -58,6 +62,7 @@ public sealed class InventoryAssetDomainTests
             2,
             "{}",
             FixedNow,
+            CreateValidRate(id),
             serialNumber: "  SN-123456  ",
             manufactureYear: 2024,
             thumbnailMediaId: thumbId);
@@ -76,10 +81,10 @@ public sealed class InventoryAssetDomainTests
     [InlineData(null)]
     public void Create_InvalidModel_Fails(string? model)
     {
+        var id = Guid.NewGuid();
         var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
-            model!, 1, "{}", FixedNow);
-
+            id, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            model!, 1, "{}", FixedNow, CreateValidRate(id));
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_MODEL", result.Error.Code);
     }
@@ -88,10 +93,10 @@ public sealed class InventoryAssetDomainTests
     public void Create_ModelTooLong_Fails()
     {
         var longModel = new string('A', 201);
+        var id = Guid.NewGuid();
         var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
-            longModel, 1, "{}", FixedNow);
-
+            id, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            longModel, 1, "{}", FixedNow, CreateValidRate(id));
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_MODEL", result.Error.Code);
     }
@@ -99,11 +104,12 @@ public sealed class InventoryAssetDomainTests
     [Fact]
     public void Create_WhitespaceSerialNumber_NormalizedToNull()
     {
+        var id = Guid.NewGuid();
         var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            id, TestOwnerId, TestEquipmentTypeId, TestBrandId,
             "Model X", 1, "{}", FixedNow,
+            CreateValidRate(id),
             serialNumber: "   ");
-
         Assert.True(result.IsSuccess);
         Assert.Null(result.Value.SerialNumber);
     }
@@ -112,11 +118,12 @@ public sealed class InventoryAssetDomainTests
     public void Create_SerialNumberTooLong_Fails()
     {
         var longSerial = new string('S', 101);
+        var id = Guid.NewGuid();
         var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            id, TestOwnerId, TestEquipmentTypeId, TestBrandId,
             "Model X", 1, "{}", FixedNow,
+            CreateValidRate(id),
             serialNumber: longSerial);
-
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_SERIAL_NUMBER", result.Error.Code);
     }
@@ -126,11 +133,12 @@ public sealed class InventoryAssetDomainTests
     [InlineData(2030)] // Greater than 2026 (Vietnam current year in FixedNow)
     public void Create_ManufactureYearOutOfRange_Fails(int year)
     {
+        var id = Guid.NewGuid();
         var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            id, TestOwnerId, TestEquipmentTypeId, TestBrandId,
             "Model X", 1, "{}", FixedNow,
+            CreateValidRate(id),
             manufactureYear: year);
-
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_MANUFACTURE_YEAR", result.Error.Code);
     }
@@ -140,16 +148,20 @@ public sealed class InventoryAssetDomainTests
     {
         var currentYear = BusinessDateTime.ToVietnamDate(FixedNow).Year;
 
+        var id1 = Guid.NewGuid();
         var r1 = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            id1, TestOwnerId, TestEquipmentTypeId, TestBrandId,
             "Model X", 1, "{}", FixedNow,
+            CreateValidRate(id1),
             manufactureYear: 1900);
         Assert.True(r1.IsSuccess);
         Assert.Equal(1900, r1.Value.ManufactureYear);
 
+        var id2 = Guid.NewGuid();
         var r2 = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            id2, TestOwnerId, TestEquipmentTypeId, TestBrandId,
             "Model X", 1, "{}", FixedNow,
+            CreateValidRate(id2),
             manufactureYear: currentYear);
         Assert.True(r2.IsSuccess);
         Assert.Equal(currentYear, r2.Value.ManufactureYear);
@@ -158,11 +170,12 @@ public sealed class InventoryAssetDomainTests
     [Fact]
     public void Create_EmptyGuidThumbnail_Fails()
     {
+        var id = Guid.NewGuid();
         var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            id, TestOwnerId, TestEquipmentTypeId, TestBrandId,
             "Model X", 1, "{}", FixedNow,
+            CreateValidRate(id),
             thumbnailMediaId: Guid.Empty);
-
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_THUMBNAIL_MEDIA_ID", result.Error.Code);
     }
@@ -172,10 +185,10 @@ public sealed class InventoryAssetDomainTests
     [InlineData(-1)]
     public void Create_InvalidSchemaVersion_Fails(int version)
     {
+        var id = Guid.NewGuid();
         var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
-            "Model X", version, "{}", FixedNow);
-
+            id, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Model X", version, "{}", FixedNow, CreateValidRate(id));
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_SCHEMA_VERSION", result.Error.Code);
     }
@@ -189,10 +202,10 @@ public sealed class InventoryAssetDomainTests
     [InlineData("not-json")]
     public void Create_InvalidSpecValues_Fails(string specs)
     {
+        var id = Guid.NewGuid();
         var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
-            "Model X", 1, specs, FixedNow);
-
+            id, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Model X", 1, specs, FixedNow, CreateValidRate(id));
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_SPEC_VALUES", result.Error.Code);
     }
@@ -200,25 +213,27 @@ public sealed class InventoryAssetDomainTests
     [Fact]
     public void Create_EmptyIdentities_Fails()
     {
-        var r1 = InventoryAsset.Create(Guid.Empty, TestOwnerId, TestEquipmentTypeId, TestBrandId, "M", 1, "{}", FixedNow);
+        var id = Guid.NewGuid();
+        var r1 = InventoryAsset.Create(Guid.Empty, TestOwnerId, TestEquipmentTypeId, TestBrandId, "M", 1, "{}", FixedNow, CreateValidRate(id));
         Assert.Equal("INVALID_ASSET_ID", r1.Error.Code);
 
-        var r2 = InventoryAsset.Create(Guid.NewGuid(), Guid.Empty, TestEquipmentTypeId, TestBrandId, "M", 1, "{}", FixedNow);
+        var r2 = InventoryAsset.Create(id, Guid.Empty, TestEquipmentTypeId, TestBrandId, "M", 1, "{}", FixedNow, CreateValidRate(id));
         Assert.Equal("INVALID_OWNER_USER_ID", r2.Error.Code);
 
-        var r3 = InventoryAsset.Create(Guid.NewGuid(), TestOwnerId, Guid.Empty, TestBrandId, "M", 1, "{}", FixedNow);
+        var r3 = InventoryAsset.Create(id, TestOwnerId, Guid.Empty, TestBrandId, "M", 1, "{}", FixedNow, CreateValidRate(id));
         Assert.Equal("INVALID_EQUIPMENT_TYPE_ID", r3.Error.Code);
 
-        var r4 = InventoryAsset.Create(Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, Guid.Empty, "M", 1, "{}", FixedNow);
+        var r4 = InventoryAsset.Create(id, TestOwnerId, TestEquipmentTypeId, Guid.Empty, "M", 1, "{}", FixedNow, CreateValidRate(id));
         Assert.Equal("INVALID_BRAND_ID", r4.Error.Code);
     }
 
     [Fact]
     public void UpdateDetails_ValidValues_UpdatesAllAndMutatesTime()
     {
+        var id = Guid.NewGuid();
         var asset = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
-            "Model A", 1, "{}", FixedNow).Value;
+            id, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Model A", 1, "{}", FixedNow, CreateValidRate(id)).Value;
 
         var updateTime = FixedNow.AddHours(2);
         var thumb = Guid.NewGuid();
@@ -239,9 +254,10 @@ public sealed class InventoryAssetDomainTests
     [Fact]
     public void UpdateDetails_CannotRemoveExistingBrand()
     {
+        var id = Guid.NewGuid();
         var asset = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
-            "Model A", 1, "{}", FixedNow).Value;
+            id, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Model A", 1, "{}", FixedNow, CreateValidRate(id)).Value;
 
         var result = asset.UpdateDetails(null, "Model B", null, null, null, 1, "{}", FixedNow.AddHours(1));
 
@@ -253,9 +269,10 @@ public sealed class InventoryAssetDomainTests
     [Fact]
     public void UpdateDetails_EmptyGuidBrand_Fails()
     {
+        var id = Guid.NewGuid();
         var asset = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
-            "Model A", 1, "{}", FixedNow).Value;
+            id, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Model A", 1, "{}", FixedNow, CreateValidRate(id)).Value;
 
         var result = asset.UpdateDetails(Guid.Empty, "Model B", null, null, null, 1, "{}", FixedNow.AddHours(1));
 
@@ -266,9 +283,11 @@ public sealed class InventoryAssetDomainTests
     [Fact]
     public void UpdateDetails_InvalidValue_DoesNotMutateState()
     {
+        var id = Guid.NewGuid();
         var asset = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            id, TestOwnerId, TestEquipmentTypeId, TestBrandId,
             "Model Original", 1, "{\"k\":\"v\"}", FixedNow,
+            CreateValidRate(id),
             serialNumber: "SN-ORIG",
             manufactureYear: 2020).Value;
 
@@ -298,9 +317,10 @@ public sealed class InventoryAssetDomainTests
     [Fact]
     public void BookingToggle_EnableAndDisable_WorksAsExpected()
     {
+        var id = Guid.NewGuid();
         var asset = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId, TestBrandId,
-            "Model A", 1, "{}", FixedNow).Value;
+            id, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Model A", 1, "{}", FixedNow, CreateValidRate(id)).Value;
 
         Assert.True(asset.CanAcceptBookings());
 

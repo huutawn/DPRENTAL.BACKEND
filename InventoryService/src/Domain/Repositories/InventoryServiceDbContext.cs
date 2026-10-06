@@ -23,6 +23,11 @@ public sealed class InventoryServiceDbContext : DbContext
     public DbSet<InventoryAsset> Assets => Set<InventoryAsset>();
 
     /// <summary>
+    /// Bảng quản lý giá thuê niêm yết của tài sản trong kho.
+    /// </summary>
+    public DbSet<AssetRentalRate> AssetRentalRates => Set<AssetRentalRate>();
+
+    /// <summary>
     /// Bảng quản lý các lượt phân bổ lịch tài sản.
     /// </summary>
     public DbSet<AssetAllocation> AssetAllocations => Set<AssetAllocation>();
@@ -97,6 +102,10 @@ public sealed class InventoryServiceDbContext : DbContext
             b.HasMany(a => a.CalendarBlocks)
                 .WithOne(cb => cb.Asset)
                 .HasForeignKey(cb => cb.AssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(a => a.RentalRate)
+                .WithOne(r => r.Asset)
+                .HasForeignKey<AssetRentalRate>(r => r.AssetId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -193,6 +202,54 @@ public sealed class InventoryServiceDbContext : DbContext
 
             b.HasIndex(i => new { i.Status, i.NextAttemptAt })
                 .HasDatabaseName("ix_inbox_messages_status_next_attempt");
+        });
+
+        // 7. Cấu hình thực thể AssetRentalRate
+        modelBuilder.Entity<AssetRentalRate>(b =>
+        {
+            b.ToTable("asset_rental_rates", SchemaName, t =>
+            {
+                t.HasCheckConstraint("ck_asset_rental_rates_asset_id", "asset_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+                t.HasCheckConstraint("ck_asset_rental_rates_daily_rate", "daily_rate >= 1 AND daily_rate <= 999999999999999999 AND trunc(daily_rate) = daily_rate");
+                t.HasCheckConstraint("ck_asset_rental_rates_weekly_rate", "weekly_rate IS NULL OR (weekly_rate >= 1 AND weekly_rate <= 999999999999999999 AND trunc(weekly_rate) = weekly_rate)");
+                t.HasCheckConstraint("ck_asset_rental_rates_monthly_rate", "monthly_rate IS NULL OR (monthly_rate >= 1 AND monthly_rate <= 999999999999999999 AND trunc(monthly_rate) = monthly_rate)");
+                t.HasCheckConstraint("ck_asset_rental_rates_currency", "currency = 'VND'");
+            });
+
+            b.HasKey(r => r.AssetId)
+                .HasName("pk_asset_rental_rates");
+
+            b.Property(r => r.AssetId)
+                .HasColumnName("asset_id");
+
+            b.Property(r => r.DailyRate)
+                .HasColumnName("daily_rate")
+                .HasColumnType("numeric(18,0)")
+                .IsRequired();
+
+            b.Property(r => r.WeeklyRate)
+                .HasColumnName("weekly_rate")
+                .HasColumnType("numeric(18,0)");
+
+            b.Property(r => r.MonthlyRate)
+                .HasColumnName("monthly_rate")
+                .HasColumnType("numeric(18,0)");
+
+            b.Property(r => r.Currency)
+                .HasColumnName("currency")
+                .HasMaxLength(10)
+                .IsRequired();
+
+            b.Property(r => r.CreatedAt)
+                .HasColumnName("created_at")
+                .IsRequired();
+
+            b.Property(r => r.UpdatedAt)
+                .HasColumnName("updated_at")
+                .IsRequired();
+
+            b.HasIndex(r => r.DailyRate)
+                .HasDatabaseName("ix_asset_rental_rates_daily_rate");
         });
     }
 }

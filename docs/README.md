@@ -15,15 +15,15 @@ Domain sở hữu entities, value objects, domain policies, repository contracts
 
 ## Domain Model và Thực thể (Target Domain)
 
-Hệ thống quản lý 6 bảng thực thể trong schema `inventory`:
+Hệ thống quản lý 7 bảng thực thể trong schema `inventory`:
 
 1. `InventoryAsset` (`inventory.assets`): Tài sản trong kho, thuộc sở hữu cá nhân (`OwnerUserId`), liên kết với loại thiết bị Catalog (`EquipmentTypeId`) cùng thương hiệu chuẩn (`BrandId`), tên model (`Model`), số serial (`SerialNumber`), năm sản xuất (`ManufactureYear`), ảnh đại diện (`ThumbnailMediaId`), phiên bản dynamic schema (`SchemaVersion`), thông số kỹ thuật (`SpecValues` lưu JSONB), và cờ nhận lịch (`AcceptingBookings`). Thuộc tính `OrganizationId` đã được loại bỏ hoàn toàn khỏi entity và database schema.
-2. `AssetAllocation` (`inventory.asset_allocations`): Lượt phân bổ hoặc giữ chỗ lịch của tài sản, gồm nguồn (`SourceSystem`), mã tham chiếu (`ExternalReference`), khoảng thời gian (`RentalPeriod`), trạng thái (`AllocationStatus`: Held=1, Allocated=2, Cancelled=5, Released=6) và hạn giữ (`HoldExpiresAt`).
-3. `AllocationTransition` (`inventory.allocation_transitions`): Lịch sử chuyển đổi trạng thái của lượt phân bổ (append-only audit log), có thứ tự `Sequence` và `OperationKey` chống trùng lặp.
-4. `CalendarBlock` (`inventory.calendar_blocks`): Khoảng thời gian chặn lịch tài sản phục vụ bảo trì, kiểm định hoặc sử dụng nội bộ (tối đa chân trời 6 tháng).
-5. `OutboxMessage` (`inventory.outbox_messages`): Lưu trữ thông điệp sự kiện theo mẫu Transactional Outbox Pattern với payload `jsonb` phục vụ xuất bản ra Kafka.
-6. `InboxMessage` (`inventory.inbox_messages`): Lưu trữ thông điệp theo mẫu Transactional Inbox Pattern với khóa duy nhất `(handler, message_id)`.
-
+2. `AssetRentalRate` (`inventory.asset_rental_rates`): Giá thuê niêm yết của tài sản (quan hệ 1:1 với `inventory.assets` qua `asset_id`), gồm `DailyRate` (VND nguyên, bắt buộc), `WeeklyRate` (tùy chọn), `MonthlyRate` (tùy chọn), `Currency` (bắt buộc bằng `"VND"`), `CreatedAt`, `UpdatedAt`. B-tree index trên `daily_rate`.
+3. `AssetAllocation` (`inventory.asset_allocations`): Lượt phân bổ hoặc giữ chỗ lịch của tài sản, gồm nguồn (`SourceSystem`), mã tham chiếu (`ExternalReference`), khoảng thời gian (`RentalPeriod`), trạng thái (`AllocationStatus`: Held=1, Allocated=2, Cancelled=5, Released=6) và hạn giữ (`HoldExpiresAt`).
+4. `AllocationTransition` (`inventory.allocation_transitions`): Lịch sử chuyển đổi trạng thái của lượt phân bổ (append-only audit log), có thứ tự `Sequence` và `OperationKey` chống trùng lặp.
+5. `CalendarBlock` (`inventory.calendar_blocks`): Khoảng thời gian chặn lịch tài sản phục vụ bảo trì, kiểm định hoặc sử dụng nội bộ (tối đa chân trời 6 tháng).
+6. `OutboxMessage` (`inventory.outbox_messages`): Lưu trữ thông điệp sự kiện theo mẫu Transactional Outbox Pattern với payload `jsonb` phục vụ xuất bản ra Kafka.
+7. `InboxMessage` (`inventory.inbox_messages`): Lưu trữ thông điệp theo mẫu Transactional Inbox Pattern với khóa duy nhất `(handler, message_id)`.
 ---
 
 ## Date Semantics và Availability Policy
@@ -204,6 +204,34 @@ Hệ thống áp dụng cơ chế: **PostgreSQL `READ COMMITTED` transaction + a
    - Mở rộng `OutboxPublisherWorker`: khi claim được sự kiện `InventoryAssetAvailabilityChanged` đã commit trong DB, thực hiện invalidate toàn bộ month keys của tài sản qua script Lua atomic trước khi publish Kafka, ngoài database transaction.
    - Lỗi invalidation chỉ log cảnh báo, không chặn publication hay rollback mutation.
 
+
+---
+
+## Ranh giới sở hữu giá thuê niêm yết (DPR-169: Listed Rental Rates)
+
+1. **Ranh giới sở hữu giữa các dịch vụ**:
+   - **Inventory Service sở hữu giá niêm yết hiện tại**: Inventory quản lý và lưu trữ mức giá cho thuê niêm yết hiện hành (`AssetRentalRate`) của từng thiết bị trong kho (`InventoryAsset`).
+   - **Rental Service chịu trách nhiệm revalidate và lưu PriceSnapshot**: Khi khách hàng hoặc đối tác tạo đơn thuê (`RentalOrder`), Rental Service bắt buộc phải đọc/revalidate giá niêm yết từ Inventory Service và lưu bản chụp giá (`PriceSnapshot`) cố định gắn liền với vòng đời của đơn hàng.
+   - **Tính bất biến của đơn hàng**: Việc thay đổi giá niêm yết trên Inventory Service tuyệt đối không làm thay đổi giá của các đơn hàng cũ đã tạo.
+
+2. **Quy tắc phân quyền cập nhật giá**:
+   - Riêng API `PUT /api/v1/inventory/assets/{assetId}/rental-rate` chỉ yêu cầu Human Owner (JWT sub khớp `asset.OwnerUserId`) hoặc Human Admin (`r=adm`), không cần permission `inventory.asset.manage`.
+   - Service principal và người dùng khác bị từ chối với HTTP 403 Forbidden.
+   - Anonymous bị từ chối với HTTP 401 Unauthorized.
+
+3. **Ngoài phạm vi của Inventory Service**:
+   - `RentalOrder`, `PriceSnapshot` implementation, payment/refund/deposit, fee, voucher, tax, delivery fee, dynamic pricing và price history.
+
+4. **Runbook bảo trì và cutover migration AddAssetRentalRate**:
+   - **Preflight script**: `scripts/add-asset-rental-rate-preflight.sql` tạo staging table `inventory.asset_rental_rate_backfill` sử dụng kiểu `numeric` không giới hạn precision để kiểm tra phần lẻ, range `[1, 999999999999999999]` và currency = `'VND'`.
+   - **Yêu cầu đối với DB có asset**: Từng AssetId phải có mapping giá hợp lệ trước khi chạy migration; thiếu giá, sai giá hoặc AssetId không tồn tại làm migration thất bại atomically. DB rỗng không yêu cầu backfill.
+   - **Quy trình cutover**:
+     1. Dừng toàn bộ writer cũ của Inventory Service.
+     2. Sao lưu (backup) database PostgreSQL.
+     3. Chạy script tạo staging table `inventory.asset_rental_rate_backfill` (`scripts/add-asset-rental-rate-preflight.sql`), sau đó Inventory team nạp dữ liệu giá đã xác nhận vào staging.
+     4. Chạy truy vấn kiểm tra mức độ sẵn sàng trong preflight script. Xác nhận `missing_count = 0`, `invalid_rate_count = 0` và `unmatched_asset_count = 0`. Thiếu giá xác nhận hoặc sai sót dữ liệu sẽ chặn cutover.
+     5. Thực thi migration `AddAssetRentalRate` (tạo bảng, constraints, index, insert giá đã xác nhận, xóa staging table).
+     6. Migration chặn `Down()` để bảo vệ dữ liệu giá. Khởi động binary Inventory Service mới.
 ## Forward migration và maintenance cutover
 
 `20261002024109_HardenInventoryBoundary` áp dụng sau migration boundary hiện có; không chỉnh sửa migration đã merge. DB được giữ nguyên: assets/allocations, ngày, trạng thái, external references, operation keys và Outbox/Inbox vẫn tồn tại. Migration thêm CHECK cho GUID khác rỗng, SchemaVersion >= 1 và SpecValues phải là JSON object. Dữ liệu không hợp lệ làm toàn bộ migration rollback, không được tự suy đoán mapping hoặc reset database.

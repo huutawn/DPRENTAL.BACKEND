@@ -20,6 +20,7 @@ public sealed class CalendarBlockDomainTests
 
     private InventoryAsset CreateAsset(bool acceptingBookings = true)
     {
+        var rate = AssetRentalRate.Create(_assetId, 100_000m, null, null, "VND", _now).Value;
         var asset = InventoryAsset.Create(
             _assetId,
             _ownerUserId,
@@ -28,7 +29,8 @@ public sealed class CalendarBlockDomainTests
             "Sony FX3",
             1,
             "{}",
-            _now).Value;
+            _now,
+            rate).Value;
 
         if (!acceptingBookings)
         {

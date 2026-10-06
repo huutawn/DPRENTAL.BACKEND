@@ -198,4 +198,32 @@ public sealed class InventoryAssetsController : ControllerBase
 
         return Ok(result.Value);
     }
+
+    /// <summary>
+    /// Cập nhật giá thuê niêm yết của tài sản (thay thế toàn bộ).
+    /// </summary>
+    /// <param name="assetId">Định danh tài sản cần cập nhật giá.</param>
+    /// <param name="request">Thông tin giá thuê mới.</param>
+    /// <param name="cancellationToken">Token hủy yêu cầu.</param>
+    /// <returns>Thông tin giá thuê sau khi cập nhật.</returns>
+    [HttpPut("{assetId:guid}/rental-rate")]
+    [ProducesResponseType(typeof(AssetRentalRateDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> UpdateRentalRate(
+        Guid assetId,
+        [FromBody] AssetRentalRateDto request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _assetService.UpdateRentalRateAsync(assetId, request, _callerContext, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
+    }
 }

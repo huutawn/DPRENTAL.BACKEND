@@ -24,6 +24,7 @@ public sealed class InventoryAssetRepository : IInventoryAssetRepository
     public async Task<InventoryAsset?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         return await _context.Assets
+            .Include(a => a.RentalRate)
             .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
     }
 
@@ -31,6 +32,7 @@ public sealed class InventoryAssetRepository : IInventoryAssetRepository
     public async Task<InventoryAsset?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default)
     {
         return await _context.Assets
+            .Include(a => a.RentalRate)
             .FirstOrDefaultAsync(a => a.Id == id && a.OwnerUserId == ownerUserId, cancellationToken);
     }
 
@@ -67,6 +69,7 @@ public sealed class InventoryAssetRepository : IInventoryAssetRepository
 
         return await _context.Assets
             .FromSqlRaw(sql, parameters.ToArray())
+            .Include(a => a.RentalRate)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
     }
