@@ -572,9 +572,11 @@ public sealed partial class AssetHttpIntegrationTests
             await db.Database.ExecuteSqlInterpolatedAsync($$"""
                 INSERT INTO inventory.assets (id, owner_user_id, equipment_type_id, brand_id, model, schema_version, spec_values, accepting_bookings, created_at, updated_at)
                 VALUES ({{assetId}}, {{owner}}, {{eqId}}, NULL, 'Legacy Camera', 1, '{"res":"1080p"}'::jsonb, true, {{FixedNow}}, {{FixedNow}});
+
+                INSERT INTO inventory.asset_rental_rates (asset_id, daily_rate, currency, created_at, updated_at)
+                VALUES ({{assetId}}, 100000, 'VND', {{FixedNow}}, {{FixedNow}});
             """);
         }
-
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
             secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
 

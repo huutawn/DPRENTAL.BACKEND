@@ -246,7 +246,7 @@ public sealed partial class PostgresIntegrationTests
         var notFoundForOwnerB = await repo.GetByIdForOwnerAsync(assetA.Id, ownerB);
         Assert.Null(notFoundForOwnerB);
 
-        var listA = await repo.SearchAsync(AssetSearchCriteria.ForOwner(ownerA, 0, 10));
+        var listA = await repo.SearchForOwnerAsync(OwnerAssetSearchCriteria.ForOwner(ownerA, 0, 10));
         Assert.Single(listA);
         Assert.Equal(assetA.Id, listA[0].Id);
     }
