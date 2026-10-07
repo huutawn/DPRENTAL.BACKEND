@@ -682,6 +682,542 @@ public sealed class CatalogMigrationTests
             await DropDatabaseAsync(dbName);
         }
     }
+
+    [Fact]
+    public async Task UpgradeMigration_From94321a8Fixture_WithoutActiveSchemaVersionId_UpgradesSuccessfully()
+    {
+        string dbName = $"catalog_mig_94321a8_no_col_{Guid.NewGuid():N}";
+        await CreateDatabaseAsync(dbName);
+
+        try
+        {
+            string dbConnString = GetConnectionString(dbName);
+            Guid categoryId = Guid.NewGuid();
+            Guid brandId = Guid.NewGuid();
+            Guid eq1Id = Guid.NewGuid();
+            Guid eq2Id = Guid.NewGuid();
+            Guid mediaId1 = Guid.NewGuid();
+            Guid mediaId2 = Guid.NewGuid();
+            DateTime now = new(2026, 10, 7, 8, 51, 0, DateTimeKind.Utc);
+
+            // 1. Khởi tạo schema và dữ liệu fixture 94321a8 (7 migration, KHÔNG CÓ cột ActiveSchemaVersionId)
+            await Setup94321a8HistoricalSchemaAsync(
+                dbConnString,
+                includeActiveSchemaVersionId: false,
+                categoryId,
+                brandId,
+                eq1Id,
+                eq2Id,
+                mediaId1,
+                mediaId2,
+                now);
+
+            // 2. Xác nhận trạng thái trước nâng cấp: 7 migrations, không có ActiveSchemaVersionId, không có bảng legacy
+            await using (var preConn = new NpgsqlConnection(dbConnString))
+            {
+                await preConn.OpenAsync();
+
+                await using var preHistCmd = new NpgsqlCommand(
+                    "SELECT count(*) FROM catalog.\"__EFMigrationsHistory\";", preConn);
+                Assert.Equal(7, (long)(await preHistCmd.ExecuteScalarAsync())!);
+
+                await using var preColCmd = new NpgsqlCommand(
+                    """
+                    SELECT count(*) FROM information_schema.columns
+                    WHERE table_schema = 'catalog' AND table_name = 'EquipmentTypes' AND column_name = 'ActiveSchemaVersionId';
+                    """, preConn);
+                Assert.Equal(0, (long)(await preColCmd.ExecuteScalarAsync())!);
+
+                await using var preLegacyTableCmd = new NpgsqlCommand(
+                    """
+                    SELECT count(*) FROM information_schema.tables
+                    WHERE table_schema = 'catalog' AND table_name IN ('SpecSchemas', 'SchemaVersions', 'SpecFields', 'SpecOptions');
+                    """, preConn);
+                Assert.Equal(0, (long)(await preLegacyTableCmd.ExecuteScalarAsync())!);
+            }
+
+            // 3. Thực hiện nâng cấp toàn bộ migration
+            using var context = CreateContext(dbConnString);
+            await context.Database.MigrateAsync();
+
+            // 4. Xác nhận trạng thái sau nâng cấp
+            await using (var postConn = new NpgsqlConnection(dbConnString))
+            {
+                await postConn.OpenAsync();
+
+                // Ghi nhận đủ 10 migrations
+                await using var postHistCmd = new NpgsqlCommand(
+                    "SELECT \"MigrationId\" FROM catalog.\"__EFMigrationsHistory\" ORDER BY \"MigrationId\";", postConn);
+                var applied = new List<string>();
+                await using (var r = await postHistCmd.ExecuteReaderAsync())
+                {
+                    while (await r.ReadAsync())
+                    {
+                        applied.Add(r.GetString(0));
+                    }
+                }
+                Assert.Equal(10, applied.Count);
+                Assert.Contains(applied, m => m.EndsWith("_RefactorToCanonicalCatalog", StringComparison.Ordinal));
+                Assert.Contains(applied, m => m.EndsWith("_CanonicalRulesAndSchemaLifecycle", StringComparison.Ordinal));
+                Assert.Contains(applied, m => m.EndsWith("_UseEquipmentTypeSpecSchemasOnly", StringComparison.Ordinal));
+
+                // Cột ActiveSchemaVersionId và các bảng legacy đã bị dọn sạch
+                await using var postColCmd = new NpgsqlCommand(
+                    """
+                    SELECT count(*) FROM information_schema.columns
+                    WHERE table_schema = 'catalog' AND table_name = 'EquipmentTypes' AND column_name = 'ActiveSchemaVersionId';
+                    """, postConn);
+                Assert.Equal(0, (long)(await postColCmd.ExecuteScalarAsync())!);
+
+                await using var postLegacyTableCmd = new NpgsqlCommand(
+                    """
+                    SELECT count(*) FROM information_schema.tables
+                    WHERE table_schema = 'catalog' AND table_name IN ('SpecSchemas', 'SchemaVersions', 'SpecFields', 'SpecOptions');
+                    """, postConn);
+                Assert.Equal(0, (long)(await postLegacyTableCmd.ExecuteScalarAsync())!);
+
+                // Xác nhận bảo toàn dữ liệu trước và sau
+                // Category
+                await using var catCmd = new NpgsqlCommand(
+                    "SELECT \"Name\", \"Slug\", \"IsActive\" FROM catalog.\"Categories\" WHERE \"Id\" = @id;", postConn);
+                catCmd.Parameters.AddWithValue("id", categoryId);
+                await using (var r = await catCmd.ExecuteReaderAsync())
+                {
+                    Assert.True(await r.ReadAsync());
+                    Assert.Equal("Âm thanh", r.GetString(0));
+                    Assert.Equal("am-thanh", r.GetString(1));
+                    Assert.True(r.GetBoolean(2));
+                }
+
+                // Brand
+                await using var brandCmd = new NpgsqlCommand(
+                    "SELECT \"Code\", \"Name\", \"Slug\", \"IsActive\" FROM catalog.\"Brands\" WHERE \"Id\" = @id;", postConn);
+                brandCmd.Parameters.AddWithValue("id", brandId);
+                await using (var r = await brandCmd.ExecuteReaderAsync())
+                {
+                    Assert.True(await r.ReadAsync());
+                    Assert.Equal("SONY", r.GetString(0));
+                    Assert.Equal("Sony Corporation", r.GetString(1));
+                    Assert.Equal("sony", r.GetString(2));
+                }
+
+                // EquipmentTypes (eq1: Published, eq2: Draft)
+                await using var eqCmd = new NpgsqlCommand(
+                    "SELECT \"Id\", \"Code\", \"Name\", \"Status\", \"CurrentSchemaVersion\", \"CreatedAt\", \"PublishedAt\" FROM catalog.\"EquipmentTypes\" ORDER BY \"Code\";", postConn);
+                await using (var r = await eqCmd.ExecuteReaderAsync())
+                {
+                    Assert.True(await r.ReadAsync());
+                    Assert.Equal(eq2Id, r.GetGuid(0));
+                    Assert.Equal("CAM-001", r.GetString(1));
+                    Assert.Equal("Máy quay phim", r.GetString(2));
+                    Assert.Equal("Draft", r.GetString(3));
+                    Assert.Equal(1, r.GetInt32(4));
+
+                    Assert.True(await r.ReadAsync());
+                    Assert.Equal(eq1Id, r.GetGuid(0));
+                    Assert.Equal("MIC-001", r.GetString(1));
+                    Assert.Equal("Micro không dây", r.GetString(2));
+                    Assert.Equal("Published", r.GetString(3));
+                    Assert.Equal(1, r.GetInt32(4));
+                    Assert.False(await r.IsDBNullAsync(6));
+                    Assert.False(await r.ReadAsync());
+                }
+
+                // EquipmentTypeSpecSchemas (JSON definition được bảo toàn)
+                await using var specCmd = new NpgsqlCommand(
+                    "SELECT \"EquipmentTypeId\", \"Version\", \"Definition\" FROM catalog.\"EquipmentTypeSpecSchemas\" ORDER BY \"EquipmentTypeId\";", postConn);
+                await using (var r = await specCmd.ExecuteReaderAsync())
+                {
+                    int count = 0;
+                    while (await r.ReadAsync())
+                    {
+                        count++;
+                        Assert.Equal(1, r.GetInt32(1));
+                        string json = r.GetString(2);
+                        Assert.Contains("\"fields\"", json);
+                    }
+                    Assert.Equal(2, count);
+                }
+
+                // Categories & Media relations
+                await using var relCmd = new NpgsqlCommand(
+                    "SELECT count(*) FROM catalog.\"EquipmentTypeCategories\";", postConn);
+                Assert.Equal(2, (long)(await relCmd.ExecuteScalarAsync())!);
+
+                await using var mediaCmd = new NpgsqlCommand(
+                    "SELECT count(*) FROM catalog.\"EquipmentTypeMedia\";", postConn);
+                Assert.Equal(2, (long)(await mediaCmd.ExecuteScalarAsync())!);
+            }
+        }
+        finally
+        {
+            await DropDatabaseAsync(dbName);
+        }
+    }
+
+    [Fact]
+    public async Task UpgradeMigration_FromHistorical_WithPreexistingActiveSchemaVersionId_UpgradesSuccessfully()
+    {
+        string dbName = $"catalog_mig_94321a8_with_col_{Guid.NewGuid():N}";
+        await CreateDatabaseAsync(dbName);
+
+        try
+        {
+            string dbConnString = GetConnectionString(dbName);
+            Guid categoryId = Guid.NewGuid();
+            Guid brandId = Guid.NewGuid();
+            Guid eq1Id = Guid.NewGuid();
+            Guid eq2Id = Guid.NewGuid();
+            Guid mediaId1 = Guid.NewGuid();
+            Guid mediaId2 = Guid.NewGuid();
+            DateTime now = new(2026, 10, 7, 8, 51, 0, DateTimeKind.Utc);
+
+            // 1. Khởi tạo fixture lịch sử biến thể CÓ SẴN cột ActiveSchemaVersionId
+            await Setup94321a8HistoricalSchemaAsync(
+                dbConnString,
+                includeActiveSchemaVersionId: true,
+                categoryId,
+                brandId,
+                eq1Id,
+                eq2Id,
+                mediaId1,
+                mediaId2,
+                now);
+
+            // Xác nhận cột ActiveSchemaVersionId có trước khi nâng cấp
+            await using (var preConn = new NpgsqlConnection(dbConnString))
+            {
+                await preConn.OpenAsync();
+                await using var colCmd = new NpgsqlCommand(
+                    """
+                    SELECT count(*) FROM information_schema.columns
+                    WHERE table_schema = 'catalog' AND table_name = 'EquipmentTypes' AND column_name = 'ActiveSchemaVersionId';
+                    """, preConn);
+                Assert.Equal(1, (long)(await colCmd.ExecuteScalarAsync())!);
+            }
+
+            // 2. Chạy nâng cấp (IF NOT EXISTS giúp lệnh không bị lỗi trùng cột)
+            using var context = CreateContext(dbConnString);
+            await context.Database.MigrateAsync();
+
+            // 3. Xác nhận sau nâng cấp
+            await using (var postConn = new NpgsqlConnection(dbConnString))
+            {
+                await postConn.OpenAsync();
+
+                await using var histCmd = new NpgsqlCommand(
+                    "SELECT count(*) FROM catalog.\"__EFMigrationsHistory\";", postConn);
+                Assert.Equal(10, (long)(await histCmd.ExecuteScalarAsync())!);
+
+                // Cột và bảng legacy bị xóa theo đường nâng cấp
+                await using var colCmd = new NpgsqlCommand(
+                    """
+                    SELECT count(*) FROM information_schema.columns
+                    WHERE table_schema = 'catalog' AND table_name = 'EquipmentTypes' AND column_name = 'ActiveSchemaVersionId';
+                    """, postConn);
+                Assert.Equal(0, (long)(await colCmd.ExecuteScalarAsync())!);
+
+                await using var legacyTableCmd = new NpgsqlCommand(
+                    """
+                    SELECT count(*) FROM information_schema.tables
+                    WHERE table_schema = 'catalog' AND table_name IN ('SpecSchemas', 'SchemaVersions', 'SpecFields', 'SpecOptions');
+                    """, postConn);
+                Assert.Equal(0, (long)(await legacyTableCmd.ExecuteScalarAsync())!);
+
+                // Dữ liệu EquipmentType còn nguyên vẹn
+                await using var eqCmd = new NpgsqlCommand(
+                    "SELECT count(*) FROM catalog.\"EquipmentTypes\";", postConn);
+                Assert.Equal(2, (long)(await eqCmd.ExecuteScalarAsync())!);
+            }
+        }
+        finally
+        {
+            await DropDatabaseAsync(dbName);
+        }
+    }
+
+    [Fact]
+    public async Task UpgradeMigration_IdempotentSecondRun_PreservesDataAndSchema()
+    {
+        string dbName = $"catalog_mig_idempotent_{Guid.NewGuid():N}";
+        await CreateDatabaseAsync(dbName);
+
+        try
+        {
+            string dbConnString = GetConnectionString(dbName);
+            using var context = CreateContext(dbConnString);
+
+            // 1. Chạy migration lần 1
+            await context.Database.MigrateAsync();
+
+            // Thêm dữ liệu vào database đã nâng cấp đầy đủ
+            var brand = new Brand
+            {
+                Id = Guid.NewGuid(),
+                Code = "IDEM-01",
+                Name = "Idempotent Brand",
+                Slug = "idempotent-brand",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            context.Brands.Add(brand);
+            await context.SaveChangesAsync();
+
+            // 2. Chạy migration lần 2
+            using var context2 = CreateContext(dbConnString);
+            await context2.Database.MigrateAsync();
+
+            // 3. Xác nhận không thay đổi dữ liệu hoặc history
+            await using var verifyConn = new NpgsqlConnection(dbConnString);
+            await verifyConn.OpenAsync();
+
+            await using var histCmd = new NpgsqlCommand(
+                "SELECT count(*) FROM catalog.\"__EFMigrationsHistory\";", verifyConn);
+            Assert.Equal(10, (long)(await histCmd.ExecuteScalarAsync())!);
+
+            await using var brandCmd = new NpgsqlCommand(
+                "SELECT count(*) FROM catalog.\"Brands\" WHERE \"Code\" = 'IDEM-01';", verifyConn);
+            Assert.Equal(1, (long)(await brandCmd.ExecuteScalarAsync())!);
+        }
+        finally
+        {
+            await DropDatabaseAsync(dbName);
+        }
+    }
+
+    [Fact]
+    public async Task UpgradeMigration_FailedMigration_RollsBackTransaction_AndDoesNotRecordHistory()
+    {
+        string dbName = $"catalog_mig_rollback_{Guid.NewGuid():N}";
+        await CreateDatabaseAsync(dbName);
+
+        try
+        {
+            string dbConnString = GetConnectionString(dbName);
+            using var context = CreateContext(dbConnString);
+            var migrator = context.GetService<IMigrator>();
+
+            // 1. Áp dụng đến migration InitCategoryTable
+            await migrator.MigrateAsync("20261001080359_InitCategoryTable");
+
+            // 2. Chèn dữ liệu vi phạm làm cho migration RefactorEquipmentToEquipmentType thất bại (trùng Code)
+            Guid catId = Guid.NewGuid();
+            DateTime now = DateTime.UtcNow;
+            await using (var conn = new NpgsqlConnection(dbConnString))
+            {
+                await conn.OpenAsync();
+                await using var catCmd = new NpgsqlCommand(
+                    "INSERT INTO catalog.\"Categories\" (\"Id\", \"Name\", \"Slug\", \"IsActive\", \"CreatedAtUtc\") VALUES (@id, 'C', 'c', TRUE, @now);", conn);
+                catCmd.Parameters.AddWithValue("id", catId);
+                catCmd.Parameters.AddWithValue("now", now);
+                await catCmd.ExecuteNonQueryAsync();
+
+                // Chèn 2 equipment có Code trùng nhau 'DUP'
+                await using var eq1Cmd = new NpgsqlCommand(
+                    """
+                    INSERT INTO catalog."Equipments" ("Id", "OrganizationId", "CategoryId", "Code", "Name", "Brand", "Description", "DailyPrice", "RegionId", "Status", "Specifications", "CreatedAtUtc")
+                    VALUES (@id1, @org1, @catId, 'DUP', 'Eq 1', 'B', 'D', 100, @reg, 'Draft', '{}'::jsonb, @now);
+                    INSERT INTO catalog."Equipments" ("Id", "OrganizationId", "CategoryId", "Code", "Name", "Brand", "Description", "DailyPrice", "RegionId", "Status", "Specifications", "CreatedAtUtc")
+                    VALUES (@id2, @org2, @catId, 'DUP', 'Eq 2', 'B', 'D', 100, @reg, 'Draft', '{}'::jsonb, @now);
+                    """, conn);
+                eq1Cmd.Parameters.AddWithValue("id1", Guid.NewGuid());
+                eq1Cmd.Parameters.AddWithValue("id2", Guid.NewGuid());
+                eq1Cmd.Parameters.AddWithValue("org1", Guid.NewGuid());
+                eq1Cmd.Parameters.AddWithValue("org2", Guid.NewGuid());
+                eq1Cmd.Parameters.AddWithValue("catId", catId);
+                eq1Cmd.Parameters.AddWithValue("reg", Guid.NewGuid());
+                eq1Cmd.Parameters.AddWithValue("now", now);
+                await eq1Cmd.ExecuteNonQueryAsync();
+            }
+
+            // 3. Chạy migration RefactorEquipmentToEquipmentType -> phải ném PostgresException vì trùng Code
+            await Assert.ThrowsAnyAsync<PostgresException>(() =>
+                migrator.MigrateAsync("20261002014206_RefactorEquipmentToEquipmentType"));
+
+            // 4. Xác nhận transaction được rollback: RefactorEquipmentToEquipmentType KHÔNG được ghi vào history
+            await using (var verifyConn = new NpgsqlConnection(dbConnString))
+            {
+                await verifyConn.OpenAsync();
+                await using var histCmd = new NpgsqlCommand(
+                    "SELECT count(*) FROM catalog.\"__EFMigrationsHistory\" WHERE \"MigrationId\" LIKE '%RefactorEquipmentToEquipmentType%';", verifyConn);
+                Assert.Equal(0, (long)(await histCmd.ExecuteScalarAsync())!);
+
+                // Bảng Equipments ban đầu vẫn còn nguyên
+                await using var tableCmd = new NpgsqlCommand(
+                    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'catalog' AND table_name = 'Equipments';", verifyConn);
+                Assert.Equal(1, (long)(await tableCmd.ExecuteScalarAsync())!);
+            }
+        }
+        finally
+        {
+            await DropDatabaseAsync(dbName);
+        }
+    }
+
+    private static async Task Setup94321a8HistoricalSchemaAsync(
+        string connectionString,
+        bool includeActiveSchemaVersionId,
+        Guid categoryId,
+        Guid brandId,
+        Guid eq1Id,
+        Guid eq2Id,
+        Guid mediaId1,
+        Guid mediaId2,
+        DateTime now)
+    {
+        await using var conn = new NpgsqlConnection(connectionString);
+        await conn.OpenAsync();
+
+        string activeColDdl = includeActiveSchemaVersionId
+            ? """
+              ALTER TABLE catalog."EquipmentTypes" ADD COLUMN "ActiveSchemaVersionId" uuid NULL;
+              CREATE INDEX "IX_EquipmentTypes_ActiveSchemaVersionId" ON catalog."EquipmentTypes" ("ActiveSchemaVersionId");
+              """
+            : string.Empty;
+
+        string ddl = $"""
+            CREATE SCHEMA IF NOT EXISTS catalog;
+
+            CREATE TABLE catalog."__EFMigrationsHistory" (
+                "MigrationId" character varying(150) NOT NULL PRIMARY KEY,
+                "ProductVersion" character varying(32) NOT NULL
+            );
+
+            INSERT INTO catalog."__EFMigrationsHistory" ("MigrationId", "ProductVersion") VALUES
+            ('20261001065210_InitialCatalogSchema', '10.0.12'),
+            ('20261001080359_InitCategoryTable', '10.0.12'),
+            ('20261002014206_RefactorEquipmentToEquipmentType', '10.0.12'),
+            ('20261002080315_AddCategoryImagesAndEquipmentTypeCategories', '10.0.12'),
+            ('20261002100634_AddEquipmentTypeOrganizationId', '10.0.12'),
+            ('20261005042152_AddEquipmentTypeSpecSchemaAndDropOrganizationId', '10.0.12'),
+            ('20261005083741_AddBrands', '10.0.12');
+
+            CREATE TABLE catalog."Categories" (
+                "Id" uuid NOT NULL PRIMARY KEY,
+                "Name" character varying(150) NOT NULL,
+                "Slug" character varying(150) NOT NULL,
+                "Description" character varying(1000),
+                "IsActive" boolean NOT NULL DEFAULT TRUE,
+                "ImageMediaId" uuid,
+                "CreatedAtUtc" timestamp with time zone NOT NULL,
+                "UpdatedAtUtc" timestamp with time zone
+            );
+            CREATE UNIQUE INDEX "IX_Categories_Slug" ON catalog."Categories" ("Slug");
+
+            CREATE TABLE catalog."EquipmentTypes" (
+                "Id" uuid NOT NULL PRIMARY KEY,
+                "Code" character varying(50) NOT NULL,
+                "Name" character varying(200) NOT NULL,
+                "Description" character varying(4000),
+                "Status" character varying(20) NOT NULL,
+                "CurrentSchemaVersion" integer,
+                "CreatedAt" timestamp with time zone NOT NULL,
+                "UpdatedAt" timestamp with time zone,
+                "PublishedAt" timestamp with time zone,
+                CONSTRAINT "CK_EquipmentTypes_Status_Canonical" CHECK ("Status" IN ('Draft', 'Published', 'Disabled'))
+            );
+            CREATE UNIQUE INDEX "IX_EquipmentTypes_Code" ON catalog."EquipmentTypes" ("Code");
+            CREATE INDEX "IX_EquipmentTypes_CreatedAt" ON catalog."EquipmentTypes" ("CreatedAt");
+            CREATE INDEX "IX_EquipmentTypes_PublishedAt" ON catalog."EquipmentTypes" ("PublishedAt");
+            CREATE INDEX "IX_EquipmentTypes_Status" ON catalog."EquipmentTypes" ("Status");
+            CREATE INDEX "IX_EquipmentTypes_Id_CurrentSchemaVersion" ON catalog."EquipmentTypes" ("Id", "CurrentSchemaVersion");
+
+            {activeColDdl}
+
+            CREATE TABLE catalog."EquipmentTypeCategories" (
+                "EquipmentTypeId" uuid NOT NULL REFERENCES catalog."EquipmentTypes" ("Id") ON DELETE CASCADE,
+                "CategoryId" uuid NOT NULL REFERENCES catalog."Categories" ("Id") ON DELETE RESTRICT,
+                CONSTRAINT "PK_EquipmentTypeCategories" PRIMARY KEY ("EquipmentTypeId", "CategoryId")
+            );
+            CREATE INDEX "IX_EquipmentTypeCategories_CategoryId" ON catalog."EquipmentTypeCategories" ("CategoryId");
+
+            CREATE TABLE catalog."EquipmentTypeMedia" (
+                "Id" uuid NOT NULL PRIMARY KEY,
+                "EquipmentTypeId" uuid NOT NULL REFERENCES catalog."EquipmentTypes" ("Id") ON DELETE CASCADE,
+                "MediaId" uuid NOT NULL,
+                "DisplayOrder" integer NOT NULL,
+                "IsThumbnail" boolean NOT NULL
+            );
+            CREATE UNIQUE INDEX "IX_EquipmentTypeMedia_EquipmentTypeId_MediaId" ON catalog."EquipmentTypeMedia" ("EquipmentTypeId", "MediaId");
+            CREATE UNIQUE INDEX "UX_EquipmentTypeMedia_EquipmentTypeId_Thumbnail" ON catalog."EquipmentTypeMedia" ("EquipmentTypeId") WHERE ("IsThumbnail" = TRUE);
+
+            CREATE TABLE catalog."EquipmentTypeSpecSchemas" (
+                "Id" uuid NOT NULL PRIMARY KEY,
+                "EquipmentTypeId" uuid NOT NULL REFERENCES catalog."EquipmentTypes" ("Id") ON DELETE CASCADE,
+                "Version" integer NOT NULL,
+                "Definition" jsonb NOT NULL,
+                "CreatedAt" timestamp with time zone NOT NULL,
+                "PublishedAt" timestamp with time zone,
+                CONSTRAINT "AK_EquipmentTypeSpecSchemas_EquipmentTypeId_Version" UNIQUE ("EquipmentTypeId", "Version"),
+                CONSTRAINT "CK_EquipmentTypeSpecSchemas_Version_Positive" CHECK ("Version" > 0)
+            );
+            CREATE UNIQUE INDEX "UX_EquipmentTypeSpecSchemas_EquipmentTypeId_Draft" ON catalog."EquipmentTypeSpecSchemas" ("EquipmentTypeId") WHERE ("PublishedAt" IS NULL);
+
+
+            CREATE TABLE catalog."Brands" (
+                "Id" uuid NOT NULL PRIMARY KEY,
+                "Code" character varying(50) NOT NULL,
+                "Name" character varying(200) NOT NULL,
+                "Slug" character varying(200) NOT NULL,
+                "LogoMediaId" uuid,
+                "IsActive" boolean NOT NULL DEFAULT TRUE,
+                "CreatedAt" timestamp with time zone NOT NULL,
+                "UpdatedAt" timestamp with time zone
+            );
+            CREATE UNIQUE INDEX "IX_Brands_Code" ON catalog."Brands" ("Code");
+            CREATE UNIQUE INDEX "IX_Brands_Slug" ON catalog."Brands" ("Slug");
+            CREATE INDEX "IX_Brands_CreatedAt" ON catalog."Brands" ("CreatedAt");
+            CREATE INDEX "IX_Brands_IsActive" ON catalog."Brands" ("IsActive");
+            """;
+
+        await using (var cmd = new NpgsqlCommand(ddl, conn))
+        {
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Seed dữ liệu mẫu
+        await using var seedCmd = new NpgsqlCommand(
+            """
+            INSERT INTO catalog."Categories" ("Id", "Name", "Slug", "Description", "IsActive", "CreatedAtUtc")
+            VALUES (@catId, 'Âm thanh', 'am-thanh', 'Thiết bị âm thanh', TRUE, @now);
+
+            INSERT INTO catalog."Brands" ("Id", "Code", "Name", "Slug", "IsActive", "CreatedAt")
+            VALUES (@brandId, 'SONY', 'Sony Corporation', 'sony', TRUE, @now);
+
+            INSERT INTO catalog."EquipmentTypes" ("Id", "Code", "Name", "Description", "Status", "CurrentSchemaVersion", "CreatedAt", "PublishedAt")
+            VALUES
+            (@eq1Id, 'MIC-001', 'Micro không dây', 'Micro cầm tay sân khấu', 'Published', 1, @now - INTERVAL '2 days', @now - INTERVAL '1 day'),
+            (@eq2Id, 'CAM-001', 'Máy quay phim', 'Máy quay 4K chuyên nghiệp', 'Draft', 1, @now - INTERVAL '1 day', NULL);
+
+            INSERT INTO catalog."EquipmentTypeSpecSchemas" ("Id", "EquipmentTypeId", "Version", "Definition", "CreatedAt", "PublishedAt")
+            VALUES
+            (gen_random_uuid(), @eq1Id, 1, '{"fields":[{"key":"weight","label":"Trọng lượng","dataType":"number","isRequired":true}]}'::jsonb, @now - INTERVAL '2 days', @now - INTERVAL '1 day'),
+            (gen_random_uuid(), @eq2Id, 1, '{"fields":[{"key":"resolution","label":"Độ phân giải","dataType":"text","isRequired":false}]}'::jsonb, @now - INTERVAL '1 day', @now - INTERVAL '1 day');
+
+            INSERT INTO catalog."EquipmentTypeCategories" ("EquipmentTypeId", "CategoryId")
+            VALUES (@eq1Id, @catId), (@eq2Id, @catId);
+
+            INSERT INTO catalog."EquipmentTypeMedia" ("Id", "EquipmentTypeId", "MediaId", "DisplayOrder", "IsThumbnail")
+            VALUES
+            (@m1Id, @eq1Id, gen_random_uuid(), 0, TRUE),
+            (@m2Id, @eq2Id, gen_random_uuid(), 0, TRUE);
+
+            ALTER TABLE catalog."EquipmentTypes"
+                ADD CONSTRAINT "FK_EquipmentTypes_EquipmentTypeSpecSchemas_CurrentSchema"
+                FOREIGN KEY ("Id", "CurrentSchemaVersion")
+                REFERENCES catalog."EquipmentTypeSpecSchemas" ("EquipmentTypeId", "Version")
+                ON DELETE RESTRICT;
+            """, conn);
+
+        seedCmd.Parameters.AddWithValue("catId", categoryId);
+        seedCmd.Parameters.AddWithValue("brandId", brandId);
+        seedCmd.Parameters.AddWithValue("eq1Id", eq1Id);
+        seedCmd.Parameters.AddWithValue("eq2Id", eq2Id);
+        seedCmd.Parameters.AddWithValue("m1Id", mediaId1);
+        seedCmd.Parameters.AddWithValue("m2Id", mediaId2);
+        seedCmd.Parameters.AddWithValue("now", now);
+        await seedCmd.ExecuteNonQueryAsync();
+    }
     private static string GetConnectionString(string dbName) =>
         $"Host=localhost;Port=5436;Database={dbName};Username=postgres;Password=postgres;Include Error Detail=true";
 

@@ -83,7 +83,13 @@ namespace CatalogService.Domain.Migrations
                 });
 
 
-            // 5. Cập nhật khóa ngoại ActiveSchemaVersionId cho EquipmentTypes
+            // 5. Thêm cột ActiveSchemaVersionId và index cho EquipmentTypes nếu chưa tồn tại
+            migrationBuilder.Sql("""
+                ALTER TABLE catalog."EquipmentTypes"
+                    ADD COLUMN IF NOT EXISTS "ActiveSchemaVersionId" uuid NULL;
+                CREATE INDEX IF NOT EXISTS "IX_EquipmentTypes_ActiveSchemaVersionId"
+                    ON catalog."EquipmentTypes" ("ActiveSchemaVersionId");
+                """);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_EquipmentTypes_SchemaVersions_ActiveSchemaVersionId",
@@ -171,7 +177,32 @@ namespace CatalogService.Domain.Migrations
 
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            // Unit Test thường không gọi hàm Down nên để trống
+            migrationBuilder.DropTable(
+                name: "SpecOptions",
+                schema: "catalog");
+
+            migrationBuilder.DropTable(
+                name: "SpecFields",
+                schema: "catalog");
+
+            migrationBuilder.DropForeignKey(
+                name: "FK_EquipmentTypes_SchemaVersions_ActiveSchemaVersionId",
+                schema: "catalog",
+                table: "EquipmentTypes");
+
+            migrationBuilder.DropTable(
+                name: "SchemaVersions",
+                schema: "catalog");
+
+            migrationBuilder.DropTable(
+                name: "SpecSchemas",
+                schema: "catalog");
+
+            migrationBuilder.Sql("""
+                DROP INDEX IF EXISTS catalog."IX_EquipmentTypes_ActiveSchemaVersionId";
+                ALTER TABLE catalog."EquipmentTypes"
+                    DROP COLUMN IF EXISTS "ActiveSchemaVersionId";
+                """);
         }
     }
 }
