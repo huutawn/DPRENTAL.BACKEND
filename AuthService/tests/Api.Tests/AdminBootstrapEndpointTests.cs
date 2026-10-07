@@ -23,8 +23,10 @@ public sealed class AdminBootstrapEndpointTests
     private const string ConfiguredBootstrapKey = "test-admin-bootstrap-secret-key-12345";
     private static readonly Guid AdminRoleId = new("fba7cef9-3ad7-49f5-8c2b-f9364945fcc4");
 
-    [Fact]
-    public async Task AdminCreationIsHiddenFromSwaggerButEndpointRemainsAvailable()
+    [Theory]
+    [InlineData("admins", HttpStatusCode.Unauthorized)]
+    [InlineData("service-token", HttpStatusCode.BadRequest)]
+    public async Task InternalAuthEndpointIsHiddenFromSwaggerButRemainsAvailable(string route, HttpStatusCode expectedStatus)
     {
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
@@ -32,12 +34,12 @@ public sealed class AdminBootstrapEndpointTests
         using HttpResponseMessage swaggerResponse = await client.GetAsync("/swagger/v1/swagger.json");
         Assert.Equal(HttpStatusCode.OK, swaggerResponse.StatusCode);
         using JsonDocument swagger = JsonDocument.Parse(await swaggerResponse.Content.ReadAsStringAsync());
-        Assert.False(swagger.RootElement.GetProperty("paths").TryGetProperty("/api/v1/auth/admins", out _));
+        Assert.False(swagger.RootElement.GetProperty("paths").TryGetProperty($"/api/v1/auth/{route}", out _));
 
         using HttpResponseMessage endpointResponse = await client.PostAsJsonAsync(
-            "/api/v1/auth/admins",
+            $"/api/v1/auth/{route}",
             new RegisterAdminRequest("admin@example.com", "Password123!", "Admin"));
-        Assert.Equal(HttpStatusCode.Unauthorized, endpointResponse.StatusCode);
+        Assert.Equal(expectedStatus, endpointResponse.StatusCode);
     }
 
     [Fact]
