@@ -1,5 +1,6 @@
 ﻿using CatalogService.Application.DTOs.Schemas;
 using CatalogService.Application.IServices;
+using Dprental.CatalogService.Api.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,7 +12,7 @@ public class EquipmentTypeSchemaController(ISchemaQueryService queries) : Contro
 {
     /// <summary>Admin: danh sách mọi version và Id để gọi các API drafts, publish, fields</summary>
     [HttpGet("versions")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = CatalogPolicies.EquipmentManage)]
     [ProducesResponseType(typeof(SchemaOverviewDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetOverview(Guid equipmentTypeId, CancellationToken cancellationToken)
@@ -22,7 +23,7 @@ public class EquipmentTypeSchemaController(ISchemaQueryService queries) : Contro
 
     /// <summary>Admin: đọc một version bất kỳ trạng thái (kể cả Deprecated)</summary>
     [HttpGet("versions/{versionNumber:int}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = CatalogPolicies.EquipmentManage)]
     [ProducesResponseType(typeof(SchemaVersionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetVersion(

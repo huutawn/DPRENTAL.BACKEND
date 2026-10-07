@@ -8,7 +8,7 @@ namespace CatalogService.Api.Controllers;
 
 [ApiController]
 [Route("schemas")] // Swagger sẽ hiển thị dạng: /api/v1/catalog/schemas
-[Authorize(Roles = "Admin")] // Chặn truy cập từ người dùng thông thường
+[Authorize(Roles = "adm")] // Chặn truy cập từ người dùng thông thường
 public class SchemaController : ControllerBase
 {
     private readonly ISchemaService _schemaService;
