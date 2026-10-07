@@ -82,3 +82,35 @@ dotnet ef database update --project CatalogService/src/Domain/CatalogService.Dom
 
 ### 2. Rollback
 Phương thức `Down` của migration `AddBrands` ném `NotSupportedException` để từ chối rollback phá hủy dữ liệu. Khi rollback ứng dụng, bảng `catalog.Brands` được giữ nguyên trong cơ sở dữ liệu.
+
+## Hướng dẫn Triển khai và Vận hành An toàn
+
+### 1. Nguyên tắc triển khai và chuẩn bị
+- **Lưu lại image cũ**: Trước khi cập nhật `release.env`, ghi nhận image SHA đang hoạt động (`PREV_CATALOG_IMAGE`) để có thể rollback runtime ngay lập tức nếu migration hoặc khởi động thất bại.
+- **Sao lưu database trước migration**: Luôn chạy backup (toàn bộ database hoặc schema `catalog`) trước khi thực thi container migrator:
+  ```bash
+  docker exec dprental-dev-postgres-1 pg_dump -U authservice -d authservice -n catalog -Fc > catalog_backup_$(date +%Y%m%d%H%M%S).dump
+  ```
+
+### 2. Thực thi migration và kiểm tra exit code
+- Chạy migrator và bắt buộc kiểm tra exit code của lệnh (`$?` phải bằng `0`):
+  ```bash
+  docker compose --env-file .env --env-file release.env --profile migration run --rm catalog-migrate
+  ```
+- **Phục hồi runtime cũ khi migration thất bại**: Nếu migrator thoát với exit code khác `0` do lỗi migration (transaction đã rollback, schema vẫn tương thích với bản cũ), người vận hành phải:
+  1. Đưa `CATALOG_SERVICE_IMAGE` và `CATALOG_MIGRATOR_IMAGE` trong `release.env` về lại SHA cũ.
+  2. Khởi động lại container Catalog cũ ngay lập tức để tránh làm gián đoạn dịch vụ của hệ thống.
+
+### 3. Kiểm tra tính sẵn sàng sau triển khai
+- **Không dùng health Gateway làm bằng chứng**: Endpoint `/health/ready` của Gateway chỉ xác nhận Gateway đã sẵn sàng routing và JWKS hợp lệ; Gateway vẫn trả `200` khi downstream Catalog đang chết (trả `502`).
+- **Kiểm tra trực tiếp Catalog và các endpoint nghiệp vụ**:
+  1. Kiểm tra readiness nội bộ:
+     ```bash
+     docker compose exec -T catalog-service wget --quiet --spider http://127.0.0.1:8080/health/ready
+     ```
+  2. Kiểm tra các endpoint nghiệp vụ qua domain công khai hoặc Gateway:
+     ```bash
+     curl --fail --show-error "https://$DEV_DOMAIN/api/v1/catalog/categories"
+     curl --fail --show-error "https://$DEV_DOMAIN/api/v1/catalog/equipment-types?page=1&pageSize=20"
+     ```
+     (Các endpoint có bảo vệ xác thực như `/brands` kiểm tra với token hợp lệ).

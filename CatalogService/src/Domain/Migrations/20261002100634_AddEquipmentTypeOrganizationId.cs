@@ -17,25 +17,11 @@ namespace CatalogService.Domain.Migrations
                 table: "EquipmentTypes",
                 type: "uuid",
                 nullable: true);
-
-            migrationBuilder.AddColumn<Guid>(
-                name: "ActiveSchemaVersionId",
-                schema: "catalog",
-                table: "EquipmentTypes",
-                type: "uuid",
-                nullable: true);
-
             migrationBuilder.CreateIndex(
                 name: "IX_EquipmentTypes_OrganizationId",
                 schema: "catalog",
                 table: "EquipmentTypes",
                 column: "OrganizationId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_EquipmentTypes_ActiveSchemaVersionId",
-                schema: "catalog",
-                table: "EquipmentTypes",
-                column: "ActiveSchemaVersionId");
         }
 
         /// <inheritdoc />
@@ -45,19 +31,8 @@ namespace CatalogService.Domain.Migrations
                 name: "IX_EquipmentTypes_OrganizationId",
                 schema: "catalog",
                 table: "EquipmentTypes");
-
-            migrationBuilder.DropIndex(
-                name: "IX_EquipmentTypes_ActiveSchemaVersionId",
-                schema: "catalog",
-                table: "EquipmentTypes");
-
             migrationBuilder.DropColumn(
                 name: "OrganizationId",
-                schema: "catalog",
-                table: "EquipmentTypes");
-
-            migrationBuilder.DropColumn(
-                name: "ActiveSchemaVersionId",
                 schema: "catalog",
                 table: "EquipmentTypes");
         }
