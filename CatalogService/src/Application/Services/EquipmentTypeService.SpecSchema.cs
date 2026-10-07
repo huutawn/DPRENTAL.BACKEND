@@ -184,6 +184,7 @@ public sealed partial class EquipmentTypeService
         var sortedFields = schema.Definition.Fields
             .OrderBy(f => f.DisplayOrder)
             .ThenBy(f => f.Key, StringComparer.Ordinal)
+            .Select(ToPublishedSchemaField)
             .ToList();
 
         return new EquipmentTypePublishedSchemaResponse(
@@ -212,6 +213,7 @@ public sealed partial class EquipmentTypeService
         var sortedFields = schema.Definition.Fields
             .OrderBy(f => f.DisplayOrder)
             .ThenBy(f => f.Key, StringComparer.Ordinal)
+            .Select(ToPublishedSchemaField)
             .ToList();
 
         return new EquipmentTypePublishedSchemaResponse(
@@ -219,6 +221,21 @@ public sealed partial class EquipmentTypeService
             schema.Version,
             sortedFields);
     }
+
+    private static EquipmentTypePublishedSchemaField ToPublishedSchemaField(EquipmentTypeSpecField field) => new(
+        field.Key,
+        field.Label,
+        field.DataType,
+        field.Required,
+        field.Unit,
+        field.Min,
+        field.Max,
+        field.Options?.Select(option => option.Value).ToArray(),
+        field.Filterable,
+        field.Primary,
+        field.DisplayOrder,
+        field.Description,
+        field.Metadata);
 
     public async Task<Result<EquipmentTypeBatchSchemasResponse>> GetSchemasBatchAsync(
         Guid equipmentTypeId,
@@ -318,7 +335,7 @@ public sealed partial class EquipmentTypeService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (request.SchemaVersion <= 0 || request.SpecValues.ValueKind != System.Text.Json.JsonValueKind.Object)
+        if (request.SchemaVersion <= 0 || request.Values.ValueKind != System.Text.Json.JsonValueKind.Object)
         {
             return CatalogErrors.Catalog.InvalidRequest;
         }
@@ -335,8 +352,8 @@ public sealed partial class EquipmentTypeService
         }
 
         var schema = resolveResult.Value;
-        var validationResult = SpecificationValuesValidator.Validate(schema.Definition, request.SpecValues);
-        return Result.Success(validationResult);
+        var validationResult = SpecificationValuesValidator.Validate(schema.Definition, request.Values);
+        return Result.Success(validationResult with { SchemaVersion = schema.Version });
     }
 
     private async Task<Result<EquipmentTypeSpecSchemaDto>> ResolvePublishedSchemaAsync(

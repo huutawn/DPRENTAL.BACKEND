@@ -96,6 +96,7 @@ public static class CatalogErrors
 
         public static Error InvalidSchemaDefinitionWithDetail(string detail) =>
             Error.Validation(CatalogErrorCode.EquipmentType.InvalidSchemaDefinition, detail);
+
     }
 
     public static class Category

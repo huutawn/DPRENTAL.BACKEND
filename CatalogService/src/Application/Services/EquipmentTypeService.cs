@@ -1,4 +1,4 @@
-﻿using CatalogService.Application.Services;
+using CatalogService.Application.Services;
 using Dprental.CatalogService.Application.Clients;
 using Dprental.CatalogService.Application.Common;
 using Dprental.CatalogService.Application.IServices;
