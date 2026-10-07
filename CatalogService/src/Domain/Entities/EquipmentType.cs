@@ -1,4 +1,6 @@
 using Dprental.CatalogService.Common.Enums;
+using Dprental.CatalogService.Domain.ValueObjects;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Dprental.CatalogService.Domain.Entities;
 
@@ -15,15 +17,31 @@ public class EquipmentType
 
     /// <summary>Danh sách category mà equipment type này thuộc về.</summary>
     public ICollection<Category> Categories { get; set; } = new List<Category>();
+
     /// <summary>Mã thiết bị duy nhất trong toàn bộ Catalog.</summary>
     public string Code { get; set; } = string.Empty;
 
-    public string Name { get; set; } = string.Empty;
+    private string _name = string.Empty;
 
+    public string Name
+    {
+        get => _name;
+        set
+        {
+            _name = value;
+            NormalizedName = CatalogNormalizer.NormalizeName(value);
+        }
+    }
+    /// <summary>Tên đã chuẩn hóa dùng để chống trùng canonical. Luôn đồng bộ với Name.</summary>
+    public string NormalizedName { get; private set; } = string.Empty;
     public string? Description { get; set; }
 
     /// <summary>Trạng thái vòng đời, lưu dạng chuỗi và chỉ thay đổi qua <see cref="Publish"/> và <see cref="Disable"/>.</summary>
     public EquipmentTypeStatus Status { get; private set; } = EquipmentTypeStatus.Draft;
+
+    /// <summary>Version schema hiện hành, Supplier khai tài sản mới theo version này. Null khi chưa có version nào được kích hoạt.</summary>
+    [NotMapped]
+    public Guid? ActiveSchemaVersionId { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
@@ -33,6 +51,33 @@ public class EquipmentType
     public DateTime? PublishedAt { get; private set; }
 
     public ICollection<EquipmentTypeMedia> Media { get; set; } = new List<EquipmentTypeMedia>();
+
+    /// <summary>Schema thông số của loại thiết bị. Cần Include khi truy vấn, nếu không sẽ là null.</summary>
+    [NotMapped]
+    public SpecSchema? Schema { get; private set; }
+
+    /// <summary>Tạo schema nếu chưa có. Gọi sau khi đã gán <see cref="Id"/>.</summary>
+    public SpecSchema EnsureSchema() => Schema ??= SpecSchema.Create(Id);
+
+
+    /// <summary>Kích hoạt một version đã Published của chính schema này.</summary>
+    public void ActivateSchemaVersion(SchemaVersion version, DateTime utcNow)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+
+        if (Schema is null || version.SpecSchemaId != Schema.Id)
+        {
+            throw new InvalidOperationException("Version không thuộc schema của loại thiết bị này.");
+        }
+
+        if (version.Status != SchemaVersionStatus.Published)
+        {
+            throw new InvalidOperationException("Chỉ kích hoạt được version đã Published.");
+        }
+
+        ActiveSchemaVersionId = version.Id;
+        UpdatedAt = AsUtc(utcNow);
+    }
 
     /// <summary>Đưa equipment type lên public catalog từ trạng thái Draft hoặc Disabled.</summary>
     public void Publish(DateTime utcNow)

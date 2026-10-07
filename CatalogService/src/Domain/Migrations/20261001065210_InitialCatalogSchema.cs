@@ -162,7 +162,7 @@ namespace CatalogService.Domain.Migrations
                 name: "EquipmentMedia",
                 schema: "catalog");
 
-            migrationBuilder.DropTable(
+            migrationBuilder.DropTable( 
                 name: "Equipments",
                 schema: "catalog");
 

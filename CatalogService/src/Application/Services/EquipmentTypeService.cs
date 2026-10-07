@@ -1,3 +1,4 @@
+using CatalogService.Application.Services;
 using Dprental.CatalogService.Application.Clients;
 using Dprental.CatalogService.Application.Common;
 using Dprental.CatalogService.Application.IServices;
@@ -18,6 +19,7 @@ public sealed partial class EquipmentTypeService(
     EquipmentTypeListQueryValidator listQueryValidator,
     CreateEquipmentTypeRequestValidator createValidator,
     UpdateEquipmentTypeRequestValidator updateValidator,
+    CanonicalEquipmentTypeRules canonicalRules,
     ICatalogCallerContext caller,
     ILogger<EquipmentTypeService> logger) : IEquipmentTypeService
 {
@@ -32,6 +34,7 @@ public sealed partial class EquipmentTypeService(
         {
             return validationResult.Error;
         }
+
 
         PagedResult<EquipmentTypeListItemDto> pagedResult = await repository.SearchPublishedAsync(request, cancellationToken);
         return EnrichList(pagedResult);
@@ -132,6 +135,17 @@ public sealed partial class EquipmentTypeService(
         {
             return validationResult.Error;
         }
+        CanonicalCheck canonicalCheck = await canonicalRules.CheckAsync(
+            request.Name,
+            request.CategoryIds,
+            excludeId: null,
+            cancellationToken: cancellationToken);
+
+        if (canonicalCheck != CanonicalCheck.Ok)
+        {
+            return MapCanonicalError(canonicalCheck);
+        }
+
 
 
         var categories = new List<Category>();
@@ -157,7 +171,7 @@ public sealed partial class EquipmentTypeService(
             return CatalogErrors.EquipmentType.DuplicateCode;
         }
 
-        // Xác minh toàn bộ media trước khi public
+        // XÃ¡c minh toÃ n bá»™ media trÆ°á»›c khi public
         var distinctMediaIds = request.Media?
             .Where(m => m != null)
             .Select(m => m!.MediaId)
@@ -197,39 +211,76 @@ public sealed partial class EquipmentTypeService(
     }
 
     private async Task<Result<EquipmentTypeDetailDto>> UpdateCoreAsync(
-        Guid id,
-        UpdateEquipmentTypeRequest request,
-        string operatorUserId,
-        CancellationToken cancellationToken)
+    Guid id,
+    UpdateEquipmentTypeRequest request,
+    string operatorUserId,
+    CancellationToken cancellationToken)
     {
         Result validationResult = updateValidator.Validate(request);
+
         if (validationResult.IsFailure)
         {
             return validationResult.Error;
         }
 
-        var entity = await repository.GetByIdAsync(id, cancellationToken);
+        EquipmentType? entity =
+            await repository.GetByIdAsync(id, cancellationToken);
+
         if (entity is null)
         {
             return CatalogErrors.EquipmentType.NotFound;
         }
 
 
+        // ------------------------------------------------------------
+        // XÃ¡c Ä‘á»‹nh Name + Categories sau khi update
+        // ------------------------------------------------------------
+        string effectiveName = request.IsNameSpecified
+            ? request.Name!.Trim()
+            : entity.Name;
+        Guid[] effectiveCategoryIds = request.IsCategoryIdsSpecified
+            ? request.CategoryIds!.Distinct().ToArray()
+            : entity.Categories
+                .Select(c => c.Id)
+                .Distinct()
+                .ToArray();
+        // ------------------------------------------------------------
+        // Canonical validation
+        // ------------------------------------------------------------
+        var existingCategoryIds = entity.Categories.Select(c => c.Id).ToList();
+        CanonicalCheck canonicalCheck =
+            await canonicalRules.CheckAsync(
+                effectiveName,
+                effectiveCategoryIds,
+                excludeId: id,
+                existingCategoryIds: existingCategoryIds,
+                cancellationToken);
+
+
+        if (canonicalCheck != CanonicalCheck.Ok)
+        {
+            return MapCanonicalError(canonicalCheck);
+        }
+        // ------------------------------------------------------------
+        // Categories
+        // ------------------------------------------------------------
         if (request.IsCategoryIdsSpecified)
         {
-            var existingCategoryIds = entity.Categories.Select(c => c.Id).ToHashSet();
             var newCategories = new List<Category>();
 
-            foreach (var categoryId in request.CategoryIds!)
+            foreach (Guid categoryId in effectiveCategoryIds)
             {
-                var category = await categoryRepository.GetByIdAsync(categoryId, cancellationToken);
+                Category? category =
+                    await categoryRepository.GetByIdAsync(
+                        categoryId,
+                        cancellationToken);
+
                 if (category is null)
                 {
                     return CatalogErrors.EquipmentType.CategoryNotFound;
                 }
 
-                // Chỉ gắn mới category active; category đã gắn rồi bị inactive được giữ lại
-                if (!category.IsActive && !existingCategoryIds.Contains(category.Id))
+                if (!category.IsActive && !existingCategoryIds.Contains(categoryId))
                 {
                     return CatalogErrors.EquipmentType.CategoryInactive;
                 }
@@ -238,44 +289,70 @@ public sealed partial class EquipmentTypeService(
             }
 
             entity.Categories.Clear();
-            foreach (var cat in newCategories)
+
+            foreach (Category category in newCategories)
             {
-                entity.Categories.Add(cat);
+                entity.Categories.Add(category);
             }
         }
-
-        if (request.IsCodeSpecified && !string.IsNullOrWhiteSpace(request.Code))
+        // ------------------------------------------------------------
+        // Code
+        // ------------------------------------------------------------
+        if (request.IsCodeSpecified)
         {
-            string trimmedCode = request.Code.Trim();
-            if (await repository.ExistsByCodeAsync(trimmedCode, id, cancellationToken))
+            string trimmedCode = request.Code!.Trim();
+
+            if (await repository.ExistsByCodeAsync(
+                    trimmedCode,
+                    id,
+                    cancellationToken))
             {
                 return CatalogErrors.EquipmentType.DuplicateCode;
             }
 
             entity.Code = trimmedCode;
         }
-
+        // ------------------------------------------------------------
+        // Name
+        // ------------------------------------------------------------
         if (request.IsNameSpecified)
         {
             entity.Name = request.Name!.Trim();
         }
-
+        // ------------------------------------------------------------
+        // Description
+        // ------------------------------------------------------------
         if (request.IsDescriptionSpecified)
         {
             entity.Description = request.Description;
         }
+        // ------------------------------------------------------------
+        // Media
+        // ------------------------------------------------------------
 
-        if (request.IsMediaSpecified && request.Media != null)
+        if (request.IsMediaSpecified)
         {
-            var desiredMediaIds = request.Media
-                .Where(m => m != null)
-                .Select(m => m!.MediaId)
+            // Validator Ä‘Ã£ reject null.
+            IReadOnlyList<EquipmentTypeMediaItemDto> desiredMedia =
+                request.Media!
+                    .Where(m => m is not null)
+                    .Select(m => m!)
+                    .ToList();
+
+            var desiredMediaIds = desiredMedia
+                .Select(m => m.MediaId)
                 .Distinct()
                 .ToList();
 
-            var existingMediaIds = entity.Media.Select(m => m.MediaId).ToHashSet();
-            var newlyAddedMediaIds = desiredMediaIds.Where(mId => !existingMediaIds.Contains(mId)).ToList();
+            var existingMediaIds = entity.Media
+                .Select(m => m.MediaId)
+                .ToHashSet();
 
+            var newlyAddedMediaIds = desiredMediaIds
+                .Where(mediaId => !existingMediaIds.Contains(mediaId))
+                .ToList();
+
+            // Verify media má»›i
             if (newlyAddedMediaIds.Count > 0)
             {
                 var mediaResult = await MediaValidationHelper.ValidateAndPublishMediaListAsync(
@@ -290,16 +367,62 @@ public sealed partial class EquipmentTypeService(
             }
         }
 
+        // ------------------------------------------------------------
+        // UpdatedAt
+        // ------------------------------------------------------------
+
         entity.UpdatedAt = DateTime.UtcNow;
 
-        IReadOnlyList<EquipmentTypeMediaItemDto?>? desiredMedia = request.IsMediaSpecified ? request.Media : null;
-        var saveResult = await repository.SaveAsync(entity, desiredMedia, cancellationToken);
+        // ------------------------------------------------------------
+        // Save
+        // ------------------------------------------------------------
+
+        IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaToSave =
+            request.IsMediaSpecified
+                ? request.Media
+                : null;
+
+        Result<EquipmentTypeDetailDto> saveResult =
+            await repository.SaveAsync(
+                entity,
+                mediaToSave,
+                cancellationToken);
+
         if (saveResult.IsFailure)
         {
             return saveResult.Error;
         }
 
         return EnrichDetail(saveResult.Value);
+    }
+    private static Result<EquipmentTypeDetailDto> MapCanonicalError(
+    CanonicalCheck check)
+    {
+        return check switch
+        {
+            CanonicalCheck.CategoryRequired =>
+                CatalogErrors.EquipmentType.CategoryRequired,
+
+            CanonicalCheck.CategoryNotFound =>
+                CatalogErrors.EquipmentType.CategoryNotFound,
+
+            CanonicalCheck.CategoryInactive =>
+                CatalogErrors.EquipmentType.CategoryInactive,
+
+            CanonicalCheck.DuplicateName =>
+                CatalogErrors.EquipmentType.DuplicateCanonicalName,
+
+            CanonicalCheck.Ok =>
+                throw new ArgumentException(
+                    "Canonical check must not be Ok.",
+                    nameof(check)),
+
+            _ =>
+                throw new ArgumentOutOfRangeException(
+                    nameof(check),
+                    check,
+                    null)
+        };
     }
 
     private async Task<Result<EquipmentTypeDetailDto>> PublishCoreAsync(
@@ -311,6 +434,7 @@ public sealed partial class EquipmentTypeService(
         {
             return CatalogErrors.EquipmentType.NotFound;
         }
+
 
         if (!entity.CurrentSchemaVersion.HasValue)
         {
@@ -346,6 +470,7 @@ public sealed partial class EquipmentTypeService(
         {
             return CatalogErrors.EquipmentType.NotFound;
         }
+
 
 
         if (entity.Status != EquipmentTypeStatus.Published)

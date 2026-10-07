@@ -63,7 +63,6 @@ namespace CatalogService.Domain.Migrations
                 SET "CurrentSchemaVersion" = 1;
                 """);
 
-            // Drop ownership index và column sau khi backfill
             migrationBuilder.DropIndex(
                 name: "IX_EquipmentTypes_OrganizationId",
                 schema: "catalog",

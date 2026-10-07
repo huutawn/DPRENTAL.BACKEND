@@ -40,7 +40,7 @@ public static class SpecificationValuesValidator
         {
             return new SpecificationValidationResult(
                 false,
-                [new SpecificationValidationError("specValues", CodeTypeMismatch, MessageTypeMismatch)]);
+                [new SpecificationValidationError("values", CodeTypeMismatch, MessageTypeMismatch)]);
         }
 
         HashSet<string> schemaKeys = new(StringComparer.Ordinal);
@@ -125,6 +125,7 @@ public static class SpecificationValuesValidator
         switch (field.DataType)
         {
             case "number":
+            case "integer":
                 if (value.ValueKind != JsonValueKind.Number)
                 {
                     return new SpecificationValidationError(field.Key, CodeTypeMismatch, MessageTypeMismatch);
@@ -133,6 +134,11 @@ public static class SpecificationValuesValidator
                 if (!value.TryGetDecimal(out decimal numValue))
                 {
                     return new SpecificationValidationError(field.Key, CodeOutOfRange, MessageOutOfRange);
+                }
+
+                if (field.DataType == "integer" && decimal.Truncate(numValue) != numValue)
+                {
+                    return new SpecificationValidationError(field.Key, CodeTypeMismatch, MessageTypeMismatch);
                 }
 
                 if (field.Min.HasValue && numValue < field.Min.Value)
