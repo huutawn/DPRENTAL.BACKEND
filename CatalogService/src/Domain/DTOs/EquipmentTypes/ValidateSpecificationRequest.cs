@@ -6,8 +6,18 @@ namespace Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
 [JsonConverter(typeof(ValidateSpecificationRequestJsonConverter))]
 public sealed record ValidateSpecificationRequest
 {
+    [JsonPropertyName("schemaVersion")]
     public int SchemaVersion { get; init; }
-    public JsonElement SpecValues { get; init; }
+
+    [JsonPropertyName("values")]
+    public JsonElement Values { get; init; }
+
+    [JsonIgnore]
+    public JsonElement SpecValues
+    {
+        get => Values;
+        init => Values = value;
+    }
 }
 
 public sealed class ValidateSpecificationRequestJsonConverter : JsonConverter<ValidateSpecificationRequest>
@@ -15,6 +25,7 @@ public sealed class ValidateSpecificationRequestJsonConverter : JsonConverter<Va
     private static readonly HashSet<string> AllowedProperties = new(StringComparer.OrdinalIgnoreCase)
     {
         "schemaVersion",
+        "values",
         "specValues"
     };
 
@@ -48,10 +59,19 @@ public sealed class ValidateSpecificationRequestJsonConverter : JsonConverter<Va
             throw new JsonException("Thiếu thuộc tính bắt buộc 'schemaVersion'.");
         }
 
-        if (!rootMap.TryGetValue("specValues", out var valuesProp))
+        bool hasValues = rootMap.TryGetValue("values", out var valuesProp);
+        bool hasLegacyValues = rootMap.TryGetValue("specValues", out var legacyValuesProp);
+        if (hasValues && hasLegacyValues)
         {
-            throw new JsonException("Thiếu thuộc tính bắt buộc 'specValues'.");
+            throw new JsonException("Provide either 'values' or legacy 'specValues', not both.");
         }
+
+        if (!hasValues && !hasLegacyValues)
+        {
+            throw new JsonException("Thiếu thuộc tính bắt buộc 'values'.");
+        }
+
+        valuesProp = hasValues ? valuesProp : legacyValuesProp;
 
         if (versionProp.Value.ValueKind != JsonValueKind.Number
             || !versionProp.Value.TryGetInt32(out int schemaVersion)
@@ -62,7 +82,7 @@ public sealed class ValidateSpecificationRequestJsonConverter : JsonConverter<Va
 
         if (valuesProp.Value.ValueKind != JsonValueKind.Object)
         {
-            throw new JsonException("Thuộc tính 'specValues' phải là JSON object.");
+            throw new JsonException("Thuộc tính 'values' phải là JSON object.");
         }
 
         var valuesMap = new Dictionary<string, JsonProperty>(StringComparer.Ordinal);
@@ -70,14 +90,14 @@ public sealed class ValidateSpecificationRequestJsonConverter : JsonConverter<Va
         {
             if (!valuesMap.TryAdd(prop.Name, prop))
             {
-                throw new JsonException($"Thuộc tính '{prop.Name}' bị trùng lặp trong 'specValues'.");
+                throw new JsonException($"Thuộc tính '{prop.Name}' bị trùng lặp trong 'values'.");
             }
         }
 
         return new ValidateSpecificationRequest
         {
             SchemaVersion = schemaVersion,
-            SpecValues = valuesProp.Value.Clone()
+            Values = valuesProp.Value.Clone()
         };
     }
 
@@ -85,8 +105,8 @@ public sealed class ValidateSpecificationRequestJsonConverter : JsonConverter<Va
     {
         writer.WriteStartObject();
         writer.WriteNumber("schemaVersion", value.SchemaVersion);
-        writer.WritePropertyName("specValues");
-        value.SpecValues.WriteTo(writer);
+        writer.WritePropertyName("values");
+        value.Values.WriteTo(writer);
         writer.WriteEndObject();
     }
 }

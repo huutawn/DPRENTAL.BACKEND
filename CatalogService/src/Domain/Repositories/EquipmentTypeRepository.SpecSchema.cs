@@ -108,6 +108,11 @@ public partial class EquipmentTypeRepository
             .FirstOrDefaultAsync(s => s.EquipmentTypeId == equipmentTypeId && s.Version == version, cancellationToken);
     }
 
+    public Task<EquipmentTypeSpecSchema?> GetSpecSchemaEntityByIdAsync(
+        Guid schemaId,
+        CancellationToken cancellationToken = default) =>
+        dbContext.EquipmentTypeSpecSchemas.FirstOrDefaultAsync(s => s.Id == schemaId, cancellationToken);
+
     public async Task<int> GetMaxSpecSchemaVersionAsync(
         Guid equipmentTypeId,
         CancellationToken cancellationToken = default)

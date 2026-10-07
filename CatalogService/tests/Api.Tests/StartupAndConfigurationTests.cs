@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Dprental.CatalogService.Common;
 using Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
 using Dprental.CatalogService.Domain.Entities;
@@ -176,7 +176,7 @@ public sealed class StartupAndConfigurationTests
         Assert.Equal("http", bearerScheme.GetProperty("type").GetString());
         Assert.Equal("bearer", bearerScheme.GetProperty("scheme").GetString());
 
-        // Thiếu security requirement trên operation thì Swagger UI không gửi token dù đã Authorize.
+        // Thiáº¿u security requirement trÃªn operation thÃ¬ Swagger UI khÃ´ng gá»­i token dÃ¹ Ä‘Ã£ Authorize.
         JsonElement equipmentTypes = doc.RootElement.GetProperty("paths").GetProperty("/api/v1/catalog/equipment-types");
         JsonElement postSecurity = equipmentTypes.GetProperty("post").GetProperty("security");
         Assert.Contains(postSecurity.EnumerateArray(), requirement => requirement.TryGetProperty("Bearer", out _));
@@ -213,7 +213,7 @@ public sealed class StartupAndConfigurationTests
             .Single(parameter => string.Equals(parameter.GetProperty("name").GetString(), "status", StringComparison.OrdinalIgnoreCase))
             .GetProperty("schema");
 
-        // Enum đơn (không phải array) để Swagger UI hiện dropdown thay vì hộp chọn nhiều dòng.
+        // Enum Ä‘Æ¡n (khÃ´ng pháº£i array) Ä‘á»ƒ Swagger UI hiá»‡n dropdown thay vÃ¬ há»™p chá»n nhiá»u dÃ²ng.
         Assert.Equal("string", statusSchema.GetProperty("type").GetString());
         Assert.Equal(
             ["Draft", "Published", "Disabled"],
@@ -252,7 +252,8 @@ public sealed class StartupAndConfigurationTests
                 }
             }
         }
-        Assert.Equal(17, equipmentTypeEndpointsCount);
+
+        Assert.Equal(19, equipmentTypeEndpointsCount);
         Assert.DoesNotContain("/api/v1/catalog/equipments", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("dailyPrice", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("regionId", json, StringComparison.OrdinalIgnoreCase);
@@ -311,11 +312,11 @@ public sealed class StartupAndConfigurationTests
             bool isNullable = prop.Value.TryGetProperty("nullable", out JsonElement nullProp) && nullProp.GetBoolean();
             if (string.Equals(prop.Name, "description", StringComparison.OrdinalIgnoreCase))
             {
-                Assert.True(isNullable, "description phải nullable");
+                Assert.True(isNullable, "description pháº£i nullable");
             }
             else
             {
-                Assert.False(isNullable, $"{prop.Name} không được nullable");
+                Assert.False(isNullable, $"{prop.Name} khÃ´ng Ä‘Æ°á»£c nullable");
             }
         }
 
@@ -417,8 +418,9 @@ public sealed class StartupAndConfigurationTests
 
         public Task<Result<EquipmentTypeDetailDto>> SaveStateTransitionAsync(EquipmentType entity, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
-
-        public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+        public Task<EquipmentType?> GetWithSchemaAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentType?>(null);
+public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<EquipmentTypeSpecSchemaDto>>([]);
 
         public Task<EquipmentTypeSpecSchemaDto?> GetSpecSchemaAsync(Guid equipmentTypeId, int version, CancellationToken cancellationToken = default) =>

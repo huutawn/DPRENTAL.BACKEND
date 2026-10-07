@@ -20,8 +20,12 @@ public static class CatalogErrorCode
         public const string DuplicateCode = "EquipmentType.DuplicateCode";
         public const string InvalidStateTransition = "EquipmentType.InvalidStateTransition";
         public const string ConcurrencyConflict = "EquipmentType.ConcurrencyConflict";
+
+        public const string CategoryRequired = "EquipmentType.CategoryRequired";
         public const string CategoryNotFound = "EquipmentType.CategoryNotFound";
         public const string CategoryInactive = "EquipmentType.CategoryInactive";
+        public const string DuplicateCanonicalName = "EquipmentType.DuplicateCanonicalName";
+
         public const string InvalidMedia = "EquipmentType.InvalidMedia";
         public const string InvalidPayload = "EquipmentType.InvalidPayload";
         public const string InvalidCode = "EquipmentType.InvalidCode";
@@ -79,7 +83,8 @@ public static class CatalogErrorCode
     {
         public const string Uncategorized = "Catalog.Uncategorized";
         public const string InvalidRequest = "Catalog.InvalidRequest";
-        public const string Unauthorized = "Catalog.Unauthorized";
+        public const string Unauthorized = "Catalog.Unauthorized";  
         public const string Forbidden = "Catalog.Forbidden";
     }
+
 }
