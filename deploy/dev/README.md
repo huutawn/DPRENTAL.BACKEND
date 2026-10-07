@@ -98,25 +98,30 @@ signing key cần cập nhật Catalog và giữ key cũ cho đến khi token c�
    docker compose --env-file .env --env-file release.env up -d postgres
    ```
 
-4. Nếu Catalog đã chạy, dừng ghi và stop catalog-service. Sao lưu đầy đủ schema catalog (gồm supplier
-   columns và migration history) hoặc backup database trước khi migrate. Migration kiểm tra Code trùng
-   giữa organizations và dừng nguyên transaction nếu có trùng; sửa dữ liệu nguồn rồi chạy lại. Không tự
-   đổi mã hoặc gộp equipment. Refactor drop supplier columns nên phiên bản cũ không chạy trên schema mới;
-   rollback cần restore backup, không chạy Down.
-5. Chạy migration trước runtime; lỗi migration phải dừng release:
-
+4. Nếu Catalog đã chạy:
+   - **Ghi nhận image cũ**: Lưu lại SHA đang chạy của `CATALOG_SERVICE_IMAGE` và `CATALOG_MIGRATOR_IMAGE` để sẵn sàng khôi phục nếu migration/release thất bại.
+   - **Dừng ghi và sao lưu**: Tạm dừng ghi và stop catalog-service. Sao lưu đầy đủ schema `catalog` (hoặc toàn bộ database) trước khi migrate:
+     ```bash
+     docker compose --env-file .env --env-file release.env exec -T postgres pg_dump -U authservice -d authservice -n catalog -Fc > backups/catalog/catalog_pre_migrate_$(date +%Y%m%d%H%M%S).dump
+     ```
+     Migration kiểm tra Code trùng giữa organizations và dừng nguyên transaction nếu có trùng; sửa dữ liệu nguồn rồi chạy lại. Không tự đổi mã hoặc gộp equipment.
+5. Chạy migration trước runtime và **kiểm tra exit code**:
    ```bash
    docker compose --env-file .env --env-file release.env --profile migration run --rm catalog-migrate
-   docker compose --env-file .env --env-file release.env up -d --no-deps --wait catalog-service
    ```
-
+   - **Nếu migration thất bại (exit code khác 0)**: Do migration chạy trong transaction và được rollback, schema vẫn ở phiên bản cũ tương thích với runtime trước. **Phục hồi ngay runtime cũ**: đưa `CATALOG_SERVICE_IMAGE` và `CATALOG_MIGRATOR_IMAGE` trong `release.env` về lại SHA cũ đã lưu ở bước 4, rồi khởi động lại `catalog-service` cũ để khôi phục dịch vụ cho người dùng trước khi phân tích nguyên nhân.
+   - **Nếu migration thành công (exit code 0)**: Khởi động runtime mới:
+     ```bash
+     docker compose --env-file .env --env-file release.env up -d --no-deps --wait catalog-service
+     ```
 6. Kiểm tra readiness nội bộ và các GET công khai qua Gateway:
-
-   ```bash
-   docker compose --env-file .env --env-file release.env exec -T catalog-service wget --quiet --spider http://127.0.0.1:8080/health/ready
-   curl --fail --show-error "https://$DEV_DOMAIN/api/v1/catalog/categories"
-   curl --fail --show-error "https://$DEV_DOMAIN/api/v1/catalog/equipment-types?page=1&pageSize=20"
-   ```
+   - **CẢNH BÁO**: Tuyệt đối không dùng `/health/ready` của Gateway làm bằng chứng CatalogService hoạt động; Gateway chỉ kiểm tra JWKS nội bộ và trả `200` ngay cả khi CatalogService đang dừng và trả `502`.
+   - Bắt buộc kiểm tra readiness Catalog nội bộ và các endpoint nghiệp vụ thực tế:
+     ```bash
+     docker compose --env-file .env --env-file release.env exec -T catalog-service wget --quiet --spider http://127.0.0.1:8080/health/ready
+     curl --fail --show-error "https://$DEV_DOMAIN/api/v1/catalog/categories"
+     curl --fail --show-error "https://$DEV_DOMAIN/api/v1/catalog/equipment-types?page=1&pageSize=20"
+     ```
 
    `$DEV_DOMAIN` là hostname trong .env; export biến này trong shell trước khi chạy curl.
    GET chỉ trả Published; Draft/Disabled detail trả 404. POST/PATCH/publish/disable không có token phải
