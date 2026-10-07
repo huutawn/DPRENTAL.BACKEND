@@ -262,7 +262,8 @@ public sealed class SpecificationValuesValidatorTests
             ]
         };
 
-        var values = ParseJson($$"""{ "weight": {{outOfRangeValue}} }""");
+        var jsonValue = JsonSerializer.Serialize(outOfRangeValue);
+        var values = ParseJson($$"""{ "weight": {{jsonValue}} }""");
         var result = SpecificationValuesValidator.Validate(definition, values);
 
         Assert.False(result.Valid);

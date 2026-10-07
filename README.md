@@ -71,7 +71,8 @@ API ghi trả `401` khi thiếu/token không hợp lệ, `403` khi token hợp l
 **Dữ liệu canonical Brand**:
 - `Brand` là dữ liệu platform canonical dùng chung toàn platform, do Admin quản lý, không có Organization ownership. Request gửi `organizationId` bị từ chối `400 Bad Request`.
 - Bảng `catalog.Brands`: `Id` (UUID, sinh ở ứng dụng), `Code` (trim/uppercase, tối đa 50 ký tự), `Name` (Unicode NFC, trim/gom khoảng trắng, tối đa 200 ký tự), `Slug` (trim/lowercase, tối đa 150 ký tự dạng ASCII alphanumeric phân cách bằng dấu `-`), `LogoMediaId` (UUID, tùy chọn), `IsActive` (boolean, tạo mới mặc định active), `CreatedAt` (UTC), `UpdatedAt` (UTC).
-- Unique index `IX_Brands_Code` và `IX_Brands_Slug` áp dụng cho cả Brand inactive, trùng lặp trả về `409 Conflict`.
+- `slug` là tùy chọn khi tạo Brand: bỏ qua, `null` hoặc chuỗi rỗng thì hệ thống tự sinh từ `Name` (bỏ dấu tiếng Việt, lowercase, phân cách bằng `-`), fallback sang `Code` nếu `Name` không còn ký tự hợp lệ; slug tự sinh bị trùng sẽ được thêm hậu tố timestamp. PATCH đổi `Name` không tự đổi `Slug`.
+- Unique index `IX_Brands_Code` và `IX_Brands_Slug` áp dụng cho cả Brand inactive, trùng lặp `Code` hoặc `slug` do client gửi trả về `409 Conflict`.
 - Concurrency token PostgreSQL `xmin` ngăn mất cập nhật khi ghi đồng thời, trả về `409 Conflict`.
 - Logo quản lý qua MediaService: verify Ready, MIME `image/jpeg`, `image/png`, `image/webp`, uploader khớp operator trước khi gọi `SetVisibilityAsync(..., "public")` và lưu Brand. Không verify lại khi PATCH giữ nguyên logo hoặc gỡ logo (`logoMediaId: null`). GET dựng URL qua `MediaUrlResolver` không gọi MediaService. Nếu database lưu thất bại sau khi đã public media, media asset vẫn giữ trạng thái public (đây là giới hạn chấp nhận được để tránh giữ transaction DB trong khi gọi external HTTP MediaService).
 - Disable/Enable có tính idempotent: gọi lại cùng trạng thái không thay đổi timestamp `UpdatedAt`.

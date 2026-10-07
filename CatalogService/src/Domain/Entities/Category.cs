@@ -1,15 +1,15 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.CatalogService.Domain.Entities;
 
-/// <summary>Nhóm phân loại equipment type. MVP dùng danh sách phẳng, chưa có phân cấp.</summary>
+/// <summary>NhÃ³m phÃ¢n loáº¡i equipment type. MVP dÃ¹ng danh sÃ¡ch pháº³ng, chÆ°a cÃ³ phÃ¢n cáº¥p.</summary>
 [Table("Categories", Schema = "catalog")]
 [Index(nameof(Slug), IsUnique = true)]
 public class Category
 {
-    /// <summary>Id do ứng dụng tự gán, để EF luôn INSERT entity mới thay vì đoán theo giá trị khóa.</summary>
+    /// <summary>Id do á»©ng dá»¥ng tá»± gÃ¡n, Ä‘á»ƒ EF luÃ´n INSERT entity má»›i thay vÃ¬ Ä‘oÃ¡n theo giÃ¡ trá»‹ khÃ³a.</summary>
     [Key]
     [DatabaseGenerated(DatabaseGeneratedOption.None)]
     public Guid Id { get; set; }
@@ -18,7 +18,7 @@ public class Category
     [MaxLength(150)]
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>Định danh dạng URL-friendly, duy nhất trong toàn bộ catalog.</summary>
+    /// <summary>Äá»‹nh danh dáº¡ng URL-friendly, duy nháº¥t trong toÃ n bá»™ catalog.</summary>
     [Required]
     [MaxLength(150)]
     public string Slug { get; set; } = string.Empty;
@@ -26,21 +26,20 @@ public class Category
     [MaxLength(1000)]
     public string? Description { get; set; }
 
-    /// <summary>Category ngừng hoạt động không nhận equipment type mới và không cho publish.</summary>
+    /// <summary>Category ngá»«ng hoáº¡t Ä‘á»™ng khÃ´ng nháº­n equipment type má»›i vÃ  khÃ´ng cho publish.</summary>
     public bool IsActive { get; set; } = true;
-    /// <summary>Ảnh đại diện của category, tham chiếu logic tới MediaService.</summary>
-    public Guid? ImageMediaId { get; set; }
 
+    /// <summary>áº¢nh Ä‘áº¡i diá»‡n cá»§a category, tham chiáº¿u logic tá»›i MediaService.</summary>
+    public Guid? ImageMediaId { get; set; }
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
     public DateTime? UpdatedAtUtc { get; set; }
 
     public ICollection<EquipmentType> EquipmentTypes { get; set; } = new List<EquipmentType>();
-
     /// <summary>
-    /// Chuyển đổi trạng thái hoạt động của category. Có tính idempotent:
-    /// nếu trạng thái không thay đổi thì không cập nhật UpdatedAtUtc và trả về false.
+    /// Chuyá»ƒn Ä‘á»•i tráº¡ng thÃ¡i hoáº¡t Ä‘á»™ng cá»§a category. CÃ³ tÃ­nh idempotent:
+    /// náº¿u tráº¡ng thÃ¡i khÃ´ng thay Ä‘á»•i thÃ¬ khÃ´ng cáº­p nháº­t UpdatedAtUtc vÃ  tráº£ vá» false.
     /// </summary>
     public bool TransitionStatus(bool targetActive, DateTime utcNow)
     {
@@ -55,19 +54,19 @@ public class Category
     }
 
     /// <summary>
-    /// Vô hiệu hóa category. Có tính idempotent: nếu đã inactive thì không thay đổi UpdatedAtUtc.
-    /// Trả về true nếu trạng thái thực sự thay đổi.
+    /// VÃ´ hiá»‡u hÃ³a category. CÃ³ tÃ­nh idempotent: náº¿u Ä‘Ã£ inactive thÃ¬ khÃ´ng thay Ä‘á»•i UpdatedAtUtc.
+    /// Tráº£ vá» true náº¿u tráº¡ng thÃ¡i thá»±c sá»± thay Ä‘á»•i.
     /// </summary>
     public bool Disable(DateTime utcNow) => TransitionStatus(false, utcNow);
 
     /// <summary>
-    /// Kích hoạt category. Có tính idempotent: nếu đã active thì không thay đổi UpdatedAtUtc.
-    /// Trả về true nếu trạng thái thực sự thay đổi.
+    /// KÃ­ch hoáº¡t category. CÃ³ tÃ­nh idempotent: náº¿u Ä‘Ã£ active thÃ¬ khÃ´ng thay Ä‘á»•i UpdatedAtUtc.
+    /// Tráº£ vá» true náº¿u tráº¡ng thÃ¡i thá»±c sá»± thay Ä‘á»•i.
     /// </summary>
     public bool Enable(DateTime utcNow) => TransitionStatus(true, utcNow);
 
     /// <summary>
-    /// Cập nhật thời điểm sửa đổi của category theo chuẩn UTC.
+    /// Cáº­p nháº­t thá»i Ä‘iá»ƒm sá»­a Ä‘á»•i cá»§a category theo chuáº©n UTC.
     /// </summary>
     public void Touch(DateTime utcNow)
     {

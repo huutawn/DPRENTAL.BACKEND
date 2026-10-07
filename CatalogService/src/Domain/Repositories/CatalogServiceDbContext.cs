@@ -4,11 +4,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.CatalogService.Domain.Repositories;
 
-public sealed class CatalogServiceDbContext : DbContext
+public sealed class CatalogServiceDbContext(DbContextOptions<CatalogServiceDbContext> options) : DbContext(options)
 {
     public const string SchemaName = "catalog";
     public const string MigrationsHistoryTableName = "__EFMigrationsHistory";
-
     public const string StatusCheckConstraintName = "CK_EquipmentTypes_Status_Canonical";
 
     public DbSet<EquipmentType> EquipmentTypes { get; set; }
@@ -22,12 +21,9 @@ public sealed class CatalogServiceDbContext : DbContext
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    public CatalogServiceDbContext(DbContextOptions<CatalogServiceDbContext> options) : base(options)
-    {
-    }
-
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        ArgumentNullException.ThrowIfNull(modelBuilder);
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.Entity<EquipmentType>(entity =>
@@ -44,7 +40,12 @@ public sealed class CatalogServiceDbContext : DbContext
                 .IsRequired()
                 .HasMaxLength(50);
 
+
             entity.Property(e => e.Name)
+                .IsRequired()
+                .HasMaxLength(200);
+
+            entity.Property(e => e.NormalizedName)
                 .IsRequired()
                 .HasMaxLength(200);
 
@@ -76,6 +77,10 @@ public sealed class CatalogServiceDbContext : DbContext
             entity.HasIndex(e => e.Code)
                 .IsUnique()
                 .HasDatabaseName("IX_EquipmentTypes_Code");
+
+
+            entity.HasIndex(e => e.NormalizedName)
+                .HasDatabaseName("IX_EquipmentTypes_NormalizedName");
 
             entity.HasIndex(e => e.Status)
                 .HasDatabaseName("IX_EquipmentTypes_Status");

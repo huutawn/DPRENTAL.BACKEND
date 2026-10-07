@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -42,7 +42,7 @@ public sealed class RsaJwtAuthTests
         }
 
         // Invalid JSON proves an authorized role reaches model binding without invoking persistence.
-        // adm quản lý cả category lẫn equipment type; các role khác (kể cả own) bị 403 Forbidden.
+        // adm quáº£n lÃ½ cáº£ category láº«n equipment type; cÃ¡c role khÃ¡c (ká»ƒ cáº£ own) bá»‹ 403 Forbidden.
         string id = Guid.NewGuid().ToString();
         (HttpMethod Method, string Path)[] endpoints =
         [
@@ -367,8 +367,9 @@ public sealed class RsaJwtAuthTests
 
         public Task<Result<EquipmentTypeDetailDto>> SaveStateTransitionAsync(EquipmentType entity, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
-
-        public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+        public Task<EquipmentType?> GetWithSchemaAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<EquipmentType?>(null);
+public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<EquipmentTypeSpecSchemaDto>>([]);
 
         public Task<EquipmentTypeSpecSchemaDto?> GetSpecSchemaAsync(Guid equipmentTypeId, int version, CancellationToken cancellationToken = default) =>
@@ -394,7 +395,7 @@ public sealed class RsaJwtAuthTests
     }
 }
 
-/// <summary>Endpoint chỉ có trong test để kiểm thử hành vi bảo vệ xác thực mặc định.</summary>
+/// <summary>Endpoint chá»‰ cÃ³ trong test Ä‘á»ƒ kiá»ƒm thá»­ hÃ nh vi báº£o vá»‡ xÃ¡c thá»±c máº·c Ä‘á»‹nh.</summary>
 [ApiController]
 [Route("test-protected")]
 public sealed class TestProtectedController : ControllerBase

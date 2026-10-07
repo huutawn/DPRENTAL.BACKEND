@@ -12,6 +12,7 @@ public static class SpecSchemaDefinitionValidator
     private static readonly HashSet<string> AllowedDataTypes = new(StringComparer.Ordinal)
     {
         "number",
+        "integer",
         "text",
         "boolean",
         "enum"
@@ -438,7 +439,7 @@ public static class SpecSchemaDefinitionValidator
                 return Result.Failure(CatalogErrors.EquipmentType.InvalidSchemaDefinitionWithDetail("Thuộc tính 'displayOrder' phải là số nguyên không âm."));
             }
 
-            if (field.DataType == "number")
+            if (field.DataType is "number" or "integer")
             {
                 if (field.Options != null)
                 {
