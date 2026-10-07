@@ -184,6 +184,7 @@ public sealed partial class EquipmentTypeService
         var sortedFields = schema.Definition.Fields
             .OrderBy(f => f.DisplayOrder)
             .ThenBy(f => f.Key, StringComparer.Ordinal)
+
             .Select(ToPublishedSchemaField)
             .ToList();
 
