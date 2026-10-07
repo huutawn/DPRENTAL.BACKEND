@@ -27,10 +27,14 @@ public sealed class CreateBrandRequestValidator
             return nameResult;
         }
 
-        var slugResult = BrandValidationRules.ValidateSlug(request.Slug, out normalizedSlug);
-        if (slugResult.IsFailure)
+        // Slug là tùy chọn: bỏ trống thì normalizedSlug rỗng để service tự sinh từ Name
+        if (!string.IsNullOrWhiteSpace(request.Slug))
         {
-            return slugResult;
+            var slugResult = BrandValidationRules.ValidateSlug(request.Slug, out normalizedSlug);
+            if (slugResult.IsFailure)
+            {
+                return slugResult;
+            }
         }
 
         var logoResult = BrandValidationRules.ValidateLogoMediaId(request.LogoMediaId, request.LogoMediaId.HasValue);

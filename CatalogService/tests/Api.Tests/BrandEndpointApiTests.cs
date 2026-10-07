@@ -268,6 +268,48 @@ public sealed class BrandEndpointApiTests : IAsyncLifetime, IDisposable
         Assert.Null(dto.UpdatedAt);
     }
 
+    [Theory]
+    [InlineData("""{"code": "SONY", "name": "  Sony   Điện Tử  "}""", "sony-dien-tu")]
+    [InlineData("""{"code": "SONY", "name": "Sony Điện Tử", "slug": null}""", "sony-dien-tu")]
+    [InlineData("""{"code": "SONY", "name": "Sony Điện Tử", "slug": ""}""", "sony-dien-tu")]
+    [InlineData("""{"code": "B-D", "name": "Black & Decker - Tools"}""", "black-decker-tools")]
+    [InlineData("""{"code": "NIHON-1", "name": "日本"}""", "nihon-1")] // Name không sinh được slug: fallback sang Code
+    public async Task CreateBrand_WithoutSlug_AutoGeneratesSlug(string json, string expectedSlug)
+    {
+        AuthenticateAsAdmin();
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/catalog/brands")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+
+        var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        var dto = await response.Content.ReadFromJsonAsync<BrandDto>();
+        Assert.NotNull(dto);
+        Assert.Equal(expectedSlug, dto.Slug);
+    }
+
+    [Fact]
+    public async Task CreateBrand_WithoutSlug_GeneratedSlugAlreadyExists_AppendsSuffixInsteadOfConflict()
+    {
+        AuthenticateAsAdmin();
+
+        var body1 = new { code = "NIKON-1", name = "Nikon" };
+        var r1 = await client.PostAsJsonAsync("/api/v1/catalog/brands", body1);
+        Assert.Equal(HttpStatusCode.Created, r1.StatusCode);
+        var dto1 = await r1.Content.ReadFromJsonAsync<BrandDto>();
+        Assert.Equal("nikon", dto1?.Slug);
+
+        var body2 = new { code = "NIKON-2", name = "Nikon" };
+        var r2 = await client.PostAsJsonAsync("/api/v1/catalog/brands", body2);
+        Assert.Equal(HttpStatusCode.Created, r2.StatusCode);
+        var dto2 = await r2.Content.ReadFromJsonAsync<BrandDto>();
+        Assert.NotNull(dto2);
+        Assert.Matches("^nikon-[0-9]+$", dto2.Slug);
+    }
+
     [Fact]
     public async Task CreateBrand_DuplicateCode_Returns409Conflict()
     {
@@ -305,7 +347,7 @@ public sealed class BrandEndpointApiTests : IAsyncLifetime, IDisposable
     [Theory]
     [InlineData("""{"code": "", "name": "Sony", "slug": "sony"}""")]
     [InlineData("""{"code": "SONY", "name": "", "slug": "sony"}""")]
-    [InlineData("""{"code": "SONY", "name": "Sony", "slug": ""}""")]
+    [InlineData("""{"code": "!!!", "name": "!!!"}""")] // Không gửi slug và không sinh được slug từ Name/Code
     [InlineData("""{"code": "SONY", "name": "Sony", "slug": "invalid_slug"}""")]
     [InlineData("""{"code": "SONY", "name": "Sony", "slug": "-sony"}""")]
     [InlineData("""{"code": "SONY", "name": "Sony", "slug": "sony-"}""")]

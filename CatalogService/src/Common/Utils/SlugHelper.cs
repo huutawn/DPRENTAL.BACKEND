@@ -5,7 +5,7 @@ namespace Dprental.CatalogService.Common.Utils;
 
 public static class SlugHelper
 {
-    public static string GenerateSlug(string phrase)
+    public static string GenerateSlug(string phrase, int? maxLength = null)
     {
         if (string.IsNullOrWhiteSpace(phrase)) return string.Empty;
 
@@ -13,10 +13,14 @@ public static class SlugHelper
 
         // Xóa các ký tự không hợp lệ
         str = Regex.Replace(str, @"[^a-z0-9\s-]", "");
-        // Chuyển nhiều khoảng trắng thành 1 khoảng trắng
-        str = Regex.Replace(str, @"\s+", " ").Trim();
-        // Thay khoảng trắng bằng dấu gạch ngang
-        str = Regex.Replace(str, @"\s", "-");
+        // Gom khoảng trắng và dấu gạch ngang liên tiếp thành 1 dấu gạch ngang, bỏ gạch ngang ở đầu/cuối
+        str = Regex.Replace(str, @"[\s-]+", "-").Trim('-');
+
+        // Cắt theo độ dài tối đa (nếu có) và không để dấu gạch ngang ở cuối sau khi cắt
+        if (maxLength.HasValue && str.Length > maxLength.Value)
+        {
+            str = str[..maxLength.Value].TrimEnd('-');
+        }
 
         return str;
     }

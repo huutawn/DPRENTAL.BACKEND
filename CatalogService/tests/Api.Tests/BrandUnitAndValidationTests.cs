@@ -7,6 +7,7 @@ using Dprental.CatalogService.Application.DTOs.Media;
 using Dprental.CatalogService.Application.Options;
 using Dprental.CatalogService.Application.Validators;
 using Dprental.CatalogService.Common;
+using Dprental.CatalogService.Common.Utils;
 using Dprental.CatalogService.Domain.Entities;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -239,13 +240,60 @@ public sealed class BrandUnitAndValidationTests
         var nameRes = validator.Validate(missingName, out _, out _, out _);
         Assert.Equal(CatalogErrorCode.Brand.InvalidName, nameRes.Error.Code);
 
-        var missingSlug = new CreateBrandRequest { Code = "SONY", Name = "Sony", Slug = "" };
-        var slugRes = validator.Validate(missingSlug, out _, out _, out _);
+        var invalidSlug = new CreateBrandRequest { Code = "SONY", Name = "Sony", Slug = "invalid_slug" };
+        var slugRes = validator.Validate(invalidSlug, out _, out _, out _);
         Assert.Equal(CatalogErrorCode.Brand.InvalidSlug, slugRes.Error.Code);
 
         var emptyLogo = new CreateBrandRequest { Code = "SONY", Name = "Sony", Slug = "sony", LogoMediaId = Guid.Empty };
         var logoRes = validator.Validate(emptyLogo, out _, out _, out _);
         Assert.Equal(CatalogErrorCode.Brand.InvalidLogo, logoRes.Error.Code);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void CreateValidator_OmittedOrBlankSlug_SucceedsWithEmptySlugForAutoGeneration(string? rawSlug)
+    {
+        var validator = new CreateBrandRequestValidator();
+        var request = new CreateBrandRequest { Code = "SONY", Name = "Sony", Slug = rawSlug! };
+
+        var result = validator.Validate(request, out _, out _, out var slug);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(string.Empty, slug);
+    }
+
+    [Theory]
+    [InlineData("Sony", "sony")]
+    [InlineData("  Sony   Điện Tử  ", "sony-dien-tu")]
+    [InlineData("Máy Ảnh Đức", "may-anh-duc")]
+    [InlineData("A - B", "a-b")]
+    [InlineData("-Sony-", "sony")]
+    [InlineData("Black & Decker", "black-decker")]
+    [InlineData("sony--alpha", "sony-alpha")]
+    [InlineData("!!!", "")]
+    [InlineData("日本", "")]
+    public void SlugHelper_GeneratesSlugMatchingBrandSlugFormat(string phrase, string expected)
+    {
+        string slug = SlugHelper.GenerateSlug(phrase, BrandValidationRules.MaxSlugLength);
+
+        Assert.Equal(expected, slug);
+        if (expected.Length > 0)
+        {
+            Assert.True(BrandValidationRules.ValidateSlug(slug, out _).IsSuccess);
+        }
+    }
+
+    [Fact]
+    public void SlugHelper_TruncatesToMaxLength_WithoutTrailingHyphen()
+    {
+        string phrase = new string('a', 149) + " " + new string('b', 20);
+
+        string slug = SlugHelper.GenerateSlug(phrase, BrandValidationRules.MaxSlugLength);
+
+        Assert.Equal(new string('a', 149), slug);
+        Assert.True(BrandValidationRules.ValidateSlug(slug, out _).IsSuccess);
     }
 
     [Fact]
