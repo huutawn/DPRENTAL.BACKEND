@@ -4,6 +4,7 @@ using Dprental.CatalogService.Application.DTOs.Brands;
 using Dprental.CatalogService.Application.IServices;
 using Dprental.CatalogService.Application.Validators;
 using Dprental.CatalogService.Common;
+using Dprental.CatalogService.Common.Utils;
 using Dprental.CatalogService.Domain.Entities;
 using Dprental.CatalogService.Domain.IRepositories;
 using Microsoft.Extensions.Logging;
@@ -130,13 +131,22 @@ public sealed partial class BrandService(
             return validationResult.Error;
         }
 
-        // Kiểm tra trùng Code và Slug trước khi gọi MediaService
+        // Kiểm tra trùng Code và xác định Slug trước khi gọi MediaService
         if (await repository.IsCodeExistsAsync(normalizedCode, cancellationToken))
         {
             return CatalogErrors.Brand.DuplicateCode;
         }
 
-        if (await repository.IsSlugExistsAsync(normalizedSlug, cancellationToken))
+        if (string.IsNullOrEmpty(normalizedSlug))
+        {
+            // Không gửi slug: tự sinh từ Name, trùng thì thêm hậu tố thay vì trả lỗi
+            normalizedSlug = await GenerateUniqueSlugAsync(normalizedName, normalizedCode, cancellationToken);
+            if (string.IsNullOrEmpty(normalizedSlug))
+            {
+                return CatalogErrors.Brand.InvalidSlug;
+            }
+        }
+        else if (await repository.IsSlugExistsAsync(normalizedSlug, cancellationToken))
         {
             return CatalogErrors.Brand.DuplicateSlug;
         }
@@ -325,6 +335,31 @@ public sealed partial class BrandService(
         }
 
         return BrandDto.FromEntity(updateResult.Value);
+    }
+
+    /// <summary>
+    /// Sinh slug từ Name (fallback sang Code nếu Name không còn ký tự hợp lệ).
+    /// Trả về chuỗi rỗng nếu không sinh được slug hợp lệ.
+    /// </summary>
+    private async Task<string> GenerateUniqueSlugAsync(string name, string code, CancellationToken cancellationToken)
+    {
+        string slug = SlugHelper.GenerateSlug(name, BrandValidationRules.MaxSlugLength);
+        if (string.IsNullOrEmpty(slug))
+        {
+            slug = SlugHelper.GenerateSlug(code, BrandValidationRules.MaxSlugLength);
+        }
+
+        if (string.IsNullOrEmpty(slug) || !await repository.IsSlugExistsAsync(slug, cancellationToken))
+        {
+            return slug;
+        }
+
+        // Trùng slug: thêm timestamp vào đuôi (giống Category), cắt phần gốc để không vượt MaxSlugLength
+        string suffix = $"-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
+        int maxBaseLength = BrandValidationRules.MaxSlugLength - suffix.Length;
+        string baseSlug = slug.Length > maxBaseLength ? slug[..maxBaseLength].TrimEnd('-') : slug;
+
+        return baseSlug + suffix;
     }
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Không thể lưu Brand {Code} vào database sau khi kiểm tra media: {Error}")]
