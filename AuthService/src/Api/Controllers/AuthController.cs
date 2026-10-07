@@ -146,6 +146,7 @@ public sealed class AuthController(
 
     /// <summary>Cấp access token OAuth2 client_credentials cho service, không đại diện người dùng.</summary>
     [HttpPost("service-token")]
+    [ApiExplorerSettings(IgnoreApi = true)]
     [ProducesResponseType<ServiceTokenResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
