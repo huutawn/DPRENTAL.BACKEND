@@ -873,7 +873,9 @@ Các service .NET theo structure hiện tại:
 
 Chứa Entities/Aggregates, ValueObjects, Policies, domain state transitions và repository contracts khi phù hợp.
 
-Domain không phụ thuộc HTTP, controller, EF-specific API, Kafka client, Redis hoặc external service SDK.
+Domain không phụ thuộc HTTP, controller, Kafka client, Redis hoặc external service SDK.
+
+*Ngoại lệ kiến trúc riêng của RentalService*: DbContext và EF Core repositories đặt trực tiếp trong `RentalService.Domain/Repositories` tương đồng AuthService, không tách riêng project Infrastructure. ValueObjects được inline trực tiếp thành các fields trên entities sở hữu kèm DataAnnotations/Fluent mapping.
 
 ## Application
 

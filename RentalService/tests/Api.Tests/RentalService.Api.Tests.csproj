@@ -16,5 +16,6 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Api/RentalService.Api.csproj" />
     <ProjectReference Include="../../src/Application/RentalService.Application.csproj" />
+    <ProjectReference Include="../../src/Domain/RentalService.Domain.csproj" />
   </ItemGroup>
 </Project>
