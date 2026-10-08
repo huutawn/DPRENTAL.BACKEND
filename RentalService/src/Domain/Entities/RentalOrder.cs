@@ -1,5 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Security.Cryptography;
+using System.Text;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Errors;
@@ -13,7 +15,7 @@ namespace Dprental.RentalService.Domain.Entities;
 [Index(nameof(RenterId))]
 [Index(nameof(Status))]
 [Index(nameof(PaymentDeadline))]
-public class RentalOrder
+public partial class RentalOrder
 {
     [Key]
     public Guid Id { get; private set; }
@@ -75,6 +77,8 @@ public class RentalOrder
 
     public DateTimeOffset? PaymentConfirmedAt { get; private set; }
 
+    public bool LatePaymentRefundRequired { get; private set; }
+
     [Required]
     [MaxLength(64)]
     public string CheckoutOperationId { get; private set; } = string.Empty;
@@ -94,813 +98,80 @@ public class RentalOrder
     private readonly List<RentalStateTransition> _stateTransitions = [];
     public IReadOnlyCollection<RentalStateTransition> StateTransitions => _stateTransitions.AsReadOnly();
 
+    private readonly List<RentalOperationReceipt> _operationReceipts = [];
+    public IReadOnlyCollection<RentalOperationReceipt> OperationReceipts => _operationReceipts.AsReadOnly();
+
     private RentalOrder()
     {
     }
 
-    public static Result<RentalOrder> Create(
-        Guid id,
-        string orderCode,
-        Guid renterId,
-        string currency,
-        string deliveryMethod,
-        string recipientName,
-        string recipientPhone,
-        string deliveryAddress,
-        string? deliveryNote,
-        string refundDestinationRef,
-        string termsVersion,
-        string termsDocumentRef,
-        string termsContentHash,
-        string checkoutOperationId,
-        DateTimeOffset utcNow,
-        IEnumerable<InitialRentalItemDto> initialItems)
+    private Result? CheckAndGetExistingReceipt(string operationId, string action, string fingerprint)
     {
-        if (id == Guid.Empty || renterId == Guid.Empty)
+        var existing = _operationReceipts.Find(r => r.OperationId == operationId);
+        if (existing is null)
         {
-            return RentalErrors.InvalidSnapshot;
+            return null;
         }
 
-        if (string.IsNullOrWhiteSpace(orderCode))
+        if (existing.Fingerprint != fingerprint)
         {
-            return RentalErrors.InvalidSnapshot;
+            return RentalErrors.OperationConflict;
         }
 
-        if (string.IsNullOrWhiteSpace(currency) || currency.Trim().Length != 3)
-        {
-            return RentalErrors.CurrencyMismatch;
-        }
+        return existing.IsSuccess
+            ? Result.Success()
+            : Result.Failure(new Error(existing.ErrorCode ?? "Operation.Failed", existing.ErrorMessage ?? string.Empty, ErrorType.Conflict));
+    }
 
-        if (string.IsNullOrWhiteSpace(deliveryMethod) ||
-            string.IsNullOrWhiteSpace(recipientName) ||
-            string.IsNullOrWhiteSpace(recipientPhone) ||
-            string.IsNullOrWhiteSpace(deliveryAddress) ||
-            string.IsNullOrWhiteSpace(refundDestinationRef) ||
-            string.IsNullOrWhiteSpace(termsVersion) ||
-            string.IsNullOrWhiteSpace(termsDocumentRef) ||
-            string.IsNullOrWhiteSpace(termsContentHash) ||
-            string.IsNullOrWhiteSpace(checkoutOperationId))
-        {
-            return RentalErrors.InvalidSnapshot;
-        }
-
-        var itemsList = initialItems?.ToList() ?? [];
-        if (itemsList.Count == 0)
-        {
-            return RentalErrors.CartEmpty;
-        }
-
-        RentalOrder order = new()
-        {
-            Id = id,
-            OrderCode = orderCode.Trim(),
-            RenterId = renterId,
-            Status = RentalOrderStatus.PendingPayment,
-            Currency = currency.Trim().ToUpperInvariant(),
-            DeliveryMethod = deliveryMethod.Trim(),
-            RecipientName = recipientName.Trim(),
-            RecipientPhone = recipientPhone.Trim(),
-            DeliveryAddress = deliveryAddress.Trim(),
-            DeliveryNote = deliveryNote?.Trim(),
-            RefundDestinationRef = refundDestinationRef.Trim(),
-            TermsVersion = termsVersion.Trim(),
-            TermsDocumentRef = termsDocumentRef.Trim(),
-            TermsContentHash = termsContentHash.Trim(),
-            PaymentDeadline = utcNow.AddMinutes(30),
-            CheckoutOperationId = checkoutOperationId.Trim(),
-            CreatedAt = utcNow,
-            UpdatedAt = utcNow,
-            Version = 1
-        };
-
-        order.TermsAcceptance = new RentalTermsAcceptance(
+    private void RecordSuccessReceipt(string operationId, string action, string fingerprint, DateTimeOffset utcNow)
+    {
+        _operationReceipts.Add(new RentalOperationReceipt(
             Guid.NewGuid(),
-            id,
-            renterId,
-            termsVersion.Trim(),
-            termsContentHash.Trim(),
-            utcNow);
+            Id,
+            operationId,
+            action,
+            fingerprint,
+            true,
+            null,
+            null,
+            utcNow));
+    }
 
-        foreach (var itemDto in itemsList)
+    private static string ComputeFingerprint(string action, Guid? targetId, ActorRole actorRole, Guid? actorId, params object?[] parameters)
+    {
+        StringBuilder sb = new();
+        sb.Append(action).Append('|')
+          .Append(targetId?.ToString() ?? "none").Append('|')
+          .Append((int)actorRole).Append('|')
+          .Append(actorId?.ToString() ?? "none");
+
+        foreach (var p in parameters)
         {
-            if (itemDto.Quantity <= 0)
+            sb.Append('|');
+            if (p is IEnumerable<Guid> guids)
             {
-                return RentalErrors.InvalidQuantity;
+                sb.Append(string.Join(",", guids));
             }
-
-            if (itemDto.ExpectedStartDate >= itemDto.ExpectedEndDate)
+            else if (p is IEnumerable<HandoverObservationDto> handovers)
             {
-                return RentalErrors.InvalidRentalPeriod;
+                sb.Append(string.Join(";", handovers.Select(h => $"{h.AssignmentId}:{h.Condition}:{h.Note}")));
             }
-
-            var assignments = itemDto.Assignments?.ToList() ?? [];
-            if (assignments.Count != itemDto.Quantity)
+            else if (p is IEnumerable<ReturnObservationDto> returns)
             {
-                return RentalErrors.QuantityAssignmentMismatch;
+                sb.Append(string.Join(";", returns.Select(r => $"{r.AssignmentId}:{r.Condition}:{r.Note}")));
             }
-
-            RentalItem item = new(
-                itemDto.Id,
-                id,
-                itemDto.EquipmentListingId,
-                itemDto.SupplierId,
-                itemDto.Quantity,
-                itemDto.ExpectedStartDate,
-                itemDto.ExpectedEndDate,
-                itemDto.ListingTitleSnapshot,
-                itemDto.ListingDescriptionSnapshot,
-                itemDto.PickupLocationSnapshot,
-                itemDto.DailyRateSnapshot,
-                itemDto.DepositPerUnitSnapshot,
-                itemDto.AllocationGroupId,
-                assignments);
-
-            order._items.Add(item);
+            else if (p is IEnumerable<DeductionLineDto> deductions)
+            {
+                sb.Append(string.Join(";", deductions.Select(d => $"{d.AssignmentId}:{d.ProposedAmount}:{d.Reason}")));
+            }
+            else
+            {
+                sb.Append(p?.ToString() ?? "null");
+            }
         }
 
-        order.LogTransition(
-            null,
-            null,
-            RentalOrderStatus.PendingPayment.ToString(),
-            "CreateOrder",
-            renterId,
-            ActorRole.Renter,
-            "Checkout payable order",
-            utcNow,
-            checkoutOperationId);
-
-        return order;
-    }
-
-    public Result ConfirmPayment(
-        string invoiceRef,
-        string paymentRef,
-        DateTimeOffset confirmedAt,
-        TimeSpan supplierConfirmationTimeout,
-        string operationId)
-    {
-        if (Status != RentalOrderStatus.PendingPayment)
-        {
-            return RentalErrors.OrderAlreadyPaid;
-        }
-
-        if (confirmedAt > PaymentDeadline)
-        {
-            return RentalErrors.PaymentExpired;
-        }
-
-        InvoiceRef = invoiceRef.Trim();
-        PaymentRef = paymentRef.Trim();
-        PaymentConfirmedAt = confirmedAt;
-
-        DateTimeOffset supplierDeadline = confirmedAt.Add(supplierConfirmationTimeout);
-
-        string fromState = Status.ToString();
-        foreach (var item in _items)
-        {
-            string itemFromState = item.Status.ToString();
-            item.SetPaymentConfirmed(supplierDeadline);
-            LogTransition(
-                item.Id,
-                itemFromState,
-                item.Status.ToString(),
-                "InvoicePaid",
-                null,
-                ActorRole.System,
-                "Payment confirmed",
-                confirmedAt,
-                operationId);
-        }
-
-        RecalculateStatus();
-        UpdatedAt = confirmedAt;
-        Version++;
-
-        LogTransition(
-            null,
-            fromState,
-            Status.ToString(),
-            "InvoicePaid",
-            null,
-            ActorRole.System,
-            "Order payment confirmed",
-            confirmedAt,
-            operationId);
-
-        return Result.Success();
-    }
-
-    public Result ExpirePayment(DateTimeOffset utcNow, string operationId)
-    {
-        if (Status != RentalOrderStatus.PendingPayment)
-        {
-            return RentalErrors.InvalidOrderStatus;
-        }
-
-        string fromState = Status.ToString();
-        foreach (var item in _items)
-        {
-            string itemFrom = item.Status.ToString();
-            item.SetPaymentExpired();
-            LogTransition(
-                item.Id,
-                itemFrom,
-                item.Status.ToString(),
-                "PaymentTimeout",
-                null,
-                ActorRole.System,
-                "Payment deadline expired",
-                utcNow,
-                operationId);
-        }
-
-        Status = RentalOrderStatus.Expired;
-        UpdatedAt = utcNow;
-        Version++;
-
-        LogTransition(
-            null,
-            fromState,
-            Status.ToString(),
-            "PaymentTimeout",
-            null,
-            ActorRole.System,
-            "Order payment expired",
-            utcNow,
-            operationId);
-
-        return Result.Success();
-    }
-
-    public Result CancelByRenter(Guid renterId, string reason, DateTimeOffset utcNow, string operationId)
-    {
-        if (RenterId != renterId)
-        {
-            return RentalErrors.OrderCancellationForbidden;
-        }
-
-        if (Status != RentalOrderStatus.PendingPayment)
-        {
-            return RentalErrors.OrderCancellationForbidden;
-        }
-
-        string fromState = Status.ToString();
-        foreach (var item in _items)
-        {
-            string itemFrom = item.Status.ToString();
-            item.SetCancelled();
-            LogTransition(
-                item.Id,
-                itemFrom,
-                item.Status.ToString(),
-                "RenterCancel",
-                renterId,
-                ActorRole.Renter,
-                reason,
-                utcNow,
-                operationId);
-        }
-
-        Status = RentalOrderStatus.Cancelled;
-        UpdatedAt = utcNow;
-        Version++;
-
-        LogTransition(
-            null,
-            fromState,
-            Status.ToString(),
-            "RenterCancel",
-            renterId,
-            ActorRole.Renter,
-            reason,
-            utcNow,
-            operationId);
-
-        return Result.Success();
-    }
-
-    public Result SupplierAcceptItem(Guid itemId, Guid supplierId, DateTimeOffset utcNow, string operationId)
-    {
-        RentalItem? item = _items.Find(i => i.Id == itemId);
-        if (item is null)
-        {
-            return RentalErrors.ItemNotFound;
-        }
-
-        string itemFrom = item.Status.ToString();
-        string orderFrom = Status.ToString();
-
-        Result result = item.SupplierAccept(supplierId, utcNow);
-        if (result.IsFailure)
-        {
-            return result;
-        }
-
-        LogTransition(
-            item.Id,
-            itemFrom,
-            item.Status.ToString(),
-            "SupplierAccept",
-            supplierId,
-            ActorRole.Supplier,
-            "Supplier accepted item",
-            utcNow,
-            operationId);
-
-        RecalculateStatus();
-        UpdatedAt = utcNow;
-        Version++;
-
-        if (Status.ToString() != orderFrom)
-        {
-            LogTransition(
-                null,
-                orderFrom,
-                Status.ToString(),
-                "SupplierAccept",
-                supplierId,
-                ActorRole.Supplier,
-                "Order status updated after supplier acceptance",
-                utcNow,
-                operationId);
-        }
-
-        return Result.Success();
-    }
-
-    public Result SupplierRejectItem(Guid itemId, Guid supplierId, string reason, DateTimeOffset utcNow, string operationId)
-    {
-        RentalItem? item = _items.Find(i => i.Id == itemId);
-        if (item is null)
-        {
-            return RentalErrors.ItemNotFound;
-        }
-
-        string itemFrom = item.Status.ToString();
-        string orderFrom = Status.ToString();
-
-        Result result = item.SupplierReject(supplierId, reason, utcNow);
-        if (result.IsFailure)
-        {
-            return result;
-        }
-
-        LogTransition(
-            item.Id,
-            itemFrom,
-            item.Status.ToString(),
-            "SupplierReject",
-            supplierId,
-            ActorRole.Supplier,
-            reason,
-            utcNow,
-            operationId);
-
-        RecalculateStatus();
-        UpdatedAt = utcNow;
-        Version++;
-
-        if (Status.ToString() != orderFrom)
-        {
-            LogTransition(
-                null,
-                orderFrom,
-                Status.ToString(),
-                "SupplierReject",
-                supplierId,
-                ActorRole.Supplier,
-                "Order status updated after supplier rejection",
-                utcNow,
-                operationId);
-        }
-
-        return Result.Success();
-    }
-
-    public Result SupplierTimeoutItem(Guid itemId, DateTimeOffset utcNow, string operationId)
-    {
-        RentalItem? item = _items.Find(i => i.Id == itemId);
-        if (item is null)
-        {
-            return RentalErrors.ItemNotFound;
-        }
-
-        string itemFrom = item.Status.ToString();
-        string orderFrom = Status.ToString();
-
-        Result result = item.SupplierTimeout(utcNow);
-        if (result.IsFailure)
-        {
-            return result;
-        }
-
-        LogTransition(
-            item.Id,
-            itemFrom,
-            item.Status.ToString(),
-            "SupplierTimeout",
-            null,
-            ActorRole.System,
-            "Supplier confirmation deadline expired",
-            utcNow,
-            operationId);
-
-        RecalculateStatus();
-        UpdatedAt = utcNow;
-        Version++;
-
-        if (Status.ToString() != orderFrom)
-        {
-            LogTransition(
-                null,
-                orderFrom,
-                Status.ToString(),
-                "SupplierTimeout",
-                null,
-                ActorRole.System,
-                "Order status updated after supplier timeout",
-                utcNow,
-                operationId);
-        }
-
-        return Result.Success();
-    }
-
-    public Result CancelItemBeforeHandover(Guid itemId, string reason, DateTimeOffset utcNow, string operationId)
-    {
-        RentalItem? item = _items.Find(i => i.Id == itemId);
-        if (item is null)
-        {
-            return RentalErrors.ItemNotFound;
-        }
-
-        string itemFrom = item.Status.ToString();
-        string orderFrom = Status.ToString();
-
-        Result result = item.CancelBeforeHandover(reason, utcNow);
-        if (result.IsFailure)
-        {
-            return result;
-        }
-
-        LogTransition(
-            item.Id,
-            itemFrom,
-            item.Status.ToString(),
-            "CancelBeforeHandover",
-            null,
-            ActorRole.System,
-            reason,
-            utcNow,
-            operationId);
-
-        RecalculateStatus();
-        UpdatedAt = utcNow;
-        Version++;
-
-        if (Status.ToString() != orderFrom)
-        {
-            LogTransition(
-                null,
-                orderFrom,
-                Status.ToString(),
-                "CancelBeforeHandover",
-                null,
-                ActorRole.System,
-                "Order status updated after item cancellation",
-                utcNow,
-                operationId);
-        }
-
-        return Result.Success();
-    }
-
-    public Result SubmitHandover(
-        Guid itemId,
-        Guid supplierId,
-        DateTimeOffset actualHandoverAt,
-        IEnumerable<HandoverObservationDto> observations,
-        string? note,
-        DateTimeOffset utcNow,
-        string operationId)
-    {
-        RentalItem? item = _items.Find(i => i.Id == itemId);
-        if (item is null)
-        {
-            return RentalErrors.ItemNotFound;
-        }
-
-        string itemFrom = item.Status.ToString();
-        string orderFrom = Status.ToString();
-
-        Result result = item.SubmitHandover(Guid.NewGuid(), supplierId, actualHandoverAt, observations, note, utcNow);
-        if (result.IsFailure)
-        {
-            return result;
-        }
-
-        LogTransition(
-            item.Id,
-            itemFrom,
-            item.Status.ToString(),
-            "SubmitHandover",
-            supplierId,
-            ActorRole.Supplier,
-            note ?? "Handover record submitted",
-            utcNow,
-            operationId);
-
-        RecalculateStatus();
-        UpdatedAt = utcNow;
-        Version++;
-
-        if (Status.ToString() != orderFrom)
-        {
-            LogTransition(
-                null,
-                orderFrom,
-                Status.ToString(),
-                "SubmitHandover",
-                supplierId,
-                ActorRole.Supplier,
-                "Order status updated after handover",
-                utcNow,
-                operationId);
-        }
-
-        return Result.Success();
-    }
-
-    public Result AcknowledgeHandover(Guid itemId, Guid renterId, DateTimeOffset acknowledgedAt, string? note, DateTimeOffset utcNow, string operationId)
-    {
-        if (RenterId != renterId)
-        {
-            return RentalErrors.OrderCancellationForbidden;
-        }
-
-        RentalItem? item = _items.Find(i => i.Id == itemId);
-        if (item is null)
-        {
-            return RentalErrors.ItemNotFound;
-        }
-
-        Result result = item.AcknowledgeHandover(renterId, acknowledgedAt, note);
-        if (result.IsFailure)
-        {
-            return result;
-        }
-
-        UpdatedAt = utcNow;
-        Version++;
-        return Result.Success();
-    }
-
-    public Result SubmitReturn(
-        Guid itemId,
-        Guid supplierId,
-        DateTimeOffset actualReturnAt,
-        IEnumerable<ReturnObservationDto> observations,
-        string? note,
-        DateTimeOffset utcNow,
-        string operationId)
-    {
-        RentalItem? item = _items.Find(i => i.Id == itemId);
-        if (item is null)
-        {
-            return RentalErrors.ItemNotFound;
-        }
-
-        string itemFrom = item.Status.ToString();
-        string orderFrom = Status.ToString();
-
-        Result result = item.SubmitReturn(Guid.NewGuid(), supplierId, actualReturnAt, observations, note, utcNow);
-        if (result.IsFailure)
-        {
-            return result;
-        }
-
-        LogTransition(
-            item.Id,
-            itemFrom,
-            item.Status.ToString(),
-            "SubmitReturn",
-            supplierId,
-            ActorRole.Supplier,
-            note ?? "Return record submitted",
-            utcNow,
-            operationId);
-
-        RecalculateStatus();
-        UpdatedAt = utcNow;
-        Version++;
-
-        if (Status.ToString() != orderFrom)
-        {
-            LogTransition(
-                null,
-                orderFrom,
-                Status.ToString(),
-                "SubmitReturn",
-                supplierId,
-                ActorRole.Supplier,
-                "Order status updated after return",
-                utcNow,
-                operationId);
-        }
-
-        return Result.Success();
-    }
-
-    public Result SubmitDeductionProposal(
-        Guid itemId,
-        Guid supplierId,
-        IEnumerable<DeductionLineDto> lines,
-        DateTimeOffset utcNow,
-        string operationId)
-    {
-        RentalItem? item = _items.Find(i => i.Id == itemId);
-        if (item is null)
-        {
-            return RentalErrors.ItemNotFound;
-        }
-
-        Result result = item.SubmitDeductionProposal(Guid.NewGuid(), supplierId, lines, utcNow);
-        if (result.IsFailure)
-        {
-            return result;
-        }
-
-        UpdatedAt = utcNow;
-        Version++;
-        return Result.Success();
-    }
-
-    public Result ExpireDeductionSubmission(Guid itemId, DateTimeOffset utcNow, string operationId)
-    {
-        RentalItem? item = _items.Find(i => i.Id == itemId);
-        if (item is null)
-        {
-            return RentalErrors.ItemNotFound;
-        }
-
-        Result result = item.ExpireDeductionSubmission(utcNow);
-        if (result.IsFailure)
-        {
-            return result;
-        }
-
-        UpdatedAt = utcNow;
-        Version++;
-        return Result.Success();
-    }
-
-    public Result AcceptDeductionProposal(Guid itemId, Guid renterId, DateTimeOffset utcNow, string operationId)
-    {
-        if (RenterId != renterId)
-        {
-            return RentalErrors.OrderCancellationForbidden;
-        }
-
-        RentalItem? item = _items.Find(i => i.Id == itemId);
-        if (item is null)
-        {
-            return RentalErrors.ItemNotFound;
-        }
-
-        Result result = item.AcceptDeductionProposal(renterId, utcNow);
-        if (result.IsFailure)
-        {
-            return result;
-        }
-
-        UpdatedAt = utcNow;
-        Version++;
-        return Result.Success();
-    }
-
-    public Result TimeoutDeductionProposal(Guid itemId, DateTimeOffset utcNow, string operationId)
-    {
-        RentalItem? item = _items.Find(i => i.Id == itemId);
-        if (item is null)
-        {
-            return RentalErrors.ItemNotFound;
-        }
-
-        Result result = item.TimeoutDeductionProposal(utcNow);
-        if (result.IsFailure)
-        {
-            return result;
-        }
-
-        UpdatedAt = utcNow;
-        Version++;
-        return Result.Success();
-    }
-
-    public Result DisputeDeductionProposal(Guid itemId, Guid renterId, string reason, IEnumerable<Guid>? mediaIds, DateTimeOffset utcNow, string operationId)
-    {
-        if (RenterId != renterId)
-        {
-            return RentalErrors.OrderCancellationForbidden;
-        }
-
-        RentalItem? item = _items.Find(i => i.Id == itemId);
-        if (item is null)
-        {
-            return RentalErrors.ItemNotFound;
-        }
-
-        Result result = item.DisputeDeductionProposal(Guid.NewGuid(), renterId, reason, mediaIds, utcNow);
-        if (result.IsFailure)
-        {
-            return result;
-        }
-
-        UpdatedAt = utcNow;
-        Version++;
-        return Result.Success();
-    }
-
-    public Result ResolveDispute(
-        Guid itemId,
-        Guid adminId,
-        decimal finalDeductionAmount,
-        string reason,
-        IEnumerable<Guid>? mediaIds,
-        DateTimeOffset utcNow,
-        string operationId)
-    {
-        RentalItem? item = _items.Find(i => i.Id == itemId);
-        if (item is null)
-        {
-            return RentalErrors.ItemNotFound;
-        }
-
-        Result result = item.ResolveDispute(adminId, finalDeductionAmount, reason, mediaIds, utcNow);
-        if (result.IsFailure)
-        {
-            return result;
-        }
-
-        UpdatedAt = utcNow;
-        Version++;
-        return Result.Success();
-    }
-
-    public Result ConfirmClosuresAndComplete(
-        Guid itemId,
-        DateTimeOffset inventoryClosureAt,
-        DateTimeOffset financialClosureAt,
-        string? settlementRef,
-        string? refundRef,
-        DateTimeOffset utcNow,
-        string operationId)
-    {
-        RentalItem? item = _items.Find(i => i.Id == itemId);
-        if (item is null)
-        {
-            return RentalErrors.ItemNotFound;
-        }
-
-        string itemFrom = item.Status.ToString();
-        string orderFrom = Status.ToString();
-
-        Result result = item.ConfirmClosuresAndComplete(inventoryClosureAt, financialClosureAt, settlementRef, refundRef);
-        if (result.IsFailure)
-        {
-            return result;
-        }
-
-        LogTransition(
-            item.Id,
-            itemFrom,
-            item.Status.ToString(),
-            "CompleteItem",
-            null,
-            ActorRole.System,
-            "Closures confirmed and item completed",
-            utcNow,
-            operationId);
-
-        RecalculateStatus();
-        UpdatedAt = utcNow;
-        Version++;
-
-        if (Status.ToString() != orderFrom)
-        {
-            LogTransition(
-                null,
-                orderFrom,
-                Status.ToString(),
-                "CompleteItem",
-                null,
-                ActorRole.System,
-                "Order status updated after item completed",
-                utcNow,
-                operationId);
-        }
-
-        return Result.Success();
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()));
+        return Convert.ToHexString(hash);
     }
 
     private void RecalculateStatus()
@@ -924,7 +195,6 @@ public class RentalOrder
             }
         }
 
-        // Priority after payment: InRental -> PendingSettlement -> AwaitingHandover -> PendingSupplierConfirmation
         if (_items.Any(i => i.Status == RentalItemStatus.InRental))
         {
             Status = RentalOrderStatus.InRental;
@@ -949,7 +219,6 @@ public class RentalOrder
             return;
         }
 
-        // Check if all items are terminal
         bool allTerminal = _items.All(i => i.Status is RentalItemStatus.Completed
             or RentalItemStatus.Rejected
             or RentalItemStatus.Expired

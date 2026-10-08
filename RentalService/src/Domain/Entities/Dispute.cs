@@ -24,7 +24,8 @@ public class Dispute
     [MaxLength(2000)]
     public string Reason { get; private set; } = string.Empty;
 
-    public List<Guid> MediaIds { get; private set; } = [];
+    private readonly List<Guid> _mediaIds = [];
+    public IReadOnlyList<Guid> MediaIds => _mediaIds.AsReadOnly();
 
     [Precision(18, 2)]
     public decimal? FinalDeductionAmount { get; private set; }
@@ -36,7 +37,8 @@ public class Dispute
 
     public DateTimeOffset? ResolvedAt { get; private set; }
 
-    public List<Guid> ResolutionMediaIds { get; private set; } = [];
+    private readonly List<Guid> _resolutionMediaIds = [];
+    public IReadOnlyList<Guid> ResolutionMediaIds => _resolutionMediaIds.AsReadOnly();
 
     [ForeignKey(nameof(DeductionProposalId))]
     public DeductionProposal? DeductionProposal { get; private set; }
@@ -59,7 +61,11 @@ public class Dispute
         OpenedById = openedById;
         OpenedAt = openedAt;
         Reason = reason;
-        MediaIds = (mediaIds ?? []).ToList();
+        _mediaIds.Clear();
+        if (mediaIds is not null)
+        {
+            _mediaIds.AddRange(mediaIds);
+        }
     }
 
     internal void Resolve(
@@ -73,7 +79,11 @@ public class Dispute
         ResolutionReason = reason;
         ResolvedById = resolvedById;
         ResolvedAt = resolvedAt;
-        ResolutionMediaIds = (mediaIds ?? []).ToList();
+        _resolutionMediaIds.Clear();
+        if (mediaIds is not null)
+        {
+            _resolutionMediaIds.AddRange(mediaIds);
+        }
         Status = DisputeStatus.Resolved;
     }
 }
