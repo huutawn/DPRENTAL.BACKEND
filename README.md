@@ -187,6 +187,8 @@ dotnet test InventoryService.sln
   - Replay khi nhóm đã hết hạn hoặc đã giải phóng: Trả về `409 Conflict` (`HOLD_EXPIRED`).
   - Replay với payload khác biệt (sai số lượng, ngày, ghi chú): Trả về `409 Conflict` (`EXTERNAL_REFERENCE_REUSED`).
   - Dùng cùng key cho Listing khác: Trả về `409 Conflict` (`EXTERNAL_REFERENCE_REUSED`).
+- **Yêu cầu trạng thái Listing Active**: Cả giữ chỗ đơn (`POST /api/v1/inventory/assets/{assetId}/holds`) và giữ chỗ nhóm (`POST /api/v1/inventory/equipment-listings/{id}/holds`) khi tạo mới đều bắt buộc Listing cha phải ở trạng thái `Active`. Nếu Listing ở trạng thái `Draft` hoặc `Inactive`, yêu cầu bị từ chối bằng `409 Conflict` (`LISTING_NOT_ACTIVE`). Replay hợp lệ và xác nhận phân bổ (`Allocate`) cho các lượt giữ chỗ đã tạo thành công trước đó vẫn tiếp tục hoạt động ngay cả khi Listing chuyển sang `Inactive`.
+- **Đánh giá thời gian thực**: Lịch tổng hợp cấp Listing lấy clock đánh giá occupancy sau khi tải snapshot từ database, đảm bảo tính nhất quán tuyệt đối với availability queries nếu có hold hết hạn trong quá trình I/O.
 
 ---
 

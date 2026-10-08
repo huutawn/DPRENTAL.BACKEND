@@ -188,7 +188,7 @@ public sealed class EquipmentListingServiceTests
         };
 
     [Fact]
-    public async Task CreateListingAsync_ValidRequest_CreatesListingAndNUnits()
+    public async Task CreateListingAsync_ValidRequest_CreatesListingAndInitialUnit()
     {
         var service = CreateService();
         var ownerId = Guid.NewGuid();

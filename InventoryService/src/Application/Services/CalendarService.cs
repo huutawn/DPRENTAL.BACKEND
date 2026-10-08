@@ -170,6 +170,9 @@ public sealed class CalendarService : ICalendarService
             return Error.Forbidden("FORBIDDEN", "Bạn không có quyền truy cập lịch của Listing này.");
         }
 
+        // Lấy clock đánh giá occupancy SAU KHI snapshot I/O tải xong
+        var evaluationNowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+
         var days = new List<ListingCalendarDayResponse>();
         var d = validStart;
         while (true)
@@ -185,8 +188,7 @@ public sealed class CalendarService : ICalendarService
                 bool isOccupied = unit.Allocations.Any(al =>
                     al.RentalPeriod.StartDate <= d &&
                     al.RentalPeriod.EndDate >= d &&
-                    (al.Status == AllocationStatus.Allocated ||
-                     (al.Status == AllocationStatus.Held && al.HoldExpiresAt > nowUtc)));
+                    AssetAvailabilityPolicy.OccupiesCalendar(al, evaluationNowUtc));
 
                 bool isBlocked = unit.CalendarBlocks.Any(cb =>
                     cb.StartDate <= d &&

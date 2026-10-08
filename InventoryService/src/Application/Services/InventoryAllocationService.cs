@@ -85,7 +85,19 @@ public sealed class InventoryAllocationService : IInventoryAllocationService
                 return TryReplayExistingHold(existing, assetId, period, canonicalHoldExpiresAt, request.Notes);
             }
 
-            // d. Với key mới: validate bằng CreateHold với canonical expiry
+            // d. Kiểm tra trạng thái Listing cha: Bắt buộc Active để nhận giữ chỗ mới
+            var listing = asset.Listing ?? await ctx.Listings.GetByIdAsync(asset.EquipmentListingId, ct);
+            if (listing is null)
+            {
+                return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+            }
+
+            if (listing.Status != EquipmentListingStatus.Active)
+            {
+                return Error.Conflict("LISTING_NOT_ACTIVE", "Listing không ở trạng thái Active để nhận giữ chỗ mới.");
+            }
+
+            // e. Với key mới: validate bằng CreateHold với canonical expiry
             var holdId = Guid.NewGuid();
             var holdResult = AssetAllocation.CreateHold(
                 id: holdId,
