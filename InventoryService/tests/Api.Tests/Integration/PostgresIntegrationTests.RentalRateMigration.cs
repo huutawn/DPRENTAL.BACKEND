@@ -1,5 +1,6 @@
 using Dprental.InventoryService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Npgsql;
 using Xunit;
 
@@ -19,7 +20,7 @@ public sealed partial class PostgresIntegrationTests
                 .Options;
             await using var db = new InventoryServiceDbContext(options);
 
-            await db.Database.MigrateAsync();
+            await db.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>().MigrateAsync("20261006000000_AddAssetRentalRate");
 
             // 1. Table exists
             var tableExists = await db.Database.SqlQueryRaw<bool>("""
@@ -155,7 +156,7 @@ public sealed partial class PostgresIntegrationTests
             """);
 
             // Migrate forward
-            await db.Database.MigrateAsync();
+            await db.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>().MigrateAsync("20261006000000_AddAssetRentalRate");
 
             // Verify in asset_rental_rates
             var daily = await db.Database.SqlQuery<decimal>($"""
@@ -311,14 +312,26 @@ public sealed partial class PostgresIntegrationTests
     [Fact]
     public async Task AddAssetRentalRate_Downgrade_ThrowsNotSupportedException()
     {
-        await using var db = await CreateMigratedDbContextAsync();
+        var fixture = new PostgresFixture { TargetMigration = "20261006000000_AddAssetRentalRate" };
+        await fixture.InitializeAsync();
+        try
+        {
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
+                .UseNpgsql(fixture.ConnectionString, o => o.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
+                .Options;
+            await using var db = new InventoryServiceDbContext(options);
 
-        var ex = await Assert.ThrowsAsync<NotSupportedException>(() =>
-            db.Database.MigrateAsync("20261005050000_AddAssetBrandId"));
-        Assert.Contains("AddAssetRentalRate retains asset_rental_rates table", ex.Message);
+            var ex = await Assert.ThrowsAsync<NotSupportedException>(() =>
+                db.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>().MigrateAsync("20261005050000_AddAssetBrandId"));
+            Assert.Contains("AddAssetRentalRate retains asset_rental_rates table", ex.Message);
 
-        // Verify table still exists
-        var tableExists = await db.Database.SqlQueryRaw<bool>("SELECT to_regclass('inventory.asset_rental_rates') IS NOT NULL AS \"Value\"").SingleAsync();
-        Assert.True(tableExists);
+            // Verify table still exists
+            var tableExists = await db.Database.SqlQueryRaw<bool>("SELECT to_regclass('inventory.asset_rental_rates') IS NOT NULL AS \"Value\"").SingleAsync();
+            Assert.True(tableExists);
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
     }
 }

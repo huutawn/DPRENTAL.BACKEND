@@ -22,27 +22,30 @@ namespace Dprental.InventoryService.Application.Services;
 public sealed class InventoryAvailabilityService : IInventoryAvailabilityService
 {
     private readonly IInventoryAssetRepository _assetRepository;
+    private readonly IEquipmentListingRepository _listingRepository;
     private readonly IInventoryAvailabilityCache _cache;
     private readonly InventoryCacheOptions _cacheOptions;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<InventoryAvailabilityService>? _logger;
-
     public InventoryAvailabilityService(
         IInventoryAssetRepository assetRepository,
+        IEquipmentListingRepository listingRepository,
         IInventoryAvailabilityCache cache,
         TimeProvider timeProvider)
-        : this(assetRepository, cache, null, timeProvider, null)
+        : this(assetRepository, listingRepository, cache, null, timeProvider, null)
     {
     }
 
     public InventoryAvailabilityService(
         IInventoryAssetRepository assetRepository,
+        IEquipmentListingRepository listingRepository,
         IInventoryAvailabilityCache cache,
         IOptions<InventoryCacheOptions>? cacheOptions = null,
         TimeProvider? timeProvider = null,
         ILogger<InventoryAvailabilityService>? logger = null)
     {
         _assetRepository = assetRepository ?? throw new ArgumentNullException(nameof(assetRepository));
+        _listingRepository = listingRepository ?? throw new ArgumentNullException(nameof(listingRepository));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _cacheOptions = cacheOptions?.Value ?? new InventoryCacheOptions();
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -130,6 +133,74 @@ public sealed class InventoryAvailabilityService : IInventoryAvailabilityService
         return Result.Success(new CheckAvailabilityBatchResponse(
             unavailableAssetIds,
             notFoundAssetIds));
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<CheckListingAvailabilityResponse>> CheckListingAvailabilityAsync(
+        Guid listingId,
+        CheckListingAvailabilityRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (listingId == Guid.Empty)
+        {
+            return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+        }
+
+        if (request.RequestedQuantity < 1)
+        {
+            return Error.Validation("INVALID_REQUESTED_QUANTITY", "Số lượng yêu cầu (requestedQuantity) phải lớn hơn hoặc bằng 1.");
+        }
+
+        var dateValResult = AvailabilityDateValidator.ValidateDateWindow(
+            request.StartDate,
+            request.EndDate,
+            out var validStart,
+            out var validEnd);
+
+        if (dateValResult.IsFailure)
+        {
+            return dateValResult.Error;
+        }
+
+        var snapshot = await _listingRepository.GetCalendarSnapshotAsync(listingId, validStart, validEnd, cancellationToken);
+        if (snapshot is null)
+        {
+            return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+        }
+
+        if (snapshot.Status != EquipmentListingStatus.Active)
+        {
+            return Result.Success(new CheckListingAvailabilityResponse(
+                listingId,
+                validStart,
+                validEnd,
+                request.RequestedQuantity,
+                AvailableQuantity: 0,
+                IsAvailable: false));
+        }
+
+        var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+
+        int availableQuantity = snapshot.Assets.Count(a =>
+            a.AcceptingBookings &&
+            !a.CalendarBlocks.Any(cb => cb.StartDate <= validEnd && cb.EndDate >= validStart) &&
+            !a.Allocations.Any(al =>
+                (al.Status == AllocationStatus.Allocated ||
+                 (al.Status == AllocationStatus.Held && al.HoldExpiresAt > nowUtc)) &&
+                al.RentalPeriod.StartDate <= validEnd &&
+                al.RentalPeriod.EndDate >= validStart));
+
+        bool isAvailable = availableQuantity >= request.RequestedQuantity;
+
+        return Result.Success(new CheckListingAvailabilityResponse(
+            listingId,
+            validStart,
+            validEnd,
+            request.RequestedQuantity,
+            availableQuantity,
+            isAvailable));
     }
 
     /// <inheritdoc />

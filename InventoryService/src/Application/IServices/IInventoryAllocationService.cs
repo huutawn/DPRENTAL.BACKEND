@@ -17,6 +17,15 @@ public interface IInventoryAllocationService
         CreateHoldRequest request,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Tạo mới một lượt giữ chỗ tạm thời theo nhóm (Group Hold) trên EquipmentListing hoặc trả về lượt hiện tại nếu idempotent replay.
+    /// </summary>
+    Task<Result<ListingHoldResponse>> CreateListingHoldAsync(
+        Guid listingId,
+        CreateListingHoldRequest request,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default);
+
 
     /// <summary>
     /// Chuyển đổi lượt giữ chỗ còn hạn sang trạng thái phân bổ chính thức (Held -&gt; Allocated).

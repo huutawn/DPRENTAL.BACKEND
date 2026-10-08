@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Dprental.InventoryService.Application.DTOs.Assets;
+using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.Security;
 using Microsoft.AspNetCore.Mvc;
@@ -17,11 +18,12 @@ public sealed partial class AssetHttpIntegrationTests
         "ownerUserId", "owner_user_id", "ownerId", "owner_id",
         "organizationId", "organization_id",
         "serialNumber", "serial_number", "serial", "serialNo", "serial_no",
+        "assetCode", "asset_code", "assetId", "asset_id", "assets",
+        "groupReference", "group_reference",
         "displayName", "display_name",
         "suspensionReason", "suspension_reason",
         "externalReference", "external_reference",
         "sourceSystem", "source_system",
-        "holdExpiresAt", "hold_expires_at",
         "calendarBlocks", "calendar_blocks",
         "allocations", "allocationId", "allocation_id",
         "renterId", "renter_id",
@@ -57,14 +59,14 @@ public sealed partial class AssetHttpIntegrationTests
             specValues: "{\"capacityKg\": 2500, \"fuelType\": \"diesel\", \"ownerUserId\": \"leak-attempt\"}");
 
         // 1. List
-        var resList = await client.GetAsync("api/v1/inventory/public/assets");
+        var resList = await client.GetAsync("api/v1/inventory/public/equipment-listings");
         Assert.Equal(HttpStatusCode.OK, resList.StatusCode);
         var listJson = await resList.Content.ReadAsStringAsync();
         using var docList = JsonDocument.Parse(listJson);
         AssertZeroForbiddenProperties(docList.RootElement);
 
         // 2. Detail
-        var resDetail = await client.GetAsync($"api/v1/inventory/public/assets/{asset.Id:D}");
+        var resDetail = await client.GetAsync($"api/v1/inventory/public/equipment-listings/{asset.EquipmentListingId:D}");
         Assert.Equal(HttpStatusCode.OK, resDetail.StatusCode);
         var detailJson = await resDetail.Content.ReadAsStringAsync();
         using var docDetail = JsonDocument.Parse(detailJson);
@@ -84,9 +86,9 @@ public sealed partial class AssetHttpIntegrationTests
         var asset = await SeedAssetAsync(owner, model: "ModelPublic77", serial: secretSerial);
 
         // Public discovery search by serial number returns NO matches
-        var resPublic = await client.GetAsync($"api/v1/inventory/public/assets?q={secretSerial}");
+        var resPublic = await client.GetAsync($"api/v1/inventory/public/equipment-listings?q={secretSerial}");
         Assert.Equal(HttpStatusCode.OK, resPublic.StatusCode);
-        var pagedPublic = await resPublic.Content.ReadFromJsonAsync<PagedResponse<PublicInventoryAssetResponse>>();
+        var pagedPublic = await resPublic.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(pagedPublic);
         Assert.Empty(pagedPublic.Items);
         Assert.Equal(0, pagedPublic.TotalCount);
@@ -122,7 +124,7 @@ public sealed partial class AssetHttpIntegrationTests
         using var client = app.CreateClient();
 
         var filterJson = Uri.EscapeDataString($"[{{\"field\":\"{reservedKey}\",\"operator\":\"eq\",\"value\":\"secret\"}}]");
-        var res = await client.GetAsync($"api/v1/inventory/public/assets?equipmentTypeId={Guid.NewGuid():D}&filters={filterJson}");
+        var res = await client.GetAsync($"api/v1/inventory/public/equipment-listings?equipmentTypeId={Guid.NewGuid():D}&filters={filterJson}");
 
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
         var problem = await res.Content.ReadFromJsonAsync<ProblemDetails>();

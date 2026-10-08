@@ -68,27 +68,7 @@ public sealed class PostgresAllocationConcurrencyTests : IClassFixture<PostgresF
     private async Task<InventoryAsset> SeedAssetAsync(Guid ownerUserId, bool acceptingBookings = true)
     {
         await using var db = CreateDbContext();
-        var assetId = Guid.NewGuid();
-        var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", InitialNow).Value;
-        var asset = InventoryAsset.Create(
-            assetId,
-            ownerUserId,
-            Guid.NewGuid(),
-            Guid.NewGuid(),
-            "Sony FX3",
-            1,
-            "{}",
-            InitialNow,
-            rate).Value;
-
-        if (!acceptingBookings)
-        {
-            asset.DisableBookings("Suspended for test", InitialNow);
-        }
-
-        db.Assets.Add(asset);
-        await db.SaveChangesAsync();
-        return asset;
+        return await IntegrationTestHelper.InsertTestAssetAsync(db, ownerId: ownerUserId, acceptingBookings: acceptingBookings, now: InitialNow);
     }
 
     private async Task WaitForAdvisoryLockWaiterAsync(Guid assetId, TimeSpan timeout)
@@ -162,6 +142,20 @@ public sealed class PostgresAllocationConcurrencyTests : IClassFixture<PostgresF
                 return await operation(ctx, ct);
             }, cancellationToken);
         }
+
+        public Task<Result<T>> ExecuteListingWriteAsync<T>(
+            Guid listingId,
+            Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation,
+            CancellationToken cancellationToken = default) =>
+            inner.ExecuteListingWriteAsync(listingId, operation, cancellationToken);
+
+        public Task<Result<T>> ExecuteGroupHoldAsync<T>(
+            string sourceSystem,
+            string groupReference,
+            Guid listingId,
+            Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation,
+            CancellationToken cancellationToken = default) =>
+            inner.ExecuteGroupHoldAsync(sourceSystem, groupReference, listingId, operation, cancellationToken);
     }
 
     private sealed class InterceptingAllocationRepository(
@@ -186,6 +180,11 @@ public sealed class PostgresAllocationConcurrencyTests : IClassFixture<PostgresF
         public Task<AssetAllocation?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             inner.GetByIdAsync(id, cancellationToken);
 
+
+        public Task<IReadOnlyList<AssetAllocation>> GetByGroupReferenceAsync(string sourceSystem, string groupReference, CancellationToken cancellationToken = default) =>
+            inner.GetByGroupReferenceAsync(sourceSystem, groupReference, cancellationToken);
+
+        public void AddRange(IEnumerable<AssetAllocation> allocations) => inner.AddRange(allocations);
         public Task<AssetAllocation?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default) =>
             inner.GetByIdForOwnerAsync(id, ownerUserId, cancellationToken);
 
@@ -353,7 +352,7 @@ public sealed class PostgresAllocationConcurrencyTests : IClassFixture<PostgresF
                 await allowBlockToProceed.Task.WaitAsync(TimeSpan.FromSeconds(15), ct);
             });
 
-            var calendarService1 = new CalendarService(sp1.GetRequiredService<IInventoryAssetRepository>(), interceptingTx1, clock);
+            var calendarService1 = new CalendarService(sp1.GetRequiredService<IInventoryAssetRepository>(), sp1.GetRequiredService<IEquipmentListingRepository>(), interceptingTx1, clock);
             var allocationService2 = sp2.GetRequiredService<IInventoryAllocationService>();
 
             var period = new RentalPeriod(InitialToday.AddDays(25), InitialToday.AddDays(28));

@@ -4,6 +4,7 @@ using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Catalog;
+using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Domain.Entities;
@@ -39,13 +40,13 @@ public sealed partial class AssetHttpIntegrationTests
         }
 
         // Query without date parameters
-        var response = await client.GetAsync($"api/v1/inventory/public/assets?q={uniqueModel}");
+        var response = await client.GetAsync($"api/v1/inventory/public/equipment-listings?q={uniqueModel}");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicInventoryAssetResponse>>();
+        var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(paged);
         Assert.Single(paged.Items);
-        Assert.Equal(asset.Id, paged.Items[0].Id);
+        Assert.Equal(asset.EquipmentListingId, paged.Items[0].Id);
     }
 
     [Fact]
@@ -78,15 +79,15 @@ public sealed partial class AssetHttpIntegrationTests
             await db.SaveChangesAsync();
         }
 
-        var response = await client.GetAsync($"api/v1/inventory/public/assets?equipmentTypeId={eqTypeId:D}&from=2026-11-01&to=2026-11-10");
+        var response = await client.GetAsync($"api/v1/inventory/public/equipment-listings?equipmentTypeId={eqTypeId:D}&from=2026-11-01&to=2026-11-10");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicInventoryAssetResponse>>();
+        var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(paged);
 
         var ids = paged.Items.Select(i => i.Id).ToList();
-        Assert.Contains(assetFree.Id, ids);
-        Assert.DoesNotContain(assetBlocked.Id, ids);
+        Assert.Contains(assetFree.EquipmentListingId, ids);
+        Assert.DoesNotContain(assetBlocked.EquipmentListingId, ids);
     }
 
     [Fact]
@@ -134,20 +135,20 @@ public sealed partial class AssetHttpIntegrationTests
             await db.SaveChangesAsync();
         }
 
-        var response = await client.GetAsync($"api/v1/inventory/public/assets?equipmentTypeId={eqTypeId:D}&from=2026-11-01&to=2026-11-15");
+        var response = await client.GetAsync($"api/v1/inventory/public/equipment-listings?equipmentTypeId={eqTypeId:D}&from=2026-11-01&to=2026-11-15");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicInventoryAssetResponse>>();
+        var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(paged);
 
         var ids = paged.Items.Select(i => i.Id).ToList();
         // ActiveHeld and Allocated excluded!
-        Assert.DoesNotContain(assetActiveHeld.Id, ids);
-        Assert.DoesNotContain(assetAllocated.Id, ids);
+        Assert.DoesNotContain(assetActiveHeld.EquipmentListingId, ids);
+        Assert.DoesNotContain(assetAllocated.EquipmentListingId, ids);
 
         // ExpiredHeld and Released included!
-        Assert.Contains(assetExpiredHeld.Id, ids);
-        Assert.Contains(assetReleased.Id, ids);
+        Assert.Contains(assetExpiredHeld.EquipmentListingId, ids);
+        Assert.Contains(assetReleased.EquipmentListingId, ids);
     }
 
     [Fact]
@@ -182,10 +183,10 @@ public sealed partial class AssetHttpIntegrationTests
             await db.SaveChangesAsync();
         }
 
-        var response = await client.GetAsync($"api/v1/inventory/public/assets?q={uniquePrefix}&from=2026-12-01&to=2026-12-05&page=1&pageSize=2");
+        var response = await client.GetAsync($"api/v1/inventory/public/equipment-listings?q={uniquePrefix}&from=2026-12-01&to=2026-12-05&page=1&pageSize=2");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicInventoryAssetResponse>>();
+        var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(paged);
 
         // Must be a full page of 2 items
@@ -195,7 +196,7 @@ public sealed partial class AssetHttpIntegrationTests
         Assert.Equal(2, paged.TotalPages);
 
         var returnedIds = paged.Items.Select(i => i.Id).ToList();
-        Assert.Equal([a3.Id, a2.Id], returnedIds);
+        Assert.Equal([a3.EquipmentListingId, a2.EquipmentListingId], returnedIds);
     }
 
     [Fact]
@@ -240,15 +241,15 @@ public sealed partial class AssetHttpIntegrationTests
         }
 
         var filterJson = Uri.EscapeDataString("[{\"field\":\"power\",\"operator\":\"gte\",\"value\":40}]");
-        var response = await client.GetAsync($"api/v1/inventory/public/assets?equipmentTypeId={eqTypeId:D}&filters={filterJson}&from=2026-11-05&to=2026-11-10");
+        var response = await client.GetAsync($"api/v1/inventory/public/equipment-listings?equipmentTypeId={eqTypeId:D}&filters={filterJson}&from=2026-11-05&to=2026-11-10");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicInventoryAssetResponse>>();
+        var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(paged);
 
         // Because evaluation timestamp was taken AFTER Catalog (at FixedNow + 10m), the hold (expired at +5m) is EXPIRED!
         // Asset is therefore available and included in the result!
         Assert.Single(paged.Items);
-        Assert.Equal(asset.Id, paged.Items[0].Id);
+        Assert.Equal(asset.EquipmentListingId, paged.Items[0].Id);
     }
 }

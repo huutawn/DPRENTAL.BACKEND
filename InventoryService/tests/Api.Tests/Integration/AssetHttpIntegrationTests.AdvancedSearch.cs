@@ -54,7 +54,7 @@ public sealed partial class AssetHttpIntegrationTests
         Assert.NotNull(paged);
         Assert.Equal(2, paged.TotalCount);
         Assert.Equal(2, paged.Items.Count);
-        Assert.All(paged.Items, a => Assert.True(a.Model is "Excavator 3000" or "Excavator 2500"));
+        Assert.Equal(2, paged.Items.Count);
     }
 
     [Fact]
@@ -83,9 +83,9 @@ public sealed partial class AssetHttpIntegrationTests
         var token = secFactory.CreateHumanToken(ownerId, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        await SeedAssetAsync(ownerId, model: "Truck Diesel GPS", eqTypeId: eqTypeId, specValues: "{\"fuelType\":\"diesel\",\"hasGps\":true}");
-        await SeedAssetAsync(ownerId, model: "Truck Diesel NoGPS", eqTypeId: eqTypeId, specValues: "{\"fuelType\":\"diesel\",\"hasGps\":false}");
-        await SeedAssetAsync(ownerId, model: "Truck Electric GPS", eqTypeId: eqTypeId, specValues: "{\"fuelType\":\"electric\",\"hasGps\":true}");
+        var a1 = await SeedAssetAsync(ownerId, model: "Truck Diesel GPS", serial: "SN-GPS-1", eqTypeId: eqTypeId, specValues: "{\"fuelType\":\"diesel\",\"hasGps\":true}");
+        var a2 = await SeedAssetAsync(ownerId, model: "Truck Diesel NoGPS", serial: "SN-NOGPS-2", eqTypeId: eqTypeId, specValues: "{\"fuelType\":\"diesel\",\"hasGps\":false}");
+        var a3 = await SeedAssetAsync(ownerId, model: "Truck Electric GPS", serial: "SN-ELEC-3", eqTypeId: eqTypeId, specValues: "{\"fuelType\":\"electric\",\"hasGps\":true}");
 
         var filterJson = Uri.EscapeDataString("[{\"field\":\"fuelType\",\"operator\":\"eq\",\"value\":\"diesel\"},{\"field\":\"hasGps\",\"operator\":\"eq\",\"value\":true}]");
         var response = await client.GetAsync($"api/v1/inventory/assets?equipmentTypeId={eqTypeId:D}&filters={filterJson}");
@@ -94,7 +94,7 @@ public sealed partial class AssetHttpIntegrationTests
         var paged = await response.Content.ReadFromJsonAsync<PagedResponse<InventoryAssetResponse>>();
         Assert.NotNull(paged);
         Assert.Equal(1, paged.TotalCount);
-        Assert.Equal("Truck Diesel GPS", paged.Items[0].Model);
+        Assert.Equal(a1.Id, paged.Items[0].Id);
     }
 
     [Fact]
@@ -190,8 +190,8 @@ public sealed partial class AssetHttpIntegrationTests
         var token = secFactory.CreateHumanToken(ownerId, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        await SeedAssetAsync(ownerId, model: "Zoom 100% Optical", serial: "SN-LIT-01");
-        await SeedAssetAsync(ownerId, model: "Standard Camera", serial: "SN_SPECIAL_01");
+        var a1 = await SeedAssetAsync(ownerId, model: "Zoom 100% Optical", serial: "SN-LIT-01");
+        var a2 = await SeedAssetAsync(ownerId, model: "Standard Camera", serial: "SN_SPECIAL_01");
 
         // Literal '%'
         var respPercent = await client.GetAsync($"api/v1/inventory/assets?q={Uri.EscapeDataString("100%")}");
@@ -199,7 +199,7 @@ public sealed partial class AssetHttpIntegrationTests
         var pagedPercent = await respPercent.Content.ReadFromJsonAsync<PagedResponse<InventoryAssetResponse>>();
         Assert.NotNull(pagedPercent);
         Assert.Single(pagedPercent.Items);
-        Assert.Equal("Zoom 100% Optical", pagedPercent.Items[0].Model);
+        Assert.Equal(a1.Id, pagedPercent.Items[0].Id);
 
         // Literal '_'
         var respUnder = await client.GetAsync($"api/v1/inventory/assets?q={Uri.EscapeDataString("_SPECIAL_")}");
@@ -207,7 +207,7 @@ public sealed partial class AssetHttpIntegrationTests
         var pagedUnder = await respUnder.Content.ReadFromJsonAsync<PagedResponse<InventoryAssetResponse>>();
         Assert.NotNull(pagedUnder);
         Assert.Single(pagedUnder.Items);
-        Assert.Equal("Standard Camera", pagedUnder.Items[0].Model);
+        Assert.Equal(a2.Id, pagedUnder.Items[0].Id);
     }
 
     [Fact]

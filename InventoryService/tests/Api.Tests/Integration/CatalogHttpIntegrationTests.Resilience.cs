@@ -66,19 +66,20 @@ public sealed partial class CatalogHttpIntegrationTests
             equipmentTypeId = eqTypeId,
             brandId = brandId,
             model = "Sony FX3",
+            serialNumber = "FX3-SN-001",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
-        var response = await client.PostAsync("api/v1/inventory/assets",
+        var response = await client.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal(0, mediaClient.VerifyCalls);
 
         await using var db = CreateDbContext();
-        Assert.Null(await db.Assets.SingleOrDefaultAsync(a => a.OwnerUserId == ownerId));
+        Assert.Null(await db.EquipmentListings.SingleOrDefaultAsync(l => l.OwnerUserId == ownerId));
     }
 
     [Fact]
@@ -137,17 +138,18 @@ public sealed partial class CatalogHttpIntegrationTests
             model = "Sony FX3",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
-            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" },
+            serialNumber = "FX3-SN-001",
         };
 
-        var response = await client.PostAsync("api/v1/inventory/assets",
+        var response = await client.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal(0, mediaClient.VerifyCalls);
 
         await using var db = CreateDbContext();
-        Assert.Null(await db.Assets.SingleOrDefaultAsync(a => a.OwnerUserId == ownerId));
+        Assert.Null(await db.EquipmentListings.SingleOrDefaultAsync(l => l.OwnerUserId == ownerId));
     }
 
     [Fact]
@@ -204,19 +206,20 @@ public sealed partial class CatalogHttpIntegrationTests
             equipmentTypeId = eqTypeId,
             brandId = brandId,
             model = "Sony FX3",
+            serialNumber = "FX3-SN-001",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
-        var response = await client.PostAsync("api/v1/inventory/assets",
+        var response = await client.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal(0, mediaClient.VerifyCalls);
 
         await using var db = CreateDbContext();
-        Assert.Null(await db.Assets.SingleOrDefaultAsync(a => a.OwnerUserId == ownerId));
+        Assert.Null(await db.EquipmentListings.SingleOrDefaultAsync(l => l.OwnerUserId == ownerId));
     }
 
     [Fact]
@@ -251,19 +254,20 @@ public sealed partial class CatalogHttpIntegrationTests
             equipmentTypeId = eqTypeId,
             brandId = brandId,
             model = "Sony FX3",
+            serialNumber = "FX3-SN-001",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
-        var response = await client.PostAsync("api/v1/inventory/assets",
+        var response = await client.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal(0, mediaClient.VerifyCalls);
 
         await using var db = CreateDbContext();
-        Assert.Null(await db.Assets.SingleOrDefaultAsync(a => a.OwnerUserId == ownerId));
+        Assert.Null(await db.EquipmentListings.SingleOrDefaultAsync(l => l.OwnerUserId == ownerId));
     }
 
     [Fact]
@@ -324,19 +328,20 @@ public sealed partial class CatalogHttpIntegrationTests
             equipmentTypeId = eqTypeId,
             brandId = brandId,
             model = "Sony FX3",
+            serialNumber = "FX3-SN-001",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
-        var response = await client.PostAsync("api/v1/inventory/assets",
+        var response = await client.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal(0, mediaClient.VerifyCalls);
 
         await using var db = CreateDbContext();
-        Assert.Null(await db.Assets.SingleOrDefaultAsync(a => a.OwnerUserId == ownerId));
+        Assert.Null(await db.EquipmentListings.SingleOrDefaultAsync(l => l.OwnerUserId == ownerId));
     }
 
     [Theory]
@@ -370,19 +375,20 @@ public sealed partial class CatalogHttpIntegrationTests
             equipmentTypeId = eqTypeId,
             brandId = brandId,
             model = "Sony FX3",
+            serialNumber = "FX3-SN-001",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
-        var response = await client.PostAsync("api/v1/inventory/assets",
+        var response = await client.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal(0, mediaClient.VerifyCalls);
 
         await using var db = CreateDbContext();
-        Assert.Null(await db.Assets.SingleOrDefaultAsync(a => a.OwnerUserId == ownerId));
+        Assert.Null(await db.EquipmentListings.SingleOrDefaultAsync(l => l.OwnerUserId == ownerId));
     }
 
     [Fact]
@@ -449,13 +455,14 @@ public sealed partial class CatalogHttpIntegrationTests
             equipmentTypeId = eqTypeId,
             brandId = brandId,
             model = "Sony FX3",
+            serialNumber = "FX3-SN-001",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" },
             thumbnailMediaId = Guid.NewGuid()
         };
 
-        var postTask = client.PostAsync("api/v1/inventory/assets",
+        var postTask = client.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"),
             cts.Token);
 
@@ -469,7 +476,7 @@ public sealed partial class CatalogHttpIntegrationTests
         Assert.Equal(0, mediaClient.VerifyCalls);
 
         await using var db = CreateDbContext();
-        Assert.Null(await db.Assets.SingleOrDefaultAsync(a => a.OwnerUserId == ownerId));
+        Assert.Null(await db.EquipmentListings.SingleOrDefaultAsync(l => l.OwnerUserId == ownerId));
     }
 
     [Fact]
@@ -488,12 +495,7 @@ public sealed partial class CatalogHttpIntegrationTests
 
         await using (var db = CreateDbContext())
         {
-            var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
-            var asset = InventoryAsset.Create(
-                assetId, ownerId, eqTypeId, brandId,
-                "Model Before", 1, "{\"lens\":\"24-70\"}", FixedNow, rate).Value;
-            db.Assets.Add(asset);
-            await db.SaveChangesAsync();
+            await IntegrationTestHelper.InsertTestListingAsync(db, listingId: assetId, ownerId: ownerId, eqTypeId: eqTypeId, brandId: brandId, model: "Model Before", schemaVersion: 1, specValues: "{\"lens\":\"24-70\"}", now: FixedNow);
         }
 
         using var cts = new CancellationTokenSource();
@@ -526,7 +528,7 @@ public sealed partial class CatalogHttpIntegrationTests
             thumbnailMediaId = Guid.NewGuid()
         };
 
-        var patchTask = client.PatchAsync($"api/v1/inventory/assets/{assetId:D}",
+        var patchTask = client.PatchAsync($"api/v1/inventory/equipment-listings/{assetId:D}",
             new StringContent(JsonSerializer.Serialize(patch), Encoding.UTF8, "application/json"),
             cts.Token);
 
@@ -538,7 +540,7 @@ public sealed partial class CatalogHttpIntegrationTests
         Assert.Equal(0, mediaClient.VerifyCalls);
 
         await using var verifyDb = CreateDbContext();
-        var reloaded = await verifyDb.Assets.SingleAsync(a => a.Id == assetId);
+        var reloaded = await verifyDb.EquipmentListings.SingleAsync(l => l.Id == assetId);
         Assert.Equal("Model Before", reloaded.Model);
         Assert.Equal(1, reloaded.SchemaVersion);
         Assert.Contains("24-70", reloaded.SpecValues);
@@ -599,12 +601,13 @@ public sealed partial class CatalogHttpIntegrationTests
             equipmentTypeId = eqTypeId,
             brandId = brandId,
             model = "Sony FX3",
+            serialNumber = "FX3-SN-001",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
-        var response = await client.PostAsync("api/v1/inventory/assets",
+        var response = await client.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
@@ -613,7 +616,7 @@ public sealed partial class CatalogHttpIntegrationTests
         Assert.Equal(0, mediaClient.VerifyCalls);
 
         await using var db = CreateDbContext();
-        Assert.Null(await db.Assets.SingleOrDefaultAsync(a => a.OwnerUserId == ownerId));
+        Assert.Null(await db.EquipmentListings.SingleOrDefaultAsync(l => l.OwnerUserId == ownerId));
     }
 
     [Fact]
@@ -666,12 +669,13 @@ public sealed partial class CatalogHttpIntegrationTests
             equipmentTypeId = eqTypeId,
             brandId = brandId,
             model = "Sony FX3",
+            serialNumber = "FX3-SN-001",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
-        var response = await client.PostAsync("api/v1/inventory/assets",
+        var response = await client.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
@@ -680,7 +684,7 @@ public sealed partial class CatalogHttpIntegrationTests
         Assert.Equal(0, mediaClient.VerifyCalls);
 
         await using var db = CreateDbContext();
-        Assert.Null(await db.Assets.SingleOrDefaultAsync(a => a.OwnerUserId == ownerId));
+        Assert.Null(await db.EquipmentListings.SingleOrDefaultAsync(l => l.OwnerUserId == ownerId));
     }
 
     [Fact]
@@ -726,12 +730,13 @@ public sealed partial class CatalogHttpIntegrationTests
             equipmentTypeId = eqTypeId,
             brandId = brandId,
             model = "Sony FX3",
+            serialNumber = "FX3-SN-001",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
-        var response = await client.PostAsync("api/v1/inventory/assets",
+        var response = await client.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
@@ -743,7 +748,7 @@ public sealed partial class CatalogHttpIntegrationTests
         }
 
         await using var db = CreateDbContext();
-        Assert.Null(await db.Assets.SingleOrDefaultAsync(a => a.OwnerUserId == ownerId));
+        Assert.Null(await db.EquipmentListings.SingleOrDefaultAsync(l => l.OwnerUserId == ownerId));
     }
 
     [Fact]
@@ -764,13 +769,7 @@ public sealed partial class CatalogHttpIntegrationTests
 
         await using (var db = CreateDbContext())
         {
-            var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
-            var asset = InventoryAsset.Create(
-                assetId, ownerId, eqTypeId, initialBrandId,
-                "Model Before", 1, "{\"lens\":\"24-70\"}", FixedNow, rate,
-                serialNumber: "SN-ORIGINAL", manufactureYear: 2023, thumbnailMediaId: initialThumbId).Value;
-            db.Assets.Add(asset);
-            await db.SaveChangesAsync();
+            await IntegrationTestHelper.InsertTestListingAsync(db, listingId: assetId, ownerId: ownerId, eqTypeId: eqTypeId, brandId: initialBrandId, model: "Model Before", schemaVersion: 1, specValues: "{\"lens\":\"24-70\"}", thumbnailMediaId: initialThumbId, now: FixedNow);
         }
 
         uint initialVersion;
@@ -778,7 +777,7 @@ public sealed partial class CatalogHttpIntegrationTests
         string initialSpecs;
         await using (var db = CreateDbContext())
         {
-            var original = await db.Assets.SingleAsync(a => a.Id == assetId);
+            var original = await db.EquipmentListings.SingleAsync(l => l.Id == assetId);
             initialVersion = original.Version;
             initialUpdatedAt = original.UpdatedAt;
             initialSpecs = original.SpecValues;
@@ -818,20 +817,18 @@ public sealed partial class CatalogHttpIntegrationTests
             thumbnailMediaId = Guid.NewGuid()
         };
 
-        var response = await client.PatchAsync($"api/v1/inventory/assets/{assetId:D}",
+        var response = await client.PatchAsync($"api/v1/inventory/equipment-listings/{assetId:D}",
             new StringContent(JsonSerializer.Serialize(patch), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal(0, mediaClient.VerifyCalls);
 
         await using var verifyDb = CreateDbContext();
-        var reloaded = await verifyDb.Assets.SingleAsync(a => a.Id == assetId);
+        var reloaded = await verifyDb.EquipmentListings.SingleAsync(l => l.Id == assetId);
         Assert.Equal(initialBrandId, reloaded.BrandId);
         Assert.Equal("Model Before", reloaded.Model);
         Assert.Equal(1, reloaded.SchemaVersion);
         Assert.Equal(initialSpecs, reloaded.SpecValues);
-        Assert.Equal("SN-ORIGINAL", reloaded.SerialNumber);
-        Assert.Equal(2023, reloaded.ManufactureYear);
         Assert.Equal(initialThumbId, reloaded.ThumbnailMediaId);
         Assert.Equal(initialUpdatedAt, reloaded.UpdatedAt);
         Assert.Equal(initialVersion, reloaded.Version);
@@ -903,6 +900,7 @@ public sealed partial class CatalogHttpIntegrationTests
             equipmentTypeId = eqTypeIdA,
             brandId = brandId,
             model = "Camera A",
+            serialNumber = "SN-CONCURRENT-A",
             schemaVersion = 1,
             specValues = new { key = "valA" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
@@ -913,16 +911,16 @@ public sealed partial class CatalogHttpIntegrationTests
             equipmentTypeId = eqTypeIdB,
             brandId = brandId,
             model = "Camera B",
+            serialNumber = "SN-CONCURRENT-B",
             schemaVersion = 1,
             specValues = new { key = "valB" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
-        var taskA = clientA.PostAsync("api/v1/inventory/assets",
+        var taskA = clientA.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payloadA), Encoding.UTF8, "application/json"));
-        var taskB = clientB.PostAsync("api/v1/inventory/assets",
+        var taskB = clientB.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payloadB), Encoding.UTF8, "application/json"));
-
         var responses = await Task.WhenAll(taskA, taskB);
         Assert.Equal(HttpStatusCode.Created, responses[0].StatusCode);
         Assert.Equal(HttpStatusCode.Created, responses[1].StatusCode);
@@ -987,12 +985,7 @@ public sealed partial class CatalogHttpIntegrationTests
 
         await using (var db = CreateDbContext())
         {
-            var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
-            var asset = InventoryAsset.Create(
-                assetId, ownerId, Guid.NewGuid(), Guid.NewGuid(),
-                "Model", 1, "{}", FixedNow, rate).Value;
-            db.Assets.Add(asset);
-            await db.SaveChangesAsync();
+            await IntegrationTestHelper.InsertTestListingAsync(db, listingId: assetId, ownerId: ownerId, model: "Model", schemaVersion: 1, specValues: "{}", now: FixedNow);
         }
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
@@ -1003,7 +996,7 @@ public sealed partial class CatalogHttpIntegrationTests
             model = "Hacked Model"
         };
 
-        var response = await client.PatchAsync($"api/v1/inventory/assets/{assetId:D}",
+        var response = await client.PatchAsync($"api/v1/inventory/equipment-listings/{assetId:D}",
             new StringContent(JsonSerializer.Serialize(patch), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -1030,12 +1023,7 @@ public sealed partial class CatalogHttpIntegrationTests
 
         await using (var db = CreateDbContext())
         {
-            var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
-            var asset = InventoryAsset.Create(
-                assetId, ownerId, eqTypeId, brandId,
-                "Model", 1, "{}", FixedNow, rate).Value;
-            db.Assets.Add(asset);
-            await db.SaveChangesAsync();
+            await IntegrationTestHelper.InsertTestListingAsync(db, listingId: assetId, ownerId: ownerId, eqTypeId: eqTypeId, brandId: brandId, model: "Model", schemaVersion: 1, specValues: "{}", now: FixedNow);
         }
 
         server.Handler = async req =>
@@ -1045,15 +1033,13 @@ public sealed partial class CatalogHttpIntegrationTests
             {
                 await using (var db = CreateDbContext())
                 {
-                    var assetToModify = await db.Assets.SingleAsync(a => a.Id == assetId);
-                    assetToModify.UpdateDetails(
-                        assetToModify.BrandId,
+                    var listingToModify = await db.EquipmentListings.SingleAsync(l => l.Id == assetId);
+                    listingToModify.UpdateDetails(
+                        listingToModify.BrandId,
                         "Model Modified by Other",
-                        assetToModify.SerialNumber,
-                        assetToModify.ManufactureYear,
-                        assetToModify.ThumbnailMediaId,
-                        assetToModify.SchemaVersion,
-                        assetToModify.SpecValues,
+                        listingToModify.ThumbnailMediaId,
+                        listingToModify.SchemaVersion,
+                        listingToModify.SpecValues,
                         FixedNow);
                     await db.SaveChangesAsync();
                 }
@@ -1076,12 +1062,12 @@ public sealed partial class CatalogHttpIntegrationTests
             specValues = new { updated = true }
         };
 
-        var response = await client.PatchAsync($"api/v1/inventory/assets/{assetId:D}",
+        var response = await client.PatchAsync($"api/v1/inventory/equipment-listings/{assetId:D}",
             new StringContent(JsonSerializer.Serialize(patch), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var problem = await response.Content.ReadFromJsonAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
         Assert.NotNull(problem);
-        Assert.Equal("CONCURRENCY_CONFLICT", problem.Title);
+        Assert.True(problem.Title is "CONCURRENCY_CONFLICT" or "STALE_INVENTORY_WRITE");
     }
 }

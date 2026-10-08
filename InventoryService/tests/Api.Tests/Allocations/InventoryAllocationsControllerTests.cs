@@ -27,6 +27,18 @@ public sealed class InventoryAllocationsControllerTests
     {
         public Func<Guid, CreateHoldRequest, Task<Result<CreateHoldResult>>>? CreateHoldHandler { get; set; }
         public Func<Guid, AllocateRequest, Task<Result<AllocationResponse>>>? AllocateHandler { get; set; }
+        public Func<Guid, CreateListingHoldRequest, Task<Result<ListingHoldResponse>>>? CreateListingHoldHandler { get; set; }
+
+        public Task<Result<ListingHoldResponse>> CreateListingHoldAsync(
+            Guid listingId,
+            CreateListingHoldRequest request,
+            IInventoryCallerContext caller,
+            CancellationToken cancellationToken = default)
+        {
+            return CreateListingHoldHandler is not null
+                ? CreateListingHoldHandler(listingId, request)
+                : Task.FromResult(Result.Success(new ListingHoldResponse(listingId, request.SourceSystem, request.GroupReference, request.Quantity, Array.Empty<AllocationResponse>(), false)));
+        }
 
         public Task<Result<CreateHoldResult>> CreateHoldAsync(
             Guid assetId,

@@ -16,6 +16,12 @@ public interface IAssetAllocationRepository : IRepo<AssetAllocation, Guid>
     /// Tìm kiếm lượt phân bổ theo hệ thống nguồn và mã tham chiếu external (Idempotency lookup).
     /// </summary>
     Task<AssetAllocation?> GetByExternalReferenceAsync(string sourceSystem, string externalReference, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Tìm kiếm toàn bộ các lượt phân bổ thuộc một request group theo hệ thống nguồn và mã tham chiếu nhóm.
+    /// Tải toàn bộ nhóm không lọc theo active status phục vụ idempotent replay.
+    /// </summary>
+    Task<IReadOnlyList<AssetAllocation>> GetByGroupReferenceAsync(string sourceSystem, string groupReference, CancellationToken cancellationToken = default);
+
 
     /// <summary>
     /// Lấy danh sách các phân bổ ứng viên có khả năng chiếm lịch (Held còn hạn, Allocated) trên tài sản trong khoảng ngày.
@@ -56,6 +62,11 @@ public interface IAssetAllocationRepository : IRepo<AssetAllocation, Guid>
     /// Đưa lượt phân bổ mới vào hàng đợi lưu trữ.
     /// </summary>
     void Add(AssetAllocation allocation);
+    /// <summary>
+    /// Đưa hàng loạt lượt phân bổ mới vào hàng đợi lưu trữ.
+    /// </summary>
+    void AddRange(IEnumerable<AssetAllocation> allocations);
+
 
     /// <summary>
     /// Đánh dấu cập nhật lượt phân bổ.

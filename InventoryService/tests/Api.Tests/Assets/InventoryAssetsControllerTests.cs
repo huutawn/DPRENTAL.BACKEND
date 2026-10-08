@@ -57,12 +57,12 @@ public sealed class InventoryAssetsControllerTests
     }
 
     [Theory]
-    [InlineData("POST", "api/v1/inventory/assets")]
+    [InlineData("POST", "api/v1/inventory/equipment-listings")]
     [InlineData("GET", "api/v1/inventory/assets")]
     [InlineData("GET", "api/v1/inventory/assets/3fa85f64-5717-4562-b3fc-2c963f66afa6")]
     [InlineData("PATCH", "api/v1/inventory/assets/3fa85f64-5717-4562-b3fc-2c963f66afa6")]
     [InlineData("PATCH", "api/v1/inventory/assets/3fa85f64-5717-4562-b3fc-2c963f66afa6/accepting-bookings")]
-    [InlineData("PUT", "api/v1/inventory/assets/3fa85f64-5717-4562-b3fc-2c963f66afa6/rental-rate")]
+    [InlineData("PUT", "api/v1/inventory/equipment-listings/3fa85f64-5717-4562-b3fc-2c963f66afa6/rental-rate")]
     public async Task MissingToken_AllEndpointsReturn401(string method, string url)
     {
         await using var factory = CreateFactory();
@@ -85,8 +85,8 @@ public sealed class InventoryAssetsControllerTests
         using var client = factory.CreateClient();
 
         var serviceToken = factory.CreateServiceToken(Guid.NewGuid());
-        using var request = new HttpRequestMessage(HttpMethod.Post, "api/v1/inventory/assets");
-        var validBody = $"{{\"equipmentTypeId\":\"{Guid.NewGuid():D}\",\"model\":\"FX3\",\"schemaVersion\":1,\"specValues\":{{}}}}";
+        using var request = new HttpRequestMessage(HttpMethod.Post, "api/v1/inventory/equipment-listings");
+        var validBody = $"{{\"equipmentTypeId\":\"{Guid.NewGuid():D}\",\"brandId\":\"{Guid.NewGuid():D}\",\"model\":\"FX3\",\"schemaVersion\":1,\"quantity\":1,\"rentalRate\":{{\"dailyRate\":100000,\"currency\":\"VND\"}},\"specValues\":{{}}}}";
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
         request.Content = new StringContent(validBody, Encoding.UTF8, "application/json");
         using var response = await client.SendAsync(request);
@@ -100,8 +100,8 @@ public sealed class InventoryAssetsControllerTests
         using var client = factory.CreateClient();
 
         var humanToken = factory.CreateHumanToken(Guid.NewGuid(), permissions: []);
-        using var request = new HttpRequestMessage(HttpMethod.Post, "api/v1/inventory/assets");
-        var validBody = $"{{\"equipmentTypeId\":\"{Guid.NewGuid():D}\",\"model\":\"FX3\",\"schemaVersion\":1,\"specValues\":{{}}}}";
+        using var request = new HttpRequestMessage(HttpMethod.Post, "api/v1/inventory/equipment-listings");
+        var validBody = $"{{\"equipmentTypeId\":\"{Guid.NewGuid():D}\",\"brandId\":\"{Guid.NewGuid():D}\",\"model\":\"FX3\",\"schemaVersion\":1,\"quantity\":1,\"rentalRate\":{{\"dailyRate\":100000,\"currency\":\"VND\"}},\"specValues\":{{}}}}";
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", humanToken);
         request.Content = new StringContent(validBody, Encoding.UTF8, "application/json");
         using var response = await client.SendAsync(request);
@@ -160,7 +160,7 @@ public sealed class InventoryAssetsControllerTests
         using var client = factory.CreateClient();
 
         var token = factory.CreateHumanToken(Guid.NewGuid(), permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
-        using var request = new HttpRequestMessage(HttpMethod.Post, "api/v1/inventory/assets");
+        using var request = new HttpRequestMessage(HttpMethod.Post, "api/v1/inventory/equipment-listings");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
 

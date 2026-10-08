@@ -121,7 +121,8 @@ public sealed class InventoryAuthorizationHandler : IAuthorizationHandler
     {
         return resource switch
         {
-            InventoryAsset asset => asset.OwnerUserId,
+            EquipmentListing listing => listing.OwnerUserId,
+            InventoryAsset asset => asset.Listing?.OwnerUserId,
             _ => null
         };
     }

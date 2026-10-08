@@ -59,27 +59,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
     private async Task<InventoryAsset> SeedAssetAsync(Guid ownerUserId, Guid orgId, bool acceptingBookings = true)
     {
         await using var db = CreateDbContext();
-        var assetId = Guid.NewGuid();
-        var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", InitialNow).Value;
-        var asset = InventoryAsset.Create(
-            assetId,
-            ownerUserId,
-            Guid.NewGuid(),
-            Guid.NewGuid(),
-            "Sony FX3",
-            1,
-            "{}",
-            InitialNow,
-            rate).Value;
-
-        if (!acceptingBookings)
-        {
-            asset.DisableBookings("Suspended for test", InitialNow);
-        }
-
-        db.Assets.Add(asset);
-        await db.SaveChangesAsync();
-        return asset;
+        return await IntegrationTestHelper.InsertTestAssetAsync(db, ownerId: ownerUserId, acceptingBookings: acceptingBookings, now: InitialNow);
     }
 
     private async Task WaitForAdvisoryLockWaiterAsync(Guid assetId, TimeSpan timeout)
@@ -153,6 +133,20 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
                 return await operation(ctx, ct);
             }, cancellationToken);
         }
+
+        public Task<Result<T>> ExecuteListingWriteAsync<T>(
+            Guid listingId,
+            Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation,
+            CancellationToken cancellationToken = default) =>
+            inner.ExecuteListingWriteAsync(listingId, operation, cancellationToken);
+
+        public Task<Result<T>> ExecuteGroupHoldAsync<T>(
+            string sourceSystem,
+            string groupReference,
+            Guid listingId,
+            Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation,
+            CancellationToken cancellationToken = default) =>
+            inner.ExecuteGroupHoldAsync(sourceSystem, groupReference, listingId, operation, cancellationToken);
     }
 
     [Fact]
@@ -180,7 +174,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
             await allowBlock1ToProceed.Task.WaitAsync(TimeSpan.FromSeconds(15), ct);
         });
 
-        var service1 = new CalendarService(sp1.GetRequiredService<IInventoryAssetRepository>(), interceptingTx1, clock);
+        var service1 = new CalendarService(sp1.GetRequiredService<IInventoryAssetRepository>(), sp1.GetRequiredService<IEquipmentListingRepository>(), interceptingTx1, clock);
         var service2 = sp2.GetRequiredService<CalendarService>();
 
         var req1 = new CreateCalendarBlockRequest { StartDate = period.StartDate, EndDate = period.EndDate, Reason = CalendarBlockReason.Maintenance };
@@ -242,7 +236,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
             await allowBlockToProceed.Task.WaitAsync(TimeSpan.FromSeconds(15), ct);
         });
 
-        var calendarService = new CalendarService(sp1.GetRequiredService<IInventoryAssetRepository>(), interceptingTx1, clock);
+        var calendarService = new CalendarService(sp1.GetRequiredService<IInventoryAssetRepository>(), sp1.GetRequiredService<IEquipmentListingRepository>(), interceptingTx1, clock);
         var allocationService = sp2.GetRequiredService<IInventoryAllocationService>();
 
         var blockReq = new CreateCalendarBlockRequest { StartDate = period.StartDate, EndDate = period.EndDate, Reason = CalendarBlockReason.Maintenance };
@@ -353,7 +347,7 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
             await allowBlock1ToProceed.Task.WaitAsync(TimeSpan.FromSeconds(15), ct);
         });
 
-        var service1 = new CalendarService(sp1.GetRequiredService<IInventoryAssetRepository>(), interceptingTx1, clock);
+        var service1 = new CalendarService(sp1.GetRequiredService<IInventoryAssetRepository>(), sp1.GetRequiredService<IEquipmentListingRepository>(), interceptingTx1, clock);
         var service2 = sp2.GetRequiredService<CalendarService>();
 
         var reqA = new CreateCalendarBlockRequest { StartDate = periodA.StartDate, EndDate = periodA.EndDate, Reason = CalendarBlockReason.Maintenance };

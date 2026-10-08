@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Dprental.InventoryService.Application.DTOs.Assets;
+using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Application.DTOs.Catalog;
 using Dprental.InventoryService.Application.DTOs.Pagination;
@@ -17,7 +18,7 @@ namespace Dprental.InventoryService.Api.Tests.Integration;
 public sealed partial class AssetHttpIntegrationTests
 {
     [Fact]
-    public async Task Post_Success201_ReturnsCreatedAssetAndLocationHeader()
+    public async Task Post_Success201_ReturnsCreatedListingAndLocationHeader()
     {
         var (app, secFactory) = CreateFactory();
         await using var _ = app;
@@ -35,43 +36,123 @@ public sealed partial class AssetHttpIntegrationTests
             equipmentTypeId = eqTypeId,
             brandId = brandId,
             model = "Sony FX3 Cinema Line",
+            serialNumber = "FX3-TEST-SN-001",
             schemaVersion = 1,
             specValues = new { resolution = "4K", fps = 120 },
-            serialNumber = "SN-POST-01",
-            manufactureYear = 2024,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
         var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-        var response = await client.PostAsync("api/v1/inventory/assets", content);
+        var response = await client.PostAsync("api/v1/inventory/equipment-listings", content);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
-        var created = await response.Content.ReadFromJsonAsync<InventoryAssetResponse>();
+        var created = await response.Content.ReadFromJsonAsync<EquipmentListingResponse>();
         Assert.NotNull(created);
         Assert.NotEqual(Guid.Empty, created.Id);
         Assert.Equal(ownerId, created.OwnerUserId);
         Assert.Equal(eqTypeId, created.EquipmentTypeId);
         Assert.Equal(brandId, created.BrandId);
         Assert.Equal("Sony FX3 Cinema Line", created.Model);
-        Assert.Equal("SN-POST-01", created.SerialNumber);
-        Assert.Equal(2024, created.ManufactureYear);
-        Assert.True(created.AcceptingBookings);
-        Assert.Null(created.SuspensionReason);
+        Assert.Equal("Draft", created.Status);
+        Assert.Equal(1, created.TotalQuantity);
         Assert.Equal(FixedNow, created.CreatedAt);
 
-        // Location header check
+        // Location header check points to ListingId
         Assert.NotNull(response.Headers.Location);
-        Assert.EndsWith($"api/v1/inventory/assets/{created.Id:D}", response.Headers.Location.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith($"api/v1/inventory/equipment-listings/{created.Id:D}", response.Headers.Location.ToString(), StringComparison.OrdinalIgnoreCase);
 
         // Verify persisted in PostgreSQL
         await using var db = CreateDbContext();
-        var dbAsset = await db.Assets.SingleOrDefaultAsync(a => a.Id == created.Id);
-        Assert.NotNull(dbAsset);
-        Assert.Equal(ownerId, dbAsset.OwnerUserId);
-        Assert.Equal(brandId, dbAsset.BrandId);
-        Assert.Equal("Sony FX3 Cinema Line", dbAsset.Model);
-        Assert.Equal(2024, dbAsset.ManufactureYear);
-        Assert.True(dbAsset.Version > 0);
+        var dbListing = await db.EquipmentListings.SingleOrDefaultAsync(l => l.Id == created.Id);
+        Assert.NotNull(dbListing);
+        Assert.Equal(ownerId, dbListing.OwnerUserId);
+        Assert.Equal(brandId, dbListing.BrandId);
+        Assert.Equal("Sony FX3 Cinema Line", dbListing.Model);
+        Assert.True(dbListing.Version > 0);
+        var dbUnits = await db.Assets.Where(a => a.EquipmentListingId == created.Id).ToListAsync();
+        Assert.Single(dbUnits);
+        Assert.Equal("FX3-TEST-SN-001", dbUnits[0].SerialNumber);
+        Assert.Equal($"AST-{dbUnits[0].Id:N}", dbUnits[0].AssetCode);
+    }
+
+    [Fact]
+    public async Task Post_Listing_LegacyQuantityPayload_IsRejectedWithBadRequest()
+    {
+        var (app, secFactory) = CreateFactory();
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var ownerId = Guid.NewGuid();
+        var token = secFactory.CreateHumanToken(ownerId, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var payload = new
+        {
+            equipmentTypeId = Guid.NewGuid(),
+            brandId = Guid.NewGuid(),
+            model = "Sony FX3 Cinema Line",
+            quantity = 1,
+            serialNumber = "FX3-TEST-SN-001",
+            schemaVersion = 1,
+            specValues = new { resolution = "4K" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
+        };
+        var response = await client.PostAsync("api/v1/inventory/equipment-listings",
+            new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AddAsset_Success201_ReturnsCreatedAssetAndLocationHeader()
+    {
+        var (app, secFactory) = CreateFactory();
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var ownerId = Guid.NewGuid();
+        var token = secFactory.CreateHumanToken(ownerId, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        // First create listing
+        var createPayload = new
+        {
+            equipmentTypeId = Guid.NewGuid(),
+            brandId = Guid.NewGuid(),
+            model = "Sony FX3 Cinema Line",
+            serialNumber = "FX3-UNIT-001",
+            schemaVersion = 1,
+            specValues = new { resolution = "4K" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
+        };
+        var createResp = await client.PostAsync("api/v1/inventory/equipment-listings",
+            new StringContent(JsonSerializer.Serialize(createPayload), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Created, createResp.StatusCode);
+        var listing = await createResp.Content.ReadFromJsonAsync<EquipmentListingResponse>();
+        Assert.NotNull(listing);
+
+        // Now add a second physical unit
+        var addPayload = new { serialNumber = "FX3-UNIT-002" };
+        var addResp = await client.PostAsync($"api/v1/inventory/equipment-listings/{listing.Id:D}/assets",
+            new StringContent(JsonSerializer.Serialize(addPayload), Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.Created, addResp.StatusCode);
+        var createdAsset = await addResp.Content.ReadFromJsonAsync<InventoryAssetResponse>();
+        Assert.NotNull(createdAsset);
+        Assert.Equal("FX3-UNIT-002", createdAsset.SerialNumber);
+        Assert.Equal(listing.Id, createdAsset.EquipmentListingId);
+        Assert.NotEqual(listing.Id, createdAsset.Id);
+
+        // Location header points to AssetId
+        Assert.NotNull(addResp.Headers.Location);
+        Assert.EndsWith($"api/v1/inventory/assets/{createdAsset.Id:D}", addResp.Headers.Location.ToString(), StringComparison.OrdinalIgnoreCase);
+
+        // Verify DB now has 2 units
+        await using var db = CreateDbContext();
+        var units = await db.Assets.Where(a => a.EquipmentListingId == listing.Id).ToListAsync();
+        Assert.Equal(2, units.Count);
     }
 
     [Fact]
@@ -157,8 +238,9 @@ public sealed partial class AssetHttpIntegrationTests
             LookupHandler = _ => Task.FromResult(Result.Failure<CatalogEquipmentTypeResponse>(
                 Error.Validation("EQUIPMENT_TYPE_NOT_FOUND", "Loại thiết bị không tồn tại hoặc chưa được công khai.")))
         };
+        var stubMedia = new StubMediaClient();
 
-        var (app, secFactory) = CreateFactory(catalogClient: stubCatalog);
+        var (app, secFactory) = CreateFactory(catalogClient: stubCatalog, mediaClient: stubMedia);
         await using var _ = app;
         await using var __ = secFactory;
         using var client = app.CreateClient();
@@ -172,17 +254,22 @@ public sealed partial class AssetHttpIntegrationTests
             equipmentTypeId = Guid.NewGuid(),
             brandId = Guid.NewGuid(),
             model = "Sony FX3",
+            serialNumber = "FX3-TEST-SN-001",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
-        var response = await client.PostAsync("api/v1/inventory/assets",
+        var response = await client.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains("EQUIPMENT_TYPE_NOT_FOUND", body);
+        Assert.Equal(1, stubCatalog.LookupCalls);
+        Assert.Equal(0, stubCatalog.BrandCalls);
+        Assert.Equal(0, stubCatalog.SpecCalls);
+        Assert.Equal(0, stubMedia.VerifyCalls);
     }
 
     [Fact]
@@ -193,8 +280,9 @@ public sealed partial class AssetHttpIntegrationTests
             LookupHandler = _ => Task.FromResult(Result.Failure<CatalogEquipmentTypeResponse>(
                 Error.Unavailable("CATALOG_SERVICE_TIMEOUT", "Hết thời gian chờ phản hồi từ CatalogService.")))
         };
+        var stubMedia = new StubMediaClient();
 
-        var (app, secFactory) = CreateFactory(catalogClient: stubCatalog);
+        var (app, secFactory) = CreateFactory(catalogClient: stubCatalog, mediaClient: stubMedia);
         await using var _ = app;
         await using var __ = secFactory;
         using var client = app.CreateClient();
@@ -208,16 +296,21 @@ public sealed partial class AssetHttpIntegrationTests
             equipmentTypeId = Guid.NewGuid(),
             brandId = Guid.NewGuid(),
             model = "Sony FX3",
+            serialNumber = "FX3-TEST-SN-001",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
-        var response = await client.PostAsync("api/v1/inventory/assets",
+        var response = await client.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains("CATALOG_SERVICE_TIMEOUT", body);
+        Assert.Equal(1, stubCatalog.LookupCalls);
+        Assert.Equal(0, stubCatalog.BrandCalls);
+        Assert.Equal(0, stubCatalog.SpecCalls);
+        Assert.Equal(0, stubMedia.VerifyCalls);
     }
 }

@@ -283,10 +283,7 @@ public sealed class OutboxCacheInvalidationIntegrationTests : IClassFixture<Post
 
         await using (var seedDb = CreateDbContext())
         {
-            var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
-            var asset = InventoryAsset.Create(assetId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "MutationAsset", 1, "{}", FixedNow, rate).Value;
-            seedDb.Assets.Add(asset);
-            await seedDb.SaveChangesAsync();
+            await IntegrationTestHelper.InsertTestAssetAsync(seedDb, assetId: assetId, ownerId: ownerId, model: "MutationAsset", now: FixedNow);
         }
 
         var valkeyCache = CreateValkeyCache();
@@ -302,7 +299,8 @@ public sealed class OutboxCacheInvalidationIntegrationTests : IClassFixture<Post
         {
             var writeTx = scope.ServiceProvider.GetRequiredService<IInventoryWriteTransaction>();
             var assetRepo = scope.ServiceProvider.GetRequiredService<IInventoryAssetRepository>();
-            var calService = new CalendarService(assetRepo, writeTx);
+            var listingRepo = scope.ServiceProvider.GetRequiredService<IEquipmentListingRepository>();
+            var calService = new CalendarService(assetRepo, listingRepo, writeTx);
 
             var caller = new TestCaller { UserId = ownerId };
             var request = new CreateCalendarBlockRequest

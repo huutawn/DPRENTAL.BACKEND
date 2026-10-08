@@ -8,6 +8,7 @@ using Dprental.InventoryService.Common.Utils;
 using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Domain.IRepositories;
 using Dprental.InventoryService.Domain.Policies;
+using Dprental.InventoryService.Application.Validation;
 
 namespace Dprental.InventoryService.Application.Services;
 
@@ -17,15 +18,18 @@ namespace Dprental.InventoryService.Application.Services;
 public sealed class CalendarService : ICalendarService
 {
     private readonly IInventoryAssetRepository _assetRepository;
+    private readonly IEquipmentListingRepository _listingRepository;
     private readonly IInventoryWriteTransaction _writeTransaction;
     private readonly TimeProvider _timeProvider;
 
     public CalendarService(
         IInventoryAssetRepository assetRepository,
+        IEquipmentListingRepository listingRepository,
         IInventoryWriteTransaction writeTransaction,
         TimeProvider? timeProvider = null)
     {
         _assetRepository = assetRepository ?? throw new ArgumentNullException(nameof(assetRepository));
+        _listingRepository = listingRepository ?? throw new ArgumentNullException(nameof(listingRepository));
         _writeTransaction = writeTransaction ?? throw new ArgumentNullException(nameof(writeTransaction));
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
@@ -60,7 +64,7 @@ public sealed class CalendarService : ICalendarService
             return Error.NotFound("ASSET_NOT_FOUND", $"Tài sản với ID {assetId} không tồn tại.");
         }
 
-        if (!InventoryAccessEvaluator.CanAccessCalendar(caller, asset.OwnerUserId))
+        if (!InventoryAccessEvaluator.CanAccessCalendar(caller, asset.Listing.OwnerUserId))
         {
             return Error.Forbidden("FORBIDDEN", "Bạn không có quyền truy cập lịch của tài sản này.");
         }
@@ -116,6 +120,105 @@ public sealed class CalendarService : ICalendarService
         };
     }
 
+    /// <inheritdoc />
+    public async Task<Result<ListingCalendarResponse>> GetListingCalendarAsync(
+        Guid listingId,
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated || !caller.UserId.HasValue)
+        {
+            return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
+        }
+
+        var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+        var today = BusinessDateTime.ToVietnamDate(nowUtc);
+
+        DateOnly validStart;
+        DateOnly validEnd;
+
+        if (fromDate.HasValue || toDate.HasValue)
+        {
+            var dateValResult = AvailabilityDateValidator.ValidateDateWindow(fromDate, toDate, out validStart, out validEnd);
+            if (dateValResult.IsFailure)
+            {
+                return dateValResult.Error;
+            }
+        }
+        else
+        {
+            validStart = today;
+            validEnd = today.AddMonths(6);
+        }
+
+        var snapshot = await _listingRepository.GetCalendarSnapshotAsync(listingId, validStart, validEnd, cancellationToken);
+        if (snapshot is null)
+        {
+            return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+        }
+
+        if (snapshot.OwnerUserId != caller.UserId.Value && !caller.IsAdmin)
+        {
+            return Error.Forbidden("FORBIDDEN", "Bạn không có quyền truy cập lịch của Listing này.");
+        }
+
+        var days = new List<ListingCalendarDayResponse>();
+        for (var d = validStart; d <= validEnd; d = d.AddDays(1))
+        {
+            int occupied = 0;
+            int blocked = 0;
+            int available = 0;
+            int suspendedOccupied = 0;
+            int suspendedBlocked = 0;
+
+            foreach (var unit in snapshot.Assets)
+            {
+                bool isOccupied = unit.Allocations.Any(al =>
+                    al.RentalPeriod.StartDate <= d &&
+                    al.RentalPeriod.EndDate >= d &&
+                    (al.Status == AllocationStatus.Allocated ||
+                     (al.Status == AllocationStatus.Held && al.HoldExpiresAt > nowUtc)));
+
+                bool isBlocked = unit.CalendarBlocks.Any(cb =>
+                    cb.StartDate <= d &&
+                    cb.EndDate >= d);
+
+                if (unit.AcceptingBookings)
+                {
+                    if (isOccupied) occupied++;
+                    if (isBlocked) blocked++;
+                    if (!isOccupied && !isBlocked) available++;
+                }
+                else
+                {
+                    if (isOccupied) suspendedOccupied++;
+                    if (isBlocked) suspendedBlocked++;
+                }
+            }
+
+            days.Add(new ListingCalendarDayResponse(
+                d,
+                occupied,
+                blocked,
+                available,
+                suspendedOccupied,
+                suspendedBlocked));
+        }
+
+        int totalQuantity = snapshot.Assets.Count(a => a.AcceptingBookings);
+
+        return Result.Success(new ListingCalendarResponse(
+            listingId,
+            validStart,
+            validEnd,
+            totalQuantity,
+            days));
+    }
+
     /// <summary>
     /// Tạo khoảng chặn lịch mới trên tài sản dưới advisory lock của PostgreSQL và lưu cùng Outbox event.
     /// </summary>
@@ -158,7 +261,7 @@ public sealed class CalendarService : ICalendarService
             }
 
             // 2. Kiểm tra ownership
-            if (!InventoryAccessEvaluator.CanAccessCalendar(caller, asset.OwnerUserId))
+            if (!InventoryAccessEvaluator.CanAccessCalendar(caller, asset.Listing.OwnerUserId))
             {
                 return Error.Forbidden("FORBIDDEN", "Bạn không có quyền tạo khoảng chặn lịch cho tài sản này.");
             }
@@ -258,7 +361,7 @@ public sealed class CalendarService : ICalendarService
             }
 
             // 2. Kiểm tra ownership
-            if (!InventoryAccessEvaluator.CanAccessCalendar(caller, asset.OwnerUserId))
+            if (!InventoryAccessEvaluator.CanAccessCalendar(caller, asset.Listing.OwnerUserId))
             {
                 return Error.Forbidden("FORBIDDEN", "Bạn không có quyền xóa khoảng chặn lịch của tài sản này.");
             }

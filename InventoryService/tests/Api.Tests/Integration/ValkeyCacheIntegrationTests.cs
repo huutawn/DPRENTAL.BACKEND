@@ -56,14 +56,9 @@ public sealed class ValkeyCacheIntegrationTests : IClassFixture<PostgresFixture>
     private async Task<InventoryAsset> SeedAssetWithBlocksAsync(Guid assetId, DateOnly blockStart, DateOnly blockEnd)
     {
         await using var db = CreateDbContext();
-        var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
-        var asset = InventoryAsset.Create(
-            assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Camera", 1, "{}", FixedNow, rate).Value;
-
+        var asset = await IntegrationTestHelper.InsertTestAssetAsync(db, assetId: assetId, now: FixedNow);
         asset.CalendarBlocks.Add(CalendarBlock.Create(
             Guid.NewGuid(), assetId, blockStart, blockEnd, CalendarBlockReason.Maintenance, "op", FixedNow, blockStart).Value);
-
-        db.Assets.Add(asset);
         await db.SaveChangesAsync();
         return asset;
     }
@@ -92,6 +87,18 @@ public sealed class ValkeyCacheIntegrationTests : IClassFixture<PostgresFixture>
 
         public void Reset() => ExecutedQueries.Clear();
     }
+    private static InventoryAvailabilityService CreateAvailabilityService(
+        InventoryServiceDbContext db,
+        IInventoryAvailabilityCache cache,
+        TimeProvider? timeProvider = null)
+    {
+        return new InventoryAvailabilityService(
+            new InventoryAssetRepository(db),
+            new EquipmentListingRepository(db),
+            cache,
+            timeProvider ?? TimeProvider.System);
+    }
+
 
     [Fact]
     public async Task CacheMissAndHit_RealValkey_SecondCallHitsCache()
@@ -106,8 +113,7 @@ public sealed class ValkeyCacheIntegrationTests : IClassFixture<PostgresFixture>
         var timeProvider = new TestTimeProvider(FixedNow);
 
         await using var db = CreateDbContext();
-        var repo = new InventoryAssetRepository(db);
-        var service = new InventoryAvailabilityService(repo, valkeyCache, timeProvider);
+        var service = CreateAvailabilityService(db, valkeyCache, timeProvider);
 
         // 1. First call: miss, loads PostgreSQL, sets Valkey cache
         var r1 = await service.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
@@ -145,8 +151,7 @@ public sealed class ValkeyCacheIntegrationTests : IClassFixture<PostgresFixture>
         // First call to populate cache
         await using (var dbInit = CreateDbContext())
         {
-            var repoInit = new InventoryAssetRepository(dbInit);
-            var serviceInit = new InventoryAvailabilityService(repoInit, valkeyCache, timeProvider);
+            var serviceInit = CreateAvailabilityService(dbInit, valkeyCache, timeProvider);
             await serviceInit.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
         }
 
@@ -154,8 +159,7 @@ public sealed class ValkeyCacheIntegrationTests : IClassFixture<PostgresFixture>
         var interceptor = new SqlCommandCountingInterceptor();
         await using (var dbTest = CreateDbContext(interceptor))
         {
-            var repoTest = new InventoryAssetRepository(dbTest);
-            var serviceTest = new InventoryAvailabilityService(repoTest, valkeyCache, timeProvider);
+            var serviceTest = CreateAvailabilityService(dbTest, valkeyCache, timeProvider);
 
             interceptor.Reset();
             var result = await serviceTest.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
@@ -182,8 +186,7 @@ public sealed class ValkeyCacheIntegrationTests : IClassFixture<PostgresFixture>
         var timeProvider = new TestTimeProvider(FixedNow);
 
         await using var db = CreateDbContext();
-        var repo = new InventoryAssetRepository(db);
-        var service = new InventoryAvailabilityService(repo, valkeyCache, timeProvider);
+        var service = CreateAvailabilityService(db, valkeyCache, timeProvider);
 
         // Query spanning Oct, Nov, Dec
         var r1 = await service.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 12, 31));
@@ -211,14 +214,11 @@ public sealed class ValkeyCacheIntegrationTests : IClassFixture<PostgresFixture>
 
         await using (var db = CreateDbContext())
         {
-            var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
-            var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "HoldTtlTest", 1, "{}", FixedNow, rate).Value;
+            var asset = await IntegrationTestHelper.InsertTestAssetAsync(db, assetId: assetId, now: FixedNow);
             // Hold expires in 25 seconds (less than normal 60s TTL)
             asset.Allocations.Add(AssetAllocation.CreateHold(
                 Guid.NewGuid(), assetId, RentalPeriod.Create(new DateOnly(2026, 10, 10), new DateOnly(2026, 10, 12)).Value,
                 FixedNow.AddSeconds(25), FixedNow, "SYS", $"REF-{Guid.NewGuid():N}").Value);
-
-            db.Assets.Add(asset);
             await db.SaveChangesAsync();
         }
 
@@ -226,8 +226,7 @@ public sealed class ValkeyCacheIntegrationTests : IClassFixture<PostgresFixture>
         var timeProvider = new TestTimeProvider(FixedNow);
 
         await using var queryDb = CreateDbContext();
-        var repo = new InventoryAssetRepository(queryDb);
-        var service = new InventoryAvailabilityService(repo, valkeyCache, timeProvider);
+        var service = CreateAvailabilityService(queryDb, valkeyCache, timeProvider);
 
         var result = await service.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
         Assert.True(result.IsSuccess);
@@ -250,8 +249,7 @@ public sealed class ValkeyCacheIntegrationTests : IClassFixture<PostgresFixture>
         var timeProvider = new TestTimeProvider(FixedNow);
 
         await using var db = CreateDbContext();
-        var repo = new InventoryAssetRepository(db);
-        var service = new InventoryAvailabilityService(repo, valkeyCache, timeProvider);
+        var service = CreateAvailabilityService(db, valkeyCache, timeProvider);
 
         // Fill Oct and Nov into cache
         await service.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 11, 30));
@@ -289,8 +287,7 @@ public sealed class ValkeyCacheIntegrationTests : IClassFixture<PostgresFixture>
         var timeProvider = new TestTimeProvider(FixedNow);
 
         await using var db = CreateDbContext();
-        var repo = new InventoryAssetRepository(db);
-        var service = new InventoryAvailabilityService(repo, valkeyCache, timeProvider);
+        var service = CreateAvailabilityService(db, valkeyCache, timeProvider);
 
         // Must NOT throw NullReferenceException! Falls back to PostgreSQL and returns correct ranges!
         var result = await service.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
@@ -347,8 +344,7 @@ public sealed class ValkeyCacheIntegrationTests : IClassFixture<PostgresFixture>
         var brokenCache = new ValkeyInventoryAvailabilityCache(brokenOptions, brokenMux, null, NullLogger<ValkeyInventoryAvailabilityCache>.Instance);
 
         await using var db = CreateDbContext();
-        var repo = new InventoryAssetRepository(db);
-        var service = new InventoryAvailabilityService(repo, brokenCache);
+        var service = CreateAvailabilityService(db, brokenCache);
 
         // Should NOT throw! Gracefully logs warning and returns PostgreSQL data
         var result = await service.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
@@ -369,8 +365,7 @@ public sealed class ValkeyCacheIntegrationTests : IClassFixture<PostgresFixture>
         var disabledCache = CreateValkeyCache(enabled: false);
 
         await using var db = CreateDbContext();
-        var repo = new InventoryAssetRepository(db);
-        var service = new InventoryAvailabilityService(repo, disabledCache);
+        var service = CreateAvailabilityService(db, disabledCache);
 
         var result = await service.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
         Assert.True(result.IsSuccess);
