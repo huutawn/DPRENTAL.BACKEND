@@ -53,6 +53,20 @@ public static class RentalErrors
     public static readonly Error OrderCancellationForbidden =
         Error.Conflict("Order.CancellationForbidden", "Không thể hủy đơn thuê ở trạng thái hiện tại.");
 
+    public static readonly Error PaymentDeadlineNotReached =
+        Error.Validation("Order.PaymentDeadlineNotReached", "Chưa đến thời hạn hết hạn thanh toán.");
+
+    public static readonly Error OperationConflict =
+        Error.Conflict("Operation.Conflict", "OperationId đã được sử dụng cho một thao tác khác.");
+
+    public static readonly Error OperationAlreadyProcessed =
+        Error.Conflict("Operation.AlreadyProcessed", "Thao tác đã được thực hiện trước đó.");
+
+    public static readonly Error DuplicateId =
+        Error.Conflict("Rental.DuplicateId", "Mã định danh bị trùng lặp.");
+
+    public static readonly Error StringLengthExceeded =
+        Error.Validation("Rental.StringLengthExceeded", "Độ dài chuỗi vượt quá giới hạn quy định.");
     // Item Errors
     public static readonly Error ItemNotFound =
         Error.NotFound("RentalItem.NotFound", "Không tìm thấy khoản thuê.");
@@ -69,6 +83,17 @@ public static class RentalErrors
     public static readonly Error SupplierDecisionAlreadyMade =
         Error.Conflict("RentalItem.SupplierDecisionAlreadyMade", "Supplier đã đưa ra quyết định cho khoản thuê này.");
 
+    public static readonly Error SupplierDeadlineNotExpired =
+        Error.Validation("RentalItem.SupplierDeadlineNotExpired", "Chưa đến thời hạn hết hạn xác nhận của supplier.");
+
+    public static readonly Error InventoryConfirmationRequired =
+        Error.Validation("RentalItem.InventoryConfirmationRequired", "Yêu cầu mã xác nhận phân bổ từ Inventory trước khi chấp nhận.");
+
+    public static readonly Error ClosureReceiptMissing =
+        Error.Conflict("RentalItem.ClosureReceiptMissing", "Chưa nhận đủ xác nhận đóng từ Inventory hoặc Payment.");
+
+    public static readonly Error AllocationNotConfirmed =
+        Error.Conflict("RentalItem.AllocationNotConfirmed", "Phân bổ thiết bị chưa được xác nhận.");
     // Assignment & Unit Errors
     public static readonly Error AssignmentNotFound =
         Error.NotFound("RentalItem.AssignmentNotFound", "Không tìm thấy phân bổ unit cho khoản thuê.");
@@ -95,6 +120,8 @@ public static class RentalErrors
     public static readonly Error InvalidHandoverActor =
         Error.Forbidden("RentalItem.InvalidHandoverActor", "Chỉ supplier sở hữu khoản thuê mới được gửi biên bản bàn giao.");
 
+    public static readonly Error InvalidHandoverTime =
+        Error.Validation("RentalItem.InvalidHandoverTime", "Thời gian bàn giao không hợp lệ.");
     // Return Errors
     public static readonly Error ReturnAlreadySubmitted =
         Error.Conflict("RentalItem.ReturnAlreadySubmitted", "Tất cả unit của khoản thuê đã được trả đủ.");
@@ -107,6 +134,8 @@ public static class RentalErrors
 
     public static readonly Error IncompleteReturn =
         Error.Validation("RentalItem.IncompleteReturn", "Biên bản trả hàng phải ghi nhận ít nhất một unit.");
+    public static readonly Error InvalidReturnTime =
+        Error.Validation("RentalItem.InvalidReturnTime", "Thời gian trả hàng không thể trước thời gian bàn giao.");
 
     // Deduction Errors
     public static readonly Error DeductionDeadlineExpired =
@@ -130,6 +159,17 @@ public static class RentalErrors
     public static readonly Error ResponseDeadlineExpired =
         Error.Expired("Deduction.ResponseDeadlineExpired", "Đã hết thời hạn 48 giờ phản hồi đề xuất khấu trừ.");
 
+    public static readonly Error DeductionDeadlineNotExpired =
+        Error.Validation("Deduction.DeadlineNotExpired", "Chưa đến thời hạn 48 giờ để supplier gửi đề xuất khấu trừ.");
+
+    public static readonly Error ResponseDeadlineNotExpired =
+        Error.Validation("Deduction.ResponseDeadlineNotExpired", "Chưa đến thời hạn 48 giờ phản hồi đề xuất khấu trừ.");
+
+    public static readonly Error ProposalPendingResponse =
+        Error.Conflict("Deduction.ProposalPendingResponse", "Đề xuất khấu trừ đang chờ renter phản hồi.");
+
+    public static readonly Error DeductionNotFinalized =
+        Error.Conflict("Deduction.NotFinalized", "Khoản khấu trừ chưa được chốt.");
     // Dispute Errors
     public static readonly Error DisputeAlreadyExists =
         Error.Conflict("Dispute.AlreadyExists", "Khiếu nại đã được mở cho đề xuất khấu trừ này.");

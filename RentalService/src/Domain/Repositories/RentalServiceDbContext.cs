@@ -20,6 +20,7 @@ public class RentalServiceDbContext : DbContext
     public DbSet<ReturnRecord> ReturnRecords => Set<ReturnRecord>();
     public DbSet<DeductionProposal> DeductionProposals => Set<DeductionProposal>();
     public DbSet<Dispute> Disputes => Set<Dispute>();
+    public DbSet<RentalOperationReceipt> RentalOperationReceipts => Set<RentalOperationReceipt>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -70,6 +71,11 @@ public class RentalServiceDbContext : DbContext
             b.HasMany(o => o.StateTransitions)
                 .WithOne(t => t.RentalOrder)
                 .HasForeignKey(t => t.RentalOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            b.HasMany(o => o.OperationReceipts)
+                .WithOne(r => r.RentalOrder)
+                .HasForeignKey(r => r.RentalOrderId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -138,6 +144,10 @@ public class RentalServiceDbContext : DbContext
                 .WithMany(p => p.Assignments)
                 .HasForeignKey(u => u.DeductionProposalId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            b.Property(u => u.HandoverMediaIds).HasField("_handoverMediaIds");
+            b.Property(u => u.ReturnMediaIds).HasField("_returnMediaIds");
+            b.Property(u => u.DeductionMediaIds).HasField("_deductionMediaIds");
         });
 
         // DeductionProposal & Dispute
@@ -153,6 +163,14 @@ public class RentalServiceDbContext : DbContext
         {
             b.Property(d => d.FinalDeductionAmount)
                 .HasPrecision(18, 2);
+            b.Property(d => d.MediaIds).HasField("_mediaIds");
+            b.Property(d => d.ResolutionMediaIds).HasField("_resolutionMediaIds");
+        });
+
+        modelBuilder.Entity<RentalOperationReceipt>(b =>
+        {
+            b.HasIndex(r => new { r.RentalOrderId, r.OperationId })
+                .IsUnique();
         });
     }
 }
