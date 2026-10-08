@@ -203,15 +203,55 @@ public sealed partial class EquipmentListingService
         {
             return Error.Forbidden("FORBIDDEN", "Không có quyền chỉnh sửa Listing của người dùng khác.");
         }
-        // Validate Brand nếu gửi
+        if (request.IsBrandIdSpecified && (!request.BrandId.HasValue || request.BrandId.Value == Guid.Empty))
+        {
+            return Error.Validation("INVALID_BRAND_ID", "Brand ID không được để trống hoặc rỗng.");
+        }
+
+        if (request.IsModelSpecified && request.Model is null)
+        {
+            return Error.Validation("INVALID_MODEL", "Model không được để trống.");
+        }
+
+        if (request.IsSchemaVersionSpecified && !request.SchemaVersion.HasValue)
+        {
+            return Error.Validation("INVALID_SCHEMA_VERSION", "Schema Version phải là số nguyên dương lớn hơn hoặc bằng 1.");
+        }
+
+        if (request.IsSpecValuesSpecified && !request.SpecValues.HasValue)
+        {
+            return Error.Validation("INVALID_SPEC_VALUES", "Spec values không được để trống.");
+        }
+
+        if (request.IsStatusSpecified && !request.Status.HasValue)
+        {
+            return Error.Validation("INVALID_STATUS", "Trạng thái không được để trống.");
+        }
+
+        if (request.IsThumbnailMediaIdSpecified && request.ThumbnailMediaId.HasValue && request.ThumbnailMediaId.Value == Guid.Empty)
+        {
+            return Error.Validation("INVALID_THUMBNAIL_MEDIA_ID", "Thumbnail Media ID không được rỗng.");
+        }
+
+        // 2. Merge snapshot với các field được truyền (omitted giữ nguyên)
+        string targetModel = request.IsModelSpecified ? request.Model! : snapshot.Model;
+        Guid? targetThumb = request.IsThumbnailMediaIdSpecified ? request.ThumbnailMediaId : snapshot.ThumbnailMediaId;
+        int targetSchema = request.IsSchemaVersionSpecified ? request.SchemaVersion!.Value : snapshot.SchemaVersion;
+        string targetSpecs = request.IsSpecValuesSpecified ? request.SpecValues!.Value.GetRawText() : snapshot.SpecValues;
+
+        // 3. Domain validation cục bộ TRƯỚC KHI gọi Catalog / Media
+        var detailsValidation = EquipmentListing.ValidateDetails(targetModel, targetThumb, targetSchema, targetSpecs);
+        if (detailsValidation.IsFailure)
+        {
+            return detailsValidation.Error;
+        }
+
+        var (validModel, validThumb, validSchema, validSpecs) = detailsValidation.Value;
+
+        // 4. Downstream validation: Catalog Brand
         if (request.IsBrandIdSpecified)
         {
-            if (!request.BrandId.HasValue || request.BrandId.Value == Guid.Empty)
-            {
-                return Error.Validation("INVALID_BRAND_ID", "Brand ID không được để trống hoặc rỗng.");
-            }
-
-            var brandLookup = await _catalogClient.GetBrandAsync(request.BrandId.Value, cancellationToken);
+            var brandLookup = await _catalogClient.GetBrandAsync(request.BrandId!.Value, cancellationToken);
             if (brandLookup.IsFailure)
             {
                 return brandLookup.Error;
@@ -223,31 +263,27 @@ public sealed partial class EquipmentListingService
             }
         }
 
-        // Validate Schema / Spec nếu có thay đổi
-        int targetSchema = request.IsSchemaVersionSpecified ? (request.SchemaVersion ?? snapshot.SchemaVersion) : snapshot.SchemaVersion;
-        string targetSpecs = request.IsSpecValuesSpecified ? (request.SpecValues.HasValue ? request.SpecValues.Value.GetRawText() : snapshot.SpecValues) : snapshot.SpecValues;
-
+        // 5. Downstream validation: Catalog Specification
         if (request.IsSchemaVersionSpecified || request.IsSpecValuesSpecified)
         {
-            var specResult = await _catalogClient.ValidateSpecificationAsync(snapshot.EquipmentTypeId, targetSchema, targetSpecs, cancellationToken);
+            var specResult = await _catalogClient.ValidateSpecificationAsync(snapshot.EquipmentTypeId, validSchema, validSpecs, cancellationToken);
             if (specResult.IsFailure)
             {
                 return specResult.Error;
             }
         }
 
-        // Validate Media nếu thumbnail đổi
-        if (request.IsThumbnailMediaIdSpecified && request.ThumbnailMediaId.HasValue && request.ThumbnailMediaId != snapshot.ThumbnailMediaId)
+        // 6. Media preparation (nếu thumbnail đổi thành Guid mới)
+        if (request.IsThumbnailMediaIdSpecified && validThumb.HasValue && validThumb != snapshot.ThumbnailMediaId)
         {
-            var mediaResult = await _mediaService.PreparePublicAsync(request.ThumbnailMediaId.Value, caller, cancellationToken);
+            var mediaResult = await _mediaService.PreparePublicAsync(validThumb.Value, caller, cancellationToken);
             if (mediaResult.IsFailure)
             {
                 return mediaResult.Error;
             }
         }
 
-        // Thực thi transaction với advisory lock trên Listing
-        var now = _timeProvider.GetUtcNow();
+        // 7. Thực thi transaction với advisory lock trên Listing
         var txResult = await _writeTransaction.ExecuteListingWriteAsync(id, async (ctx, ct) =>
         {
             var listing = await ctx.Listings.GetByIdAsync(id, ct);
@@ -260,16 +296,19 @@ public sealed partial class EquipmentListingService
             {
                 return Error.Forbidden("FORBIDDEN", "Không có quyền chỉnh sửa Listing của người dùng khác.");
             }
+
             if (listing.Version != snapshot.Version)
             {
                 return Error.Conflict("STALE_INVENTORY_WRITE", "Dữ liệu Listing đã được thay đổi; đọc lại trước khi thử lại.");
             }
 
+            var now = _timeProvider.GetUtcNow();
+
             // Xử lý status transition nếu có
-            if (request.IsStatusSpecified && request.Status.HasValue)
+            if (request.IsStatusSpecified)
             {
                 bool hasAcceptingBookingsUnit = false;
-                if (request.Status.Value == EquipmentListingStatus.Active)
+                if (request.Status!.Value == EquipmentListingStatus.Active)
                 {
                     int totalActiveUnits = await ctx.Listings.GetTotalQuantityAsync(id, ct);
                     hasAcceptingBookingsUnit = totalActiveUnits > 0;
@@ -283,15 +322,12 @@ public sealed partial class EquipmentListingService
             }
 
             // Xử lý details update
-            string targetModel = request.IsModelSpecified ? (request.Model ?? snapshot.Model) : listing.Model;
-            Guid? targetThumb = request.IsThumbnailMediaIdSpecified ? request.ThumbnailMediaId : listing.ThumbnailMediaId;
-
             var detailsRes = listing.UpdateDetails(
                 request.IsBrandIdSpecified ? request.BrandId : null,
-                targetModel,
-                targetThumb,
-                targetSchema,
-                targetSpecs,
+                validModel,
+                validThumb,
+                validSchema,
+                validSpecs,
                 now);
 
             if (detailsRes.IsFailure)
@@ -348,7 +384,7 @@ public sealed partial class EquipmentListingService
         {
             return Error.Forbidden("FORBIDDEN", "Chỉ chủ sở hữu hoặc quản trị viên mới được cập nhật giá thuê.");
         }
-        var now = _timeProvider.GetUtcNow();
+
         var txResult = await _writeTransaction.ExecuteListingWriteAsync(id, async (ctx, ct) =>
         {
             var listing = await ctx.Listings.GetByIdAsync(id, ct);
@@ -361,6 +397,13 @@ public sealed partial class EquipmentListingService
             {
                 return Error.Forbidden("FORBIDDEN", "Chỉ chủ sở hữu hoặc quản trị viên mới được cập nhật giá thuê.");
             }
+
+            if (listing.Version != snapshot.Version)
+            {
+                return Error.Conflict("STALE_INVENTORY_WRITE", "Dữ liệu Listing đã được thay đổi; đọc lại trước khi thử lại.");
+            }
+
+            var now = _timeProvider.GetUtcNow();
             var updateRes = listing.UpdateRentalRate(
                 request.DailyRate!.Value,
                 request.WeeklyRate,
