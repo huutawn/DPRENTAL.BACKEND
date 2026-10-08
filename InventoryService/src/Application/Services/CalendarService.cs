@@ -129,9 +129,14 @@ public sealed class CalendarService : ICalendarService
     {
         ArgumentNullException.ThrowIfNull(caller);
 
-        if (!caller.IsAuthenticated || !caller.UserId.HasValue)
+        if (!caller.IsAuthenticated)
         {
             return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
+        }
+
+        if (caller.IsService || !caller.UserId.HasValue)
+        {
+            return Error.Forbidden("FORBIDDEN", "Chỉ người dùng cá nhân mới có quyền truy cập lịch của Listing.");
         }
 
         var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
@@ -160,7 +165,7 @@ public sealed class CalendarService : ICalendarService
             return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
         }
 
-        if (snapshot.OwnerUserId != caller.UserId.Value && !caller.IsAdmin)
+        if (!InventoryAccessEvaluator.CanAccessListingCalendar(caller, snapshot.OwnerUserId))
         {
             return Error.Forbidden("FORBIDDEN", "Bạn không có quyền truy cập lịch của Listing này.");
         }

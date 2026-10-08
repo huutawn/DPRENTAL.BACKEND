@@ -178,13 +178,21 @@ public sealed class EquipmentListingServiceTests
             mediaOptions,
             _clock);
     }
+    private static TestCaller CreateHumanCaller(Guid userId, params string[] permissions) =>
+        new()
+        {
+            UserId = userId,
+            IsService = false,
+            IsAuthenticated = true,
+            Permissions = new HashSet<string>(permissions)
+        };
 
     [Fact]
     public async Task CreateListingAsync_ValidRequest_CreatesListingAndNUnits()
     {
         var service = CreateService();
         var ownerId = Guid.NewGuid();
-        var caller = new TestCaller { UserId = ownerId, Permissions = new HashSet<string> { "inventory.asset.manage" } };
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
 
         using var specDoc = JsonDocument.Parse("{\"sensor\":\"Full-Frame\"}");
         var request = new CreateEquipmentListingRequest(
@@ -218,7 +226,7 @@ public sealed class EquipmentListingServiceTests
     public async Task CreateListingAsync_InvalidSerialNumber_ReturnsValidationError(string? invalidSerial)
     {
         var service = CreateService();
-        var caller = new TestCaller { UserId = Guid.NewGuid(), Permissions = new HashSet<string> { "inventory.asset.manage" } };
+        var caller = CreateHumanCaller(Guid.NewGuid(), "inventory.asset.manage");
 
         using var specDoc = JsonDocument.Parse("{}");
         var request = new CreateEquipmentListingRequest(
@@ -236,7 +244,7 @@ public sealed class EquipmentListingServiceTests
     {
         var service = CreateService();
         var ownerId = Guid.NewGuid();
-        var caller = new TestCaller { UserId = ownerId, Permissions = new HashSet<string> { "inventory.asset.manage" } };
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
 
         var listingId = Guid.NewGuid();
         var listing = EquipmentListing.Create(
@@ -256,7 +264,7 @@ public sealed class EquipmentListingServiceTests
     {
         var service = CreateService();
         var ownerId = Guid.NewGuid();
-        var caller = new TestCaller { UserId = ownerId };
+        var caller = CreateHumanCaller(ownerId);
 
         var listingId = Guid.NewGuid();
         var listing = EquipmentListing.Create(
@@ -280,7 +288,7 @@ public sealed class EquipmentListingServiceTests
     {
         var service = CreateService();
         var ownerId = Guid.NewGuid();
-        var caller = new TestCaller { UserId = ownerId };
+        var caller = CreateHumanCaller(ownerId);
 
         var listingId = Guid.NewGuid();
         var listing = EquipmentListing.Create(
@@ -294,5 +302,42 @@ public sealed class EquipmentListingServiceTests
         Assert.Equal(200_000m, result.Value.DailyRate);
         Assert.Equal(1_200_000m, result.Value.WeeklyRate);
         Assert.Equal(4_000_000m, result.Value.MonthlyRate);
+    }
+    [Fact]
+    public async Task ServicePrincipal_IsForbidden_OnAllListingServiceMethods()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var serviceCaller = new TestCaller { UserId = ownerId, IsService = true, Permissions = new HashSet<string> { "inventory.asset.manage" } };
+
+        var listingId = Guid.NewGuid();
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow).Value;
+        _listingRepo.Add(listing);
+
+        using var specDoc = JsonDocument.Parse("{}");
+        var createReq = new CreateEquipmentListingRequest(
+            Guid.NewGuid(), Guid.NewGuid(), "Model", "SN-1", specDoc.RootElement, new RentalRateDto(100_000m, null, null, "VND"));
+
+        var rCreate = await service.CreateListingAsync(createReq, serviceCaller);
+        Assert.Equal("FORBIDDEN", rCreate.Error.Code);
+
+        var rGet = await service.GetListingByIdAsync(listingId, serviceCaller);
+        Assert.Equal("FORBIDDEN", rGet.Error.Code);
+
+        var rList = await service.ListOwnerListingsAsync(new ListEquipmentListingsRequest(), serviceCaller);
+        Assert.Equal("FORBIDDEN", rList.Error.Code);
+
+        var rPatch = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest { Model = "New" }, serviceCaller);
+        Assert.Equal("FORBIDDEN", rPatch.Error.Code);
+
+        var rRate = await service.UpdateRentalRateAsync(listingId, new RentalRateDto(200_000m, null, null, "VND"), serviceCaller);
+        Assert.Equal("FORBIDDEN", rRate.Error.Code);
+
+        var rAdd = await service.AddAssetAsync(listingId, new AddListingAssetRequest("SN-2"), serviceCaller);
+        Assert.Equal("FORBIDDEN", rAdd.Error.Code);
+
+        var rAssets = await service.GetListingAssetsAsync(listingId, 1, 20, serviceCaller);
+        Assert.Equal("FORBIDDEN", rAssets.Error.Code);
     }
 }

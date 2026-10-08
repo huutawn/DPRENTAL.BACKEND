@@ -11,6 +11,109 @@ public static class InventoryAccessEvaluator
     public const string ScopeAvailabilityRead = "inventory.availability.read";
 
     /// <summary>
+    /// Kiểm tra quyền tạo mới EquipmentListing:
+    /// - Chỉ Human có permission inventory.asset.manage hoặc Human Admin (r=adm).
+    /// - Service principal bị từ chối.
+    /// </summary>
+    public static bool CanCreateListing(IInventoryCallerContext caller)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated || caller.IsService)
+        {
+            return false;
+        }
+
+        if (!caller.UserId.HasValue || caller.UserId.Value == Guid.Empty)
+        {
+            return false;
+        }
+
+        return caller.IsAdmin || caller.Permissions.Contains(PermissionAssetManage);
+    }
+
+    /// <summary>
+    /// Kiểm tra quyền xem hoặc chỉnh sửa thông tin EquipmentListing (Get/Patch/Assets):
+    /// - Chỉ Human Owner (JWT sub == listingOwnerUserId) hoặc Human Admin (r=adm).
+    /// - Service principal bị từ chối.
+    /// - Thiếu listingOwnerUserId phải fail closed.
+    /// </summary>
+    public static bool CanViewOrEditListing(IInventoryCallerContext caller, Guid? listingOwnerUserId)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated || caller.IsService)
+        {
+            return false;
+        }
+
+        if (!caller.UserId.HasValue || caller.UserId.Value == Guid.Empty)
+        {
+            return false;
+        }
+
+        if (listingOwnerUserId is null || listingOwnerUserId == Guid.Empty)
+        {
+            return false;
+        }
+
+        if (caller.IsAdmin)
+        {
+            return true;
+        }
+
+        return caller.UserId.Value == listingOwnerUserId.Value;
+    }
+
+    /// <summary>
+    /// Kiểm tra quyền thêm thiết bị vật lý vào EquipmentListing:
+    /// - Chỉ Human Owner (JWT sub == listingOwnerUserId) có permission inventory.asset.manage, hoặc Human Admin (r=adm).
+    /// - Service principal bị từ chối.
+    /// </summary>
+    public static bool CanAddListingAsset(IInventoryCallerContext caller, Guid? listingOwnerUserId)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated || caller.IsService)
+        {
+            return false;
+        }
+
+        if (!caller.UserId.HasValue || caller.UserId.Value == Guid.Empty)
+        {
+            return false;
+        }
+
+        if (listingOwnerUserId is null || listingOwnerUserId == Guid.Empty)
+        {
+            return false;
+        }
+
+        if (caller.IsAdmin)
+        {
+            return true;
+        }
+
+        return caller.UserId.Value == listingOwnerUserId.Value && caller.Permissions.Contains(PermissionAssetManage);
+    }
+
+    /// <summary>
+    /// Kiểm tra quyền cập nhật bảng giá niêm yết của EquipmentListing:
+    /// - Chỉ Human Owner (JWT sub == listingOwnerUserId) hoặc Human Admin (r=adm).
+    /// - Không yêu cầu permission 'inventory.asset.manage'.
+    /// - Service principal bị từ chối.
+    /// </summary>
+    public static bool CanUpdateListingRentalRate(IInventoryCallerContext caller, Guid? listingOwnerUserId) =>
+        CanViewOrEditListing(caller, listingOwnerUserId);
+
+    /// <summary>
+    /// Kiểm tra quyền truy cập lịch dùng chung cấp Listing:
+    /// - Cho phép Human Owner (JWT sub == listingOwnerUserId) hoặc Human Admin (r=adm).
+    /// - Service principal bị từ chối.
+    /// </summary>
+    public static bool CanAccessListingCalendar(IInventoryCallerContext caller, Guid? listingOwnerUserId) =>
+        CanViewOrEditListing(caller, listingOwnerUserId);
+    /// <summary>
     /// Kiểm tra quyền quản lý tài sản (Asset management):
     /// - Human có permission inventory.asset.manage và sở hữu tài sản (assetOwnerUserId == sub).
     /// - Human Admin (r=adm) được phép xuyên user.

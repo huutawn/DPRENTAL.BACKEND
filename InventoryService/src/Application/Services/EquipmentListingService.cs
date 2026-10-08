@@ -55,22 +55,25 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
             return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
         }
 
-        if (!caller.IsAuthenticated || !caller.UserId.HasValue)
+        if (!caller.IsAuthenticated)
         {
             return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
         }
 
+        if (caller.IsService || !caller.UserId.HasValue)
+        {
+            return Error.Forbidden("FORBIDDEN", "Chỉ người dùng cá nhân mới có quyền truy cập Listing.");
+        }
         var listing = await _listingRepository.GetByIdAsync(id, cancellationToken);
         if (listing is null)
         {
             return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
         }
 
-        if (listing.OwnerUserId != caller.UserId.Value && !caller.IsAdmin)
+        if (!InventoryAccessEvaluator.CanViewOrEditListing(caller, listing.OwnerUserId))
         {
             return Error.Forbidden("FORBIDDEN", "Không có quyền truy cập Listing của người dùng khác.");
         }
-
         int totalQuantity = await _listingRepository.GetTotalQuantityAsync(id, cancellationToken);
         return EquipmentListingMapper.ToResponse(listing, totalQuantity, _mediaOptions.PublicGatewayUrl);
     }
@@ -83,11 +86,15 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (!caller.IsAuthenticated || !caller.UserId.HasValue)
+        if (!caller.IsAuthenticated)
         {
             return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
         }
 
+        if (caller.IsService || !caller.UserId.HasValue)
+        {
+            return Error.Forbidden("FORBIDDEN", "Chỉ người dùng cá nhân mới có danh sách Listing sở hữu.");
+        }
         int page = Math.Max(1, request.Page);
         int pageSize = Math.Clamp(request.PageSize, 1, 100);
         int skip = (page - 1) * pageSize;
@@ -119,22 +126,25 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
             return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
         }
 
-        if (!caller.IsAuthenticated || !caller.UserId.HasValue)
+        if (!caller.IsAuthenticated)
         {
             return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
         }
 
+        if (caller.IsService || !caller.UserId.HasValue)
+        {
+            return Error.Forbidden("FORBIDDEN", "Chỉ người dùng cá nhân mới có quyền xem thiết bị của Listing.");
+        }
         var listing = await _listingRepository.GetByIdAsync(id, cancellationToken);
         if (listing is null)
         {
             return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
         }
 
-        if (listing.OwnerUserId != caller.UserId.Value && !caller.IsAdmin)
+        if (!InventoryAccessEvaluator.CanViewOrEditListing(caller, listing.OwnerUserId))
         {
             return Error.Forbidden("FORBIDDEN", "Không có quyền xem thiết bị của Listing người dùng khác.");
         }
-
         int normalizedPage = Math.Max(1, page);
         int normalizedPageSize = Math.Clamp(pageSize, 1, 100);
         int skip = (normalizedPage - 1) * normalizedPageSize;

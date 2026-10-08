@@ -22,16 +22,15 @@ public sealed partial class EquipmentListingService
         ArgumentNullException.ThrowIfNull(caller);
 
         // 1. Authentication và permission check
-        if (!caller.IsAuthenticated || !caller.UserId.HasValue)
+        if (!caller.IsAuthenticated)
         {
             return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
         }
 
-        if (!caller.IsAdmin && !caller.Permissions.Contains(InventoryAccessEvaluator.PermissionAssetManage))
+        if (!InventoryAccessEvaluator.CanCreateListing(caller))
         {
             return Error.Forbidden("FORBIDDEN", "Người dùng không có quyền quản lý kho tài sản.");
         }
-
         // 2. Local validation
         if (string.IsNullOrWhiteSpace(request.SerialNumber))
         {
@@ -126,7 +125,7 @@ public sealed partial class EquipmentListingService
 
         var listingResult = EquipmentListing.Create(
             listingId,
-            caller.UserId.Value,
+            caller.UserId!.Value,
             request.EquipmentTypeId,
             request.BrandId,
             validModel,
@@ -180,11 +179,15 @@ public sealed partial class EquipmentListingService
             return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
         }
 
-        if (!caller.IsAuthenticated || !caller.UserId.HasValue)
+        if (!caller.IsAuthenticated)
         {
             return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
         }
 
+        if (caller.IsService || !caller.UserId.HasValue)
+        {
+            return Error.Forbidden("FORBIDDEN", "Chỉ người dùng cá nhân mới có quyền chỉnh sửa Listing.");
+        }
         if (request.IsEmpty)
         {
             return Error.Validation("EMPTY_PATCH_REQUEST", "Yêu cầu PATCH phải chứa ít nhất một trường cần cập nhật.");
@@ -196,11 +199,10 @@ public sealed partial class EquipmentListingService
             return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
         }
 
-        if (snapshot.OwnerUserId != caller.UserId.Value && !caller.IsAdmin)
+        if (!InventoryAccessEvaluator.CanViewOrEditListing(caller, snapshot.OwnerUserId))
         {
             return Error.Forbidden("FORBIDDEN", "Không có quyền chỉnh sửa Listing của người dùng khác.");
         }
-
         // Validate Brand nếu gửi
         if (request.IsBrandIdSpecified)
         {
@@ -254,11 +256,10 @@ public sealed partial class EquipmentListingService
                 return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
             }
 
-            if (listing.OwnerUserId != caller.UserId.Value && !caller.IsAdmin)
+            if (!InventoryAccessEvaluator.CanViewOrEditListing(caller, listing.OwnerUserId))
             {
                 return Error.Forbidden("FORBIDDEN", "Không có quyền chỉnh sửa Listing của người dùng khác.");
             }
-
             if (listing.Version != snapshot.Version)
             {
                 return Error.Conflict("STALE_INVENTORY_WRITE", "Dữ liệu Listing đã được thay đổi; đọc lại trước khi thử lại.");
@@ -322,11 +323,15 @@ public sealed partial class EquipmentListingService
             return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
         }
 
-        if (!caller.IsAuthenticated || !caller.UserId.HasValue)
+        if (!caller.IsAuthenticated)
         {
             return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
         }
 
+        if (caller.IsService || !caller.UserId.HasValue)
+        {
+            return Error.Forbidden("FORBIDDEN", "Chỉ người dùng cá nhân mới có quyền cập nhật giá thuê.");
+        }
         var rateValidation = request.Validate();
         if (rateValidation.IsFailure)
         {
@@ -339,11 +344,10 @@ public sealed partial class EquipmentListingService
             return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
         }
 
-        if (snapshot.OwnerUserId != caller.UserId.Value && !caller.IsAdmin)
+        if (!InventoryAccessEvaluator.CanUpdateListingRentalRate(caller, snapshot.OwnerUserId))
         {
             return Error.Forbidden("FORBIDDEN", "Chỉ chủ sở hữu hoặc quản trị viên mới được cập nhật giá thuê.");
         }
-
         var now = _timeProvider.GetUtcNow();
         var txResult = await _writeTransaction.ExecuteListingWriteAsync(id, async (ctx, ct) =>
         {
@@ -353,11 +357,10 @@ public sealed partial class EquipmentListingService
                 return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
             }
 
-            if (listing.OwnerUserId != caller.UserId.Value && !caller.IsAdmin)
+            if (!InventoryAccessEvaluator.CanUpdateListingRentalRate(caller, listing.OwnerUserId))
             {
                 return Error.Forbidden("FORBIDDEN", "Chỉ chủ sở hữu hoặc quản trị viên mới được cập nhật giá thuê.");
             }
-
             var updateRes = listing.UpdateRentalRate(
                 request.DailyRate!.Value,
                 request.WeeklyRate,
@@ -401,16 +404,20 @@ public sealed partial class EquipmentListingService
             return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
         }
 
-        if (!caller.IsAuthenticated || !caller.UserId.HasValue)
+        if (!caller.IsAuthenticated)
         {
             return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
+        }
+
+        if (caller.IsService || !caller.UserId.HasValue)
+        {
+            return Error.Forbidden("FORBIDDEN", "Chỉ người dùng cá nhân mới có quyền thêm thiết bị cho Listing.");
         }
 
         if (!caller.IsAdmin && !caller.Permissions.Contains(InventoryAccessEvaluator.PermissionAssetManage))
         {
             return Error.Forbidden("FORBIDDEN", "Người dùng không có quyền quản lý kho tài sản.");
         }
-
         if (string.IsNullOrWhiteSpace(request.SerialNumber))
         {
             return Error.Validation("INVALID_SERIAL_NUMBER", "Số serial là bắt buộc và không được để trống.");
@@ -428,11 +435,10 @@ public sealed partial class EquipmentListingService
             return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
         }
 
-        if (snapshot.OwnerUserId != caller.UserId.Value && !caller.IsAdmin)
+        if (!InventoryAccessEvaluator.CanAddListingAsset(caller, snapshot.OwnerUserId))
         {
             return Error.Forbidden("FORBIDDEN", "Không có quyền thêm thiết bị cho Listing của người dùng khác.");
         }
-
         var now = _timeProvider.GetUtcNow();
         var txResult = await _writeTransaction.ExecuteListingWriteAsync(id, async (ctx, ct) =>
         {
@@ -442,12 +448,10 @@ public sealed partial class EquipmentListingService
                 return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
             }
 
-            if (listing.OwnerUserId != caller.UserId.Value && !caller.IsAdmin)
+            if (!InventoryAccessEvaluator.CanAddListingAsset(caller, listing.OwnerUserId))
             {
                 return Error.Forbidden("FORBIDDEN", "Không có quyền thêm thiết bị cho Listing của người dùng khác.");
             }
-
-            // Kiểm tra serial trùng trong listing (kể cả unit disable)
             bool serialExists = await ctx.Assets.ExistsSerialInListingAsync(id, normalizedSerial, null, ct);
             if (serialExists)
             {
