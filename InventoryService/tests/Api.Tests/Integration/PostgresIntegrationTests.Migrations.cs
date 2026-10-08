@@ -667,36 +667,36 @@ public sealed partial class PostgresIntegrationTests
             var ownerId = Guid.NewGuid();
             var eqId = Guid.NewGuid();
             var now = DateTimeOffset.UtcNow;
-        // 1. Rejects empty GUID
-        var invalidAssetId = Guid.NewGuid();
-        var ex = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($$"""
+            // 1. Rejects empty GUID
+            var invalidAssetId = Guid.NewGuid();
+            var ex = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($$"""
             INSERT INTO inventory.assets (id, owner_user_id, equipment_type_id, brand_id, model, schema_version, spec_values, accepting_bookings, created_at, updated_at)
             VALUES ({{invalidAssetId}}, {{ownerId}}, {{eqId}}, '00000000-0000-0000-0000-000000000000'::uuid, 'Test Model', 1, '{}'::jsonb, true, {{now}}, {{now}});
         """));
-        Assert.Equal("ck_assets_brand_id", ex.ConstraintName);
+            Assert.Equal("ck_assets_brand_id", ex.ConstraintName);
 
-        // 2. Allows NULL
-        var nullBrandAssetId = Guid.NewGuid();
-        await db.Database.ExecuteSqlInterpolatedAsync($$"""
+            // 2. Allows NULL
+            var nullBrandAssetId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($$"""
             INSERT INTO inventory.assets (id, owner_user_id, equipment_type_id, brand_id, model, schema_version, spec_values, accepting_bookings, created_at, updated_at)
             VALUES ({{nullBrandAssetId}}, {{ownerId}}, {{eqId}}, NULL, 'Test Model', 1, '{}'::jsonb, true, {{now}}, {{now}});
         """);
-        var reloadedNull = await db.Database.SqlQuery<Guid?>($"""
+            var reloadedNull = await db.Database.SqlQuery<Guid?>($"""
             SELECT brand_id AS "Value" FROM inventory.assets WHERE id = {nullBrandAssetId}
         """).SingleAsync();
-        Assert.Null(reloadedNull);
+            Assert.Null(reloadedNull);
 
-        // 3. Allows valid GUID
-        var validBrand = Guid.NewGuid();
-        var validAssetId = Guid.NewGuid();
-        await db.Database.ExecuteSqlInterpolatedAsync($$"""
+            // 3. Allows valid GUID
+            var validBrand = Guid.NewGuid();
+            var validAssetId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($$"""
             INSERT INTO inventory.assets (id, owner_user_id, equipment_type_id, brand_id, model, schema_version, spec_values, accepting_bookings, created_at, updated_at)
             VALUES ({{validAssetId}}, {{ownerId}}, {{eqId}}, {{validBrand}}, 'Test Model', 1, '{}'::jsonb, true, {{now}}, {{now}});
         """);
-        var reloadedValid = await db.Database.SqlQuery<Guid?>($"""
+            var reloadedValid = await db.Database.SqlQuery<Guid?>($"""
             SELECT brand_id AS "Value" FROM inventory.assets WHERE id = {validAssetId}
         """).SingleAsync();
-        Assert.Equal(validBrand, reloadedValid);
+            Assert.Equal(validBrand, reloadedValid);
         }
         finally
         {

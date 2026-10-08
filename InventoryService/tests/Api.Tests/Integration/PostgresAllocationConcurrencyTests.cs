@@ -73,7 +73,18 @@ public sealed class PostgresAllocationConcurrencyTests : IClassFixture<PostgresF
 
     private async Task WaitForAdvisoryLockWaiterAsync(Guid assetId, TimeSpan timeout)
     {
-        long lockKey = AssetLockKey.FromAssetId(assetId);
+        long assetLockKey = AssetLockKey.FromAssetId(assetId);
+        Guid? listingId = null;
+        await using (var db = CreateDbContext())
+        {
+            listingId = await db.Assets
+                .Where(a => a.Id == assetId)
+                .Select(a => (Guid?)a.EquipmentListingId)
+                .FirstOrDefaultAsync();
+        }
+
+        long? listingLockKey = listingId.HasValue ? AssetLockKey.FromListingId(listingId.Value) : null;
+
         using var cts = new CancellationTokenSource(timeout);
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync(cts.Token);
@@ -84,9 +95,11 @@ public sealed class PostgresAllocationConcurrencyTests : IClassFixture<PostgresF
                 SELECT count(*) 
                 FROM pg_locks 
                 WHERE locktype = 'advisory'
-                  AND ((classid::bigint << 32) | (objid::bigint & 4294967295)) = @key
+                  AND (((classid::bigint << 32) | (objid::bigint & 4294967295)) = @assetKey
+                       OR (@listingKey IS NOT NULL AND ((classid::bigint << 32) | (objid::bigint & 4294967295)) = @listingKey))
                   AND NOT granted;", conn);
-            cmd.Parameters.AddWithValue("key", lockKey);
+            cmd.Parameters.AddWithValue("assetKey", assetLockKey);
+            cmd.Parameters.AddWithValue("listingKey", (object?)listingLockKey ?? DBNull.Value);
 
             var count = Convert.ToInt64(await cmd.ExecuteScalarAsync(cts.Token), CultureInfo.InvariantCulture);
             if (count > 0)
@@ -97,7 +110,7 @@ public sealed class PostgresAllocationConcurrencyTests : IClassFixture<PostgresF
             await Task.Delay(20, cts.Token);
         }
 
-        throw new TimeoutException($"Hết thời gian chờ quan sát lock waiter cho asset {assetId} (key: {lockKey}) trong pg_locks.");
+        throw new TimeoutException($"Hết thời gian chờ quan sát lock waiter cho asset {assetId} trong pg_locks.");
     }
 
     private sealed class ServiceCallerContext : IInventoryCallerContext

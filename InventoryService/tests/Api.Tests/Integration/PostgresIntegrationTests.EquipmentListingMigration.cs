@@ -159,7 +159,7 @@ public sealed class PostgresEquipmentListingMigrationTests
     }
 
     [Fact]
-    public async Task ForwardMigration_RequireSerial_SucceedsAndAppliesNotNullConstraintAndUniqueIndex()
+    public async Task ForwardMigration_RequireSerial_SucceedsAndAppliesNotNullConstraintAndUniqueIndex_AndDbRejectsDuplicates()
     {
         var fixture = new PostgresFixture { TargetMigration = "20261007000000_RefactorEquipmentListingAndInventoryAsset" };
         await fixture.InitializeAsync();
@@ -175,18 +175,49 @@ public sealed class PostgresEquipmentListingMigrationTests
             // Apply migration
             await db.GetService<IMigrator>().MigrateAsync("20261008000000_RequireAssetSerialNumberAndUniqueListingSerial");
 
-            // Verify serial_number is NOT NULL
+            // 1. Verify serial_number is NOT NULL
             var isNullable = await db.Database.SqlQueryRaw<string>("""
                 SELECT is_nullable AS "Value" FROM information_schema.columns
                 WHERE table_schema = 'inventory' AND table_name = 'assets' AND column_name = 'serial_number'
             """).SingleAsync();
             Assert.Equal("NO", isNullable);
 
-            // Verify unique index exists
+            // 2. Verify unique index exists
             var indexExists = await db.Database.SqlQueryRaw<bool>("""
                 SELECT to_regclass('inventory.ix_assets_listing_serial_unique') IS NOT NULL AS "Value"
             """).SingleAsync();
             Assert.True(indexExists);
+
+            // 3. Insert valid listing and unit 1
+            var listingId = Guid.NewGuid();
+            var unit1Id = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($$"""
+                INSERT INTO inventory.equipment_listings (id, owner_user_id, equipment_type_id, brand_id, model, schema_version, spec_values, daily_rate, currency, status, created_at, updated_at)
+                VALUES ({{listingId}}, {{Guid.NewGuid()}}, {{Guid.NewGuid()}}, {{Guid.NewGuid()}}, 'Test Listing', 1, '{}'::jsonb, 100000, 'VND', 1, NOW(), NOW());
+
+                INSERT INTO inventory.assets (id, equipment_listing_id, asset_code, serial_number, accepting_bookings, created_at, updated_at)
+                VALUES ({{unit1Id}}, {{listingId}}, {{Guid.NewGuid().ToString("N").Insert(0, "AST-")}}, 'SN-UNIQUE-001', true, NOW(), NOW());
+            """);
+
+            // 4. DB actively rejects duplicate serial with different casing and whitespace
+            var unit2Id = Guid.NewGuid();
+            var unit2Code = Guid.NewGuid().ToString("N").Insert(0, "AST-");
+            var dupEx = await Assert.ThrowsAsync<PostgresException>(() =>
+                db.Database.ExecuteSqlInterpolatedAsync($$"""
+                    INSERT INTO inventory.assets (id, equipment_listing_id, asset_code, serial_number, accepting_bookings, created_at, updated_at)
+                    VALUES ({{unit2Id}}, {{listingId}}, {{unit2Code}}, '  sn-unique-001  ', true, NOW(), NOW());
+                """));
+            Assert.Equal("23505", dupEx.SqlState); // unique_violation
+
+            // 5. DB actively rejects blank serial (check constraint)
+            var unit3Id = Guid.NewGuid();
+            var unit3Code = Guid.NewGuid().ToString("N").Insert(0, "AST-");
+            var blankEx = await Assert.ThrowsAsync<PostgresException>(() =>
+                db.Database.ExecuteSqlInterpolatedAsync($$"""
+                    INSERT INTO inventory.assets (id, equipment_listing_id, asset_code, serial_number, accepting_bookings, created_at, updated_at)
+                    VALUES ({{unit3Id}}, {{listingId}}, {{unit3Code}}, '   ', true, NOW(), NOW());
+                """));
+            Assert.Equal("23514", blankEx.SqlState); // check_violation
         }
         finally
         {
@@ -195,7 +226,7 @@ public sealed class PostgresEquipmentListingMigrationTests
     }
 
     [Fact]
-    public async Task ForwardMigration_RequireSerial_PreflightRejectsNullOrDuplicateSerial()
+    public async Task ForwardMigration_RequireSerial_PreflightRejectsNullOrBlankSerial_AndPreservesHistoryAndData()
     {
         var fixture = new PostgresFixture { TargetMigration = "20261007000000_RefactorEquipmentListingAndInventoryAsset" };
         await fixture.InitializeAsync();
@@ -213,7 +244,7 @@ public sealed class PostgresEquipmentListingMigrationTests
             var assetId = Guid.NewGuid();
             await db.Database.ExecuteSqlInterpolatedAsync($$"""
                 INSERT INTO inventory.equipment_listings (id, owner_user_id, equipment_type_id, brand_id, model, schema_version, spec_values, daily_rate, currency, status, created_at, updated_at)
-                VALUES ({{listingId}}, {{Guid.NewGuid()}}, {{Guid.NewGuid()}}, {{Guid.NewGuid()}}, 'Test', 1, '{}'::jsonb, 100000, 'VND', 1, NOW(), NOW());
+                VALUES ({{listingId}}, {{Guid.NewGuid()}}, {{Guid.NewGuid()}}, {{Guid.NewGuid()}}, 'Test Listing', 1, '{}'::jsonb, 100000, 'VND', 1, NOW(), NOW());
 
                 INSERT INTO inventory.assets (id, equipment_listing_id, asset_code, serial_number, accepting_bookings, created_at, updated_at)
                 VALUES ({{assetId}}, {{listingId}}, 'AST-00000000000000000000000000000001', NULL, true, NOW(), NOW());
@@ -224,6 +255,79 @@ public sealed class PostgresEquipmentListingMigrationTests
                 db.GetService<IMigrator>().MigrateAsync("20261008000000_RequireAssetSerialNumberAndUniqueListingSerial"));
 
             Assert.Contains("requires all assets to have non-empty serial_number", ex.Message);
+
+            // Migration history must NOT record the failed migration
+            var historyRecorded = await db.Database.SqlQueryRaw<bool>("""
+                SELECT EXISTS (
+                    SELECT 1 FROM inventory."__EFMigrationsHistory"
+                    WHERE "MigrationId" = '20261008000000_RequireAssetSerialNumberAndUniqueListingSerial'
+                ) AS "Value"
+            """).SingleAsync();
+            Assert.False(historyRecorded);
+
+            // Existing data remains untouched
+            var assetStillExists = await db.Database.SqlQuery<bool>($"""
+                SELECT EXISTS (
+                    SELECT 1 FROM inventory.assets WHERE id = {assetId}
+                ) AS "Value"
+            """).SingleAsync();
+            Assert.True(assetStillExists);
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ForwardMigration_RequireSerial_PreflightRejectsDuplicateCasingOrTrim_AndPreservesHistoryAndData()
+    {
+        var fixture = new PostgresFixture { TargetMigration = "20261007000000_RefactorEquipmentListingAndInventoryAsset" };
+        await fixture.InitializeAsync();
+
+        try
+        {
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
+                .UseNpgsql(fixture.ConnectionString, o => o.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
+                .Options;
+
+            await using var db = new InventoryServiceDbContext(options);
+
+            // Insert listing with 2 assets having duplicate serial after trim/lowercase
+            var listingId = Guid.NewGuid();
+            var a1 = Guid.NewGuid();
+            var a2 = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($$"""
+                INSERT INTO inventory.equipment_listings (id, owner_user_id, equipment_type_id, brand_id, model, schema_version, spec_values, daily_rate, currency, status, created_at, updated_at)
+                VALUES ({{listingId}}, {{Guid.NewGuid()}}, {{Guid.NewGuid()}}, {{Guid.NewGuid()}}, 'Test Listing', 1, '{}'::jsonb, 100000, 'VND', 1, NOW(), NOW());
+
+                INSERT INTO inventory.assets (id, equipment_listing_id, asset_code, serial_number, accepting_bookings, created_at, updated_at)
+                VALUES ({{a1}}, {{listingId}}, 'AST-00000000000000000000000000000001', 'FX3-SN-001', true, NOW(), NOW());
+
+                INSERT INTO inventory.assets (id, equipment_listing_id, asset_code, serial_number, accepting_bookings, created_at, updated_at)
+                VALUES ({{a2}}, {{listingId}}, 'AST-00000000000000000000000000000002', '  fx3-sn-001  ', true, NOW(), NOW());
+            """);
+
+            // Migration must fail on preflight duplicate check!
+            var ex = await Assert.ThrowsAsync<PostgresException>(() =>
+                db.GetService<IMigrator>().MigrateAsync("20261008000000_RequireAssetSerialNumberAndUniqueListingSerial"));
+
+            Assert.Contains("detected duplicate serial numbers within the same equipment listing", ex.Message);
+
+            // Migration history must NOT record the failed migration
+            var historyRecorded = await db.Database.SqlQueryRaw<bool>("""
+                SELECT EXISTS (
+                    SELECT 1 FROM inventory."__EFMigrationsHistory"
+                    WHERE "MigrationId" = '20261008000000_RequireAssetSerialNumberAndUniqueListingSerial'
+                ) AS "Value"
+            """).SingleAsync();
+            Assert.False(historyRecorded);
+
+            // Data remains intact
+            var count = await db.Database.SqlQuery<int>($"""
+                SELECT COUNT(*)::int AS "Value" FROM inventory.assets WHERE equipment_listing_id = {listingId}
+            """).SingleAsync();
+            Assert.Equal(2, count);
         }
         finally
         {

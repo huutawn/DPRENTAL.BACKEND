@@ -56,8 +56,7 @@ public sealed class CalendarService : ICalendarService
 
         var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
         var today = BusinessDateTime.ToVietnamDate(nowUtc);
-        var horizon = today.AddMonths(6);
-
+        var horizon = today.Year == 9999 && today.Month > 6 ? DateOnly.MaxValue : today.AddMonths(6);
         var asset = await _assetRepository.GetCalendarSnapshotAsync(assetId, today, horizon, cancellationToken);
         if (asset is null)
         {
@@ -152,7 +151,7 @@ public sealed class CalendarService : ICalendarService
         else
         {
             validStart = today;
-            validEnd = today.AddMonths(6);
+            validEnd = today.Year == 9999 && today.Month > 6 ? DateOnly.MaxValue : today.AddMonths(6);
         }
 
         var snapshot = await _listingRepository.GetCalendarSnapshotAsync(listingId, validStart, validEnd, cancellationToken);
@@ -167,7 +166,8 @@ public sealed class CalendarService : ICalendarService
         }
 
         var days = new List<ListingCalendarDayResponse>();
-        for (var d = validStart; d <= validEnd; d = d.AddDays(1))
+        var d = validStart;
+        while (true)
         {
             int occupied = 0;
             int blocked = 0;
@@ -207,6 +207,12 @@ public sealed class CalendarService : ICalendarService
                 available,
                 suspendedOccupied,
                 suspendedBlocked));
+
+            if (d == validEnd)
+            {
+                break;
+            }
+            d = d.AddDays(1);
         }
 
         int totalQuantity = snapshot.Assets.Count(a => a.AcceptingBookings);
