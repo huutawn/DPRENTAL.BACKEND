@@ -73,3 +73,13 @@ với dữ liệu lớn, contract chuyên biệt phải hỗ trợ phân trang.
 Template test kiểm tra Result invariant, ánh xạ error và exception qua HTTP ở
 Production, gồm fallback khi client không nhận JSON. Không sao chép mã lỗi,
 constraint database hay dependency đặc thù nghiệp vụ AuthService.
+
+## Mô hình Rental Domain MVP
+
+Dịch vụ triển khai mô hình nghiệp vụ canonical theo AGENTS.md và thiết kế mới:
+- Toàn bộ ValueObjects đã được inline vào 11 entities sở hữu kèm DataAnnotations và Fluent API trong `RentalServiceDbContext`.
+- Các enums nghiệp vụ (`RentalCartStatus`, `RentalOrderStatus`, `RentalItemStatus`, `RentalUnitAssignmentStatus`, `UnitCondition`, `DeductionProposalStatus`, `DisputeStatus`, `ActorRole`) và `ErrorType` được đặt tập trung tại `Common/Enums`.
+- Ngoại lệ kiến trúc: EF Core persistence được đặt trong `Domain/Repositories` (tương đồng AuthService), không tách riêng project Infrastructure.
+- Hai Aggregate Roots:
+  1. `RentalCart`: Quản lý các dòng `RentalCartItem`, checkout all-or-nothing, abandon và optimistic concurrency qua `Version`.
+  2. `RentalOrder`: Quản lý `RentalItem`, `RentalUnitAssignment`, `RentalStateTransition`, `RentalTermsAcceptance`, `HandoverRecord`, `ReturnRecord`, `DeductionProposal`, `Dispute`. Trạng thái đơn được tổng hợp authoritative từ các items (`RecalculateStatus`).

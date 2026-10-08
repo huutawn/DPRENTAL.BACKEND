@@ -9,7 +9,11 @@
 | `Application` | DTOs, Services, Mapping và điều phối domain | Controller, HTTP pipeline, DbContext |
 | `Api` | Controllers, middleware và DI/composition root | Business logic trực tiếp |
 
-Domain sở hữu repository contracts, EF Core DbContext và repository implementations theo cấu trúc AuthService. API đăng ký persistence qua `AddRentalServiceDomainRepositories`.
+Domain sở hữu 11 entities nghiệp vụ Rental, repository contracts, EF Core DbContext và repository implementations theo cấu trúc AuthService. Cấu trúc persistence này là **ngoại lệ kiến trúc riêng** được ghi nhận đối với quy tắc Domain không phụ thuộc EF trong AGENTS.md (không tách project Infrastructure riêng). Toàn bộ ValueObjects đã được inline trực tiếp thành các fields trên entities sở hữu, enums nằm tại `Common/Enums`. API đăng ký persistence qua `AddRentalServiceDomainRepositories`.
+
+### Danh sách Entities và Aggregate Roots
+- **RentalCart** (Aggregate Root): `RentalCart`, `RentalCartItem`
+- **RentalOrder** (Aggregate Root): `RentalOrder`, `RentalItem`, `RentalUnitAssignment`, `RentalStateTransition`, `RentalTermsAcceptance`, `HandoverRecord`, `ReturnRecord`, `DeductionProposal`, `Dispute`
 
 ## Cấu hình môi trường
 
