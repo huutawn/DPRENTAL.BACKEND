@@ -28,7 +28,8 @@ public class RentalUnitAssignment
     [MaxLength(2000)]
     public string? HandoverNote { get; private set; }
 
-    public List<Guid> HandoverMediaIds { get; private set; } = [];
+    private readonly List<Guid> _handoverMediaIds = [];
+    public IReadOnlyList<Guid> HandoverMediaIds => _handoverMediaIds.AsReadOnly();
 
     public Guid? ReturnRecordId { get; private set; }
 
@@ -37,7 +38,8 @@ public class RentalUnitAssignment
     [MaxLength(2000)]
     public string? ReturnNote { get; private set; }
 
-    public List<Guid> ReturnMediaIds { get; private set; } = [];
+    private readonly List<Guid> _returnMediaIds = [];
+    public IReadOnlyList<Guid> ReturnMediaIds => _returnMediaIds.AsReadOnly();
 
     public DateTimeOffset? AllocationClosedAt { get; private set; }
 
@@ -52,7 +54,8 @@ public class RentalUnitAssignment
     [MaxLength(2000)]
     public string? DeductionReason { get; private set; }
 
-    public List<Guid> DeductionMediaIds { get; private set; } = [];
+    private readonly List<Guid> _deductionMediaIds = [];
+    public IReadOnlyList<Guid> DeductionMediaIds => _deductionMediaIds.AsReadOnly();
 
     [ForeignKey(nameof(RentalItemId))]
     public RentalItem? RentalItem { get; private set; }
@@ -92,7 +95,11 @@ public class RentalUnitAssignment
         HandoverRecordId = handoverRecordId;
         HandoverCondition = condition;
         HandoverNote = note;
-        HandoverMediaIds = (mediaIds ?? []).ToList();
+        _handoverMediaIds.Clear();
+        if (mediaIds is not null)
+        {
+            _handoverMediaIds.AddRange(mediaIds);
+        }
         Status = RentalUnitAssignmentStatus.HandedOver;
     }
 
@@ -107,7 +114,11 @@ public class RentalUnitAssignment
         ReturnRecordId = returnRecordId;
         ReturnCondition = condition;
         ReturnNote = note;
-        ReturnMediaIds = (mediaIds ?? []).ToList();
+        _returnMediaIds.Clear();
+        if (mediaIds is not null)
+        {
+            _returnMediaIds.AddRange(mediaIds);
+        }
         AllocationClosedAt = allocationClosedAt;
         InventoryDispositionRef = dispositionRef;
         Status = condition == UnitCondition.Damaged
@@ -124,12 +135,25 @@ public class RentalUnitAssignment
         DeductionProposalId = deductionProposalId;
         ProposedDeductionAmount = amount;
         DeductionReason = reason;
-        DeductionMediaIds = (mediaIds ?? []).ToList();
+        _deductionMediaIds.Clear();
+        if (mediaIds is not null)
+        {
+            _deductionMediaIds.AddRange(mediaIds);
+        }
     }
 
     internal void Release(DateTimeOffset? allocationClosedAt)
     {
         Status = RentalUnitAssignmentStatus.Released;
         AllocationClosedAt = allocationClosedAt;
+    }
+
+    internal void RecordAllocationClosed(DateTimeOffset closedAt, string? dispositionRef)
+    {
+        AllocationClosedAt = closedAt;
+        if (!string.IsNullOrWhiteSpace(dispositionRef))
+        {
+            InventoryDispositionRef = dispositionRef;
+        }
     }
 }
