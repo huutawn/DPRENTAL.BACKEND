@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Claims;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
@@ -145,10 +146,18 @@ public sealed class ListingAuthorizationIntegrationTests : IClassFixture<Postgre
         var ownerId = Guid.NewGuid();
         var listing = await CreateTestListingAsync(ownerId);
 
-        // Service token with sub = ownerId and manage permission
-        var serviceToken = secFactory.CreateServiceToken(
-            serviceId: ownerId,
-            scopes: [InventoryAccessEvaluator.ScopeAllocationWrite, InventoryAccessEvaluator.PermissionAssetManage]);
+        // Service token with audience = ServiceAudience, u = svc, sub = ownerId, permission p = inventory.asset.manage, role r = adm, and scope s
+        var serviceClaims = new[]
+        {
+            new Claim("u", "svc"),
+            new Claim("p", InventoryAccessEvaluator.PermissionAssetManage),
+            new Claim("r", "adm"),
+            new Claim("s", InventoryAccessEvaluator.ScopeAllocationWrite)
+        };
+        var serviceToken = secFactory.CreateToken(
+            ownerId.ToString("D"),
+            serviceClaims,
+            InventorySecurityTestFactory.ServiceAudience);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
 
         // 1. POST Create Listing -> 403 Forbidden
@@ -200,6 +209,11 @@ public sealed class ListingAuthorizationIntegrationTests : IClassFixture<Postgre
         // 8. GET Listing Calendar -> 403 Forbidden
         var calResp = await client.GetAsync($"api/v1/inventory/equipment-listings/{listing.Id:D}/calendar?from=2026-11-10&to=2026-11-12");
         Assert.Equal(HttpStatusCode.Forbidden, calResp.StatusCode);
+        // Verify ALL downstream client counters remain strictly 0
+        Assert.Equal(0, catalog.LookupCalls);
+        Assert.Equal(0, catalog.BrandCalls);
+        Assert.Equal(0, catalog.SpecCalls);
+        Assert.Equal(0, media.VerifyCalls);
 
         // Verify Database has NO mutations from the service calls
         await using var db = CreateDbContext();

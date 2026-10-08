@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -14,6 +15,7 @@ using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Enums;
+using Dprental.InventoryService.Common.Utils;
 using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Domain.IRepositories;
 using Dprental.InventoryService.Domain.Repositories;
@@ -23,6 +25,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
 using Xunit;
 
 namespace Dprental.InventoryService.Api.Tests.Integration;
@@ -64,7 +67,8 @@ public sealed class SingleHoldAndCalendarConsistencyTests : IClassFixture<Postgr
 
     private (WebApplicationFactory<Program> App, InventorySecurityTestFactory SecFactory) CreateFactory(
         TestTimeProvider? clock = null,
-        Func<IServiceProvider, IEquipmentListingRepository>? listingRepoFactory = null)
+        Func<IServiceProvider, IEquipmentListingRepository>? listingRepoFactory = null,
+        Func<IServiceProvider, IAssetAllocationRepository>? allocRepoFactory = null)
     {
         var testClock = clock ?? new TestTimeProvider(FixedNow);
         var secFactory = new InventorySecurityTestFactory(_fixture.ConnectionString, testClock);
@@ -83,6 +87,12 @@ public sealed class SingleHoldAndCalendarConsistencyTests : IClassFixture<Postgr
                 {
                     services.RemoveAll<IEquipmentListingRepository>();
                     services.AddScoped(listingRepoFactory);
+                }
+
+                if (allocRepoFactory != null)
+                {
+                    services.RemoveAll<IAssetAllocationRepository>();
+                    services.AddScoped(allocRepoFactory);
                 }
             });
         });
@@ -237,56 +247,194 @@ public sealed class SingleHoldAndCalendarConsistencyTests : IClassFixture<Postgr
         Assert.Equal("Allocated", allocatedRes.Status);
     }
 
-    [Fact]
-    public async Task LockCoordination_ListingStatusChange_RacesWithSingleHold_SerializedByListingLock()
+    private async Task WaitForAdvisoryLockWaiterAsync(Guid listingId, TimeSpan timeout)
     {
-        var (app, secFactory) = CreateFactory();
-        await using var _ = app;
-        await using var __ = secFactory;
+        long listingLockKey = AssetLockKey.FromListingId(listingId);
 
+        using var cts = new CancellationTokenSource(timeout);
+        await using var conn = new NpgsqlConnection(_fixture.ConnectionString);
+        await conn.OpenAsync(cts.Token);
+
+        while (!cts.IsCancellationRequested)
+        {
+            await using var cmd = new NpgsqlCommand("""
+                SELECT count(*)
+                FROM pg_locks
+                WHERE locktype = 'advisory'
+                  AND ((classid::bigint << 32) | (objid::bigint & 4294967295)) = @key
+                  AND NOT granted;
+                """, conn);
+            cmd.Parameters.AddWithValue("key", listingLockKey);
+
+            var count = Convert.ToInt64(await cmd.ExecuteScalarAsync(cts.Token), CultureInfo.InvariantCulture);
+            if (count > 0)
+            {
+                return; // Lock waiter observed!
+            }
+
+            await Task.Delay(20, cts.Token);
+        }
+
+        throw new TimeoutException($"Hết thời gian chờ quan sát lock waiter cho listing {listingId} trong pg_locks.");
+    }
+
+    [Fact]
+    public async Task LockCoordination_PatchWinsListingLockFirst_HoldWaitsAndFailsWith409ListingNotActive()
+    {
         var ownerId = Guid.NewGuid();
         var (listing, asset) = await CreateTestListingAndUnitAsync(ownerId, EquipmentListingStatus.Active);
 
-        var svcToken = secFactory.CreateServiceToken(Guid.NewGuid(), scopes: [InventoryAccessEvaluator.ScopeAllocationWrite]);
+        var patchAcquiredLock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowPatchCommit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int patchReadCount = 0;
+
+        var (app, secFactory) = CreateFactory(
+            listingRepoFactory: sp => new InterceptingListingRepository(
+                new EquipmentListingRepository(sp.GetRequiredService<InventoryServiceDbContext>()),
+                onGetById: async (l) =>
+                {
+                    // Call 2 is the read inside ExecuteListingWriteAsync while holding the advisory lock
+                    if (Interlocked.Increment(ref patchReadCount) == 2)
+                    {
+                        patchAcquiredLock.TrySetResult();
+                        await allowPatchCommit.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                    }
+                }));
+
+        await using var _ = app;
+        await using var __ = secFactory;
+
+        using var clientPatch = app.CreateClient();
+        using var clientHold = app.CreateClient();
+
         var humanToken = secFactory.CreateHumanToken(ownerId, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        var svcToken = secFactory.CreateServiceToken(Guid.NewGuid(), scopes: [InventoryAccessEvaluator.ScopeAllocationWrite]);
+        clientPatch.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", humanToken);
+        clientHold.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", svcToken);
+
+        var patchPayload = new { status = "Inactive" };
+        var holdPayload = new CreateHoldRequest(
+            SourceSystem: "rental_service",
+            ExternalReference: "REF-RACE-PATCH-WINS-01",
+            StartDate: new DateOnly(2026, 11, 10),
+            EndDate: new DateOnly(2026, 11, 15),
+            HoldExpiresAt: FixedNow.AddDays(5));
+
+        // 1. Launch PATCH: acquires Listing lock and pauses inside transaction
+        var tPatch = clientPatch.PatchAsync($"api/v1/inventory/equipment-listings/{listing.Id:D}",
+            new StringContent(JsonSerializer.Serialize(patchPayload), Encoding.UTF8, "application/json"));
+
+        // Wait until PATCH has acquired the Listing advisory lock in PostgreSQL
+        await patchAcquiredLock.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // 2. Launch single hold: enters ExecuteAsync and attempts to acquire Listing lock
+        var tHold = clientHold.PostAsync($"api/v1/inventory/assets/{asset.Id:D}/holds",
+            new StringContent(JsonSerializer.Serialize(holdPayload), Encoding.UTF8, "application/json"));
+
+        // 3. Observe in pg_locks that hold connection is WAITING for the Listing advisory lock!
+        await WaitForAdvisoryLockWaiterAsync(listing.Id, TimeSpan.FromSeconds(5));
+
+        // 4. Release PATCH to commit its update to Inactive
+        allowPatchCommit.TrySetResult();
+        var respPatch = await tPatch;
+        Assert.Equal(HttpStatusCode.OK, respPatch.StatusCode);
+
+        // 5. Hold unblocks, sees Listing is now Inactive, and fails with 409 LISTING_NOT_ACTIVE
+        var respHold = await tHold;
+        Assert.Equal(HttpStatusCode.Conflict, respHold.StatusCode);
+        var bodyHold = await respHold.Content.ReadAsStringAsync();
+        Assert.Contains("LISTING_NOT_ACTIVE", bodyHold);
+
+        // 6. Verify in DB: 0 allocations, 0 transitions, 0 outbox messages for the rejected hold
+        await using var db = CreateDbContext();
+        var finalListing = await db.EquipmentListings.SingleAsync(x => x.Id == listing.Id);
+        Assert.Equal(EquipmentListingStatus.Inactive, finalListing.Status);
+
+        var allocs = await db.AssetAllocations.Where(a => a.AssetId == asset.Id).ToListAsync();
+        Assert.Empty(allocs);
+
+        var transitions = await db.AllocationTransitions.Where(t => db.AssetAllocations.Any(a => a.Id == t.AllocationId && a.AssetId == asset.Id)).ToListAsync();
+        Assert.Empty(transitions);
+        var outbox = await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync();
+        Assert.Empty(outbox);
+    }
+
+    [Fact]
+    public async Task LockCoordination_HoldWinsListingLockFirst_PatchWaitsAndBothSucceed()
+    {
+        var ownerId = Guid.NewGuid();
+        var (listing, asset) = await CreateTestListingAndUnitAsync(ownerId, EquipmentListingStatus.Active);
+
+        var holdAcquiredLock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowHoldCommit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var (app, secFactory) = CreateFactory(
+            allocRepoFactory: sp => new InterceptingAllocationRepository(
+                new AssetAllocationRepository(sp.GetRequiredService<InventoryServiceDbContext>()),
+                onGetActiveCandidates: async () =>
+                {
+                    // Inside ExecuteAsync: Hold already acquired Listing lock and Asset lock
+                    holdAcquiredLock.TrySetResult();
+                    await allowHoldCommit.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                }));
+
+        await using var _ = app;
+        await using var __ = secFactory;
 
         using var clientHold = app.CreateClient();
         using var clientPatch = app.CreateClient();
+
+        var svcToken = secFactory.CreateServiceToken(Guid.NewGuid(), scopes: [InventoryAccessEvaluator.ScopeAllocationWrite]);
+        var humanToken = secFactory.CreateHumanToken(ownerId, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
         clientHold.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", svcToken);
         clientPatch.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", humanToken);
 
+        const string extRef = "REF-RACE-HOLD-WINS-01";
         var holdPayload = new CreateHoldRequest(
             SourceSystem: "rental_service",
-            ExternalReference: "REF-RACE-STATUS-01",
+            ExternalReference: extRef,
             StartDate: new DateOnly(2026, 11, 10),
             EndDate: new DateOnly(2026, 11, 15),
             HoldExpiresAt: FixedNow.AddDays(5));
 
         var patchPayload = new { status = "Inactive" };
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-
+        // 1. Launch single hold: enters ExecuteAsync, acquires Listing lock, and pauses inside operation
         var tHold = clientHold.PostAsync($"api/v1/inventory/assets/{asset.Id:D}/holds",
-            new StringContent(JsonSerializer.Serialize(holdPayload), Encoding.UTF8, "application/json"), cts.Token);
+            new StringContent(JsonSerializer.Serialize(holdPayload), Encoding.UTF8, "application/json"));
 
+        // Wait until Hold has acquired the Listing advisory lock in PostgreSQL
+        await holdAcquiredLock.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // 2. Launch PATCH: attempts to acquire Listing lock and blocks
         var tPatch = clientPatch.PatchAsync($"api/v1/inventory/equipment-listings/{listing.Id:D}",
-            new StringContent(JsonSerializer.Serialize(patchPayload), Encoding.UTF8, "application/json"), cts.Token);
+            new StringContent(JsonSerializer.Serialize(patchPayload), Encoding.UTF8, "application/json"));
 
-        await Task.WhenAll(tHold, tPatch);
+        // 3. Observe in pg_locks that PATCH connection is WAITING for the Listing advisory lock!
+        await WaitForAdvisoryLockWaiterAsync(listing.Id, TimeSpan.FromSeconds(5));
 
+        // 4. Release Hold to commit its creation
+        allowHoldCommit.TrySetResult();
         var respHold = await tHold;
-        var respPatch = await tPatch;
+        Assert.Equal(HttpStatusCode.Created, respHold.StatusCode);
 
-        // Patch to Inactive succeeds with 200 OK
+        // 5. PATCH unblocks, acquires Listing lock, updates status to Inactive, and commits
+        var respPatch = await tPatch;
         Assert.Equal(HttpStatusCode.OK, respPatch.StatusCode);
 
-        // Hold either succeeded before deactivation (201) or was rejected because Listing became Inactive (409 LISTING_NOT_ACTIVE)
-        Assert.True(respHold.StatusCode is HttpStatusCode.Created or HttpStatusCode.Conflict);
-        if (respHold.StatusCode == HttpStatusCode.Conflict)
-        {
-            var body = await respHold.Content.ReadAsStringAsync();
-            Assert.Contains("LISTING_NOT_ACTIVE", body);
-        }
+        // 6. Verify in DB: Listing is Inactive, but hold was successfully persisted
+        await using var db = CreateDbContext();
+        var finalListing = await db.EquipmentListings.SingleAsync(x => x.Id == listing.Id);
+        Assert.Equal(EquipmentListingStatus.Inactive, finalListing.Status);
+
+        var alloc = await db.AssetAllocations.SingleAsync(a => a.AssetId == asset.Id && a.ExternalReference == extRef);
+        Assert.Equal(AllocationStatus.Held, alloc.Status);
+
+        var transitions = await db.AllocationTransitions.Where(t => t.AllocationId == alloc.Id).ToListAsync();
+        Assert.Single(transitions);
+        Assert.Equal(AllocationOperationType.CreateHold, transitions[0].OperationType);
+        var outbox = await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync();
+        Assert.Single(outbox);
     }
 
     [Fact]
@@ -389,5 +537,100 @@ public sealed class SingleHoldAndCalendarConsistencyTests : IClassFixture<Postgr
 
         public void Add(EquipmentListing listing) => _inner.Add(listing);
         public void Update(EquipmentListing listing) => _inner.Update(listing);
+    }
+
+    private sealed class InterceptingListingRepository : IEquipmentListingRepository
+    {
+        private readonly IEquipmentListingRepository _inner;
+        private readonly Func<EquipmentListing?, Task>? _onGetById;
+
+        public InterceptingListingRepository(IEquipmentListingRepository inner, Func<EquipmentListing?, Task>? onGetById = null)
+        {
+            _inner = inner;
+            _onGetById = onGetById;
+        }
+
+        public async Task<EquipmentListing?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            var res = await _inner.GetByIdAsync(id, cancellationToken);
+            if (_onGetById != null)
+            {
+                await _onGetById(res);
+            }
+            return res;
+        }
+
+        public Task<EquipmentListing?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default) =>
+            _inner.GetByIdForOwnerAsync(id, ownerUserId, cancellationToken);
+
+        public Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            _inner.GetPublicByIdAsync(id, cancellationToken);
+
+        public Task<IReadOnlyList<EquipmentListing>> ListForOwnerAsync(Guid ownerUserId, int skip, int take, CancellationToken cancellationToken = default) =>
+            _inner.ListForOwnerAsync(ownerUserId, skip, take, cancellationToken);
+
+        public Task<int> CountForOwnerAsync(Guid ownerUserId, CancellationToken cancellationToken = default) =>
+            _inner.CountForOwnerAsync(ownerUserId, cancellationToken);
+
+        public Task<int> GetTotalQuantityAsync(Guid listingId, CancellationToken cancellationToken = default) =>
+            _inner.GetTotalQuantityAsync(listingId, cancellationToken);
+
+        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsPublicAsync(AssetSearchFilters filters, CancellationToken cancellationToken = default) =>
+            _inner.GetDistinctSchemaVersionsPublicAsync(filters, cancellationToken);
+
+        public Task<PublicEquipmentListingSearchResult> SearchPublicAsync(EquipmentListingSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+            _inner.SearchPublicAsync(criteria, cancellationToken);
+
+        public Task<EquipmentListing?> GetCalendarSnapshotAsync(Guid listingId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
+            _inner.GetCalendarSnapshotAsync(listingId, startDate, endDate, cancellationToken);
+
+        public void Add(EquipmentListing listing) => _inner.Add(listing);
+        public void Update(EquipmentListing listing) => _inner.Update(listing);
+    }
+
+    private sealed class InterceptingAllocationRepository : IAssetAllocationRepository
+    {
+        private readonly IAssetAllocationRepository _inner;
+        private readonly Func<Task>? _onGetActiveCandidates;
+
+        public InterceptingAllocationRepository(IAssetAllocationRepository inner, Func<Task>? onGetActiveCandidates = null)
+        {
+            _inner = inner;
+            _onGetActiveCandidates = onGetActiveCandidates;
+        }
+
+        public async Task<IReadOnlyList<AssetAllocation>> GetActiveCandidatesAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default)
+        {
+            if (_onGetActiveCandidates != null)
+            {
+                await _onGetActiveCandidates();
+            }
+            return await _inner.GetActiveCandidatesAsync(assetId, startDate, endDate, cancellationToken);
+        }
+
+        public Task<AssetAllocation?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            _inner.GetByIdAsync(id, cancellationToken);
+
+        public Task<AssetAllocation?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default) =>
+            _inner.GetByIdForOwnerAsync(id, ownerUserId, cancellationToken);
+
+        public Task<AssetAllocation?> GetByExternalReferenceAsync(string sourceSystem, string externalReference, CancellationToken cancellationToken = default) =>
+            _inner.GetByExternalReferenceAsync(sourceSystem, externalReference, cancellationToken);
+
+        public Task<IReadOnlyList<AssetAllocation>> GetByGroupReferenceAsync(string sourceSystem, string groupReference, CancellationToken cancellationToken = default) =>
+            _inner.GetByGroupReferenceAsync(sourceSystem, groupReference, cancellationToken);
+
+        public Task<IReadOnlyList<AssetAllocation>> GetExpiredHoldsAsync(Guid assetId, DateTimeOffset now, CancellationToken cancellationToken = default) =>
+            _inner.GetExpiredHoldsAsync(assetId, now, cancellationToken);
+
+        public Task<IReadOnlyList<AssetAllocation>> ListByAssetAsync(Guid assetId, int skip, int take, CancellationToken cancellationToken = default) =>
+            _inner.ListByAssetAsync(assetId, skip, take, cancellationToken);
+
+        public Task<IReadOnlyList<AssetAllocation>> ListByOwnerAsync(Guid ownerUserId, int skip, int take, CancellationToken cancellationToken = default) =>
+            _inner.ListByOwnerAsync(ownerUserId, skip, take, cancellationToken);
+
+        public void Add(AssetAllocation allocation) => _inner.Add(allocation);
+        public void AddRange(IEnumerable<AssetAllocation> allocations) => _inner.AddRange(allocations);
+        public void Update(AssetAllocation allocation) => _inner.Update(allocation);
     }
 }

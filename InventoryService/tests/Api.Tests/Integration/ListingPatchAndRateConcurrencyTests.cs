@@ -275,43 +275,64 @@ public sealed class ListingPatchAndRateConcurrencyTests : IClassFixture<Postgres
     }
 
     [Fact]
-    public async Task PutRentalRate_StaleSnapshotVersion_Returns409ConflictAndPreservesWinnerUpdate()
+    public async Task PutRentalRate_TwoConcurrentHttpPuts_SameSnapshotVersion_WinnerSucceedsAndStaleFailsWith409()
     {
         var ownerId = Guid.NewGuid();
         var listing = await CreateTestListingAsync(ownerId);
 
-        int readCount = 0;
+        var requestAReadSnapshot = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requestBFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int getByIdCount = 0;
+
         var (app, secFactory, _, _) = CreateFactory(listingRepoFactory: sp =>
             new InterceptingListingRepository(
                 new EquipmentListingRepository(sp.GetRequiredService<InventoryServiceDbContext>()),
                 onAfterGetById: async (l) =>
                 {
-                    if (Interlocked.Increment(ref readCount) == 1)
+                    // Call 1 is Request A's snapshot read: pause until Request B completes its update
+                    if (Interlocked.Increment(ref getByIdCount) == 1)
                     {
-                        // Concurrent client directly updates rental rate in DB between snapshot read and write lock
-                        await using var db2 = CreateDbContext();
-                        var listingToUpdate = await db2.EquipmentListings.SingleAsync(x => x.Id == listing.Id);
-                        listingToUpdate.UpdateRentalRate(888_000m, null, null, "VND", DateTimeOffset.UtcNow);
-                        await db2.SaveChangesAsync();
+                        requestAReadSnapshot.TrySetResult();
+                        await requestBFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
                     }
                 }));
 
         await using var _ = app;
         await using var __ = secFactory;
-        using var client = app.CreateClient();
 
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
-            secFactory.CreateHumanToken(ownerId, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
+        using var clientA = app.CreateClient();
+        using var clientB = app.CreateClient();
 
-        var payload = new RentalRateDto(777_000m, null, null, "VND");
-        var response = await client.PutAsync($"api/v1/inventory/equipment-listings/{listing.Id:D}/rental-rate",
-            new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
+        var token = secFactory.CreateHumanToken(ownerId, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        clientA.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        clientB.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("STALE_INVENTORY_WRITE", body);
+        var payloadA = new RentalRateDto(777_000m, null, null, "VND");
+        var payloadB = new RentalRateDto(888_000m, null, null, "VND");
 
-        // Verify in DB that winner's price (888,000 VND) was preserved, not overwritten by stale request (777,000 VND)
+        // 1. Launch HTTP PUT A (reads snapshot version 1 and pauses before acquiring lock)
+        var taskA = clientA.PutAsync($"api/v1/inventory/equipment-listings/{listing.Id:D}/rental-rate",
+            new StringContent(JsonSerializer.Serialize(payloadA), Encoding.UTF8, "application/json"));
+
+        // Wait until Request A has definitely read its snapshot
+        await requestAReadSnapshot.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // 2. Launch HTTP PUT B (reads same snapshot version 1, acquires lock, commits and increments version)
+        var respB = await clientB.PutAsync($"api/v1/inventory/equipment-listings/{listing.Id:D}/rental-rate",
+            new StringContent(JsonSerializer.Serialize(payloadB), Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.OK, respB.StatusCode);
+
+        // 3. Unblock Request A to proceed into its write transaction with stale version
+        requestBFinished.TrySetResult();
+        var respA = await taskA;
+
+        // Request A must be rejected with 409 Conflict STALE_INVENTORY_WRITE
+        Assert.Equal(HttpStatusCode.Conflict, respA.StatusCode);
+        var bodyA = await respA.Content.ReadAsStringAsync();
+        Assert.Contains("STALE_INVENTORY_WRITE", bodyA);
+
+        // 4. Verify in DB that winner B's price (888,000 VND) was preserved, not overwritten by stale A (777,000 VND)
         await using var db = CreateDbContext();
         var finalListing = await db.EquipmentListings.SingleAsync(x => x.Id == listing.Id);
         Assert.Equal(888_000m, finalListing.DailyRate);
