@@ -311,3 +311,20 @@ Client phải cập nhật cùng đợt phát hành: PUT không còn chỉ nhậ
 Migration `AddOrganizationSuspensionAndAuditReason` bổ sung cột `SuspensionReason` cho bảng `Organizations`, cột `Reason` và index `(Target, Timestamp)` cho bảng `AuditLogs`, đồng thời tách lý do từ chối cũ dạng `Success: ...` sang trường `Reason`.
 
 Migration `AddOrganizationAuditStatus` bổ sung cột `Status` nullable cho bảng `AuditLogs` và backfill trạng thái cho các audit log thành công có action xác định chắc chắn (Pending cho Register/Resubmit/ReviewReminder; Active cho Approve/Activate; Rejected cho Reject; Suspended cho Suspend). Log của ProfileUpdate và các log không xác định giữ `null`. Áp dụng migration trước khi rollout ứng dụng. Phiên bản cũ vẫn ghi được với `Status` null; log phát sinh từ phiên bản cũ trong thời gian rollout giữ `null` (khi lọc theo `status`, các dòng `null` không khớp).
+
+### Sửa seed Owner và loại bỏ role ops
+
+`RepairOwnerRoleSeed` bổ sung role `Owner` nếu thiếu, với ID `a1010000-0000-0000-0000-000000000001` và scope `Organization` (`1`). Migration bổ sung permission và liên kết còn thiếu: `identity.organizations.read/update`, `identity.members.read/manage`, `identity.roles.read/assign.organization/revoke.organization`, `inventory.asset.manage` và `inventory.calendar.read`. Role/permission đã đúng, mô tả hiện có, các grant bổ sung và quan hệ tài khoản được giữ nguyên. `own` chỉ là alias JWT, không tạo role riêng. Xung đột ID, tên hoặc scope của Owner, hoặc ID permission bị dùng cho code khác, làm transaction thất bại thay vì tự đổi dữ liệu.
+
+`RemoveOpsRole` xóa role global `ops` có ID `d4040000-0000-0000-0000-000000000002`, các `UserRoles` và `RolePermissions` liên quan. Migration giữ tài khoản, các role khác và toàn bộ catalog permission; không tự thay ops bằng customer hay admin. Tài khoản chỉ có ops sẽ không còn role sau migration. Các session chưa bị thu hồi của user đang có ops được thu hồi; AuthService từ chối access/refresh token của những session này. Service khác chỉ kiểm tra JWT offline có thể tiếp tục chấp nhận token cũ đến khi hết hạn. Role ops có ID/tên/scope không đúng hoặc được gán vào organization membership sẽ chặn migration để xử lý dữ liệu riêng.
+
+Trước khi chạy trên dev, lưu image migrator hiện tại và sao lưu DB. Tạm dừng các instance AuthService để tránh phát hành phiên/token từ quyền cũ trong lúc xóa ops. Tại `/opt/dprental/dev`, dùng image migrator chứa cả hai migration rồi chạy:
+
+```bash
+docker compose --env-file .env --env-file release.env stop auth-service
+docker compose --env-file .env --env-file release.env --profile migration run --rm auth-migrate
+```
+
+Chỉ khởi động lại AuthService sau khi migration thành công, kiểm tra Owner có đủ chín grant bắt buộc, liệt kê riêng grant bổ sung, xác nhận không còn ops và kiểm tra readiness. Nếu migration lỗi, giữ AuthService dừng cho tới khi xác định trạng thái dữ liệu và xử lý lỗi. Cả hai migration đều chạy trong transaction, có thể chạy lại phần sửa dữ liệu mà không tạo bản ghi trùng. `Down` chủ động từ chối: không thể phân biệt seed cũ/mới hoặc khôi phục chính xác các gán role và phiên đã bị thu hồi; muốn đảo dữ liệu phải dùng backup trước migration.
+
+Hai migration chỉ thay đổi dữ liệu RBAC. API admin tạo user vẫn chỉ nhận role global; việc admin cấp Owner gắn với tổ chức và thay thế luồng tự đăng ký chưa nằm trong thay đổi này. Các migration lịch sử tạo ops được giữ để bảo toàn lịch sử upgrade; sau khi áp dụng đầy đủ, role này không còn trong DB.
