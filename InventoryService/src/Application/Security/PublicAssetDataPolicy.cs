@@ -19,6 +19,12 @@ public static class PublicAssetDataPolicy
         "serialNumber", "serial_number", "serial", "serialNo", "serial_no",
         "displayName", "display_name",
 
+        // Physical asset & Group metadata
+        "assetCode", "asset_code",
+        "assetId", "asset_id",
+        "assets",
+        "groupReference", "group_reference",
+
         // Suspension reason
         "suspensionReason", "suspension_reason",
 

@@ -29,19 +29,14 @@ public interface IInventoryAssetRepository : IRepo<InventoryAsset, Guid>
     Task<IReadOnlyList<int>> GetDistinctSchemaVersionsForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Lấy thông tin tài sản công khai theo ID (chỉ tài sản AcceptingBookings = true).
+    /// Lấy danh sách các đơn vị vật lý thuộc một EquipmentListing kèm phân trang.
     /// </summary>
-    Task<InventoryAsset?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<InventoryAsset>> GetAssetsByListingIdAsync(Guid listingId, int skip, int take, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Lấy danh sách các distinct schema_version của tài sản công khai thỏa mãn các bộ lọc metadata.
+    /// Đếm tổng số đơn vị vật lý thuộc một EquipmentListing.
     /// </summary>
-    Task<IReadOnlyList<int>> GetDistinctSchemaVersionsPublicAsync(AssetSearchFilters filters, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Tìm kiếm và phân trang tài sản công khai trong một transaction đọc RepeatableRead duy nhất.
-    /// </summary>
-    Task<PublicAssetSearchResult> SearchPublicAsync(PublicAssetSearchCriteria criteria, CancellationToken cancellationToken = default);
+    Task<int> CountAssetsByListingIdAsync(Guid listingId, CancellationToken cancellationToken = default);
     /// <summary>
     /// Lấy snapshot tài sản cùng các khoảng chặn lịch (CalendarBlocks) và các lượt phân bổ ứng viên (Held/Allocated)
     /// giao với cửa sổ ngày [startDate, endDate] phục vụ đọc lịch tổng hợp (Calendar Read) trong một single query snapshot.
@@ -68,6 +63,14 @@ public interface IInventoryAssetRepository : IRepo<InventoryAsset, Guid>
     /// </summary>
     void Add(InventoryAsset asset);
 
+    /// <summary>
+    /// Kiểm tra số serial đã tồn tại trong cùng EquipmentListing hay chưa (so sánh lower(btrim(serial_number))).
+    /// </summary>
+    Task<bool> ExistsSerialInListingAsync(
+        Guid listingId,
+        string serialNumber,
+        Guid? excludeAssetId = null,
+        CancellationToken cancellationToken = default);
     /// <summary>
     /// Đánh dấu cập nhật thông tin tài sản.
     /// </summary>

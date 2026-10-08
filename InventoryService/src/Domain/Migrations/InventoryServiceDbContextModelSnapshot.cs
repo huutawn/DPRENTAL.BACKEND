@@ -122,6 +122,11 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("external_reference");
 
+                    b.Property<string>("GroupReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("group_reference");
+
                     b.Property<DateTimeOffset?>("HoldExpiresAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("hold_expires_at");
@@ -173,12 +178,23 @@ namespace InventoryService.Domain.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_asset_allocations_source_system_external_reference");
 
+                    b.HasIndex("SourceSystem", "GroupReference")
+                        .HasDatabaseName("ix_asset_allocations_source_system_group_reference")
+                        .HasFilter("\"group_reference\" IS NOT NULL");
+
                     b.HasIndex("Status", "HoldExpiresAt")
                         .HasDatabaseName("ix_asset_allocations_hold_expiry")
                         .HasFilter("\"status\" = 1 AND \"hold_expires_at\" IS NOT NULL");
 
+                    b.HasIndex("SourceSystem", "GroupReference", "AssetId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_asset_allocations_source_system_group_asset")
+                        .HasFilter("\"group_reference\" IS NOT NULL");
+
                     b.ToTable("asset_allocations", "inventory", t =>
                         {
+                            t.HasCheckConstraint("ck_asset_allocations_group_reference", "\"group_reference\" IS NULL OR (length(btrim(\"group_reference\")) > 0 AND length(\"group_reference\") <= 100)");
+
                             t.HasCheckConstraint("ck_asset_allocations_held_hold_expires_at", "\"status\" <> 1 OR \"hold_expires_at\" IS NOT NULL");
 
                             t.HasCheckConstraint("ck_asset_allocations_rental_period_order", "\"start_date\" <= \"end_date\"");
@@ -186,58 +202,6 @@ namespace InventoryService.Domain.Migrations
                             t.HasCheckConstraint("ck_asset_allocations_source_reference", "length(btrim(\"source_system\")) > 0 AND length(btrim(\"external_reference\")) > 0");
 
                             t.HasCheckConstraint("ck_asset_allocations_status", "\"status\" IN (1, 2, 5, 6)");
-                        });
-                });
-
-            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AssetRentalRate", b =>
-                {
-                    b.Property<Guid>("AssetId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("asset_id");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Currency")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)")
-                        .HasColumnName("currency");
-
-                    b.Property<decimal>("DailyRate")
-                        .HasColumnType("numeric(18,0)")
-                        .HasColumnName("daily_rate");
-
-                    b.Property<decimal?>("MonthlyRate")
-                        .HasColumnType("numeric(18,0)")
-                        .HasColumnName("monthly_rate");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<decimal?>("WeeklyRate")
-                        .HasColumnType("numeric(18,0)")
-                        .HasColumnName("weekly_rate");
-
-                    b.HasKey("AssetId")
-                        .HasName("pk_asset_rental_rates");
-
-                    b.HasIndex("DailyRate")
-                        .HasDatabaseName("ix_asset_rental_rates_daily_rate");
-
-                    b.ToTable("asset_rental_rates", "inventory", t =>
-                        {
-                            t.HasCheckConstraint("ck_asset_rental_rates_asset_id", "asset_id <> '00000000-0000-0000-0000-000000000000'::uuid");
-
-                            t.HasCheckConstraint("ck_asset_rental_rates_currency", "currency = 'VND'");
-
-                            t.HasCheckConstraint("ck_asset_rental_rates_daily_rate", "daily_rate >= 1 AND daily_rate <= 999999999999999999 AND trunc(daily_rate) = daily_rate");
-
-                            t.HasCheckConstraint("ck_asset_rental_rates_monthly_rate", "monthly_rate IS NULL OR (monthly_rate >= 1 AND monthly_rate <= 999999999999999999 AND trunc(monthly_rate) = monthly_rate)");
-
-                            t.HasCheckConstraint("ck_asset_rental_rates_weekly_rate", "weekly_rate IS NULL OR (weekly_rate >= 1 AND weekly_rate <= 999999999999999999 AND trunc(weekly_rate) = weekly_rate)");
                         });
                 });
 
@@ -293,6 +257,121 @@ namespace InventoryService.Domain.Migrations
                     b.ToTable("calendar_blocks", "inventory", t =>
                         {
                             t.HasCheckConstraint("ck_calendar_blocks_date_order", "\"start_date\" <= \"end_date\"");
+                        });
+                });
+
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.EquipmentListing", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("BrandId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("brand_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("currency");
+
+                    b.Property<decimal>("DailyRate")
+                        .HasColumnType("numeric(18,0)")
+                        .HasColumnName("daily_rate");
+
+                    b.Property<Guid>("EquipmentTypeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("equipment_type_id");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("model");
+
+                    b.Property<decimal?>("MonthlyRate")
+                        .HasColumnType("numeric(18,0)")
+                        .HasColumnName("monthly_rate");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_user_id");
+
+                    b.Property<int>("SchemaVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("schema_version");
+
+                    b.Property<string>("SpecValues")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("spec_values");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<Guid?>("ThumbnailMediaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("thumbnail_media_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<decimal?>("WeeklyRate")
+                        .HasColumnType("numeric(18,0)")
+                        .HasColumnName("weekly_rate");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BrandId")
+                        .HasDatabaseName("ix_equipment_listings_brand_id");
+
+                    b.HasIndex("DailyRate")
+                        .HasDatabaseName("ix_equipment_listings_daily_rate");
+
+                    b.HasIndex("EquipmentTypeId")
+                        .HasDatabaseName("ix_equipment_listings_equipment_type_id");
+
+                    b.HasIndex("OwnerUserId")
+                        .HasDatabaseName("ix_equipment_listings_owner_user_id");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("ix_equipment_listings_status");
+
+                    b.ToTable("equipment_listings", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_equipment_listings_currency", "currency = 'VND'");
+
+                            t.HasCheckConstraint("ck_equipment_listings_daily_rate", "daily_rate >= 1 AND daily_rate <= 999999999999999999 AND trunc(daily_rate) = daily_rate");
+
+                            t.HasCheckConstraint("ck_equipment_listings_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid AND brand_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_equipment_listings_model", "model ~ '\\S' AND length(model) <= 200");
+
+                            t.HasCheckConstraint("ck_equipment_listings_monthly_rate", "monthly_rate IS NULL OR (monthly_rate >= 1 AND monthly_rate <= 999999999999999999 AND trunc(monthly_rate) = monthly_rate)");
+
+                            t.HasCheckConstraint("ck_equipment_listings_schema_version", "schema_version >= 1");
+
+                            t.HasCheckConstraint("ck_equipment_listings_spec_values_object", "jsonb_typeof(spec_values) = 'object'");
+
+                            t.HasCheckConstraint("ck_equipment_listings_status", "\"status\" IN (1, 2, 3)");
+
+                            t.HasCheckConstraint("ck_equipment_listings_thumbnail_media_id", "thumbnail_media_id IS NULL OR thumbnail_media_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_equipment_listings_weekly_rate", "weekly_rate IS NULL OR (weekly_rate >= 1 AND weekly_rate <= 999999999999999999 AND trunc(weekly_rate) = weekly_rate)");
                         });
                 });
 
@@ -370,54 +449,34 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("accepting_bookings");
 
-                    b.Property<Guid?>("BrandId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("brand_id");
+                    b.Property<string>("AssetCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("asset_code");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<Guid>("EquipmentTypeId")
+                    b.Property<Guid>("EquipmentListingId")
                         .HasColumnType("uuid")
-                        .HasColumnName("equipment_type_id");
+                        .HasColumnName("equipment_listing_id");
 
                     b.Property<int?>("ManufactureYear")
                         .HasColumnType("integer")
                         .HasColumnName("manufacture_year");
 
-                    b.Property<string>("Model")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("model");
-
-                    b.Property<Guid>("OwnerUserId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("owner_user_id");
-
-                    b.Property<int>("SchemaVersion")
-                        .HasColumnType("integer")
-                        .HasColumnName("schema_version");
-
                     b.Property<string>("SerialNumber")
+                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("serial_number");
-
-                    b.Property<string>("SpecValues")
-                        .IsRequired()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("spec_values");
 
                     b.Property<string>("SuspensionReason")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
                         .HasColumnName("suspension_reason");
-
-                    b.Property<Guid?>("ThumbnailMediaId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("thumbnail_media_id");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -431,29 +490,22 @@ namespace InventoryService.Domain.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EquipmentTypeId")
-                        .HasDatabaseName("ix_assets_equipment_type_id");
+                    b.HasIndex("AssetCode")
+                        .IsUnique()
+                        .HasDatabaseName("ix_assets_asset_code");
 
-                    b.HasIndex("OwnerUserId")
-                        .HasDatabaseName("ix_assets_owner_user_id");
+                    b.HasIndex("EquipmentListingId")
+                        .HasDatabaseName("ix_assets_equipment_listing_id");
 
                     b.ToTable("assets", "inventory", t =>
                         {
-                            t.HasCheckConstraint("ck_assets_brand_id", "brand_id IS NULL OR brand_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+                            t.HasCheckConstraint("ck_assets_asset_code", "asset_code ~ '^AST-[0-9a-fA-F]{32}$'");
 
-                            t.HasCheckConstraint("ck_assets_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+                            t.HasCheckConstraint("ck_assets_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_listing_id <> '00000000-0000-0000-0000-000000000000'::uuid");
 
                             t.HasCheckConstraint("ck_assets_manufacture_year", "manufacture_year IS NULL OR manufacture_year >= 1900");
 
-                            t.HasCheckConstraint("ck_assets_model", "model ~ '\\S' AND length(model) <= 200");
-
-                            t.HasCheckConstraint("ck_assets_schema_version", "schema_version >= 1");
-
-                            t.HasCheckConstraint("ck_assets_serial_number", "serial_number IS NULL OR (serial_number ~ '\\S' AND length(serial_number) <= 100)");
-
-                            t.HasCheckConstraint("ck_assets_spec_values_object", "jsonb_typeof(spec_values) = 'object'");
-
-                            t.HasCheckConstraint("ck_assets_thumbnail_media_id", "thumbnail_media_id IS NULL OR thumbnail_media_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+                            t.HasCheckConstraint("ck_assets_serial_number", "length(btrim(serial_number)) > 0 AND length(serial_number) <= 100");
                         });
                 });
 
@@ -558,15 +610,15 @@ namespace InventoryService.Domain.Migrations
                     b.Navigation("Asset");
                 });
 
-            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AssetRentalRate", b =>
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.InventoryAsset", b =>
                 {
-                    b.HasOne("Dprental.InventoryService.Domain.Entities.InventoryAsset", "Asset")
-                        .WithOne("RentalRate")
-                        .HasForeignKey("Dprental.InventoryService.Domain.Entities.AssetRentalRate", "AssetId")
+                    b.HasOne("Dprental.InventoryService.Domain.Entities.EquipmentListing", "Listing")
+                        .WithMany("Assets")
+                        .HasForeignKey("EquipmentListingId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.Navigation("Asset");
+                    b.Navigation("Listing");
                 });
 
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AssetAllocation", b =>
@@ -574,14 +626,16 @@ namespace InventoryService.Domain.Migrations
                     b.Navigation("Transitions");
                 });
 
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.EquipmentListing", b =>
+                {
+                    b.Navigation("Assets");
+                });
+
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.InventoryAsset", b =>
                 {
                     b.Navigation("Allocations");
 
                     b.Navigation("CalendarBlocks");
-
-                    b.Navigation("RentalRate")
-                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

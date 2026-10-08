@@ -17,11 +17,11 @@ Domain sở hữu entities, value objects, domain policies, repository contracts
 
 Hệ thống quản lý 7 bảng thực thể trong schema `inventory`:
 
-1. `InventoryAsset` (`inventory.assets`): Tài sản trong kho, thuộc sở hữu cá nhân (`OwnerUserId`), liên kết với loại thiết bị Catalog (`EquipmentTypeId`) cùng thương hiệu chuẩn (`BrandId`), tên model (`Model`), số serial (`SerialNumber`), năm sản xuất (`ManufactureYear`), ảnh đại diện (`ThumbnailMediaId`), phiên bản dynamic schema (`SchemaVersion`), thông số kỹ thuật (`SpecValues` lưu JSONB), và cờ nhận lịch (`AcceptingBookings`). Thuộc tính `OrganizationId` đã được loại bỏ hoàn toàn khỏi entity và database schema.
-2. `AssetRentalRate` (`inventory.asset_rental_rates`): Giá thuê niêm yết của tài sản (quan hệ 1:1 với `inventory.assets` qua `asset_id`), gồm `DailyRate` (VND nguyên, bắt buộc), `WeeklyRate` (tùy chọn), `MonthlyRate` (tùy chọn), `Currency` (bắt buộc bằng `"VND"`), `CreatedAt`, `UpdatedAt`. B-tree index trên `daily_rate`.
-3. `AssetAllocation` (`inventory.asset_allocations`): Lượt phân bổ hoặc giữ chỗ lịch của tài sản, gồm nguồn (`SourceSystem`), mã tham chiếu (`ExternalReference`), khoảng thời gian (`RentalPeriod`), trạng thái (`AllocationStatus`: Held=1, Allocated=2, Cancelled=5, Released=6) và hạn giữ (`HoldExpiresAt`).
+1. `EquipmentListing` (`inventory.equipment_listings`): Danh mục niêm yết thiết bị trong kho, thuộc sở hữu cá nhân (`OwnerUserId`), liên kết với loại thiết bị Catalog (`EquipmentTypeId`) cùng thương hiệu chuẩn (`BrandId`), tên model (`Model`), ảnh đại diện (`ThumbnailMediaId`), phiên bản dynamic schema (`SchemaVersion`), thông số kỹ thuật (`SpecValues` lưu JSONB), giá thuê niêm yết (`DailyRate`, `WeeklyRate`, `MonthlyRate`, `Currency = "VND"`), trạng thái (`Status`: Draft=1, Active=2, Inactive=3), `CreatedAt`, `UpdatedAt`, và concurrency token `xmin`.
+2. `InventoryAsset` (`inventory.assets`): Đơn vị thiết bị vật lý thuộc một `EquipmentListing` (`EquipmentListingId`), định danh mã tài sản duy nhất (`AssetCode` = `AST-{AssetId:N}`), số serial (`SerialNumber`), năm sản xuất (`ManufactureYear`), cờ nhận lịch (`AcceptingBookings`), lý do tạm dừng (`SuspensionReason`), `CreatedAt`, `UpdatedAt`, và `xmin`.
+3. `AssetAllocation` (`inventory.asset_allocations`): Lượt phân bổ hoặc giữ chỗ lịch của đơn vị tài sản, gồm nguồn (`SourceSystem`), mã tham chiếu (`ExternalReference`), mã nhóm giữ chỗ (`GroupReference`), khoảng thời gian (`RentalPeriod`), trạng thái (`AllocationStatus`: Held=1, Allocated=2, Cancelled=5, Released=6) và hạn giữ (`HoldExpiresAt`).
 4. `AllocationTransition` (`inventory.allocation_transitions`): Lịch sử chuyển đổi trạng thái của lượt phân bổ (append-only audit log), có thứ tự `Sequence` và `OperationKey` chống trùng lặp.
-5. `CalendarBlock` (`inventory.calendar_blocks`): Khoảng thời gian chặn lịch tài sản phục vụ bảo trì, kiểm định hoặc sử dụng nội bộ (tối đa chân trời 6 tháng).
+5. `CalendarBlock` (`inventory.calendar_blocks`): Khoảng thời gian chặn lịch đơn vị tài sản phục vụ bảo trì, kiểm định hoặc sử dụng nội bộ (tối đa chân trời 6 tháng).
 6. `OutboxMessage` (`inventory.outbox_messages`): Lưu trữ thông điệp sự kiện theo mẫu Transactional Outbox Pattern với payload `jsonb` phục vụ xuất bản ra Kafka.
 7. `InboxMessage` (`inventory.inbox_messages`): Lưu trữ thông điệp theo mẫu Transactional Inbox Pattern với khóa duy nhất `(handler, message_id)`.
 ---
@@ -76,16 +76,25 @@ Hệ thống áp dụng cơ chế: **PostgreSQL `READ COMMITTED` transaction + a
 
 ---
 
-## Quản lý tài sản (DPR-160: Inventory Asset Management)
+## Quản lý danh mục và tài sản (EquipmentListing & InventoryAsset)
 
-### Hợp đồng API
+### Hợp đồng API Quản lý
 
-1. `POST /api/v1/inventory/assets`: Tạo mới tài sản (201 Created + Location header). Caller context bắt buộc authenticated human có permission `inventory.asset.manage` hoặc admin. Owner luôn lấy từ JWT `sub`. Bắt buộc `brandId`, `equipmentTypeId`, `model`, `schemaVersion`, `specValues`. Chặn spoofed/unknown body fields (`ownerUserId`, `organizationId`).
-2. `GET /api/v1/inventory/assets`: Danh sách phân trang (`page`, `pageSize`, default 1 và 20, max 100). Hỗ trợ tìm kiếm substring `q` (Model/SerialNumber, ký tự `%`, `_`, `\` được xử lý literal), metadata filters (`equipmentTypeId`, `brandId`, `acceptingBookings`, `manufactureYearFrom`, `manufactureYearTo`), `sort` whitelist (`created_asc/desc`, `model_asc/desc`, `manufacture_year_asc/desc`, year null luôn ở cuối), và dynamic filters (`filters` dạng JSON array URL-encoded, tối đa 20 điều kiện). Chặn query ngoài whitelist (bao gồm `ownerUserId`) và tham số lặp lại (trả 400). Luôn cố định `OwnerUserId = JWT sub` (kể cả admin). Trả `brandId` (nullable).
-3. `GET /api/v1/inventory/assets/{id}`: Chi tiết tài sản. 404 nếu không tìm thấy, 403 nếu cross-user (Admin được bypass xem tài sản). Trả `brandId` (nullable).
-4. `PATCH /api/v1/inventory/assets/{id}`: Cập nhật thông tin với presence tracking cho `brandId`, `model`, `serialNumber`, `manufactureYear`, `thumbnailMediaId`, `schemaVersion`, `specValues`. Omitted giữ nguyên; explicit null cho phép clear `serialNumber`, `manufactureYear`, `thumbnailMediaId`. `brandId` từ chối null; domain ngăn xóa Brand đã có. Null model/schema/spec hoặc empty patch trả 400. Chặn sửa identity, owner, hoặc booking flag.
-5. `PATCH /api/v1/inventory/assets/{id}/accepting-bookings`: Bật/tắt nhận lịch: `{ "acceptingBookings": bool, "reason": string? }`. Thuộc tính `acceptingBookings` bắt buộc ở JSON boundary. Bật lại tự động xóa reason. Chỉ khi đổi cờ mới phát sự kiện `InventoryAssetAvailabilityChanged` atomically qua Outbox.
-
+1. `POST /api/v1/inventory/equipment-listings`: Tạo mới Listing ở trạng thái Draft kèm đúng 1 đơn vị vật lý ban đầu qua số serial (201 Created + Location header). Bắt buộc `serialNumber` (không rỗng, trim, max 100), từ chối trường `quantity`. Bắt buộc `brandId`, `equipmentTypeId`, `model`, `schemaVersion`, `specValues`, `rentalRate`. Chặn spoofed/unknown body fields (`ownerUserId`, `organizationId`).
+2. `POST /api/v1/inventory/equipment-listings/{id}/assets`: Thêm một đơn vị vật lý mới bằng số serial (`serialNumber`). Trả 201 Created + Location trỏ tới Asset (`/api/v1/inventory/assets/{assetId}`). Từ chối số serial trùng lặp trong cùng Listing với 409 Conflict (`SERIAL_ALREADY_EXISTS`).
+3. `GET /api/v1/inventory/equipment-listings`: Danh sách Listing thuộc sở hữu người dùng phân trang (`page`, `pageSize`, max 100). Trả derived `totalQuantity`.
+4. `GET /api/v1/inventory/equipment-listings/{id}`: Chi tiết Listing và derived `totalQuantity` (số unit `AcceptingBookings=true`).
+5. `PATCH /api/v1/inventory/equipment-listings/{id}`: Cập nhật thông tin chung và trạng thái với presence tracking cho `brandId`, `model`, `thumbnailMediaId`, `schemaVersion`, `specValues`, `status`. Chuyển sang `Active` bắt buộc phải có ít nhất 1 physical unit đang nhận lịch (`AcceptingBookings=true`). Từ chối `quantity`.
+6. `PUT /api/v1/inventory/equipment-listings/{id}/rental-rate`: Cập nhật bảng giá niêm yết của Listing (thay thế toàn bộ). Yêu cầu Human Owner hoặc Admin.
+7. `GET /api/v1/inventory/equipment-listings/{id}/assets`: Danh sách đơn vị vật lý thuộc Listing có phân trang.
+8. `GET /api/v1/inventory/equipment-listings/{id}/calendar?from=&to=`: Lịch dùng chung tổng hợp cấp Listing (cửa sổ tối đa 6 tháng). Cho phép Owner và Admin.
+9. `POST /api/v1/inventory/equipment-listings/{id}/holds`: Tạo giữ chỗ tạm thời theo nhóm (Group Hold) cấp phát N units nguyên tử.
+10. `GET /api/v1/inventory/assets`: Danh sách đơn vị vật lý của current user (`OwnerUserId = JWT sub`). Hỗ trợ lọc theo `manufactureYearFrom/To`.
+11. `GET /api/v1/inventory/assets/{id}`: Chi tiết đơn vị vật lý (`assetCode`, `serialNumber`, `manufactureYear`, `acceptingBookings`).
+12. `PATCH /api/v1/inventory/assets/{id}`: Cập nhật thông tin vật lý (`serialNumber`, `manufactureYear`). Xử lý optimistic concurrency qua `xmin`/`Version`.
+13. `PATCH /api/v1/inventory/assets/{id}/accepting-bookings`: Bật/tắt nhận lịch của đơn vị vật lý: `{ "acceptingBookings": bool, "reason": string? }`.
+14. `GET /api/v1/inventory/assets/{id}/calendar`: Lịch sử dụng chi tiết của đơn vị vật lý. Nghiêm ngặt Owner-only (Admin bị từ chối 403).
+15. `POST /api/v1/inventory/assets/{id}/calendar-blocks`: Tạo khoảng chặn lịch của đơn vị vật lý.
 ### Tích hợp Catalog & Media
 
 - **CatalogService**:
@@ -207,21 +216,20 @@ Hệ thống áp dụng cơ chế: **PostgreSQL `READ COMMITTED` transaction + a
 
 ---
 
-## Ranh giới sở hữu giá thuê niêm yết (DPR-169: Listed Rental Rates)
+## Ranh giới sở hữu giá thuê niêm yết (EquipmentListing Rental Rates)
 
 1. **Ranh giới sở hữu giữa các dịch vụ**:
-   - **Inventory Service sở hữu giá niêm yết hiện tại**: Inventory quản lý và lưu trữ mức giá cho thuê niêm yết hiện hành (`AssetRentalRate`) của từng thiết bị trong kho (`InventoryAsset`).
+   - **Inventory Service sở hữu giá niêm yết hiện tại trên EquipmentListing**: Inventory quản lý và lưu trữ mức giá cho thuê niêm yết hiện hành (`DailyRate`, `WeeklyRate`, `MonthlyRate`, `Currency = "VND"`) trên từng `EquipmentListing`.
    - **Rental Service chịu trách nhiệm revalidate và lưu PriceSnapshot**: Khi khách hàng hoặc đối tác tạo đơn thuê (`RentalOrder`), Rental Service bắt buộc phải đọc/revalidate giá niêm yết từ Inventory Service và lưu bản chụp giá (`PriceSnapshot`) cố định gắn liền với vòng đời của đơn hàng.
    - **Tính bất biến của đơn hàng**: Việc thay đổi giá niêm yết trên Inventory Service tuyệt đối không làm thay đổi giá của các đơn hàng cũ đã tạo.
 
 2. **Quy tắc phân quyền cập nhật giá**:
-   - Riêng API `PUT /api/v1/inventory/assets/{assetId}/rental-rate` chỉ yêu cầu Human Owner (JWT sub khớp `asset.OwnerUserId`) hoặc Human Admin (`r=adm`), không cần permission `inventory.asset.manage`.
+   - API `PUT /api/v1/inventory/equipment-listings/{id}/rental-rate` yêu cầu Human Owner (JWT sub khớp `listing.OwnerUserId`) hoặc Human Admin (`r=adm`), không cần permission `inventory.asset.manage`.
    - Service principal và người dùng khác bị từ chối với HTTP 403 Forbidden.
    - Anonymous bị từ chối với HTTP 401 Unauthorized.
 
 3. **Ngoài phạm vi của Inventory Service**:
    - `RentalOrder`, `PriceSnapshot` implementation, payment/refund/deposit, fee, voucher, tax, delivery fee, dynamic pricing và price history.
-
 4. **Runbook bảo trì và cutover migration AddAssetRentalRate**:
    - **Preflight script**: `scripts/add-asset-rental-rate-preflight.sql` tạo staging table `inventory.asset_rental_rate_backfill` sử dụng kiểu `numeric` không giới hạn precision để kiểm tra phần lẻ, range `[1, 999999999999999999]` và currency = `'VND'`.
    - **Yêu cầu đối với DB có asset**: Từng AssetId phải có mapping giá hợp lệ trước khi chạy migration; thiếu giá, sai giá hoặc AssetId không tồn tại làm migration thất bại atomically. DB rỗng không yêu cầu backfill.
@@ -246,16 +254,16 @@ Root Compose dùng `inventory-migrate` chạy một lần trước Inventory run
 
 JWT RS256 lấy keys trực tiếp từ Auth; timeout/cache/maximum usable age configurable. Cache age được tính từ lần fetch thành công, không được kéo dài bởi outage. Unknown kid được refresh bất đồng bộ trước validation của request hiện tại; forced refresh và outage retry được giới hạn 10 giây để coalesce concurrent requests. Token có kid vẫn không tồn tại bị 401; không thử ký bằng tất cả keys. Request cancellation được propagate. Health endpoints anonymous; endpoint không khai báo policy vẫn yêu cầu authentication theo fallback policy. Resource policies chỉ được gọi với resource đã load phía server; không lấy OwnerUserId từ request làm authorization resource. Tạo asset và validate organization metadata thuộc DPR-148.
 
-## Đọc và Khám phá tài sản công khai (DPR-166: Public Asset Read & Discovery)
+## Đọc và Khám phá danh mục công khai (DPR-166: Public Equipment Listing Discovery)
 
 1. **Phân tách phạm vi (Scope Separation)**:
-   - Tách biệt rõ ràng giữa luồng đọc Owner (`IInventoryAssetService`, `OwnerAssetSearchCriteria`, `SearchForOwnerAsync`) và luồng công khai (`IPublicInventoryAssetService`, `PublicAssetSearchCriteria`, `SearchPublicAsync`).
+   - Tách biệt rõ ràng giữa luồng đọc Owner (`IEquipmentListingService`, `IInventoryAssetService`) và luồng công khai (`IPublicEquipmentListingService`, `EquipmentListingSearchCriteria`, `SearchPublicListingsAsync`).
    - Owner search: Bắt buộc `OwnerUserId`, tìm kiếm Model OR SerialNumber, không có date availability filter.
-   - Public search: Không có caller context hay owner predicate; bắt buộc cờ hiển thị `accepting_bookings = TRUE`; tìm kiếm Model-only; hỗ trợ availability filter trước phân trang.
-   - Loại bỏ hoàn toàn model gộp `AssetSearchCriteria` cũ.
+   - Public search: Không có caller context hay owner predicate; bắt buộc Listing `status = Active` và `totalQuantity > 0`; tìm kiếm Model-only; hỗ trợ availability filter toàn khoảng thời gian (`from`, `to`, `requestedQuantity`) trước phân trang.
+   - Bỏ lọc theo năm sản xuất công khai (`manufactureYear` thuộc từng unit vật lý, không thuộc Listing).
 
 2. **Tái sử dụng bộ lọc dùng chung (Shared Filter Architecture)**:
-   - `AssetSearchQueryValidator`: Chuẩn hóa và xác thực keyword, metadata (`equipmentTypeId`, `brandId`, `manufactureYear`), `sort` và pagination bounds cho cả 2 luồng.
+   - `AssetSearchQueryValidator`: Chuẩn hóa và xác thực keyword, metadata (`equipmentTypeId`, `brandId`), `sort` và pagination bounds cho luồng Listing công khai.
    - `AssetSearchFilterResolver`: Xử lý phân giải dynamic filters JSONB, tra cứu batch schemas từ CatalogService một lần duy nhất, kiểm tra tính tương thích lịch sử.
    - `PublicAssetDataPolicy`: Quản lý danh sách các thuộc tính nội bộ bảo lưu (owner identity, serial number, suspension reason, scheduling/allocation details, concurrency, audit). Tự động loại bỏ khỏi `specValues` công khai và từ chối các dynamic filter nhắm vào thuộc tính bảo lưu trước khi gọi Catalog hay DB.
 
@@ -263,12 +271,12 @@ JWT RS256 lấy keys trực tiếp từ Auth; timeout/cache/maximum usable age c
    - Triển khai availability predicates trực tiếp dưới PostgreSQL bằng anti-joins:
      - Anti-join bảng `calendar_blocks` với điều kiện overlap: `start_date <= to AND end_date >= from`.
      - Anti-join bảng `asset_allocations` với điều kiện overlap và trạng thái: `status = Allocated` HOẶC `(status = Held AND hold_expires_at > evaluationNowUtc)`.
-   - Áp dụng trước `ORDER BY`, `LIMIT` và `OFFSET` đảm bảo trang kết quả luôn đầy đủ và `totalCount` phản ánh chính xác số lượng tài sản thực tế có thể đặt.
-   - Parity test đối chiếu 1:1 kết quả SQL với domain policy `AssetAvailabilityPolicy.CheckAvailability` tại cùng một evaluation timestamp.
+   - Tính toán số lượng physical units sẵn sàng nhận lịch (`accepting_bookings = true`) rảnh rỗi trong toàn bộ khoảng thời gian `[from, to]` và so sánh với `requestedQuantity`.
+   - Áp dụng trước `ORDER BY`, `LIMIT` và `OFFSET` đảm bảo trang kết quả luôn đầy đủ và `totalCount` phản ánh chính xác số lượng Listing thực tế có thể đặt.
 
 4. **Hiệu năng & Ngăn chặn N+1 (Performance & No-N+1 Invariants)**:
-   - Public Detail: Đúng 1 truy vấn PostgreSQL (SELECT asset JOIN rental_rate), 0 Catalog HTTP, 0 Media HTTP.
-   - Public List không dynamic filter: Đúng 2 truy vấn PostgreSQL (1 COUNT + 1 PAGE read trong RepeatableRead transaction), 0 Catalog HTTP, 0 Media HTTP.
-   - Public List có dynamic filter: Đúng 3 truy vấn PostgreSQL (1 DISTINCT schema versions + 1 COUNT + 1 PAGE read), đúng 1 Catalog batch HTTP request, 0 Media HTTP.
+   - Public Detail: 4 truy vấn PostgreSQL (Listing + Units + Rates), 0 Catalog HTTP, 0 Media HTTP.
+   - Public List không dynamic filter: 3 truy vấn PostgreSQL (Count + Page), 0 Catalog HTTP, 0 Media HTTP.
+   - Public List có dynamic filter: 4 truy vấn PostgreSQL (Distinct schema versions + Count + Page), đúng 1 Catalog batch HTTP request, 0 Media HTTP.
    - Số lượng truy vấn hoàn toàn độc lập với kích thước trang (`pageSize` 1, 20 hay 100).
    - Thumbnail URL được format cục bộ thông qua `MediaContentUrlBuilder` và `PublicGatewayUrl`.

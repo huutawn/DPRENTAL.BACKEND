@@ -10,11 +10,6 @@ namespace Dprental.InventoryService.Application.IServices;
 /// </summary>
 public interface IInventoryAssetService
 {
-    Task<Result<InventoryAssetResponse>> CreateAssetAsync(
-        CreateInventoryAssetRequest request,
-        IInventoryCallerContext caller,
-        CancellationToken cancellationToken = default);
-
     Task<Result<InventoryAssetResponse>> GetAssetByIdAsync(
         Guid assetId,
         IInventoryCallerContext caller,
@@ -37,9 +32,4 @@ public interface IInventoryAssetService
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);
 
-    Task<Result<AssetRentalRateDto>> UpdateRentalRateAsync(
-        Guid assetId,
-        AssetRentalRateDto request,
-        IInventoryCallerContext caller,
-        CancellationToken cancellationToken = default);
 }

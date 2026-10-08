@@ -1,5 +1,5 @@
 using Dprental.InventoryService.Api.Filters;
-using Dprental.InventoryService.Application.DTOs.Assets;
+using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Common;
@@ -10,48 +10,44 @@ using Microsoft.AspNetCore.Mvc;
 namespace Dprental.InventoryService.Api.Controllers;
 
 /// <summary>
-/// API đọc và tìm kiếm khám phá tài sản công khai (Public Asset Discovery) theo DPR-166.
+/// API đọc và tìm kiếm khám phá danh mục EquipmentListing công khai (Public Equipment Listing Discovery).
 /// Cho phép truy cập ẩn danh (AllowAnonymous), áp dụng whitelist tham số và bảo vệ an toàn dữ liệu.
 /// </summary>
 [ApiController]
 [AllowAnonymous]
-[Route("public/assets")]
-public sealed class PublicInventoryAssetsController : ControllerBase
+[Route("public/equipment-listings")]
+public sealed class PublicEquipmentListingsController : ControllerBase
 {
     private static readonly HashSet<string> AllowedListQueryKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "q",
         "equipmentTypeId",
         "brandId",
-        "manufactureYearFrom",
-        "manufactureYearTo",
         "sort",
         "filters",
         "from",
         "to",
+        "requestedQuantity",
         "page",
         "pageSize"
     };
 
-    private readonly IPublicInventoryAssetService _publicAssetService;
+    private readonly IPublicEquipmentListingService _publicListingService;
 
-    public PublicInventoryAssetsController(IPublicInventoryAssetService publicAssetService)
+    public PublicEquipmentListingsController(IPublicEquipmentListingService publicListingService)
     {
-        _publicAssetService = publicAssetService ?? throw new ArgumentNullException(nameof(publicAssetService));
+        _publicListingService = publicListingService ?? throw new ArgumentNullException(nameof(publicListingService));
     }
 
     /// <summary>
-    /// Tìm kiếm và khám phá danh sách tài sản công khai theo bộ lọc và khả dụng.
+    /// Tìm kiếm và khám phá danh sách EquipmentListing công khai theo bộ lọc và tính khả dụng.
     /// </summary>
-    /// <param name="request">Các tiêu chí tìm kiếm, lọc động và khả dụng công khai.</param>
-    /// <param name="cancellationToken">Token hủy yêu cầu.</param>
-    /// <returns>Danh sách tài sản phân trang đáp ứng điều kiện.</returns>
     [HttpGet]
-    [ProducesResponseType(typeof(PagedResponse<PublicInventoryAssetResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResponse<PublicEquipmentListingResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> List(
-        [FromQuery] ListPublicAssetsRequest request,
+        [FromQuery] ListPublicEquipmentListingsRequest request,
         CancellationToken cancellationToken = default)
     {
         // 1. Từ chối parameter lặp để tránh binding mơ hồ
@@ -65,7 +61,7 @@ public sealed class PublicInventoryAssetsController : ControllerBase
             }
         }
 
-        // 2. Trả 400 cho query parameter ngoài whitelist (bao gồm ownerUserId, serialNumber, suspensionReason, acceptingBookings)
+        // 2. Trả 400 cho query parameter ngoài whitelist (loại trừ manufactureYear, ownerUserId, unit fields)
         var invalidQueryKeys = Request.Query.Keys
             .Where(k => !AllowedListQueryKeys.Contains(k))
             .ToList();
@@ -74,7 +70,7 @@ public sealed class PublicInventoryAssetsController : ControllerBase
         {
             return this.ToProblem(Error.Validation(
                 "INVALID_QUERY_PARAMETER",
-                $"Query parameter '{invalidQueryKeys[0]}' không được hỗ trợ. Endpoint danh sách công khai chỉ chấp nhận: q, equipmentTypeId, brandId, manufactureYearFrom, manufactureYearTo, sort, filters, from, to, page, pageSize."));
+                $"Query parameter '{invalidQueryKeys[0]}' không được hỗ trợ. Endpoint danh sách công khai chỉ chấp nhận: q, equipmentTypeId, brandId, sort, filters, from, to, requestedQuantity, page, pageSize."));
         }
 
         // 3. Yêu cầu from và to phải được cung cấp đồng thời; từ chối chuỗi rỗng
@@ -101,7 +97,15 @@ public sealed class PublicInventoryAssetsController : ControllerBase
             }
         }
 
-        var result = await _publicAssetService.ListPublicAssetsAsync(request, cancellationToken);
+        // 4. requestedQuantity phải đi kèm from và to
+        if (Request.Query.ContainsKey("requestedQuantity") && (!hasFrom || !hasTo))
+        {
+            return this.ToProblem(Error.Validation(
+                "INVALID_QUERY_PARAMETER",
+                "Tham số 'requestedQuantity' chỉ được sử dụng khi lọc theo khoảng thời gian 'from' và 'to'."));
+        }
+
+        var result = await _publicListingService.ListPublicListingsAsync(request, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);
@@ -111,19 +115,16 @@ public sealed class PublicInventoryAssetsController : ControllerBase
     }
 
     /// <summary>
-    /// Lấy chi tiết thông tin một tài sản công khai theo ID.
+    /// Lấy chi tiết thông tin một EquipmentListing công khai theo ID.
     /// </summary>
-    /// <param name="assetId">Định danh tài sản.</param>
-    /// <param name="cancellationToken">Token hủy yêu cầu.</param>
-    /// <returns>Thông tin chi tiết tài sản đã được làm sạch bảo mật.</returns>
-    [HttpGet("{assetId:guid}")]
-    [ProducesResponseType(typeof(PublicInventoryAssetResponse), StatusCodes.Status200OK)]
+    [HttpGet("{id:guid}")]
+    [ProducesResponseType(typeof(PublicEquipmentListingResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(
-        Guid assetId,
+        Guid id,
         CancellationToken cancellationToken = default)
     {
-        var result = await _publicAssetService.GetPublicAssetByIdAsync(assetId, cancellationToken);
+        var result = await _publicListingService.GetPublicListingByIdAsync(id, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);

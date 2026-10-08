@@ -56,17 +56,22 @@ public sealed class InventoryPolicyTests
     {
         var id = assetId ?? Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var rate = AssetRentalRate.Create(id, 100_000m, null, null, "VND", now).Value;
-        var asset = InventoryAsset.Create(
-            id,
+        var listing = EquipmentListing.Create(
+            Guid.NewGuid(),
             ownerId,
             Guid.NewGuid(),
             Guid.NewGuid(),
             "Sony FX3",
             1,
             "{\"serial\":\"TEST\"}",
-            now,
-            rate).Value;
+            100_000m,
+            null,
+            null,
+            "VND",
+            now).Value;
+
+        var asset = InventoryAsset.Create(id, listing.Id, $"SN-{id:N}", now).Value;
+        typeof(InventoryAsset).GetProperty(nameof(InventoryAsset.Listing))?.SetValue(asset, listing);
         factory.TestAssets[id] = asset;
         return asset;
     }

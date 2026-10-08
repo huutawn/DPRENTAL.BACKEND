@@ -61,6 +61,37 @@ public sealed class InventoryAllocationsController : ControllerBase
     }
 
     /// <summary>
+    /// Tạo mới một lượt giữ chỗ tạm thời theo nhóm (Group Hold) trên EquipmentListing hoặc trả về lượt hiện tại nếu idempotent replay.
+    /// </summary>
+    /// <param name="listingId">Định danh EquipmentListing.</param>
+    /// <param name="request">Thông tin giữ chỗ nhóm.</param>
+    /// <param name="cancellationToken">Token hủy yêu cầu.</param>
+    /// <returns>201 Created khi tạo mới; 200 OK khi replay.</returns>
+    [HttpPost("equipment-listings/{listingId:guid}/holds")]
+    [ProducesResponseType(typeof(ListingHoldResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ListingHoldResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> CreateListingHold(
+        Guid listingId,
+        [FromBody] CreateListingHoldRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _allocationService.CreateListingHoldAsync(listingId, request, _callerContext, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return result.Value.IsReplay
+            ? Ok(result.Value)
+            : StatusCode(StatusCodes.Status201Created, result.Value);
+    }
+
+    /// <summary>
     /// Chuyển đổi lượt giữ chỗ còn hạn sang trạng thái phân bổ chính thức (Held -&gt; Allocated).
     /// </summary>
     /// <param name="allocationId">Định danh lượt phân bổ cần chuyển trạng thái.</param>

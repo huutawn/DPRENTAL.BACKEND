@@ -19,17 +19,22 @@ public sealed class AvailabilityPolicyTests
 
     private InventoryAsset CreateActiveAsset(bool acceptingBookings = true)
     {
-        var rate = AssetRentalRate.Create(_assetId, 100_000m, null, null, "VND", _now).Value;
-        var asset = InventoryAsset.Create(
-            _assetId,
+        var listing = EquipmentListing.Create(
+            Guid.NewGuid(),
             _ownerUserId,
             _equipmentTypeId,
             Guid.NewGuid(),
             "Sony FX3",
             1,
             "{\"serial\":\"123\"}",
-            _now,
-            rate).Value;
+            100_000m,
+            null,
+            null,
+            "VND",
+            _now).Value;
+
+        var asset = InventoryAsset.Create(_assetId, listing.Id, "SN-POL-1", _now).Value;
+        typeof(InventoryAsset).GetProperty(nameof(InventoryAsset.Listing))?.SetValue(asset, listing);
 
         if (!acceptingBookings)
         {

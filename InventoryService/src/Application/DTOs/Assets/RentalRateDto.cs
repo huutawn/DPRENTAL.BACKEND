@@ -6,10 +6,10 @@ using Dprental.InventoryService.Domain.Entities;
 namespace Dprental.InventoryService.Application.DTOs.Assets;
 
 /// <summary>
-/// DTO chứa thông tin giá thuê niêm yết của tài sản (dùng cho cả request và response).
+/// DTO chứa thông tin giá thuê niêm yết (dùng cho cả request và response).
 /// </summary>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record AssetRentalRateDto(
+public sealed record RentalRateDto(
     [property: JsonPropertyName("dailyRate"), JsonConverter(typeof(StrictIntegerRateJsonConverter))] decimal? DailyRate,
     [property: JsonPropertyName("weeklyRate"), JsonConverter(typeof(StrictIntegerRateJsonConverter))] decimal? WeeklyRate = null,
     [property: JsonPropertyName("monthlyRate"), JsonConverter(typeof(StrictIntegerRateJsonConverter))] decimal? MonthlyRate = null,
@@ -31,6 +31,6 @@ public sealed record AssetRentalRateDto(
             return Error.Validation("CURRENCY_REQUIRED", "Đơn vị tiền tệ (currency) là bắt buộc.");
         }
 
-        return AssetRentalRate.ValidateRateValues(DailyRate.Value, WeeklyRate, MonthlyRate, Currency);
+        return EquipmentListing.ValidateRateValues(DailyRate.Value, WeeklyRate, MonthlyRate, Currency);
     }
 }

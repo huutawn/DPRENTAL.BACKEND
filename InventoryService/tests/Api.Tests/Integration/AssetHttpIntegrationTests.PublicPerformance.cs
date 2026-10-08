@@ -114,33 +114,32 @@ public sealed partial class AssetHttpIntegrationTests
         }
 
         // ==========================================
-        // 1. Public Detail: 1 SELECT, 0 Catalog, 0 Media
+        // 1. Public Detail: 4 SELECTs, 0 Catalog, 0 Media
         // ==========================================
         interceptor.Reset();
-        var detailRes = await client.GetAsync($"api/v1/inventory/public/assets/{firstAsset!.Id:D}");
+        var detailRes = await client.GetAsync($"api/v1/inventory/public/equipment-listings/{firstAsset!.EquipmentListingId:D}");
         Assert.Equal(HttpStatusCode.OK, detailRes.StatusCode);
-        Assert.Equal(1, interceptor.SelectCount);
+        Assert.Equal(4, interceptor.SelectCount);
         Assert.Equal(0, stubCatalog.BatchCalls);
         Assert.Equal(0, stubMedia.VerifyCalls);
-
         // ==========================================
         // 2. Public List (no dynamic filters):
-        // 2 SELECTs (Count + Page), 0 Catalog, 0 Media
+        // 3 SELECTs, 0 Catalog, 0 Media
         // Repeat across page sizes 1, 20, 100 -> counts stay constant!
         // ==========================================
         foreach (var pageSize in new[] { 1, 20, 100 })
         {
             interceptor.Reset();
-            var listRes = await client.GetAsync($"api/v1/inventory/public/assets?page=1&pageSize={pageSize}");
+            var listRes = await client.GetAsync($"api/v1/inventory/public/equipment-listings?page=1&pageSize={pageSize}");
             Assert.Equal(HttpStatusCode.OK, listRes.StatusCode);
-            Assert.Equal(2, interceptor.SelectCount);
+            Assert.Equal(3, interceptor.SelectCount);
             Assert.Equal(0, stubCatalog.BatchCalls);
             Assert.Equal(0, stubMedia.VerifyCalls);
         }
 
         // ==========================================
         // 3. Public List with dynamic filters:
-        // 3 SELECTs (Distinct versions + Count + Page), 1 Catalog HTTP, 0 Media HTTP
+        // 4 SELECTs, 1 Catalog HTTP, 0 Media HTTP
         // Repeat across page sizes 1, 20, 100 -> counts stay constant!
         // ==========================================
         var filterJson = Uri.EscapeDataString("[{\"field\":\"power\",\"operator\":\"gte\",\"value\":50}]");
@@ -149,9 +148,9 @@ public sealed partial class AssetHttpIntegrationTests
         foreach (var pageSize in new[] { 1, 20, 100 })
         {
             interceptor.Reset();
-            var listRes = await client.GetAsync($"api/v1/inventory/public/assets?equipmentTypeId={eqTypeId:D}&filters={filterJson}&page=1&pageSize={pageSize}");
+            var listRes = await client.GetAsync($"api/v1/inventory/public/equipment-listings?equipmentTypeId={eqTypeId:D}&filters={filterJson}&page=1&pageSize={pageSize}");
             Assert.Equal(HttpStatusCode.OK, listRes.StatusCode);
-            Assert.Equal(3, interceptor.SelectCount);
+            Assert.Equal(4, interceptor.SelectCount);
             Assert.Equal(previousCatalogCalls + 1, stubCatalog.BatchCalls);
             previousCatalogCalls = stubCatalog.BatchCalls;
             Assert.Equal(0, stubMedia.VerifyCalls);

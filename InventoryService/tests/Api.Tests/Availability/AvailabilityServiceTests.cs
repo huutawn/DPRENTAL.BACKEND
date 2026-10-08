@@ -16,6 +16,7 @@ public sealed class AvailabilityServiceTests
     private static readonly DateTimeOffset FixedNow = new(2026, 10, 5, 12, 0, 0, TimeSpan.Zero);
     private readonly TestTimeProvider _timeProvider = new(FixedNow);
     private readonly FakeAssetRepository _assetRepository = new();
+    private readonly FakeListingRepository _listingRepository = new();
     private readonly InventoryAvailabilityService _service;
 
     public AvailabilityServiceTests()
@@ -29,6 +30,7 @@ public sealed class AvailabilityServiceTests
 
         _service = new InventoryAvailabilityService(
             _assetRepository,
+            _listingRepository,
             NoOpInventoryAvailabilityCache.Instance,
             options,
             _timeProvider);
@@ -271,8 +273,7 @@ public sealed class AvailabilityServiceTests
         });
 
         var options = Options.Create(new InventoryCacheOptions { Enabled = false });
-        var serviceWithDelayedRepo = new InventoryAvailabilityService(delayedRepo, NoOpInventoryAvailabilityCache.Instance, options, _timeProvider);
-
+        var serviceWithDelayedRepo = new InventoryAvailabilityService(delayedRepo, _listingRepository, NoOpInventoryAvailabilityCache.Instance, options, _timeProvider);
         var request = new CheckAvailabilityBatchRequest(new[] { assetId }, windowStart, windowEnd);
         var result = await serviceWithDelayedRepo.CheckAvailabilityBatchAsync(request);
 
@@ -290,7 +291,7 @@ public sealed class AvailabilityServiceTests
 
         var fakeCache = new InspectableFakeCache();
         var options = Options.Create(new InventoryCacheOptions { Enabled = true, TtlSeconds = 5 });
-        var service = new InventoryAvailabilityService(_assetRepository, fakeCache, options, _timeProvider);
+        var service = new InventoryAvailabilityService(_assetRepository, _listingRepository, fakeCache, options, _timeProvider);
 
         var result = await service.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
         Assert.True(result.IsSuccess);
@@ -315,7 +316,7 @@ public sealed class AvailabilityServiceTests
 
         var fakeCache = new InspectableFakeCache();
         var options = Options.Create(new InventoryCacheOptions { Enabled = true, TtlSeconds = 60 });
-        var service = new InventoryAvailabilityService(_assetRepository, fakeCache, options, _timeProvider);
+        var service = new InventoryAvailabilityService(_assetRepository, _listingRepository, fakeCache, options, _timeProvider);
 
         var result = await service.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
         Assert.True(result.IsSuccess);
@@ -343,7 +344,7 @@ public sealed class AvailabilityServiceTests
         });
 
         var options = Options.Create(new InventoryCacheOptions { Enabled = true, TtlSeconds = 60 });
-        var service = new InventoryAvailabilityService(_assetRepository, midIoExpiringCache, options, _timeProvider);
+        var service = new InventoryAvailabilityService(_assetRepository, _listingRepository, midIoExpiringCache, options, _timeProvider);
 
         var result = await service.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
         Assert.True(result.IsSuccess);
@@ -370,17 +371,22 @@ public sealed class AvailabilityServiceTests
 
     private static InventoryAsset CreateAsset(Guid id, bool acceptingBookings)
     {
-        var rate = AssetRentalRate.Create(id, 100_000m, null, null, "VND", FixedNow).Value;
-        var asset = InventoryAsset.Create(
-            id,
+        var listing = EquipmentListing.Create(
+            Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid(),
             "Sony FX3",
             1,
             "{}",
-            FixedNow,
-            rate).Value;
+            100_000m,
+            null,
+            null,
+            "VND",
+            FixedNow).Value;
+
+        var asset = InventoryAsset.Create(id, listing.Id, $"SN-{id:N}", FixedNow).Value;
+        typeof(InventoryAsset).GetProperty(nameof(InventoryAsset.Listing))?.SetValue(asset, listing);
 
         if (!acceptingBookings)
         {
@@ -416,14 +422,11 @@ public sealed class AvailabilityServiceTests
         public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
             _inner.GetDistinctSchemaVersionsForOwnerAsync(criteria, cancellationToken);
 
-        public Task<InventoryAsset?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-            _inner.GetPublicByIdAsync(id, cancellationToken);
+        public Task<IReadOnlyList<InventoryAsset>> GetAssetsByListingIdAsync(Guid listingId, int skip, int take, CancellationToken cancellationToken = default) =>
+            _inner.GetAssetsByListingIdAsync(listingId, skip, take, cancellationToken);
 
-        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsPublicAsync(AssetSearchFilters filters, CancellationToken cancellationToken = default) =>
-            _inner.GetDistinctSchemaVersionsPublicAsync(filters, cancellationToken);
-
-        public Task<PublicAssetSearchResult> SearchPublicAsync(PublicAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
-            _inner.SearchPublicAsync(criteria, cancellationToken);
+        public Task<int> CountAssetsByListingIdAsync(Guid listingId, CancellationToken cancellationToken = default) =>
+            _inner.CountAssetsByListingIdAsync(listingId, cancellationToken);
         public Task<InventoryAsset?> GetCalendarSnapshotAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
             _inner.GetCalendarSnapshotAsync(assetId, startDate, endDate, cancellationToken);
 
@@ -435,6 +438,8 @@ public sealed class AvailabilityServiceTests
         }
 
         public void Add(InventoryAsset asset) => _inner.Add(asset);
+        public Task<bool> ExistsSerialInListingAsync(Guid listingId, string serialNumber, Guid? excludeAssetId = null, CancellationToken cancellationToken = default) =>
+            _inner.ExistsSerialInListingAsync(listingId, serialNumber, excludeAssetId, cancellationToken);
         public void Update(InventoryAsset asset) => _inner.Update(asset);
     }
 
@@ -495,29 +500,22 @@ public sealed class AvailabilityServiceTests
             Task.FromResult(Store.TryGetValue(id, out var a) ? a : null);
 
         public Task<InventoryAsset?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Store.TryGetValue(id, out var a) && a.OwnerUserId == ownerUserId ? a : null);
+            Task.FromResult(Store.TryGetValue(id, out var a) && a.Listing?.OwnerUserId == ownerUserId ? a : null);
 
         public Task<IReadOnlyList<InventoryAsset>> SearchForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<InventoryAsset>>(Store.Values.Where(a => a.OwnerUserId == criteria.OwnerUserId).Skip(criteria.Skip).Take(criteria.Take).ToList());
+            Task.FromResult<IReadOnlyList<InventoryAsset>>(Store.Values.Where(a => a.Listing?.OwnerUserId == criteria.OwnerUserId).Skip(criteria.Skip).Take(criteria.Take).ToList());
 
         public Task<int> CountForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Store.Values.Count(a => a.OwnerUserId == criteria.OwnerUserId));
+            Task.FromResult(Store.Values.Count(a => a.Listing?.OwnerUserId == criteria.OwnerUserId));
 
         public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<int>>(Store.Values.Where(a => a.OwnerUserId == criteria.OwnerUserId).Select(a => a.SchemaVersion).Distinct().OrderBy(v => v).ToList());
+            Task.FromResult<IReadOnlyList<int>>(Store.Values.Where(a => a.Listing?.OwnerUserId == criteria.OwnerUserId).Select(a => a.Listing!.SchemaVersion).Distinct().OrderBy(v => v).ToList());
 
-        public Task<InventoryAsset?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Store.TryGetValue(id, out var a) && a.AcceptingBookings ? a : null);
+        public Task<IReadOnlyList<InventoryAsset>> GetAssetsByListingIdAsync(Guid listingId, int skip, int take, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<InventoryAsset>>(Store.Values.Where(a => a.EquipmentListingId == listingId).Skip(skip).Take(take).ToList());
 
-        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsPublicAsync(AssetSearchFilters filters, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<int>>(Store.Values.Where(a => a.AcceptingBookings).Select(a => a.SchemaVersion).Distinct().OrderBy(v => v).ToList());
-
-        public Task<PublicAssetSearchResult> SearchPublicAsync(PublicAssetSearchCriteria criteria, CancellationToken cancellationToken = default)
-        {
-            var matching = Store.Values.Where(a => a.AcceptingBookings).ToList();
-            var paged = matching.Skip(criteria.Skip).Take(criteria.Take).ToList();
-            return Task.FromResult(new PublicAssetSearchResult(paged, matching.Count));
-        }
+        public Task<int> CountAssetsByListingIdAsync(Guid listingId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Store.Values.Count(a => a.EquipmentListingId == listingId));
         public Task<InventoryAsset?> GetCalendarSnapshotAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(assetId, out var a) ? a : null);
 
@@ -525,6 +523,45 @@ public sealed class AvailabilityServiceTests
             Task.FromResult<IReadOnlyList<InventoryAsset>>(Store.Values.Where(a => assetIds.Contains(a.Id)).ToList());
 
         public void Add(InventoryAsset asset) => Store[asset.Id] = asset;
+        public Task<bool> ExistsSerialInListingAsync(Guid listingId, string serialNumber, Guid? excludeAssetId = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Store.Values.Any(a => a.EquipmentListingId == listingId &&
+                (!excludeAssetId.HasValue || a.Id != excludeAssetId.Value) &&
+                string.Equals(a.SerialNumber.Trim(), serialNumber.Trim(), StringComparison.OrdinalIgnoreCase)));
         public void Update(InventoryAsset asset) => Store[asset.Id] = asset;
+    }
+
+    private sealed class FakeListingRepository : IEquipmentListingRepository
+    {
+        public readonly Dictionary<Guid, EquipmentListing> Store = new();
+
+        public Task<EquipmentListing?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Store.TryGetValue(id, out var l) ? l : null);
+
+        public Task<EquipmentListing?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Store.TryGetValue(id, out var l) && l.OwnerUserId == ownerUserId ? l : null);
+
+        public Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Store.TryGetValue(id, out var l) && l.Status == EquipmentListingStatus.Active ? l : null);
+
+        public Task<IReadOnlyList<EquipmentListing>> ListForOwnerAsync(Guid ownerUserId, int skip, int take, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<EquipmentListing>>(Store.Values.Where(l => l.OwnerUserId == ownerUserId).Skip(skip).Take(take).ToList());
+
+        public Task<int> CountForOwnerAsync(Guid ownerUserId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Store.Values.Count(l => l.OwnerUserId == ownerUserId));
+
+        public Task<int> GetTotalQuantityAsync(Guid listingId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(0);
+
+        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsPublicAsync(AssetSearchFilters filters, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<int>>(Array.Empty<int>());
+
+        public Task<PublicEquipmentListingSearchResult> SearchPublicAsync(EquipmentListingSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PublicEquipmentListingSearchResult(Array.Empty<PublicEquipmentListingItem>(), 0));
+
+        public Task<EquipmentListing?> GetCalendarSnapshotAsync(Guid listingId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Store.TryGetValue(listingId, out var l) ? l : null);
+
+        public void Add(EquipmentListing listing) => Store[listing.Id] = listing;
+        public void Update(EquipmentListing listing) => Store[listing.Id] = listing;
     }
 }
