@@ -45,8 +45,9 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
         var actionDesc = context.ActionDescriptor as ControllerActionDescriptor;
         if (actionDesc != null &&
             (string.Equals(actionDesc.ControllerName, "InventoryAssets", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(actionDesc.ControllerName, "PublicInventoryAssets", StringComparison.OrdinalIgnoreCase)) &&
-            string.Equals(actionDesc.ActionName, nameof(InventoryAssetsController.List), StringComparison.OrdinalIgnoreCase) &&
+             string.Equals(actionDesc.ControllerName, "PublicEquipmentListings", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(actionDesc.ControllerName, "EquipmentListings", StringComparison.OrdinalIgnoreCase)) &&
+            string.Equals(actionDesc.ActionName, "List", StringComparison.OrdinalIgnoreCase) &&
             HttpMethods.IsGet(context.HttpContext.Request.Method))
         {
             var firstError = context.ModelState.Values
