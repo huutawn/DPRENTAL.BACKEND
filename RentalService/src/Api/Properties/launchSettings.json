@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "RentalService.Api": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:52797;http://localhost:42797"
+    }
+  }
+}
