@@ -27,9 +27,7 @@ public sealed partial class PostgresIntegrationTests
         Guid typeId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        var rate1 = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", now).Value;
-        setupContext.Assets.Add(InventoryAsset.Create(assetId, ownerId, typeId, Guid.NewGuid(), "Sony FX3", 1, "{}", now, rate1).Value);
-        await setupContext.SaveChangesAsync();
+        var seededAsset = await IntegrationTestHelper.InsertTestAssetAsync(setupContext, assetId: assetId, ownerId: ownerId, eqTypeId: typeId, now: now);
 
         var sharedPeriod = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
         var readySignal = new TaskCompletionSource<bool>();
@@ -90,9 +88,7 @@ public sealed partial class PostgresIntegrationTests
         Guid typeId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        var rate2 = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", now).Value;
-        setupContext.Assets.Add(InventoryAsset.Create(assetId, ownerId, typeId, Guid.NewGuid(), "Sony FX3", 1, "{}", now, rate2).Value);
-        await setupContext.SaveChangesAsync();
+        var seededAsset = await IntegrationTestHelper.InsertTestAssetAsync(setupContext, assetId: assetId, ownerId: ownerId, eqTypeId: typeId, now: now);
 
         var periodA = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
         var periodB = new RentalPeriod(new DateOnly(2026, 11, 10), new DateOnly(2026, 11, 15));
@@ -146,9 +142,7 @@ public sealed partial class PostgresIntegrationTests
 
         Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        var rate3 = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", now).Value;
-        setupContext.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now, rate3).Value);
-        await setupContext.SaveChangesAsync();
+        var seededAsset = await IntegrationTestHelper.InsertTestAssetAsync(setupContext, assetId: assetId, now: now);
 
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
         Guid allocId = Guid.NewGuid();
@@ -179,9 +173,7 @@ public sealed partial class PostgresIntegrationTests
 
         Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        var rate4 = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", now).Value;
-        setup.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now, rate4).Value);
-        await setup.SaveChangesAsync();
+        var seededAsset = await IntegrationTestHelper.InsertTestAssetAsync(setup, assetId: assetId, now: now);
 
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
         using var cts = new CancellationTokenSource();
@@ -209,9 +201,7 @@ public sealed partial class PostgresIntegrationTests
 
         Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        var rate5 = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", now).Value;
-        setup.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now, rate5).Value);
-        await setup.SaveChangesAsync();
+        var seededAsset = await IntegrationTestHelper.InsertTestAssetAsync(setup, assetId: assetId, now: now);
 
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
         var period = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
@@ -289,9 +279,7 @@ public sealed partial class PostgresIntegrationTests
 
         Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        var rate6 = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", now).Value;
-        setup.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now, rate6).Value);
-
+        var seededAsset = await IntegrationTestHelper.InsertTestAssetAsync(setup, assetId: assetId, now: now);
         var period = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
         var hold = AssetAllocation.CreateHold(
             Guid.NewGuid(), assetId, period, now.AddSeconds(1), now, "rental", "EXT-EXP-COMPETE").Value;

@@ -26,10 +26,7 @@ public sealed partial class PostgresIntegrationTests
         Guid organizationId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        var rate1 = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", now).Value;
-        setupContext.Assets.Add(
-            InventoryAsset.Create(assetId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now, rate1).Value);
-        await setupContext.SaveChangesAsync();
+        var seededAsset = await IntegrationTestHelper.InsertTestAssetAsync(setupContext, assetId: assetId, ownerId: ownerId, now: now);
 
         const string sourceSystem = "rental_service";
         string externalRef = $"REF_{Guid.NewGuid():N}";
@@ -80,9 +77,7 @@ public sealed partial class PostgresIntegrationTests
 
         Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        var rate2 = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", now).Value;
-        setupContext.Assets.Add(InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now, rate2).Value);
-
+        var seededAsset = await IntegrationTestHelper.InsertTestAssetAsync(setupContext, assetId: assetId, now: now);
         var period = new RentalPeriod(new DateOnly(2026, 11, 20), new DateOnly(2026, 11, 25));
         var alloc = AssetAllocation.CreateManual(Guid.NewGuid(), assetId, period, now).Value;
         setupContext.AssetAllocations.Add(alloc);
@@ -120,9 +115,7 @@ public sealed partial class PostgresIntegrationTests
         await using var db = await CreateMigratedDbContextAsync();
         var assetId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var rate3 = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", now).Value;
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now, rate3).Value;
-        db.Assets.Add(asset);
+        var asset = await IntegrationTestHelper.InsertTestAssetAsync(db, assetId: assetId, now: now);
 
         // 1. Expired hold
         var period1 = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));

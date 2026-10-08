@@ -146,4 +146,91 @@ public sealed class AssetSearchQueryValidator
             manufactureYearTo,
             sortOption));
     }
+
+    /// <summary>
+    /// Kiểm tra và chuẩn hóa các tham số tìm kiếm danh mục EquipmentListing công khai (không có manufactureYear).
+    /// </summary>
+    public static Result<ValidatedAssetSearchQuery> ValidateListingQuery(
+        int page,
+        int pageSize,
+        string? q,
+        Guid? equipmentTypeId,
+        Guid? brandId,
+        string? sort)
+    {
+        if (page < 1)
+        {
+            return Error.Validation("INVALID_PAGE", "Số trang phải lớn hơn hoặc bằng 1.");
+        }
+
+        if (pageSize < 1 || pageSize > 100)
+        {
+            return Error.Validation("INVALID_PAGE_SIZE", "Kích thước trang phải từ 1 đến 100.");
+        }
+
+        long offset = (long)(page - 1) * pageSize;
+        if (offset > int.MaxValue)
+        {
+            return Error.Validation("INVALID_PAGE", "Chỉ số trang vượt quá giới hạn hệ thống.");
+        }
+
+        int skip = (int)offset;
+        int take = pageSize;
+
+        string? searchKeyword = null;
+        if (q is not null)
+        {
+            string trimmed = q.Trim();
+            if (trimmed.Length > 200)
+            {
+                return Error.Validation("INVALID_QUERY_PARAMETER", "Từ khóa tìm kiếm tối đa 200 ký tự.");
+            }
+
+            if (trimmed.Length > 0)
+            {
+                searchKeyword = trimmed;
+            }
+        }
+
+        if (equipmentTypeId.HasValue && equipmentTypeId.Value == Guid.Empty)
+        {
+            return Error.Validation("INVALID_QUERY_PARAMETER", "EquipmentTypeId không được là Guid rỗng.");
+        }
+
+        if (brandId.HasValue && brandId.Value == Guid.Empty)
+        {
+            return Error.Validation("INVALID_QUERY_PARAMETER", "BrandId không được là Guid rỗng.");
+        }
+
+        AssetSortOption sortOption = AssetSortOption.CreatedDesc;
+        if (!string.IsNullOrWhiteSpace(sort))
+        {
+            string sortStr = sort.Trim().ToLowerInvariant();
+            sortOption = sortStr switch
+            {
+                "created_desc" => AssetSortOption.CreatedDesc,
+                "created_asc" => AssetSortOption.CreatedAsc,
+                "model_desc" => AssetSortOption.ModelDesc,
+                "model_asc" => AssetSortOption.ModelAsc,
+                _ => (AssetSortOption)(-1)
+            };
+
+            if ((int)sortOption == -1)
+            {
+                return Error.Validation("INVALID_QUERY_PARAMETER", "Tùy chọn sắp xếp (sort) không hợp lệ.");
+            }
+        }
+
+        return Result.Success(new ValidatedAssetSearchQuery(
+            page,
+            pageSize,
+            skip,
+            take,
+            searchKeyword,
+            equipmentTypeId,
+            brandId,
+            null,
+            null,
+            sortOption));
+    }
 }

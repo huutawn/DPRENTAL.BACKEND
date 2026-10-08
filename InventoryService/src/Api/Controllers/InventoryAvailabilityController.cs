@@ -51,6 +51,29 @@ public sealed class InventoryAvailabilityController : ControllerBase
     }
 
     /// <summary>
+    /// Kiểm tra tính khả dụng của một EquipmentListing trong khoảng thời gian đề xuất.
+    /// </summary>
+    [HttpPost("equipment-listings/{listingId:guid}/availability/check")]
+    [ProducesResponseType(typeof(CheckListingAvailabilityResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CheckListingAvailability(
+        [FromRoute] Guid listingId,
+        [FromBody] CheckListingAvailabilityRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _availabilityService.CheckListingAvailabilityAsync(listingId, request, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
+    }
+
+    /// <summary>
     /// Lấy danh sách các khoảng ngày bận đã được làm sạch của tài sản theo cửa sổ thời gian [from, to].
     /// Sử dụng Valkey read cache theo từng tháng với fallback PostgreSQL.
     /// </summary>

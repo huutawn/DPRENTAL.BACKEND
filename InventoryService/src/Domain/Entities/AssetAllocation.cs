@@ -32,6 +32,10 @@ public sealed partial class AssetAllocation
     [MaxLength(200)]
     public string ExternalReference { get; private set; } = string.Empty;
 
+    [Column("group_reference")]
+    [MaxLength(100)]
+    public string? GroupReference { get; private set; }
+
     public RentalPeriod RentalPeriod { get; private set; } = null!;
 
     [Column("notes")]
@@ -77,7 +81,8 @@ public sealed partial class AssetAllocation
         string externalReference,
         string? notes = null,
         string actor = "system",
-        string? operationKey = null)
+        string? operationKey = null,
+        string? groupReference = null)
     {
         ArgumentNullException.ThrowIfNull(period);
 
@@ -113,6 +118,21 @@ public sealed partial class AssetAllocation
         {
             return Error.Validation("INVALID_ALLOCATION_METADATA", "Ghi chú, actor hoặc operation key không hợp lệ.");
         }
+        string? normalizedGroup = null;
+        if (groupReference is not null)
+        {
+            var trimmedGroup = groupReference.Trim();
+            if (trimmedGroup.Length == 0 || trimmedGroup.Length > 100)
+            {
+                return Error.Validation("INVALID_GROUP_REFERENCE", "Mã tham chiếu nhóm (GroupReference) không được rỗng và tối đa 100 ký tự.");
+            }
+            normalizedGroup = trimmedGroup;
+        }
+        else if (externalReference.Trim().StartsWith("listing-hold:", StringComparison.OrdinalIgnoreCase))
+        {
+            return Error.Validation("RESERVED_EXTERNAL_REFERENCE", "Tiền tố 'listing-hold:' chỉ dành riêng cho group hold.");
+        }
+
 
         var allocation = new AssetAllocation
         {
@@ -122,6 +142,7 @@ public sealed partial class AssetAllocation
             SourceSystem = sourceSystem.Trim(),
             ExternalReference = externalReference.Trim(),
             Notes = notes?.Trim(),
+            GroupReference = normalizedGroup,
             Status = AllocationStatus.Held,
             HoldExpiresAt = BusinessDateTime.NormalizeUtc(holdExpiresAt),
             CreatedAt = BusinessDateTime.NormalizeUtc(now),

@@ -29,27 +29,27 @@ public sealed partial class InventoryAssetServiceTests
             Task.FromResult(Store.TryGetValue(id, out var a) ? a : null);
 
         public Task<InventoryAsset?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Store.TryGetValue(id, out var a) && a.OwnerUserId == ownerUserId ? a : null);
+            Task.FromResult(Store.TryGetValue(id, out var a) && a.Listing?.OwnerUserId == ownerUserId ? a : null);
 
         public Task<IReadOnlyList<InventoryAsset>> SearchForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default)
         {
-            var query = Store.Values.Where(a => a.OwnerUserId == criteria.OwnerUserId);
+            var query = Store.Values.Where(a => a.Listing?.OwnerUserId == criteria.OwnerUserId);
             var filters = criteria.Filters;
 
             if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
             {
-                query = query.Where(a => a.Model.Contains(filters.SearchKeyword, StringComparison.OrdinalIgnoreCase) ||
+                query = query.Where(a => (a.Listing != null && a.Listing.Model.Contains(filters.SearchKeyword, StringComparison.OrdinalIgnoreCase)) ||
                                          (a.SerialNumber != null && a.SerialNumber.Contains(filters.SearchKeyword, StringComparison.OrdinalIgnoreCase)));
             }
 
             if (filters.EquipmentTypeId.HasValue)
             {
-                query = query.Where(a => a.EquipmentTypeId == filters.EquipmentTypeId.Value);
+                query = query.Where(a => a.Listing != null && a.Listing.EquipmentTypeId == filters.EquipmentTypeId.Value);
             }
 
             if (filters.BrandId.HasValue)
             {
-                query = query.Where(a => a.BrandId == filters.BrandId.Value);
+                query = query.Where(a => a.Listing != null && a.Listing.BrandId == filters.BrandId.Value);
             }
 
             if (criteria.AcceptingBookings.HasValue)
@@ -74,7 +74,7 @@ public sealed partial class InventoryAssetServiceTests
                     return Task.FromResult<IReadOnlyList<InventoryAsset>>(Array.Empty<InventoryAsset>());
                 }
 
-                query = query.Where(a => filters.CompatibleSchemaVersions.Contains(a.SchemaVersion));
+                query = query.Where(a => a.Listing != null && filters.CompatibleSchemaVersions.Contains(a.Listing.SchemaVersion));
             }
 
             var list = query
@@ -89,23 +89,23 @@ public sealed partial class InventoryAssetServiceTests
 
         public Task<int> CountForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default)
         {
-            var query = Store.Values.Where(a => a.OwnerUserId == criteria.OwnerUserId);
+            var query = Store.Values.Where(a => a.Listing?.OwnerUserId == criteria.OwnerUserId);
             var filters = criteria.Filters;
 
             if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
             {
-                query = query.Where(a => a.Model.Contains(filters.SearchKeyword, StringComparison.OrdinalIgnoreCase) ||
+                query = query.Where(a => (a.Listing != null && a.Listing.Model.Contains(filters.SearchKeyword, StringComparison.OrdinalIgnoreCase)) ||
                                          (a.SerialNumber != null && a.SerialNumber.Contains(filters.SearchKeyword, StringComparison.OrdinalIgnoreCase)));
             }
 
             if (filters.EquipmentTypeId.HasValue)
             {
-                query = query.Where(a => a.EquipmentTypeId == filters.EquipmentTypeId.Value);
+                query = query.Where(a => a.Listing != null && a.Listing.EquipmentTypeId == filters.EquipmentTypeId.Value);
             }
 
             if (filters.BrandId.HasValue)
             {
-                query = query.Where(a => a.BrandId == filters.BrandId.Value);
+                query = query.Where(a => a.Listing != null && a.Listing.BrandId == filters.BrandId.Value);
             }
 
             if (criteria.AcceptingBookings.HasValue)
@@ -130,7 +130,7 @@ public sealed partial class InventoryAssetServiceTests
                     return Task.FromResult(0);
                 }
 
-                query = query.Where(a => filters.CompatibleSchemaVersions.Contains(a.SchemaVersion));
+                query = query.Where(a => a.Listing != null && filters.CompatibleSchemaVersions.Contains(a.Listing.SchemaVersion));
             }
 
             return Task.FromResult(query.Count());
@@ -138,33 +138,26 @@ public sealed partial class InventoryAssetServiceTests
 
         public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default)
         {
-            var query = Store.Values.Where(a => a.OwnerUserId == criteria.OwnerUserId);
+            var query = Store.Values.Where(a => a.Listing?.OwnerUserId == criteria.OwnerUserId);
             var filters = criteria.Filters;
 
             if (filters.EquipmentTypeId.HasValue)
             {
-                query = query.Where(a => a.EquipmentTypeId == filters.EquipmentTypeId.Value);
+                query = query.Where(a => a.Listing != null && a.Listing.EquipmentTypeId == filters.EquipmentTypeId.Value);
             }
 
             if (criteria.AcceptingBookings.HasValue)
             {
                 query = query.Where(a => a.AcceptingBookings == criteria.AcceptingBookings.Value);
             }
-            return Task.FromResult<IReadOnlyList<int>>(query.Select(a => a.SchemaVersion).Distinct().OrderBy(v => v).ToList());
+            return Task.FromResult<IReadOnlyList<int>>(query.Where(a => a.Listing != null).Select(a => a.Listing.SchemaVersion).Distinct().OrderBy(v => v).ToList());
         }
 
-        public Task<InventoryAsset?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Store.TryGetValue(id, out var a) && a.AcceptingBookings ? a : null);
+        public Task<IReadOnlyList<InventoryAsset>> GetAssetsByListingIdAsync(Guid listingId, int skip, int take, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<InventoryAsset>>(Store.Values.Where(a => a.EquipmentListingId == listingId).Skip(skip).Take(take).ToList());
 
-        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsPublicAsync(AssetSearchFilters filters, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<int>>(Store.Values.Where(a => a.AcceptingBookings).Select(a => a.SchemaVersion).Distinct().OrderBy(v => v).ToList());
-
-        public Task<PublicAssetSearchResult> SearchPublicAsync(PublicAssetSearchCriteria criteria, CancellationToken cancellationToken = default)
-        {
-            var matching = Store.Values.Where(a => a.AcceptingBookings).ToList();
-            var paged = matching.Skip(criteria.Skip).Take(criteria.Take).ToList();
-            return Task.FromResult(new PublicAssetSearchResult(paged, matching.Count));
-        }
+        public Task<int> CountAssetsByListingIdAsync(Guid listingId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Store.Values.Count(a => a.EquipmentListingId == listingId));
 
         public Task<InventoryAsset?> GetCalendarSnapshotAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(assetId, out var a) ? a : null);
@@ -174,12 +167,19 @@ public sealed partial class InventoryAssetServiceTests
 
         public void Add(InventoryAsset asset) => Store[asset.Id] = asset;
         public void Update(InventoryAsset asset) => Store[asset.Id] = asset;
+        public Task<bool> ExistsSerialInListingAsync(Guid listingId, string serialNumber, Guid? excludeAssetId = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Store.Values.Any(a => a.EquipmentListingId == listingId &&
+                (!excludeAssetId.HasValue || a.Id != excludeAssetId.Value) &&
+                string.Equals(a.SerialNumber.Trim(), serialNumber.Trim(), StringComparison.OrdinalIgnoreCase)));
     }
 
     private sealed class FakeWriteContext : IInventoryWriteContext
     {
         public Guid AssetId { get; }
         public IInventoryAssetRepository Assets { get; }
+        public Guid? ListingId => null;
+        public IEquipmentListingRepository Listings => throw new NotImplementedException();
+        public Task AcquireAssetLocksAsync(IEnumerable<Guid> assetIds, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public IAssetAllocationRepository Allocations => throw new NotImplementedException();
         public ICalendarBlockRepository CalendarBlocks => throw new NotImplementedException();
         public List<OutboxMessage> StagedOutbox { get; } = new();
@@ -220,6 +220,28 @@ public sealed partial class InventoryAssetServiceTests
                 StagedOutbox.AddRange(ctx.StagedOutbox);
             }
             return result;
+        }
+
+        public Task<Result<T>> ExecuteListingWriteAsync<T>(
+            Guid listingId,
+            Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> action,
+            CancellationToken cancellationToken = default)
+        {
+            BeforeExecute?.Invoke();
+            var ctx = new FakeWriteContext(Guid.Empty, _repo);
+            return action(ctx, cancellationToken);
+        }
+
+        public Task<Result<T>> ExecuteGroupHoldAsync<T>(
+            string sourceSystem,
+            string groupReference,
+            Guid listingId,
+            Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> action,
+            CancellationToken cancellationToken = default)
+        {
+            BeforeExecute?.Invoke();
+            var ctx = new FakeWriteContext(Guid.Empty, _repo);
+            return action(ctx, cancellationToken);
         }
     }
 
@@ -323,7 +345,7 @@ public sealed partial class InventoryAssetServiceTests
         return new InventoryAssetService(_repo, writeTx, _catalogClient, mediaService, queryValidator, filterResolver, _clock);
     }
 
-    private static readonly AssetRentalRateDto DefaultRateDto = new(100_000m, null, null, "VND");
+    private static readonly RentalRateDto DefaultRateDto = new(100_000m, null, null, "VND");
 
     private static InventoryAsset CreateAssetWithRate(
         Guid? id = null,
@@ -340,19 +362,30 @@ public sealed partial class InventoryAssetServiceTests
     {
         var actualId = id ?? Guid.NewGuid();
         var actualNow = now ?? FixedNow;
-        var rate = AssetRentalRate.Create(actualId, 100_000m, null, null, "VND", actualNow).Value;
-        return InventoryAsset.Create(
-            actualId,
+        var listing = EquipmentListing.Create(
+            Guid.NewGuid(),
             ownerUserId ?? Guid.NewGuid(),
             eqTypeId ?? Guid.NewGuid(),
             brandId ?? Guid.NewGuid(),
             model,
             schemaVersion,
             specValues,
+            100_000m,
+            null,
+            null,
+            "VND",
             actualNow,
-            rate,
-            serialNumber,
-            manufactureYear,
             thumbnailMediaId).Value;
+
+        var actualSerial = string.IsNullOrWhiteSpace(serialNumber) ? $"SN-{actualId:N}" : serialNumber;
+        var asset = InventoryAsset.Create(
+            actualId,
+            listing.Id,
+            actualSerial,
+            actualNow,
+            manufactureYear).Value;
+
+        typeof(InventoryAsset).GetProperty(nameof(InventoryAsset.Listing))?.SetValue(asset, listing);
+        return asset;
     }
 }

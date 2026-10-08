@@ -1,6 +1,7 @@
 using Dprental.InventoryService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 using Xunit;
 
@@ -59,14 +60,17 @@ public sealed partial class PostgresIntegrationTests
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.asset_allocations(id,asset_id,source_system,external_reference,status,start_date,end_date,created_at,updated_at,notes) VALUES({allocationId},{assetId},'inventory.manual',{allocationId.ToString()},6,'2026-11-01','2026-11-02',NOW(),NOW(),'Customer name and phone')");
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO inventory.allocation_transitions(id,allocation_id,sequence,operation_type,from_status,to_status,created_at,actor,reason,operation_key,request_fingerprint) VALUES({Guid.NewGuid()},{allocationId},1,7,2,6,NOW(),'staff','Hoàn tất kỳ phân bổ','return-before-cutover',{new string('A', 64)})");
             await db.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>().MigrateAsync("20261002024109_HardenInventoryBoundary");
-            var allocation = await db.AssetAllocations.Include(a => a.Transitions).SingleAsync();
-            Assert.Null(allocation.Notes);
-            Assert.Null(allocation.Transitions.Single().Reason);
-            Assert.Null(allocation.Transitions.Single().RequestFingerprint);
-            Assert.Equal("return-before-cutover", allocation.Transitions.Single().OperationKey);
+            var note = await db.Database.SqlQueryRaw<string?>("SELECT notes AS \"Value\" FROM inventory.asset_allocations").SingleAsync();
+            var transition = await db.Database.SqlQueryRaw<string?>("SELECT operation_key AS \"Value\" FROM inventory.allocation_transitions").SingleAsync();
+            var transitionReason = await db.Database.SqlQueryRaw<string?>("SELECT reason AS \"Value\" FROM inventory.allocation_transitions").SingleAsync();
+            var transitionFp = await db.Database.SqlQueryRaw<string?>("SELECT request_fingerprint AS \"Value\" FROM inventory.allocation_transitions").SingleAsync();
+            Assert.Null(note);
+            Assert.Null(transitionReason);
+            Assert.Null(transitionFp);
+            Assert.Equal("return-before-cutover", transition);
             var ex = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE inventory.assets SET spec_values='[]'::jsonb WHERE id={assetId}"));
             Assert.Equal("ck_assets_spec_values_object", ex.ConstraintName);
-            Assert.Single(await db.AssetAllocations.ToListAsync());
+            Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*)::int AS \"Value\" FROM inventory.asset_allocations").SingleAsync());
         }
         finally { await fixture.DisposeAsync(); }
     }
@@ -89,7 +93,7 @@ public sealed partial class PostgresIntegrationTests
             await Assert.ThrowsAsync<PostgresException>(() => migrator.MigrateAsync("20261002024109_HardenInventoryBoundary"));
             Assert.Equal(4, (await db.Database.GetAppliedMigrationsAsync()).Count());
             Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*)::integer AS \"Value\" FROM inventory.assets").SingleAsync());
-            Assert.Equal("original note", (await db.AssetAllocations.SingleAsync()).Notes);
+            Assert.Equal("original note", await db.Database.SqlQueryRaw<string>("SELECT notes AS \"Value\" FROM inventory.asset_allocations").SingleAsync());
         }
         finally { await fixture.DisposeAsync(); }
     }
@@ -566,8 +570,8 @@ public sealed partial class PostgresIntegrationTests
                 .Options;
             await using var db = new InventoryServiceDbContext(options);
 
-            // Migrate forward to latest
-            await db.Database.MigrateAsync();
+            // Migrate forward to AddAssetBrandId
+            await db.GetService<IMigrator>().MigrateAsync("20261005050000_AddAssetBrandId");
 
             // Verify brand_id column exists and is nullable
             var isNullable = await db.Database.SqlQueryRaw<string>("""
@@ -652,41 +656,52 @@ public sealed partial class PostgresIntegrationTests
     [Fact]
     public async Task AddAssetBrandId_Constraint_RejectsEmptyGuid_AllowsNullAndValidGuid()
     {
-        await using var db = await CreateMigratedDbContextAsync();
-        var ownerId = Guid.NewGuid();
-        var eqId = Guid.NewGuid();
-        var now = DateTimeOffset.UtcNow;
-
-        // 1. Rejects empty GUID
-        var invalidAssetId = Guid.NewGuid();
-        var ex = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($$"""
+        var fixture = new PostgresFixture { TargetMigration = "20261005050000_AddAssetBrandId" };
+        await fixture.InitializeAsync();
+        try
+        {
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
+                .UseNpgsql(fixture.ConnectionString, o => o.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
+                .Options;
+            await using var db = new InventoryServiceDbContext(options);
+            var ownerId = Guid.NewGuid();
+            var eqId = Guid.NewGuid();
+            var now = DateTimeOffset.UtcNow;
+            // 1. Rejects empty GUID
+            var invalidAssetId = Guid.NewGuid();
+            var ex = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($$"""
             INSERT INTO inventory.assets (id, owner_user_id, equipment_type_id, brand_id, model, schema_version, spec_values, accepting_bookings, created_at, updated_at)
             VALUES ({{invalidAssetId}}, {{ownerId}}, {{eqId}}, '00000000-0000-0000-0000-000000000000'::uuid, 'Test Model', 1, '{}'::jsonb, true, {{now}}, {{now}});
         """));
-        Assert.Equal("ck_assets_brand_id", ex.ConstraintName);
+            Assert.Equal("ck_assets_brand_id", ex.ConstraintName);
 
-        // 2. Allows NULL
-        var nullBrandAssetId = Guid.NewGuid();
-        await db.Database.ExecuteSqlInterpolatedAsync($$"""
+            // 2. Allows NULL
+            var nullBrandAssetId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($$"""
             INSERT INTO inventory.assets (id, owner_user_id, equipment_type_id, brand_id, model, schema_version, spec_values, accepting_bookings, created_at, updated_at)
             VALUES ({{nullBrandAssetId}}, {{ownerId}}, {{eqId}}, NULL, 'Test Model', 1, '{}'::jsonb, true, {{now}}, {{now}});
         """);
-        var reloadedNull = await db.Database.SqlQuery<Guid?>($"""
+            var reloadedNull = await db.Database.SqlQuery<Guid?>($"""
             SELECT brand_id AS "Value" FROM inventory.assets WHERE id = {nullBrandAssetId}
         """).SingleAsync();
-        Assert.Null(reloadedNull);
+            Assert.Null(reloadedNull);
 
-        // 3. Allows valid GUID
-        var validBrand = Guid.NewGuid();
-        var validAssetId = Guid.NewGuid();
-        await db.Database.ExecuteSqlInterpolatedAsync($$"""
+            // 3. Allows valid GUID
+            var validBrand = Guid.NewGuid();
+            var validAssetId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($$"""
             INSERT INTO inventory.assets (id, owner_user_id, equipment_type_id, brand_id, model, schema_version, spec_values, accepting_bookings, created_at, updated_at)
             VALUES ({{validAssetId}}, {{ownerId}}, {{eqId}}, {{validBrand}}, 'Test Model', 1, '{}'::jsonb, true, {{now}}, {{now}});
         """);
-        var reloadedValid = await db.Database.SqlQuery<Guid?>($"""
+            var reloadedValid = await db.Database.SqlQuery<Guid?>($"""
             SELECT brand_id AS "Value" FROM inventory.assets WHERE id = {validAssetId}
         """).SingleAsync();
-        Assert.Equal(validBrand, reloadedValid);
+            Assert.Equal(validBrand, reloadedValid);
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
     }
 
     [Fact]

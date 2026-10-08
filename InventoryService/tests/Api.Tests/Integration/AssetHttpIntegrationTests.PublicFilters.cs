@@ -1,8 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Net.Http.Headers;
+using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Catalog;
+using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Domain.Entities;
 using Xunit;
@@ -26,17 +29,17 @@ public sealed partial class AssetHttpIntegrationTests
         await SeedAssetAsync(owner, model: uniqueModel, serial: secretSerial);
 
         // 1. Search by Model works
-        var resModel = await client.GetAsync($"api/v1/inventory/public/assets?q={uniqueModel}");
+        var resModel = await client.GetAsync($"api/v1/inventory/public/equipment-listings?q={uniqueModel}");
         Assert.Equal(HttpStatusCode.OK, resModel.StatusCode);
-        var pagedModel = await resModel.Content.ReadFromJsonAsync<PagedResponse<PublicInventoryAssetResponse>>();
+        var pagedModel = await resModel.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(pagedModel);
         Assert.Single(pagedModel.Items);
         Assert.Equal(uniqueModel, pagedModel.Items[0].Model);
 
         // 2. Search by SerialNumber MUST NOT match in public discovery
-        var resSerial = await client.GetAsync($"api/v1/inventory/public/assets?q={secretSerial}");
+        var resSerial = await client.GetAsync($"api/v1/inventory/public/equipment-listings?q={secretSerial}");
         Assert.Equal(HttpStatusCode.OK, resSerial.StatusCode);
-        var pagedSerial = await resSerial.Content.ReadFromJsonAsync<PagedResponse<PublicInventoryAssetResponse>>();
+        var pagedSerial = await resSerial.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(pagedSerial);
         Assert.Empty(pagedSerial.Items);
         Assert.Equal(0, pagedSerial.TotalCount);
@@ -59,8 +62,8 @@ public sealed partial class AssetHttpIntegrationTests
         await SeedAssetAsync(owner, model: modelWithoutWildcard);
 
         // Search with literal %
-        var resPercent = await client.GetAsync($"api/v1/inventory/public/assets?q={Uri.EscapeDataString(uniquePrefix + "_100%")}");
-        var pagedPercent = await resPercent.Content.ReadFromJsonAsync<PagedResponse<PublicInventoryAssetResponse>>();
+        var resPercent = await client.GetAsync($"api/v1/inventory/public/equipment-listings?q={Uri.EscapeDataString(uniquePrefix + "_100%")}");
+        var pagedPercent = await resPercent.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(pagedPercent);
         Assert.Single(pagedPercent.Items);
         Assert.Equal(modelWithWildcard, pagedPercent.Items[0].Model);
@@ -83,14 +86,32 @@ public sealed partial class AssetHttpIntegrationTests
         var assetWrongBrand = await SeedAssetAsync(owner, model: "WrongBrand", eqTypeId: targetEq, brandId: Guid.NewGuid(), year: 2022);
         var assetWrongYear = await SeedAssetAsync(owner, model: "WrongYear", eqTypeId: targetEq, brandId: targetBrand, year: 2018);
 
-        var query = $"api/v1/inventory/public/assets?equipmentTypeId={targetEq:D}&brandId={targetBrand:D}&manufactureYearFrom=2020&manufactureYearTo=2024";
+        var query = $"api/v1/inventory/public/equipment-listings?equipmentTypeId={targetEq:D}&brandId={targetBrand:D}";
         var res = await client.GetAsync(query);
 
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
-        var paged = await res.Content.ReadFromJsonAsync<PagedResponse<PublicInventoryAssetResponse>>();
+        var paged = await res.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(paged);
-        Assert.Single(paged.Items);
-        Assert.Equal(assetMatch.Id, paged.Items[0].Id);
+        Assert.Equal(2, paged.Items.Count);
+        Assert.Contains(paged.Items, i => i.Id == assetMatch.EquipmentListingId);
+        Assert.Contains(paged.Items, i => i.Id == assetWrongYear.EquipmentListingId);
+
+        // 1. Public year filter is rejected (unsupported query parameter)
+        var invalidYearRes = await client.GetAsync("api/v1/inventory/public/equipment-listings?manufactureYear=2022");
+        Assert.Equal(HttpStatusCode.BadRequest, invalidYearRes.StatusCode);
+
+        // 2. Public year sort is rejected
+        var invalidSortRes = await client.GetAsync("api/v1/inventory/public/equipment-listings?sort=year_desc");
+        Assert.Equal(HttpStatusCode.BadRequest, invalidSortRes.StatusCode);
+
+        // 3. Owner Asset API retains year filtering
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
+        var ownerYearRes = await client.GetAsync("api/v1/inventory/assets?manufactureYearFrom=2020");
+        Assert.Equal(HttpStatusCode.OK, ownerYearRes.StatusCode);
+        var ownerPaged = await ownerYearRes.Content.ReadFromJsonAsync<PagedResponse<InventoryAssetResponse>>();
+        Assert.NotNull(ownerPaged);
+        Assert.All(ownerPaged.Items, item => Assert.True(item.ManufactureYear >= 2020));
     }
 
     [Fact]
@@ -122,13 +143,13 @@ public sealed partial class AssetHttpIntegrationTests
 
         // Filter: tonnage >= 5 AND engine eq diesel
         var filterJson = Uri.EscapeDataString("[{\"field\":\"tonnage\",\"operator\":\"gte\",\"value\":5.0},{\"field\":\"engine\",\"operator\":\"eq\",\"value\":\"diesel\"}]");
-        var res = await client.GetAsync($"api/v1/inventory/public/assets?equipmentTypeId={eqTypeId:D}&filters={filterJson}");
+        var res = await client.GetAsync($"api/v1/inventory/public/equipment-listings?equipmentTypeId={eqTypeId:D}&filters={filterJson}");
 
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
-        var paged = await res.Content.ReadFromJsonAsync<PagedResponse<PublicInventoryAssetResponse>>();
+        var paged = await res.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(paged);
         Assert.Single(paged.Items);
-        Assert.Equal(a1.Id, paged.Items[0].Id);
+        Assert.Equal(a1.EquipmentListingId, paged.Items[0].Id);
     }
 
     [Fact]
@@ -161,13 +182,13 @@ public sealed partial class AssetHttpIntegrationTests
 
         // Filter: hasCabin eq true AND transmission eq automatic
         var filterJson = Uri.EscapeDataString("[{\"field\":\"hasCabin\",\"operator\":\"eq\",\"value\":true},{\"field\":\"transmission\",\"operator\":\"eq\",\"value\":\"automatic\"}]");
-        var res = await client.GetAsync($"api/v1/inventory/public/assets?equipmentTypeId={eqTypeId:D}&filters={filterJson}");
+        var res = await client.GetAsync($"api/v1/inventory/public/equipment-listings?equipmentTypeId={eqTypeId:D}&filters={filterJson}");
 
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
-        var paged = await res.Content.ReadFromJsonAsync<PagedResponse<PublicInventoryAssetResponse>>();
+        var paged = await res.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(paged);
         Assert.Single(paged.Items);
-        Assert.Equal(a1.Id, paged.Items[0].Id);
+        Assert.Equal(a1.EquipmentListingId, paged.Items[0].Id);
     }
 
     [Fact]
@@ -202,13 +223,13 @@ public sealed partial class AssetHttpIntegrationTests
 
         // Filter: fuelType eq electric
         var filterJson = Uri.EscapeDataString("[{\"field\":\"fuelType\",\"operator\":\"eq\",\"value\":\"electric\"}]");
-        var res = await client.GetAsync($"api/v1/inventory/public/assets?equipmentTypeId={eqTypeId:D}&filters={filterJson}");
+        var res = await client.GetAsync($"api/v1/inventory/public/equipment-listings?equipmentTypeId={eqTypeId:D}&filters={filterJson}");
 
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
-        var paged = await res.Content.ReadFromJsonAsync<PagedResponse<PublicInventoryAssetResponse>>();
+        var paged = await res.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(paged);
         // Only a2 is returned because version 1 is incompatible!
         Assert.Single(paged.Items);
-        Assert.Equal(a2.Id, paged.Items[0].Id);
+        Assert.Equal(a2.EquipmentListingId, paged.Items[0].Id);
     }
 }

@@ -1,5 +1,6 @@
 using Dprental.InventoryService.Application;
 using Dprental.InventoryService.Application.DTOs.Assets;
+using Dprental.InventoryService.Application.DTOs.Listings;
 using System.Reflection;
 using Dprental.InventoryService.Application.Kafka.Contracts;
 using Dprental.InventoryService.Common;
@@ -103,7 +104,7 @@ public sealed class ArchitectureContractTests
     [Fact]
     public void PublicAssetContracts_DoNotExpose_InternalOrOwnerFields()
     {
-        var publicProps = typeof(PublicInventoryAssetResponse).GetProperties().Select(p => p.Name).ToList();
+        var publicProps = typeof(PublicEquipmentListingResponse).GetProperties().Select(p => p.Name).ToList();
         Assert.DoesNotContain("OwnerUserId", publicProps, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("SerialNumber", publicProps, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("SuspensionReason", publicProps, StringComparer.OrdinalIgnoreCase);
@@ -111,5 +112,9 @@ public sealed class ArchitectureContractTests
         Assert.DoesNotContain("Xmin", publicProps, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("DisplayName", publicProps, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("ThumbnailMediaId", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("AssetCode", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("AssetId", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Assets", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("GroupReference", publicProps, StringComparer.OrdinalIgnoreCase);
     }
 }

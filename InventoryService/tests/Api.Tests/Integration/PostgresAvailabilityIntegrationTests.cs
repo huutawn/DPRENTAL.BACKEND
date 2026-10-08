@@ -97,21 +97,17 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
         await using var seedDb = CreateDbContext();
         for (int i = 0; i < 5; i++)
         {
-            var id = Guid.NewGuid();
-            var rate = AssetRentalRate.Create(id, 100_000m, null, null, "VND", InitialNow).Value;
-            var asset = InventoryAsset.Create(
-                id, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), $"Camera {i}", 1, "{}", InitialNow, rate).Value;
-
-            asset.CalendarBlocks.Add(CalendarBlock.Create(
+            var asset = await IntegrationTestHelper.InsertTestAssetAsync(seedDb, ownerId: ownerUserId, model: $"Camera {i}", now: InitialNow);
+            var block = CalendarBlock.Create(
                 Guid.NewGuid(), asset.Id, new DateOnly(2026, 10, 10), new DateOnly(2026, 10, 12),
-                CalendarBlockReason.Maintenance, "op", InitialNow, InitialToday).Value);
+                CalendarBlockReason.Maintenance, "op", InitialNow, InitialToday).Value;
+            seedDb.CalendarBlocks.Add(block);
 
             var hold = AssetAllocation.CreateHold(
                 Guid.NewGuid(), asset.Id, RentalPeriod.Create(new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18)).Value,
                 InitialNow.AddHours(2), InitialNow, "SYS", $"REF-{Guid.NewGuid():N}").Value;
-            asset.Allocations.Add(hold);
+            seedDb.AssetAllocations.Add(hold);
 
-            seedDb.Assets.Add(asset);
             assetIds.Add(asset.Id);
         }
         await seedDb.SaveChangesAsync();
@@ -153,14 +149,9 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
     {
         var ownerUserId = Guid.NewGuid();
         var assetId = Guid.NewGuid();
-        var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", InitialNow).Value;
-        var asset = InventoryAsset.Create(
-            assetId, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "RepeatableReadTest", 1, "{}", InitialNow, rate).Value;
-
         await using (var seedDb = CreateDbContext())
         {
-            seedDb.Assets.Add(asset);
-            await seedDb.SaveChangesAsync();
+            await IntegrationTestHelper.InsertTestAssetAsync(seedDb, assetId: assetId, ownerId: ownerUserId, model: "RepeatableReadTest", now: InitialNow);
         }
 
         var startDate = new DateOnly(2026, 10, 1);
@@ -171,7 +162,7 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
         {
             using var concurrentDb = CreateDbContext();
             var newBlock = CalendarBlock.Create(
-                Guid.NewGuid(), asset.Id, new DateOnly(2026, 10, 5), new DateOnly(2026, 10, 8),
+                Guid.NewGuid(), assetId, new DateOnly(2026, 10, 5), new DateOnly(2026, 10, 8),
                 CalendarBlockReason.Maintenance, "concurrent_op", InitialNow, InitialToday).Value;
             concurrentDb.CalendarBlocks.Add(newBlock);
             concurrentDb.SaveChanges();
@@ -181,7 +172,7 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
         var repo = new InventoryAssetRepository(readDb);
 
         // RepeatableRead transaction cô lập snapshot: đọc nhất quán và hoàn tất thành công
-        var snapshots = await repo.GetAvailabilitySnapshotsAsync(new[] { asset.Id }, startDate, endDate);
+        var snapshots = await repo.GetAvailabilitySnapshotsAsync(new[] { assetId }, startDate, endDate);
         Assert.Single(snapshots);
         // Snapshot nhất quán, query thành công không sinh lỗi deadlock hay tearing
     }
@@ -193,46 +184,33 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
         var windowStart = new DateOnly(2026, 10, 10);
         var windowEnd = new DateOnly(2026, 10, 15);
 
-        // 1. Free asset
-        var freeId = Guid.NewGuid();
-        var freeAsset = InventoryAsset.Create(freeId, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Free", 1, "{}", InitialNow, AssetRentalRate.Create(freeId, 100_000m, null, null, "VND", InitialNow).Value).Value;
-
-        // 2. Disabled bookings
-        var disabledId = Guid.NewGuid();
-        var disabledAsset = InventoryAsset.Create(disabledId, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Disabled", 1, "{}", InitialNow, AssetRentalRate.Create(disabledId, 100_000m, null, null, "VND", InitialNow).Value).Value;
-        disabledAsset.DisableBookings("Disabled", InitialNow);
-
-        // 3. Blocked
-        var blockedId = Guid.NewGuid();
-        var blockedAsset = InventoryAsset.Create(blockedId, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Blocked", 1, "{}", InitialNow, AssetRentalRate.Create(blockedId, 100_000m, null, null, "VND", InitialNow).Value).Value;
-        blockedAsset.CalendarBlocks.Add(CalendarBlock.Create(
-            Guid.NewGuid(), blockedAsset.Id, windowStart, windowEnd,
-            CalendarBlockReason.Maintenance, "op", InitialNow, windowStart).Value);
-
-        // 4. Active Hold
-        var heldId = Guid.NewGuid();
-        var heldAsset = InventoryAsset.Create(heldId, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Held", 1, "{}", InitialNow, AssetRentalRate.Create(heldId, 100_000m, null, null, "VND", InitialNow).Value).Value;
-        heldAsset.Allocations.Add(AssetAllocation.CreateHold(
-            Guid.NewGuid(), heldAsset.Id, RentalPeriod.Create(windowStart, windowEnd).Value,
-            InitialNow.AddHours(2), InitialNow, "SYS", $"REF-{Guid.NewGuid():N}").Value);
-
-        // 5. Expired Hold
-        var expiredId = Guid.NewGuid();
-        var expiredAsset = InventoryAsset.Create(expiredId, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "Expired", 1, "{}", InitialNow, AssetRentalRate.Create(expiredId, 100_000m, null, null, "VND", InitialNow).Value).Value;
-        expiredAsset.Allocations.Add(AssetAllocation.CreateHold(
-            Guid.NewGuid(), expiredAsset.Id, RentalPeriod.Create(windowStart, windowEnd).Value,
-            InitialNow.AddHours(-1), InitialNow.AddHours(-2), "SYS", $"REF-{Guid.NewGuid():N}").Value);
-
         await using var seedDb = CreateDbContext();
-        seedDb.Assets.AddRange(freeAsset, disabledAsset, blockedAsset, heldAsset, expiredAsset);
+        var freeAsset = await IntegrationTestHelper.InsertTestAssetAsync(seedDb, ownerId: ownerUserId, model: "Free", now: InitialNow);
+        var disabledAsset = await IntegrationTestHelper.InsertTestAssetAsync(seedDb, ownerId: ownerUserId, model: "Disabled", acceptingBookings: false, now: InitialNow);
+        var blockedAsset = await IntegrationTestHelper.InsertTestAssetAsync(seedDb, ownerId: ownerUserId, model: "Blocked", now: InitialNow);
+        var block = CalendarBlock.Create(
+            Guid.NewGuid(), blockedAsset.Id, windowStart, windowEnd,
+            CalendarBlockReason.Maintenance, "op", InitialNow, windowStart).Value;
+        seedDb.CalendarBlocks.Add(block);
+        var heldAsset = await IntegrationTestHelper.InsertTestAssetAsync(seedDb, ownerId: ownerUserId, model: "Held", now: InitialNow);
+        var hold = AssetAllocation.CreateHold(
+            Guid.NewGuid(), heldAsset.Id, RentalPeriod.Create(windowStart, windowEnd).Value,
+            InitialNow.AddHours(2), InitialNow, "SYS", $"REF-{Guid.NewGuid():N}").Value;
+        seedDb.AssetAllocations.Add(hold);
+        var expiredAsset = await IntegrationTestHelper.InsertTestAssetAsync(seedDb, ownerId: ownerUserId, model: "Expired", now: InitialNow);
+        var expiredHold = AssetAllocation.CreateHold(
+            Guid.NewGuid(), expiredAsset.Id, RentalPeriod.Create(windowStart, windowEnd).Value,
+            InitialNow.AddHours(-1), InitialNow.AddHours(-2), "SYS", $"REF-{Guid.NewGuid():N}").Value;
+        seedDb.AssetAllocations.Add(expiredHold);
         await seedDb.SaveChangesAsync();
 
         var missingId = Guid.NewGuid();
 
         await using var queryDb = CreateDbContext();
         var repo = new InventoryAssetRepository(queryDb);
+        var listingRepo = new EquipmentListingRepository(queryDb);
         var timeProvider = new TestTimeProvider(InitialNow);
-        var service = new InventoryAvailabilityService(repo, NoOpInventoryAvailabilityCache.Instance, timeProvider);
+        var service = new InventoryAvailabilityService(repo, listingRepo, NoOpInventoryAvailabilityCache.Instance, timeProvider);
 
         var request = new CheckAvailabilityBatchRequest(
             new[] { freeAsset.Id, disabledAsset.Id, blockedAsset.Id, heldAsset.Id, expiredAsset.Id, missingId },
@@ -252,26 +230,27 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
     {
         var ownerUserId = Guid.NewGuid();
         var busyAssetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(busyAssetId, ownerUserId, Guid.NewGuid(), Guid.NewGuid(), "RangesTest", 1, "{}", InitialNow, AssetRentalRate.Create(busyAssetId, 100_000m, null, null, "VND", InitialNow).Value).Value;
+        await using var seedDb = CreateDbContext();
+        var asset = await IntegrationTestHelper.InsertTestAssetAsync(seedDb, assetId: busyAssetId, ownerId: ownerUserId, model: "RangesTest", now: InitialNow);
 
         // Block from 2026-10-05 to 2026-10-08
-        asset.CalendarBlocks.Add(CalendarBlock.Create(
+        var block = CalendarBlock.Create(
             Guid.NewGuid(), asset.Id, new DateOnly(2026, 10, 5), new DateOnly(2026, 10, 8),
-            CalendarBlockReason.Maintenance, "op", InitialNow, InitialToday).Value);
+            CalendarBlockReason.Maintenance, "op", InitialNow, InitialToday).Value;
+        seedDb.CalendarBlocks.Add(block);
 
         // Active hold from 2026-10-09 to 2026-10-12 (adjacent to block! -> merges to 2026-10-05 to 2026-10-12)
-        asset.Allocations.Add(AssetAllocation.CreateHold(
+        var hold = AssetAllocation.CreateHold(
             Guid.NewGuid(), asset.Id, RentalPeriod.Create(new DateOnly(2026, 10, 9), new DateOnly(2026, 10, 12)).Value,
-            InitialNow.AddHours(2), InitialNow, "SYS", $"REF-{Guid.NewGuid():N}").Value);
-
-        await using var seedDb = CreateDbContext();
-        seedDb.Assets.Add(asset);
+            InitialNow.AddHours(2), InitialNow, "SYS", $"REF-{Guid.NewGuid():N}").Value;
+        seedDb.AssetAllocations.Add(hold);
         await seedDb.SaveChangesAsync();
 
         await using var queryDb = CreateDbContext();
         var repo = new InventoryAssetRepository(queryDb);
+        var listingRepo = new EquipmentListingRepository(queryDb);
         var timeProvider = new TestTimeProvider(InitialNow);
-        var service = new InventoryAvailabilityService(repo, NoOpInventoryAvailabilityCache.Instance, timeProvider);
+        var service = new InventoryAvailabilityService(repo, listingRepo, NoOpInventoryAvailabilityCache.Instance, timeProvider);
 
         var result = await service.GetBusyRangesAsync(asset.Id, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
         Assert.True(result.IsSuccess);

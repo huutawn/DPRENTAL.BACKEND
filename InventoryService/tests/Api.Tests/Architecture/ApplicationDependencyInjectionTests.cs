@@ -38,10 +38,15 @@ public sealed class ApplicationDependencyInjectionTests
         Assert.Equal(typeof(InventoryAllocationService), allocationDescriptor.ImplementationType);
         Assert.Equal(ServiceLifetime.Scoped, allocationDescriptor.Lifetime);
 
-        var publicAssetDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IPublicInventoryAssetService));
-        Assert.NotNull(publicAssetDescriptor);
-        Assert.Equal(typeof(PublicInventoryAssetService), publicAssetDescriptor.ImplementationType);
-        Assert.Equal(ServiceLifetime.Scoped, publicAssetDescriptor.Lifetime);
+        var listingDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IEquipmentListingService));
+        Assert.NotNull(listingDescriptor);
+        Assert.Equal(typeof(EquipmentListingService), listingDescriptor.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, listingDescriptor.Lifetime);
+
+        var publicListingDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IPublicEquipmentListingService));
+        Assert.NotNull(publicListingDescriptor);
+        Assert.Equal(typeof(PublicEquipmentListingService), publicListingDescriptor.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, publicListingDescriptor.Lifetime);
 
         var validatorDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(AssetSearchQueryValidator));
         Assert.NotNull(validatorDescriptor);
@@ -72,8 +77,10 @@ public sealed class ApplicationDependencyInjectionTests
         var allocationService = scope.ServiceProvider.GetService<IInventoryAllocationService>();
         Assert.NotNull(allocationService);
 
-        var publicAssetService = scope.ServiceProvider.GetService<IPublicInventoryAssetService>();
-        Assert.NotNull(publicAssetService);
+        var listingService = scope.ServiceProvider.GetService<IEquipmentListingService>();
+        Assert.NotNull(listingService);
+        var publicListingService = scope.ServiceProvider.GetService<IPublicEquipmentListingService>();
+        Assert.NotNull(publicListingService);
 
         // Khẳng định Controllers kích hoạt thành công phụ thuộc vào interfaces
         var assetController = ActivatorUtilities.CreateInstance<InventoryAssetsController>(scope.ServiceProvider);
@@ -84,8 +91,11 @@ public sealed class ApplicationDependencyInjectionTests
         var allocationController = ActivatorUtilities.CreateInstance<InventoryAllocationsController>(scope.ServiceProvider);
         Assert.NotNull(allocationController);
 
-        var publicAssetController = ActivatorUtilities.CreateInstance<PublicInventoryAssetsController>(scope.ServiceProvider);
-        Assert.NotNull(publicAssetController);
+        var listingController = ActivatorUtilities.CreateInstance<EquipmentListingsController>(scope.ServiceProvider);
+        Assert.NotNull(listingController);
+
+        var publicListingController = ActivatorUtilities.CreateInstance<PublicEquipmentListingsController>(scope.ServiceProvider);
+        Assert.NotNull(publicListingController);
     }
 
     [Fact]
@@ -108,5 +118,10 @@ public sealed class ApplicationDependencyInjectionTests
         Assert.NotNull(calRepoDesc);
         Assert.Equal(typeof(CalendarBlockRepository), calRepoDesc.ImplementationType);
         Assert.Equal(ServiceLifetime.Scoped, calRepoDesc.Lifetime);
+
+        var listingRepoDesc = services.SingleOrDefault(d => d.ServiceType == typeof(IEquipmentListingRepository));
+        Assert.NotNull(listingRepoDesc);
+        Assert.Equal(typeof(EquipmentListingRepository), listingRepoDesc.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, listingRepoDesc.Lifetime);
     }
 }

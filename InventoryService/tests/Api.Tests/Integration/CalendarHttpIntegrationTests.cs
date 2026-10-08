@@ -49,27 +49,7 @@ public sealed class CalendarHttpIntegrationTests : IClassFixture<PostgresFixture
     private async Task<InventoryAsset> SeedAssetAsync(Guid ownerUserId, Guid orgId, bool acceptingBookings = true)
     {
         await using var db = CreateDbContext();
-        var assetId = Guid.NewGuid();
-        var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
-        var asset = InventoryAsset.Create(
-            assetId,
-            ownerUserId,
-            Guid.NewGuid(),
-            Guid.NewGuid(),
-            "Sony FX3",
-            1,
-            "{}",
-            FixedNow,
-            rate).Value;
-
-        if (!acceptingBookings)
-        {
-            asset.DisableBookings("Suspended for test", FixedNow);
-        }
-
-        db.Assets.Add(asset);
-        await db.SaveChangesAsync();
-        return asset;
+        return await IntegrationTestHelper.InsertTestAssetAsync(db, ownerId: ownerUserId, acceptingBookings: acceptingBookings, now: FixedNow);
     }
 
     [Fact]

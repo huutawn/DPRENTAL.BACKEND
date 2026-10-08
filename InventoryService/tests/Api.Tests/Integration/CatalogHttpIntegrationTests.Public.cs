@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Catalog;
+using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Domain.Entities;
 using Xunit;
@@ -26,24 +27,20 @@ public sealed partial class CatalogHttpIntegrationTests
         await using var _ = app;
         using var client = app.CreateClient();
 
-        var assetId = Guid.NewGuid();
         var ownerId = Guid.NewGuid();
+        EquipmentListing listing;
         await using (var db = CreateDbContext())
         {
-            var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
-            var asset = InventoryAsset.Create(
-                assetId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "Outage Forklift", 1, "{}", FixedNow, rate).Value;
-            db.Assets.Add(asset);
-            await db.SaveChangesAsync();
+            listing = await IntegrationTestHelper.InsertTestListingAsync(db, ownerId: ownerId, model: "Outage Forklift", now: FixedNow);
         }
 
         // 1. Public list without dynamic filters succeeds despite Catalog outage!
-        var listRes = await client.GetAsync("api/v1/inventory/public/assets");
+        var listRes = await client.GetAsync("api/v1/inventory/public/equipment-listings");
         Assert.Equal(HttpStatusCode.OK, listRes.StatusCode);
         Assert.Empty(catalogServer.CapturedRequests);
 
         // 2. Public detail succeeds despite Catalog outage!
-        var detailRes = await client.GetAsync($"api/v1/inventory/public/assets/{assetId:D}");
+        var detailRes = await client.GetAsync($"api/v1/inventory/public/equipment-listings/{listing.Id:D}");
         Assert.Equal(HttpStatusCode.OK, detailRes.StatusCode);
         Assert.Empty(catalogServer.CapturedRequests);
     }
@@ -76,22 +73,17 @@ public sealed partial class CatalogHttpIntegrationTests
         await using var _ = app;
         using var client = app.CreateClient();
 
-        var assetId = Guid.NewGuid();
         var ownerId = Guid.NewGuid();
         await using (var db = CreateDbContext())
         {
-            var rate = AssetRentalRate.Create(assetId, 100_000m, null, null, "VND", FixedNow).Value;
-            var asset = InventoryAsset.Create(
-                assetId, ownerId, eqTypeId, Guid.NewGuid(), "Tonnage Forklift", 1, "{\"tonnage\": 5.0}", FixedNow, rate).Value;
-            db.Assets.Add(asset);
-            await db.SaveChangesAsync();
+            await IntegrationTestHelper.InsertTestListingAsync(db, ownerId: ownerId, eqTypeId: eqTypeId, model: "Tonnage Forklift", specValues: "{\"tonnage\": 5.0}", now: FixedNow);
         }
 
         var filterJson = Uri.EscapeDataString("[{\"field\":\"tonnage\",\"operator\":\"gte\",\"value\":4.0}]");
-        var response = await client.GetAsync($"api/v1/inventory/public/assets?equipmentTypeId={eqTypeId:D}&filters={filterJson}");
+        var response = await client.GetAsync($"api/v1/inventory/public/equipment-listings?equipmentTypeId={eqTypeId:D}&filters={filterJson}");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicInventoryAssetResponse>>();
+        var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(paged);
         Assert.Single(paged.Items);
 
@@ -114,7 +106,7 @@ public sealed partial class CatalogHttpIntegrationTests
 
         var eqTypeId = Guid.NewGuid();
         var filterJson = Uri.EscapeDataString("[{\"field\":\"tonnage\",\"operator\":\"gte\",\"value\":4.0}]");
-        var response = await client.GetAsync($"api/v1/inventory/public/assets?equipmentTypeId={eqTypeId:D}&filters={filterJson}");
+        var response = await client.GetAsync($"api/v1/inventory/public/equipment-listings?equipmentTypeId={eqTypeId:D}&filters={filterJson}");
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
     }

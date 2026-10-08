@@ -13,6 +13,13 @@ public interface ICalendarService
         Guid assetId,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);
+    Task<Result<ListingCalendarResponse>> GetListingCalendarAsync(
+        Guid listingId,
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default);
+
 
     Task<Result<CalendarBlockResponse>> CreateCalendarBlockAsync(
         Guid assetId,

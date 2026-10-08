@@ -12,49 +12,57 @@ public sealed class PatchInventoryAssetRequestJsonConverterTests
     };
 
     [Fact]
-    public void Read_ValidBrandId_SetsPresenceAndValue()
+    public void Read_ValidSerialNumber_SetsPresenceAndValue()
     {
-        var brandId = Guid.NewGuid();
-        var json = $"{{\"brandId\":\"{brandId}\"}}";
+        var json = "{\"serialNumber\":\"SN-12345\"}";
 
         var request = JsonSerializer.Deserialize<PatchInventoryAssetRequest>(json, Options);
 
         Assert.NotNull(request);
-        Assert.True(request.IsBrandIdSpecified);
-        Assert.Equal(brandId, request.BrandId);
+        Assert.True(request.IsSerialNumberSpecified);
+        Assert.Equal("SN-12345", request.SerialNumber);
         Assert.False(request.IsEmpty);
     }
 
     [Fact]
-    public void Read_NullBrandId_ThrowsJsonException()
+    public void Read_NullSerialNumber_AllowedAndSetsNull()
     {
-        var json = "{\"brandId\":null}";
+        var json = "{\"serialNumber\":null}";
 
-        var ex = Assert.Throws<JsonException>(() =>
-            JsonSerializer.Deserialize<PatchInventoryAssetRequest>(json, Options));
+        var request = JsonSerializer.Deserialize<PatchInventoryAssetRequest>(json, Options);
 
-        Assert.Contains("không được null", ex.Message);
-    }
-
-    [Theory]
-    [InlineData("{\"brandId\":\"not-a-guid\"}")]
-    [InlineData("{\"brandId\":123}")]
-    [InlineData("{\"brandId\":true}")]
-    [InlineData("{\"brandId\":[\"a\"]}")]
-    public void Read_InvalidBrandIdTypeOrFormat_ThrowsJsonException(string json)
-    {
-        var ex = Assert.Throws<JsonException>(() =>
-            JsonSerializer.Deserialize<PatchInventoryAssetRequest>(json, Options));
-
-        Assert.Contains("GUID hợp lệ", ex.Message);
+        Assert.NotNull(request);
+        Assert.True(request.IsSerialNumberSpecified);
+        Assert.Null(request.SerialNumber);
     }
 
     [Fact]
-    public void Read_DuplicateBrandId_ThrowsJsonException()
+    public void Read_ValidManufactureYear_SetsPresenceAndValue()
     {
-        var g1 = Guid.NewGuid();
-        var g2 = Guid.NewGuid();
-        var json = $"{{\"brandId\":\"{g1}\",\"brandId\":\"{g2}\"}}";
+        var json = "{\"manufactureYear\":2024}";
+
+        var request = JsonSerializer.Deserialize<PatchInventoryAssetRequest>(json, Options);
+
+        Assert.NotNull(request);
+        Assert.True(request.IsManufactureYearSpecified);
+        Assert.Equal(2024, request.ManufactureYear);
+    }
+
+    [Fact]
+    public void Read_ForbiddenProperty_BrandIdOrModel_ThrowsJsonException()
+    {
+        var json = "{\"brandId\":\"" + Guid.NewGuid() + "\"}";
+
+        var ex = Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<PatchInventoryAssetRequest>(json, Options));
+
+        Assert.Contains("không được phép cập nhật", ex.Message);
+    }
+
+    [Fact]
+    public void Read_DuplicateProperty_ThrowsJsonException()
+    {
+        var json = "{\"serialNumber\":\"SN1\",\"serialNumber\":\"SN2\"}";
 
         var ex = Assert.Throws<JsonException>(() =>
             JsonSerializer.Deserialize<PatchInventoryAssetRequest>(json, Options));
@@ -63,46 +71,20 @@ public sealed class PatchInventoryAssetRequestJsonConverterTests
     }
 
     [Fact]
-    public void Read_ForbiddenProperty_ThrowsJsonException()
+    public void Write_PropertiesSpecified_SerializesCorrectly()
     {
-        var json = "{\"equipmentTypeId\":\"" + Guid.NewGuid() + "\"}";
-
-        var ex = Assert.Throws<JsonException>(() =>
-            JsonSerializer.Deserialize<PatchInventoryAssetRequest>(json, Options));
-
-        Assert.Contains("không hợp lệ hoặc bị cấm", ex.Message);
-    }
-
-    [Fact]
-    public void Write_BrandIdSpecified_SerializesProperty()
-    {
-        var brandId = Guid.NewGuid();
         var request = new PatchInventoryAssetRequest
         {
-            IsBrandIdSpecified = true,
-            BrandId = brandId
+            IsSerialNumberSpecified = true,
+            SerialNumber = "SN-999",
+            IsManufactureYearSpecified = true,
+            ManufactureYear = 2023
         };
 
         var json = JsonSerializer.Serialize(request, Options);
 
         using var doc = JsonDocument.Parse(json);
-        Assert.True(doc.RootElement.TryGetProperty("brandId", out var prop));
-        Assert.Equal(brandId, prop.GetGuid());
-    }
-
-    [Fact]
-    public void Write_BrandIdNotSpecified_OmitsProperty()
-    {
-        var request = new PatchInventoryAssetRequest
-        {
-            IsModelSpecified = true,
-            Model = "Sony FX3"
-        };
-
-        var json = JsonSerializer.Serialize(request, Options);
-
-        using var doc = JsonDocument.Parse(json);
-        Assert.False(doc.RootElement.TryGetProperty("brandId", out _));
-        Assert.True(doc.RootElement.TryGetProperty("model", out _));
+        Assert.Equal("SN-999", doc.RootElement.GetProperty("serialNumber").GetString());
+        Assert.Equal(2023, doc.RootElement.GetProperty("manufactureYear").GetInt32());
     }
 }

@@ -4,6 +4,7 @@ using Dprental.InventoryService.Application.Kafka.Outbox;
 using Dprental.InventoryService.Application.Mapping;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
+using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Common.Utils;
 using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Domain.IRepositories;
@@ -84,7 +85,19 @@ public sealed class InventoryAllocationService : IInventoryAllocationService
                 return TryReplayExistingHold(existing, assetId, period, canonicalHoldExpiresAt, request.Notes);
             }
 
-            // d. Với key mới: validate bằng CreateHold với canonical expiry
+            // d. Kiểm tra trạng thái Listing cha: Bắt buộc Active để nhận giữ chỗ mới
+            var listing = asset.Listing ?? await ctx.Listings.GetByIdAsync(asset.EquipmentListingId, ct);
+            if (listing is null)
+            {
+                return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+            }
+
+            if (listing.Status != EquipmentListingStatus.Active)
+            {
+                return Error.Conflict("LISTING_NOT_ACTIVE", "Listing không ở trạng thái Active để nhận giữ chỗ mới.");
+            }
+
+            // e. Với key mới: validate bằng CreateHold với canonical expiry
             var holdId = Guid.NewGuid();
             var holdResult = AssetAllocation.CreateHold(
                 id: holdId,
@@ -147,6 +160,227 @@ public sealed class InventoryAllocationService : IInventoryAllocationService
         }
 
         return executeResult;
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<ListingHoldResponse>> CreateListingHoldAsync(
+        Guid listingId,
+        CreateListingHoldRequest request,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated)
+        {
+            return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
+        }
+
+        if (!InventoryAccessEvaluator.CanWriteAllocations(caller))
+        {
+            return Error.Forbidden("FORBIDDEN", "Chỉ service có quyền allocation.write mới được tạo giữ chỗ tài sản.");
+        }
+
+        if (listingId == Guid.Empty)
+        {
+            return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+        }
+
+        if (request.Quantity < 1 || request.Quantity > 500)
+        {
+            return Error.Validation("INVALID_QUANTITY", "Số lượng giữ chỗ phải từ 1 đến 500.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.SourceSystem) || request.SourceSystem.Trim().Length > 100)
+        {
+            return Error.Validation("INVALID_SOURCE_SYSTEM", "SourceSystem không được rỗng và tối đa 100 ký tự.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.GroupReference) || request.GroupReference.Trim().Length > 100)
+        {
+            return Error.Validation("INVALID_GROUP_REFERENCE", "GroupReference không được rỗng và tối đa 100 ký tự.");
+        }
+
+        if (request.StartDate == default)
+        {
+            return Error.Validation("START_DATE_REQUIRED", "Ngày bắt đầu không được để trống.");
+        }
+
+        if (request.EndDate == default)
+        {
+            return Error.Validation("END_DATE_REQUIRED", "Ngày kết thúc không được để trống.");
+        }
+
+        if (request.HoldExpiresAt == default)
+        {
+            return Error.Validation("HOLD_EXPIRES_AT_REQUIRED", "Thời hạn giữ chỗ không được để trống.");
+        }
+
+        var periodResult = RentalPeriod.Create(request.StartDate, request.EndDate);
+        if (periodResult.IsFailure)
+        {
+            return periodResult.Error;
+        }
+
+        var period = periodResult.Value;
+        var canonicalHoldExpiresAt = BusinessDateTime.NormalizeUtc(request.HoldExpiresAt);
+        var sourceSystem = request.SourceSystem.Trim();
+        var groupReference = request.GroupReference.Trim();
+        var notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim();
+
+        if (notes?.Length > 500)
+        {
+            return Error.Validation("INVALID_ALLOCATION_METADATA", "Ghi chú tối đa 500 ký tự.");
+        }
+
+        return await _writeTransaction.ExecuteGroupHoldAsync(sourceSystem, groupReference, listingId, async (ctx, ct) =>
+        {
+            var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+
+            // 1. Replay check: tra cứu toàn bộ nhóm
+            var existingGroup = await ctx.Allocations.GetByGroupReferenceAsync(sourceSystem, groupReference, ct);
+            if (existingGroup.Count > 0)
+            {
+                // Đối chiếu Listing
+                if (existingGroup.Any(a => a.Asset.EquipmentListingId != listingId))
+                {
+                    return Error.Conflict("EXTERNAL_REFERENCE_REUSED", "Mã tham chiếu nhóm đã được sử dụng cho listing khác.");
+                }
+
+                // Đối chiếu số lượng
+                if (existingGroup.Count != request.Quantity)
+                {
+                    return Error.Conflict("EXTERNAL_REFERENCE_REUSED", "Số lượng yêu cầu không khớp với nhóm đã tạo.");
+                }
+
+                // Đối chiếu khoảng thời gian
+                if (existingGroup.Any(a => a.RentalPeriod.StartDate != period.StartDate || a.RentalPeriod.EndDate != period.EndDate))
+                {
+                    return Error.Conflict("EXTERNAL_REFERENCE_REUSED", "Khoảng thời gian không khớp với nhóm đã tạo.");
+                }
+
+                // Đối chiếu hạn giữ chỗ canonical
+                if (existingGroup.Any(a => a.HoldExpiresAt != canonicalHoldExpiresAt))
+                {
+                    return Error.Conflict("EXTERNAL_REFERENCE_REUSED", "Thời hạn giữ chỗ không khớp với nhóm đã tạo.");
+                }
+
+                // Đối chiếu notes
+                if (existingGroup.Any(a => !string.Equals(a.Notes, notes, StringComparison.Ordinal)))
+                {
+                    return Error.Conflict("EXTERNAL_REFERENCE_REUSED", "Ghi chú không khớp với nhóm đã tạo.");
+                }
+
+                // Kiểm tra trạng thái: không hồi sinh nhóm đã hết hạn/released/cancelled khi retry
+                if (existingGroup.Any(a => a.Status is AllocationStatus.Released or AllocationStatus.Cancelled ||
+                    (a.Status == AllocationStatus.Held && nowUtc >= a.HoldExpiresAt)))
+                {
+                    return Error.Conflict("HOLD_EXPIRED", "Lượt giữ chỗ nhóm đã hết hạn hoặc đã bị giải phóng.");
+                }
+
+                // Idempotent replay: trả lại các allocations hiện tại
+                var existingResponses = existingGroup.Select(InventoryAllocationMapper.ToResponse).ToList();
+                return Result.Success(new ListingHoldResponse(
+                    listingId,
+                    sourceSystem,
+                    groupReference,
+                    existingGroup.Count,
+                    existingResponses,
+                    IsReplay: true));
+            }
+
+            // 2. Validate thời hạn giữ chỗ cho request mới
+            var startOfDayUtc = BusinessDateTime.StartOfDayUtc(period.StartDate);
+            if (canonicalHoldExpiresAt <= nowUtc)
+            {
+                return Error.Validation("HOLD_EXPIRES_IN_PAST", "Thời hạn giữ chỗ phải lớn hơn thời điểm hiện tại.");
+            }
+
+            if (canonicalHoldExpiresAt >= startOfDayUtc)
+            {
+                return Error.Validation("HOLD_EXPIRES_AFTER_START", "Thời hạn giữ chỗ phải trước 00:00 ngày bắt đầu theo giờ Việt Nam.");
+            }
+
+            // 3. Đọc lại Listing và kiểm tra Active
+            var listing = await ctx.Listings.GetByIdAsync(listingId, ct);
+            if (listing is null)
+            {
+                return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+            }
+
+            if (listing.Status != EquipmentListingStatus.Active)
+            {
+                return Error.Conflict("LISTING_NOT_ACTIVE", "Listing không ở trạng thái Active để nhận giữ chỗ mới.");
+            }
+
+            // 4. Tìm N candidate units accepting bookings theo thứ tự Asset ID tăng dần
+            var listingSnapshot = await ctx.Listings.GetCalendarSnapshotAsync(listingId, period.StartDate, period.EndDate, ct);
+            if (listingSnapshot is null)
+            {
+                return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+            }
+
+            var freeUnits = listingSnapshot.Assets
+                .Where(a => a.AcceptingBookings &&
+                    !a.CalendarBlocks.Any(cb => cb.StartDate <= period.EndDate && cb.EndDate >= period.StartDate) &&
+                    !a.Allocations.Any(al =>
+                        (al.Status == AllocationStatus.Allocated ||
+                         (al.Status == AllocationStatus.Held && al.HoldExpiresAt > nowUtc)) &&
+                        al.RentalPeriod.StartDate <= period.EndDate &&
+                        al.RentalPeriod.EndDate >= period.StartDate))
+                .OrderBy(a => a.Id)
+                .ToList();
+
+            if (freeUnits.Count < request.Quantity)
+            {
+                return Error.Conflict("INSUFFICIENT_AVAILABILITY", "Không đủ số lượng thiết bị khả dụng trong khoảng thời gian yêu cầu.");
+            }
+
+            var chosenUnits = freeUnits.Take(request.Quantity).ToList();
+
+            // 5. Khóa các unit đã chọn theo thứ tự ID tăng dần
+            await ctx.AcquireAssetLocksAsync(chosenUnits.Select(u => u.Id), ct);
+
+            // 6. Tạo N allocations + transitions + outbox
+            var createdAllocations = new List<AssetAllocation>(request.Quantity);
+            foreach (var unit in chosenUnits)
+            {
+                var unitExtRef = $"listing-hold:{groupReference}:{unit.AssetCode}";
+                var holdResult = AssetAllocation.CreateHold(
+                    id: Guid.NewGuid(),
+                    assetId: unit.Id,
+                    period: period,
+                    holdExpiresAt: canonicalHoldExpiresAt,
+                    now: nowUtc,
+                    sourceSystem: sourceSystem,
+                    externalReference: unitExtRef,
+                    notes: notes,
+                    actor: "system",
+                    groupReference: groupReference);
+
+                if (holdResult.IsFailure)
+                {
+                    return holdResult.Error;
+                }
+
+                var hold = holdResult.Value;
+                ctx.Allocations.Add(hold);
+                createdAllocations.Add(hold);
+
+                var outboxMsg = InventoryAssetAvailabilityEvents.CreateAvailabilityChangedOutboxMessage(unit.Id, nowUtc);
+                ctx.StageOutbox(outboxMsg);
+            }
+
+            var responses = createdAllocations.Select(InventoryAllocationMapper.ToResponse).ToList();
+            return Result.Success(new ListingHoldResponse(
+                listingId,
+                sourceSystem,
+                groupReference,
+                request.Quantity,
+                responses,
+                IsReplay: false));
+        }, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -233,6 +467,11 @@ public sealed class InventoryAllocationService : IInventoryAllocationService
         {
             return Error.Validation("EXTERNAL_REFERENCE_REQUIRED", "Mã tham chiếu không được để trống.");
         }
+        if (request.ExternalReference.Trim().StartsWith("listing-hold:", StringComparison.OrdinalIgnoreCase))
+        {
+            return Error.Validation("RESERVED_EXTERNAL_REFERENCE", "Tiền tố 'listing-hold:' chỉ dành riêng cho group hold.");
+        }
+
 
         if (request.StartDate == default)
         {

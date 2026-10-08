@@ -15,6 +15,14 @@ public interface IInventoryAvailabilityService
     Task<Result<CheckAvailabilityBatchResponse>> CheckAvailabilityBatchAsync(
         CheckAvailabilityBatchRequest request,
         CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Kiểm tra tính khả dụng của một EquipmentListing đối với khoảng thời gian và số lượng đề xuất.
+    /// </summary>
+    Task<Result<CheckListingAvailabilityResponse>> CheckListingAvailabilityAsync(
+        Guid listingId,
+        CheckListingAvailabilityRequest request,
+        CancellationToken cancellationToken = default);
+
 
     /// <summary>
     /// Lấy danh sách các khoảng bận đã được làm sạch của tài sản trong khoảng thời gian [from, to].

@@ -69,7 +69,7 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
             return Error.NotFound("ASSET_NOT_FOUND", "Tài sản không tồn tại.");
         }
 
-        if (!InventoryAccessEvaluator.CanManageAsset(caller, asset.OwnerUserId))
+        if (!InventoryAccessEvaluator.CanManageAsset(caller, asset.Listing.OwnerUserId))
         {
             return Error.Forbidden("FORBIDDEN", "Không có quyền truy cập tài sản này.");
         }

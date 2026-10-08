@@ -36,9 +36,13 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
         public Func<Guid, int, string, Task<Result>>? SpecHandler { get; set; }
         public Func<Guid, IReadOnlyList<int>, Task<Result<CatalogBatchSchemasResponse>>>? BatchSchemasHandler { get; set; }
         public int BatchCalls { get; set; }
+        public int LookupCalls { get; set; }
+        public int BrandCalls { get; set; }
+        public int SpecCalls { get; set; }
 
         public Task<Result<CatalogEquipmentTypeResponse>> GetPublishedEquipmentTypeAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default)
         {
+            LookupCalls++;
             return LookupHandler is not null
                 ? LookupHandler(equipmentTypeId)
                 : Task.FromResult(Result.Success(new CatalogEquipmentTypeResponse(
@@ -47,6 +51,7 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
 
         public Task<Result<CatalogBrandResponse>> GetBrandAsync(Guid brandId, CancellationToken cancellationToken = default)
         {
+            BrandCalls++;
             return BrandHandler is not null
                 ? BrandHandler(brandId)
                 : Task.FromResult(Result.Success(new CatalogBrandResponse(
@@ -55,6 +60,7 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
 
         public Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default)
         {
+            SpecCalls++;
             return SpecHandler is not null
                 ? SpecHandler(equipmentTypeId, schemaVersion, specValues)
                 : Task.FromResult(Result.Success());
@@ -89,64 +95,6 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
             Task.FromResult(Result.Success(new MediaVisibilityInfo(mediaId, "Public")));
     }
 
-    private sealed class RaceInterceptingAssetRepository(
-        IInventoryAssetRepository inner,
-        InventoryServiceDbContext? db = null,
-        Func<InventoryAsset?, Task>? onAfterSnapshotRead = null,
-        Action? onInsideLockRead = null,
-        Action? onGetById = null) : IInventoryAssetRepository
-    {
-        public RaceInterceptingAssetRepository(IInventoryAssetRepository inner, Action onGetById)
-            : this(inner, null, null, null, onGetById)
-        {
-        }
-
-        public async Task<InventoryAsset?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
-        {
-            var res = await inner.GetByIdAsync(id, cancellationToken);
-            onGetById?.Invoke();
-
-            if (db != null && db.Database.CurrentTransaction != null)
-            {
-                onInsideLockRead?.Invoke();
-            }
-            else if (onAfterSnapshotRead != null)
-            {
-                await onAfterSnapshotRead(res);
-            }
-
-            return res;
-        }
-
-        public Task<InventoryAsset?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default) =>
-            inner.GetByIdForOwnerAsync(id, ownerUserId, cancellationToken);
-
-        public Task<IReadOnlyList<InventoryAsset>> SearchForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
-            inner.SearchForOwnerAsync(criteria, cancellationToken);
-
-        public Task<int> CountForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
-            inner.CountForOwnerAsync(criteria, cancellationToken);
-
-        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
-            inner.GetDistinctSchemaVersionsForOwnerAsync(criteria, cancellationToken);
-
-        public Task<InventoryAsset?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-            inner.GetPublicByIdAsync(id, cancellationToken);
-
-        public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsPublicAsync(AssetSearchFilters filters, CancellationToken cancellationToken = default) =>
-            inner.GetDistinctSchemaVersionsPublicAsync(filters, cancellationToken);
-
-        public Task<PublicAssetSearchResult> SearchPublicAsync(PublicAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
-            inner.SearchPublicAsync(criteria, cancellationToken);
-        public Task<InventoryAsset?> GetCalendarSnapshotAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
-            inner.GetCalendarSnapshotAsync(assetId, startDate, endDate, cancellationToken);
-
-        public Task<IReadOnlyList<InventoryAsset>> GetAvailabilitySnapshotsAsync(IReadOnlyList<Guid> assetIds, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
-            inner.GetAvailabilitySnapshotsAsync(assetIds, startDate, endDate, cancellationToken);
-
-        public void Add(InventoryAsset asset) => inner.Add(asset);
-        public void Update(InventoryAsset asset) => inner.Update(asset);
-    }
 
     private sealed class ConcurrencySnapshotBarrier(int count = 2, TimeSpan? timeout = null)
     {
@@ -218,23 +166,91 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
     {
         var actualNow = createdAt ?? FixedNow;
         await using var db = CreateDbContext();
-        var id = Guid.NewGuid();
-        var rate = AssetRentalRate.Create(id, 100_000m, null, null, "VND", actualNow).Value;
-        var asset = InventoryAsset.Create(
-            id,
-            ownerUserId,
-            eqTypeId ?? Guid.NewGuid(),
-            brandId ?? Guid.NewGuid(),
-            model,
-            schemaVersion,
-            specValues,
-            actualNow,
-            rate,
-            serial,
-            year,
-            thumb).Value;
-        db.Assets.Add(asset);
-        await db.SaveChangesAsync();
-        return asset;
+        return await IntegrationTestHelper.InsertTestAssetAsync(
+            db,
+            ownerId: ownerUserId,
+            eqTypeId: eqTypeId,
+            brandId: brandId,
+            model: model,
+            schemaVersion: schemaVersion,
+            specValues: specValues,
+            now: actualNow,
+            serialNumber: serial,
+            manufactureYear: year,
+            thumbnailMediaId: thumb);
     }
+}
+
+internal sealed class RaceInterceptingAssetRepository : IInventoryAssetRepository
+{
+    private readonly IInventoryAssetRepository inner;
+    private readonly InventoryServiceDbContext? db;
+    private readonly Func<InventoryAsset?, Task>? onAfterSnapshotRead;
+    private readonly Action? onInsideLockRead;
+    private readonly Action? onGetById;
+
+    public RaceInterceptingAssetRepository(
+        IInventoryAssetRepository inner,
+        InventoryServiceDbContext? db = null,
+        Func<InventoryAsset?, Task>? onAfterSnapshotRead = null,
+        Action? onInsideLockRead = null,
+        Action? onGetById = null)
+    {
+        this.inner = inner;
+        this.db = db;
+        this.onAfterSnapshotRead = onAfterSnapshotRead;
+        this.onInsideLockRead = onInsideLockRead;
+        this.onGetById = onGetById;
+    }
+
+    public RaceInterceptingAssetRepository(IInventoryAssetRepository inner, Action onGetById)
+        : this(inner, null, null, null, onGetById)
+    {
+    }
+
+    public async Task<InventoryAsset?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var res = await inner.GetByIdAsync(id, cancellationToken);
+        onGetById?.Invoke();
+
+        if (db != null && db.Database.CurrentTransaction != null)
+        {
+            onInsideLockRead?.Invoke();
+        }
+        else if (onAfterSnapshotRead != null)
+        {
+            await onAfterSnapshotRead(res);
+        }
+
+        return res;
+    }
+
+    public Task<InventoryAsset?> GetByIdForOwnerAsync(Guid id, Guid ownerUserId, CancellationToken cancellationToken = default) =>
+        inner.GetByIdForOwnerAsync(id, ownerUserId, cancellationToken);
+
+    public Task<IReadOnlyList<InventoryAsset>> SearchForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+        inner.SearchForOwnerAsync(criteria, cancellationToken);
+
+    public Task<int> CountForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+        inner.CountForOwnerAsync(criteria, cancellationToken);
+
+    public Task<IReadOnlyList<int>> GetDistinctSchemaVersionsForOwnerAsync(OwnerAssetSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+        inner.GetDistinctSchemaVersionsForOwnerAsync(criteria, cancellationToken);
+
+    public Task<IReadOnlyList<InventoryAsset>> GetAssetsByListingIdAsync(Guid listingId, int skip, int take, CancellationToken cancellationToken = default) =>
+        inner.GetAssetsByListingIdAsync(listingId, skip, take, cancellationToken);
+
+    public Task<int> CountAssetsByListingIdAsync(Guid listingId, CancellationToken cancellationToken = default) =>
+        inner.CountAssetsByListingIdAsync(listingId, cancellationToken);
+
+    public Task<InventoryAsset?> GetCalendarSnapshotAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
+        inner.GetCalendarSnapshotAsync(assetId, startDate, endDate, cancellationToken);
+
+    public Task<IReadOnlyList<InventoryAsset>> GetAvailabilitySnapshotsAsync(IReadOnlyList<Guid> assetIds, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
+        inner.GetAvailabilitySnapshotsAsync(assetIds, startDate, endDate, cancellationToken);
+
+    public void Add(InventoryAsset asset) => inner.Add(asset);
+    public void Update(InventoryAsset asset) => inner.Update(asset);
+    public Task<bool> ExistsSerialInListingAsync(Guid listingId, string serialNumber, Guid? excludeAssetId = null, CancellationToken cancellationToken = default) =>
+        inner.ExistsSerialInListingAsync(listingId, serialNumber, excludeAssetId, cancellationToken);
 }
