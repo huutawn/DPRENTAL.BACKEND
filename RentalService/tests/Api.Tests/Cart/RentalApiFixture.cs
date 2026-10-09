@@ -1,0 +1,156 @@
+﻿using System;
+using System.Collections.Concurrent;
+using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Security.Claims;
+using System.Text.Encodings.Web;
+using System.Threading;
+using System.Threading.Tasks;
+using Dprental.RentalService.Api.Security;
+using Dprental.RentalService.Application.Cart;
+using Dprental.RentalService.Application.Cart.ReadModel;
+using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Domain.IRepositories;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace Dprental.RentalService.Api.Tests.Cart;
+
+public class RentalApiFixture : WebApplicationFactory<Program>
+{
+    public HttpClient CreateAuthorizedClient(Guid renterId)
+    {
+        var client = CreateClient();
+
+        // Truyền ID giả lập và chỉ định dùng Scheme TestAuth
+        client.DefaultRequestHeaders.Add("X-Test-Renter-Id", renterId.ToString());
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestAuth");
+
+        return client;
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.ConfigureTestServices(services =>
+        {
+            // 1. Vượt qua [Authorize] bằng TestAuthHandler
+            services.AddAuthentication("TestAuth")
+                    .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("TestAuth", options => { });
+
+            // 2. Mock CurrentRenter lấy từ Header
+            services.AddHttpContextAccessor();
+            services.AddScoped<ICurrentRenter, FakeCurrentRenter>();
+
+            // 3. Mock Repository (Lưu trữ RAM bằng Singleton Dictionary)
+            services.AddSingleton<IRentalCartRepository, FakeRentalCartRepository>();
+
+            // 4. Mock Inventory Providers (Trả về dữ liệu dummy)
+            var fakeDeps = new FakeDependencies();
+            services.AddSingleton<IRentalListingOwnerProvider>(fakeDeps);
+            services.AddSingleton<IRentalListingReader>(fakeDeps);
+            services.AddSingleton<IRentalAvailabilityReader>(fakeDeps);
+            services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
+
+            services.AddSingleton<TimeProvider>(TimeProvider.System);
+            services.AddScoped<RentalCartUseCases>();
+            services.AddScoped<GetRentalCart>();
+        });
+    }
+
+    // ==========================================
+    // CÁC CLASS MOCK DÙNG RIÊNG CHO MÔI TRƯỜNG TEST
+    // ==========================================
+
+    private sealed class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+    {
+        public TestAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
+            : base(options, logger, encoder) { }
+
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+        {
+            if (Context.Request.Headers.TryGetValue("X-Test-Renter-Id", out var renterIdStr))
+            {
+                var claims = new[] { new Claim(ClaimTypes.NameIdentifier, renterIdStr.ToString()) };
+                var identity = new ClaimsIdentity(claims, "TestAuth");
+                var principal = new ClaimsPrincipal(identity);
+                var ticket = new AuthenticationTicket(principal, "TestAuth");
+
+                return Task.FromResult(AuthenticateResult.Success(ticket));
+            }
+            return Task.FromResult(AuthenticateResult.Fail("Unauthorized"));
+        }
+    }
+
+    private sealed class FakeCurrentRenter : ICurrentRenter
+    {
+        private readonly IHttpContextAccessor _accessor;
+        public FakeCurrentRenter(IHttpContextAccessor accessor) => _accessor = accessor;
+
+        public Guid RenterId
+        {
+            get
+            {
+                var val = _accessor.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                return Guid.TryParse(val, out var id) ? id : Guid.Empty;
+            }
+        }
+    }
+
+    private sealed class FakeRentalCartRepository : IRentalCartRepository
+    {
+        // Dùng ConcurrentDictionary để Thread-Safe cho Integration Tests
+        private readonly ConcurrentDictionary<Guid, RentalCart> _carts = new();
+
+        public Task<RentalCart?> GetByRenterIdAsync(Guid renterId, CancellationToken token = default)
+        {
+            var cart = _carts.Values.FirstOrDefault(c => c.RenterId == renterId);
+            return Task.FromResult(cart);
+        }
+
+        // Sửa kiểu trả về thành Task<RentalCart> cho khớp với Interface
+        public Task<RentalCart> CreateAsync(RentalCart cart, CancellationToken token = default)
+        {
+            _carts.TryAdd(cart.Id, cart);
+            return Task.FromResult(cart);
+        }
+
+        public Task<bool> UpdateAsync(RentalCart cart, CancellationToken token = default)
+        {
+            _carts[cart.Id] = cart;
+            return Task.FromResult(true);
+        }
+
+        // Bổ sung hàm GetByIdAsync bị thiếu
+        public Task<RentalCart?> GetByIdAsync(Guid id, CancellationToken token = default)
+        {
+            _carts.TryGetValue(id, out var cart);
+            return Task.FromResult(cart);
+        }
+
+        // Bổ sung hàm DeleteAsync bị thiếu
+        public Task<bool> DeleteAsync(Guid id, CancellationToken token = default)
+        {
+            return Task.FromResult(_carts.TryRemove(id, out _));
+        }
+    }
+
+    private sealed class FakeDependencies : IRentalListingOwnerProvider, IRentalListingReader, IRentalAvailabilityReader
+    {
+        public Task<Guid?> GetOwnerIdAsync(Guid listingId, CancellationToken token = default)
+            => Task.FromResult<Guid?>(Guid.NewGuid()); // Owner ID fake luôn khác RenterId
+
+        public Task<RentalListingSnapshot?> GetListingAsync(Guid listingId, CancellationToken token = default)
+            => Task.FromResult<RentalListingSnapshot?>(new RentalListingSnapshot(
+                listingId, Guid.NewGuid(), true, true, 100m, 50m, "v1"));
+
+        public Task<int?> GetAvailableQuantityAsync(Guid listingId, DateOnly start, DateOnly end, CancellationToken token = default)
+            => Task.FromResult<int?>(999); // Luôn dồi dào số lượng
+    }
+}

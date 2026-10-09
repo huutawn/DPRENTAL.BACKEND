@@ -1,5 +1,6 @@
 using System.IO;
 using Dprental.RentalService.Api.Exceptions;
+using Dprental.RentalService.Application.Cart.ReadModel;
 using Dprental.RentalService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -15,6 +16,9 @@ builder.Services.AddHealthChecks()
         tags: ["ready"]);
 
 builder.Services.AddControllers();
+builder.Services.AddAuthentication();
+builder.Services.AddAuthorization();
+builder.Services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddEndpointsApiExplorer();
@@ -37,6 +41,8 @@ if (app.Environment.IsDevelopment())
 
 app.UseExceptionHandler();
 app.UseStatusCodePages();
+app.UseAuthentication();
+app.UseAuthorization();
 
 HealthCheckOptions livenessOptions = new()
 {

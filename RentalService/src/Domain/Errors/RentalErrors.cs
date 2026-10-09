@@ -28,11 +28,8 @@ public static class RentalErrors
 
     public static readonly Error InvalidRentalPeriod =
         Error.Validation("Rental.InvalidPeriod", "Ngày bắt đầu không được sau ngày kết thúc.");
-    public static readonly Error DurationExceeded =
-        Error.Validation("Rental.DurationExceeded", "Thời gian thuê vượt quá giới hạn cho phép.");
-
-    public static readonly Error InvalidDurationLimit =
-        Error.Failure("Rental.InvalidDurationLimit", "Giới hạn thời lượng thuê phải lớn hơn hoặc bằng một ngày.");
+    public static readonly Error DurationExceedsOneYear =
+        Error.Validation("Rental.DurationExceedsOneYear", "Thời gian thuê không được vượt quá 1 năm.");
 
     // Order Errors
     public static readonly Error OrderNotFound =

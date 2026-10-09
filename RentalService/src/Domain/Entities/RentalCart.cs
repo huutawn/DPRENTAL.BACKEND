@@ -11,6 +11,9 @@ namespace Dprental.RentalService.Domain.Entities;
 [Index(nameof(RenterId))]
 public class RentalCart
 {
+    /// <summary>Maximum rental date difference in days for the MVP.</summary>
+    public const int MaximumRentalDays = 365;
+
     [Key]
     public Guid Id { get; private set; }
 
@@ -54,20 +57,15 @@ public class RentalCart
         int quantity,
         DateOnly expectedStartDate,
         DateOnly expectedEndDate,
-        int maxRentalDays, // Policy từ ngoài truyền vào
         DateTimeOffset utcNow)
     {
         if (Status != RentalCartStatus.Active) return RentalErrors.CartNotActive;
         if (itemId == Guid.Empty || equipmentListingId == Guid.Empty) return RentalErrors.CartItemNotFound;
 
+        Result requestValidation = ValidateRentalRequest(
+            equipmentListingOwnerId, expectedStartDate, expectedEndDate);
+        if (requestValidation.IsFailure) return requestValidation.Error;
         if (quantity <= 0) return RentalErrors.InvalidQuantity;
-
-        Result validation = ValidateRentalRequest(
-            equipmentListingOwnerId,
-            expectedStartDate,
-            expectedEndDate,
-            maxRentalDays);
-        if (validation.IsFailure) return validation.Error;
 
         RentalCartItem? existing = _items.Find(i =>
             i.EquipmentListingId == equipmentListingId &&
@@ -119,7 +117,6 @@ public class RentalCart
         Guid equipmentListingOwnerId,
         DateOnly newStartDate,
         DateOnly newEndDate,
-        int maxRentalDays, // Policy từ ngoài truyền vào
         DateTimeOffset utcNow)
     {
         if (Status != RentalCartStatus.Active) return RentalErrors.CartNotActive;
@@ -127,12 +124,9 @@ public class RentalCart
         RentalCartItem? item = _items.Find(i => i.Id == cartItemId);
         if (item is null) return RentalErrors.CartItemNotFound;
 
-        Result validation = ValidateRentalRequest(
-            equipmentListingOwnerId,
-            newStartDate,
-            newEndDate,
-            maxRentalDays);
-        if (validation.IsFailure) return validation.Error;
+        Result requestValidation = ValidateRentalRequest(
+            equipmentListingOwnerId, newStartDate, newEndDate);
+        if (requestValidation.IsFailure) return requestValidation.Error;
 
         RentalCartItem? duplicate = _items.Find(i =>
             i.Id != cartItemId &&
@@ -161,17 +155,15 @@ public class RentalCart
     private Result ValidateRentalRequest(
         Guid equipmentListingOwnerId,
         DateOnly startDate,
-        DateOnly endDate,
-        int maxRentalDays)
+        DateOnly endDate)
     {
         Result ownership = ValidateListingOwner(equipmentListingOwnerId);
         if (ownership.IsFailure) return ownership.Error;
 
-        if (maxRentalDays < 1) return RentalErrors.InvalidDurationLimit;
         if (startDate > endDate) return RentalErrors.InvalidRentalPeriod;
-        if (endDate.DayNumber - startDate.DayNumber > maxRentalDays)
+        if (endDate.DayNumber - startDate.DayNumber > MaximumRentalDays)
         {
-            return RentalErrors.DurationExceeded;
+            return RentalErrors.DurationExceedsOneYear;
         }
 
         return Result.Success();
