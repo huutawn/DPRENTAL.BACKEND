@@ -81,7 +81,7 @@ public class RentalCart
             return RentalErrors.InvalidQuantity;
         }
 
-        if (expectedStartDate >= expectedEndDate)
+        if (expectedStartDate > expectedEndDate)
         {
             return RentalErrors.InvalidRentalPeriod;
         }
@@ -123,7 +123,7 @@ public class RentalCart
             return RentalErrors.InvalidQuantity;
         }
 
-        if (newStartDate >= newEndDate)
+        if (newStartDate > newEndDate)
         {
             return RentalErrors.InvalidRentalPeriod;
         }

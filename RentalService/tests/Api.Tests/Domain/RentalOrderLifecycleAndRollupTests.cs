@@ -27,7 +27,8 @@ public sealed class RentalOrderLifecycleAndRollupTests
             100_000m,
             200_000m,
             "hold-1",
-            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())]);
+            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
+            TestListingSnapshots.Default);
 
         InitialRentalItemDto item2 = new(
             Guid.NewGuid(),
@@ -42,7 +43,8 @@ public sealed class RentalOrderLifecycleAndRollupTests
             50_000m,
             150_000m,
             "hold-2",
-            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())]);
+            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
+            TestListingSnapshots.Default);
 
         return RentalOrder.Create(
             Guid.NewGuid(),

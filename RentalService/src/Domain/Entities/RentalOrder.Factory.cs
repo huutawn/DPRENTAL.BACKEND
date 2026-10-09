@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Errors;
@@ -89,14 +90,23 @@ public partial class RentalOrder
                 return RentalErrors.NegativeAmount;
             }
 
-            if (itemDto.ExpectedStartDate >= itemDto.ExpectedEndDate)
+            if (itemDto.ExpectedStartDate > itemDto.ExpectedEndDate)
             {
                 return RentalErrors.InvalidRentalPeriod;
             }
 
             if (string.IsNullOrWhiteSpace(itemDto.ListingTitleSnapshot) || itemDto.ListingTitleSnapshot.Trim().Length > 200 ||
-                string.IsNullOrWhiteSpace(itemDto.PickupLocationSnapshot) || itemDto.PickupLocationSnapshot.Trim().Length > 500 ||
                 string.IsNullOrWhiteSpace(itemDto.AllocationGroupId) || itemDto.AllocationGroupId.Trim().Length > 64)
+            {
+                return RentalErrors.InvalidSnapshot;
+            }
+
+            if (itemDto.PickupLocationSnapshot is not null && itemDto.PickupLocationSnapshot.Trim().Length > 500)
+            {
+                return RentalErrors.InvalidSnapshot;
+            }
+
+            if (!IsValidListingSnapshot(itemDto.ListingSnapshot))
             {
                 return RentalErrors.InvalidSnapshot;
             }
@@ -169,11 +179,12 @@ public partial class RentalOrder
                 itemDto.ExpectedEndDate,
                 itemDto.ListingTitleSnapshot.Trim(),
                 itemDto.ListingDescriptionSnapshot?.Trim(),
-                itemDto.PickupLocationSnapshot.Trim(),
+                string.IsNullOrWhiteSpace(itemDto.PickupLocationSnapshot) ? null : itemDto.PickupLocationSnapshot.Trim(),
                 itemDto.DailyRateSnapshot,
                 itemDto.DepositPerUnitSnapshot,
                 itemDto.AllocationGroupId.Trim(),
-                itemDto.Assignments);
+                itemDto.Assignments,
+                itemDto.ListingSnapshot);
 
             order._items.Add(item);
         }
@@ -202,5 +213,35 @@ public partial class RentalOrder
             checkoutOperationId.Trim());
 
         return order;
+    }
+
+    private static bool IsValidListingSnapshot(RentalItemListingSnapshotDto? snapshot)
+    {
+        if (snapshot is null ||
+            snapshot.EquipmentTypeId == Guid.Empty ||
+            snapshot.BrandId == Guid.Empty ||
+            snapshot.ThumbnailMediaId == Guid.Empty ||
+            snapshot.SpecSchemaVersion < 1)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(snapshot.EquipmentTypeName) || snapshot.EquipmentTypeName.Trim().Length > 200 ||
+            string.IsNullOrWhiteSpace(snapshot.BrandName) || snapshot.BrandName.Trim().Length > 200 ||
+            string.IsNullOrWhiteSpace(snapshot.Model) || snapshot.Model.Trim().Length > 200 ||
+            string.IsNullOrWhiteSpace(snapshot.SpecValuesJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(snapshot.SpecValuesJson);
+            return document.RootElement.ValueKind == JsonValueKind.Object;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 }

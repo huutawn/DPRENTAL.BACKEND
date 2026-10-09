@@ -32,7 +32,8 @@ public sealed class RentalOrderIdempotencyAndValidationTests
             100_000m,
             200_000m,
             "group-01",
-            assignments);
+            assignments,
+            TestListingSnapshots.Default);
 
         RentalOrder order = RentalOrder.Create(
             Guid.NewGuid(),
@@ -76,7 +77,8 @@ public sealed class RentalOrderIdempotencyAndValidationTests
             100_000m,
             200_000m,
             "grp-1",
-            [a1]);
+            [a1],
+            TestListingSnapshots.Default);
 
         RentalOrder order = RentalOrder.Create(
             Guid.NewGuid(),
@@ -128,7 +130,8 @@ public sealed class RentalOrderIdempotencyAndValidationTests
             100_000m,
             200_000m,
             "grp-1",
-            [a1]);
+            [a1],
+            TestListingSnapshots.Default);
 
         RentalOrder order = RentalOrder.Create(
             Guid.NewGuid(),
@@ -229,7 +232,8 @@ public sealed class RentalOrderIdempotencyAndValidationTests
             -100_000m,
             200_000m,
             "grp-1",
-            [a1]);
+            [a1],
+            TestListingSnapshots.Default);
 
         Result<RentalOrder> failDailyRate = RentalOrder.Create(
             Guid.NewGuid(),
@@ -272,7 +276,8 @@ public sealed class RentalOrderIdempotencyAndValidationTests
             100_000m,
             200_000m,
             "grp-1",
-            [new(Guid.NewGuid(), duplicateAssetId, Guid.NewGuid())]);
+            [new(Guid.NewGuid(), duplicateAssetId, Guid.NewGuid())],
+            TestListingSnapshots.Default);
 
         InitialRentalItemDto item2 = new(
             duplicateItemId, // Duplicate item ID!
@@ -287,7 +292,8 @@ public sealed class RentalOrderIdempotencyAndValidationTests
             100_000m,
             200_000m,
             "grp-2",
-            [new(Guid.NewGuid(), duplicateAssetId, Guid.NewGuid())]);
+            [new(Guid.NewGuid(), duplicateAssetId, Guid.NewGuid())],
+            TestListingSnapshots.Default);
 
         Result<RentalOrder> duplicateResult = RentalOrder.Create(
             Guid.NewGuid(),

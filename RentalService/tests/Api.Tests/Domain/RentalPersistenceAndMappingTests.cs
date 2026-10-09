@@ -48,7 +48,8 @@ public sealed class RentalPersistenceAndMappingTests
             200_000m,
             500_000m,
             "group-01",
-            [assignmentDto]);
+            [assignmentDto],
+            TestListingSnapshots.Default);
 
         RentalOrder order = RentalOrder.Create(
             orderId,

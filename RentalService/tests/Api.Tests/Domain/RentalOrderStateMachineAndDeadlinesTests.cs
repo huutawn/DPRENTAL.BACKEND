@@ -27,7 +27,8 @@ public sealed class RentalOrderStateMachineAndDeadlinesTests
             200_000m,
             500_000m,
             "group-fx3",
-            [assignment]);
+            [assignment],
+            TestListingSnapshots.Default);
 
         return RentalOrder.Create(
             Guid.NewGuid(),

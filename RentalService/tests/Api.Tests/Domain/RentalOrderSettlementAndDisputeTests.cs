@@ -27,7 +27,8 @@ public sealed class RentalOrderSettlementAndDisputeTests
             100_000m,
             deposit,
             "group-01",
-            [new(unitId, Guid.NewGuid(), Guid.NewGuid())]);
+            [new(unitId, Guid.NewGuid(), Guid.NewGuid())],
+            TestListingSnapshots.Default);
 
         RentalOrder order = RentalOrder.Create(
             Guid.NewGuid(),
@@ -181,7 +182,8 @@ public sealed class RentalOrderSettlementAndDisputeTests
             100_000m,
             200_000m,
             "group-1",
-            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())]);
+            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
+            TestListingSnapshots.Default);
 
         Guid supplier2 = Guid.NewGuid();
         InitialRentalItemDto item2Dto = new(
@@ -197,7 +199,8 @@ public sealed class RentalOrderSettlementAndDisputeTests
             100_000m,
             200_000m,
             "group-2",
-            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())]);
+            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
+            TestListingSnapshots.Default);
 
         RentalOrder order = RentalOrder.Create(
             Guid.NewGuid(),

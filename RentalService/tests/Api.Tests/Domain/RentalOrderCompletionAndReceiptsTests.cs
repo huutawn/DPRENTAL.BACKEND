@@ -32,7 +32,8 @@ public sealed class RentalOrderCompletionAndReceiptsTests
             100_000m,
             200_000m,
             "group-01",
-            assignments);
+            assignments,
+            TestListingSnapshots.Default);
 
         RentalOrder order = RentalOrder.Create(
             Guid.NewGuid(),

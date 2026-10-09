@@ -35,6 +35,7 @@ public sealed class CommonBoundaryTests
     [InlineData(ErrorType.Expired, 410)]
     [InlineData(ErrorType.Unprocessable, 422)]
     [InlineData(ErrorType.Failure, 500)]
+    [InlineData(ErrorType.Unavailable, 503)]
     public void ExpectedError_MapsToHttpStatus(ErrorType type, int status)
     {
         BoundaryTestController controller = new();

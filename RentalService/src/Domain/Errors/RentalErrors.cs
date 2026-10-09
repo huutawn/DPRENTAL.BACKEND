@@ -21,7 +21,7 @@ public static class RentalErrors
         Error.Validation("Rental.InvalidQuantity", "Số lượng thuê phải lớn hơn 0.");
 
     public static readonly Error InvalidRentalPeriod =
-        Error.Validation("Rental.InvalidPeriod", "Ngày bắt đầu phải trước ngày kết thúc.");
+        Error.Validation("Rental.InvalidPeriod", "Ngày bắt đầu không được sau ngày kết thúc.");
 
     // Order Errors
     public static readonly Error OrderNotFound =

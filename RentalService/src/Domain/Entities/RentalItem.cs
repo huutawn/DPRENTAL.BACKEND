@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Dprental.RentalService.Common.Enums;
+using Dprental.RentalService.Domain.Policies;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.RentalService.Domain.Entities;
@@ -35,9 +36,34 @@ public partial class RentalItem
     [MaxLength(2000)]
     public string? ListingDescriptionSnapshot { get; private set; }
 
-    [Required]
     [MaxLength(500)]
-    public string PickupLocationSnapshot { get; private set; } = string.Empty;
+    public string? PickupLocationSnapshot { get; private set; }
+
+    public Guid EquipmentTypeId { get; private set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string EquipmentTypeNameSnapshot { get; private set; } = string.Empty;
+
+    public Guid BrandId { get; private set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string BrandNameSnapshot { get; private set; } = string.Empty;
+
+    [Required]
+    [MaxLength(200)]
+    public string ModelSnapshot { get; private set; } = string.Empty;
+
+    public int SpecSchemaVersionSnapshot { get; private set; }
+
+    [Required]
+    [Column(TypeName = "jsonb")]
+    public string SpecValuesSnapshot { get; private set; } = "{}";
+
+    public Guid? ThumbnailMediaIdSnapshot { get; private set; }
+
+    public int RentalDays { get; private set; }
 
     [Precision(18, 2)]
     public decimal DailyRateSnapshot { get; private set; }
@@ -88,9 +114,6 @@ public partial class RentalItem
     public DateTimeOffset? FinancialClosureConfirmedAt { get; private set; }
 
     [NotMapped]
-    public int RentalDays => ExpectedEndDate.DayNumber - ExpectedStartDate.DayNumber;
-
-    [NotMapped]
     public bool AreAllUnitsReturned =>
         _unitAssignments.Count > 0 &&
         _unitAssignments.All(u => u.Status is RentalUnitAssignmentStatus.ReturnedNormal or RentalUnitAssignmentStatus.ReturnedDamaged);
@@ -126,11 +149,12 @@ public partial class RentalItem
         DateOnly expectedEndDate,
         string listingTitleSnapshot,
         string? listingDescriptionSnapshot,
-        string pickupLocationSnapshot,
+        string? pickupLocationSnapshot,
         decimal dailyRateSnapshot,
         decimal depositPerUnitSnapshot,
         string allocationGroupId,
-        IEnumerable<InitialRentalUnitAssignmentDto> assignments)
+        IEnumerable<InitialRentalUnitAssignmentDto> assignments,
+        RentalItemListingSnapshotDto listingSnapshot)
     {
         Id = id;
         RentalOrderId = rentalOrderId;
@@ -147,9 +171,18 @@ public partial class RentalItem
         AllocationGroupId = allocationGroupId;
         Status = RentalItemStatus.PendingPayment;
 
-        int rentalDays = expectedEndDate.DayNumber - expectedStartDate.DayNumber;
-        RentalAmount = dailyRateSnapshot * quantity * rentalDays;
-        DepositAmount = depositPerUnitSnapshot * quantity;
+        EquipmentTypeId = listingSnapshot.EquipmentTypeId;
+        EquipmentTypeNameSnapshot = listingSnapshot.EquipmentTypeName.Trim();
+        BrandId = listingSnapshot.BrandId;
+        BrandNameSnapshot = listingSnapshot.BrandName.Trim();
+        ModelSnapshot = listingSnapshot.Model.Trim();
+        SpecSchemaVersionSnapshot = listingSnapshot.SpecSchemaVersion;
+        SpecValuesSnapshot = listingSnapshot.SpecValuesJson.Trim();
+        ThumbnailMediaIdSnapshot = listingSnapshot.ThumbnailMediaId;
+
+        RentalDays = RentalPricingPolicy.CalculateRentalDays(expectedStartDate, expectedEndDate);
+        RentalAmount = RentalPricingPolicy.CalculateRentalAmount(dailyRateSnapshot, quantity, RentalDays);
+        DepositAmount = RentalPricingPolicy.CalculateDepositAmount(depositPerUnitSnapshot, quantity);
 
         foreach (var a in assignments)
         {
