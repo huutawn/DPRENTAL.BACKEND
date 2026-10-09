@@ -29,7 +29,7 @@ public sealed class RentalCartUseCases(
         if (ownerId is null)
             return RentalErrors.OwnerIdRequired;
 
-        RentalCart? cart = await carts.GetByRenterIdAsync(renterId, cancellationToken);
+        RentalCart? cart = await carts.GetActiveByRenterIdAsync(renterId, cancellationToken);
         bool isNewCart = false;
 
         // Check trực tiếp ở đây để C# Analyzer hiểu được null-state
@@ -186,7 +186,7 @@ public sealed class RentalCartUseCases(
         if (renterId == Guid.Empty)
             return null;
 
-        RentalCart? cart = await carts.GetByRenterIdAsync(renterId, cancellationToken);
+        RentalCart? cart = await carts.GetActiveByRenterIdAsync(renterId, cancellationToken);
         return cart?.Status == RentalCartStatus.Active ? cart : null;
     }
 }

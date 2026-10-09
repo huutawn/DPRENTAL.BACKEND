@@ -21,7 +21,7 @@ public sealed class GetRentalCart(
     {
         if (renterId == Guid.Empty) return Result.Success(new RentalCartReadModel(Guid.Empty, []));
 
-        RentalCart? cart = await carts.GetByRenterIdAsync(renterId, cancellationToken);
+        RentalCart? cart = await carts.GetActiveByRenterIdAsync(renterId, cancellationToken);
         if (cart is null || cart.Status != RentalCartStatus.Active)
             return Result.Success(new RentalCartReadModel(cart?.Id ?? Guid.Empty, []));
 

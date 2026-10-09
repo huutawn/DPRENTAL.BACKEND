@@ -91,4 +91,5 @@ public class RentalCartApiTests : IClassFixture<RentalApiFixture>
         var deleteResponse = await _renter2Client.DeleteAsync($"rental/cart/items/{realCartItemId}");
         Assert.Equal(HttpStatusCode.NotFound, deleteResponse.StatusCode);
     }
+
 }

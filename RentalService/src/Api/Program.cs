@@ -4,16 +4,20 @@ using Dprental.RentalService.Application.Cart.ReadModel;
 using Dprental.RentalService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Dprental.RentalService.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRentalServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddRentalServiceApplication();
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<RentalServiceDbContext>(
         "postgres",
         failureStatus: HealthStatus.Unhealthy,
         tags: ["ready"]);
+
+builder.Services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
 
 builder.Services.AddControllers();
 builder.Services.AddAuthentication();

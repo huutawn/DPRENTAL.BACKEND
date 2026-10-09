@@ -1,15 +1,7 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Linq;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Security.Claims;
-using System.Text.Encodings.Web;
-using System.Threading;
-using System.Threading.Tasks;
-using Dprental.RentalService.Api.Security;
+﻿using Dprental.RentalService.Api.Security;
 using Dprental.RentalService.Application.Cart;
 using Dprental.RentalService.Application.Cart.ReadModel;
+using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.AspNetCore.Authentication;
@@ -20,6 +12,15 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System;
+using System.Collections.Concurrent;
+using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Security.Claims;
+using System.Text.Encodings.Web;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Dprental.RentalService.Api.Tests.Cart;
 
@@ -108,9 +109,9 @@ public class RentalApiFixture : WebApplicationFactory<Program>
         // Dùng ConcurrentDictionary để Thread-Safe cho Integration Tests
         private readonly ConcurrentDictionary<Guid, RentalCart> _carts = new();
 
-        public Task<RentalCart?> GetByRenterIdAsync(Guid renterId, CancellationToken token = default)
+        public Task<RentalCart?> GetActiveByRenterIdAsync(Guid renterId, CancellationToken token = default)
         {
-            var cart = _carts.Values.FirstOrDefault(c => c.RenterId == renterId);
+            var cart = _carts.Values.FirstOrDefault(c => c.RenterId == renterId && c.Status == RentalCartStatus.Active);
             return Task.FromResult(cart);
         }
 

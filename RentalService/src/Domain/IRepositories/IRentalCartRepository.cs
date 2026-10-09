@@ -9,7 +9,7 @@ public interface IRentalCartRepository
 {
     Task<RentalCart?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
-    Task<RentalCart?> GetByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default);
+    Task<RentalCart?> GetActiveByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default);
 
     Task<RentalCart> CreateAsync(RentalCart cart, CancellationToken cancellationToken = default);
 
