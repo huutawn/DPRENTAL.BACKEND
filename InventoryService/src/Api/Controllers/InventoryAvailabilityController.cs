@@ -61,10 +61,33 @@ public sealed class InventoryAvailabilityController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> CheckListingAvailability(
         [FromRoute] Guid listingId,
-        [FromBody] CheckListingAvailabilityRequest request,
+        [FromBody] CheckAvailabilityRequest request,
         CancellationToken cancellationToken)
     {
         var result = await _availabilityService.CheckListingAvailabilityAsync(listingId, request, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
+    }
+
+    /// <summary>
+    /// Kiểm tra tính khả dụng của một InventoryAsset trong khoảng thời gian đề xuất.
+    /// </summary>
+    [HttpPost("assets/{assetId:guid}/availability/check")]
+    [ProducesResponseType(typeof(CheckAssetAvailabilityResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CheckAssetAvailability(
+        [FromRoute] Guid assetId,
+        [FromBody] CheckAvailabilityRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _availabilityService.CheckAssetAvailabilityAsync(assetId, request, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);

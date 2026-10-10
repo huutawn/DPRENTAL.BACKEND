@@ -11,14 +11,33 @@ public interface ICalendarService
 {
     Task<Result<CalendarResponse>> GetCalendarAsync(
         Guid assetId,
+        string? month,
+        DateOnly? fromDate,
+        DateOnly? toDate,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);
+
+    Task<Result<CalendarResponse>> GetCalendarAsync(
+        Guid assetId,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default) =>
+        GetCalendarAsync(assetId, null, null, null, caller, cancellationToken);
+
+    Task<Result<ListingCalendarResponse>> GetListingCalendarAsync(
+        Guid listingId,
+        string? month,
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default);
+
     Task<Result<ListingCalendarResponse>> GetListingCalendarAsync(
         Guid listingId,
         DateOnly? fromDate,
         DateOnly? toDate,
         IInventoryCallerContext caller,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default) =>
+        GetListingCalendarAsync(listingId, null, fromDate, toDate, caller, cancellationToken);
 
 
     Task<Result<CalendarBlockResponse>> CreateCalendarBlockAsync(

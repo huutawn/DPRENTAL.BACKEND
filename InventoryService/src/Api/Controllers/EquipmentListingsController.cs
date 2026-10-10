@@ -109,11 +109,12 @@ public sealed class EquipmentListingsController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetCalendar(
         Guid id,
+        [FromQuery] string? month,
         [FromQuery] DateOnly? from,
         [FromQuery] DateOnly? to,
         CancellationToken cancellationToken)
     {
-        var result = await _calendarService.GetListingCalendarAsync(id, from, to, _callerContext, cancellationToken);
+        var result = await _calendarService.GetListingCalendarAsync(id, month, from, to, _callerContext, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);
@@ -176,16 +177,20 @@ public sealed class EquipmentListingsController : ControllerBase
     /// </summary>
     [HttpGet("{id:guid}/assets")]
     [ProducesResponseType(typeof(PagedResponse<InventoryAssetResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetListingAssets(
         Guid id,
+        [FromQuery(Name = "from")] DateOnly? fromDate,
+        [FromQuery(Name = "to")] DateOnly? toDate,
+        [FromQuery] string? status,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
-        var result = await _listingService.GetListingAssetsAsync(id, page, pageSize, _callerContext, cancellationToken);
+        var result = await _listingService.GetListingAssetsAsync(id, fromDate, toDate, status, page, pageSize, _callerContext, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);

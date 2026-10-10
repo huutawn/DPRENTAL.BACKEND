@@ -83,6 +83,46 @@ public sealed class EquipmentListingServiceTests
         public Task<int> CountAssetsByListingIdAsync(Guid listingId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.Values.Count(a => a.EquipmentListingId == listingId));
 
+        public Task<(IReadOnlyList<InventoryAsset> Items, int TotalCount)> GetFilteredAssetsByListingIdAsync(
+            Guid listingId,
+            DateOnly startDate,
+            DateOnly endDate,
+            string status,
+            DateTimeOffset evaluationNowUtc,
+            int skip,
+            int take,
+            CancellationToken cancellationToken = default)
+        {
+            var units = Store.Values.Where(a => a.EquipmentListingId == listingId);
+            Func<InventoryAsset, bool> predicate = status switch
+            {
+                "available" => a => a.AcceptingBookings &&
+                    !a.CalendarBlocks.Any(cb => cb.StartDate <= endDate && cb.EndDate >= startDate) &&
+                    !a.Allocations.Any(al =>
+                        (al.Status == AllocationStatus.Allocated ||
+                         (al.Status == AllocationStatus.Held && al.HoldExpiresAt != null && al.HoldExpiresAt > evaluationNowUtc)) &&
+                        al.RentalPeriod.StartDate <= endDate &&
+                        al.RentalPeriod.EndDate >= startDate),
+                "rented" => a => a.Allocations.Any(al =>
+                    al.Status == AllocationStatus.Allocated &&
+                    al.RentalPeriod.StartDate <= endDate &&
+                    al.RentalPeriod.EndDate >= startDate),
+                "held" => a => a.Allocations.Any(al =>
+                    al.Status == AllocationStatus.Held &&
+                    al.HoldExpiresAt != null && al.HoldExpiresAt > evaluationNowUtc &&
+                    al.RentalPeriod.StartDate <= endDate &&
+                    al.RentalPeriod.EndDate >= startDate),
+                "blocked" => a => a.CalendarBlocks.Any(cb =>
+                    cb.StartDate <= endDate &&
+                    cb.EndDate >= startDate),
+                _ => _ => false
+            };
+
+            var filtered = units.Where(predicate).OrderBy(a => a.CreatedAt).ThenBy(a => a.Id).ToList();
+            int count = filtered.Count;
+            var paged = filtered.Skip(skip).Take(take).ToList();
+            return Task.FromResult<(IReadOnlyList<InventoryAsset> Items, int TotalCount)>((paged, count));
+        }
         public Task<InventoryAsset?> GetCalendarSnapshotAsync(Guid assetId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(assetId, out var a) ? a : null);
 

@@ -23,6 +23,7 @@ using Dprental.InventoryService.Domain.Repositories;
 using Dprental.InventoryService.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
+using Dprental.InventoryService.Api.Tests.Security;
 
 namespace Dprental.InventoryService.Api.Tests.Integration;
 
@@ -65,13 +66,17 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             Task.FromResult(Result.Success(new MediaVisibilityInfo(mediaId, "Public")));
     }
 
-    private (Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> App, Dprental.InventoryService.Api.Tests.Security.InventorySecurityTestFactory SecFactory) CreateFactory()
+    private (Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> App, Dprental.InventoryService.Api.Tests.Security.InventorySecurityTestFactory SecFactory) CreateFactory(TestTimeProvider? clock = null)
     {
-        var secFactory = new Dprental.InventoryService.Api.Tests.Security.InventorySecurityTestFactory(_fixture.ConnectionString);
+        clock ??= new TestTimeProvider(FixedNow);
+        var secFactory = new Dprental.InventoryService.Api.Tests.Security.InventorySecurityTestFactory(_fixture.ConnectionString, clock);
         var app = secFactory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureTestServices(services =>
             {
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton<TimeProvider>(clock);
+
                 services.RemoveAll<ICatalogServiceClient>();
                 services.AddSingleton<ICatalogServiceClient>(new StubCatalogClient());
 
@@ -217,7 +222,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
         }
 
         // 1. Check full interval [Mon, Tue] -> AvailableQuantity must be 0!
-        var intervalReq = new CheckListingAvailabilityRequest(mon, tue, 1);
+        var intervalReq = new CheckAvailabilityRequest(mon, tue, 1);
         var token = secFactory.CreateHumanToken(owner);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
@@ -230,7 +235,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
         Assert.False(intervalResult.IsAvailable);
 
         // 2. Check Monday single day -> AvailableQuantity is 1!
-        var monReq = new CheckListingAvailabilityRequest(mon, mon, 1);
+        var monReq = new CheckAvailabilityRequest(mon, mon, 1);
         var monResp = await client.PostAsync($"api/v1/inventory/equipment-listings/{listingId:D}/availability/check",
             new StringContent(JsonSerializer.Serialize(monReq), Encoding.UTF8, "application/json"));
         var monResult = await monResp.Content.ReadFromJsonAsync<CheckListingAvailabilityResponse>();
@@ -239,7 +244,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
         Assert.True(monResult.IsAvailable);
 
         // 3. Check Tuesday single day -> AvailableQuantity is 1!
-        var tueReq = new CheckListingAvailabilityRequest(tue, tue, 1);
+        var tueReq = new CheckAvailabilityRequest(tue, tue, 1);
         var tueResp = await client.PostAsync($"api/v1/inventory/equipment-listings/{listingId:D}/availability/check",
             new StringContent(JsonSerializer.Serialize(tueReq), Encoding.UTF8, "application/json"));
         var tueResult = await tueResp.Content.ReadFromJsonAsync<CheckListingAvailabilityResponse>();

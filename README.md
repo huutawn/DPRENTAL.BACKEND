@@ -92,10 +92,11 @@ dotnet test InventoryService.sln
 | `GET` | `/api/v1/inventory/equipment-listings/{id}` | Owner / Admin | Chi tiết Listing và derived `totalQuantity`. |
 | `PATCH` | `/api/v1/inventory/equipment-listings/{id}` | Owner / Admin | Cập nhật metadata/status (presence tracking). Từ chối field `quantity`. Draft → Active yêu cầu >= 1 unit accepting bookings. |
 | `PUT` | `/api/v1/inventory/equipment-listings/{id}/rental-rate` | Owner / Admin | Thay thế toàn bộ bảng giá thuê niêm yết của Listing (VND, số nguyên dương). |
-| `GET` | `/api/v1/inventory/equipment-listings/{id}/assets` | Owner / Admin | Danh sách đơn vị vật lý thuộc Listing có phân trang. |
+| `GET` | `/api/v1/inventory/equipment-listings/{id}/assets?from=&to=&status=&page=&pageSize=` | Owner / Admin | Danh sách đơn vị vật lý thuộc Listing có phân trang. Hỗ trợ lọc theo khoảng ngày (`from`, `to`) và trạng thái (`available`, `rented`, `held`, `blocked`). |
 | `POST` | `/api/v1/inventory/equipment-listings/{id}/assets` | `inventory.asset.manage` / Admin | Thêm **từng đơn vị vật lý (add-one)** vào Listing bằng `serialNumber`. Trả 201 Created + Location trỏ tới Asset. |
-| `GET` | `/api/v1/inventory/equipment-listings/{id}/calendar?from=&to=` | Owner / Admin | Lịch dùng chung tổng hợp cấp Listing (cửa sổ tối đa 6 tháng). |
-| `POST` | `/api/v1/inventory/equipment-listings/{id}/availability/check` | `AvailabilityRead` | Kiểm tra tính khả dụng toàn khoảng thời gian cho số lượng yêu cầu. |
+| `GET` | `/api/v1/inventory/equipment-listings/{id}/calendar?month=YYYY-MM` | Owner / Admin | Lịch dùng chung tổng hợp cấp Listing (theo tháng `YYYY-MM` hoặc cửa sổ `from/to` tối đa 6 tháng, không gửi đồng thời). Bổ sung `totalAssetQuantity` và breakdown hàng ngày: `rentedQuantity`, `heldQuantity`, `maintenanceQuantity`, `otherBlockedQuantity`. |
+| `POST` | `/api/v1/inventory/equipment-listings/{id}/availability/check` | `AvailabilityRead` | Kiểm tra tính khả dụng toàn khoảng thời gian cho Listing (`requestedQuantity` từ 1–500, mặc định 1). |
+| `POST` | `/api/v1/inventory/assets/{id}/availability/check` | `AvailabilityRead` | Kiểm tra tính khả dụng của đơn vị vật lý (`requestedQuantity` bắt buộc bằng 1). |
 | `POST` | `/api/v1/inventory/equipment-listings/{id}/holds` | `inventory.allocation.write` | Tạo giữ chỗ tạm thời theo nhóm (Group Hold) trên Listing. |
 
 ---
@@ -108,7 +109,7 @@ dotnet test InventoryService.sln
 | `GET` | `/api/v1/inventory/assets/{id}` | Owner / Admin | Chi tiết đơn vị vật lý (`assetCode`, `serialNumber`, `manufactureYear`, `acceptingBookings`). |
 | `PATCH` | `/api/v1/inventory/assets/{id}` | Owner / Admin | Cập nhật thông tin vật lý (`serialNumber`, `manufactureYear`). Xử lý optimistic concurrency qua `xmin`. |
 | `PATCH` | `/api/v1/inventory/assets/{id}/accepting-bookings` | Owner / Admin | Bật/tắt nhận lịch của đơn vị vật lý. Tắt yêu cầu cung cấp `reason`. |
-| `GET` | `/api/v1/inventory/assets/{id}/calendar` | Owner Only | Lịch sử dụng chi tiết của đơn vị vật lý (Admin bị từ chối 403). |
+| `GET` | `/api/v1/inventory/assets/{id}/calendar?month=YYYY-MM` | Owner Only | Lịch sử dụng chi tiết của đơn vị vật lý (theo tháng `YYYY-MM` hoặc `from/to`, Admin bị từ chối 403). Clock đánh giá hold sau snapshot I/O. |
 | `POST` | `/api/v1/inventory/assets/{id}/calendar-blocks` | Owner Only | Tạo khoảng chặn lịch bảo trì/kiểm định cho đơn vị vật lý. |
 | `DELETE` | `/api/v1/inventory/assets/{id}/calendar-blocks/{blockId}` | Owner Only | Xóa khoảng chặn lịch của đơn vị vật lý. |
 
@@ -169,15 +170,19 @@ dotnet test InventoryService.sln
 ## Lịch tổng hợp (Shared Calendar) & Quản lý giữ chỗ nhóm (Group Hold)
 
 ### 1. Lịch tổng hợp cấp Listing (`GET /api/v1/inventory/equipment-listings/{id}/calendar`)
-- Thống kê chi tiết theo từng ngày trong khoảng yêu cầu (`from` đến `to`, tối đa 6 tháng):
-  - `occupiedQuantity`: Số unit đang có lượt giữ chỗ hợp lệ hoặc đơn thuê đã xác nhận.
-  - `blockedQuantity`: Số unit đang có khoảng chặn lịch vận hành (`CalendarBlock`).
-  - `availableQuantity`: Số unit hoạt động và hoàn toàn rảnh rỗi (`totalQuantity - distinct unavailable`).
+- Truy vấn theo tháng (`?month=YYYY-MM`, trả đủ số ngày của tháng 28/29/30/31 ngày) hoặc theo khoảng ngày (`from` đến `to`, tối đa 6 tháng). Không cho phép gửi đồng thời cả hai.
+- Thống kê chi tiết theo từng ngày trong khoảng yêu cầu:
+  - `totalAssetQuantity`: Tổng số physical units, bao gồm cả unit tạm dừng.
+  - `rentedQuantity`: Số unit có phân bổ Allocated đang hiệu lực (tính cả unit tạm dừng).
+  - `heldQuantity`: Số unit có giữ chỗ Held còn hạn (tính cả unit tạm dừng).
+  - `maintenanceQuantity`: Số unit có khoảng chặn lịch với lý do `Maintenance` (tính cả unit tạm dừng).
+  - `otherBlockedQuantity`: Số unit có khoảng chặn lịch với lý do khác bảo trì (tính cả unit tạm dừng).
+  - `availableQuantity`: Số unit hoạt động (`accepting_bookings = true`) và hoàn toàn rảnh rỗi trong toàn ngày.
+  - `occupiedQuantity` & `blockedQuantity`: Chỉ số tổng hợp legacy cho các unit nhận booking.
   - `suspendedOccupiedQuantity` & `suspendedBlockedQuantity`: Thống kê riêng cho các unit tạm dừng nhận lịch (`accepting_bookings = false`).
-- Các ngày không có lịch (ngày trống) tự động trả về `occupied = 0`, `blocked = 0`, `available = totalQuantity`.
-- Lượt giữ chỗ đã hết hạn (`hold_expires_at <= now`) hoặc đã hủy/giải phóng (`Released`/`Cancelled`) không làm tăng số lượng occupied.
-- Mỗi physical unit chỉ được tính tối đa một lần cho từng trạng thái trong ngày (`distinct-unit counting`).
-
+- Các ngày không có lịch (ngày trống) tự động trả về `rented = 0`, `held = 0`, `maintenance = 0`, `otherBlocked = 0`, `available = totalQuantity`.
+- Lượt giữ chỗ đã hết hạn (`hold_expires_at <= now`) hoặc đã hủy/giải phóng (`Released`/`Cancelled`) không chiếm lịch.
+- Mỗi physical unit chỉ được tính tối đa một lần cho từng nhóm trong ngày (`distinct-unit counting`).
 ### 2. Giữ chỗ tạm thời theo nhóm (Group Hold - DPR-151)
 - Endpoint: `POST /api/v1/inventory/equipment-listings/{id}/holds`.
 - Khóa phân cấp nghiêm ngặt: `Group Lock` → `Listing Lock` → `Asset Locks` (theo thứ tự ID tăng dần).
@@ -193,6 +198,11 @@ dotnet test InventoryService.sln
 ---
 
 ## Breaking Changes so với phiên bản trước
+### Thay đổi hành vi quan trọng (Availability & Batch Check)
+- **Batch Asset Availability**: Batch check (`POST /api/v1/inventory/availability/check`) và Single Asset Check (`POST /api/v1/inventory/assets/{assetId}/availability/check`) sẽ đánh giá tài sản là **không khả dụng** (`unavailable`) khi `EquipmentListing` cha chưa ở trạng thái `Active` (ví dụ: `Draft`, `Inactive`).
+- **Asset Availability Check**: Endpoint mới `POST /api/v1/inventory/assets/{assetId}/availability/check` chỉ chấp nhận `requestedQuantity = 1`.
+- **Listing Availability Check**: `POST /api/v1/inventory/equipment-listings/{id}/availability/check` giới hạn `requestedQuantity` từ 1 đến 500 (mặc định 1).
+- **Lọc thiết bị Listing**: `GET /api/v1/inventory/equipment-listings/{id}/assets?from=&to=&status=` hỗ trợ `status`: `available`, `rented`, `held`, `blocked` (bắt buộc truyền đủ cả `from`, `to`, `status` nếu lọc).
 
 1. **Bỏ các endpoints cũ**:
    - `POST /api/v1/inventory/assets` → Chuyển thành `POST /api/v1/inventory/equipment-listings`.

@@ -11,7 +11,11 @@ public sealed record ListingCalendarDayResponse(
     [property: JsonPropertyName("blockedQuantity")] int BlockedQuantity,
     [property: JsonPropertyName("availableQuantity")] int AvailableQuantity,
     [property: JsonPropertyName("suspendedOccupiedQuantity")] int SuspendedOccupiedQuantity,
-    [property: JsonPropertyName("suspendedBlockedQuantity")] int SuspendedBlockedQuantity
+    [property: JsonPropertyName("suspendedBlockedQuantity")] int SuspendedBlockedQuantity,
+    [property: JsonPropertyName("rentedQuantity")] int RentedQuantity,
+    [property: JsonPropertyName("heldQuantity")] int HeldQuantity,
+    [property: JsonPropertyName("maintenanceQuantity")] int MaintenanceQuantity,
+    [property: JsonPropertyName("otherBlockedQuantity")] int OtherBlockedQuantity
 );
 
 /// <summary>
@@ -22,5 +26,6 @@ public sealed record ListingCalendarResponse(
     [property: JsonPropertyName("from")] DateOnly From,
     [property: JsonPropertyName("to")] DateOnly To,
     [property: JsonPropertyName("totalQuantity")] int TotalQuantity,
+    [property: JsonPropertyName("totalAssetQuantity")] int TotalAssetQuantity,
     [property: JsonPropertyName("days")] IReadOnlyList<ListingCalendarDayResponse> Days
 );

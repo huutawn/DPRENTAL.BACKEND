@@ -116,6 +116,11 @@ public sealed class InventoryAvailabilityService : IInventoryAvailabilityService
                 notFoundAssetIds.Add(id);
                 continue;
             }
+            if (asset.Listing is null || asset.Listing.Status != EquipmentListingStatus.Active)
+            {
+                unavailableAssetIds.Add(id);
+                continue;
+            }
 
             var checkResult = AssetAvailabilityPolicy.CheckAvailability(
                 asset,
@@ -138,7 +143,7 @@ public sealed class InventoryAvailabilityService : IInventoryAvailabilityService
     /// <inheritdoc />
     public async Task<Result<CheckListingAvailabilityResponse>> CheckListingAvailabilityAsync(
         Guid listingId,
-        CheckListingAvailabilityRequest request,
+        CheckAvailabilityRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -148,9 +153,9 @@ public sealed class InventoryAvailabilityService : IInventoryAvailabilityService
             return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
         }
 
-        if (request.RequestedQuantity < 1)
+        if (request.RequestedQuantity < 1 || request.RequestedQuantity > 500)
         {
-            return Error.Validation("INVALID_REQUESTED_QUANTITY", "Số lượng yêu cầu (requestedQuantity) phải lớn hơn hoặc bằng 1.");
+            return Error.Validation("INVALID_REQUESTED_QUANTITY", "Số lượng yêu cầu (requestedQuantity) phải từ 1 đến 500.");
         }
 
         var dateValResult = AvailabilityDateValidator.ValidateDateWindow(
@@ -196,6 +201,77 @@ public sealed class InventoryAvailabilityService : IInventoryAvailabilityService
 
         return Result.Success(new CheckListingAvailabilityResponse(
             listingId,
+            validStart,
+            validEnd,
+            request.RequestedQuantity,
+            availableQuantity,
+            isAvailable));
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<CheckAssetAvailabilityResponse>> CheckAssetAvailabilityAsync(
+        Guid assetId,
+        CheckAvailabilityRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (assetId == Guid.Empty)
+        {
+            return Error.NotFound("ASSET_NOT_FOUND", "Tài sản không tồn tại.");
+        }
+
+        if (request.RequestedQuantity != 1)
+        {
+            return Error.Validation("INVALID_REQUESTED_QUANTITY", "Số lượng yêu cầu (requestedQuantity) cho Asset chỉ chấp nhận giá trị bằng 1.");
+        }
+
+        var dateValResult = AvailabilityDateValidator.ValidateDateWindow(
+            request.StartDate,
+            request.EndDate,
+            out var validStart,
+            out var validEnd);
+
+        if (dateValResult.IsFailure)
+        {
+            return dateValResult.Error;
+        }
+
+        var periodResult = RentalPeriod.Create(validStart, validEnd);
+        if (periodResult.IsFailure)
+        {
+            return periodResult.Error;
+        }
+
+        var asset = await _assetRepository.GetCalendarSnapshotAsync(assetId, validStart, validEnd, cancellationToken);
+        if (asset is null)
+        {
+            return Error.NotFound("ASSET_NOT_FOUND", $"Tài sản với ID {assetId} không tồn tại.");
+        }
+
+        var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+
+        bool isAvailable = false;
+        int availableQuantity = 0;
+
+        if (asset.Listing is not null && asset.Listing.Status == EquipmentListingStatus.Active)
+        {
+            var checkResult = AssetAvailabilityPolicy.CheckAvailability(
+                asset,
+                periodResult.Value,
+                nowUtc,
+                asset.Allocations,
+                asset.CalendarBlocks);
+
+            if (checkResult.IsSuccess)
+            {
+                isAvailable = true;
+                availableQuantity = 1;
+            }
+        }
+
+        return Result.Success(new CheckAssetAvailabilityResponse(
+            assetId,
             validStart,
             validEnd,
             request.RequestedQuantity,

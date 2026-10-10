@@ -31,18 +31,25 @@ public sealed class InventoryCalendarController : ControllerBase
     /// Đọc lịch tổng hợp của tài sản trong cửa sổ MVP (từ hôm nay đến 6 tháng sau).
     /// </summary>
     /// <param name="assetId">Định danh tài sản.</param>
+    /// <param name="month">Tháng truy vấn theo định dạng YYYY-MM.</param>
+    /// <param name="from">Ngày bắt đầu cửa sổ xem lịch.</param>
+    /// <param name="to">Ngày kết thúc cửa sổ xem lịch.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <returns>Dữ liệu lịch tổng hợp gồm các khoảng CalendarBlock, Held và Allocated.</returns>
     [HttpGet("calendar")]
     [ProducesResponseType(typeof(CalendarResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetCalendar(
         Guid assetId,
+        [FromQuery] string? month,
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
         CancellationToken cancellationToken)
     {
-        var result = await _calendarService.GetCalendarAsync(assetId, _callerContext, cancellationToken);
+        var result = await _calendarService.GetCalendarAsync(assetId, month, from, to, _callerContext, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);

@@ -35,10 +35,13 @@ public sealed class CalendarService : ICalendarService
     }
 
     /// <summary>
-    /// Đọc lịch tổng hợp của tài sản trong cửa sổ 6 tháng tính từ ngày hôm nay tại Việt Nam.
+    /// Đọc lịch tổng hợp của tài sản trong cửa sổ chỉ định (tháng YYYY-MM, from/to hoặc mặc định 6 tháng).
     /// </summary>
     public async Task<Result<CalendarResponse>> GetCalendarAsync(
         Guid assetId,
+        string? month,
+        DateOnly? fromDate,
+        DateOnly? toDate,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default)
     {
@@ -56,8 +59,21 @@ public sealed class CalendarService : ICalendarService
 
         var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
         var today = BusinessDateTime.ToVietnamDate(nowUtc);
-        var horizon = today.Year == 9999 && today.Month > 6 ? DateOnly.MaxValue : today.AddMonths(6);
-        var asset = await _assetRepository.GetCalendarSnapshotAsync(assetId, today, horizon, cancellationToken);
+
+        var dateValResult = AvailabilityDateValidator.ValidateCalendarWindow(
+            month,
+            fromDate,
+            toDate,
+            today,
+            out var validStart,
+            out var validEnd);
+
+        if (dateValResult.IsFailure)
+        {
+            return dateValResult.Error;
+        }
+
+        var asset = await _assetRepository.GetCalendarSnapshotAsync(assetId, validStart, validEnd, cancellationToken);
         if (asset is null)
         {
             return Error.NotFound("ASSET_NOT_FOUND", $"Tài sản với ID {assetId} không tồn tại.");
@@ -67,6 +83,9 @@ public sealed class CalendarService : ICalendarService
         {
             return Error.Forbidden("FORBIDDEN", "Bạn không có quyền truy cập lịch của tài sản này.");
         }
+
+        // Lấy clock đánh giá hold SAU snapshot I/O
+        var evaluationNowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
 
         var entries = new List<CalendarEntryResponse>();
 
@@ -86,7 +105,7 @@ public sealed class CalendarService : ICalendarService
 
         foreach (var alloc in asset.Allocations)
         {
-            if (!AssetAvailabilityPolicy.OccupiesCalendar(alloc, nowUtc))
+            if (!AssetAvailabilityPolicy.OccupiesCalendar(alloc, evaluationNowUtc))
             {
                 continue;
             }
@@ -113,15 +132,23 @@ public sealed class CalendarService : ICalendarService
         return new CalendarResponse
         {
             AssetId = asset.Id,
-            StartDate = today,
-            EndDate = horizon,
+            StartDate = validStart,
+            EndDate = validEnd,
             Entries = sortedEntries
         };
     }
 
     /// <inheritdoc />
+    public Task<Result<CalendarResponse>> GetCalendarAsync(
+        Guid assetId,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default) =>
+        GetCalendarAsync(assetId, null, null, null, caller, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<Result<ListingCalendarResponse>> GetListingCalendarAsync(
         Guid listingId,
+        string? month,
         DateOnly? fromDate,
         DateOnly? toDate,
         IInventoryCallerContext caller,
@@ -142,21 +169,17 @@ public sealed class CalendarService : ICalendarService
         var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
         var today = BusinessDateTime.ToVietnamDate(nowUtc);
 
-        DateOnly validStart;
-        DateOnly validEnd;
+        var dateValResult = AvailabilityDateValidator.ValidateCalendarWindow(
+            month,
+            fromDate,
+            toDate,
+            today,
+            out var validStart,
+            out var validEnd);
 
-        if (fromDate.HasValue || toDate.HasValue)
+        if (dateValResult.IsFailure)
         {
-            var dateValResult = AvailabilityDateValidator.ValidateDateWindow(fromDate, toDate, out validStart, out validEnd);
-            if (dateValResult.IsFailure)
-            {
-                return dateValResult.Error;
-            }
-        }
-        else
-        {
-            validStart = today;
-            validEnd = today.Year == 9999 && today.Month > 6 ? DateOnly.MaxValue : today.AddMonths(6);
+            return dateValResult.Error;
         }
 
         var snapshot = await _listingRepository.GetCalendarSnapshotAsync(listingId, validStart, validEnd, cancellationToken);
@@ -183,6 +206,11 @@ public sealed class CalendarService : ICalendarService
             int suspendedOccupied = 0;
             int suspendedBlocked = 0;
 
+            int rented = 0;
+            int held = 0;
+            int maintenance = 0;
+            int otherBlocked = 0;
+
             foreach (var unit in snapshot.Assets)
             {
                 bool isOccupied = unit.Allocations.Any(al =>
@@ -193,6 +221,33 @@ public sealed class CalendarService : ICalendarService
                 bool isBlocked = unit.CalendarBlocks.Any(cb =>
                     cb.StartDate <= d &&
                     cb.EndDate >= d);
+
+                bool isRented = unit.Allocations.Any(al =>
+                    al.RentalPeriod.StartDate <= d &&
+                    al.RentalPeriod.EndDate >= d &&
+                    al.Status == AllocationStatus.Allocated &&
+                    AssetAvailabilityPolicy.OccupiesCalendar(al, evaluationNowUtc));
+
+                bool isHeld = unit.Allocations.Any(al =>
+                    al.RentalPeriod.StartDate <= d &&
+                    al.RentalPeriod.EndDate >= d &&
+                    al.Status == AllocationStatus.Held &&
+                    AssetAvailabilityPolicy.OccupiesCalendar(al, evaluationNowUtc));
+
+                bool isMaintenance = unit.CalendarBlocks.Any(cb =>
+                    cb.StartDate <= d &&
+                    cb.EndDate >= d &&
+                    cb.Reason == CalendarBlockReason.Maintenance);
+
+                bool isOtherBlocked = unit.CalendarBlocks.Any(cb =>
+                    cb.StartDate <= d &&
+                    cb.EndDate >= d &&
+                    cb.Reason != CalendarBlockReason.Maintenance);
+
+                if (isRented) rented++;
+                if (isHeld) held++;
+                if (isMaintenance) maintenance++;
+                if (isOtherBlocked) otherBlocked++;
 
                 if (unit.AcceptingBookings)
                 {
@@ -213,7 +268,11 @@ public sealed class CalendarService : ICalendarService
                 blocked,
                 available,
                 suspendedOccupied,
-                suspendedBlocked));
+                suspendedBlocked,
+                rented,
+                held,
+                maintenance,
+                otherBlocked));
 
             if (d == validEnd)
             {
@@ -223,14 +282,25 @@ public sealed class CalendarService : ICalendarService
         }
 
         int totalQuantity = snapshot.Assets.Count(a => a.AcceptingBookings);
+        int totalAssetQuantity = snapshot.Assets.Count;
 
         return Result.Success(new ListingCalendarResponse(
             listingId,
             validStart,
             validEnd,
             totalQuantity,
+            totalAssetQuantity,
             days));
     }
+
+    /// <inheritdoc />
+    public Task<Result<ListingCalendarResponse>> GetListingCalendarAsync(
+        Guid listingId,
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default) =>
+        GetListingCalendarAsync(listingId, null, fromDate, toDate, caller, cancellationToken);
 
     /// <summary>
     /// Tạo khoảng chặn lịch mới trên tài sản dưới advisory lock của PostgreSQL và lưu cùng Outbox event.

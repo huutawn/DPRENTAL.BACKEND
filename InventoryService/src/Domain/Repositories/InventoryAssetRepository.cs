@@ -59,6 +59,82 @@ public sealed partial class InventoryAssetRepository : IInventoryAssetRepository
         return await _context.Assets
             .CountAsync(a => a.EquipmentListingId == listingId, cancellationToken);
     }
+    /// <inheritdoc />
+    public async Task<(IReadOnlyList<InventoryAsset> Items, int TotalCount)> GetFilteredAssetsByListingIdAsync(
+        Guid listingId,
+        DateOnly startDate,
+        DateOnly endDate,
+        string status,
+        DateTimeOffset evaluationNowUtc,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        var baseQuery = _context.Assets
+            .AsNoTracking()
+            .Where(a => a.EquipmentListingId == listingId);
+
+        IQueryable<InventoryAsset> query = status switch
+        {
+            "available" => baseQuery.Where(a =>
+                a.AcceptingBookings &&
+                !a.CalendarBlocks.Any(cb => cb.StartDate <= endDate && cb.EndDate >= startDate) &&
+                !a.Allocations.Any(al =>
+                    (al.Status == AllocationStatus.Allocated ||
+                     (al.Status == AllocationStatus.Held && al.HoldExpiresAt != null && al.HoldExpiresAt > evaluationNowUtc)) &&
+                    al.RentalPeriod.StartDate <= endDate &&
+                    al.RentalPeriod.EndDate >= startDate)),
+
+            "rented" => baseQuery.Where(a =>
+                a.Allocations.Any(al =>
+                    al.Status == AllocationStatus.Allocated &&
+                    al.RentalPeriod.StartDate <= endDate &&
+                    al.RentalPeriod.EndDate >= startDate)),
+
+            "held" => baseQuery.Where(a =>
+                a.Allocations.Any(al =>
+                    al.Status == AllocationStatus.Held &&
+                    al.HoldExpiresAt != null &&
+                    al.HoldExpiresAt > evaluationNowUtc &&
+                    al.RentalPeriod.StartDate <= endDate &&
+                    al.RentalPeriod.EndDate >= startDate)),
+
+            "blocked" => baseQuery.Where(a =>
+                a.CalendarBlocks.Any(cb =>
+                    cb.StartDate <= endDate &&
+                    cb.EndDate >= startDate)),
+
+            _ => baseQuery.Where(_ => false)
+        };
+
+        if (_context.Database.IsRelational() && _context.Database.CurrentTransaction is null)
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                IsolationLevel.RepeatableRead,
+                cancellationToken);
+
+            int totalCount = await query.CountAsync(cancellationToken);
+            var items = await query
+                .OrderBy(a => a.CreatedAt)
+                .ThenBy(a => a.Id)
+                .Skip(skip)
+                .Take(take)
+                .ToListAsync(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+            return (items, totalCount);
+        }
+
+        int count = await query.CountAsync(cancellationToken);
+        var pagedItems = await query
+            .OrderBy(a => a.CreatedAt)
+            .ThenBy(a => a.Id)
+            .Skip(skip)
+            .Take(take)
+            .ToListAsync(cancellationToken);
+
+        return (pagedItems, count);
+    }
 
 
     /// <inheritdoc />
@@ -96,6 +172,7 @@ public sealed partial class InventoryAssetRepository : IInventoryAssetRepository
             .AsNoTrackingWithIdentityResolution()
             .AsSplitQuery()
             .Where(a => assetIds.Contains(a.Id))
+            .Include(a => a.Listing)
             .Include(a => a.CalendarBlocks.Where(cb => cb.StartDate <= endDate && cb.EndDate >= startDate))
             .Include(a => a.Allocations.Where(al =>
                 (al.Status == AllocationStatus.Held || al.Status == AllocationStatus.Allocated) &&

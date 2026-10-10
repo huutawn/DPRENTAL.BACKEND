@@ -38,6 +38,20 @@ public interface IInventoryAssetRepository : IRepo<InventoryAsset, Guid>
     /// </summary>
     Task<int> CountAssetsByListingIdAsync(Guid listingId, CancellationToken cancellationToken = default);
     /// <summary>
+    /// Lọc và phân trang danh sách các đơn vị vật lý thuộc một EquipmentListing trực tiếp dưới PostgreSQL
+    /// theo khoảng ngày [startDate, endDate] và trạng thái khả dụng (available, rented, held, blocked).
+    /// </summary>
+    Task<(IReadOnlyList<InventoryAsset> Items, int TotalCount)> GetFilteredAssetsByListingIdAsync(
+        Guid listingId,
+        DateOnly startDate,
+        DateOnly endDate,
+        string status,
+        DateTimeOffset evaluationNowUtc,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<(IReadOnlyList<InventoryAsset> Items, int TotalCount)>((Array.Empty<InventoryAsset>(), 0));
+    /// <summary>
     /// Lấy snapshot tài sản cùng các khoảng chặn lịch (CalendarBlocks) và các lượt phân bổ ứng viên (Held/Allocated)
     /// giao với cửa sổ ngày [startDate, endDate] phục vụ đọc lịch tổng hợp (Calendar Read) trong một single query snapshot.
     /// </summary>

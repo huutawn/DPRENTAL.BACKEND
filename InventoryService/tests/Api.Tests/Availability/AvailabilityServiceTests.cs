@@ -384,7 +384,7 @@ public sealed class AvailabilityServiceTests
             null,
             "VND",
             FixedNow).Value;
-
+        listing.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
         var asset = InventoryAsset.Create(id, listing.Id, $"SN-{id:N}", FixedNow).Value;
         typeof(InventoryAsset).GetProperty(nameof(InventoryAsset.Listing))?.SetValue(asset, listing);
 

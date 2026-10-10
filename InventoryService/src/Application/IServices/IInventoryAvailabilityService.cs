@@ -20,7 +20,15 @@ public interface IInventoryAvailabilityService
     /// </summary>
     Task<Result<CheckListingAvailabilityResponse>> CheckListingAvailabilityAsync(
         Guid listingId,
-        CheckListingAvailabilityRequest request,
+        CheckAvailabilityRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Kiểm tra tính khả dụng của một InventoryAsset đối với khoảng thời gian đề xuất.
+    /// </summary>
+    Task<Result<CheckAssetAvailabilityResponse>> CheckAssetAvailabilityAsync(
+        Guid assetId,
+        CheckAvailabilityRequest request,
         CancellationToken cancellationToken = default);
 
 

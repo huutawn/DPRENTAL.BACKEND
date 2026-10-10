@@ -67,8 +67,19 @@ public interface IEquipmentListingService
     /// </summary>
     Task<Result<PagedResponse<InventoryAssetResponse>>> GetListingAssetsAsync(
         Guid id,
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        string? status,
         int page,
         int pageSize,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);
+
+    Task<Result<PagedResponse<InventoryAssetResponse>>> GetListingAssetsAsync(
+        Guid id,
+        int page,
+        int pageSize,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default) =>
+        GetListingAssetsAsync(id, null, null, null, page, pageSize, caller, cancellationToken);
 }

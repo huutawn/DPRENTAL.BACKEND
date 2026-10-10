@@ -1,3 +1,4 @@
+using System.Linq;
 using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Listings;
@@ -6,8 +7,13 @@ using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Mapping;
 using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.Security;
+using Dprental.InventoryService.Application.Validation;
 using Dprental.InventoryService.Common;
+using Dprental.InventoryService.Common.Enums;
+using Dprental.InventoryService.Common.Utils;
+using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Domain.IRepositories;
+using Dprental.InventoryService.Domain.Policies;
 using Microsoft.Extensions.Options;
 
 namespace Dprental.InventoryService.Application.Services;
@@ -116,6 +122,9 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
     /// <inheritdoc />
     public async Task<Result<PagedResponse<InventoryAssetResponse>>> GetListingAssetsAsync(
         Guid id,
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        string? status,
         int page,
         int pageSize,
         IInventoryCallerContext caller,
@@ -135,6 +144,44 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         {
             return Error.Forbidden("FORBIDDEN", "Chỉ người dùng cá nhân mới có quyền xem thiết bị của Listing.");
         }
+
+        bool hasFrom = fromDate.HasValue;
+        bool hasTo = toDate.HasValue;
+        bool hasStatus = !string.IsNullOrWhiteSpace(status);
+        bool hasAnyFilter = hasFrom || hasTo || hasStatus;
+
+        DateOnly validStart = default;
+        DateOnly validEnd = default;
+        string normalizedStatus = string.Empty;
+
+        if (hasAnyFilter)
+        {
+            if (!hasFrom || !hasTo || !hasStatus)
+            {
+                return Error.Validation(
+                    "INVALID_FILTER_PARAMETERS",
+                    "Lọc thiết bị theo ngày yêu cầu cung cấp đầy đủ cả 'from', 'to' và 'status'.");
+            }
+
+            var dateValResult = AvailabilityDateValidator.ValidateDateWindow(fromDate, toDate, out validStart, out validEnd);
+            if (dateValResult.IsFailure)
+            {
+                return dateValResult.Error;
+            }
+
+            normalizedStatus = status!.Trim().ToLowerInvariant();
+            if (normalizedStatus is not ("available" or "rented" or "held" or "blocked"))
+            {
+                return Error.Validation(
+                    "INVALID_FILTER_STATUS",
+                    "Giá trị 'status' không hợp lệ. Các giá trị được chấp nhận: available, rented, held, blocked.");
+            }
+        }
+
+        int normalizedPage = Math.Max(1, page);
+        int normalizedPageSize = Math.Clamp(pageSize, 1, 100);
+        int skip = (normalizedPage - 1) * normalizedPageSize;
+
         var listing = await _listingRepository.GetByIdAsync(id, cancellationToken);
         if (listing is null)
         {
@@ -145,15 +192,48 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         {
             return Error.Forbidden("FORBIDDEN", "Không có quyền xem thiết bị của Listing người dùng khác.");
         }
-        int normalizedPage = Math.Max(1, page);
-        int normalizedPageSize = Math.Clamp(pageSize, 1, 100);
-        int skip = (normalizedPage - 1) * normalizedPageSize;
 
-        var assets = await _assetRepository.GetAssetsByListingIdAsync(id, skip, normalizedPageSize, cancellationToken);
-        int totalCount = await _assetRepository.CountAssetsByListingIdAsync(id, cancellationToken);
-        int totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling((double)totalCount / normalizedPageSize);
+        if (!hasAnyFilter)
+        {
+            var assets = await _assetRepository.GetAssetsByListingIdAsync(id, skip, normalizedPageSize, cancellationToken);
+            int totalCount = await _assetRepository.CountAssetsByListingIdAsync(id, cancellationToken);
+            int totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling((double)totalCount / normalizedPageSize);
 
-        var items = assets.Select(InventoryAssetMapper.ToResponse).ToList();
-        return new PagedResponse<InventoryAssetResponse>(items, normalizedPage, normalizedPageSize, totalCount, totalPages);
+            var items = assets.Select(InventoryAssetMapper.ToResponse).ToList();
+            return new PagedResponse<InventoryAssetResponse>(items, normalizedPage, normalizedPageSize, totalCount, totalPages);
+        }
+        var evaluationNowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+
+        var (filteredAssets, filteredTotalCount) = await _assetRepository.GetFilteredAssetsByListingIdAsync(
+            id,
+            validStart,
+            validEnd,
+            normalizedStatus,
+            evaluationNowUtc,
+            skip,
+            normalizedPageSize,
+            cancellationToken);
+
+        int filteredTotalPages = filteredTotalCount == 0 ? 0 : (int)Math.Ceiling((double)filteredTotalCount / normalizedPageSize);
+
+        var pagedItems = filteredAssets
+            .Select(InventoryAssetMapper.ToResponse)
+            .ToList();
+
+        return new PagedResponse<InventoryAssetResponse>(
+            pagedItems,
+            normalizedPage,
+            normalizedPageSize,
+            filteredTotalCount,
+            filteredTotalPages);
     }
+
+    /// <inheritdoc />
+    public Task<Result<PagedResponse<InventoryAssetResponse>>> GetListingAssetsAsync(
+        Guid id,
+        int page,
+        int pageSize,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default) =>
+        GetListingAssetsAsync(id, null, null, null, page, pageSize, caller, cancellationToken);
 }
