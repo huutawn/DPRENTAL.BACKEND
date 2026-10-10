@@ -14,6 +14,9 @@ RUN dotnet publish RentalService/src/Api/RentalService.Api.csproj \
     --configuration Release \
     --output /app/publish \
     --no-restore
+FROM build AS migrator
+RUN dotnet tool install --tool-path /tools dotnet-ef --version 10.0.12
+ENTRYPOINT ["/tools/dotnet-ef", "database", "update", "--project", "RentalService/src/Domain/RentalService.Domain.csproj", "--startup-project", "RentalService/src/Api/RentalService.Api.csproj", "--configuration", "Release", "--no-build"]
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app

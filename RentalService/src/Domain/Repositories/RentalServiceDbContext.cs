@@ -1,9 +1,10 @@
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.RentalService.Domain.Repositories;
 
-public class RentalServiceDbContext : DbContext
+public class RentalServiceDbContext : DbContext, IUnitOfWork
 {
     public RentalServiceDbContext(DbContextOptions<RentalServiceDbContext> options) : base(options)
     {

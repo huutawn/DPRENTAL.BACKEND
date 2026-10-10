@@ -1,8 +1,8 @@
+using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Dprental.RentalService.Domain.Repositories;
-
 /// <summary>
 /// Đăng ký PostgreSQL persistence cho service.
 /// </summary>
@@ -19,6 +19,8 @@ public static class DomainRepositoriesServiceCollectionExtensions
         }
 
         services.AddDbContext<RentalServiceDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddScoped<IRentalOrderRepository, RentalOrderRepository>();
+        services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<RentalServiceDbContext>());
 
         return services;
     }

@@ -51,6 +51,9 @@ public partial class RentalItem
     [Precision(18, 2)]
     public decimal DepositAmount { get; private set; }
 
+    [NotMapped]
+    public decimal TotalAmount => RentalAmount + DepositAmount;
+
     public RentalItemStatus Status { get; private set; }
 
     [Required]
@@ -155,5 +158,54 @@ public partial class RentalItem
         {
             _unitAssignments.Add(new RentalUnitAssignment(a.Id, Id, a.AssetId, a.AllocationId));
         }
+    }
+
+    public void SetHandoverRecord(HandoverRecord handoverRecord)
+    {
+        ArgumentNullException.ThrowIfNull(handoverRecord);
+        HandoverRecord = handoverRecord;
+    }
+
+    public void AddReturnRecord(ReturnRecord returnRecord)
+    {
+        ArgumentNullException.ThrowIfNull(returnRecord);
+        _returnRecords.Add(returnRecord);
+    }
+
+    public void SetDeductionProposal(DeductionProposal proposal)
+    {
+        ArgumentNullException.ThrowIfNull(proposal);
+        DeductionProposal = proposal;
+    }
+
+    public void AddUnitAssignment(RentalUnitAssignment unit)
+    {
+        ArgumentNullException.ThrowIfNull(unit);
+        _unitAssignments.Add(unit);
+    }
+    public bool ContainsEvidenceMedia(Guid mediaId)
+    {
+        if (mediaId == Guid.Empty) return false;
+
+        foreach (var unit in _unitAssignments)
+        {
+            if (unit.HandoverMediaIds.Contains(mediaId) ||
+                unit.ReturnMediaIds.Contains(mediaId) ||
+                unit.DeductionMediaIds.Contains(mediaId))
+            {
+                return true;
+            }
+        }
+
+        if (DeductionProposal?.Dispute is not null)
+        {
+            if (DeductionProposal.Dispute.MediaIds.Contains(mediaId) ||
+                DeductionProposal.Dispute.ResolutionMediaIds.Contains(mediaId))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

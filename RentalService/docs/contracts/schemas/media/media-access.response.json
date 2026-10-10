@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MediaAccessResponse",
+  "type": "object",
+  "required": ["mediaId", "url", "expiresAtUtc"],
+  "properties": {
+    "mediaId": { "type": "string", "format": "uuid" },
+    "url": { "type": "string", "format": "uri" },
+    "expiresAtUtc": { "type": "string", "format": "date-time" }
+  }
+}

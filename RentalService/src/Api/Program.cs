@@ -1,9 +1,13 @@
 using System.IO;
 using Dprental.RentalService.Api.Exceptions;
+using Dprental.RentalService.Api.Routing;
+using Dprental.RentalService.Api.Security;
+using Dprental.RentalService.Application.IServices;
+using Dprental.RentalService.Application.Security;
+using Dprental.RentalService.Application.Services;
 using Dprental.RentalService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRentalServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
@@ -14,7 +18,18 @@ builder.Services.AddHealthChecks()
         failureStatus: HealthStatus.Unhealthy,
         tags: ["ready"]);
 
-builder.Services.AddControllers();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddRentalJwtAuthentication(builder.Configuration);
+builder.Services.AddScoped<IRentalCallerContext>(sp =>
+{
+    var http = sp.GetRequiredService<IHttpContextAccessor>();
+    return RentalCallerContext.FromClaimsPrincipal(http.HttpContext?.User);
+});
+builder.Services.AddScoped<IRentalCalendarService, RentalCalendarService>();
+
+builder.Services.AddControllers(options =>
+    options.Conventions.Add(new ApiRoutePrefixConvention(ApiRoutes.Prefix)));
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddEndpointsApiExplorer();
@@ -51,6 +66,8 @@ HealthCheckOptions readinessOptions = new()
     AllowCachingResponses = false
 };
 app.MapHealthChecks("/health/ready", readinessOptions).AllowAnonymous();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 
