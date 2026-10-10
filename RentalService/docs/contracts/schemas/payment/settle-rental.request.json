@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SettleRentalRequest",
+  "type": "object",
+  "required": [
+    "rentalOrderId",
+    "rentalItemId",
+    "invoiceRef",
+    "paymentRef",
+    "supplierId",
+    "depositAmount",
+    "finalDeductionAmount",
+    "refundedDepositAmount",
+    "currency",
+    "decisionRef",
+    "operationKey"
+  ],
+  "properties": {
+    "rentalOrderId": { "type": "string", "format": "uuid" },
+    "rentalItemId": { "type": "string", "format": "uuid" },
+    "invoiceRef": { "type": "string", "maxLength": 256 },
+    "paymentRef": { "type": "string", "maxLength": 256 },
+    "supplierId": { "type": "string", "format": "uuid" },
+    "depositAmount": { "type": "integer", "minimum": 0 },
+    "finalDeductionAmount": { "type": "integer", "minimum": 0 },
+    "refundedDepositAmount": { "type": "integer", "minimum": 0 },
+    "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+    "decisionRef": { "type": "string", "maxLength": 256 },
+    "operationKey": { "type": "string", "maxLength": 64 }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SettleRentalResponse",
+  "type": "object",
+  "required": [
+    "settlementRef",
+    "operationKey",
+    "status",
+    "finalDeductionAmount",
+    "refundedDepositAmount",
+    "currency",
+    "isReplay"
+  ],
+  "properties": {
+    "settlementRef": { "type": "string" },
+    "operationKey": { "type": "string" },
+    "status": { "type": "string", "enum": ["Accepted"] },
+    "finalDeductionAmount": { "type": "integer", "minimum": 0 },
+    "refundedDepositAmount": { "type": "integer", "minimum": 0 },
+    "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+    "isReplay": { "type": "boolean" }
+  }
+}

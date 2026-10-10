@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CreateInvoiceRequest",
+  "type": "object",
+  "required": [
+    "rentalOrderId",
+    "orderCode",
+    "renterId",
+    "currency",
+    "paymentDeadline",
+    "items",
+    "operationKey"
+  ],
+  "properties": {
+    "rentalOrderId": { "type": "string", "format": "uuid" },
+    "orderCode": { "type": "string", "maxLength": 64 },
+    "renterId": { "type": "string", "format": "uuid" },
+    "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+    "paymentDeadline": { "type": "string", "format": "date-time" },
+    "operationKey": { "type": "string", "maxLength": 64 },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["rentalItemId", "supplierId", "rentalAmount", "depositAmount"],
+        "properties": {
+          "rentalItemId": { "type": "string", "format": "uuid" },
+          "supplierId": { "type": "string", "format": "uuid" },
+          "rentalAmount": { "type": "integer", "minimum": 0 },
+          "depositAmount": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

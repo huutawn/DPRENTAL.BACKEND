@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RequestRefundRequest",
+  "type": "object",
+  "required": ["rentalOrderId", "invoiceRef", "paymentRef", "items", "reason", "operationKey"],
+  "properties": {
+    "rentalOrderId": { "type": "string", "format": "uuid" },
+    "invoiceRef": { "type": "string", "maxLength": 256 },
+    "paymentRef": { "type": "string", "maxLength": 256 },
+    "reason": { "type": "string", "maxLength": 500 },
+    "operationKey": { "type": "string", "maxLength": 64 },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["rentalItemId", "refundRentalAmount", "refundDepositAmount"],
+        "properties": {
+          "rentalItemId": { "type": "string", "format": "uuid" },
+          "refundRentalAmount": { "type": "integer", "minimum": 0 },
+          "refundDepositAmount": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

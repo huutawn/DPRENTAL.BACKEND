@@ -1,21 +1,24 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using System.Security.Cryptography;
-using System.Text;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
+using Dprental.RentalService.Common.Utils;
 using Dprental.RentalService.Domain.Errors;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.RentalService.Domain.Entities;
 
+/// <summary>
+/// Aggregate root representing a customer's rental order.
+/// Focuses purely on data, relationships, localized invariants, and collection management.
+/// Business workflows and state transitions are decoupled into application services.
+/// </summary>
 [Table("rental_orders", Schema = "rental")]
 [Index(nameof(OrderCode), IsUnique = true)]
-[Index(nameof(CheckoutOperationId), IsUnique = true)]
 [Index(nameof(RenterId))]
 [Index(nameof(Status))]
 [Index(nameof(PaymentDeadline))]
-public partial class RentalOrder
+public class RentalOrder
 {
     [Key]
     public Guid Id { get; private set; }
@@ -51,9 +54,8 @@ public partial class RentalOrder
     [MaxLength(2000)]
     public string? DeliveryNote { get; private set; }
 
-    [Required]
     [MaxLength(256)]
-    public string RefundDestinationRef { get; private set; } = string.Empty;
+    public string RefundDestinationRef { get; private set; } = "ORIGINAL_PAYMENT_SOURCE";
 
     [Required]
     [MaxLength(64)]
@@ -93,6 +95,15 @@ public partial class RentalOrder
     private readonly List<RentalItem> _items = [];
     public IReadOnlyCollection<RentalItem> Items => _items.AsReadOnly();
 
+    [NotMapped]
+    public decimal TotalRentalAmount => _items.Sum(i => i.RentalAmount);
+
+    [NotMapped]
+    public decimal TotalDepositAmount => _items.Sum(i => i.DepositAmount);
+
+    [NotMapped]
+    public decimal TotalPayableAmount => TotalRentalAmount + TotalDepositAmount;
+
     public RentalTermsAcceptance? TermsAcceptance { get; private set; }
 
     private readonly List<RentalStateTransition> _stateTransitions = [];
@@ -105,179 +116,290 @@ public partial class RentalOrder
     {
     }
 
-    private Result? CheckAndGetExistingReceipt(string operationId, string action, string fingerprint)
+    public static Result<RentalOrder> Create(
+        Guid id,
+        string orderCode,
+        Guid renterId,
+        string currency,
+        string deliveryMethod,
+        string recipientName,
+        string recipientPhone,
+        string deliveryAddress,
+        string? deliveryNote,
+        string termsVersion,
+        string termsDocumentRef,
+        string termsContentHash,
+        string checkoutOperationId,
+        DateTimeOffset utcNow,
+        IEnumerable<InitialRentalItemDto> initialItems) =>
+        Create(
+            id,
+            orderCode,
+            renterId,
+            currency,
+            deliveryMethod,
+            recipientName,
+            recipientPhone,
+            deliveryAddress,
+            deliveryNote,
+            null,
+            termsVersion,
+            termsDocumentRef,
+            termsContentHash,
+            checkoutOperationId,
+            utcNow,
+            initialItems);
+
+    public static Result<RentalOrder> Create(
+        Guid id,
+        string orderCode,
+        Guid renterId,
+        string currency,
+        string deliveryMethod,
+        string recipientName,
+        string recipientPhone,
+        string deliveryAddress,
+        string? deliveryNote,
+        string? refundDestinationRef,
+        string termsVersion,
+        string termsDocumentRef,
+        string termsContentHash,
+        string checkoutOperationId,
+        DateTimeOffset utcNow,
+        IEnumerable<InitialRentalItemDto> initialItems)
     {
-        var existing = _operationReceipts.Find(r => r.OperationId == operationId);
-        if (existing is null)
+        if (id == Guid.Empty || renterId == Guid.Empty)
         {
-            return null;
+            return RentalErrors.InvalidSnapshot;
         }
 
-        if (existing.Fingerprint != fingerprint)
+        if (string.IsNullOrWhiteSpace(orderCode) || orderCode.Trim().Length > 64)
         {
-            return RentalErrors.OperationConflict;
+            return RentalErrors.InvalidSnapshot;
         }
 
-        return existing.IsSuccess
-            ? Result.Success()
-            : Result.Failure(new Error(existing.ErrorCode ?? "Operation.Failed", existing.ErrorMessage ?? string.Empty, ErrorType.Conflict));
-    }
+        if (string.IsNullOrWhiteSpace(currency) || !string.Equals(currency.Trim(), "VND", StringComparison.OrdinalIgnoreCase))
+        {
+            return RentalErrors.CurrencyMismatch;
+        }
 
-    private void RecordSuccessReceipt(string operationId, string action, string fingerprint, DateTimeOffset utcNow)
-    {
-        _operationReceipts.Add(new RentalOperationReceipt(
+        if (string.IsNullOrWhiteSpace(deliveryMethod) || deliveryMethod.Trim().Length > 64 ||
+            string.IsNullOrWhiteSpace(recipientName) || recipientName.Trim().Length > 200 ||
+            string.IsNullOrWhiteSpace(recipientPhone) || recipientPhone.Trim().Length > 32 ||
+            string.IsNullOrWhiteSpace(deliveryAddress) || deliveryAddress.Trim().Length > 500 ||
+            string.IsNullOrWhiteSpace(termsVersion) || termsVersion.Trim().Length > 64 ||
+            string.IsNullOrWhiteSpace(termsDocumentRef) || termsDocumentRef.Trim().Length > 256 ||
+            string.IsNullOrWhiteSpace(termsContentHash) || termsContentHash.Trim().Length > 128 ||
+            string.IsNullOrWhiteSpace(checkoutOperationId) || checkoutOperationId.Trim().Length > 64)
+        {
+            return RentalErrors.InvalidSnapshot;
+        }
+
+        string effectiveRefundDestination = string.IsNullOrWhiteSpace(refundDestinationRef)
+            ? "ORIGINAL_PAYMENT_SOURCE"
+            : refundDestinationRef.Trim();
+
+        if (effectiveRefundDestination.Length > 256)
+        {
+            return RentalErrors.StringLengthExceeded;
+        }
+
+        if (deliveryNote is not null && deliveryNote.Trim().Length > 2000)
+        {
+            return RentalErrors.InvalidSnapshot;
+        }
+
+        var itemsList = initialItems?.ToList() ?? [];
+        if (itemsList.Count == 0)
+        {
+            return RentalErrors.CartEmpty;
+        }
+
+        if (itemsList.Select(i => i.Id).Distinct().Count() != itemsList.Count)
+        {
+            return RentalErrors.DuplicateId;
+        }
+
+        HashSet<Guid> seenAssignmentIds = [];
+        HashSet<Guid> seenAssetIds = [];
+        HashSet<Guid> seenAllocationIds = [];
+
+        foreach (var itemDto in itemsList)
+        {
+            if (itemDto.Id == Guid.Empty || itemDto.EquipmentListingId == Guid.Empty || itemDto.SupplierId == Guid.Empty)
+            {
+                return RentalErrors.InvalidSnapshot;
+            }
+
+            if (itemDto.Quantity <= 0)
+            {
+                return RentalErrors.InvalidQuantity;
+            }
+
+            var rateCheck = VndAmountValidator.ValidateVndAmount(itemDto.DailyRateSnapshot, "Giá thuê theo ngày");
+            if (rateCheck.IsFailure) return rateCheck.Error;
+
+            var depositCheck = VndAmountValidator.ValidateVndAmount(itemDto.DepositPerUnitSnapshot, "Tiền cọc mỗi thiết bị");
+            if (depositCheck.IsFailure) return depositCheck.Error;
+
+            if (itemDto.ExpectedStartDate >= itemDto.ExpectedEndDate)
+            {
+                return RentalErrors.InvalidRentalPeriod;
+            }
+
+            int rentalDays = itemDto.ExpectedEndDate.DayNumber - itemDto.ExpectedStartDate.DayNumber;
+            decimal calculatedRental = itemDto.DailyRateSnapshot * itemDto.Quantity * rentalDays;
+            decimal calculatedDeposit = itemDto.DepositPerUnitSnapshot * itemDto.Quantity;
+
+            var rentalAmountCheck = VndAmountValidator.ValidateVndAmount(calculatedRental, "Tiền thuê tính toán");
+            if (rentalAmountCheck.IsFailure) return rentalAmountCheck.Error;
+
+            var depositAmountCheck = VndAmountValidator.ValidateVndAmount(calculatedDeposit, "Tiền cọc tính toán");
+            if (depositAmountCheck.IsFailure) return depositAmountCheck.Error;
+
+            if (string.IsNullOrWhiteSpace(itemDto.ListingTitleSnapshot) || itemDto.ListingTitleSnapshot.Trim().Length > 200 ||
+                string.IsNullOrWhiteSpace(itemDto.PickupLocationSnapshot) || itemDto.PickupLocationSnapshot.Trim().Length > 500 ||
+                string.IsNullOrWhiteSpace(itemDto.AllocationGroupId) || itemDto.AllocationGroupId.Trim().Length > 64)
+            {
+                return RentalErrors.InvalidSnapshot;
+            }
+
+            if (itemDto.ListingDescriptionSnapshot is not null && itemDto.ListingDescriptionSnapshot.Trim().Length > 2000)
+            {
+                return RentalErrors.InvalidSnapshot;
+            }
+
+            var assignments = itemDto.Assignments?.ToList() ?? [];
+            if (assignments.Count != itemDto.Quantity)
+            {
+                return RentalErrors.QuantityAssignmentMismatch;
+            }
+
+            foreach (var a in assignments)
+            {
+                if (a.Id == Guid.Empty || a.AssetId == Guid.Empty || a.AllocationId == Guid.Empty)
+                {
+                    return RentalErrors.InvalidSnapshot;
+                }
+
+                if (!seenAssignmentIds.Add(a.Id) || !seenAssetIds.Add(a.AssetId) || !seenAllocationIds.Add(a.AllocationId))
+                {
+                    return RentalErrors.DuplicateAssignment;
+                }
+            }
+        }
+
+        decimal totalOrderPayable = itemsList.Sum(i =>
+            (i.DailyRateSnapshot * i.Quantity * (i.ExpectedEndDate.DayNumber - i.ExpectedStartDate.DayNumber)) +
+            (i.DepositPerUnitSnapshot * i.Quantity));
+
+        var totalOrderCheck = VndAmountValidator.ValidateVndAmount(totalOrderPayable, "Tổng tiền đơn thuê");
+        if (totalOrderCheck.IsFailure) return totalOrderCheck.Error;
+
+        RentalOrder order = new()
+        {
+            Id = id,
+            OrderCode = orderCode.Trim(),
+            RenterId = renterId,
+            Status = RentalOrderStatus.PendingPayment,
+            Currency = currency.Trim().ToUpperInvariant(),
+            DeliveryMethod = deliveryMethod.Trim(),
+            RecipientName = recipientName.Trim(),
+            RecipientPhone = recipientPhone.Trim(),
+            DeliveryAddress = deliveryAddress.Trim(),
+            DeliveryNote = deliveryNote?.Trim(),
+            RefundDestinationRef = effectiveRefundDestination,
+            TermsVersion = termsVersion.Trim(),
+            TermsDocumentRef = termsDocumentRef.Trim(),
+            TermsContentHash = termsContentHash.Trim(),
+            PaymentDeadline = utcNow.AddMinutes(30),
+            CheckoutOperationId = checkoutOperationId.Trim(),
+            CreatedAt = utcNow,
+            UpdatedAt = utcNow,
+            Version = 1
+        };
+
+        order.TermsAcceptance = new RentalTermsAcceptance(
             Guid.NewGuid(),
-            Id,
-            operationId,
-            action,
-            fingerprint,
+            id,
+            renterId,
+            termsVersion.Trim(),
+            termsContentHash.Trim(),
+            utcNow);
+
+        foreach (var itemDto in itemsList)
+        {
+            RentalItem item = new(
+                itemDto.Id,
+                id,
+                itemDto.EquipmentListingId,
+                itemDto.SupplierId,
+                itemDto.Quantity,
+                itemDto.ExpectedStartDate,
+                itemDto.ExpectedEndDate,
+                itemDto.ListingTitleSnapshot.Trim(),
+                itemDto.ListingDescriptionSnapshot?.Trim(),
+                itemDto.PickupLocationSnapshot.Trim(),
+                itemDto.DailyRateSnapshot,
+                itemDto.DepositPerUnitSnapshot,
+                itemDto.AllocationGroupId.Trim(),
+                itemDto.Assignments);
+
+            order._items.Add(item);
+        }
+
+        order.AddOperationReceipt(new RentalOperationReceipt(
+            Guid.NewGuid(),
+            id,
+            checkoutOperationId.Trim(),
+            "CreateOrder",
+            $"create-order:{order.OrderCode}",
             true,
             null,
             null,
             utcNow));
-    }
 
-    private static string ComputeFingerprint(string action, Guid? targetId, ActorRole actorRole, Guid? actorId, params object?[] parameters)
-    {
-        StringBuilder sb = new();
-        sb.Append(action).Append('|')
-          .Append(targetId?.ToString() ?? "none").Append('|')
-          .Append((int)actorRole).Append('|')
-          .Append(actorId?.ToString() ?? "none");
-
-        foreach (var p in parameters)
-        {
-            sb.Append('|');
-            if (p is IEnumerable<Guid> guids)
-            {
-                sb.Append(string.Join(",", guids));
-            }
-            else if (p is IEnumerable<HandoverObservationDto> handovers)
-            {
-                sb.Append(string.Join(";", handovers.Select(h => $"{h.AssignmentId}:{h.Condition}:{h.Note}")));
-            }
-            else if (p is IEnumerable<ReturnObservationDto> returns)
-            {
-                sb.Append(string.Join(";", returns.Select(r => $"{r.AssignmentId}:{r.Condition}:{r.Note}")));
-            }
-            else if (p is IEnumerable<DeductionLineDto> deductions)
-            {
-                sb.Append(string.Join(";", deductions.Select(d => $"{d.AssignmentId}:{d.ProposedAmount}:{d.Reason}")));
-            }
-            else
-            {
-                sb.Append(p?.ToString() ?? "null");
-            }
-        }
-
-        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()));
-        return Convert.ToHexString(hash);
-    }
-
-    private void RecalculateStatus()
-    {
-        if (Status is RentalOrderStatus.PendingPayment or RentalOrderStatus.Expired or RentalOrderStatus.Cancelled)
-        {
-            if (_items.All(i => i.Status == RentalItemStatus.PendingPayment))
-            {
-                Status = RentalOrderStatus.PendingPayment;
-                return;
-            }
-            if (_items.All(i => i.Status == RentalItemStatus.Expired))
-            {
-                Status = RentalOrderStatus.Expired;
-                return;
-            }
-            if (_items.All(i => i.Status == RentalItemStatus.Cancelled))
-            {
-                Status = RentalOrderStatus.Cancelled;
-                return;
-            }
-        }
-
-        if (_items.Any(i => i.Status == RentalItemStatus.InRental))
-        {
-            Status = RentalOrderStatus.InRental;
-            return;
-        }
-
-        if (_items.Any(i => i.Status == RentalItemStatus.PendingSettlement))
-        {
-            Status = RentalOrderStatus.PendingSettlement;
-            return;
-        }
-
-        if (_items.Any(i => i.Status == RentalItemStatus.AwaitingHandover))
-        {
-            Status = RentalOrderStatus.AwaitingHandover;
-            return;
-        }
-
-        if (_items.Any(i => i.Status == RentalItemStatus.PendingSupplierConfirmation))
-        {
-            Status = RentalOrderStatus.PendingSupplierConfirmation;
-            return;
-        }
-
-        bool allTerminal = _items.All(i => i.Status is RentalItemStatus.Completed
-            or RentalItemStatus.Rejected
-            or RentalItemStatus.Expired
-            or RentalItemStatus.Cancelled);
-
-        if (allTerminal)
-        {
-            if (_items.Any(i => i.Status == RentalItemStatus.Completed))
-            {
-                Status = RentalOrderStatus.Completed;
-                return;
-            }
-
-            if (_items.All(i => i.Status == RentalItemStatus.Rejected))
-            {
-                Status = RentalOrderStatus.Rejected;
-                return;
-            }
-
-            if (_items.All(i => i.Status == RentalItemStatus.Expired))
-            {
-                Status = RentalOrderStatus.Expired;
-                return;
-            }
-
-            if (_items.All(i => i.Status == RentalItemStatus.Cancelled))
-            {
-                Status = RentalOrderStatus.Cancelled;
-                return;
-            }
-
-            Status = RentalOrderStatus.Cancelled;
-        }
-    }
-
-    private void LogTransition(
-        Guid? rentalItemId,
-        string? fromState,
-        string toState,
-        string action,
-        Guid? actorId,
-        ActorRole actorRole,
-        string? reason,
-        DateTimeOffset occurredAt,
-        string operationId)
-    {
-        RentalStateTransition transition = new(
+        order.AddStateTransition(new RentalStateTransition(
             Guid.NewGuid(),
-            Id,
-            rentalItemId,
-            fromState,
-            toState,
-            action,
-            actorId,
-            actorRole,
-            reason,
-            occurredAt,
-            operationId);
+            id,
+            null,
+            null,
+            RentalOrderStatus.PendingPayment.ToString(),
+            "CreateOrder",
+            renterId,
+            ActorRole.Renter,
+            "Checkout payable order",
+            utcNow,
+            checkoutOperationId.Trim()));
 
+        return order;
+    }
+
+    public void AddRentalItem(RentalItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (_items.Any(i => i.Id == item.Id))
+        {
+            throw new InvalidOperationException($"RentalItem '{item.Id}' already exists in order.");
+        }
+        _items.Add(item);
+    }
+
+    public void SetTermsAcceptance(RentalTermsAcceptance termsAcceptance)
+    {
+        ArgumentNullException.ThrowIfNull(termsAcceptance);
+        TermsAcceptance = termsAcceptance;
+    }
+
+    public void AddStateTransition(RentalStateTransition transition)
+    {
+        ArgumentNullException.ThrowIfNull(transition);
         _stateTransitions.Add(transition);
+    }
+
+    public void AddOperationReceipt(RentalOperationReceipt receipt)
+    {
+        ArgumentNullException.ThrowIfNull(receipt);
+        _operationReceipts.Add(receipt);
     }
 }
