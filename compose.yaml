@@ -36,6 +36,10 @@ services:
       Routes__14__DownstreamHostAndPorts__0__Port: 8080
       Routes__15__DownstreamHostAndPorts__0__Host: inventory-service
       Routes__15__DownstreamHostAndPorts__0__Port: 8080
+      Routes__16__DownstreamHostAndPorts__0__Host: rental-service
+      Routes__16__DownstreamHostAndPorts__0__Port: 8080
+      Routes__17__DownstreamHostAndPorts__0__Host: rental-service
+      Routes__17__DownstreamHostAndPorts__0__Port: 8080
       Gateway__Security__Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:-http://localhost:3000}
       Gateway__Security__Cors__AllowedOrigins__1: ${CORS_ALLOWED_ORIGIN_1:-http://localhost:5173}
       Gateway__Security__Cors__AllowedOrigins__2: http://localhost:${GATEWAY_PORT:-5050}
@@ -54,6 +58,8 @@ services:
         condition: service_started
       media-service:
         condition: service_healthy
+      rental-service:
+        condition: service_started
     networks:
       - dprental
 
@@ -394,6 +400,62 @@ services:
         condition: service_healthy
     networks:
       - dprental
+  rental-postgres:
+    image: postgres:17.11-alpine3.24
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${RENTAL_POSTGRES_DB:-rentalservice}
+      POSTGRES_USER: ${RENTAL_POSTGRES_USER:-rentalservice}
+      POSTGRES_PASSWORD: ${RENTAL_POSTGRES_PASSWORD:?Set RENTAL_POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${DPRENTAL_RENTAL_POSTGRES_HOST_PORT:-5434}:5432"
+    volumes:
+      - rental-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=$$POSTGRES_USER --dbname=$$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    networks:
+      - dprental
+
+  rental-migrate:
+    build:
+      context: ./RentalService
+      dockerfile: Dockerfile
+      target: migrator
+    restart: "no"
+    environment:
+      ConnectionStrings__Postgres: "Host=rental-postgres;Port=5432;Database=${RENTAL_POSTGRES_DB:-rentalservice};Username=${RENTAL_POSTGRES_USER:-rentalservice};Password=${RENTAL_POSTGRES_PASSWORD:?Set RENTAL_POSTGRES_PASSWORD in .env}"
+    depends_on:
+      rental-postgres:
+        condition: service_healthy
+    networks:
+      - dprental
+
+  rental-service:
+    build:
+      context: ./RentalService
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${RENTAL_SERVICE_PORT:-8084}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ConnectionStrings__Postgres: "Host=rental-postgres;Port=5432;Database=${RENTAL_POSTGRES_DB:-rentalservice};Username=${RENTAL_POSTGRES_USER:-rentalservice};Password=${RENTAL_POSTGRES_PASSWORD:?Set RENTAL_POSTGRES_PASSWORD in .env}"
+      Authentication__Jwt__Issuer: ${AUTH_JWT_ISSUER:-dprental-authservice-dev}
+      Authentication__Jwt__Audience: dprental-clients
+      Authentication__Jwt__JwksUri: http://auth-service:8080/.well-known/jwks.json
+    depends_on:
+      rental-postgres:
+        condition: service_healthy
+      rental-migrate:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_started
+    networks:
+      - dprental
 
 volumes:
   postgres-data:
@@ -402,6 +464,7 @@ volumes:
   valkey-data:
   kafka-data:
   jwt-keys:
+  rental-postgres-data:
 
 networks:
   dprental:
