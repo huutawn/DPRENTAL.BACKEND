@@ -20,4 +20,19 @@ public interface IRentalOrderRepository
     Task<RentalOrder> CreateAsync(RentalOrder order, CancellationToken cancellationToken = default);
 
     Task<bool> UpdateAsync(RentalOrder order, CancellationToken cancellationToken = default);
+
+    Task<RentalOrder?> GetByIdWithDetailsAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<RentalOrder?> GetByItemIdWithDetailsAsync(Guid itemId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<Guid>> GetPendingPaymentExpiredOrderIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<Guid>> GetPendingSupplierTimeoutItemIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<RenterCalendarItemRecord>> GetRenterCalendarItemsAsync(
+        Guid renterId,
+        DateOnly monthStart,
+        DateOnly monthEnd,
+        IReadOnlyCollection<Dprental.RentalService.Common.Enums.RentalItemStatus> targetStatuses,
+        CancellationToken cancellationToken = default);
 }

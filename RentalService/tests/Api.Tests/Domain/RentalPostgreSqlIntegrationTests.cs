@@ -1,5 +1,6 @@
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -106,7 +107,9 @@ public sealed class RentalPostgreSqlIntegrationTests
             Assert.Contains("deduction_proposals", tables);
             Assert.Contains("disputes", tables);
             Assert.Contains("rental_terms_acceptances", tables);
-            Assert.Equal(12, tables.Count);
+            Assert.Contains("rental_inbox_messages", tables);
+            Assert.Contains("rental_outbox_messages", tables);
+            Assert.Equal(14, tables.Count);
         }
         finally
         {

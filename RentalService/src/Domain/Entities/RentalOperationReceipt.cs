@@ -6,8 +6,22 @@ namespace Dprental.RentalService.Domain.Entities;
 
 [Table("rental_operation_receipts", Schema = "rental")]
 [Index(nameof(RentalOrderId), nameof(OperationId), IsUnique = true)]
+[Index(nameof(Status), nameof(NextRetryAt))]
+[Index(nameof(Action), nameof(Status))]
+[Index(nameof(TargetItemId))]
+[Index(nameof(PrerequisiteOperationId))]
 public class RentalOperationReceipt
 {
+    public const string StatusPending = "Pending";
+    public const string StatusProcessing = "Processing";
+    public const string StatusSucceeded = "Succeeded";
+    public const string StatusFailed = "Failed";
+
+    public const string ClassificationTransient = "Transient";
+    public const string ClassificationBusiness = "Business";
+    public const string ClassificationUncertain = "Uncertain";
+    public const string ClassificationUncertainExhausted = "UncertainExhausted";
+
     [Key]
     public Guid Id { get; private set; }
 
@@ -35,6 +49,33 @@ public class RentalOperationReceipt
 
     public DateTimeOffset CreatedAt { get; private set; }
 
+    [Required]
+    [MaxLength(32)]
+    public string Status { get; private set; } = StatusSucceeded;
+
+    public int RetryCount { get; private set; }
+
+    public DateTimeOffset? LastAttemptedAt { get; private set; }
+
+    public DateTimeOffset? NextRetryAt { get; private set; }
+
+    public DateTimeOffset? CompletedAt { get; private set; }
+
+    public Guid? TargetItemId { get; private set; }
+
+    public string? PayloadJson { get; private set; }
+    public string? ResponseJson { get; private set; }
+
+    public string? ApiResponseJson { get; private set; }
+
+    [MaxLength(64)]
+    public string? PrerequisiteOperationId { get; private set; }
+
+    [MaxLength(64)]
+    public string? ErrorClassification { get; private set; }
+
+    public bool IsTransient { get; private set; }
+
     [ForeignKey(nameof(RentalOrderId))]
     public RentalOrder? RentalOrder { get; private set; }
 
@@ -51,7 +92,19 @@ public class RentalOperationReceipt
         bool isSuccess,
         string? errorCode,
         string? errorMessage,
-        DateTimeOffset createdAt)
+        DateTimeOffset createdAt,
+        string? status = null,
+        int retryCount = 0,
+        DateTimeOffset? lastAttemptedAt = null,
+        DateTimeOffset? nextRetryAt = null,
+        DateTimeOffset? completedAt = null,
+        Guid? targetItemId = null,
+        string? payloadJson = null,
+        string? responseJson = null,
+        string? apiResponseJson = null,
+        string? prerequisiteOperationId = null,
+        string? errorClassification = null,
+        bool isTransient = false)
     {
         Id = id;
         RentalOrderId = rentalOrderId;
@@ -62,5 +115,116 @@ public class RentalOperationReceipt
         ErrorCode = errorCode;
         ErrorMessage = errorMessage;
         CreatedAt = createdAt;
+        Status = status ?? (isSuccess ? StatusSucceeded : StatusFailed);
+        RetryCount = retryCount;
+        LastAttemptedAt = lastAttemptedAt;
+        NextRetryAt = nextRetryAt;
+        CompletedAt = completedAt ?? (isSuccess ? createdAt : null);
+        TargetItemId = targetItemId;
+        PayloadJson = payloadJson;
+        ResponseJson = responseJson;
+        ApiResponseJson = apiResponseJson;
+        PrerequisiteOperationId = prerequisiteOperationId;
+        ErrorClassification = errorClassification;
+        IsTransient = isTransient;
+    }
+
+    internal static RentalOperationReceipt CreatePending(
+        Guid id,
+        Guid rentalOrderId,
+        string operationId,
+        string action,
+        string fingerprint,
+        DateTimeOffset createdAt,
+        Guid? targetItemId = null,
+        string? payloadJson = null)
+    {
+        return new RentalOperationReceipt(
+            id,
+            rentalOrderId,
+            operationId,
+            action,
+            fingerprint,
+            isSuccess: false,
+            errorCode: null,
+            errorMessage: null,
+            createdAt: createdAt,
+            status: StatusPending,
+            retryCount: 0,
+            lastAttemptedAt: null,
+            nextRetryAt: null,
+            completedAt: null,
+            targetItemId: targetItemId,
+            payloadJson: payloadJson,
+            responseJson: null);
+    }
+
+    internal void MarkProcessing(DateTimeOffset attemptedAt)
+    {
+        Status = StatusProcessing;
+        LastAttemptedAt = attemptedAt;
+    }
+
+    internal void MarkSucceeded(DateTimeOffset completedAt, string? responseJson = null, string? apiResponseJson = null)
+    {
+        IsSuccess = true;
+        Status = StatusSucceeded;
+        CompletedAt = completedAt;
+        NextRetryAt = null;
+        ErrorClassification = null;
+        IsTransient = false;
+        if (responseJson is not null)
+        {
+            ResponseJson = responseJson;
+        }
+        if (apiResponseJson is not null)
+        {
+            ApiResponseJson = apiResponseJson;
+        }
+    }
+
+    internal void SetApiResponse(string apiResponseJson)
+    {
+        ApiResponseJson = apiResponseJson;
+    }
+
+    internal void MarkFailed(string? errorCode, string? errorMessage, DateTimeOffset attemptedAt, string? classification = null, bool isTransient = false, DateTimeOffset? nextRetryAt = null)
+    {
+        IsSuccess = false;
+        Status = StatusFailed;
+        ErrorCode = errorCode;
+        ErrorMessage = errorMessage;
+        LastAttemptedAt = attemptedAt;
+        NextRetryAt = nextRetryAt;
+        ErrorClassification = classification;
+        IsTransient = isTransient;
+    }
+
+    internal void MarkUncertain(string? errorCode, string? errorMessage, DateTimeOffset attemptedAt, DateTimeOffset? nextRetryAt = null)
+    {
+        IsSuccess = false;
+        Status = StatusProcessing;
+        ErrorCode = errorCode;
+        ErrorMessage = errorMessage;
+        LastAttemptedAt = attemptedAt;
+        NextRetryAt = nextRetryAt;
+        ErrorClassification = "Uncertain";
+        IsTransient = true;
+    }
+
+    internal void RecordRetryAttempt(DateTimeOffset attemptedAt, DateTimeOffset? nextRetryAt, string? errorMessage = null, string? classification = null)
+    {
+        RetryCount++;
+        LastAttemptedAt = attemptedAt;
+        NextRetryAt = nextRetryAt;
+        IsTransient = true;
+        if (!string.IsNullOrWhiteSpace(errorMessage))
+        {
+            ErrorMessage = errorMessage;
+        }
+        if (!string.IsNullOrWhiteSpace(classification))
+        {
+            ErrorClassification = classification;
+        }
     }
 }

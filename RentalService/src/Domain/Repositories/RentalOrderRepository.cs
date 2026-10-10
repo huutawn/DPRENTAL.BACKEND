@@ -1,5 +1,7 @@
+using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
+using Dprental.RentalService.Common.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.RentalService.Domain.Repositories;
@@ -95,7 +97,95 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
     public Task<bool> UpdateAsync(RentalOrder order, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(order);
-        _dbContext.RentalOrders.Update(order);
+        var entry = _dbContext.Entry(order);
+        if (entry.State == EntityState.Detached)
+        {
+            _dbContext.RentalOrders.Update(order);
+        }
+
+        foreach (var t in order.StateTransitions)
+        {
+            var tEntry = _dbContext.Entry(t);
+            if (tEntry.State == EntityState.Detached)
+            {
+                tEntry.State = EntityState.Added;
+            }
+        }
+
         return Task.FromResult(true);
+    }
+
+    public Task<RentalOrder?> GetByIdWithDetailsAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return GetByIdAsync(id, cancellationToken);
+    }
+
+    public async Task<RentalOrder?> GetByItemIdWithDetailsAsync(Guid itemId, CancellationToken cancellationToken = default)
+    {
+        var orderHeader = await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Id == itemId)
+            .Select(i => new { i.RentalOrderId })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (orderHeader == null)
+        {
+            return null;
+        }
+
+        return await GetByIdAsync(orderHeader.RentalOrderId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetPendingPaymentExpiredOrderIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalOrders
+            .AsNoTracking()
+            .Where(o => o.Status == RentalOrderStatus.PendingPayment && o.PaymentDeadline <= utcNow)
+            .OrderBy(o => o.PaymentDeadline)
+            .Select(o => o.Id)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetPendingSupplierTimeoutItemIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.PendingSupplierConfirmation &&
+                        i.SupplierConfirmationDeadline.HasValue &&
+                        i.SupplierConfirmationDeadline.Value <= utcNow)
+            .OrderBy(i => i.SupplierConfirmationDeadline)
+            .Select(i => i.Id)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+    }
+
+
+    public async Task<IReadOnlyList<RenterCalendarItemRecord>> GetRenterCalendarItemsAsync(
+        Guid renterId,
+        DateOnly monthStart,
+        DateOnly monthEnd,
+        IReadOnlyCollection<Dprental.RentalService.Common.Enums.RentalItemStatus> targetStatuses,
+        CancellationToken cancellationToken = default)
+    {
+        var query = from order in _dbContext.RentalOrders.AsNoTracking()
+                    where order.RenterId == renterId
+                    from item in order.Items
+                    where targetStatuses.Contains(item.Status)
+                          && item.ExpectedStartDate <= monthEnd
+                          && item.ExpectedEndDate > monthStart
+                    select new RenterCalendarItemRecord(
+                        order.Id,
+                        order.OrderCode,
+                        item.Id,
+                        item.EquipmentListingId,
+                        item.ListingTitleSnapshot,
+                        item.Quantity,
+                        item.ExpectedStartDate,
+                        item.ExpectedEndDate,
+                        item.Status,
+                        order.CreatedAt);
+
+        return await query.ToListAsync(cancellationToken);
     }
 }

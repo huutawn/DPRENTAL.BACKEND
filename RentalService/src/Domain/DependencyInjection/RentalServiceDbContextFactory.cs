@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
-namespace Dprental.RentalService.Domain.Repositories;
+namespace Dprental.RentalService.Domain.DependencyInjection;
 
 /// <summary>
 /// Factory khởi tạo RentalServiceDbContext tại thời điểm thiết kế (Design-time) phục vụ công cụ dotnet-ef migrations.

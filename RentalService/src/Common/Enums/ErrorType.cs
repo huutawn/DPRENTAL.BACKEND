@@ -9,5 +9,6 @@ public enum ErrorType
     Conflict = 4,
     Expired = 5,
     Unprocessable = 6,
-    Failure = 7
+    Failure = 7,
+    ServiceUnavailable = 8
 }

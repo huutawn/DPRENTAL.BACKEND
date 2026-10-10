@@ -6,9 +6,7 @@ using Dprental.RentalService.Application.IServices;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
-using Dprental.RentalService.Domain.Repositories;
-using Microsoft.EntityFrameworkCore;
-
+using Dprental.RentalService.Domain.IRepositories;
 namespace Dprental.RentalService.Application.Services;
 
 /// <summary>
@@ -25,14 +23,14 @@ public sealed class RentalCalendarService : IRentalCalendarService
         RentalItemStatus.Completed
     ];
 
-    private readonly RentalServiceDbContext _dbContext;
+    private readonly IRentalOrderRepository _orderRepository;
     private readonly TimeProvider _timeProvider;
 
     public RentalCalendarService(
-        RentalServiceDbContext dbContext,
+        IRentalOrderRepository orderRepository,
         TimeProvider? timeProvider = null)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -87,28 +85,13 @@ public sealed class RentalCalendarService : IRentalCalendarService
         DateOnly monthStart = new(year, monthNum, 1);
         DateOnly monthEnd = new(year, monthNum, daysInMonth);
 
-        // Query trực tiếp dữ liệu Rental với ownership predicate (RenterId == renterId)
-        var query = from order in _dbContext.RentalOrders.AsNoTracking()
-                    where order.RenterId == renterId
-                    from item in order.Items
-                    where TargetStatuses.Contains(item.Status)
-                          && item.ExpectedStartDate <= monthEnd
-                          && item.ExpectedEndDate > monthStart
-                    select new
-                    {
-                        OrderId = order.Id,
-                        OrderCode = order.OrderCode,
-                        RentalItemId = item.Id,
-                        EquipmentListingId = item.EquipmentListingId,
-                        ListingTitle = item.ListingTitleSnapshot,
-                        Quantity = item.Quantity,
-                        ExpectedStartDate = item.ExpectedStartDate,
-                        ExpectedEndDate = item.ExpectedEndDate,
-                        Status = item.Status,
-                        CreatedAt = order.CreatedAt
-                    };
-
-        var matchingItems = await query.ToListAsync(cancellationToken);
+        // Query dữ liệu Rental thông qua repository contract
+        var matchingItems = await _orderRepository.GetRenterCalendarItemsAsync(
+            renterId,
+            monthStart,
+            monthEnd,
+            TargetStatuses,
+            cancellationToken);
 
         // Thống kê days: đủ ngày trong tháng, rentedQuantity tính trước pagination
         var days = new List<RenterCalendarDayResponse>(daysInMonth);

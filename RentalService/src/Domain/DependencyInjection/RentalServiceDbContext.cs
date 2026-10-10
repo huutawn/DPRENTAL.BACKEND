@@ -2,7 +2,7 @@ using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
 
-namespace Dprental.RentalService.Domain.Repositories;
+namespace Dprental.RentalService.Domain.DependencyInjection;
 
 public class RentalServiceDbContext : DbContext, IUnitOfWork
 {
@@ -22,6 +22,8 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
     public DbSet<DeductionProposal> DeductionProposals => Set<DeductionProposal>();
     public DbSet<Dispute> Disputes => Set<Dispute>();
     public DbSet<RentalOperationReceipt> RentalOperationReceipts => Set<RentalOperationReceipt>();
+    public DbSet<RentalInboxMessage> RentalInboxMessages => Set<RentalInboxMessage>();
+    public DbSet<RentalOutboxMessage> RentalOutboxMessages => Set<RentalOutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -98,6 +100,11 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
             b.Property(i => i.FinalDeductionAmount)
                 .HasPrecision(18, 2);
 
+            b.HasIndex(i => i.SupplierDecisionBy);
+
+            b.Property(i => i.SupplierDecisionNote)
+                .HasMaxLength(2000);
+
             b.HasMany(i => i.UnitAssignments)
                 .WithOne(u => u.RentalItem)
                 .HasForeignKey(u => u.RentalItemId)
@@ -168,10 +175,34 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
             b.Property(d => d.ResolutionMediaIds).HasField("_resolutionMediaIds");
         });
 
+        modelBuilder.Entity<RentalStateTransition>(b =>
+        {
+            b.Property(t => t.Id).ValueGeneratedNever();
+        });
+
         modelBuilder.Entity<RentalOperationReceipt>(b =>
         {
-            b.HasIndex(r => new { r.RentalOrderId, r.OperationId })
-                .IsUnique();
+            b.Property(r => r.Id).ValueGeneratedNever();
+            b.HasIndex(r => new { r.RentalOrderId, r.OperationId }).IsUnique();
+            b.HasIndex(r => new { r.Status, r.NextRetryAt });
+            b.HasIndex(r => new { r.Action, r.Status });
+            b.HasIndex(r => r.TargetItemId);
+            b.HasIndex(r => r.PrerequisiteOperationId);
+        });
+
+        modelBuilder.Entity<RentalInboxMessage>(b =>
+        {
+            b.Property(m => m.Id).ValueGeneratedNever();
+            b.HasIndex(m => m.MessageId).IsUnique();
+            b.HasIndex(m => m.Status);
+        });
+
+        modelBuilder.Entity<RentalOutboxMessage>(b =>
+        {
+            b.Property(m => m.Id).ValueGeneratedNever();
+            b.HasIndex(m => new { m.Status, m.ScheduledAt, m.CreatedAt });
+            b.HasIndex(m => new { m.Status, m.ScheduledAt, m.LockedUntilUtc });
+            b.HasIndex(m => m.Status);
         });
     }
 }
