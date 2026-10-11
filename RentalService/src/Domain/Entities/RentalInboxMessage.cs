@@ -7,8 +7,14 @@ namespace Dprental.RentalService.Domain.Entities;
 [Table("rental_inbox_messages", Schema = "rental")]
 [Index(nameof(MessageId), IsUnique = true)]
 [Index(nameof(Status))]
+[Index(nameof(Status), nameof(NextRetryAt), nameof(ReceivedAt))]
 public class RentalInboxMessage
 {
+    public const string StatusReceived = "Received";
+    public const string StatusFailed = "Failed";
+    public const string StatusProcessed = "Processed";
+    public const string StatusDeadLettered = "DeadLettered";
+
     [Key]
     public Guid Id { get; private set; }
 
@@ -40,7 +46,7 @@ public class RentalInboxMessage
 
     [Required]
     [MaxLength(32)]
-    public string Status { get; private set; } = "Received";
+    public string Status { get; private set; } = StatusReceived;
 
     public int RetryCount { get; private set; }
 
@@ -52,6 +58,13 @@ public class RentalInboxMessage
     public DateTimeOffset ReceivedAt { get; private set; }
 
     public DateTimeOffset? ProcessedAt { get; private set; }
+
+    [MaxLength(256)]
+    public string? KafkaTopic { get; private set; }
+
+    public int? KafkaPartition { get; private set; }
+    public long? KafkaOffset { get; private set; }
+
     private RentalInboxMessage()
     {
     }
@@ -66,9 +79,11 @@ public class RentalInboxMessage
         Guid? causationId,
         string payload,
         DateTimeOffset receivedAt,
-        string? payloadFingerprint = null)
+        string? payloadFingerprint = null,
+        string? kafkaTopic = null,
+        int? kafkaPartition = null,
+        long? kafkaOffset = null)
     {
-        Id = id;
         MessageId = messageId;
         MessageType = messageType;
         Producer = producer;
@@ -78,25 +93,28 @@ public class RentalInboxMessage
         Payload = payload;
         PayloadFingerprint = payloadFingerprint ?? ComputeHash(payload);
         ReceivedAt = receivedAt;
-        Status = "Received";
+        Status = StatusReceived;
+        KafkaTopic = kafkaTopic;
+        KafkaPartition = kafkaPartition;
+        KafkaOffset = kafkaOffset;
     }
     public void MarkProcessed(DateTimeOffset processedAt)
     {
-        Status = "Processed";
+        Status = StatusProcessed;
         ProcessedAt = processedAt;
     }
 
     public void MarkFailed(string errorMessage, DateTimeOffset? nextRetryAt = null)
     {
         RetryCount++;
-        Status = "Failed";
+        Status = StatusFailed;
         ErrorMessage = errorMessage;
         NextRetryAt = nextRetryAt;
     }
 
     public void MarkDeadLettered(string errorMessage)
     {
-        Status = "DeadLettered";
+        Status = StatusDeadLettered;
         ErrorMessage = errorMessage;
     }
 

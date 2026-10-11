@@ -19,18 +19,33 @@ public sealed class InboxRepository : IInboxRepository
         return await _dbContext.RentalInboxMessages
             .FirstOrDefaultAsync(m => m.MessageId == messageId, cancellationToken);
     }
+    public async Task<RentalInboxMessage?> GetByIdForProcessingAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalInboxMessages
+            .FirstOrDefaultAsync(m => m.Id == id, cancellationToken);
+    }
 
-    public async Task<IReadOnlyList<RentalInboxMessage>> GetPendingRetryBatchAsync(
+    public async Task<IReadOnlyList<InboxMessageDescriptor>> GetPendingRetryDescriptorsAsync(
         DateTimeOffset utcNow,
         int batchSize,
         CancellationToken cancellationToken = default)
     {
         return await _dbContext.RentalInboxMessages
-            .Where(m => (m.Status == "Received" || m.Status == "Failed") &&
+            .AsNoTracking()
+            .Where(m => (m.Status == RentalInboxMessage.StatusReceived || m.Status == RentalInboxMessage.StatusFailed) &&
                         m.RetryCount < 10 &&
                         (m.NextRetryAt == null || m.NextRetryAt <= utcNow))
             .OrderBy(m => m.ReceivedAt)
             .Take(batchSize)
+            .Select(m => new InboxMessageDescriptor(
+                m.Id,
+                m.MessageId,
+                m.MessageType,
+                m.AggregateId,
+                m.Status,
+                m.RetryCount,
+                m.NextRetryAt,
+                m.ReceivedAt))
             .ToListAsync(cancellationToken);
     }
 
@@ -43,6 +58,10 @@ public sealed class InboxRepository : IInboxRepository
     public void Update(RentalInboxMessage message)
     {
         ArgumentNullException.ThrowIfNull(message);
-        _dbContext.RentalInboxMessages.Update(message);
+        var entry = _dbContext.Entry(message);
+        if (entry.State == EntityState.Detached)
+        {
+            _dbContext.RentalInboxMessages.Update(message);
+        }
     }
 }

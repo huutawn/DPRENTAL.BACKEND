@@ -33,12 +33,26 @@ public sealed class InboxProcessingWorkerTests
     {
         public Func<PaymentEventEnvelope<InvoicePaidPayload>, Task<Result>>? Handler { get; set; }
 
+        public Task<Result> ApplyInvoicePaidStagedAsync(
+            RentalOrder order,
+            PaymentEventEnvelope<InvoicePaidPayload> envelope,
+            RentalInboxMessage inboxMessage,
+            CancellationToken cancellationToken = default) =>
+            Handler != null ? Handler(envelope) : Task.FromResult(Result.Success());
+
         public Task<Result> ProcessInvoicePaidAsync(PaymentEventEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default) =>
             Handler != null ? Handler(envelope) : Task.FromResult(Result.Success());
     }
 
     private sealed class StubRefundConsumer : IRefundCompletedConsumer
     {
+        public Task<Result> ApplyRefundCompletedStagedAsync(
+            RentalOrder order,
+            PaymentEventEnvelope<RefundCompletedPayload> envelope,
+            RentalInboxMessage inboxMessage,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success());
+
         public Task<Result> ProcessRefundCompletedAsync(PaymentEventEnvelope<RefundCompletedPayload> envelope, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success());
     }
@@ -50,7 +64,13 @@ public sealed class InboxProcessingWorkerTests
         await using var db = CreateDbContext(dbName);
 
         Guid orderId = Guid.NewGuid();
-        var payload = new InvoicePaidPayload(orderId, Guid.NewGuid(), "INV-001", "PAY-001", 1_500_000m, "VND", FixedNow);
+        var order = RentalOrder.Create(
+            orderId, "ORD-001", Guid.NewGuid(), "VND", "Standard", "Renter", "0123456789", "Address", null,
+            "ORIGINAL_PAYMENT_SOURCE", "v1.0", "DOC-001", "HASH-001", "OP-001", FixedNow,
+            new[] { new InitialRentalItemDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, DateOnly.FromDateTime(DateTime.UtcNow), DateOnly.FromDateTime(DateTime.UtcNow.AddDays(3)), "Listing", null, "Pickup", 500_000m, 1_000_000m, "GRP-001", new[] { new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()) }) }).Value;
+        db.RentalOrders.Add(order);
+
+        var payload = new InvoicePaidPayload(orderId, order.RenterId, "INV-001", "PAY-001", order.TotalPayableAmount, "VND", FixedNow);
         var envelope = new PaymentEventEnvelope<InvoicePaidPayload>(
             Guid.NewGuid(), "InvoicePaid", 1, "payment-service", orderId.ToString("D"), FixedNow, "corr", null, payload);
 
@@ -59,16 +79,17 @@ public sealed class InboxProcessingWorkerTests
             JsonSerializer.Serialize(envelope), FixedNow);
         db.RentalInboxMessages.Add(inboxMsg);
         await db.SaveChangesAsync();
-
         var services = new ServiceCollection();
         services.AddRentalServiceDomainRepositories("Host=localhost;Database=test;Username=test");
         services.RemoveAll<DbContextOptions<RentalServiceDbContext>>();
         services.RemoveAll<IDbContextOptionsConfiguration<RentalServiceDbContext>>();
         services.AddDbContext<RentalServiceDbContext>(options => options.UseInMemoryDatabase(dbName));
+        services.AddLogging();
+        services.AddSingleton<IOrderLockManager, Dprental.RentalService.Api.Tests.TestHelpers.FakeOrderLockManager>();
         services.AddSingleton<IPaymentWorkflowService>(new StubPaymentWorkflow());
         services.AddSingleton<IRefundCompletedConsumer>(new StubRefundConsumer());
+        services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
-
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
@@ -89,7 +110,13 @@ public sealed class InboxProcessingWorkerTests
         await using var db = CreateDbContext(dbName);
 
         Guid orderId = Guid.NewGuid();
-        var payload = new InvoicePaidPayload(orderId, Guid.NewGuid(), "INV-001", "PAY-001", 1_500_000m, "VND", FixedNow);
+        var order = RentalOrder.Create(
+            orderId, "ORD-002", Guid.NewGuid(), "VND", "Standard", "Renter", "0123456789", "Address", null,
+            "ORIGINAL_PAYMENT_SOURCE", "v1.0", "DOC-001", "HASH-001", "OP-002", FixedNow,
+            new[] { new InitialRentalItemDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, DateOnly.FromDateTime(DateTime.UtcNow), DateOnly.FromDateTime(DateTime.UtcNow.AddDays(3)), "Listing", null, "Pickup", 500_000m, 1_000_000m, "GRP-002", new[] { new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()) }) }).Value;
+        db.RentalOrders.Add(order);
+
+        var payload = new InvoicePaidPayload(orderId, order.RenterId, "INV-002", "PAY-002", order.TotalPayableAmount, "VND", FixedNow);
         var envelope = new PaymentEventEnvelope<InvoicePaidPayload>(
             Guid.NewGuid(), "InvoicePaid", 1, "payment-service", orderId.ToString("D"), FixedNow, "corr", null, payload);
 
@@ -98,7 +125,6 @@ public sealed class InboxProcessingWorkerTests
             JsonSerializer.Serialize(envelope), FixedNow);
         db.RentalInboxMessages.Add(inboxMsg);
         await db.SaveChangesAsync();
-
         var paymentWorkflow = new StubPaymentWorkflow
         {
             Handler = _ => Task.FromResult(Result.Failure(Error.Failure("INVOICE_NOT_ATTACHED", "Invoice not attached yet")))
@@ -109,10 +135,12 @@ public sealed class InboxProcessingWorkerTests
         services.RemoveAll<DbContextOptions<RentalServiceDbContext>>();
         services.RemoveAll<IDbContextOptionsConfiguration<RentalServiceDbContext>>();
         services.AddDbContext<RentalServiceDbContext>(options => options.UseInMemoryDatabase(dbName));
+        services.AddLogging();
+        services.AddSingleton<IOrderLockManager, Dprental.RentalService.Api.Tests.TestHelpers.FakeOrderLockManager>();
         services.AddSingleton<IPaymentWorkflowService>(paymentWorkflow);
         services.AddSingleton<IRefundCompletedConsumer>(new StubRefundConsumer());
+        services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
-
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 

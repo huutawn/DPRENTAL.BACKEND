@@ -38,26 +38,15 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
 
         Guid supplierId = caller.UserId!.Value;
 
-        var order = await _orderRepository.GetByItemIdWithDetailsAsync(itemId, cancellationToken);
-        if (order == null)
+        // Lookup only OrderId before lock using AsNoTracking
+        var orderId = await _orderRepository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
+        if (!orderId.HasValue)
         {
             return Error.NotFound("ITEM_NOT_FOUND", $"Không tìm thấy mục thuê '{itemId}'.");
-        }
-
-        var item = order.Items.FirstOrDefault(i => i.Id == itemId);
-        if (item == null)
-        {
-            return Error.NotFound("ITEM_NOT_FOUND", $"Không tìm thấy mục thuê '{itemId}'.");
-        }
-
-        // IDOR check: Admin or service token cannot act on behalf of supplier
-        if (item.SupplierId != supplierId)
-        {
-            return Error.Forbidden("SUPPLIER_MISMATCH", "Chỉ chủ sở hữu thiết bị mới có quyền chấp nhận yêu cầu thuê này.");
         }
 
         return await _operationExecutor.ExecuteSupplierAcceptAsync(
-            order.Id,
+            orderId.Value,
             itemId,
             supplierId,
             idempotencyKey.Trim(),
@@ -89,25 +78,15 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
 
         Guid supplierId = caller.UserId!.Value;
 
-        var order = await _orderRepository.GetByItemIdWithDetailsAsync(itemId, cancellationToken);
-        if (order == null)
+        // Lookup only OrderId before lock using AsNoTracking
+        var orderId = await _orderRepository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
+        if (!orderId.HasValue)
         {
             return Error.NotFound("ITEM_NOT_FOUND", $"Không tìm thấy mục thuê '{itemId}'.");
-        }
-
-        var item = order.Items.FirstOrDefault(i => i.Id == itemId);
-        if (item == null)
-        {
-            return Error.NotFound("ITEM_NOT_FOUND", $"Không tìm thấy mục thuê '{itemId}'.");
-        }
-
-        if (item.SupplierId != supplierId)
-        {
-            return Error.Forbidden("SUPPLIER_MISMATCH", "Chỉ chủ sở hữu thiết bị mới có quyền từ chối yêu cầu thuê này.");
         }
 
         return await _operationExecutor.ExecuteSupplierRejectAsync(
-            order.Id,
+            orderId.Value,
             itemId,
             supplierId,
             request.RejectReason.Trim(),

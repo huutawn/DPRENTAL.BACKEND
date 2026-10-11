@@ -216,8 +216,7 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
             linkedCts.CancelAfter(TimeSpan.FromSeconds(10));
 
             using var httpResponse = await _httpClient.SendAsync(httpRequest, linkedCts.Token);
-            string responseJson = await httpResponse.Content.ReadAsStringAsync(ct);
-
+            string responseJson = await httpResponse.Content.ReadAsStringAsync(linkedCts.Token);
             if (httpResponse.IsSuccessStatusCode)
             {
                 var data = JsonSerializer.Deserialize<TResponse>(responseJson, JsonOptions);

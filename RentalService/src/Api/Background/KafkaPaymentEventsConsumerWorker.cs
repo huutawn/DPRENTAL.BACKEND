@@ -1,7 +1,8 @@
 #pragma warning disable CA1848, CA1873
 using Confluent.Kafka;
 using Dprental.RentalService.Application.Integration;
-using Microsoft.Extensions.Configuration;
+using Dprental.RentalService.Common;
+using Dprental.RentalService.Common.Enums;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -83,14 +84,28 @@ public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
                 _logger.LogInformation("Consumed message from {Topic} [P:{Partition}, O:{Offset}] Key={Key}",
                     consumeResult.Topic, consumeResult.Partition.Value, consumeResult.Offset.Value, consumeResult.Message.Key);
 
-                // Dispatch message: stores Inbox durably and executes workflow (or writes to DLQ Outbox if invalid)
+                // Consumer calls ONLY receive entrypoint: stores Inbox durably or routes to DLQ
+                Result receiveResult;
                 using (var scope = _scopeFactory.CreateScope())
                 {
                     var dispatcher = scope.ServiceProvider.GetRequiredService<IPaymentEventsDispatcher>();
-                    await dispatcher.DispatchRawMessageAsync(consumeResult.Message.Value, stoppingToken);
+                    receiveResult = await dispatcher.ReceiveMessageAsync(
+                        consumeResult.Message.Value,
+                        consumeResult.Topic,
+                        consumeResult.Partition.Value,
+                        consumeResult.Offset.Value,
+                        stoppingToken);
                 }
 
-                // Commit offset ONLY after durable Inbox storage / DLQ write
+                if (receiveResult.IsFailure && receiveResult.Error.Type == ErrorType.Failure)
+                {
+                    _logger.LogError("Lỗi lưu bền vững Kafka payment message [P:{Partition}, O:{Offset}]: {Error}. Chưa commit offset.",
+                        consumeResult.Partition.Value, consumeResult.Offset.Value, receiveResult.Error.Message);
+                    await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+                    continue;
+                }
+
+                // Commit offset ONLY after durable Inbox storage / DLQ write or recognized duplicate
                 _consumer.Commit(consumeResult);
                 _logger.LogInformation("Committed offset {Offset} for partition {Partition}",
                     consumeResult.Offset.Value, consumeResult.Partition.Value);

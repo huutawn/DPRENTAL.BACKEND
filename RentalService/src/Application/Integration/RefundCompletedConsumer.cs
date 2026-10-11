@@ -42,11 +42,180 @@ public sealed class RefundCompletedConsumer : IRefundCompletedConsumer
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
+    public async Task<Result> ApplyRefundCompletedStagedAsync(
+        RentalOrder order,
+        PaymentEventEnvelope<RefundCompletedPayload> envelope,
+        RentalInboxMessage inboxMessage,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = envelope.Payload;
+        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
+
+        // 1. Validate references & currency
+        if (!string.IsNullOrWhiteSpace(order.InvoiceRef) &&
+            !string.Equals(order.InvoiceRef, payload.InvoiceRef, StringComparison.OrdinalIgnoreCase))
+        {
+            return Error.Conflict("INVOICE_REF_MISMATCH", "InvoiceRef trong sự kiện hoàn tiền không khớp với đơn hàng.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(order.PaymentRef) &&
+            !string.Equals(order.PaymentRef, payload.PaymentRef, StringComparison.OrdinalIgnoreCase))
+        {
+            return Error.Conflict("PAYMENT_REF_MISMATCH", "PaymentRef trong sự kiện hoàn tiền không khớp với đơn hàng.");
+        }
+
+        if (!string.Equals(payload.Currency, "VND", StringComparison.OrdinalIgnoreCase))
+        {
+            return Error.Validation("CURRENCY_MISMATCH", "Tiền tệ phải là VND.");
+        }
+
+        // 2. Validate operation receipt matching
+        var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == payload.OperationKey);
+        if (receipt == null || receipt.Action != "RequestRefund")
+        {
+            return Error.Validation("INVALID_OPERATION_KEY", "Không tìm thấy yêu cầu hoàn tiền tương ứng trong đơn hàng.");
+        }
+
+        // 3. Stored refund request must exist, parse, and validate
+        if (string.IsNullOrWhiteSpace(receipt.PayloadJson))
+        {
+            return Error.Validation("MISSING_STORED_REQUEST", "Thiếu request payload JSON cho RequestRefund.");
+        }
+
+        RequestRefundRequest? storedRequest = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(receipt.PayloadJson);
+            if (doc.RootElement.TryGetProperty("providerRequestJson", out var providerJsonProp))
+            {
+                string? providerJson = providerJsonProp.GetString();
+                if (!string.IsNullOrWhiteSpace(providerJson))
+                {
+                    storedRequest = JsonSerializer.Deserialize<RequestRefundRequest>(providerJson, JsonOptions);
+                }
+            }
+            else
+            {
+                storedRequest = JsonSerializer.Deserialize<RequestRefundRequest>(receipt.PayloadJson, JsonOptions);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse stored RequestRefund payload for {OpKey}", receipt.OperationId);
+            return Error.Validation("CORRUPTED_STORED_REQUEST", "Stored RequestRefund payload bị hỏng; không thể đối soát.");
+        }
+
+        if (storedRequest == null)
+        {
+            return Error.Validation("CORRUPTED_STORED_REQUEST", "Không thể trích xuất RequestRefund request từ journal.");
+        }
+
+        // Validate item membership, uniqueness, breakdown, and totals
+        var payloadItemIds = payload.Items.Select(i => i.RentalItemId).ToList();
+        if (payloadItemIds.Distinct().Count() != payloadItemIds.Count)
+        {
+            return Error.Validation("DUPLICATE_ITEM_REFUND", "Sự kiện chứa RentalItemId trùng lặp.");
+        }
+
+        if (payload.Items.Count != storedRequest.Items.Count)
+        {
+            return Error.Validation("ITEM_COUNT_MISMATCH", "Số lượng mục hoàn tiền trong sự kiện không khớp với yêu cầu.");
+        }
+
+        foreach (var pItem in payload.Items)
+        {
+            var storedItem = storedRequest.Items.FirstOrDefault(i => i.RentalItemId == pItem.RentalItemId);
+            if (storedItem == null)
+            {
+                return Error.Validation("ITEM_MEMBERSHIP_MISMATCH", $"Mục thuê {pItem.RentalItemId} không thuộc yêu cầu hoàn tiền.");
+            }
+
+            if (storedItem.RefundRentalAmount != pItem.RefundedRentalAmount ||
+                storedItem.RefundDepositAmount != pItem.RefundedDepositAmount)
+            {
+                return Error.Validation("AMOUNT_BREAKDOWN_MISMATCH", $"Số tiền hoàn của mục {pItem.RentalItemId} không khớp với yêu cầu.");
+            }
+        }
+
+        if (storedRequest.TotalRefundAmount != payload.TotalRefundedAmount)
+        {
+            return Error.Validation("TOTAL_REFUND_MISMATCH", "Tổng số tiền hoàn không khớp với yêu cầu.");
+        }
+
+        // 4. Validate against stored ACK if present
+        if (!string.IsNullOrWhiteSpace(receipt.ResponseJson))
+        {
+            try
+            {
+                var ack = JsonSerializer.Deserialize<RequestRefundResponse>(receipt.ResponseJson, JsonOptions);
+                if (ack != null && !string.IsNullOrWhiteSpace(ack.RefundRef) &&
+                    !string.Equals(ack.RefundRef, payload.RefundRef, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Error.Conflict("REFUND_REF_MISMATCH", $"RefundRef ({payload.RefundRef}) không khớp với ACK đã lưu ({ack.RefundRef}).");
+                }
+            }
+            catch
+            {
+                // Ignore parse errors on responseJson if non-fatal
+            }
+        }
+
+        // 5. Check if already completed (RefundCompletionJson already recorded)
+        if (!string.IsNullOrWhiteSpace(receipt.RefundCompletionJson))
+        {
+            try
+            {
+                var existingCompletion = JsonSerializer.Deserialize<RefundCompletedPayload>(receipt.RefundCompletionJson, JsonOptions);
+                if (existingCompletion != null &&
+                    string.Equals(existingCompletion.RefundRef, payload.RefundRef, StringComparison.OrdinalIgnoreCase) &&
+                    existingCompletion.TotalRefundedAmount == payload.TotalRefundedAmount)
+                {
+                    _logger.LogInformation("RefundCompleted event {MessageId} replayed for already completed refund {RefundRef}",
+                        envelope.MessageId, payload.RefundRef);
+                    return Result.Success();
+                }
+            }
+            catch
+            {
+                // Fall through to conflict
+            }
+            return Error.Conflict("REFUND_COMPLETION_CONFLICT", "Sự kiện hoàn tiền mâu thuẫn với kết quả hoàn tiền đã được ghi nhận trước đó.");
+        }
+
+        // 6. Mutate data: Record refund reference and financial audit once
+        foreach (var refundedItem in payload.Items)
+        {
+            var item = order.Items.FirstOrDefault(i => i.Id == refundedItem.RentalItemId);
+            if (item != null)
+            {
+                item.RecordRefund(payload.RefundRef);
+
+                order.AddStateTransition(new RentalStateTransition(
+                    Guid.NewGuid(),
+                    order.Id,
+                    item.Id,
+                    item.Status.ToString(),
+                    item.Status.ToString(),
+                    "RefundCompleted",
+                    null,
+                    ActorRole.System,
+                    $"Refund confirmed: fee {refundedItem.RefundedRentalAmount:N0} VND, deposit {refundedItem.RefundedDepositAmount:N0} VND (RefundRef: {payload.RefundRef})",
+                    utcNow,
+                    payload.OperationKey));
+            }
+        }
+
+        // Save immutable RefundCompletionJson separately from ACK ResponseJson
+        receipt.SetRefundCompletion(JsonSerializer.Serialize(payload, JsonOptions), utcNow);
+        receipt.MarkSucceeded(utcNow);
+
+        return Result.Success();
+    }
+
     public async Task<Result> ProcessRefundCompletedAsync(
         PaymentEventEnvelope<RefundCompletedPayload> envelope,
         CancellationToken cancellationToken = default)
     {
-        // 1. Envelope validation
         if (envelope == null || envelope.Payload == null)
         {
             return Error.Validation("INVALID_ENVELOPE", "Envelope không được rỗng.");
@@ -75,124 +244,24 @@ public sealed class RefundCompletedConsumer : IRefundCompletedConsumer
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
 
-        // 2. Lock FIRST
         await using var orderLock = await _lockManager.AcquireOrderLockAsync(payload.RentalOrderId, TimeSpan.FromSeconds(5), cancellationToken);
 
-        // 3. Deduplication in Inbox under lock
-        string payloadJson = JsonSerializer.Serialize(payload, JsonOptions);
-        string payloadFingerprint = ComputeHash(payloadJson);
+        string rawPayload = JsonSerializer.Serialize(envelope, JsonOptions);
+        string payloadFingerprint = ComputeHash(rawPayload);
 
         var existingInbox = await _inboxRepository.GetByMessageIdAsync(envelope.MessageId, cancellationToken);
-        if (existingInbox != null)
+        if (existingInbox != null && existingInbox.Status == RentalInboxMessage.StatusProcessed)
         {
-            if (string.Equals(existingInbox.PayloadFingerprint, payloadFingerprint, StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogInformation("RefundCompleted message {MessageId} replayed idempotently", envelope.MessageId);
-                return Result.Success();
-            }
-            return Error.Conflict("REFUND_CONFLICT", "MessageId đã tồn tại với nội dung khác.");
+            return Result.Success();
         }
 
-        // 4. Load Order with details
         var order = await _orderRepository.GetByIdWithDetailsAsync(payload.RentalOrderId, cancellationToken);
         if (order == null)
         {
             return Error.NotFound("ORDER_NOT_FOUND", $"Không tìm thấy đơn hàng '{payload.RentalOrderId}'.");
         }
 
-        // 5. Validate references & currency
-        if (!string.IsNullOrWhiteSpace(order.InvoiceRef) &&
-            !string.Equals(order.InvoiceRef, payload.InvoiceRef, StringComparison.OrdinalIgnoreCase))
-        {
-            return Error.Conflict("INVOICE_REF_MISMATCH", "InvoiceRef trong sự kiện hoàn tiền không khớp với đơn hàng.");
-        }
-
-        if (!string.IsNullOrWhiteSpace(order.PaymentRef) &&
-            !string.Equals(order.PaymentRef, payload.PaymentRef, StringComparison.OrdinalIgnoreCase))
-        {
-            return Error.Conflict("PAYMENT_REF_MISMATCH", "PaymentRef trong sự kiện hoàn tiền không khớp với đơn hàng.");
-        }
-
-        if (!string.Equals(payload.Currency, "VND", StringComparison.OrdinalIgnoreCase))
-        {
-            return Error.Validation("CURRENCY_MISMATCH", "Tiền tệ phải là VND.");
-        }
-
-        // 6. Validate operation request matching
-        var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == payload.OperationKey);
-        if (receipt == null || receipt.Action != "RequestRefund")
-        {
-            return Error.Validation("INVALID_OPERATION_KEY", "Không tìm thấy yêu cầu hoàn tiền tương ứng trong đơn hàng.");
-        }
-
-        // Validate items membership, uniqueness, and breakdown amounts with stored request
-        if (!string.IsNullOrWhiteSpace(receipt.PayloadJson))
-        {
-            try
-            {
-                var storedRequest = JsonSerializer.Deserialize<RequestRefundRequest>(receipt.PayloadJson, JsonOptions);
-                if (storedRequest != null)
-                {
-                    // Check item membership and uniqueness
-                    var payloadItemIds = payload.Items.Select(i => i.RentalItemId).ToList();
-                    if (payloadItemIds.Distinct().Count() != payloadItemIds.Count)
-                    {
-                        return Error.Validation("DUPLICATE_ITEM_REFUND", "Sự kiện chứa RentalItemId trùng lặp.");
-                    }
-
-                    foreach (var pItem in payload.Items)
-                    {
-                        var storedItem = storedRequest.Items.FirstOrDefault(i => i.RentalItemId == pItem.RentalItemId);
-                        if (storedItem == null)
-                        {
-                            return Error.Validation("ITEM_MEMBERSHIP_MISMATCH", $"Mục thuê {pItem.RentalItemId} không thuộc yêu cầu hoàn tiền.");
-                        }
-
-                        if (storedItem.RefundRentalAmount != pItem.RefundedRentalAmount ||
-                            storedItem.RefundDepositAmount != pItem.RefundedDepositAmount)
-                        {
-                            return Error.Validation("AMOUNT_BREAKDOWN_MISMATCH", $"Số tiền hoàn của mục {pItem.RentalItemId} không khớp với yêu cầu.");
-                        }
-                    }
-
-                    if (storedRequest.TotalRefundAmount != payload.TotalRefundedAmount)
-                    {
-                        return Error.Validation("TOTAL_REFUND_MISMATCH", "Tổng số tiền hoàn không khớp với yêu cầu.");
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is not ArgumentException)
-            {
-                _logger.LogWarning(ex, "Failed to parse stored RequestRefund payload for {OpKey}", receipt.OperationId);
-            }
-        }
-
-        // 7. Mutate data: Record refund reference and financial audit for each refunded item
-        foreach (var refundedItem in payload.Items)
-        {
-            var item = order.Items.FirstOrDefault(i => i.Id == refundedItem.RentalItemId);
-            if (item != null)
-            {
-                item.RecordRefund(payload.RefundRef);
-
-                order.AddStateTransition(new RentalStateTransition(
-                    Guid.NewGuid(),
-                    order.Id,
-                    item.Id,
-                    item.Status.ToString(),
-                    item.Status.ToString(),
-                    "RefundCompleted",
-                    null,
-                    ActorRole.System,
-                    $"Refund confirmed: fee {refundedItem.RefundedRentalAmount:N0} VND, deposit {refundedItem.RefundedDepositAmount:N0} VND (RefundRef: {payload.RefundRef})",
-                    utcNow,
-                    payload.OperationKey));
-            }
-        }
-
-        receipt.MarkSucceeded(utcNow, JsonSerializer.Serialize(payload, JsonOptions));
-
-        var inboxMessage = new RentalInboxMessage(
+        var inboxMessage = existingInbox ?? new RentalInboxMessage(
             Guid.NewGuid(),
             envelope.MessageId,
             envelope.MessageType,
@@ -200,17 +269,29 @@ public sealed class RefundCompletedConsumer : IRefundCompletedConsumer
             envelope.AggregateId,
             envelope.CorrelationId,
             envelope.CausationId,
-            payloadJson,
+            rawPayload,
             utcNow,
             payloadFingerprint);
-        inboxMessage.MarkProcessed(utcNow);
-        await _inboxRepository.AddAsync(inboxMessage, cancellationToken);
 
+        if (existingInbox == null)
+        {
+            await _inboxRepository.AddAsync(inboxMessage, cancellationToken);
+        }
+
+        var result = await ApplyRefundCompletedStagedAsync(order, envelope, inboxMessage, cancellationToken);
+        if (result.IsFailure)
+        {
+            return result;
+        }
+
+        inboxMessage.MarkProcessed(utcNow);
+        if (existingInbox != null)
+        {
+            _inboxRepository.Update(inboxMessage);
+        }
         order.IncrementVersion();
         await _orderRepository.UpdateAsync(order, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        _logger.LogInformation("Processed RefundCompleted for Order {OrderId}, total refund: {Amount} VND (RefundRef: {RefundRef})",
-            order.Id, payload.TotalRefundedAmount, payload.RefundRef);
 
         return Result.Success();
     }

@@ -137,41 +137,119 @@ Dịch vụ triển khai mô hình nghiệp vụ canonical theo AGENTS.md và th
 
 ### 5. Hướng dẫn đối soát Journal, DLQ và Vận hành (Runbook)
 
-#### Đối soát Journal (`rental_operation_receipts`)
-- **Truy vấn tác vụ cần đối soát**:
-  ```sql
-  SELECT "Id", "RentalOrderId", "OperationId", "Action", "Status", "ErrorClassification", "RetryCount", "ErrorMessage", "CreatedAt"
-  FROM rental.rental_operation_receipts
-  WHERE "Status" = 'Processing' OR "ErrorClassification" = 'UncertainExhausted'
-  ORDER BY "CreatedAt" ASC;
-  ```
-- **Ý nghĩa trạng thái**:
-  - `Uncertain`: Gặp sự cố mạng/timeout sau khi gửi request; hệ thống đang khóa hành động đối nghịch để ngăn ngừa mâu thuẫn dữ liệu.
-  - `UncertainExhausted`: Đã hết 10 lần retry tự động nhưng chưa xác nhận được kết quả upstream. Vận hành kiểm tra đối soát với Provider (Payment/Inventory).
-- **Kích hoạt Replay có Audit**:
-  Sử dụng lệnh nội bộ `ReplayStoredOperationAsync(orderId, operationId)` của `RentalOperationExecutor`. Lệnh này tái mở budget retry, đọc chính xác `PayloadJson` đã lưu ban đầu (không sửa đổi payload) và ghi vết audit `ReplayOperation` (Actor: Admin).
+#### Luồng Intake → Inbox → Journal
+1. **Kafka Intake (`KafkaPaymentEventsConsumerWorker`):**
+   - Chỉ gọi entrypoint `ReceiveMessageAsync`.
+   - Xác thực schema Envelope v1, tính toán fingerprint canonical từ các trường hợp đồng (`messageId`, `messageType`, `version`, `producer`, `aggregateId`, financial fields).
+   - Lưu bền vững vào bảng `rental.rental_inbox_messages` với trạng thái `Received`, kèm metadata Kafka (`KafkaTopic`, `KafkaPartition`, `KafkaOffset`), rồi commit local DB.
+   - Commit offset Kafka ngay sau khi commit DB thành công. Tuyệt đối không lookup Order hoặc thực thi use case nghiệp vụ trong luồng consumer này.
+   - Bản tin lỗi định dạng/schema được định tuyến ngay vào topic DLQ `payment.events.v1.dlq` với ID tất định từ topic/partition/offset để chống trùng lặp DLQ khi Kafka gửi lại record.
 
-#### Đối soát Dead Letter Queue (`payment.events.v1.dlq`)
-- **Truy vấn tin nhắn DeadLetter trong Inbox**:
-  ```sql
-  SELECT "Id", "MessageId", "MessageType", "AggregateId", "ErrorMessage", "ReceivedAt"
-  FROM rental.rental_inbox_messages
-  WHERE "Status" = 'DeadLettered'
-  ORDER BY "ReceivedAt" DESC;
+2. **Inbox Processing (`InboxProcessingWorker`):**
+   - Quét descriptors (`GetPendingRetryDescriptorsAsync`) bằng `AsNoTracking` để tránh tracking entity rải rác.
+   - Khởi tạo `IServiceScope` độc lập cho từng message.
+   - Thu thập PostgreSQL advisory lock theo `orderId` (tổng timeout kết nối và chờ lock là 5 giây).
+   - Tải aggregate `RentalOrder` sau khi đã giữ lock.
+   - Thực thi use case (`PaymentWorkflowService` hoặc `RefundCompletedConsumer`) theo dạng staging (không tự gọi `SaveChangesAsync`).
+   - Thực hiện **một local commit nguyên tử** đồng thời: Order/Items state, audit transitions, operation receipts (journal), Outbox notifications và Inbox chuyển `Processed`.
+   - Lỗi tạm thời (`INVOICE_NOT_ATTACHED`, `ORDER_NOT_FOUND`) được đánh dấu `Failed` và lên lịch retry bằng exponential backoff có jitter (tối đa 60s). Hết 10 lần retry sẽ chuyển `DeadLettered` và phát Outbox DLQ.
+
+#### Trạng thái và Retry Semantics trong Journal (`rental_operation_receipts`)
+- **Ngân sách retry:** Chốt tối đa 10 attempts cho một budget, bao gồm cả lần đầu tiên.
+- **Bộ đếm Retry:** `RetryCount` tăng đúng một lần trước khi bắt đầu HTTP attempt qua `receipt.BeginProviderAttempt(utcNow)`. Chờ điều kiện tiên quyết (`PrerequisiteOperationId`), chưa đến `NextRetryAt`, scan định kỳ hoặc replay response không tính là attempt.
+- **Phân loại kết quả:**
+  - **Transient Failure:** Lỗi mạng hoặc 5xx tạm thời $\rightarrow$ `Status = Pending`, lên lịch retry (`NextRetryAt`).
+  - **Business Failure:** Lỗi từ chối nghiệp vụ xác định từ provider (4xx không liên quan timeout) $\rightarrow$ `Status = Failed`, `ErrorClassification = Business`, không retry.
+  - **Uncertain:** Timeout mạng, lỗi 5xx sau khi đã gửi request, hoặc nhận mã 2xx nhưng response thiếu/sai receipt hoặc identity $\rightarrow$ `Status = Processing`, `IsOutcomeUncertain = true`, `ErrorClassification = Uncertain`. Uncertainty là trạng thái **sticky**: lỗi 4xx ở lần retry sau không tự chứng minh request trước chưa được provider xử lý.
+  - **Success:** Provider xác nhận hợp lệ $\rightarrow$ `Status = Succeeded`, xóa uncertainty (`IsOutcomeUncertain = false`), commit side effects.
+  - **UncertainExhausted:** Hết 10 attempts nhưng vẫn còn uncertainty $\rightarrow$ `Status = Failed`, `ErrorClassification = UncertainExhausted`, tiếp tục bảo vệ item khỏi thao tác đối nghịch và yêu cầu can thiệp Admin.
+  - **TransientExhausted:** Hết 10 attempts do lỗi tạm thời chắc chắn chưa có side effect $\rightarrow$ `Status = Failed`, `ErrorClassification = TransientExhausted`.
+
+#### Endpoint Admin Replay (`POST /api/v1/rental/internal/orders/{orderId}/operations/{operationId}/replay`)
+- **Quyền truy cập:** Yêu cầu JWT của human Admin (`ActorRole.Admin`). Service token hoặc customer token bị từ chối (403 Forbidden). Không xác thực trả 401 Unauthorized.
+- **Mạng nội bộ:** Endpoint thuộc prefix `internal`, chỉ publish qua mạng nội bộ hoặc API Gateway private.
+- **Headers:**
+  - `Authorization: Bearer <ADMIN_JWT>`
+  - `Idempotency-Key: <IDEMP_KEY>` (bắt buộc, tối đa 64 ký tự).
+- **Body:**
+  ```json
+  {
+    "reason": "Xác nhận mạng Inventory đã ổn định; tái thực thi confirm allocation"
+  }
   ```
-- **Truy vấn Outbox DLQ tương ứng**:
+- **Quy tắc xử lý:**
+  - Thu thập order advisory lock, kiểm tra sự tồn tại và tính hợp lệ của receipt.
+  - Nếu operation đã `Succeeded`: trả 409 Conflict (`OPERATION_ALREADY_SUCCEEDED`).
+  - Nếu journal payload bị hỏng hoặc thiếu: trả 422 Unprocessable Entity (`CORRUPTED_JOURNAL`).
+  - Kiểm tra idempotency: Replay với cùng key và reason trả 202 đã lưu (không reset lặp lại); cùng key nhưng khác reason trả 409 Conflict (`IDEMPOTENCY_CONFLICT`).
+  - Ghi vết audit transition `AdminReplayRequested` kèm thông tin Admin actor, lý do, trạng thái cũ và số lần retry trước đó.
+  - Đặt lại `RetryCount = 0`, `Status = Pending`, `NextRetryAt = NOW()`, giữ nguyên `IsOutcomeUncertain` và payload bất biến ban đầu.
+  - Commit thay đổi và trả về `202 Accepted` kèm body `AdminReplayResponse`:
+    ```json
+    {
+      "orderId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "operationId": "op-confirm-001",
+      "action": "SupplierAccept",
+      "status": "Pending",
+      "retryCount": 0,
+      "replayedAt": "2026-10-11T14:30:00Z"
+    }
+    ```
+  - Worker `OperationRecoveryWorker` sẽ tự động đón và thực thi tác vụ này trong chu kỳ chạy kế tiếp.
+
+#### Cách tìm Uncertainty, Exhausted, Prerequisite bị kẹt và Lease hết hạn
+
+1. **Tìm các tác vụ có kết quả chưa rõ hoặc đã hết lượt thử lại:**
+   ```sql
+   SELECT "Id", "RentalOrderId", "OperationId", "Action", "Status", "ErrorClassification", "IsOutcomeUncertain", "RetryCount", "LastAttemptedAt", "NextRetryAt"
+   FROM rental.rental_operation_receipts
+   WHERE "IsOutcomeUncertain" = TRUE
+      OR "ErrorClassification" IN ('UncertainExhausted', 'TransientExhausted')
+   ORDER BY "CreatedAt" ASC;
+   ```
+
+2. **Tìm các tác vụ bị kẹt do điều kiện tiên quyết (Prerequisite) chưa hoàn tất:**
+   ```sql
+   SELECT r."OperationId" AS "BlockedOperation", r."Action" AS "BlockedAction",
+          r."PrerequisiteOperationId",
+          p."Status" AS "PrereqStatus", p."ErrorClassification" AS "PrereqError", p."RetryCount" AS "PrereqRetries"
+   FROM rental.rental_operation_receipts r
+   LEFT JOIN rental.rental_operation_receipts p
+          ON r."RentalOrderId" = p."RentalOrderId" AND r."PrerequisiteOperationId" = p."OperationId"
+   WHERE r."PrerequisiteOperationId" IS NOT NULL
+     AND (p."Status" IS NULL OR p."Status" != 'Succeeded');
+   ```
+
+3. **Tìm Outbox messages có lease bị hết hạn hoặc worker crash:**
+   ```sql
+   SELECT "Id", "Topic", "PartitionKey", "MessageType", "Status", "RetryCount", "LockedBy", "LockedUntilUtc", NOW() AS "DatabaseNow"
+   FROM rental.rental_outbox_messages
+   WHERE "Status" = 'Pending'
+     AND "LockedUntilUtc" IS NOT NULL
+     AND "LockedUntilUtc" <= NOW();
+   ```
+
+#### Kiểm tra Dead Letter Queue mà không ghi log payload nhạy cảm
+- **Nguyên tắc bảo mật:** Không in nội dung thô `rawMessage` ra log console. Log ứng dụng chỉ ghi `MessageId`, `Topic`, `PartitionKey`, mã lỗi và thông báo vắn tắt.
+- **Truy vấn an toàn các tin nhắn trong DLQ:**
   ```sql
-  SELECT "Id", "Topic", "PartitionKey", "MessageType", "Status", "CreatedAt"
+  SELECT "Id", "Topic", "PartitionKey", "MessageType", "Status", "RetryCount", "CreatedAt"
   FROM rental.rental_outbox_messages
   WHERE "Topic" = 'payment.events.v1.dlq'
-  ORDER BY "CreatedAt" DESC;
+  ORDER BY "CreatedAt" DESC
+  LIMIT 50;
   ```
 
+#### Ghi chú về Dependency Conformance
+- Toàn bộ logic nội bộ, ranh giới dịch vụ, cơ chế khóa session advisory lock PostgreSQL và giao thức streaming Kafka đã được kiểm chứng bằng kiểm thử tích hợp tự động.
+- Khả năng tương thích end-to-end với các dịch vụ phụ thuộc (`AuthService`, `PaymentService`, `InventoryService`) cần được kiểm chứng trên môi trường staging tích hợp thông qua live provider khi các dịch vụ này triển khai đúng contract đã freeze (v1).
+
 #### Metrics Observability (`Dprental.RentalService`)
-- Meter Name: `Dprental.RentalService`
-- Danh mục Metrics:
-  - `rental.operations.retries`: Bộ đếm số lần retry của các tác vụ nghiệp vụ (`action`).
-  - `rental.operations.reconciled`: Bộ đếm số tác vụ được phục hồi/reconcile thành công (`action`).
-  - `rental.dlq.messages`: Bộ đếm số tin nhắn được chuyển vào Dead Letter Queue (`topic`).
-  - `rental.release.failures`: Bộ đếm số lần giải phóng allocation thất bại.
-  - `rental.refund.failures`: Bộ đếm số lần yêu cầu hoàn tiền thất bại.
+- **Meter Name:** `Dprental.RentalService` (đặt tại tầng `Application/Observability`)
+- **Danh mục Metrics:**
+  - `rental.operations.retries`: Số lần thử lại tác vụ nghiệp vụ (`action`).
+  - `rental.operations.reconciled`: Số tác vụ được phục hồi/reconcile thành công (`action`).
+  - `rental.dlq.messages`: Số tin nhắn chuyển vào Dead Letter Queue (`topic`).
+  - `rental.release.failures`: Số lần giải phóng allocation thất bại.
+  - `rental.refund.failures`: Số lần yêu cầu hoàn tiền thất bại.
+  - `rental.operations.uncertain_exhausted`: Số tác vụ hết lượt thử lại nhưng trạng thái chưa rõ (`action`).

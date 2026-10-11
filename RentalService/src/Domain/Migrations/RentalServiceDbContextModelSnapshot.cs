@@ -241,9 +241,18 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<long?>("KafkaOffset")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("KafkaPartition")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("KafkaTopic")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<DateTimeOffset?>("NextRetryAt")
                         .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("Payload")
                         .IsRequired()
                         .HasColumnType("text");
@@ -278,6 +287,8 @@ namespace RentalService.Domain.Migrations
                         .IsUnique();
 
                     b.HasIndex("Status");
+
+                    b.HasIndex("Status", "NextRetryAt", "ReceivedAt");
 
                     b.ToTable("rental_inbox_messages", "rental");
                 });
@@ -446,9 +457,13 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<bool>("IsOutcomeUncertain")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("IsSuccess")
                         .HasColumnType("boolean");
-
                     b.Property<bool>("IsTransient")
                         .HasColumnType("boolean");
 
@@ -473,9 +488,11 @@ namespace RentalService.Domain.Migrations
                     b.Property<Guid>("RentalOrderId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("ResponseJson")
+                    b.Property<string>("RefundCompletionJson")
                         .HasColumnType("text");
 
+                    b.Property<string>("ResponseJson")
+                        .HasColumnType("text");
                     b.Property<int>("RetryCount")
                         .HasColumnType("integer");
 

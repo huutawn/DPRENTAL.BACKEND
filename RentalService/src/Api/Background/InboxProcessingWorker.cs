@@ -82,115 +82,38 @@ public sealed class InboxProcessingWorker : BackgroundService
 
     public async Task<int> ProcessBatchAsync(CancellationToken cancellationToken)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var inboxRepository = scope.ServiceProvider.GetRequiredService<IInboxRepository>();
-        var outboxRepository = scope.ServiceProvider.GetRequiredService<IOutboxRepository>();
-        var paymentWorkflow = scope.ServiceProvider.GetRequiredService<IPaymentWorkflowService>();
-        var refundConsumer = scope.ServiceProvider.GetRequiredService<IRefundCompletedConsumer>();
-        var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
         DateTimeOffset utcNow = DateTimeOffset.UtcNow;
+        IReadOnlyList<InboxMessageDescriptor> descriptors;
 
-        var messages = await inboxRepository.GetPendingRetryBatchAsync(utcNow, 50, cancellationToken);
-        if (messages.Count == 0)
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var inboxRepository = scope.ServiceProvider.GetRequiredService<IInboxRepository>();
+            descriptors = await inboxRepository.GetPendingRetryDescriptorsAsync(utcNow, 50, cancellationToken);
+        }
+
+        if (descriptors.Count == 0)
         {
             return 0;
         }
 
-        _logger.LogInformation("InboxProcessingWorker processing {Count} pending inbox messages", messages.Count);
+        _logger.LogInformation("InboxProcessingWorker processing {Count} pending inbox messages", descriptors.Count);
 
         int processed = 0;
-        foreach (var msg in messages)
+        foreach (var descriptor in descriptors)
         {
             try
             {
-                bool success = false;
-                string? failureCode = null;
-                string? failureMsg = null;
-
-                if (string.Equals(msg.MessageType, "InvoicePaid", StringComparison.OrdinalIgnoreCase))
+                using var messageScope = _scopeFactory.CreateScope();
+                var dispatcher = messageScope.ServiceProvider.GetRequiredService<IPaymentEventsDispatcher>();
+                var result = await dispatcher.ProcessInboxMessageAsync(descriptor.Id, cancellationToken);
+                if (result.IsSuccess)
                 {
-                    var envelope = JsonSerializer.Deserialize<PaymentEventEnvelope<InvoicePaidPayload>>(msg.Payload, JsonOptions);
-                    if (envelope != null)
-                    {
-                        var res = await paymentWorkflow.ProcessInvoicePaidAsync(envelope, cancellationToken);
-                        success = res.IsSuccess;
-                        if (!res.IsSuccess)
-                        {
-                            failureCode = res.Error.Code;
-                            failureMsg = res.Error.Message;
-                        }
-                    }
-                }
-                else if (string.Equals(msg.MessageType, "RefundCompleted", StringComparison.OrdinalIgnoreCase))
-                {
-                    var envelope = JsonSerializer.Deserialize<PaymentEventEnvelope<RefundCompletedPayload>>(msg.Payload, JsonOptions);
-                    if (envelope != null)
-                    {
-                        var res = await refundConsumer.ProcessRefundCompletedAsync(envelope, cancellationToken);
-                        success = res.IsSuccess;
-                        if (!res.IsSuccess)
-                        {
-                            failureCode = res.Error.Code;
-                            failureMsg = res.Error.Message;
-                        }
-                    }
-                }
-
-                if (success)
-                {
-                    msg.MarkProcessed(DateTimeOffset.UtcNow);
-                    inboxRepository.Update(msg);
-                    await unitOfWork.SaveChangesAsync(cancellationToken);
                     processed++;
-                }
-                else
-                {
-                    // Check if error is retryable or terminal
-                    bool isRetryable = failureCode is "INVOICE_NOT_ATTACHED" or "ORDER_NOT_FOUND" or "Payment.Timeout" or "Payment.Unavailable";
-
-                    if (isRetryable && msg.RetryCount < 9)
-                    {
-                        double baseDelay = Math.Min(60, Math.Pow(2, msg.RetryCount));
-                        int jitterMs = Random.Shared.Next(0, 1000);
-                        DateTimeOffset nextRetry = DateTimeOffset.UtcNow.AddSeconds(baseDelay).AddMilliseconds(jitterMs);
-
-                        msg.MarkFailed(failureMsg ?? "Retryable error occurred", nextRetry);
-                        inboxRepository.Update(msg);
-                        await unitOfWork.SaveChangesAsync(cancellationToken);
-                    }
-                    else
-                    {
-                        // Terminal failure or exhausted retries -> route to DLQ
-                        msg.MarkDeadLettered(failureMsg ?? "Max retries exceeded");
-                        inboxRepository.Update(msg);
-
-                        var dlqEnvelope = new RentalEventEnvelope<DeadLetterPayload>(
-                            Guid.NewGuid(),
-                            RentalEventTypes.DeadLetter,
-                            1,
-                            "rental-service",
-                            msg.AggregateId,
-                            DateTimeOffset.UtcNow,
-                            msg.CorrelationId,
-                            msg.CausationId,
-                            new DeadLetterPayload(msg.MessageType, msg.Payload, $"{failureCode}: {failureMsg}", DateTimeOffset.UtcNow));
-
-                        var outbox = new RentalOutboxMessage(
-                            dlqEnvelope.MessageId,
-                            _dlqTopic,
-                            msg.AggregateId,
-                            RentalEventTypes.DeadLetter,
-                            JsonSerializer.Serialize(dlqEnvelope, JsonOptions),
-                            DateTimeOffset.UtcNow);
-
-                        await outboxRepository.AddAsync(outbox, cancellationToken);
-                        await unitOfWork.SaveChangesAsync(cancellationToken);
-                    }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Lỗi xử lý Inbox message {Id}", msg.Id);
+                _logger.LogWarning(ex, "Lỗi xử lý Inbox message {Id}", descriptor.Id);
             }
         }
 

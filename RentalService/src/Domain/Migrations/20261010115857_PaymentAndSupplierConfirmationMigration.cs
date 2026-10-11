@@ -41,6 +41,14 @@ namespace RentalService.Domain.Migrations
                 nullable: false,
                 defaultValue: false);
 
+            migrationBuilder.AddColumn<bool>(
+                name: "IsOutcomeUncertain",
+                schema: "rental",
+                table: "rental_operation_receipts",
+                type: "boolean",
+                nullable: false,
+                defaultValue: false);
+
             migrationBuilder.AddColumn<DateTimeOffset>(
                 name: "LastAttemptedAt",
                 schema: "rental",
@@ -72,6 +80,13 @@ namespace RentalService.Domain.Migrations
 
             migrationBuilder.AddColumn<string>(
                 name: "ResponseJson",
+                schema: "rental",
+                table: "rental_operation_receipts",
+                type: "text",
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "RefundCompletionJson",
                 schema: "rental",
                 table: "rental_operation_receipts",
                 type: "text",
@@ -135,7 +150,10 @@ namespace RentalService.Domain.Migrations
                     NextRetryAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     ErrorMessage = table.Column<string>(type: "character varying(2000)", maxLength: 2000, nullable: true),
                     ReceivedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    ProcessedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
+                    ProcessedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    KafkaTopic = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
+                    KafkaPartition = table.Column<int>(type: "integer", nullable: true),
+                    KafkaOffset = table.Column<long>(type: "bigint", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -210,6 +228,12 @@ namespace RentalService.Domain.Migrations
                 table: "rental_inbox_messages",
                 column: "Status");
 
+
+            migrationBuilder.CreateIndex(
+                name: "IX_rental_inbox_messages_Status_NextRetryAt_ReceivedAt",
+                schema: "rental",
+                table: "rental_inbox_messages",
+                columns: new[] { "Status", "NextRetryAt", "ReceivedAt" });
             migrationBuilder.CreateIndex(
                 name: "IX_rental_outbox_messages_Status",
                 schema: "rental",
@@ -287,6 +311,11 @@ namespace RentalService.Domain.Migrations
                 schema: "rental",
                 table: "rental_operation_receipts");
 
+
+            migrationBuilder.DropColumn(
+                name: "IsOutcomeUncertain",
+                schema: "rental",
+                table: "rental_operation_receipts");
             migrationBuilder.DropColumn(
                 name: "LastAttemptedAt",
                 schema: "rental",
@@ -312,6 +341,11 @@ namespace RentalService.Domain.Migrations
                 schema: "rental",
                 table: "rental_operation_receipts");
 
+
+            migrationBuilder.DropColumn(
+                name: "RefundCompletionJson",
+                schema: "rental",
+                table: "rental_operation_receipts");
             migrationBuilder.DropColumn(
                 name: "RetryCount",
                 schema: "rental",

@@ -270,11 +270,6 @@ public partial class RentalItem
         SupplierDecisionReason = reason;
         SupplierDecisionNote = note;
 
-        foreach (var unit in _unitAssignments)
-        {
-            unit.Release(decisionAt);
-        }
-
         RentalOrder?.AddStateTransition(new RentalStateTransition(
             Guid.NewGuid(),
             RentalOrderId,
@@ -293,11 +288,6 @@ public partial class RentalItem
     {
         string from = Status.ToString();
         Status = RentalItemStatus.Expired;
-
-        foreach (var unit in _unitAssignments)
-        {
-            unit.Release(expiredAt);
-        }
 
         RentalOrder?.AddStateTransition(new RentalStateTransition(
             Guid.NewGuid(),
@@ -335,6 +325,15 @@ public partial class RentalItem
             reason,
             expiredAt,
             operationId));
+    }
+
+    internal void MarkAssignmentsReleased(DateTimeOffset? releasedAt = null)
+    {
+        DateTimeOffset now = releasedAt ?? DateTimeOffset.UtcNow;
+        foreach (var unit in _unitAssignments)
+        {
+            unit.Release(now);
+        }
     }
 
     internal void RecordRefund(string refundRef)

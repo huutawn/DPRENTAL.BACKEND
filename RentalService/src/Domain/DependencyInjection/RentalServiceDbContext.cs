@@ -183,6 +183,8 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
         modelBuilder.Entity<RentalOperationReceipt>(b =>
         {
             b.Property(r => r.Id).ValueGeneratedNever();
+            b.Property(r => r.IsOutcomeUncertain).HasDefaultValue(false);
+            b.Property(r => r.RefundCompletionJson);
             b.HasIndex(r => new { r.RentalOrderId, r.OperationId }).IsUnique();
             b.HasIndex(r => new { r.Status, r.NextRetryAt });
             b.HasIndex(r => new { r.Action, r.Status });
@@ -193,10 +195,13 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
         modelBuilder.Entity<RentalInboxMessage>(b =>
         {
             b.Property(m => m.Id).ValueGeneratedNever();
+            b.Property(m => m.KafkaTopic).HasMaxLength(256);
+            b.Property(m => m.KafkaPartition);
+            b.Property(m => m.KafkaOffset);
             b.HasIndex(m => m.MessageId).IsUnique();
             b.HasIndex(m => m.Status);
+            b.HasIndex(m => new { m.Status, m.NextRetryAt, m.ReceivedAt });
         });
-
         modelBuilder.Entity<RentalOutboxMessage>(b =>
         {
             b.Property(m => m.Id).ValueGeneratedNever();

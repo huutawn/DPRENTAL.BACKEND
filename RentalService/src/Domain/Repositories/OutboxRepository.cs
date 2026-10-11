@@ -15,7 +15,7 @@ public sealed class OutboxRepository : IOutboxRepository
     }
 
     public async Task<IReadOnlyList<RentalOutboxMessage>> ClaimPendingBatchAsync(
-        string workerId,
+        string claimToken,
         TimeSpan leaseDuration,
         int batchSize,
         CancellationToken cancellationToken = default)
@@ -31,23 +31,27 @@ public sealed class OutboxRepository : IOutboxRepository
                 .FromSqlInterpolated($@"
                     SELECT * FROM rental.rental_outbox_messages
                     WHERE ""Status"" = 'Pending'
-                      AND (""ScheduledAt"" IS NULL OR ""ScheduledAt"" <= {utcNow})
-                      AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" <= {utcNow})
+                      AND (""ScheduledAt"" IS NULL OR ""ScheduledAt"" <= NOW())
+                      AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" <= NOW())
                     ORDER BY ""CreatedAt""
                     LIMIT {batchSize}
                     FOR UPDATE SKIP LOCKED")
                 .ToListAsync(cancellationToken);
 
-            foreach (var msg in messages)
-            {
-                msg.Claim(workerId, leaseUntil);
-            }
-
             if (messages.Count > 0)
             {
-                await _dbContext.SaveChangesAsync(cancellationToken);
-            }
+                var ids = messages.Select(m => m.Id).ToList();
+                await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+                    UPDATE rental.rental_outbox_messages
+                    SET ""LockedBy"" = {claimToken},
+                        ""LockedUntilUtc"" = NOW() + ({leaseDuration.TotalSeconds} * interval '1 second')
+                    WHERE ""Id"" = ANY({ids})", cancellationToken);
 
+                foreach (var msg in messages)
+                {
+                    msg.Claim(claimToken, leaseUntil);
+                }
+            }
             await tx.CommitAsync(cancellationToken);
             return messages;
         }
@@ -63,7 +67,7 @@ public sealed class OutboxRepository : IOutboxRepository
 
             foreach (var msg in messages)
             {
-                msg.Claim(workerId, leaseUntil);
+                msg.Claim(claimToken, leaseUntil);
             }
 
             if (messages.Count > 0)
@@ -83,42 +87,82 @@ public sealed class OutboxRepository : IOutboxRepository
 
     public async Task<bool> MarkPublishedAsync(
         Guid id,
-        string workerId,
+        string claimToken,
         DateTimeOffset publishedAt,
         CancellationToken cancellationToken = default)
     {
-        DateTimeOffset utcNow = DateTimeOffset.UtcNow;
-        var msg = await _dbContext.RentalOutboxMessages
-            .FirstOrDefaultAsync(m => m.Id == id && m.LockedBy == workerId && (m.LockedUntilUtc == null || m.LockedUntilUtc >= utcNow), cancellationToken);
-
-        if (msg == null)
+        if (_dbContext.Database.IsNpgsql())
         {
-            return false;
-        }
+            int rows = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+                UPDATE rental.rental_outbox_messages
+                SET ""Status"" = 'Published',
+                    ""PublishedAt"" = {publishedAt},
+                    ""LockedBy"" = NULL,
+                    ""LockedUntilUtc"" = NULL
+                WHERE ""Id"" = {id}
+                  AND ""Status"" = 'Pending'
+                  AND ""LockedBy"" = {claimToken}
+                  AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" > NOW())", cancellationToken);
 
-        msg.MarkPublished(publishedAt);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+            return rows == 1;
+        }
+        else
+        {
+            DateTimeOffset utcNow = DateTimeOffset.UtcNow;
+            var msg = await _dbContext.RentalOutboxMessages
+                .FirstOrDefaultAsync(m => m.Id == id && m.LockedBy == claimToken && m.Status == "Pending" && (m.LockedUntilUtc == null || m.LockedUntilUtc >= utcNow), cancellationToken);
+
+            if (msg == null)
+            {
+                return false;
+            }
+
+            msg.MarkPublished(publishedAt);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
     }
 
     public async Task<bool> RecordFailureAsync(
         Guid id,
-        string workerId,
+        string claimToken,
         string errorMessage,
         DateTimeOffset attemptedAt,
         DateTimeOffset? nextScheduledAt = null,
         CancellationToken cancellationToken = default)
     {
-        var msg = await _dbContext.RentalOutboxMessages
-            .FirstOrDefaultAsync(m => m.Id == id && m.LockedBy == workerId, cancellationToken);
-
-        if (msg == null)
+        if (_dbContext.Database.IsNpgsql())
         {
-            return false;
-        }
+            int rows = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+                UPDATE rental.rental_outbox_messages
+                SET ""RetryCount"" = ""RetryCount"" + 1,
+                    ""Status"" = CASE WHEN ""RetryCount"" + 1 >= 10 THEN 'DeadLettered' ELSE 'Pending' END,
+                    ""ErrorMessage"" = {errorMessage},
+                    ""LastAttemptedAt"" = {attemptedAt},
+                    ""ScheduledAt"" = CASE WHEN ""RetryCount"" + 1 >= 10 THEN NULL ELSE {nextScheduledAt} END,
+                    ""LockedBy"" = NULL,
+                    ""LockedUntilUtc"" = NULL
+                WHERE ""Id"" = {id}
+                  AND ""Status"" = 'Pending'
+                  AND ""LockedBy"" = {claimToken}
+                  AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" > NOW())", cancellationToken);
 
-        msg.RecordFailure(errorMessage, attemptedAt, nextScheduledAt);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        return true;
+            return rows == 1;
+        }
+        else
+        {
+            DateTimeOffset utcNow = DateTimeOffset.UtcNow;
+            var msg = await _dbContext.RentalOutboxMessages
+                .FirstOrDefaultAsync(m => m.Id == id && m.LockedBy == claimToken && m.Status == "Pending" && (m.LockedUntilUtc == null || m.LockedUntilUtc >= utcNow), cancellationToken);
+
+            if (msg == null)
+            {
+                return false;
+            }
+
+            msg.RecordFailure(errorMessage, attemptedAt, nextScheduledAt);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
     }
 }

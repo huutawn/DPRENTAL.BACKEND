@@ -21,7 +21,7 @@ public class RentalOperationReceipt
     public const string ClassificationBusiness = "Business";
     public const string ClassificationUncertain = "Uncertain";
     public const string ClassificationUncertainExhausted = "UncertainExhausted";
-
+    public const string ClassificationTransientExhausted = "TransientExhausted";
     [Key]
     public Guid Id { get; private set; }
 
@@ -41,6 +41,7 @@ public class RentalOperationReceipt
 
     public bool IsSuccess { get; private set; }
 
+    public bool IsOutcomeUncertain { get; private set; }
     [MaxLength(64)]
     public string? ErrorCode { get; private set; }
 
@@ -66,8 +67,9 @@ public class RentalOperationReceipt
     public string? PayloadJson { get; private set; }
     public string? ResponseJson { get; private set; }
 
-    public string? ApiResponseJson { get; private set; }
+    public string? RefundCompletionJson { get; private set; }
 
+    public string? ApiResponseJson { get; private set; }
     [MaxLength(64)]
     public string? PrerequisiteOperationId { get; private set; }
 
@@ -104,7 +106,9 @@ public class RentalOperationReceipt
         string? apiResponseJson = null,
         string? prerequisiteOperationId = null,
         string? errorClassification = null,
-        bool isTransient = false)
+        bool isTransient = false,
+        bool isOutcomeUncertain = false,
+        string? refundCompletionJson = null)
     {
         Id = id;
         RentalOrderId = rentalOrderId;
@@ -127,6 +131,8 @@ public class RentalOperationReceipt
         PrerequisiteOperationId = prerequisiteOperationId;
         ErrorClassification = errorClassification;
         IsTransient = isTransient;
+        IsOutcomeUncertain = isOutcomeUncertain;
+        RefundCompletionJson = refundCompletionJson;
     }
 
     internal static RentalOperationReceipt CreatePending(
@@ -156,7 +162,9 @@ public class RentalOperationReceipt
             completedAt: null,
             targetItemId: targetItemId,
             payloadJson: payloadJson,
-            responseJson: null);
+            responseJson: null,
+            isOutcomeUncertain: false,
+            refundCompletionJson: null);
     }
 
     internal void MarkProcessing(DateTimeOffset attemptedAt)
@@ -168,6 +176,7 @@ public class RentalOperationReceipt
     internal void MarkSucceeded(DateTimeOffset completedAt, string? responseJson = null, string? apiResponseJson = null)
     {
         IsSuccess = true;
+        IsOutcomeUncertain = false;
         Status = StatusSucceeded;
         CompletedAt = completedAt;
         NextRetryAt = null;
@@ -183,6 +192,11 @@ public class RentalOperationReceipt
         }
     }
 
+    internal void SetRefundCompletion(string refundCompletionJson, DateTimeOffset completedAt)
+    {
+        RefundCompletionJson = refundCompletionJson;
+        CompletedAt = completedAt;
+    }
     internal void SetApiResponse(string apiResponseJson)
     {
         ApiResponseJson = apiResponseJson;
@@ -203,12 +217,69 @@ public class RentalOperationReceipt
     internal void MarkUncertain(string? errorCode, string? errorMessage, DateTimeOffset attemptedAt, DateTimeOffset? nextRetryAt = null)
     {
         IsSuccess = false;
+        IsOutcomeUncertain = true;
         Status = StatusProcessing;
         ErrorCode = errorCode;
         ErrorMessage = errorMessage;
         LastAttemptedAt = attemptedAt;
         NextRetryAt = nextRetryAt;
-        ErrorClassification = "Uncertain";
+        ErrorClassification = ClassificationUncertain;
+        IsTransient = true;
+    }
+
+    internal void BeginProviderAttempt(DateTimeOffset attemptedAt)
+    {
+        RetryCount++;
+        Status = StatusProcessing;
+        LastAttemptedAt = attemptedAt;
+    }
+
+    internal void RecordAttemptFailure(
+        string? errorCode,
+        string? errorMessage,
+        DateTimeOffset attemptedAt,
+        DateTimeOffset? nextRetryAt,
+        bool isUncertain,
+        bool isExhausted)
+    {
+        ErrorCode = errorCode;
+        ErrorMessage = errorMessage;
+        LastAttemptedAt = attemptedAt;
+        NextRetryAt = nextRetryAt;
+
+        if (isUncertain)
+        {
+            IsOutcomeUncertain = true;
+        }
+
+        if (isExhausted)
+        {
+            Status = StatusFailed;
+            ErrorClassification = (isUncertain || IsOutcomeUncertain)
+                ? ClassificationUncertainExhausted
+                : ClassificationTransientExhausted;
+            IsTransient = false;
+        }
+        else if (isUncertain || IsOutcomeUncertain)
+        {
+            Status = StatusProcessing;
+            ErrorClassification = ClassificationUncertain;
+            IsTransient = true;
+        }
+        else
+        {
+            Status = StatusPending;
+            ErrorClassification = ClassificationTransient;
+            IsTransient = true;
+        }
+    }
+
+    internal void ReopenForManualReplay(DateTimeOffset requestedAt)
+    {
+        RetryCount = 0;
+        Status = StatusPending;
+        NextRetryAt = requestedAt;
+        LastAttemptedAt = requestedAt;
         IsTransient = true;
     }
 

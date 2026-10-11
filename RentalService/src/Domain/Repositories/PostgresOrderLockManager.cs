@@ -41,27 +41,30 @@ public sealed class PostgresOrderLockManager : IOrderLockManager
         long lockKey = ComputeLockKey(orderId);
 
         NpgsqlConnection conn = new(_connectionString);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(effectiveTimeout);
+
         try
         {
-            await conn.OpenAsync(cancellationToken);
+            await conn.OpenAsync(timeoutCts.Token);
 
             DateTimeOffset deadline = DateTimeOffset.UtcNow.Add(effectiveTimeout);
             bool acquired = false;
 
-            while (DateTimeOffset.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
+            while (DateTimeOffset.UtcNow < deadline && !timeoutCts.IsCancellationRequested)
             {
                 await using var cmd = conn.CreateCommand();
                 cmd.CommandText = "SELECT pg_try_advisory_lock(@key);";
                 cmd.Parameters.AddWithValue("key", lockKey);
 
-                object? result = await cmd.ExecuteScalarAsync(cancellationToken);
+                object? result = await cmd.ExecuteScalarAsync(timeoutCts.Token);
                 if (result is bool b && b)
                 {
                     acquired = true;
                     break;
                 }
 
-                await Task.Delay(50, cancellationToken);
+                await Task.Delay(50, timeoutCts.Token);
             }
 
             if (!acquired)
@@ -71,6 +74,11 @@ public sealed class PostgresOrderLockManager : IOrderLockManager
             }
 
             return new PostgresLockReleaser(conn, lockKey, _logger);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            await conn.DisposeAsync();
+            throw new TimeoutException($"Không thể thu thập PostgreSQL advisory lock cho RentalOrder '{orderId}' sau {effectiveTimeout.TotalSeconds}s.");
         }
         catch (Exception ex)
         {

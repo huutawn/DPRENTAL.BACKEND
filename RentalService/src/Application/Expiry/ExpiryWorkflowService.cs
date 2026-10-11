@@ -90,15 +90,13 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
     {
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
 
-        var order = await _orderRepository.GetByItemIdWithDetailsAsync(itemId, cancellationToken);
-        if (order == null) return Result.Success();
+        var orderId = await _orderRepository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
+        if (!orderId.HasValue) return Result.Success();
 
         string? inFlightAcceptOpId = null;
-        string? releaseOpKey = null;
-
-        await using (var orderLock = await _lockManager.AcquireOrderLockAsync(order.Id, TimeSpan.FromSeconds(5), cancellationToken))
+        await using (var orderLock = await _lockManager.AcquireOrderLockAsync(orderId.Value, TimeSpan.FromSeconds(5), cancellationToken))
         {
-            order = await _orderRepository.GetByIdWithDetailsAsync(order.Id, cancellationToken);
+            var order = await _orderRepository.GetByIdWithDetailsAsync(orderId.Value, cancellationToken);
             if (order == null) return Result.Success();
 
             var item = order.Items.FirstOrDefault(i => i.Id == itemId);
@@ -112,10 +110,11 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
                 return Result.Success();
             }
 
+            // Check in-flight accept intent created before deadline for reconciliation
             var inFlightAccept = order.OperationReceipts
                 .FirstOrDefault(r => r.Action == "SupplierAccept" &&
                                      r.TargetItemId == item.Id &&
-                                     r.Status == RentalOperationReceipt.StatusProcessing &&
+                                     (r.Status == RentalOperationReceipt.StatusProcessing || r.Status == RentalOperationReceipt.StatusPending) &&
                                      item.SupplierConfirmationDeadline.HasValue &&
                                      r.CreatedAt < item.SupplierConfirmationDeadline.Value);
 
@@ -123,29 +122,45 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
             {
                 inFlightAcceptOpId = inFlightAccept.OperationId;
             }
+            else if (order.HasInFlightAccept(item.Id))
+            {
+                _logger.LogInformation("Item {ItemId} has in-flight accept intent or uncertain outcome; protected from supplier timeout expiry.", itemId);
+                return Result.Success();
+            }
             else
             {
                 string timeoutOpKey = RentalOperationExecutor.ComputeOperationKey("SupplierTimeout", $"{order.Id}:{item.Id}");
                 item.ApplySupplierTimeout(utcNow, timeoutOpKey);
                 order.EvaluateOrderStatusRollup(utcNow, timeoutOpKey);
 
-                releaseOpKey = RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
+                string releaseOpKey = RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
                 var releaseReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == releaseOpKey);
                 if (releaseReceipt == null)
                 {
+                    var releaseReq = new ReleaseAllocationRequest(releaseOpKey, "Supplier confirmation deadline expired");
+                    var relCmd = new RentalOperationCommand(
+                        1,
+                        "ReleaseAllocation",
+                        order.Id,
+                        item.Id,
+                        releaseOpKey,
+                        item.AllocationGroupId,
+                        null,
+                        JsonSerializer.Serialize(releaseReq, JsonOptions));
+
                     releaseReceipt = new RentalOperationReceipt(
                         Guid.NewGuid(),
                         order.Id,
                         releaseOpKey,
                         "ReleaseAllocation",
-                        RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.AllocationGroupId}"),
+                        RentalOperationExecutor.ComputeFingerprint($"ReleaseAllocation:{item.AllocationGroupId}"),
                         isSuccess: false,
                         errorCode: null,
                         errorMessage: null,
                         createdAt: utcNow,
                         status: RentalOperationReceipt.StatusPending,
                         targetItemId: item.Id,
-                        payloadJson: JsonSerializer.Serialize(new ReleaseAllocationRequest(releaseOpKey, "Supplier confirmation deadline expired"), JsonOptions));
+                        payloadJson: JsonSerializer.Serialize(relCmd, JsonOptions));
                     order.AddOperationReceipt(releaseReceipt);
                 }
 
@@ -154,12 +169,23 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
                 if (refundReceipt == null)
                 {
                     var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
+                    var refundReq = new RequestRefundRequest(order.Id, order.InvoiceRef!, order.PaymentRef!, refundItems, "Supplier confirmation deadline expired", refundOpKey);
+                    var refundCmd = new RentalOperationCommand(
+                        1,
+                        "RequestRefund",
+                        order.Id,
+                        item.Id,
+                        refundOpKey,
+                        null,
+                        null,
+                        JsonSerializer.Serialize(refundReq, JsonOptions));
+
                     refundReceipt = new RentalOperationReceipt(
                         Guid.NewGuid(),
                         order.Id,
                         refundOpKey,
                         "RequestRefund",
-                        RentalOperationExecutor.ComputeOperationKey("RequestRefund", $"{order.Id}:{item.RentalAmount + item.DepositAmount}"),
+                        RentalOperationExecutor.ComputeFingerprint($"RequestRefund:{order.Id}:{item.RentalAmount + item.DepositAmount}"),
                         isSuccess: false,
                         errorCode: null,
                         errorMessage: null,
@@ -167,10 +193,9 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
                         status: RentalOperationReceipt.StatusPending,
                         targetItemId: item.Id,
                         prerequisiteOperationId: releaseOpKey,
-                        payloadJson: JsonSerializer.Serialize(new RequestRefundRequest(order.Id, order.InvoiceRef!, order.PaymentRef!, refundItems, "Supplier confirmation deadline expired", refundOpKey), JsonOptions));
+                        payloadJson: JsonSerializer.Serialize(refundCmd, JsonOptions));
                     order.AddOperationReceipt(refundReceipt);
                 }
-
                 var outboxEnvelope = new RentalEventEnvelope<RentalItemExpiredPayload>(
                     Guid.NewGuid(),
                     RentalEventTypes.RentalItemExpired,
@@ -199,16 +224,12 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
 
         if (inFlightAcceptOpId != null)
         {
-            var reconcileRes = await _operationExecutor.ExecuteReconcileAcceptAsync(order.Id, itemId, inFlightAcceptOpId, cancellationToken);
+            var reconcileRes = await _operationExecutor.ExecuteReconcileAcceptAsync(orderId.Value, itemId, inFlightAcceptOpId, cancellationToken);
             if (reconcileRes.IsSuccess)
             {
                 _logger.LogInformation("Reconciled in-flight accept intent for item {ItemId} instead of timing out.", itemId);
                 return Result.Success();
             }
-        }
-        else if (releaseOpKey != null)
-        {
-            _ = _operationExecutor.ExecuteReleaseAllocationAsync(order.Id, itemId, releaseOpKey, cancellationToken);
         }
 
         return Result.Success();

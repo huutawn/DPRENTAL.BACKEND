@@ -120,6 +120,17 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
         return GetByIdAsync(id, cancellationToken);
     }
 
+    public async Task<Guid?> GetOrderIdByItemIdAsync(Guid itemId, CancellationToken cancellationToken = default)
+    {
+        var item = await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Id == itemId)
+            .Select(i => new { i.RentalOrderId })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return item?.RentalOrderId;
+    }
+
     public async Task<RentalOrder?> GetByItemIdWithDetailsAsync(Guid itemId, CancellationToken cancellationToken = default)
     {
         var orderHeader = await _dbContext.RentalItems

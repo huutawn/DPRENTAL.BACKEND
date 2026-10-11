@@ -58,272 +58,280 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         _rentalEventsTopic = configuration["Kafka:RentalEventsTopic"] ?? "rental.events.v1";
     }
 
-    public async Task<Result> ProcessInvoicePaidAsync(
+    public async Task<Result> ApplyInvoicePaidStagedAsync(
+        RentalOrder order,
         PaymentEventEnvelope<InvoicePaidPayload> envelope,
+        RentalInboxMessage inboxMessage,
         CancellationToken cancellationToken = default)
     {
-        // 1. Envelope validation
         var envValidation = ValidateEnvelope(envelope);
-        if (envValidation.IsFailure)
-        {
-            _logger.LogWarning("InvoicePaid envelope validation failed: {Code} - {Msg}",
-                envValidation.Error.Code, envValidation.Error.Message);
-            return envValidation;
-        }
+        if (envValidation.IsFailure) return envValidation;
 
         var payload = envelope.Payload;
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
 
-        List<(RentalItem item, string opKey)> operationsToExecute;
-        bool isLatePayment;
-
-        // 2. Local transaction under lock
-        await using (var orderLock = await _lockManager.AcquireOrderLockAsync(
-            payload.RentalOrderId,
-            TimeSpan.FromSeconds(5),
-            cancellationToken))
+        // Invoice must be already attached to Order
+        if (string.IsNullOrWhiteSpace(order.InvoiceRef))
         {
-            // Deduplication under lock
-            string payloadJson = JsonSerializer.Serialize(payload, JsonOptions);
-            string payloadFingerprint = ComputeHash(payloadJson);
-
-            var existingInbox = await _inboxRepository.GetByMessageIdAsync(envelope.MessageId, cancellationToken);
-            if (existingInbox != null)
-            {
-                if (string.Equals(existingInbox.PayloadFingerprint, payloadFingerprint, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogInformation("InvoicePaid message {MessageId} replayed idempotently", envelope.MessageId);
-                    return Result.Success();
-                }
-                return Error.Conflict("PAYMENT_CONFLICT", "MessageId đã tồn tại với nội dung thanh toán khác.");
-            }
-
-            // Load Order Aggregate with details
-            var order = await _orderRepository.GetByIdWithDetailsAsync(payload.RentalOrderId, cancellationToken);
-            if (order == null)
-            {
-                return Error.NotFound("ORDER_NOT_FOUND", $"Không tìm thấy đơn hàng '{payload.RentalOrderId}'.");
-            }
-
-            // Invoice must be already attached to Order
-            if (string.IsNullOrWhiteSpace(order.InvoiceRef))
-            {
-                return Error.Failure("INVOICE_NOT_ATTACHED", "Đơn hàng chưa được gắn mã invoice từ Checkout; giữ event để retry.");
-            }
-
-            if (!string.Equals(order.InvoiceRef, payload.InvoiceRef, StringComparison.OrdinalIgnoreCase))
-            {
-                return Error.Conflict("INVOICE_MISMATCH", $"InvoiceRef ({payload.InvoiceRef}) không khớp với đơn hàng ({order.InvoiceRef}).");
-            }
-
-            // Validate snapshot matching
-            if (order.RenterId != payload.RenterId)
-            {
-                return Error.Validation("RENTER_MISMATCH", "RenterId trong sự kiện thanh toán không khớp với đơn hàng.");
-            }
-
-            if (!string.Equals(order.Currency, payload.Currency, StringComparison.OrdinalIgnoreCase))
-            {
-                return Error.Validation("CURRENCY_MISMATCH", $"Tiền tệ thanh toán ({payload.Currency}) không khớp với đơn hàng ({order.Currency}).");
-            }
-
-            if (order.TotalPayableAmount != payload.PaidAmount)
-            {
-                return Error.Validation("AMOUNT_MISMATCH", $"Số tiền thanh toán ({payload.PaidAmount}) không khớp với tổng tiền đơn hàng ({order.TotalPayableAmount}).");
-            }
-
-            // Payment identity check
-            if (!string.IsNullOrWhiteSpace(order.PaymentRef))
-            {
-                if (string.Equals(order.PaymentRef, payload.PaymentRef, StringComparison.OrdinalIgnoreCase))
-                {
-                    return Result.Success();
-                }
-                return Error.Conflict("PAYMENT_REF_CONFLICT", "Đơn hàng đã được thanh toán với mã tham chiếu thanh toán khác.");
-            }
-
-            // Lifecycle branching
-            isLatePayment = order.Status is RentalOrderStatus.Expired or RentalOrderStatus.Cancelled ||
-                            payload.PaidAt >= order.PaymentDeadline;
-
-            if (isLatePayment)
-            {
-                var prepRes = await PrepareLatePaymentAsync(order, envelope, payloadFingerprint, utcNow, cancellationToken);
-                if (prepRes.IsFailure) return prepRes.Error;
-                operationsToExecute = prepRes.Value;
-            }
-            else
-            {
-                var prepRes = await PrepareOnTimePaymentAsync(order, envelope, payloadFingerprint, utcNow, cancellationToken);
-                if (prepRes.IsFailure) return prepRes.Error;
-                operationsToExecute = prepRes.Value;
-            }
+            return Error.Failure("INVOICE_NOT_ATTACHED", "Đơn hàng chưa được gắn mã invoice từ Checkout; giữ event để retry.");
         }
 
-        // 3. Lock released! Execute operations outside lock
+        if (!string.Equals(order.InvoiceRef, payload.InvoiceRef, StringComparison.OrdinalIgnoreCase))
+        {
+            return Error.Conflict("INVOICE_MISMATCH", $"InvoiceRef ({payload.InvoiceRef}) không khớp với đơn hàng ({order.InvoiceRef}).");
+        }
+
+        // Validate snapshot matching
+        if (order.RenterId != payload.RenterId)
+        {
+            return Error.Validation("RENTER_MISMATCH", "RenterId trong sự kiện thanh toán không khớp với đơn hàng.");
+        }
+
+        if (!string.Equals(order.Currency, payload.Currency, StringComparison.OrdinalIgnoreCase))
+        {
+            return Error.Validation("CURRENCY_MISMATCH", $"Tiền tệ thanh toán ({payload.Currency}) không khớp với đơn hàng ({order.Currency}).");
+        }
+
+        if (order.TotalPayableAmount != payload.PaidAmount)
+        {
+            return Error.Validation("AMOUNT_MISMATCH", $"Số tiền thanh toán ({payload.PaidAmount}) không khớp với tổng tiền đơn hàng ({order.TotalPayableAmount}).");
+        }
+
+        // Payment identity check
+        if (!string.IsNullOrWhiteSpace(order.PaymentRef))
+        {
+            if (string.Equals(order.PaymentRef, payload.PaymentRef, StringComparison.OrdinalIgnoreCase))
+            {
+                return Result.Success();
+            }
+            return Error.Conflict("PAYMENT_REF_CONFLICT", "Đơn hàng đã được thanh toán với mã tham chiếu thanh toán khác.");
+        }
+
+        // Lifecycle branching
+        bool isLatePayment = order.Status is RentalOrderStatus.Expired or RentalOrderStatus.Cancelled ||
+                             payload.PaidAt >= order.PaymentDeadline;
+
         if (isLatePayment)
         {
-            foreach (var (item, opKey) in operationsToExecute)
+            _logger.LogWarning("Payment arrived late for Order {OrderId} (Status: {Status}, Deadline: {Deadline}, PaidAt: {PaidAt}). Staging late-payment cleanup and refund.",
+                order.Id, order.Status, order.PaymentDeadline, payload.PaidAt);
+
+            order.MarkAsLatePayment(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
+
+            foreach (var item in order.Items)
             {
-                await _operationExecutor.ExecuteRequestRefundAsync(payload.RentalOrderId, item.Id, opKey, cancellationToken);
+                string releaseOpKey = RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
+                var existingRelease = order.OperationReceipts.FirstOrDefault(r => r.OperationId == releaseOpKey);
+                if (existingRelease == null)
+                {
+                    var releaseReq = new ReleaseAllocationRequest(releaseOpKey, "Late payment arrived after deadline; releasing allocation");
+                    var releaseCmd = new RentalOperationCommand(
+                        1,
+                        "ReleaseAllocation",
+                        order.Id,
+                        item.Id,
+                        releaseOpKey,
+                        item.AllocationGroupId,
+                        null,
+                        JsonSerializer.Serialize(releaseReq, JsonOptions));
+
+                    var releaseReceipt = RentalOperationReceipt.CreatePending(
+                        Guid.NewGuid(),
+                        order.Id,
+                        releaseOpKey,
+                        "ReleaseAllocation",
+                        RentalOperationExecutor.ComputeFingerprint($"ReleaseAllocation:{item.AllocationGroupId}"),
+                        utcNow,
+                        item.Id,
+                        JsonSerializer.Serialize(releaseCmd, JsonOptions));
+
+                    order.AddOperationReceipt(releaseReceipt);
+                }
+
+                string refundKey = RentalOperationExecutor.ComputeOperationKey("RequestRefund", $"{order.Id}:{item.Id}");
+                var existingRefund = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundKey);
+                if (existingRefund == null)
+                {
+                    var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
+                    var refundReq = new RequestRefundRequest(order.Id, payload.InvoiceRef, payload.PaymentRef, refundItems, "Late payment arrived on terminal/expired order; 100% refund", refundKey);
+                    var refundCmd = new RentalOperationCommand(
+                        1,
+                        "RequestRefund",
+                        order.Id,
+                        item.Id,
+                        refundKey,
+                        null,
+                        null,
+                        JsonSerializer.Serialize(refundReq, JsonOptions));
+
+                    var refundReceipt = new RentalOperationReceipt(
+                        Guid.NewGuid(),
+                        order.Id,
+                        refundKey,
+                        "RequestRefund",
+                        RentalOperationExecutor.ComputeFingerprint($"RequestRefund:{order.Id}:{item.RentalAmount + item.DepositAmount}"),
+                        isSuccess: false,
+                        errorCode: null,
+                        errorMessage: null,
+                        createdAt: utcNow,
+                        status: RentalOperationReceipt.StatusPending,
+                        targetItemId: item.Id,
+                        prerequisiteOperationId: releaseOpKey,
+                        payloadJson: JsonSerializer.Serialize(refundCmd, JsonOptions));
+
+                    order.AddOperationReceipt(refundReceipt);
+                }
             }
+
+            var outboxEnvelope = new RentalEventEnvelope<LatePaymentRefundRequestedPayload>(
+                Guid.NewGuid(),
+                RentalEventTypes.LatePaymentRefundRequested,
+                1,
+                "rental-service",
+                order.Id.ToString("D"),
+                utcNow,
+                envelope.CorrelationId,
+                envelope.MessageId,
+                new LatePaymentRefundRequestedPayload(
+                    order.Id,
+                    order.RenterId,
+                    payload.InvoiceRef,
+                    payload.PaymentRef,
+                    order.TotalPayableAmount,
+                    utcNow));
+
+            var outboxMessage = new RentalOutboxMessage(
+                outboxEnvelope.MessageId,
+                _rentalEventsTopic,
+                order.Id.ToString("D"),
+                RentalEventTypes.LatePaymentRefundRequested,
+                JsonSerializer.Serialize(outboxEnvelope, JsonOptions),
+                utcNow);
+
+            await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
         }
         else
         {
-            foreach (var (item, opKey) in operationsToExecute)
+            var markResult = order.MarkAsPaid(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
+            if (markResult.IsFailure) return markResult.Error;
+
+            foreach (var item in order.Items)
             {
-                await _operationExecutor.ExecuteExtendHoldAsync(payload.RentalOrderId, item.Id, opKey, cancellationToken);
+                string opKey = RentalOperationExecutor.ComputeOperationKey("ExtendHold", $"{order.Id}:{item.Id}");
+                var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
+                if (existingReceipt == null)
+                {
+                    DateTimeOffset newHoldExpiresAt = item.SupplierConfirmationDeadline ?? payload.PaidAt.AddHours(24);
+                    var extHoldReq = new ExtendHoldRequest(newHoldExpiresAt, opKey);
+                    var extHoldCmd = new RentalOperationCommand(
+                        1,
+                        "ExtendHold",
+                        order.Id,
+                        item.Id,
+                        opKey,
+                        item.AllocationGroupId,
+                        null,
+                        JsonSerializer.Serialize(extHoldReq, JsonOptions));
+
+                    var receipt = RentalOperationReceipt.CreatePending(
+                        Guid.NewGuid(),
+                        order.Id,
+                        opKey,
+                        "ExtendHold",
+                        RentalOperationExecutor.ComputeFingerprint($"ExtendHold:{item.AllocationGroupId}:{newHoldExpiresAt:O}"),
+                        utcNow,
+                        item.Id,
+                        JsonSerializer.Serialize(extHoldCmd, JsonOptions));
+
+                    order.AddOperationReceipt(receipt);
+                }
             }
         }
 
         return Result.Success();
     }
 
-    private async Task<Result<List<(RentalItem item, string opKey)>>> PrepareLatePaymentAsync(
-        RentalOrder order,
+    public async Task<Result> ProcessInvoicePaidAsync(
         PaymentEventEnvelope<InvoicePaidPayload> envelope,
-        string payloadFingerprint,
-        DateTimeOffset utcNow,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken = default)
     {
+        var envValidation = ValidateEnvelope(envelope);
+        if (envValidation.IsFailure) return envValidation;
+
         var payload = envelope.Payload;
-        _logger.LogWarning("Payment arrived late for Order {OrderId} (Status: {Status}, Deadline: {Deadline}, PaidAt: {PaidAt}). Executing late-payment refund.",
-            order.Id, order.Status, order.PaymentDeadline, payload.PaidAt);
+        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
 
-        order.MarkAsLatePayment(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
-
-        var inboxMessage = new RentalInboxMessage(
-            Guid.NewGuid(),
-            envelope.MessageId,
-            envelope.MessageType,
-            envelope.Producer,
-            envelope.AggregateId,
-            envelope.CorrelationId,
-            envelope.CausationId,
-            JsonSerializer.Serialize(payload, JsonOptions),
-            utcNow,
-            payloadFingerprint);
-        inboxMessage.MarkProcessed(utcNow);
-        await _inboxRepository.AddAsync(inboxMessage, cancellationToken);
-
-        var refundOpKeys = new List<(RentalItem item, string opKey)>();
-        foreach (var item in order.Items)
+        RentalOrder? order;
+        await using (var orderLock = await _lockManager.AcquireOrderLockAsync(payload.RentalOrderId, TimeSpan.FromSeconds(5), cancellationToken))
         {
-            string refundKey = RentalOperationExecutor.ComputeOperationKey("RequestRefund", $"{order.Id}:{item.Id}");
-            var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundKey);
-            if (existingReceipt == null)
+            string rawPayload = JsonSerializer.Serialize(envelope, JsonOptions);
+            string fingerprint = ComputeHash(rawPayload);
+
+            var existingInbox = await _inboxRepository.GetByMessageIdAsync(envelope.MessageId, cancellationToken);
+            if (existingInbox != null && existingInbox.Status == RentalInboxMessage.StatusProcessed)
             {
-                var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
-                var request = new RequestRefundRequest(order.Id, payload.InvoiceRef, payload.PaymentRef, refundItems, "Late payment arrived on terminal/expired order; 100% refund", refundKey);
-
-                var refundReceipt = new RentalOperationReceipt(
-                    Guid.NewGuid(),
-                    order.Id,
-                    refundKey,
-                    "RequestRefund",
-                    RentalOperationExecutor.ComputeOperationKey("RequestRefund", $"{order.Id}:{item.RentalAmount + item.DepositAmount}"),
-                    isSuccess: false,
-                    errorCode: null,
-                    errorMessage: null,
-                    createdAt: utcNow,
-                    status: RentalOperationReceipt.StatusPending,
-                    targetItemId: item.Id,
-                    payloadJson: JsonSerializer.Serialize(request, JsonOptions));
-
-                order.AddOperationReceipt(refundReceipt);
+                return Result.Success();
             }
-            refundOpKeys.Add((item, refundKey));
+
+            order = await _orderRepository.GetByIdWithDetailsAsync(payload.RentalOrderId, cancellationToken);
+            if (order == null)
+            {
+                return Error.NotFound("ORDER_NOT_FOUND", $"Không tìm thấy đơn hàng '{payload.RentalOrderId}'.");
+            }
+
+            var inboxMessage = existingInbox ?? new RentalInboxMessage(
+                Guid.NewGuid(),
+                envelope.MessageId,
+                envelope.MessageType,
+                envelope.Producer,
+                envelope.AggregateId,
+                envelope.CorrelationId,
+                envelope.CausationId,
+                rawPayload,
+                utcNow,
+                fingerprint);
+
+            if (existingInbox == null)
+            {
+                await _inboxRepository.AddAsync(inboxMessage, cancellationToken);
+            }
+
+            var result = await ApplyInvoicePaidStagedAsync(order, envelope, inboxMessage, cancellationToken);
+            if (result.IsFailure)
+            {
+                return result;
+            }
+
+            inboxMessage.MarkProcessed(utcNow);
+            if (existingInbox != null)
+            {
+                _inboxRepository.Update(inboxMessage);
+            }
+
+            order.IncrementVersion();
+            await _orderRepository.UpdateAsync(order, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
-        var outboxEnvelope = new RentalEventEnvelope<LatePaymentRefundRequestedPayload>(
-            Guid.NewGuid(),
-            RentalEventTypes.LatePaymentRefundRequested,
-            1,
-            "rental-service",
-            order.Id.ToString("D"),
-            utcNow,
-            envelope.CorrelationId,
-            envelope.MessageId,
-            new LatePaymentRefundRequestedPayload(
-                order.Id,
-                order.RenterId,
-                payload.InvoiceRef,
-                payload.PaymentRef,
-                order.TotalPayableAmount,
-                utcNow));
-
-        var outboxMessage = new RentalOutboxMessage(
-            outboxEnvelope.MessageId,
-            _rentalEventsTopic,
-            order.Id.ToString("D"),
-            RentalEventTypes.LatePaymentRefundRequested,
-            JsonSerializer.Serialize(outboxEnvelope, JsonOptions),
-            utcNow);
-        await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
-
-        order.IncrementVersion();
-        await _orderRepository.UpdateAsync(order, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return refundOpKeys;
-    }
-
-    private async Task<Result<List<(RentalItem item, string opKey)>>> PrepareOnTimePaymentAsync(
-        RentalOrder order,
-        PaymentEventEnvelope<InvoicePaidPayload> envelope,
-        string payloadFingerprint,
-        DateTimeOffset utcNow,
-        CancellationToken cancellationToken)
-    {
-        var payload = envelope.Payload;
-
-        var markResult = order.MarkAsPaid(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
-        if (markResult.IsFailure) return markResult.Error;
-
-        var inboxMessage = new RentalInboxMessage(
-            Guid.NewGuid(),
-            envelope.MessageId,
-            envelope.MessageType,
-            envelope.Producer,
-            envelope.AggregateId,
-            envelope.CorrelationId,
-            envelope.CausationId,
-            JsonSerializer.Serialize(payload, JsonOptions),
-            utcNow,
-            payloadFingerprint);
-        inboxMessage.MarkProcessed(utcNow);
-        await _inboxRepository.AddAsync(inboxMessage, cancellationToken);
-
-        var extendHoldKeys = new List<(RentalItem item, string opKey)>();
-        foreach (var item in order.Items)
+        // Direct invocation/tests outside lock executes hold/cleanup
+        if (order.Status == RentalOrderStatus.Paid)
         {
-            string opKey = RentalOperationExecutor.ComputeOperationKey("ExtendHold", $"{order.Id}:{item.Id}");
-            var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
-            if (existingReceipt == null)
+            foreach (var item in order.Items)
             {
-                var request = new ExtendHoldRequest(item.SupplierConfirmationDeadline!.Value, opKey);
-                var receipt = new RentalOperationReceipt(
-                    Guid.NewGuid(),
-                    order.Id,
-                    opKey,
-                    "ExtendHold",
-                    RentalOperationExecutor.ComputeOperationKey("ExtendHold", $"{item.AllocationGroupId}:{item.SupplierConfirmationDeadline:O}"),
-                    isSuccess: false,
-                    errorCode: null,
-                    errorMessage: null,
-                    createdAt: utcNow,
-                    status: RentalOperationReceipt.StatusPending,
-                    targetItemId: item.Id,
-                    payloadJson: JsonSerializer.Serialize(request, JsonOptions));
-
-                order.AddOperationReceipt(receipt);
+                string opKey = RentalOperationExecutor.ComputeOperationKey("ExtendHold", $"{order.Id}:{item.Id}");
+                await _operationExecutor.ExecuteExtendHoldAsync(order.Id, item.Id, opKey, cancellationToken);
             }
-            extendHoldKeys.Add((item, opKey));
+        }
+        else if (order.LatePaymentRefundRequired)
+        {
+            foreach (var item in order.Items)
+            {
+                string relKey = RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
+                await _operationExecutor.ExecuteReleaseAllocationAsync(order.Id, item.Id, relKey, cancellationToken);
+            }
         }
 
-        order.IncrementVersion();
-        await _orderRepository.UpdateAsync(order, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return extendHoldKeys;
+        return Result.Success();
     }
 
     private static Result ValidateEnvelope(PaymentEventEnvelope<InvoicePaidPayload> envelope)

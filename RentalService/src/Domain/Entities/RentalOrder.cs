@@ -414,6 +414,8 @@ public class RentalOrder
             r.Action == "SupplierAccept" &&
             r.TargetItemId == itemId &&
             (r.Status == RentalOperationReceipt.StatusProcessing ||
+             r.Status == RentalOperationReceipt.StatusPending ||
+             r.IsOutcomeUncertain ||
              r.ErrorClassification is RentalOperationReceipt.ClassificationUncertain or RentalOperationReceipt.ClassificationUncertainExhausted) &&
             !r.IsSuccess);
     }
@@ -430,7 +432,6 @@ public class RentalOrder
         PaymentRef = paymentRef;
         PaymentConfirmedAt = paidAt;
         UpdatedAt = utcNow;
-        Version++;
         foreach (var item in _items)
         {
             item.RecordPaid(paidAt);
@@ -459,7 +460,6 @@ public class RentalOrder
         PaymentRef = paymentRef;
         PaymentConfirmedAt = paidAt;
         UpdatedAt = utcNow;
-        Version++;
         AddStateTransition(new RentalStateTransition(
             Guid.NewGuid(),
             Id,
@@ -496,7 +496,6 @@ public class RentalOrder
                 string from = Status.ToString();
                 Status = RentalOrderStatus.AwaitingHandover;
                 UpdatedAt = utcNow;
-                Version++;
                 AddStateTransition(new RentalStateTransition(
                     Guid.NewGuid(),
                     Id,
@@ -521,7 +520,6 @@ public class RentalOrder
                 string from = Status.ToString();
                 Status = RentalOrderStatus.Rejected;
                 UpdatedAt = utcNow;
-                Version++;
                 AddStateTransition(new RentalStateTransition(
                     Guid.NewGuid(),
                     Id,
@@ -547,7 +545,6 @@ public class RentalOrder
                 string from = Status.ToString();
                 Status = RentalOrderStatus.Expired;
                 UpdatedAt = utcNow;
-                Version++;
                 AddStateTransition(new RentalStateTransition(
                     Guid.NewGuid(),
                     Id,
@@ -570,7 +567,6 @@ public class RentalOrder
         string from = Status.ToString();
         Status = RentalOrderStatus.Expired;
         UpdatedAt = utcNow;
-        Version++;
         foreach (var item in _items)
         {
             item.ApplyHoldExpired(utcNow, operationId, "Payment deadline expired");

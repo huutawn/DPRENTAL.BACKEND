@@ -69,25 +69,30 @@ public sealed class OperationRecoveryWorker : BackgroundService
 
     public async Task<int> ProcessBatchAsync(CancellationToken cancellationToken)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var receiptRepository = scope.ServiceProvider.GetRequiredService<IOperationReceiptRepository>();
-        var executor = scope.ServiceProvider.GetRequiredService<IRentalOperationExecutor>();
         DateTimeOffset utcNow = DateTimeOffset.UtcNow;
+        IReadOnlyList<OperationReceiptDescriptor> descriptors;
 
-        var receipts = await receiptRepository.GetPendingOperationsAsync(utcNow, 50, cancellationToken);
-        if (receipts.Count == 0)
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var receiptRepository = scope.ServiceProvider.GetRequiredService<IOperationReceiptRepository>();
+            descriptors = await receiptRepository.GetPendingOperationDescriptorsAsync(utcNow, 50, cancellationToken);
+        }
+
+        if (descriptors.Count == 0)
         {
             return 0;
         }
 
-        _logger.LogInformation("OperationRecoveryWorker recovering {Count} pending operations", receipts.Count);
+        _logger.LogInformation("OperationRecoveryWorker recovering {Count} pending operations", descriptors.Count);
 
         int processed = 0;
-        foreach (var receipt in receipts)
+        foreach (var descriptor in descriptors)
         {
             try
             {
-                var result = await executor.ReplayStoredOperationAsync(receipt.RentalOrderId, receipt.OperationId, cancellationToken);
+                using var opScope = _scopeFactory.CreateScope();
+                var executor = opScope.ServiceProvider.GetRequiredService<IRentalOperationExecutor>();
+                var result = await executor.ExecuteScheduledOperationAsync(descriptor, cancellationToken);
                 if (result.IsSuccess)
                 {
                     processed++;
@@ -95,7 +100,7 @@ public sealed class OperationRecoveryWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to recover operation {OpId} ({Action})", receipt.OperationId, receipt.Action);
+                _logger.LogWarning(ex, "Failed to recover operation {OpId} ({Action})", descriptor.OperationId, descriptor.Action);
             }
         }
 

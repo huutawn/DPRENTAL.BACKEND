@@ -16,7 +16,7 @@ using Dprental.RentalService.Application.Operations;
 using Dprental.RentalService.Application.Payments;
 using Dprental.RentalService.Application.SupplierDecision;
 using Dprental.RentalService.Domain.IRepositories;
-using Dprental.RentalService.Api.Observability;
+using Dprental.RentalService.Application.Observability;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 var builder = WebApplication.CreateBuilder(args);
@@ -39,9 +39,12 @@ builder.Services.AddScoped<IRentalCallerContext>(sp =>
 });
 builder.Services.AddScoped<IRentalCalendarService, RentalCalendarService>();
 builder.Services.AddScoped<IRentalOperationExecutor, RentalOperationExecutor>();
-builder.Services.AddHttpClient<IServiceTokenProvider, AuthServiceTokenProvider>();
-builder.Services.AddHttpClient<IPaymentRentalClient, HttpPaymentRentalClient>();
-builder.Services.AddHttpClient<IInventoryRentalClient, HttpInventoryRentalClient>();
+builder.Services.AddHttpClient<IServiceTokenProvider, AuthServiceTokenProvider>()
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+builder.Services.AddHttpClient<IPaymentRentalClient, HttpPaymentRentalClient>()
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+builder.Services.AddHttpClient<IInventoryRentalClient, HttpInventoryRentalClient>()
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<IPaymentWorkflowService, PaymentWorkflowService>();
 builder.Services.AddScoped<ISupplierDecisionService, SupplierDecisionService>();
 builder.Services.AddScoped<IExpiryWorkflowService, ExpiryWorkflowService>();

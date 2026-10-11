@@ -20,16 +20,27 @@ public sealed class OperationReceiptRepository : IOperationReceiptRepository
             .FirstOrDefaultAsync(r => r.RentalOrderId == orderId && r.OperationId == operationId, cancellationToken);
     }
 
-    public async Task<IReadOnlyList<RentalOperationReceipt>> GetPendingOperationsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<OperationReceiptDescriptor>> GetPendingOperationDescriptorsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
     {
         return await _dbContext.RentalOperationReceipts
-            .Include(r => r.RentalOrder)
-                .ThenInclude(o => o!.Items)
-            .Where(r => (r.Status == "Pending" || r.Status == "Processing") &&
+            .AsNoTracking()
+            .Where(r => (r.Status == RentalOperationReceipt.StatusPending || r.Status == RentalOperationReceipt.StatusProcessing) &&
                         r.RetryCount < 10 &&
                         (r.NextRetryAt == null || r.NextRetryAt <= utcNow))
             .OrderBy(r => r.CreatedAt)
             .Take(batchSize)
+            .Select(r => new OperationReceiptDescriptor(
+                r.Id,
+                r.RentalOrderId,
+                r.OperationId,
+                r.Action,
+                r.TargetItemId,
+                r.Status,
+                r.RetryCount,
+                r.NextRetryAt,
+                r.CreatedAt,
+                r.PrerequisiteOperationId,
+                r.IsOutcomeUncertain))
             .ToListAsync(cancellationToken);
     }
 

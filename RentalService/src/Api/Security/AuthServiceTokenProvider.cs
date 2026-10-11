@@ -22,7 +22,7 @@ public sealed class AuthServiceTokenProvider : IServiceTokenProvider, IDisposabl
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
     private readonly ILogger<AuthServiceTokenProvider> _logger;
-    private readonly ConcurrentDictionary<string, CachedTokenEntry> _cache = new();
+    private static readonly ConcurrentDictionary<string, CachedTokenEntry> _cache = new();
     private readonly SemaphoreSlim _semaphore = new(1, 1);
 
     public AuthServiceTokenProvider(
@@ -90,12 +90,11 @@ public sealed class AuthServiceTokenProvider : IServiceTokenProvider, IDisposabl
             using var resp = await _httpClient.SendAsync(req, timeoutCts.Token);
             if (!resp.IsSuccessStatusCode)
             {
-                string errorBody = await resp.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogWarning("Không thể lấy service token từ AuthService (Status: {Status}): {Body}", resp.StatusCode, errorBody);
+                _logger.LogWarning("Không thể lấy service token từ AuthService (Status: {Status})", resp.StatusCode);
                 return Error.Unauthorized("AUTH_TOKEN_ACQUISITION_FAILED", $"Lấy service token thất bại từ AuthService (Status: {(int)resp.StatusCode}).");
             }
 
-            string json = await resp.Content.ReadAsStringAsync(cancellationToken);
+            string json = await resp.Content.ReadAsStringAsync(timeoutCts.Token);
             var tokenResp = JsonSerializer.Deserialize<ServiceTokenResponsePayload>(json, JsonOptions);
 
             if (tokenResp == null || string.IsNullOrWhiteSpace(tokenResp.AccessToken))
@@ -103,10 +102,12 @@ public sealed class AuthServiceTokenProvider : IServiceTokenProvider, IDisposabl
                 return Error.Failure("AUTH_TOKEN_EMPTY", "Phản hồi từ AuthService không chứa AccessToken hợp lệ.");
             }
 
-            DateTimeOffset expiresAt = tokenResp.ExpiresAtUtc ??
-                                       (tokenResp.ExpiresIn.HasValue
-                                           ? DateTimeOffset.UtcNow.AddSeconds(tokenResp.ExpiresIn.Value)
-                                           : DateTimeOffset.UtcNow.AddHours(1));
+            if (!tokenResp.ExpiresAtUtc.HasValue && !tokenResp.ExpiresIn.HasValue)
+            {
+                return Error.Failure("AUTH_EXPIRY_MISSING", "AuthService không trả về hạn dùng token hợp lệ (expiresAtUtc hoặc expiresIn).");
+            }
+
+            DateTimeOffset expiresAt = tokenResp.ExpiresAtUtc ?? DateTimeOffset.UtcNow.AddSeconds(tokenResp.ExpiresIn!.Value);
 
             _cache[cacheKey] = new CachedTokenEntry(tokenResp.AccessToken, expiresAt);
             return Result.Success(tokenResp.AccessToken);
@@ -119,7 +120,7 @@ public sealed class AuthServiceTokenProvider : IServiceTokenProvider, IDisposabl
         catch (Exception ex)
         {
             _logger.LogError(ex, "Lỗi khi gọi AuthService lấy service token");
-            return Error.ServiceUnavailable("AUTH_UNAVAILABLE", $"Lỗi kết nối AuthService: {ex.Message}");
+            return Error.ServiceUnavailable("AUTH_UNAVAILABLE", "Không thể kết nối tới AuthService.");
         }
         finally
         {

@@ -291,10 +291,12 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
 
             // Context A updates and saves (Version becomes 2)
             orderA.MarkAsPaid("INV-1", "PAY-1", FixedNow, FixedNow);
+            orderA.IncrementVersion();
             await ctxA.SaveChangesAsync();
 
             // Context B tries to update with stale Version (Version 1) -> must throw DbUpdateConcurrencyException
             orderB.MarkPaymentExpired(FixedNow, "op-stale");
+            orderB.IncrementVersion();
             await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => ctxB.SaveChangesAsync());
         }
         finally

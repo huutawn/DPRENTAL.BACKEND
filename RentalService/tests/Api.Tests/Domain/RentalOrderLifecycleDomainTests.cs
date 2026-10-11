@@ -226,8 +226,10 @@ public sealed class RentalOrderLifecycleDomainTests
         Assert.Equal("Device undergoing repair", item.SupplierDecisionReason);
         Assert.Equal("Optional note", item.SupplierDecisionNote);
         Assert.Equal(supplierId, item.SupplierDecisionBy);
+        // Assignments remain Assigned until Inventory confirms release
+        Assert.All(item.UnitAssignments, u => Assert.Equal(RentalUnitAssignmentStatus.Assigned, u.Status));
+        item.MarkAssignmentsReleased(rejectTime);
         Assert.All(item.UnitAssignments, u => Assert.Equal(RentalUnitAssignmentStatus.Released, u.Status));
-
         // Single item order -> all rejected -> Order moves to Rejected
         Assert.Equal(RentalOrderStatus.Rejected, order.Status);
     }

@@ -1,6 +1,6 @@
 using System.Diagnostics.Metrics;
 
-namespace Dprental.RentalService.Api.Observability;
+namespace Dprental.RentalService.Application.Observability;
 
 public sealed class RentalMetrics
 {
@@ -11,6 +11,7 @@ public sealed class RentalMetrics
     private readonly Counter<long> _dlqMessagesCounter;
     private readonly Counter<long> _releaseFailuresCounter;
     private readonly Counter<long> _refundFailuresCounter;
+    private readonly Counter<long> _uncertainExhaustedCounter;
 
     public RentalMetrics(IMeterFactory meterFactory)
     {
@@ -40,6 +41,11 @@ public sealed class RentalMetrics
             "rental.refund.failures",
             unit: "{failures}",
             description: "Số lần yêu cầu hoàn tiền thất bại");
+
+        _uncertainExhaustedCounter = meter.CreateCounter<long>(
+            "rental.operations.uncertain_exhausted",
+            unit: "{operations}",
+            description: "Số tác vụ hết lượt thử lại nhưng trạng thái chưa rõ kết quả");
     }
 
     public void RecordRetry(string action) => _operationsRetriedCounter.Add(1, new KeyValuePair<string, object?>("action", action));
@@ -47,4 +53,5 @@ public sealed class RentalMetrics
     public void RecordDlqMessage(string topic) => _dlqMessagesCounter.Add(1, new KeyValuePair<string, object?>("topic", topic));
     public void RecordReleaseFailure() => _releaseFailuresCounter.Add(1);
     public void RecordRefundFailure() => _refundFailuresCounter.Add(1);
+    public void RecordUncertainExhausted(string action) => _uncertainExhaustedCounter.Add(1, new KeyValuePair<string, object?>("action", action));
 }

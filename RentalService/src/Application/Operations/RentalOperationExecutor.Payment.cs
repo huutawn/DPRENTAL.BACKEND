@@ -31,6 +31,15 @@ public sealed partial class RentalOperationExecutor
         return await CancelInvoiceInternalAsync(order, receipt, operationKey, cancellationToken);
     }
 
+    internal async Task<Result> CancelInvoiceCoreAsync(
+        RentalOrder order,
+        RentalOperationReceipt receipt,
+        string operationKey,
+        CancellationToken cancellationToken)
+    {
+        return await CancelInvoiceInternalAsync(order, receipt, operationKey, cancellationToken);
+    }
+
     internal async Task<Result> CancelInvoiceInternalAsync(
         RentalOrder order,
         RentalOperationReceipt receipt,
@@ -41,7 +50,7 @@ public sealed partial class RentalOperationExecutor
         if (receipt.IsSuccess && receipt.Status == RentalOperationReceipt.StatusSucceeded) return Result.Success();
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-        receipt.MarkProcessing(utcNow);
+        receipt.BeginProviderAttempt(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
 
         CancelInvoiceRequest request;
@@ -49,7 +58,15 @@ public sealed partial class RentalOperationExecutor
         {
             try
             {
-                request = JsonSerializer.Deserialize<CancelInvoiceRequest>(receipt.PayloadJson, JsonOptions)!;
+                using var doc = JsonDocument.Parse(receipt.PayloadJson);
+                if (doc.RootElement.TryGetProperty("providerRequestJson", out var provProp))
+                {
+                    request = JsonSerializer.Deserialize<CancelInvoiceRequest>(provProp.GetString()!, JsonOptions)!;
+                }
+                else
+                {
+                    request = JsonSerializer.Deserialize<CancelInvoiceRequest>(receipt.PayloadJson, JsonOptions)!;
+                }
             }
             catch
             {
@@ -60,19 +77,17 @@ public sealed partial class RentalOperationExecutor
         {
             return Error.Failure("MISSING_REQUEST_PAYLOAD", "Thiếu request payload JSON cho CancelInvoice.");
         }
-
         var result = await _paymentClient.CancelInvoiceAsync(request, cancellationToken);
 
         utcNow = _timeProvider.GetUtcNow();
         if (result.IsSuccess)
         {
-            if (!result.Value.Cancelled)
+            if (!result.Value.Cancelled || !string.Equals(result.Value.InvoiceRef, order.InvoiceRef, StringComparison.OrdinalIgnoreCase))
             {
-                receipt.MarkFailed("CANCEL_UNCONFIRMED", "PaymentService không xác nhận hủy invoice (Cancelled != true).", utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+                RecordExecutionFailure(receipt, Error.Validation("CANCEL_UNCONFIRMED", "PaymentService không xác nhận hủy invoice (Cancelled != true hoặc InvoiceRef sai)."), utcNow, forceUncertain: true);
                 await CommitLocalChangesAsync(order, cancellationToken);
                 return Error.Unprocessable("CANCEL_UNCONFIRMED", "PaymentService không xác nhận hủy invoice.");
             }
-
             receipt.MarkSucceeded(utcNow, JsonSerializer.Serialize(result.Value, JsonOptions));
             await CommitLocalChangesAsync(order, cancellationToken);
             return Result.Success();
@@ -110,6 +125,16 @@ public sealed partial class RentalOperationExecutor
         return await RequestRefundInternalAsync(order, item, receipt, operationKey, cancellationToken);
     }
 
+    internal async Task<Result> RequestRefundCoreAsync(
+        RentalOrder order,
+        RentalItem item,
+        RentalOperationReceipt receipt,
+        string operationKey,
+        CancellationToken cancellationToken)
+    {
+        return await RequestRefundInternalAsync(order, item, receipt, operationKey, cancellationToken);
+    }
+
     internal async Task<Result> RequestRefundInternalAsync(
         RentalOrder order,
         RentalItem item,
@@ -131,15 +156,22 @@ public sealed partial class RentalOperationExecutor
         }
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-        receipt.MarkProcessing(utcNow);
+        receipt.BeginProviderAttempt(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
-
         RequestRefundRequest request;
         if (!string.IsNullOrWhiteSpace(receipt.PayloadJson))
         {
             try
             {
-                request = JsonSerializer.Deserialize<RequestRefundRequest>(receipt.PayloadJson, JsonOptions)!;
+                using var doc = JsonDocument.Parse(receipt.PayloadJson);
+                if (doc.RootElement.TryGetProperty("providerRequestJson", out var provProp))
+                {
+                    request = JsonSerializer.Deserialize<RequestRefundRequest>(provProp.GetString()!, JsonOptions)!;
+                }
+                else
+                {
+                    request = JsonSerializer.Deserialize<RequestRefundRequest>(receipt.PayloadJson, JsonOptions)!;
+                }
             }
             catch
             {
@@ -150,7 +182,6 @@ public sealed partial class RentalOperationExecutor
         {
             return Error.Failure("MISSING_REQUEST_PAYLOAD", "Thiếu request payload JSON cho RequestRefund.");
         }
-
         // Amount = 0 does not disburse
         if (request.TotalRefundAmount <= 0)
         {
@@ -166,13 +197,13 @@ public sealed partial class RentalOperationExecutor
         {
             var refundData = result.Value;
             if (string.IsNullOrWhiteSpace(refundData.RefundRef) ||
-                !string.Equals(refundData.Status, "Accepted", StringComparison.OrdinalIgnoreCase))
+                !string.Equals(refundData.Status, "Accepted", StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(refundData.OperationKey, operationKey, StringComparison.OrdinalIgnoreCase))
             {
-                receipt.MarkFailed("INVALID_REFUND_RESPONSE", "Phản hồi từ PaymentService không hợp lệ.", utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+                RecordExecutionFailure(receipt, Error.Validation("INVALID_REFUND_RESPONSE", "Phản hồi từ PaymentService không hợp lệ."), utcNow, forceUncertain: true);
                 await CommitLocalChangesAsync(order, cancellationToken);
                 return Error.Unprocessable("INVALID_REFUND_RESPONSE", "Phản hồi hoàn tiền từ PaymentService không hợp lệ.");
             }
-
             receipt.MarkSucceeded(utcNow, JsonSerializer.Serialize(refundData, JsonOptions));
             await CommitLocalChangesAsync(order, cancellationToken);
             return Result.Success();
@@ -296,5 +327,13 @@ public sealed partial class RentalOperationExecutor
         await CommitLocalChangesAsync(order, cancellationToken);
 
         return Result.Success();
+    }
+
+    internal async Task<Result> PaymentExpiryCoreAsync(
+        RentalOrder order,
+        RentalOperationReceipt receipt,
+        CancellationToken cancellationToken)
+    {
+        return await ExecutePaymentExpiryAsync(order.Id, receipt.OperationId, cancellationToken);
     }
 }

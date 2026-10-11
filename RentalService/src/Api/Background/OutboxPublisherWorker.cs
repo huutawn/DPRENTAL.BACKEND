@@ -94,44 +94,51 @@ public sealed class OutboxPublisherWorker : BackgroundService
     {
         using var scope = _scopeFactory.CreateScope();
         var outboxRepository = scope.ServiceProvider.GetRequiredService<IOutboxRepository>();
-        string workerId = Environment.MachineName + "_" + Environment.ProcessId;
+        string claimToken = Guid.NewGuid().ToString("N");
 
-        // Atomically claim batch of pending messages with 30s lease
-        var messages = await outboxRepository.ClaimPendingBatchAsync(workerId, TimeSpan.FromSeconds(30), 50, cancellationToken);
+        // Atomically claim batch of pending messages with 30s lease and unique claimToken
+        var messages = await outboxRepository.ClaimPendingBatchAsync(claimToken, TimeSpan.FromSeconds(30), 50, cancellationToken);
         if (messages.Count == 0)
         {
             return 0;
         }
 
-        _logger.LogInformation("OutboxPublisherWorker processing {Count} pending messages", messages.Count);
+        _logger.LogInformation("OutboxPublisherWorker processing {Count} pending messages with claim token {Token}", messages.Count, claimToken);
 
         int publishedCount = 0;
         foreach (var msg in messages)
         {
             try
             {
-                if (_producer != null)
+                if (_producer == null)
                 {
-                    var deliveryResult = await _producer.ProduceAsync(msg.Topic, new Message<string, string>
-                    {
-                        Key = msg.PartitionKey,
-                        Value = msg.Payload
-                    }, cancellationToken);
+                    throw new InvalidOperationException("Kafka producer chưa được cấu hình hoặc không kết nối được broker.");
+                }
 
-                    if (deliveryResult.Status != PersistenceStatus.Persisted)
-                    {
-                        throw new InvalidOperationException($"Kafka broker chưa xác nhận persist message: {deliveryResult.Status}");
-                    }
+                using var publishCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                publishCts.CancelAfter(TimeSpan.FromSeconds(10));
+
+                var deliveryResult = await _producer.ProduceAsync(msg.Topic, new Message<string, string>
+                {
+                    Key = msg.PartitionKey,
+                    Value = msg.Payload
+                }, publishCts.Token);
+
+                if (deliveryResult.Status != PersistenceStatus.Persisted)
+                {
+                    throw new InvalidOperationException($"Kafka broker chưa xác nhận persist message: {deliveryResult.Status}");
+                }
+
+                // MarkPublished only AFTER broker acknowledgment, returns true only if lease was still valid
+                bool published = await outboxRepository.MarkPublishedAsync(msg.Id, claimToken, DateTimeOffset.UtcNow, cancellationToken);
+                if (published)
+                {
+                    publishedCount++;
                 }
                 else
                 {
-                    // Simulated transport for test/local without broker
-                    _logger.LogInformation("Simulated broker ack for outbox message {MessageId} to topic {Topic}", msg.Id, msg.Topic);
+                    _logger.LogWarning("Outbox message {MessageId} lease expired or was reclaimed before completion could be saved.", msg.Id);
                 }
-
-                // MarkPublished only AFTER broker acknowledgment
-                await outboxRepository.MarkPublishedAsync(msg.Id, workerId, DateTimeOffset.UtcNow, cancellationToken);
-                publishedCount++;
             }
             catch (Exception ex)
             {
@@ -141,7 +148,7 @@ public sealed class OutboxPublisherWorker : BackgroundService
                 double baseDelay = Math.Min(60, Math.Pow(2, msg.RetryCount));
                 int jitterMs = Random.Shared.Next(0, 1000);
                 DateTimeOffset nextRetry = DateTimeOffset.UtcNow.AddSeconds(baseDelay).AddMilliseconds(jitterMs);
-                await outboxRepository.RecordFailureAsync(msg.Id, workerId, ex.Message, DateTimeOffset.UtcNow, nextRetry, cancellationToken);
+                await outboxRepository.RecordFailureAsync(msg.Id, claimToken, ex.Message, DateTimeOffset.UtcNow, nextRetry, cancellationToken);
             }
         }
 

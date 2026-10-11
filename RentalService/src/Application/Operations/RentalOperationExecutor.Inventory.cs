@@ -29,6 +29,15 @@ public sealed partial class RentalOperationExecutor
         var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == operationKey);
         if (receipt == null) return Error.NotFound("RECEIPT_NOT_FOUND", "Không tìm thấy operation receipt.");
 
+        return await ExtendHoldCoreAsync(order, item, receipt, cancellationToken);
+    }
+
+    internal async Task<Result> ExtendHoldCoreAsync(
+        RentalOrder order,
+        RentalItem item,
+        RentalOperationReceipt receipt,
+        CancellationToken cancellationToken)
+    {
         if (receipt.IsSuccess && receipt.Status == RentalOperationReceipt.StatusSucceeded)
         {
             return Result.Success();
@@ -47,7 +56,15 @@ public sealed partial class RentalOperationExecutor
         {
             try
             {
-                request = JsonSerializer.Deserialize<ExtendHoldRequest>(receipt.PayloadJson, JsonOptions)!;
+                using var doc = JsonDocument.Parse(receipt.PayloadJson);
+                if (doc.RootElement.TryGetProperty("providerRequestJson", out var provProp))
+                {
+                    request = JsonSerializer.Deserialize<ExtendHoldRequest>(provProp.GetString()!, JsonOptions)!;
+                }
+                else
+                {
+                    request = JsonSerializer.Deserialize<ExtendHoldRequest>(receipt.PayloadJson, JsonOptions)!;
+                }
             }
             catch
             {
@@ -59,7 +76,7 @@ public sealed partial class RentalOperationExecutor
             return Error.Failure("MISSING_REQUEST_PAYLOAD", "Thiếu request payload JSON cho ExtendHold.");
         }
 
-        receipt.MarkProcessing(utcNow);
+        receipt.BeginProviderAttempt(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
 
         // Call external HTTP without holding DB transaction
@@ -69,11 +86,12 @@ public sealed partial class RentalOperationExecutor
         if (result.IsSuccess)
         {
             var holdData = result.Value;
-            if (string.IsNullOrWhiteSpace(holdData.ReceiptRef))
+            if (string.IsNullOrWhiteSpace(holdData.ReceiptRef) ||
+                !string.Equals(holdData.AllocationGroupId, item.AllocationGroupId, StringComparison.OrdinalIgnoreCase))
             {
-                receipt.MarkFailed("INVALID_RECEIPT", "ReceiptRef từ Inventory không được rỗng.", utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+                RecordExecutionFailure(receipt, Error.Validation("INVALID_HOLD_RESPONSE", "ReceiptRef hoặc AllocationGroupId từ Inventory không hợp lệ."), utcNow, forceUncertain: true);
                 await CommitLocalChangesAsync(order, cancellationToken);
-                return Error.Unprocessable("INVALID_RECEIPT", "ReceiptRef từ Inventory không được rỗng.");
+                return Error.Unprocessable("INVALID_HOLD_RESPONSE", "Phản hồi ExtendHold từ Inventory không hợp lệ.");
             }
 
             receipt.MarkSucceeded(utcNow, JsonSerializer.Serialize(holdData, JsonOptions));
@@ -85,7 +103,7 @@ public sealed partial class RentalOperationExecutor
                 "rental-service",
                 order.Id.ToString("D"),
                 utcNow,
-                operationKey,
+                receipt.OperationId,
                 null,
                 new RentalSupplierConfirmationRequestedPayload(
                     order.Id,
@@ -114,7 +132,6 @@ public sealed partial class RentalOperationExecutor
             return await HandleHoldFailureAsync(order, item, receipt, result.Error.Message, cancellationToken);
         }
 
-        // Transient failure
         RecordExecutionFailure(receipt, result.Error, utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
 
@@ -138,6 +155,16 @@ public sealed partial class RentalOperationExecutor
         var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == operationKey);
         if (receipt == null) return Error.NotFound("RECEIPT_NOT_FOUND", "Không tìm thấy receipt.");
 
+        return await ReleaseAllocationCoreAsync(order, item, receipt, operationKey, cancellationToken);
+    }
+
+    internal async Task<Result> ReleaseAllocationCoreAsync(
+        RentalOrder order,
+        RentalItem item,
+        RentalOperationReceipt receipt,
+        string operationKey,
+        CancellationToken cancellationToken)
+    {
         return await ReleaseAllocationInternalAsync(order, item, receipt, operationKey, cancellationToken);
     }
 
@@ -151,7 +178,7 @@ public sealed partial class RentalOperationExecutor
         if (receipt.IsSuccess && receipt.Status == RentalOperationReceipt.StatusSucceeded) return Result.Success();
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-        receipt.MarkProcessing(utcNow);
+        receipt.BeginProviderAttempt(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
 
         ReleaseAllocationRequest request;
@@ -159,7 +186,15 @@ public sealed partial class RentalOperationExecutor
         {
             try
             {
-                request = JsonSerializer.Deserialize<ReleaseAllocationRequest>(receipt.PayloadJson, JsonOptions)!;
+                using var doc = JsonDocument.Parse(receipt.PayloadJson);
+                if (doc.RootElement.TryGetProperty("providerRequestJson", out var provProp))
+                {
+                    request = JsonSerializer.Deserialize<ReleaseAllocationRequest>(provProp.GetString()!, JsonOptions)!;
+                }
+                else
+                {
+                    request = JsonSerializer.Deserialize<ReleaseAllocationRequest>(receipt.PayloadJson, JsonOptions)!;
+                }
             }
             catch
             {
@@ -176,12 +211,16 @@ public sealed partial class RentalOperationExecutor
         utcNow = _timeProvider.GetUtcNow();
         if (result.IsSuccess)
         {
-            if (string.IsNullOrWhiteSpace(result.Value.ReceiptRef))
+            if (string.IsNullOrWhiteSpace(result.Value.ReceiptRef) ||
+                !string.Equals(result.Value.AllocationGroupId, item.AllocationGroupId, StringComparison.OrdinalIgnoreCase))
             {
-                receipt.MarkFailed("INVALID_RECEIPT", "ReceiptRef từ Inventory không được rỗng.", utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+                RecordExecutionFailure(receipt, Error.Validation("INVALID_RECEIPT", "ReceiptRef hoặc AllocationGroupId từ Inventory không hợp lệ."), utcNow, forceUncertain: true);
                 await CommitLocalChangesAsync(order, cancellationToken);
                 return Error.Unprocessable("INVALID_RECEIPT", "ReceiptRef từ Inventory không được rỗng.");
             }
+
+            // UnitAssignments only marked Released after valid Inventory receipt!
+            item.MarkAssignmentsReleased();
 
             receipt.MarkSucceeded(utcNow, JsonSerializer.Serialize(result.Value, JsonOptions));
             await CommitLocalChangesAsync(order, cancellationToken);

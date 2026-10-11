@@ -36,38 +36,52 @@ public sealed partial class RentalOperationExecutor
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         string normalizedKey = idempotencyKey.Trim();
-        string fingerprint = ComputeFingerprint($"accept:{itemId}:{supplierId}");
+        string structuredFingerprint = ComputeFingerprint(new { Action = "SupplierAccept", ItemId = itemId, SupplierId = supplierId });
+        string legacyFingerprint = ComputeFingerprint($"accept:{itemId}:{supplierId}");
+        string fingerprint = structuredFingerprint;
 
         // 1. Replay check on existing receipt with same key
         var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == normalizedKey);
         if (existingReceipt != null)
         {
+            bool isFingerprintMatch = string.Equals(existingReceipt.Fingerprint, structuredFingerprint, StringComparison.OrdinalIgnoreCase) ||
+                                      string.Equals(existingReceipt.Fingerprint, legacyFingerprint, StringComparison.OrdinalIgnoreCase);
+
+            if (existingReceipt.Action != "SupplierAccept" ||
+                existingReceipt.TargetItemId != itemId ||
+                !isFingerprintMatch)
+            {
+                return Error.Conflict("IDEMPOTENCY_CONFLICT", "Khóa idempotency đã được sử dụng với hành động hoặc nội dung khác.");
+            }
+
             if (existingReceipt.IsSuccess && existingReceipt.Status == RentalOperationReceipt.StatusSucceeded)
             {
-                if (existingReceipt.Action == "SupplierAccept" &&
-                    existingReceipt.TargetItemId == itemId &&
-                    string.Equals(existingReceipt.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase))
+                if (string.IsNullOrWhiteSpace(existingReceipt.ApiResponseJson))
                 {
-                    if (string.IsNullOrWhiteSpace(existingReceipt.ApiResponseJson))
-                    {
-                        return Error.Failure("CORRUPTED_JOURNAL_RESPONSE", "Dữ liệu phản hồi trong journal bị hỏng.");
-                    }
-                    try
-                    {
-                        var storedResp = JsonSerializer.Deserialize<SupplierDecisionResponse>(existingReceipt.ApiResponseJson, JsonOptions);
-                        if (storedResp != null) return storedResp;
-                    }
-                    catch
-                    {
-                        return Error.Failure("CORRUPTED_JOURNAL_RESPONSE", "Dữ liệu phản hồi trong journal không hợp lệ.");
-                    }
+                    return Error.Failure("CORRUPTED_JOURNAL_RESPONSE", "Dữ liệu phản hồi trong journal bị hỏng.");
+                }
+                try
+                {
+                    var storedResp = JsonSerializer.Deserialize<SupplierDecisionResponse>(existingReceipt.ApiResponseJson, JsonOptions);
+                    if (storedResp != null) return storedResp;
+                }
+                catch
+                {
+                    return Error.Failure("CORRUPTED_JOURNAL_RESPONSE", "Dữ liệu phản hồi trong journal không hợp lệ.");
                 }
                 return Error.Conflict("IDEMPOTENCY_CONFLICT", "Khóa idempotency đã được sử dụng với hành động hoặc nội dung khác.");
             }
 
-            // In-flight processing with same key -> continue operation
-        }
+            if (existingReceipt.ErrorClassification == RentalOperationReceipt.ClassificationUncertainExhausted)
+            {
+                return Error.Conflict("UNCERTAIN_EXHAUSTED", "Yêu cầu trước đó đã hết ngân sách thử lại nhưng chưa rõ kết quả; cần can thiệp Admin replay.");
+            }
 
+            if (existingReceipt.NextRetryAt.HasValue && existingReceipt.NextRetryAt.Value > utcNow)
+            {
+                return Error.ServiceUnavailable("RETRY_SCHEDULED", "Yêu cầu đang chờ thời điểm thử lại tự động theo lịch.");
+            }
+        }
         // 2. DECISION_IN_PROGRESS check: check if any in-flight accept intent exists with different key
         if (existingReceipt == null && order.HasInFlightAccept(itemId))
         {
@@ -85,11 +99,10 @@ public sealed partial class RentalOperationExecutor
             return Error.Conflict("ORDER_NOT_PAID", "Đơn hàng chưa được thanh toán.");
         }
 
-        if (item.SupplierConfirmationDeadline.HasValue && utcNow >= item.SupplierConfirmationDeadline.Value)
+        if (existingReceipt == null && item.SupplierConfirmationDeadline.HasValue && utcNow >= item.SupplierConfirmationDeadline.Value)
         {
             return Error.Expired("SUPPLIER_DEADLINE_EXPIRED", "Đã quá thời hạn xác nhận của supplier.");
         }
-
         // 4. ExtendHold must be Succeeded
         string holdOpKey = ComputeOperationKey("ExtendHold", $"{order.Id}:{item.Id}");
         var holdReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == holdOpKey || (r.Action == "ExtendHold" && r.TargetItemId == item.Id));
@@ -99,6 +112,19 @@ public sealed partial class RentalOperationExecutor
         }
 
         // 5. Claim intent in journal before HTTP call
+        var confirmReq = new ConfirmAllocationRequest(normalizedKey);
+        var command = new RentalOperationCommand(
+            1,
+            "SupplierAccept",
+            order.Id,
+            item.Id,
+            normalizedKey,
+            item.AllocationGroupId,
+            supplierId,
+            JsonSerializer.Serialize(confirmReq, JsonOptions));
+
+        string commandJson = JsonSerializer.Serialize(command, JsonOptions);
+
         var receipt = existingReceipt ?? new RentalOperationReceipt(
             Guid.NewGuid(),
             order.Id,
@@ -110,7 +136,8 @@ public sealed partial class RentalOperationExecutor
             errorMessage: null,
             createdAt: utcNow,
             status: RentalOperationReceipt.StatusProcessing,
-            targetItemId: item.Id);
+            targetItemId: item.Id,
+            payloadJson: commandJson);
 
         if (existingReceipt == null)
         {
@@ -120,7 +147,6 @@ public sealed partial class RentalOperationExecutor
         {
             receipt.MarkProcessing(utcNow);
         }
-
         await CommitLocalChangesAsync(order, cancellationToken);
 
         // 6. Execute ConfirmAllocation core
@@ -151,17 +177,20 @@ public sealed partial class RentalOperationExecutor
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         string normalizedKey = idempotencyKey.Trim();
-        string fingerprint = ComputeFingerprint($"reject:{itemId}:{reason}:{note}");
-
-        // Replay check
+        string structuredFingerprint = ComputeFingerprint(new { Action = "SupplierReject", ItemId = itemId, SupplierId = supplierId, Reason = reason, Note = note });
+        string legacyFingerprint = ComputeFingerprint($"reject:{itemId}:{reason}:{note}");
+        string fingerprint = structuredFingerprint;
         var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == normalizedKey);
         if (existingReceipt != null)
         {
+            bool isFingerprintMatch = string.Equals(existingReceipt.Fingerprint, structuredFingerprint, StringComparison.OrdinalIgnoreCase) ||
+                                      string.Equals(existingReceipt.Fingerprint, legacyFingerprint, StringComparison.OrdinalIgnoreCase);
+
             if (existingReceipt.IsSuccess && existingReceipt.Status == RentalOperationReceipt.StatusSucceeded)
             {
                 if (existingReceipt.Action == "SupplierReject" &&
                     existingReceipt.TargetItemId == itemId &&
-                    string.Equals(existingReceipt.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase))
+                    isFingerprintMatch)
                 {
                     if (string.IsNullOrWhiteSpace(existingReceipt.ApiResponseJson))
                     {
@@ -225,24 +254,35 @@ public sealed partial class RentalOperationExecutor
             apiResponseJson: apiResponseJson);
         order.AddOperationReceipt(rejectReceipt);
 
-        // Schedule ReleaseAllocation and single logical RequestRefund
+        // Schedule ReleaseAllocation and single logical RequestRefund with RentalOperationCommand
         string releaseOpKey = ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
         var releaseReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == releaseOpKey);
         if (releaseReceipt == null)
         {
+            var releaseReq = new ReleaseAllocationRequest(releaseOpKey, reason);
+            var relCmd = new RentalOperationCommand(
+                1,
+                "ReleaseAllocation",
+                order.Id,
+                item.Id,
+                releaseOpKey,
+                item.AllocationGroupId,
+                supplierId,
+                JsonSerializer.Serialize(releaseReq, JsonOptions));
+
             releaseReceipt = new RentalOperationReceipt(
                 Guid.NewGuid(),
                 order.Id,
                 releaseOpKey,
                 "ReleaseAllocation",
-                ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.AllocationGroupId}"),
+                ComputeFingerprint($"ReleaseAllocation:{item.AllocationGroupId}"),
                 isSuccess: false,
                 errorCode: null,
                 errorMessage: null,
                 createdAt: utcNow,
                 status: RentalOperationReceipt.StatusPending,
                 targetItemId: item.Id,
-                payloadJson: JsonSerializer.Serialize(new ReleaseAllocationRequest(releaseOpKey, reason), JsonOptions));
+                payloadJson: JsonSerializer.Serialize(relCmd, JsonOptions));
             order.AddOperationReceipt(releaseReceipt);
         }
 
@@ -251,12 +291,23 @@ public sealed partial class RentalOperationExecutor
         if (refundReceipt == null)
         {
             var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
+            var refundReq = new RequestRefundRequest(order.Id, order.InvoiceRef!, order.PaymentRef!, refundItems, reason, refundOpKey);
+            var refundCmd = new RentalOperationCommand(
+                1,
+                "RequestRefund",
+                order.Id,
+                item.Id,
+                refundOpKey,
+                null,
+                supplierId,
+                JsonSerializer.Serialize(refundReq, JsonOptions));
+
             refundReceipt = new RentalOperationReceipt(
                 Guid.NewGuid(),
                 order.Id,
                 refundOpKey,
                 "RequestRefund",
-                ComputeOperationKey("RequestRefund", $"{order.Id}:{item.RentalAmount + item.DepositAmount}"),
+                ComputeFingerprint($"RequestRefund:{order.Id}:{item.RentalAmount + item.DepositAmount}"),
                 isSuccess: false,
                 errorCode: null,
                 errorMessage: null,
@@ -264,10 +315,9 @@ public sealed partial class RentalOperationExecutor
                 status: RentalOperationReceipt.StatusPending,
                 targetItemId: item.Id,
                 prerequisiteOperationId: releaseOpKey,
-                payloadJson: JsonSerializer.Serialize(new RequestRefundRequest(order.Id, order.InvoiceRef!, order.PaymentRef!, refundItems, reason, refundOpKey), JsonOptions));
+                payloadJson: JsonSerializer.Serialize(refundCmd, JsonOptions));
             order.AddOperationReceipt(refundReceipt);
         }
-
         var notifyEnvelope = new RentalEventEnvelope<RentalItemRejectedPayload>(
             Guid.NewGuid(),
             RentalEventTypes.RentalItemRejected,
@@ -332,11 +382,17 @@ public sealed partial class RentalOperationExecutor
         bool isReconciliation,
         CancellationToken cancellationToken)
     {
+        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
+
+        // Begin provider attempt before HTTP call
+        receipt.BeginProviderAttempt(utcNow);
+        await CommitLocalChangesAsync(order, cancellationToken);
+
         // Call Inventory ConfirmAllocation without holding DB transaction
         var confirmReq = new ConfirmAllocationRequest(operationKey);
         var confirmResult = await _inventoryClient.ConfirmAllocationAsync(item.AllocationGroupId, confirmReq, cancellationToken);
 
-        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
+        utcNow = _timeProvider.GetUtcNow();
         if (confirmResult.IsFailure)
         {
             _logger.LogWarning("ConfirmAllocation for item {ItemId} failed: {Code} - {Msg}", item.Id, confirmResult.Error.Code, confirmResult.Error.Message);
@@ -349,7 +405,8 @@ public sealed partial class RentalOperationExecutor
         var validation = ValidateAllocationResponse(item, confirmData);
         if (validation.IsFailure)
         {
-            receipt.MarkFailed("INVALID_ALLOCATION", validation.Error.Message, utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+            // 2xx response with invalid payload is UNCERTAIN! Not safe business failure!
+            RecordExecutionFailure(receipt, validation.Error, utcNow, forceUncertain: true);
             await CommitLocalChangesAsync(order, cancellationToken);
             return validation.Error;
         }

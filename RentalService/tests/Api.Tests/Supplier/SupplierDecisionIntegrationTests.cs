@@ -406,11 +406,20 @@ public sealed class SupplierDecisionIntegrationTests
 
         var reloaded = await db.RentalItems.Include(i => i.UnitAssignments).FirstAsync(i => i.Id == item.Id);
         Assert.Equal(RentalItemStatus.Rejected, reloaded.Status);
-        Assert.All(reloaded.UnitAssignments, u => Assert.Equal(RentalUnitAssignmentStatus.Released, u.Status));
+        // Invariant: UnitAssignments remain Assigned until valid Inventory release receipt confirms release
+        Assert.All(reloaded.UnitAssignments, u => Assert.Equal(RentalUnitAssignmentStatus.Assigned, u.Status));
         string releaseOpKey = RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
         var releaseReceipt = await db.RentalOperationReceipts.FirstOrDefaultAsync(r => r.OperationId == releaseOpKey);
         Assert.NotNull(releaseReceipt);
         Assert.Equal("Pending", releaseReceipt.Status);
+
+        // Execute release to verify units become Released after Inventory ACK
+        var executor = new RentalOperationExecutor(new RentalOrderRepository(db), new OperationReceiptRepository(db), new OutboxRepository(db), new FakeOrderLockManager(), inventoryClient, new StubPaymentClient(), db, new ConfigurationBuilder().Build(), NullLogger<RentalOperationExecutor>.Instance);
+        var relRes = await executor.ExecuteReleaseAllocationAsync(order.Id, item.Id, releaseOpKey);
+        Assert.True(relRes.IsSuccess);
+
+        var reloadedAfterRelease = await db.RentalItems.Include(i => i.UnitAssignments).FirstAsync(i => i.Id == item.Id);
+        Assert.All(reloadedAfterRelease.UnitAssignments, u => Assert.Equal(RentalUnitAssignmentStatus.Released, u.Status));
         var outbox = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "RentalItemRejected");
         Assert.NotNull(outbox);
     }

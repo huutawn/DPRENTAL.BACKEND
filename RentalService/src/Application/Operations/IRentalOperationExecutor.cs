@@ -1,8 +1,17 @@
 using Dprental.RentalService.Application.DTOs.Supplier;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Domain.IRepositories;
 
 namespace Dprental.RentalService.Application.Operations;
+
+public sealed record AdminReplayResponse(
+    Guid OrderId,
+    string OperationId,
+    string Action,
+    string Status,
+    int RetryCount,
+    DateTimeOffset ReplayedAt);
 
 public interface IRentalOperationExecutor
 {
@@ -59,5 +68,17 @@ public interface IRentalOperationExecutor
     Task<Result> ReplayStoredOperationAsync(
         Guid orderId,
         string operationId,
+        CancellationToken cancellationToken = default);
+
+    Task<Result> ExecuteScheduledOperationAsync(
+        OperationReceiptDescriptor descriptor,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<AdminReplayResponse>> ExecuteAdminReplayAsync(
+        Guid orderId,
+        string operationId,
+        Guid adminActorId,
+        string reason,
+        string idempotencyKey,
         CancellationToken cancellationToken = default);
 }
