@@ -1,5 +1,6 @@
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Xunit;

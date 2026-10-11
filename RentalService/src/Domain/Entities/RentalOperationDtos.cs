@@ -39,3 +39,13 @@ public sealed record InitialRentalItemDto(
     decimal DepositPerUnitSnapshot,
     string AllocationGroupId,
     IEnumerable<InitialRentalUnitAssignmentDto> Assignments);
+
+public sealed record RentalOperationCommand(
+    int Version,
+    string Action,
+    Guid RentalOrderId,
+    Guid? TargetItemId,
+    string OperationKey,
+    string? TargetGroupOrReference,
+    Guid? ActorId,
+    string? ProviderRequestJson);

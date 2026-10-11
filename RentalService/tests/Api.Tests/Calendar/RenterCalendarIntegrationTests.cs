@@ -8,7 +8,9 @@ using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Security.Jwt;
 using Dprental.RentalService.Application.Services;
 using Dprental.RentalService.Common.Enums;
+using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Domain.Repositories;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -34,6 +36,9 @@ public sealed class RenterCalendarIntegrationTests
             .Options;
         return new RentalServiceDbContext(options);
     }
+
+    private static RentalCalendarService CreateCalendarService(RentalServiceDbContext db) =>
+        new(new RentalOrderRepository(db), new TestTimeProvider(FixedNow));
 
     private static RentalOrder CreateOrderWithItem(
         Guid renterId,
@@ -94,7 +99,7 @@ public sealed class RenterCalendarIntegrationTests
     public async Task GetRenterCalendar_Unauthenticated_ReturnsUnauthorized()
     {
         await using var db = CreateInMemoryDbContext(Guid.NewGuid().ToString("N"));
-        var service = new RentalCalendarService(db, new TestTimeProvider(FixedNow));
+        var service = CreateCalendarService(db);
 
         var result = await service.GetRenterCalendarAsync("2026-10", 1, 50, RentalCallerContext.Anonymous);
 
@@ -106,7 +111,7 @@ public sealed class RenterCalendarIntegrationTests
     public async Task GetRenterCalendar_ServiceCaller_ReturnsForbidden()
     {
         await using var db = CreateInMemoryDbContext(Guid.NewGuid().ToString("N"));
-        var service = new RentalCalendarService(db, new TestTimeProvider(FixedNow));
+        var service = CreateCalendarService(db);
 
         var serviceCaller = CreateServiceCaller("payment-worker");
         var result = await service.GetRenterCalendarAsync("2026-10", 1, 50, serviceCaller);
@@ -124,7 +129,7 @@ public sealed class RenterCalendarIntegrationTests
     public async Task GetRenterCalendar_InvalidMonthFormat_ReturnsValidationError(string invalidMonth)
     {
         await using var db = CreateInMemoryDbContext(Guid.NewGuid().ToString("N"));
-        var service = new RentalCalendarService(db, new TestTimeProvider(FixedNow));
+        var service = CreateCalendarService(db);
 
         var caller = CreateUserCaller(Guid.NewGuid());
         var result = await service.GetRenterCalendarAsync(invalidMonth, 1, 50, caller);
@@ -141,7 +146,7 @@ public sealed class RenterCalendarIntegrationTests
     public async Task GetRenterCalendar_DifferentMonthLengths_ReturnsCorrectNumberOfDays(string month, int expectedDays)
     {
         await using var db = CreateInMemoryDbContext(Guid.NewGuid().ToString("N"));
-        var service = new RentalCalendarService(db, new TestTimeProvider(FixedNow));
+        var service = CreateCalendarService(db);
 
         var caller = CreateUserCaller(Guid.NewGuid());
         var result = await service.GetRenterCalendarAsync(month, 1, 50, caller);
@@ -156,7 +161,7 @@ public sealed class RenterCalendarIntegrationTests
     public async Task GetRenterCalendar_DefaultMonth_UsesVietnamCurrentMonth()
     {
         await using var db = CreateInMemoryDbContext(Guid.NewGuid().ToString("N"));
-        var service = new RentalCalendarService(db, new TestTimeProvider(FixedNow));
+        var service = CreateCalendarService(db);
 
         var caller = CreateUserCaller(Guid.NewGuid());
         var result = await service.GetRenterCalendarAsync(null, 1, 50, caller);
@@ -205,7 +210,7 @@ public sealed class RenterCalendarIntegrationTests
 
         await using (var db = CreateInMemoryDbContext(dbName))
         {
-            var service = new RentalCalendarService(db, new TestTimeProvider(FixedNow));
+            var service = CreateCalendarService(db);
             var caller = CreateUserCaller(renterId, roles: ["customer"]);
 
             var result = await service.GetRenterCalendarAsync("2026-10", 1, 50, caller);
@@ -275,7 +280,7 @@ public sealed class RenterCalendarIntegrationTests
 
         await using (var db = CreateInMemoryDbContext(dbName))
         {
-            var service = new RentalCalendarService(db, new TestTimeProvider(FixedNow));
+            var service = CreateCalendarService(db);
             var caller = CreateUserCaller(renterId);
 
             // Page 1 with pageSize = 2
@@ -319,7 +324,7 @@ public sealed class RenterCalendarIntegrationTests
 
         await using (var db = CreateInMemoryDbContext(dbName))
         {
-            var service = new RentalCalendarService(db, new TestTimeProvider(FixedNow));
+            var service = CreateCalendarService(db);
             // Admin caller
             var adminCaller = CreateUserCaller(adminId, roles: ["admin", "adm"]);
 
