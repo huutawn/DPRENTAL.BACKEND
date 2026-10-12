@@ -9,8 +9,12 @@ using Microsoft.AspNetCore.Mvc;
 namespace Dprental.RentalService.Api.Controllers;
 
 /// <summary>
-/// Endpoint quản trị thống kê xác nhận của supplier từ Rental history.
+/// Quản trị số liệu thống kê xác nhận của Nhà cung cấp (Supplier Confirmation Statistics).
 /// </summary>
+/// <remarks>
+/// Cung cấp endpoint dành riêng cho Quản trị viên (Admin) để theo dõi và đánh giá hiệu suất phản hồi đơn thuê của Supplier
+/// (tỷ lệ chấp nhận, từ chối, quá hạn xác nhận, hủy sau khi chấp nhận) dựa trên lịch sử chuyển trạng thái trong RentalService.
+/// </remarks>
 [ApiController]
 [Authorize]
 [Route("admin/suppliers")]
@@ -28,8 +32,25 @@ public sealed class AdminSupplierStatisticsController : ControllerBase
     }
 
     /// <summary>
-    /// Thống kê xác nhận của supplier theo khoảng thời gian (GET /api/v1/rental/admin/suppliers/{supplierId}/confirmation-statistics).
+    /// Thống kê tỷ lệ và số lượng xác nhận của Supplier theo khoảng thời gian.
     /// </summary>
+    /// <remarks>
+    /// Trả về số liệu thống kê các quyết định của Supplier trong khoảng thời gian chỉ định:
+    /// - <c>AcceptedCount</c>: Số lượng mục thuê Supplier đã chấp nhận (chuyển sang AWAITING_HANDOVER, IN_RENTAL, COMPLETED, v.v.).
+    /// - <c>RejectedCount</c>: Số lượng mục thuê Supplier đã chủ động từ chối (REJECTED).
+    /// - <c>ConfirmationTimeoutCount</c>: Số lượng mục thuê bị hệ thống tự động hủy do Supplier quá hạn phản hồi (EXPIRED).
+    /// - <c>CancelAfterAcceptCount</c>: Số lượng mục thuê bị hủy sau khi Supplier đã chấp nhận.
+    /// Yêu cầu người gọi có quyền Admin.
+    /// </remarks>
+    /// <param name="supplierId">Mã định danh duy nhất của nhà cung cấp (SupplierId dạng GUID).</param>
+    /// <param name="fromUtc">Thời điểm bắt đầu khoảng thống kê theo chuẩn ISO-8601 UTC (tùy chọn, ví dụ: 2026-01-01T00:00:00Z).</param>
+    /// <param name="toUtc">Thời điểm kết thúc khoảng thống kê theo chuẩn ISO-8601 UTC (tùy chọn, ví dụ: 2026-02-01T00:00:00Z).</param>
+    /// <param name="cancellationToken">Token hủy yêu cầu.</param>
+    /// <response code="200">Lấy dữ liệu thống kê thành công.</response>
+    /// <response code="400">Mã Supplier ID không hợp lệ hoặc khoảng thời gian fromUtc/toUtc sai định dạng/ngược thứ tự.</response>
+    /// <response code="401">Người dùng chưa được xác thực.</response>
+    /// <response code="403">Người dùng không có quyền Admin.</response>
+    /// <returns>Dữ liệu thống kê số lượng đơn xác nhận, từ chối và quá hạn của Supplier.</returns>
     [HttpGet("{supplierId}/confirmation-statistics")]
     [ProducesResponseType(typeof(SupplierConfirmationStatisticsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
