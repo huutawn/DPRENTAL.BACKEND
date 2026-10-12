@@ -167,6 +167,35 @@ public static class RentalAuthorizationPolicy
     }
 
     /// <summary>
+    /// Evaluates whether the caller has authority to access admin supplier statistics.
+    /// Invariant: Only authenticated human administrators can view supplier statistics.
+    /// </summary>
+    public static Result AuthorizeAdminStatisticsRead(IRentalCallerContext caller)
+    {
+        if (!caller.IsAuthenticated)
+        {
+            return Error.Unauthorized(ErrorCodes.Unauthorized, "Yêu cầu đăng nhập.");
+        }
+
+        if (caller.IsService)
+        {
+            return Error.Forbidden(ErrorCodes.ServiceTokenNotAllowed, "Service token không được truy cập số liệu thống kê quản trị.");
+        }
+
+        if (!caller.UserId.HasValue)
+        {
+            return Error.Unauthorized(ErrorCodes.Unauthorized, "Yêu cầu danh tính người dùng hợp lệ.");
+        }
+
+        if (!caller.IsAdmin())
+        {
+            return Error.Forbidden(ErrorCodes.Forbidden, "Chỉ quản trị viên mới có quyền xem thống kê của supplier.");
+        }
+
+        return Result.Success();
+    }
+
+    /// <summary>
     /// Evaluates whether the caller has authority to access private evidence media for a given rental item/order.
     /// Invariants:
     /// - Caller must be platform admin, the order's renter, or the item's supplier.

@@ -15,6 +15,9 @@ internal sealed class FakeCartRepository : IRentalCartRepository
 {
     public RentalCart? Cart { get; set; }
 
+    public Task<RentalCart?> GetActiveByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Cart?.RenterId == renterId && Cart.Status == RentalCartStatus.Active ? Cart : null);
+
     public Task<RentalCart?> GetByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Cart?.RenterId == renterId ? Cart : null);
 
@@ -34,6 +37,13 @@ internal sealed class FakeCartRepository : IRentalCartRepository
 internal sealed class FakeOrderRepository : IRentalOrderRepository
 {
     public RentalOrder? PendingPaymentOrder { get; set; }
+
+    public Task<SupplierConfirmationStatisticsRecord> GetSupplierConfirmationStatisticsAsync(
+        Guid supplierId,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new SupplierConfirmationStatisticsRecord(0, 0, 0, 0));
 
     public Task<RentalOrder?> GetPendingPaymentByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default) =>
         Task.FromResult(PendingPaymentOrder?.RenterId == renterId ? PendingPaymentOrder : null);

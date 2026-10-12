@@ -9,6 +9,7 @@ namespace Dprental.RentalService.Domain.Entities;
 [Index(nameof(RentalOrderId))]
 [Index(nameof(RentalItemId))]
 [Index(nameof(OccurredAt))]
+[Index(nameof(RentalItemId), nameof(Action), nameof(OccurredAt))]
 public class RentalStateTransition
 {
     [Key]

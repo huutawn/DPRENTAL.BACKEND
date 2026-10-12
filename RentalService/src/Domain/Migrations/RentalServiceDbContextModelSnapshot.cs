@@ -189,6 +189,9 @@ namespace RentalService.Domain.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("EquipmentListingId")
                         .HasColumnType("uuid");
 
@@ -203,6 +206,9 @@ namespace RentalService.Domain.Migrations
 
                     b.Property<Guid>("RentalCartId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
@@ -785,6 +791,8 @@ namespace RentalService.Domain.Migrations
                     b.HasIndex("RentalItemId");
 
                     b.HasIndex("RentalOrderId");
+
+                    b.HasIndex("RentalItemId", "Action", "OccurredAt");
 
                     b.ToTable("rental_state_transitions", "rental");
                 });

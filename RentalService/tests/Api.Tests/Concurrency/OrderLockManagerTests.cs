@@ -20,9 +20,7 @@ public sealed class OrderLockManagerTests
     }
 
     private static string TestConnectionString =>
-        Environment.GetEnvironmentVariable("POSTGRESQL_TEST_CONNECTION_STRING")
-        ?? Environment.GetEnvironmentVariable("RENTAL_TEST_POSTGRES_CONNECTION")
-        ?? "Host=127.0.0.1;Port=5433;Database=postgres;Username=inventoryservice;Password=inventory_test_secret_123!;Include Error Detail=true";
+        Dprental.RentalService.Api.Tests.TestHelpers.PostgresTestDatabaseHelper.BaseConnectionString;
 
     private static IConfiguration CreateConfig() =>
         new ConfigurationBuilder()
