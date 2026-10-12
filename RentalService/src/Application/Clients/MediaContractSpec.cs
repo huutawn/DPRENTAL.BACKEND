@@ -2,7 +2,7 @@ namespace Dprental.RentalService.Application.Clients;
 
 /// <summary>
 /// Specification metadata and wire constants for Rental–Media Contract v1.
-/// NOTE: Uses X-Api-Key internal header reflecting active gateway & media service deployment.
+/// NOTE: Uses X-Api-Key internal header reflecting active gateway &amp; media service deployment.
 /// </summary>
 public static class MediaContractSpec
 {

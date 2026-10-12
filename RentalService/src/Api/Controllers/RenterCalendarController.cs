@@ -8,6 +8,13 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Dprental.RentalService.Api.Controllers;
 
+/// <summary>
+/// Quản lý lịch thuê cá nhân (Renter Calendar) của người thuê thiết bị.
+/// </summary>
+/// <remarks>
+/// Cung cấp dữ liệu lịch thuê theo tháng của người dùng hiện tại, bao gồm mật độ số lượng thiết bị thuê theo từng ngày
+/// và danh sách chi tiết các mục thuê trong tháng kèm phân trang. Tuyệt đối bảo mật, không để lộ mã thiết bị hay số serial.
+/// </remarks>
 [ApiController]
 [Authorize]
 [Route("me")]
@@ -25,18 +32,33 @@ public sealed class RenterCalendarController : ControllerBase
     }
 
     /// <summary>
-    /// Đọc lịch thuê cá nhân của người thuê hiện tại (/api/v1/rental/me/calendar).
+    /// Tra cứu lịch thuê thiết bị cá nhân của người thuê theo từng tháng.
     /// </summary>
-    /// <param name="month">Tháng truy vấn theo định dạng YYYY-MM (mặc định tháng hiện tại theo giờ Việt Nam).</param>
-    /// <param name="page">Số trang phân trang.</param>
-    /// <param name="pageSize">Kích thước trang (tối đa 100).</param>
+    /// <remarks>
+    /// Cung cấp dữ liệu lịch thuê cá nhân của người thuê hiện tại:
+    /// - <c>days</c>: Danh sách tất cả các ngày trong tháng cùng tổng số lượng thiết bị đang thuê trong mỗi ngày.
+    /// - <c>entries</c>: Danh sách chi tiết các mục thuê hợp lệ trong tháng (bao gồm mã đơn hàng, tên bài niêm yết, số lượng, khoảng ngày thuê, trạng thái).
+    /// - **Bảo mật và riêng tư**: Tuyệt đối không để lộ mã thiết bị vật lý (<c>AssetCode</c>), số sê-ri (<c>SerialNumber</c>) hoặc thông tin phân bổ nội bộ (<c>AllocationId</c>).
+    /// - Múi giờ kinh doanh: Việt Nam (<c>Asia/Ho_Chi_Minh</c>).
+    /// </remarks>
+    /// <param name="month">Tháng truy vấn theo định dạng <c>YYYY-MM</c> (ví dụ: <c>2026-10</c>). Mặc định là tháng hiện tại theo giờ Việt Nam.</param>
+    /// <param name="page">Số thứ tự trang cần lấy trong danh sách entries (mặc định là 1).</param>
+    /// <param name="pageSize">Số lượng mục thuê tối đa trên mỗi trang (mặc định là 50, giới hạn tối đa 100).</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
-    /// <returns>Dữ liệu lịch thuê cá nhân gồm các ngày trong tháng và danh sách entries.</returns>
+    /// <response code="200">Lấy dữ liệu lịch thuê thành công.</response>
+    /// <response code="400">Tham số tháng sai định dạng (không khớp YYYY-MM) hoặc phân trang không hợp lệ.</response>
+    /// <response code="401">Người dùng chưa được xác thực.</response>
+    /// <response code="403">Người dùng không có quyền truy cập dữ liệu này.</response>
+    /// <response code="404">Không tìm thấy dữ liệu lịch thuê phù hợp.</response>
+    /// <response code="409">Xung đột dữ liệu khi truy vấn lịch thuê.</response>
+    /// <returns>Dữ liệu lịch thuê cá nhân gồm tổng hợp ngày trong tháng và danh sách mục thuê chi tiết.</returns>
     [HttpGet("calendar")]
     [ProducesResponseType(typeof(RenterCalendarResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> GetMyCalendar(
         [FromQuery] string? month,
         [FromQuery] int page = 1,
