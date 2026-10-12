@@ -19,14 +19,9 @@ public interface IEquipmentListingRepository : IRepo<EquipmentListing, Guid>
     Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Lấy danh sách Listing của người sở hữu kèm phân trang.
+    /// Tìm kiếm và phân trang Listing của người sở hữu kèm derived totalQuantity trong RepeatableRead transaction (2 SELECTs).
     /// </summary>
-    Task<IReadOnlyList<EquipmentListing>> ListForOwnerAsync(Guid ownerUserId, int skip, int take, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Đếm tổng số Listing thuộc người sở hữu.
-    /// </summary>
-    Task<int> CountForOwnerAsync(Guid ownerUserId, CancellationToken cancellationToken = default);
+    Task<OwnerEquipmentListingSearchResult> SearchOwnerAsync(OwnerEquipmentListingSearchCriteria criteria, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Lấy tổng số lượng thiết bị vật lý đang nhận đặt lịch (AcceptingBookings == true) của một Listing.

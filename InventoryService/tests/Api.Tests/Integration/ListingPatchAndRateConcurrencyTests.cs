@@ -125,6 +125,8 @@ public sealed class ListingPatchAndRateConcurrencyTests : IClassFixture<Postgres
             Guid.NewGuid(),
             Guid.NewGuid(),
             "Original Sony FX3",
+            null,
+            "Original Sony FX3",
             1,
             "{\"resolution\":\"4K\"}",
             500_000m,
@@ -341,11 +343,8 @@ public sealed class ListingPatchAndRateConcurrencyTests : IClassFixture<Postgres
         public Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             _inner.GetPublicByIdAsync(id, cancellationToken);
 
-        public Task<IReadOnlyList<EquipmentListing>> ListForOwnerAsync(Guid ownerUserId, int skip, int take, CancellationToken cancellationToken = default) =>
-            _inner.ListForOwnerAsync(ownerUserId, skip, take, cancellationToken);
-
-        public Task<int> CountForOwnerAsync(Guid ownerUserId, CancellationToken cancellationToken = default) =>
-            _inner.CountForOwnerAsync(ownerUserId, cancellationToken);
+        public Task<OwnerEquipmentListingSearchResult> SearchOwnerAsync(OwnerEquipmentListingSearchCriteria criteria, CancellationToken cancellationToken = default) =>
+            _inner.SearchOwnerAsync(criteria, cancellationToken);
 
         public Task<int> GetTotalQuantityAsync(Guid listingId, CancellationToken cancellationToken = default) =>
             _inner.GetTotalQuantityAsync(listingId, cancellationToken);

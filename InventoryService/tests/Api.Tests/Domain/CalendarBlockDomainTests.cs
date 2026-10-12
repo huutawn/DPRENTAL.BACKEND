@@ -26,6 +26,8 @@ public sealed class CalendarBlockDomainTests
             _equipmentTypeId,
             Guid.NewGuid(),
             "Sony FX3",
+            null,
+            "Sony FX3",
             1,
             "{}",
             100_000m,

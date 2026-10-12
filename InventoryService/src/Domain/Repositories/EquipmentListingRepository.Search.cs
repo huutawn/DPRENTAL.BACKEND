@@ -35,7 +35,7 @@ public sealed partial class EquipmentListingRepository
         if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
         {
             var escaped = EscapeLikePattern(filters.SearchKeyword);
-            clauses.Add("l.model ILIKE @pSearch ESCAPE '\\'");
+            clauses.Add("(l.name ILIKE @pSearch ESCAPE '\\' OR l.model ILIKE @pSearch ESCAPE '\\')");
             parameters.Add(new NpgsqlParameter("pSearch", $"%{escaped}%"));
         }
 
@@ -91,7 +91,6 @@ public sealed partial class EquipmentListingRepository
             var rows = await _context.Database
                 .SqlQueryRaw<ListingPageRow>(pageSql, pageParams)
                 .ToListAsync(cancellationToken);
-
             var ids = rows.Select(r => r.Id).ToList();
             var listings = await _context.EquipmentListings
                 .Where(l => ids.Contains(l.Id))
@@ -125,7 +124,7 @@ public sealed partial class EquipmentListingRepository
         if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
         {
             var escaped = EscapeLikePattern(filters.SearchKeyword);
-            clauses.Add("l.model ILIKE @pSearch ESCAPE '\\'");
+            clauses.Add("(l.name ILIKE @pSearch ESCAPE '\\' OR l.model ILIKE @pSearch ESCAPE '\\')");
             commonParams.Add(new NpgsqlParameter("pSearch", $"%{escaped}%"));
         }
 

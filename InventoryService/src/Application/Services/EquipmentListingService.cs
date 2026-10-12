@@ -6,6 +6,7 @@ using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Mapping;
 using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.Security;
+using Dprental.InventoryService.Application.Validation;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Domain.IRepositories;
 using Microsoft.Extensions.Options;
@@ -95,22 +96,52 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         {
             return Error.Forbidden("FORBIDDEN", "Chỉ người dùng cá nhân mới có danh sách Listing sở hữu.");
         }
-        int page = Math.Max(1, request.Page);
-        int pageSize = Math.Clamp(request.PageSize, 1, 100);
-        int skip = (page - 1) * pageSize;
-
-        var listings = await _listingRepository.ListForOwnerAsync(caller.UserId.Value, skip, pageSize, cancellationToken);
-        int totalCount = await _listingRepository.CountForOwnerAsync(caller.UserId.Value, cancellationToken);
-        int totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling((double)totalCount / pageSize);
-
-        var items = new List<EquipmentListingResponse>(listings.Count);
-        foreach (var l in listings)
+        var keywordResult = AssetSearchQueryValidator.ValidateSearchKeyword(request.Q);
+        if (keywordResult.IsFailure)
         {
-            int totalQty = await _listingRepository.GetTotalQuantityAsync(l.Id, cancellationToken);
-            items.Add(EquipmentListingMapper.ToResponse(l, totalQty, _mediaOptions.PublicGatewayUrl));
+            return keywordResult.Error;
         }
 
-        return new PagedResponse<EquipmentListingResponse>(items, page, pageSize, totalCount, totalPages);
+        if (request.EquipmentTypeId.HasValue && request.EquipmentTypeId.Value == Guid.Empty)
+        {
+            return Error.Validation("INVALID_QUERY_PARAMETER", "EquipmentTypeId không được là Guid rỗng.");
+        }
+
+        if (request.BrandId.HasValue && request.BrandId.Value == Guid.Empty)
+        {
+            return Error.Validation("INVALID_QUERY_PARAMETER", "BrandId không được là Guid rỗng.");
+        }
+
+        if (request.Status.HasValue && !Enum.IsDefined(request.Status.Value))
+        {
+            return Error.Validation("INVALID_QUERY_PARAMETER", "Trạng thái không hợp lệ.");
+        }
+
+        int page = Math.Max(1, request.Page);
+        int pageSize = Math.Clamp(request.PageSize, 1, 100);
+        long offset = (long)(page - 1) * pageSize;
+        if (offset > int.MaxValue)
+        {
+            return Error.Validation("INVALID_PAGE", "Chỉ số trang vượt quá giới hạn hệ thống.");
+        }
+        int skip = (int)offset;
+
+        var criteria = new OwnerEquipmentListingSearchCriteria(
+            caller.UserId.Value,
+            keywordResult.Value,
+            skip,
+            pageSize,
+            request.EquipmentTypeId,
+            request.BrandId,
+            request.Status);
+        var searchResult = await _listingRepository.SearchOwnerAsync(criteria, cancellationToken);
+        int totalPages = searchResult.TotalCount == 0 ? 0 : (int)Math.Ceiling((double)searchResult.TotalCount / pageSize);
+
+        var items = searchResult.Items
+            .Select(item => EquipmentListingMapper.ToResponse(item.Listing, item.TotalQuantity, _mediaOptions.PublicGatewayUrl))
+            .ToList();
+
+        return new PagedResponse<EquipmentListingResponse>(items, page, pageSize, searchResult.TotalCount, totalPages);
     }
 
     /// <inheritdoc />
@@ -147,7 +178,12 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         }
         int normalizedPage = Math.Max(1, page);
         int normalizedPageSize = Math.Clamp(pageSize, 1, 100);
-        int skip = (normalizedPage - 1) * normalizedPageSize;
+        long offset = (long)(normalizedPage - 1) * normalizedPageSize;
+        if (offset > int.MaxValue)
+        {
+            return Error.Validation("INVALID_PAGE", "Chỉ số trang vượt quá giới hạn hệ thống.");
+        }
+        int skip = (int)offset;
 
         var assets = await _assetRepository.GetAssetsByListingIdAsync(id, skip, normalizedPageSize, cancellationToken);
         int totalCount = await _assetRepository.CountAssetsByListingIdAsync(id, cancellationToken);

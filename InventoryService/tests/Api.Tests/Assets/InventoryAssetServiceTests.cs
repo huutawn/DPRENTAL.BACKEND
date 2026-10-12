@@ -368,6 +368,8 @@ public sealed partial class InventoryAssetServiceTests
             eqTypeId ?? Guid.NewGuid(),
             brandId ?? Guid.NewGuid(),
             model,
+            null,
+            model,
             schemaVersion,
             specValues,
             100_000m,

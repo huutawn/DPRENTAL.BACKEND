@@ -34,7 +34,7 @@ public sealed class EquipmentListingsController : ControllerBase
         _callerContext = callerContext ?? throw new ArgumentNullException(nameof(callerContext));
     }
     /// <summary>
-    /// Tạo mới một EquipmentListing ở trạng thái Draft cùng N đơn vị thiết bị vật lý ban đầu.
+    /// Tạo mới một EquipmentListing ở trạng thái Draft cùng một thiết bị vật lý ban đầu qua số serial.
     /// </summary>
     [HttpPost]
     [ProducesResponseType(typeof(EquipmentListingResponse), StatusCodes.Status201Created)]

@@ -285,15 +285,25 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("numeric(18,0)")
                         .HasColumnName("daily_rate");
 
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("description");
+
                     b.Property<Guid>("EquipmentTypeId")
                         .HasColumnType("uuid")
                         .HasColumnName("equipment_type_id");
-
                     b.Property<string>("Model")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("model");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
 
                     b.Property<decimal?>("MonthlyRate")
                         .HasColumnType("numeric(18,0)")
@@ -359,8 +369,11 @@ namespace InventoryService.Domain.Migrations
 
                             t.HasCheckConstraint("ck_equipment_listings_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid AND brand_id <> '00000000-0000-0000-0000-000000000000'::uuid");
 
+                            t.HasCheckConstraint("ck_equipment_listings_description", "description IS NULL OR (description ~ '\\S' AND length(description) <= 2000)");
+
                             t.HasCheckConstraint("ck_equipment_listings_model", "model ~ '\\S' AND length(model) <= 200");
 
+                            t.HasCheckConstraint("ck_equipment_listings_name", "name ~ '\\S' AND length(name) <= 200");
                             t.HasCheckConstraint("ck_equipment_listings_monthly_rate", "monthly_rate IS NULL OR (monthly_rate >= 1 AND monthly_rate <= 999999999999999999 AND trunc(monthly_rate) = monthly_rate)");
 
                             t.HasCheckConstraint("ck_equipment_listings_schema_version", "schema_version >= 1");

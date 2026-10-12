@@ -12,6 +12,8 @@ public static class IntegrationTestHelper
         Guid? ownerId = null,
         Guid? eqTypeId = null,
         Guid? brandId = null,
+        string? name = null,
+        string? description = null,
         string model = "Sony FX3",
         int schemaVersion = 1,
         string specValues = "{}",
@@ -27,12 +29,14 @@ public static class IntegrationTestHelper
         var actualOwner = ownerId ?? Guid.NewGuid();
         var actualEqType = eqTypeId ?? Guid.NewGuid();
         var actualBrand = brandId ?? Guid.NewGuid();
-
+        var actualName = string.IsNullOrWhiteSpace(name) ? model : name;
         var listing = EquipmentListing.Create(
             Guid.NewGuid(),
             actualOwner,
             actualEqType,
             actualBrand,
+            actualName,
+            description,
             model,
             schemaVersion,
             specValues,
@@ -72,6 +76,8 @@ public static class IntegrationTestHelper
         Guid? ownerId = null,
         Guid? eqTypeId = null,
         Guid? brandId = null,
+        string? name = null,
+        string? description = null,
         string model = "Sony FX3",
         int schemaVersion = 1,
         string specValues = "{}",
@@ -86,12 +92,14 @@ public static class IntegrationTestHelper
         var actualOwner = ownerId ?? Guid.NewGuid();
         var actualEqType = eqTypeId ?? Guid.NewGuid();
         var actualBrand = brandId ?? Guid.NewGuid();
-
+        var actualName = string.IsNullOrWhiteSpace(name) ? model : name;
         var listing = EquipmentListing.Create(
             actualListingId,
             actualOwner,
             actualEqType,
             actualBrand,
+            actualName,
+            description,
             model,
             schemaVersion,
             specValues,

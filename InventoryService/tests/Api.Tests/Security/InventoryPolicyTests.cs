@@ -62,6 +62,8 @@ public sealed class InventoryPolicyTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             "Sony FX3",
+            null,
+            "Sony FX3",
             1,
             "{\"serial\":\"TEST\"}",
             100_000m,

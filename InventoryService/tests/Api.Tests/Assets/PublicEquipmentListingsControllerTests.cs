@@ -123,6 +123,8 @@ public sealed class PublicEquipmentListingsControllerTests
             id,
             Guid.NewGuid(),
             Guid.NewGuid(),
+            "Name X",
+            "Desc X",
             "Model X",
             1,
             doc.RootElement.Clone(),

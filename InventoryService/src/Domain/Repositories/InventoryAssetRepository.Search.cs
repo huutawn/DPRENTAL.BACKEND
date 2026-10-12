@@ -35,7 +35,6 @@ public sealed partial class InventoryAssetRepository
 
         return await _context.Assets
             .FromSqlRaw(sql, parameters.ToArray())
-            .Include(a => a.Listing)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
     }

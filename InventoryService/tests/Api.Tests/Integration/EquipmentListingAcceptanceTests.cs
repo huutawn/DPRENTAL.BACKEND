@@ -1,4 +1,5 @@
 using System.Net;
+using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Application.DTOs.Catalog;
 using Dprental.InventoryService.Application.DTOs.Media;
@@ -65,13 +66,18 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             Task.FromResult(Result.Success(new MediaVisibilityInfo(mediaId, "Public")));
     }
 
-    private (Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> App, Dprental.InventoryService.Api.Tests.Security.InventorySecurityTestFactory SecFactory) CreateFactory()
+    private (Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> App, Dprental.InventoryService.Api.Tests.Security.InventorySecurityTestFactory SecFactory) CreateFactory(
+        TestTimeProvider? clock = null)
     {
-        var secFactory = new Dprental.InventoryService.Api.Tests.Security.InventorySecurityTestFactory(_fixture.ConnectionString);
+        var testClock = clock ?? new TestTimeProvider(FixedNow);
+        var secFactory = new Dprental.InventoryService.Api.Tests.Security.InventorySecurityTestFactory(_fixture.ConnectionString, testClock);
         var app = secFactory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureTestServices(services =>
             {
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton<TimeProvider>(testClock);
+
                 services.RemoveAll<ICatalogServiceClient>();
                 services.AddSingleton<ICatalogServiceClient>(new StubCatalogClient());
 
@@ -106,6 +112,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
         {
             equipmentTypeId = Guid.NewGuid(),
             brandId = Guid.NewGuid(),
+            name = "Sony FX3 Batch 5",
             model = "Sony FX3 Batch 5",
             serialNumber = "FX3-TEST-00001",
             schemaVersion = 1,

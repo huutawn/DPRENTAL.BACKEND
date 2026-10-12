@@ -15,6 +15,13 @@ public sealed class PatchEquipmentListingRequest
     [JsonIgnore]
     public bool IsBrandIdSpecified { get; set; }
     public Guid? BrandId { get; set; }
+    [JsonIgnore]
+    public bool IsNameSpecified { get; set; }
+    public string? Name { get; set; }
+
+    [JsonIgnore]
+    public bool IsDescriptionSpecified { get; set; }
+    public string? Description { get; set; }
 
     [JsonIgnore]
     public bool IsModelSpecified { get; set; }
@@ -39,6 +46,8 @@ public sealed class PatchEquipmentListingRequest
     [JsonIgnore]
     public bool IsEmpty =>
         !IsBrandIdSpecified &&
+        !IsNameSpecified &&
+        !IsDescriptionSpecified &&
         !IsModelSpecified &&
         !IsThumbnailMediaIdSpecified &&
         !IsSchemaVersionSpecified &&

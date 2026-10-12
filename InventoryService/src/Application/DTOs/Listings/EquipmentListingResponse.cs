@@ -13,6 +13,8 @@ public sealed record EquipmentListingResponse(
     [property: JsonPropertyName("ownerUserId")] Guid OwnerUserId,
     [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
     [property: JsonPropertyName("brandId")] Guid BrandId,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("description")] string? Description,
     [property: JsonPropertyName("model")] string Model,
     [property: JsonPropertyName("schemaVersion")] int SchemaVersion,
     [property: JsonPropertyName("specValues")] JsonElement SpecValues,

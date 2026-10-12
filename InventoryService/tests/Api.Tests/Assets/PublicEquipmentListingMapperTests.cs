@@ -39,6 +39,8 @@ public sealed class PublicEquipmentListingMapperTests
             ownerId,
             eqTypeId,
             brandId,
+            "Xe nâng dầu Toyota 2.5T",
+            "Xe nâng hoạt động tốt",
             "Toyota 8FD25",
             2,
             rawSpecs,
@@ -55,6 +57,8 @@ public sealed class PublicEquipmentListingMapperTests
         Assert.Equal(listingId, response.Id);
         Assert.Equal(eqTypeId, response.EquipmentTypeId);
         Assert.Equal(brandId, response.BrandId);
+        Assert.Equal("Xe nâng dầu Toyota 2.5T", response.Name);
+        Assert.Equal("Xe nâng hoạt động tốt", response.Description);
         Assert.Equal("Toyota 8FD25", response.Model);
         Assert.Equal(2, response.SchemaVersion);
         Assert.Equal(10, response.TotalQuantity);

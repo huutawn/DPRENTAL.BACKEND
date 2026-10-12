@@ -1,5 +1,5 @@
+using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Domain.Entities;
-
 namespace Dprental.InventoryService.Domain.IRepositories;
 
 /// <summary>
@@ -65,4 +65,30 @@ public sealed record PublicEquipmentListingItem(
 /// </summary>
 public sealed record PublicEquipmentListingSearchResult(
     IReadOnlyList<PublicEquipmentListingItem> Items,
+    int TotalCount);
+
+/// <summary>
+/// Tiêu chí tìm kiếm và phân trang EquipmentListing của người sở hữu (Owner Listings).
+/// </summary>
+public sealed record OwnerEquipmentListingSearchCriteria(
+    Guid OwnerUserId,
+    string? SearchKeyword,
+    int Skip,
+    int Take,
+    Guid? EquipmentTypeId = null,
+    Guid? BrandId = null,
+    EquipmentListingStatus? Status = null);
+
+/// <summary>
+/// Đại diện một Listing thuộc người sở hữu cùng số lượng thiết bị vật lý đang nhận đặt lịch.
+/// </summary>
+public sealed record OwnerEquipmentListingItem(
+    EquipmentListing Listing,
+    int TotalQuantity);
+
+/// <summary>
+/// Kết quả tìm kiếm và phân trang Listing của người sở hữu.
+/// </summary>
+public sealed record OwnerEquipmentListingSearchResult(
+    IReadOnlyList<OwnerEquipmentListingItem> Items,
     int TotalCount);

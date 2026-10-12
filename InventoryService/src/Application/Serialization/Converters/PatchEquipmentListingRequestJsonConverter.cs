@@ -14,13 +14,14 @@ public sealed class PatchEquipmentListingRequestJsonConverter : JsonConverter<Pa
     private static readonly HashSet<string> AllowedProperties = new(StringComparer.OrdinalIgnoreCase)
     {
         "brandId",
+        "name",
+        "description",
         "model",
         "thumbnailMediaId",
         "schemaVersion",
         "specValues",
         "status"
     };
-
     public override PatchEquipmentListingRequest Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType != JsonTokenType.StartObject)
@@ -77,6 +78,37 @@ public sealed class PatchEquipmentListingRequestJsonConverter : JsonConverter<Pa
                     else
                     {
                         throw new JsonException("Thuộc tính 'brandId' phải là chuỗi GUID hợp lệ hoặc null.");
+                    }
+                    break;
+                case "name":
+                    request.IsNameSpecified = true;
+                    if (reader.TokenType == JsonTokenType.Null)
+                    {
+                        request.Name = null;
+                    }
+                    else if (reader.TokenType == JsonTokenType.String)
+                    {
+                        request.Name = reader.GetString();
+                    }
+                    else
+                    {
+                        throw new JsonException("Thuộc tính 'name' phải là kiểu chuỗi hoặc null.");
+                    }
+                    break;
+
+                case "description":
+                    request.IsDescriptionSpecified = true;
+                    if (reader.TokenType == JsonTokenType.Null)
+                    {
+                        request.Description = null;
+                    }
+                    else if (reader.TokenType == JsonTokenType.String)
+                    {
+                        request.Description = reader.GetString();
+                    }
+                    else
+                    {
+                        throw new JsonException("Thuộc tính 'description' phải là kiểu chuỗi hoặc null.");
                     }
                     break;
 
@@ -164,7 +196,9 @@ public sealed class PatchEquipmentListingRequestJsonConverter : JsonConverter<Pa
                     else if (reader.TokenType == JsonTokenType.String)
                     {
                         var statusStr = reader.GetString();
-                        if (Enum.TryParse<EquipmentListingStatus>(statusStr, ignoreCase: true, out var parsedStatus))
+                        if (!int.TryParse(statusStr, out _) &&
+                            Enum.TryParse<EquipmentListingStatus>(statusStr, ignoreCase: true, out var parsedStatus) &&
+                            Enum.IsDefined(parsedStatus))
                         {
                             request.Status = parsedStatus;
                         }
@@ -197,6 +231,29 @@ public sealed class PatchEquipmentListingRequestJsonConverter : JsonConverter<Pa
             else
             {
                 writer.WriteString("brandId", value.BrandId.Value);
+            }
+        }
+        if (value.IsNameSpecified)
+        {
+            if (value.Name == null)
+            {
+                writer.WriteNull("name");
+            }
+            else
+            {
+                writer.WriteString("name", value.Name);
+            }
+        }
+
+        if (value.IsDescriptionSpecified)
+        {
+            if (value.Description == null)
+            {
+                writer.WriteNull("description");
+            }
+            else
+            {
+                writer.WriteString("description", value.Description);
             }
         }
 

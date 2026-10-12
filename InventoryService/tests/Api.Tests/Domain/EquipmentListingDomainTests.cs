@@ -20,6 +20,8 @@ public sealed class EquipmentListingDomainTests
             TestOwnerId,
             TestEquipmentTypeId,
             TestBrandId,
+            "Sony FX3 kèm bộ phụ kiện",
+            "Mô tả máy quay FX3",
             "Sony FX3",
             1,
             "{\"sensor\":\"Full-Frame\"}",
@@ -35,6 +37,8 @@ public sealed class EquipmentListingDomainTests
         Assert.Equal(TestOwnerId, listing.OwnerUserId);
         Assert.Equal(TestEquipmentTypeId, listing.EquipmentTypeId);
         Assert.Equal(TestBrandId, listing.BrandId);
+        Assert.Equal("Sony FX3 kèm bộ phụ kiện", listing.Name);
+        Assert.Equal("Mô tả máy quay FX3", listing.Description);
         Assert.Equal("Sony FX3", listing.Model);
         Assert.Equal(1, listing.SchemaVersion);
         Assert.Equal(EquipmentListingStatus.Draft, listing.Status);
@@ -54,6 +58,8 @@ public sealed class EquipmentListingDomainTests
             TestOwnerId,
             TestEquipmentTypeId,
             TestBrandId,
+            "Sony FX3",
+            null,
             "Sony FX3",
             1,
             "{}",
@@ -76,6 +82,8 @@ public sealed class EquipmentListingDomainTests
             TestEquipmentTypeId,
             Guid.Empty,
             "Sony FX3",
+            null,
+            "Sony FX3",
             1,
             "{}",
             500_000m,
@@ -97,6 +105,8 @@ public sealed class EquipmentListingDomainTests
             TestEquipmentTypeId,
             TestBrandId,
             "Sony FX3",
+            null,
+            "Sony FX3",
             1,
             "{}",
             -100m,
@@ -113,6 +123,8 @@ public sealed class EquipmentListingDomainTests
             TestOwnerId,
             TestEquipmentTypeId,
             TestBrandId,
+            "Sony FX3",
+            null,
             "Sony FX3",
             1,
             "{}",
@@ -135,6 +147,8 @@ public sealed class EquipmentListingDomainTests
             TestEquipmentTypeId,
             TestBrandId,
             "Sony FX3",
+            null,
+            "Sony FX3",
             1,
             "{}",
             500_000m,
@@ -155,6 +169,8 @@ public sealed class EquipmentListingDomainTests
             TestOwnerId,
             TestEquipmentTypeId,
             TestBrandId,
+            "Sony FX3",
+            null,
             "Sony FX3",
             1,
             "{}",
@@ -180,6 +196,8 @@ public sealed class EquipmentListingDomainTests
             TestEquipmentTypeId,
             TestBrandId,
             "Sony FX3",
+            null,
+            "Sony FX3",
             1,
             "{}",
             500_000m,
@@ -202,6 +220,8 @@ public sealed class EquipmentListingDomainTests
             TestOwnerId,
             TestEquipmentTypeId,
             TestBrandId,
+            "Sony FX3",
+            null,
             "Sony FX3",
             1,
             "{}",
@@ -230,6 +250,8 @@ public sealed class EquipmentListingDomainTests
             TestEquipmentTypeId,
             TestBrandId,
             "Sony FX3",
+            null,
+            "Sony FX3",
             1,
             "{}",
             500_000m,
@@ -240,13 +262,77 @@ public sealed class EquipmentListingDomainTests
 
         var newBrand = Guid.NewGuid();
         var updateTime = FixedNow.AddHours(1);
-        var result = listing.UpdateDetails(newBrand, "Sony FX3 v2", null, 2, "{\"version\":2}", updateTime);
+        var result = listing.UpdateDetails(newBrand, "Sony FX3 v2 Name", "New Desc", "Sony FX3 v2", null, 2, "{\"version\":2}", updateTime);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(newBrand, listing.BrandId);
+        Assert.Equal("Sony FX3 v2 Name", listing.Name);
+        Assert.Equal("New Desc", listing.Description);
         Assert.Equal("Sony FX3 v2", listing.Model);
         Assert.Equal(2, listing.SchemaVersion);
         Assert.Equal("{\"version\":2}", listing.SpecValues);
         Assert.Equal(updateTime, listing.UpdatedAt);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Create_InvalidName_FailsValidation(string? invalidName)
+    {
+        var result = EquipmentListing.Create(
+            TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            invalidName!, null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_NAME", result.Error.Code);
+    }
+
+    [Fact]
+    public void Create_NameTooLong_FailsValidation()
+    {
+        var longName = new string('A', 201);
+        var result = EquipmentListing.Create(
+            TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            longName, null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_NAME", result.Error.Code);
+    }
+
+    [Fact]
+    public void Create_DescriptionTooLong_FailsValidation()
+    {
+        var longDesc = new string('B', 2001);
+        var result = EquipmentListing.Create(
+            TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Valid Name", longDesc, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_DESCRIPTION", result.Error.Code);
+    }
+
+    [Fact]
+    public void Create_WhitespaceDescription_NormalizesToNull()
+    {
+        var result = EquipmentListing.Create(
+            TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Valid Name", "   ", "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.Value.Description);
+    }
+
+    [Fact]
+    public void UpdateStatus_InvalidEnumValue_FailsValidation()
+    {
+        var listing = EquipmentListing.Create(
+            TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Valid Name", null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow).Value;
+
+        var result = listing.UpdateStatus((EquipmentListingStatus)999, false, FixedNow);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_STATUS", result.Error.Code);
     }
 }

@@ -35,6 +35,7 @@ public sealed partial class AssetHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3 Cinema Line",
             model = "Sony FX3 Cinema Line",
             serialNumber = "FX3-TEST-SN-001",
             schemaVersion = 1,
@@ -91,6 +92,7 @@ public sealed partial class AssetHttpIntegrationTests
         {
             equipmentTypeId = Guid.NewGuid(),
             brandId = Guid.NewGuid(),
+            name = "Sony FX3 Cinema Line",
             model = "Sony FX3 Cinema Line",
             quantity = 1,
             serialNumber = "FX3-TEST-SN-001",
@@ -121,6 +123,7 @@ public sealed partial class AssetHttpIntegrationTests
         {
             equipmentTypeId = Guid.NewGuid(),
             brandId = Guid.NewGuid(),
+            name = "Sony FX3 Cinema Line",
             model = "Sony FX3 Cinema Line",
             serialNumber = "FX3-UNIT-001",
             schemaVersion = 1,
@@ -253,6 +256,7 @@ public sealed partial class AssetHttpIntegrationTests
         {
             equipmentTypeId = Guid.NewGuid(),
             brandId = Guid.NewGuid(),
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-TEST-SN-001",
             schemaVersion = 1,
@@ -295,6 +299,7 @@ public sealed partial class AssetHttpIntegrationTests
         {
             equipmentTypeId = Guid.NewGuid(),
             brandId = Guid.NewGuid(),
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-TEST-SN-001",
             schemaVersion = 1,

@@ -31,10 +31,17 @@ public sealed class EquipmentListing
     [Column("brand_id")]
     public Guid BrandId { get; private set; }
 
+    [Column("name")]
+    [MaxLength(200)]
+    public string Name { get; private set; } = string.Empty;
+
+    [Column("description")]
+    [MaxLength(2000)]
+    public string? Description { get; private set; }
+
     [Column("model")]
     [MaxLength(200)]
     public string Model { get; private set; } = string.Empty;
-
     [Column("schema_version")]
     public int SchemaVersion { get; private set; }
 
@@ -80,22 +87,26 @@ public sealed class EquipmentListing
         Guid id,
         Guid ownerUserId,
         Guid equipmentTypeId,
-        Guid brandId,
-        string model,
-        int schemaVersion,
-        string specValues,
-        Guid? thumbnailMediaId,
-        decimal dailyRate,
-        decimal? weeklyRate,
-        decimal? monthlyRate,
-        string currency,
-        EquipmentListingStatus status,
-        DateTimeOffset now)
+Guid brandId,
+string name,
+string? description,
+string model,
+int schemaVersion,
+string specValues,
+Guid? thumbnailMediaId,
+decimal dailyRate,
+decimal? weeklyRate,
+decimal? monthlyRate,
+string currency,
+EquipmentListingStatus status,
+DateTimeOffset now)
     {
         Id = id;
         OwnerUserId = ownerUserId;
         EquipmentTypeId = equipmentTypeId;
         BrandId = brandId;
+        Name = name;
+        Description = description;
         Model = model;
         SchemaVersion = schemaVersion;
         SpecValues = specValues;
@@ -117,10 +128,12 @@ public sealed class EquipmentListing
         Guid id,
         Guid ownerUserId,
         Guid equipmentTypeId,
-        Guid brandId,
-        string model,
-        int schemaVersion,
-        string specValues,
+Guid brandId,
+string name,
+string? description,
+string model,
+int schemaVersion,
+string specValues,
         decimal dailyRate,
         decimal? weeklyRate,
         decimal? monthlyRate,
@@ -154,19 +167,21 @@ public sealed class EquipmentListing
             return rateValidation.Error;
         }
 
-        var detailsValidation = ValidateDetails(model, thumbnailMediaId, schemaVersion, specValues);
+        var detailsValidation = ValidateDetails(name, description, model, thumbnailMediaId, schemaVersion, specValues);
         if (detailsValidation.IsFailure)
         {
             return detailsValidation.Error;
         }
 
-        var (validModel, validThumb, validSchema, validSpecs) = detailsValidation.Value;
+        var (validName, validDesc, validModel, validThumb, validSchema, validSpecs) = detailsValidation.Value;
 
         return new EquipmentListing(
             id,
             ownerUserId,
             equipmentTypeId,
             brandId,
+            validName,
+            validDesc,
             validModel,
             validSchema,
             validSpecs,
@@ -184,7 +199,9 @@ public sealed class EquipmentListing
     /// </summary>
     public Result UpdateDetails(
         Guid? brandId,
-        string model,
+string name,
+string? description,
+string model,
         Guid? thumbnailMediaId,
         int schemaVersion,
         string specValues,
@@ -195,19 +212,20 @@ public sealed class EquipmentListing
             return Error.Validation("INVALID_BRAND_ID", "Brand ID không được rỗng.");
         }
 
-        var validation = ValidateDetails(model, thumbnailMediaId, schemaVersion, specValues);
+        var validation = ValidateDetails(name, description, model, thumbnailMediaId, schemaVersion, specValues);
         if (validation.IsFailure)
         {
             return validation.Error;
         }
 
-        var (validModel, validThumb, validSchema, validSpecs) = validation.Value;
+        var (validName, validDesc, validModel, validThumb, validSchema, validSpecs) = validation.Value;
 
         if (brandId.HasValue)
         {
             BrandId = brandId.Value;
         }
-
+        Name = validName;
+        Description = validDesc;
         Model = validModel;
         ThumbnailMediaId = validThumb;
         SchemaVersion = validSchema;
@@ -251,6 +269,11 @@ public sealed class EquipmentListing
         bool hasUnitAcceptingBookings,
         DateTimeOffset now)
     {
+        if (!Enum.IsDefined(newStatus))
+        {
+            return Error.Validation("INVALID_STATUS", "Trạng thái không hợp lệ.");
+        }
+
         if (Status == newStatus)
         {
             return Result.Success();
@@ -266,12 +289,35 @@ public sealed class EquipmentListing
         return Result.Success();
     }
 
-    public static Result<(string Model, Guid? ThumbnailMediaId, int SchemaVersion, string SpecValues)> ValidateDetails(
+    public static Result<(string Name, string? Description, string Model, Guid? ThumbnailMediaId, int SchemaVersion, string SpecValues)> ValidateDetails(
+        string name,
+        string? description,
         string model,
         Guid? thumbnailMediaId,
         int schemaVersion,
         string specValues)
     {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return Error.Validation("INVALID_NAME", "Tên thiết bị không được để trống.");
+        }
+
+        var trimmedName = name.Trim();
+        if (trimmedName.Length > 200)
+        {
+            return Error.Validation("INVALID_NAME", "Tên thiết bị tối đa 200 ký tự.");
+        }
+
+        string? trimmedDescription = null;
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            var trimmedDesc = description.Trim();
+            if (trimmedDesc.Length > 2000)
+            {
+                return Error.Validation("INVALID_DESCRIPTION", "Mô tả tối đa 2.000 ký tự.");
+            }
+            trimmedDescription = trimmedDesc;
+        }
         if (string.IsNullOrWhiteSpace(model))
         {
             return Error.Validation("INVALID_MODEL", "Model không được để trống.");
@@ -311,7 +357,7 @@ public sealed class EquipmentListing
             return Error.Validation("INVALID_SPEC_VALUES", "Spec values không đúng định dạng JSON.");
         }
 
-        return Result.Success((trimmedModel, thumbnailMediaId, schemaVersion, specValues));
+        return Result.Success((trimmedName, trimmedDescription, trimmedModel, thumbnailMediaId, schemaVersion, specValues));
     }
 
     public static Result ValidateRateValues(
