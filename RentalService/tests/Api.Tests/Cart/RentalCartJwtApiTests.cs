@@ -19,6 +19,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -94,10 +96,9 @@ public sealed class RentalCartJwtApiTests : IClassFixture<RentalCartJwtApiTests.
                 new Dictionary<string, string?>
                 {
                     ["ConnectionStrings:Postgres"] = "Host=localhost;Database=rental-test;Username=test;Password=test",
-                    ["Auth:Jwt:Issuer"] = Issuer,
-                    ["Auth:Jwt:Audience"] = Audience,
-                    ["Auth:Jwt:Keys:0:KeyId"] = KeyId,
-                    ["Auth:Jwt:Keys:0:PublicKeyPem"] = _rsa.ExportSubjectPublicKeyInfoPem()
+                    ["Authentication:Jwt:Issuer"] = Issuer,
+                    ["Authentication:Jwt:Audience"] = Audience,
+                    ["Authentication:Jwt:JwksUri"] = "http://localhost/test-jwks"
                 }));
 
             builder.ConfigureTestServices(services =>
@@ -106,8 +107,7 @@ public sealed class RentalCartJwtApiTests : IClassFixture<RentalCartJwtApiTests.
                 {
                     options.TokenValidationParameters.ValidIssuer = Issuer;
                     options.TokenValidationParameters.ValidAudience = Audience;
-                    options.TokenValidationParameters.IssuerSigningKeyResolver = (_, _, _, _) =>
-                        [new RsaSecurityKey(_rsa) { KeyId = KeyId }];
+                    options.ConfigurationManager = new TestJwksConfigurationManager(_rsa, KeyId);
                 });
                 services.RemoveAll<IRentalCartRepository>();
                 services.AddSingleton<IRentalCartRepository>(_carts);
@@ -160,6 +160,24 @@ public sealed class RentalCartJwtApiTests : IClassFixture<RentalCartJwtApiTests.
             base.Dispose(disposing);
             if (disposing) _rsa.Dispose();
         }
+
+        private sealed class TestJwksConfigurationManager(RSA rsa, string keyId)
+            : IConfigurationManager<OpenIdConnectConfiguration>
+        {
+            private readonly OpenIdConnectConfiguration _configuration = CreateConfiguration(rsa, keyId);
+
+            public Task<OpenIdConnectConfiguration> GetConfigurationAsync(CancellationToken cancel)
+                => Task.FromResult(_configuration);
+
+            public void RequestRefresh() { }
+
+            private static OpenIdConnectConfiguration CreateConfiguration(RSA rsa, string keyId)
+            {
+                var configuration = new OpenIdConnectConfiguration();
+                configuration.SigningKeys.Add(new RsaSecurityKey(rsa) { KeyId = keyId });
+                return configuration;
+            }
+        }
     }
 
     private sealed class FakeCartRepository : IRentalCartRepository
@@ -173,6 +191,10 @@ public sealed class RentalCartJwtApiTests : IClassFixture<RentalCartJwtApiTests.
         }
 
         public Task<RentalCart?> GetActiveByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default)
+            => Task.FromResult<RentalCart?>(System.Linq.Enumerable.FirstOrDefault(
+                _carts.Values, cart => cart.RenterId == renterId));
+
+        public Task<RentalCart?> GetByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default)
             => Task.FromResult<RentalCart?>(System.Linq.Enumerable.FirstOrDefault(
                 _carts.Values, cart => cart.RenterId == renterId));
 

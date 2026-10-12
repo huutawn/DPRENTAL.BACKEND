@@ -5,6 +5,7 @@
     <UserSecretsId>e0b5d282-d885-497a-be42-284927a417c2</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Confluent.Kafka" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>

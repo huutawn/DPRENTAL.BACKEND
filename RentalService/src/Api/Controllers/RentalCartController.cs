@@ -14,7 +14,8 @@ namespace Dprental.RentalService.Api.Controllers;
 
 [ApiController]
 [Authorize(Policy = "Renter")]
-[Route("rental/cart")]
+[Route("cart")]
+[Route("~/rental/cart")]
 public sealed class RentalCartController(
     ICurrentRenter currentRenter,
     RentalCartUseCases cartUseCases,

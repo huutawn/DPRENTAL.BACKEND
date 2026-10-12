@@ -1,17 +1,16 @@
 using System;
-using System.Security.Claims;
-using Microsoft.AspNetCore.Http;
+using Dprental.RentalService.Application.Security;
 
 namespace Dprental.RentalService.Api.Security;
 
-public sealed class CurrentRenter(IHttpContextAccessor httpContextAccessor) : ICurrentRenter
+public sealed class CurrentRenter(IRentalCallerContext callerContext) : ICurrentRenter
 {
     public Guid RenterId
     {
         get
         {
-            string? subject = httpContextAccessor.HttpContext?.User.FindFirstValue("sub");
-            if (Guid.TryParse(subject, out Guid renterId) && renterId != Guid.Empty)
+            if (callerContext.IsAuthenticated && !callerContext.IsService &&
+                callerContext.UserId is Guid renterId && renterId != Guid.Empty)
             {
                 return renterId;
             }

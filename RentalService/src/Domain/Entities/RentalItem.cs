@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Dprental.RentalService.Common.Enums;
+using Dprental.RentalService.Domain.Policies;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.RentalService.Domain.Entities;
@@ -39,6 +40,30 @@ public partial class RentalItem
     [MaxLength(500)]
     public string PickupLocationSnapshot { get; private set; } = string.Empty;
 
+    public Guid EquipmentTypeId { get; private set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string EquipmentTypeNameSnapshot { get; private set; } = string.Empty;
+
+    public Guid BrandId { get; private set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string BrandNameSnapshot { get; private set; } = string.Empty;
+
+    [Required]
+    [MaxLength(200)]
+    public string ModelSnapshot { get; private set; } = string.Empty;
+
+    public int SpecSchemaVersionSnapshot { get; private set; }
+
+    [Required]
+    [Column(TypeName = "jsonb")]
+    public string SpecValuesSnapshot { get; private set; } = "{}";
+
+    public Guid? ThumbnailMediaIdSnapshot { get; private set; }
+
     [Precision(18, 2)]
     public decimal DailyRateSnapshot { get; private set; }
 
@@ -51,6 +76,9 @@ public partial class RentalItem
     [Precision(18, 2)]
     public decimal DepositAmount { get; private set; }
 
+    [NotMapped]
+    public decimal TotalAmount => RentalAmount + DepositAmount;
+
     public RentalItemStatus Status { get; private set; }
 
     [Required]
@@ -61,9 +89,13 @@ public partial class RentalItem
 
     public DateTimeOffset? SupplierDecisionAt { get; private set; }
 
+    public Guid? SupplierDecisionBy { get; private set; }
+
     [MaxLength(2000)]
     public string? SupplierDecisionReason { get; private set; }
 
+    [MaxLength(2000)]
+    public string? SupplierDecisionNote { get; private set; }
     [MaxLength(256)]
     public string? InventoryConfirmationRef { get; private set; }
 
@@ -88,7 +120,7 @@ public partial class RentalItem
     public DateTimeOffset? FinancialClosureConfirmedAt { get; private set; }
 
     [NotMapped]
-    public int RentalDays => ExpectedEndDate.DayNumber - ExpectedStartDate.DayNumber;
+    public int RentalDays => RentalPricingPolicy.CalculateRentalDays(ExpectedStartDate, ExpectedEndDate);
 
     [NotMapped]
     public bool AreAllUnitsReturned =>
@@ -130,7 +162,8 @@ public partial class RentalItem
         decimal dailyRateSnapshot,
         decimal depositPerUnitSnapshot,
         string allocationGroupId,
-        IEnumerable<InitialRentalUnitAssignmentDto> assignments)
+        IEnumerable<InitialRentalUnitAssignmentDto> assignments,
+        RentalItemListingSnapshotDto listingSnapshot)
     {
         Id = id;
         RentalOrderId = rentalOrderId;
@@ -147,13 +180,198 @@ public partial class RentalItem
         AllocationGroupId = allocationGroupId;
         Status = RentalItemStatus.PendingPayment;
 
-        int rentalDays = expectedEndDate.DayNumber - expectedStartDate.DayNumber;
-        RentalAmount = dailyRateSnapshot * quantity * rentalDays;
-        DepositAmount = depositPerUnitSnapshot * quantity;
+        EquipmentTypeId = listingSnapshot.EquipmentTypeId;
+        EquipmentTypeNameSnapshot = listingSnapshot.EquipmentTypeName.Trim();
+        BrandId = listingSnapshot.BrandId;
+        BrandNameSnapshot = listingSnapshot.BrandName.Trim();
+        ModelSnapshot = listingSnapshot.Model.Trim();
+        SpecSchemaVersionSnapshot = listingSnapshot.SpecSchemaVersion;
+        SpecValuesSnapshot = listingSnapshot.SpecValuesJson.Trim();
+        ThumbnailMediaIdSnapshot = listingSnapshot.ThumbnailMediaId;
+
+        RentalAmount = RentalPricingPolicy.CalculateRentalAmount(dailyRateSnapshot, quantity, RentalDays);
+        DepositAmount = RentalPricingPolicy.CalculateDepositAmount(depositPerUnitSnapshot, quantity);
 
         foreach (var a in assignments)
         {
             _unitAssignments.Add(new RentalUnitAssignment(a.Id, Id, a.AssetId, a.AllocationId));
         }
+    }
+
+    public void SetHandoverRecord(HandoverRecord handoverRecord)
+    {
+        ArgumentNullException.ThrowIfNull(handoverRecord);
+        HandoverRecord = handoverRecord;
+    }
+
+    public void AddReturnRecord(ReturnRecord returnRecord)
+    {
+        ArgumentNullException.ThrowIfNull(returnRecord);
+        _returnRecords.Add(returnRecord);
+    }
+
+    public void SetDeductionProposal(DeductionProposal proposal)
+    {
+        ArgumentNullException.ThrowIfNull(proposal);
+        DeductionProposal = proposal;
+    }
+
+    public void AddUnitAssignment(RentalUnitAssignment unit)
+    {
+        ArgumentNullException.ThrowIfNull(unit);
+        _unitAssignments.Add(unit);
+    }
+    public bool ContainsEvidenceMedia(Guid mediaId)
+    {
+        if (mediaId == Guid.Empty) return false;
+
+        foreach (var unit in _unitAssignments)
+        {
+            if (unit.HandoverMediaIds.Contains(mediaId) ||
+                unit.ReturnMediaIds.Contains(mediaId) ||
+                unit.DeductionMediaIds.Contains(mediaId))
+            {
+                return true;
+            }
+        }
+
+        if (DeductionProposal?.Dispute is not null)
+        {
+            if (DeductionProposal.Dispute.MediaIds.Contains(mediaId) ||
+                DeductionProposal.Dispute.ResolutionMediaIds.Contains(mediaId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static DateTimeOffset CalculateSupplierConfirmationDeadline(DateTimeOffset paidAt, DateOnly expectedStartDate)
+    {
+        TimeSpan vnOffset = TimeSpan.FromHours(7);
+        DateTimeOffset startOfDayVn = new(expectedStartDate.Year, expectedStartDate.Month, expectedStartDate.Day, 0, 0, 0, vnOffset);
+        DateTimeOffset cutoffUtc = startOfDayVn.AddSeconds(-1).ToUniversalTime();
+        DateTimeOffset plus24hUtc = paidAt.ToUniversalTime().AddHours(24);
+
+        return plus24hUtc < cutoffUtc ? plus24hUtc : cutoffUtc;
+    }
+
+    internal void RecordPaid(DateTimeOffset paidAt)
+    {
+        if (!SupplierConfirmationDeadline.HasValue)
+        {
+            SupplierConfirmationDeadline = CalculateSupplierConfirmationDeadline(paidAt, ExpectedStartDate);
+        }
+        Status = RentalItemStatus.PendingSupplierConfirmation;
+    }
+
+    internal void ApplySupplierAccept(
+        Guid supplierId,
+        DateTimeOffset decisionAt,
+        string inventoryConfirmationRef,
+        string operationId)
+    {
+        Status = RentalItemStatus.AwaitingHandover;
+        SupplierDecisionBy = supplierId;
+        SupplierDecisionAt = decisionAt;
+        InventoryConfirmationRef = inventoryConfirmationRef;
+
+        RentalOrder?.AddStateTransition(new RentalStateTransition(
+            Guid.NewGuid(),
+            RentalOrderId,
+            Id,
+            RentalItemStatus.PendingSupplierConfirmation.ToString(),
+            RentalItemStatus.AwaitingHandover.ToString(),
+            "SupplierAccept",
+            supplierId,
+            ActorRole.Supplier,
+            "Supplier accepted rental item",
+            decisionAt,
+            operationId));
+    }
+
+    internal void ApplySupplierReject(
+        Guid supplierId,
+        DateTimeOffset decisionAt,
+        string reason,
+        string? note,
+        string operationId)
+    {
+        Status = RentalItemStatus.Rejected;
+        SupplierDecisionBy = supplierId;
+        SupplierDecisionAt = decisionAt;
+        SupplierDecisionReason = reason;
+        SupplierDecisionNote = note;
+
+        RentalOrder?.AddStateTransition(new RentalStateTransition(
+            Guid.NewGuid(),
+            RentalOrderId,
+            Id,
+            RentalItemStatus.PendingSupplierConfirmation.ToString(),
+            RentalItemStatus.Rejected.ToString(),
+            "SupplierReject",
+            supplierId,
+            ActorRole.Supplier,
+            reason,
+            decisionAt,
+            operationId));
+    }
+
+    internal void ApplySupplierTimeout(DateTimeOffset expiredAt, string operationId)
+    {
+        string from = Status.ToString();
+        Status = RentalItemStatus.Expired;
+
+        RentalOrder?.AddStateTransition(new RentalStateTransition(
+            Guid.NewGuid(),
+            RentalOrderId,
+            Id,
+            from,
+            RentalItemStatus.Expired.ToString(),
+            "SupplierTimeout",
+            null,
+            ActorRole.System,
+            "Supplier confirmation deadline expired without decision",
+            expiredAt,
+            operationId));
+    }
+
+    internal void ApplyHoldExpired(DateTimeOffset expiredAt, string operationId, string reason)
+    {
+        string from = Status.ToString();
+        Status = RentalItemStatus.Expired;
+
+        foreach (var unit in _unitAssignments)
+        {
+            unit.Release(expiredAt);
+        }
+
+        RentalOrder?.AddStateTransition(new RentalStateTransition(
+            Guid.NewGuid(),
+            RentalOrderId,
+            Id,
+            from,
+            RentalItemStatus.Expired.ToString(),
+            "HoldExpired",
+            null,
+            ActorRole.System,
+            reason,
+            expiredAt,
+            operationId));
+    }
+
+    internal void MarkAssignmentsReleased(DateTimeOffset? releasedAt = null)
+    {
+        DateTimeOffset now = releasedAt ?? DateTimeOffset.UtcNow;
+        foreach (var unit in _unitAssignments)
+        {
+            unit.Release(now);
+        }
+    }
+
+    internal void RecordRefund(string refundRef)
+    {
+        RefundRef = refundRef;
     }
 }

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CreateInvoiceResponse",
+  "type": "object",
+  "required": ["invoiceRef", "totalAmount", "currency", "paymentDeadline", "isReplay"],
+  "properties": {
+    "invoiceRef": { "type": "string" },
+    "totalAmount": { "type": "integer", "minimum": 0 },
+    "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+    "paymentDeadline": { "type": "string", "format": "date-time" },
+    "isReplay": { "type": "boolean" }
+  }
+}

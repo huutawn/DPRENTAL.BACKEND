@@ -1,12 +1,11 @@
 ﻿using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
-using Dprental.RentalService.Domain.Repositories; // THÊM USING NÀY ĐỂ NHẬN DIỆN RentalServiceDbContext
+using Dprental.RentalService.Domain.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.RentalService.Infrastructure.Persistence.Repositories;
 
-// ĐÃ SỬA: Dùng đúng tên RentalServiceDbContext
 public sealed class RentalCartRepository(RentalServiceDbContext dbContext) : IRentalCartRepository
 {
     public async Task<RentalCart?> GetActiveByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default)
@@ -14,6 +13,14 @@ public sealed class RentalCartRepository(RentalServiceDbContext dbContext) : IRe
         return await dbContext.RentalCarts
             .Include(cart => cart.Items)
             .FirstOrDefaultAsync(cart => cart.RenterId == renterId && cart.Status == RentalCartStatus.Active, cancellationToken);
+    }
+
+    public async Task<RentalCart?> GetByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default)
+    {
+        return await dbContext.RentalCarts
+            .Include(cart => cart.Items)
+            .OrderByDescending(cart => cart.UpdatedAt)
+            .FirstOrDefaultAsync(cart => cart.RenterId == renterId, cancellationToken);
     }
 
     public async Task<RentalCart?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)

@@ -115,6 +115,12 @@ public class RentalApiFixture : WebApplicationFactory<Program>
             return Task.FromResult(cart);
         }
 
+        public Task<RentalCart?> GetByRenterIdAsync(Guid renterId, CancellationToken token = default)
+        {
+            var cart = _carts.Values.FirstOrDefault(c => c.RenterId == renterId);
+            return Task.FromResult(cart);
+        }
+
         // Sửa kiểu trả về thành Task<RentalCart> cho khớp với Interface
         public Task<RentalCart> CreateAsync(RentalCart cart, CancellationToken token = default)
         {

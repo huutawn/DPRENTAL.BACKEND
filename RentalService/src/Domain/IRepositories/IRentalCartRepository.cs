@@ -11,6 +11,8 @@ public interface IRentalCartRepository
 
     Task<RentalCart?> GetActiveByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default);
 
+    Task<RentalCart?> GetByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default);
+
     Task<RentalCart> CreateAsync(RentalCart cart, CancellationToken cancellationToken = default);
 
     Task<bool> UpdateAsync(RentalCart cart, CancellationToken cancellationToken = default);

@@ -25,6 +25,19 @@ public sealed record InitialRentalUnitAssignmentDto(
     Guid AssetId,
     Guid AllocationId);
 
+/// <summary>
+/// Bản sao thông tin Listing tại thời điểm checkout. Không chứa AssetCode hoặc SerialNumber.
+/// </summary>
+public sealed record RentalItemListingSnapshotDto(
+    Guid EquipmentTypeId,
+    string EquipmentTypeName,
+    Guid BrandId,
+    string BrandName,
+    string Model,
+    int SpecSchemaVersion,
+    string SpecValuesJson,
+    Guid? ThumbnailMediaId);
+
 public sealed record InitialRentalItemDto(
     Guid Id,
     Guid EquipmentListingId,
@@ -38,4 +51,15 @@ public sealed record InitialRentalItemDto(
     decimal DailyRateSnapshot,
     decimal DepositPerUnitSnapshot,
     string AllocationGroupId,
-    IEnumerable<InitialRentalUnitAssignmentDto> Assignments);
+    IEnumerable<InitialRentalUnitAssignmentDto> Assignments,
+    RentalItemListingSnapshotDto ListingSnapshot);
+
+public sealed record RentalOperationCommand(
+    int Version,
+    string Action,
+    Guid RentalOrderId,
+    Guid? TargetItemId,
+    string OperationKey,
+    string? TargetGroupOrReference,
+    Guid? ActorId,
+    string? ProviderRequestJson);
