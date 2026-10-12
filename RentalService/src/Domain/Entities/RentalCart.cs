@@ -11,7 +11,7 @@ namespace Dprental.RentalService.Domain.Entities;
 [Index(nameof(RenterId))]
 public class RentalCart
 {
-    /// <summary>Maximum rental date difference in days for the MVP.</summary>
+    /// <summary>Maximum rental duration in calendar days, including both endpoints.</summary>
     public const int MaximumRentalDays = 365;
 
     [Key]
@@ -161,7 +161,8 @@ public class RentalCart
         if (ownership.IsFailure) return ownership.Error;
 
         if (startDate > endDate) return RentalErrors.InvalidRentalPeriod;
-        if (endDate.DayNumber - startDate.DayNumber > MaximumRentalDays)
+        int durationInDays = endDate.DayNumber - startDate.DayNumber + 1;
+        if (durationInDays > MaximumRentalDays)
         {
             return RentalErrors.DurationExceedsOneYear;
         }

@@ -12,6 +12,7 @@ public sealed record RentalCartLineReadModel(
     decimal? CurrentDailyRate,
     decimal? CurrentDeposit,
     decimal? EstimatedRentalAmount,
+    string? CurrentPriceVersion,
     RentalCartLineStatus Status,
     string? Message);
 

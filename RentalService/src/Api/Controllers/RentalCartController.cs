@@ -21,10 +21,10 @@ public sealed class RentalCartController(
     GetRentalCart getRentalCart) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> Get(CancellationToken cancellationToken)
+    public async Task<IActionResult> Get([FromQuery] Dictionary<Guid, string>? clientPriceVersions, CancellationToken cancellationToken)
     {
         Result<RentalCartReadModel> result = await getRentalCart.ExecuteAsync(
-            currentRenter.RenterId, cancellationToken);
+            currentRenter.RenterId, clientPriceVersions, cancellationToken);
 
         return result.IsFailure
             ? this.ToProblem(result.Error)
@@ -57,24 +57,31 @@ public sealed class RentalCartController(
         [FromBody] UpdateCartItemRequest request,
         CancellationToken cancellationToken)
     {
-        // Từ chối payload sai/thiếu
-        if (request.Quantity is null && (request.ExpectedStartDate is null || request.ExpectedEndDate is null))
+        bool hasAnyDate = request.ExpectedStartDate is not null || request.ExpectedEndDate is not null;
+        bool hasBothDates = request.ExpectedStartDate is not null && request.ExpectedEndDate is not null;
+        bool hasQuantity = request.Quantity is not null;
+
+        if ((hasAnyDate && !hasBothDates) || hasQuantity == hasBothDates)
         {
-            return BadRequest("Phải cung cấp Quantity hoặc cả ExpectedStartDate và ExpectedEndDate.");
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Cart.InvalidUpdate",
+                Detail = "Cung cấp Quantity hoặc cả ExpectedStartDate và ExpectedEndDate; mỗi PATCH chỉ cập nhật một loại thông tin."
+            });
         }
 
-        if (request.Quantity is not null)
+        if (hasQuantity)
         {
             var qtyResult = await cartUseCases.UpdateCartItemQuantityAsync(
-                currentRenter.RenterId, id, request.Quantity.Value, cancellationToken);
+                currentRenter.RenterId, id, request.Quantity.GetValueOrDefault(), cancellationToken);
 
             if (qtyResult.IsFailure) return this.ToProblem(qtyResult.Error);
         }
-
-        if (request.ExpectedStartDate is not null && request.ExpectedEndDate is not null)
+        else
         {
             var datesResult = await cartUseCases.UpdateCartItemDatesAsync(
-                currentRenter.RenterId, id, request.ExpectedStartDate.Value, request.ExpectedEndDate.Value, cancellationToken);
+                currentRenter.RenterId, id, request.ExpectedStartDate.GetValueOrDefault(), request.ExpectedEndDate.GetValueOrDefault(), cancellationToken);
 
             if (datesResult.IsFailure) return this.ToProblem(datesResult.Error);
         }

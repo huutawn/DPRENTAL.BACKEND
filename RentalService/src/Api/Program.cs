@@ -1,4 +1,6 @@
 using System.IO;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Dprental.RentalService.Api.Exceptions;
 using Dprental.RentalService.Application.Cart.ReadModel;
 using Dprental.RentalService.Domain.Repositories;
@@ -19,10 +21,10 @@ builder.Services.AddHealthChecks()
 
 builder.Services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
 
-builder.Services.AddControllers();
+builder.Services.AddControllers().AddJsonOptions(options =>
+    options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseUpper)));
 builder.Services.AddAuthentication();
 builder.Services.AddAuthorization();
-builder.Services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddEndpointsApiExplorer();

@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Dprental.RentalService.Common;
@@ -13,10 +12,12 @@ public sealed class GetRentalCart(
     IRentalCartRepository carts,
     IRentalListingReader listingReader,
     IRentalAvailabilityReader availabilityReader,
-    IRentalCartPolicy policy)
+    IRentalCartPolicy policy,
+    TimeProvider timeProvider)
 {
     public async Task<Result<RentalCartReadModel>> ExecuteAsync(
         Guid renterId,
+        IReadOnlyDictionary<Guid, string>? clientPriceVersions,
         CancellationToken cancellationToken = default)
     {
         if (renterId == Guid.Empty) return Result.Success(new RentalCartReadModel(Guid.Empty, []));
@@ -27,14 +28,34 @@ public sealed class GetRentalCart(
 
         var lines = new List<RentalCartLineReadModel>();
 
+        DateOnly todayVn = DateOnly.FromDateTime(timeProvider.GetUtcNow().AddHours(7).DateTime);
+        DateOnly maxAdvanceDate = todayVn.AddMonths(6);
+
         foreach (RentalCartItem item in cart.Items)
         {
-            int duration = item.ExpectedEndDate.DayNumber - item.ExpectedStartDate.DayNumber;
+            int duration = item.ExpectedEndDate.DayNumber - item.ExpectedStartDate.DayNumber + 1;
 
-            // Đồng bộ: Đã chặn triệt để Start == End (duration <= 0)
-            if (item.Quantity < 1 || duration <= 0 || duration > policy.MaximumRentalDays)
+            if (item.ExpectedStartDate > item.ExpectedEndDate || item.Quantity < 1)
             {
                 lines.Add(CreateFailedLine(item, RentalCartLineStatus.ValidationFailed, "Kỳ thuê hoặc số lượng không hợp lệ."));
+                continue;
+            }
+
+            if (duration > policy.MaximumRentalDays)
+            {
+                lines.Add(CreateFailedLine(item, RentalCartLineStatus.ValidationFailed, $"Thời gian thuê không được vượt quá {policy.MaximumRentalDays} ngày."));
+                continue;
+            }
+
+            // MỚI: Kiểm tra ngày thuê (DatePassed và 6 tháng)
+            if (item.ExpectedStartDate <= todayVn)
+            {
+                lines.Add(CreateFailedLine(item, RentalCartLineStatus.DatePassed, "Ngày bắt đầu thuê đã qua. Hãy chọn ngày từ ngày mai."));
+                continue;
+            }
+            if (item.ExpectedStartDate > maxAdvanceDate)
+            {
+                lines.Add(CreateFailedLine(item, RentalCartLineStatus.ValidationFailed, "Chỉ được phép đặt thuê trước tối đa 6 tháng."));
                 continue;
             }
 
@@ -54,7 +75,15 @@ public sealed class GetRentalCart(
 
             if (!listing.IsPublished || !listing.AcceptsBookings)
             {
-                lines.Add(CreateLine(item, listing, RentalCartLineStatus.ListingDisabled, "Sản phẩm hiện không nhận đơn thuê."));
+                lines.Add(CreateLine(item, listing, duration, RentalCartLineStatus.ListingDisabled, "Sản phẩm hiện không nhận đơn thuê."));
+                continue;
+            }
+
+            // MỚI: Kiểm tra PriceVersion từ Client gửi lên so với bản Snapshot hiện tại
+            string? clientVersion = clientPriceVersions != null && clientPriceVersions.TryGetValue(item.Id, out var v) ? v : null;
+            if (clientVersion != null && clientVersion != listing.PriceVersion)
+            {
+                lines.Add(CreateLine(item, listing, duration, RentalCartLineStatus.PriceChanged, "Giá hoặc cọc đã thay đổi, vui lòng xác nhận lại."));
                 continue;
             }
 
@@ -64,17 +93,17 @@ public sealed class GetRentalCart(
             // Phân biệt Null (Lỗi hệ thống) và 0 (hết hàng)
             if (availableQty is null)
             {
-                lines.Add(CreateLine(item, listing, RentalCartLineStatus.ValidationFailed, "Không thể kiểm tra tồn kho tại thời điểm này."));
+                lines.Add(CreateLine(item, listing, duration, RentalCartLineStatus.ValidationFailed, "Không thể kiểm tra tồn kho tại thời điểm này."));
                 continue;
             }
 
             if (availableQty < item.Quantity)
             {
-                lines.Add(CreateLine(item, listing, RentalCartLineStatus.InsufficientQuantity, $"Chỉ còn {availableQty} sản phẩm khả dụng."));
+                lines.Add(CreateLine(item, listing, duration, RentalCartLineStatus.InsufficientQuantity, $"Chỉ còn {availableQty} sản phẩm khả dụng."));
                 continue;
             }
 
-            lines.Add(CreateLine(item, listing, RentalCartLineStatus.Available, null));
+            lines.Add(CreateLine(item, listing, duration, RentalCartLineStatus.Available, null));
         }
 
         return Result.Success(new RentalCartReadModel(cart.Id, lines));
@@ -84,18 +113,16 @@ public sealed class GetRentalCart(
     {
         return new RentalCartLineReadModel(
             item.Id, item.EquipmentListingId, item.Quantity, item.ExpectedStartDate, item.ExpectedEndDate,
-            CurrentDailyRate: null, CurrentDeposit: null, EstimatedRentalAmount: null, status, message);
+            CurrentDailyRate: null, CurrentDeposit: null, EstimatedRentalAmount: null, CurrentPriceVersion: null, status, message);
     }
 
-    private static RentalCartLineReadModel CreateLine(RentalCartItem item, RentalListingSnapshot listing, RentalCartLineStatus status, string? message)
+    private static RentalCartLineReadModel CreateLine(RentalCartItem item, RentalListingSnapshot listing, int duration, RentalCartLineStatus status, string? message)
     {
-        int duration = item.ExpectedEndDate.DayNumber - item.ExpectedStartDate.DayNumber;
-
-        // MỚI: Đã bổ sung nhân thêm item.Quantity
+        // SỬA: Công thức tính tiền chuẩn xác
         decimal estimatedAmount = duration * listing.DailyRate * item.Quantity;
 
         return new RentalCartLineReadModel(
             item.Id, item.EquipmentListingId, item.Quantity, item.ExpectedStartDate, item.ExpectedEndDate,
-            listing.DailyRate, listing.Deposit, estimatedAmount, status, message);
+            listing.DailyRate, listing.Deposit, estimatedAmount, listing.PriceVersion, status, message);
     }
 }

@@ -86,7 +86,7 @@ public sealed class RentalCartTests
         RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
 
         DateOnly start = new DateOnly(2026, 10, 1);
-        DateOnly end = start.AddDays(RentalCart.MaximumRentalDays + 1);
+        DateOnly end = start.AddDays(RentalCart.MaximumRentalDays);
 
         Result<RentalCartItem> result = cart.AddItem(Guid.NewGuid(), Guid.NewGuid(), _ownerId, 2, start, end, _now);
 
@@ -95,10 +95,10 @@ public sealed class RentalCartTests
     }
 
     [Fact]
-    public void AddItem_DurationExactlyOneYear_IsAccepted()
+    public void AddItem_DurationExactlyMaximumRentalDays_IsAccepted()
     {
         RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
-        DateOnly end = _start.AddDays(RentalCart.MaximumRentalDays);
+        DateOnly end = _start.AddDays(RentalCart.MaximumRentalDays - 1);
 
         Result<RentalCartItem> result = cart.AddItem(
             Guid.NewGuid(), Guid.NewGuid(), _ownerId, 1, _start, end, _now);
@@ -176,7 +176,7 @@ public sealed class RentalCartTests
         Guid itemId = Guid.NewGuid();
         cart.AddItem(itemId, Guid.NewGuid(), _ownerId, 2, _start, _end, _now);
 
-        DateOnly newEnd = _start.AddDays(RentalCart.MaximumRentalDays + 1);
+        DateOnly newEnd = _start.AddDays(RentalCart.MaximumRentalDays);
         Result result = cart.UpdateItemDates(itemId, _ownerId, _start, newEnd, _now);
 
         Assert.True(result.IsFailure);
@@ -190,7 +190,7 @@ public sealed class RentalCartTests
         Guid itemId = Guid.NewGuid();
         cart.AddItem(itemId, Guid.NewGuid(), _ownerId, 1, _start, _end, _now);
 
-        DateOnly maximumEnd = _start.AddDays(RentalCart.MaximumRentalDays);
+        DateOnly maximumEnd = _start.AddDays(RentalCart.MaximumRentalDays - 1);
         Result result = cart.UpdateItemDates(itemId, _ownerId, _start, maximumEnd, _now.AddMinutes(1));
 
         Assert.True(result.IsSuccess);

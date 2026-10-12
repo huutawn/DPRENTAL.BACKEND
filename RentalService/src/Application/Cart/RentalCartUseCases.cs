@@ -3,6 +3,7 @@ using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
+using System.Security.AccessControl;
 
 namespace Dprental.RentalService.Application.Cart;
 
@@ -19,6 +20,7 @@ public sealed class RentalCartUseCases(
         DateOnly endDate,
         CancellationToken cancellationToken = default)
     {
+        Result dateCheck = ValidateRentalDates(startDate, endDate); if (dateCheck.IsFailure) return dateCheck.Error;
         if (renterId == Guid.Empty)
             return RentalErrors.CartNotFound;
 
@@ -114,6 +116,7 @@ public sealed class RentalCartUseCases(
         DateOnly endDate,
         CancellationToken cancellationToken = default)
     {
+        Result dateCheck = ValidateRentalDates(startDate, endDate); if (dateCheck.IsFailure) return dateCheck.Error;
         RentalCart? cart = await GetActiveCartAsync(renterId, cancellationToken);
         if (cart is null)
             return RentalErrors.CartNotFound;
@@ -177,6 +180,23 @@ public sealed class RentalCartUseCases(
         return await carts.UpdateAsync(cart, cancellationToken)
             ? Result.Success()
             : RentalErrors.CartNotFound;
+    }
+    private Result ValidateRentalDates(DateOnly startDate, DateOnly endDate)
+    {
+        DateOnly todayVn = DateOnly.FromDateTime(timeProvider.GetUtcNow().AddHours(7).DateTime);
+
+        if (startDate > endDate) return RentalErrors.InvalidRentalPeriod;
+
+        int durationDays = endDate.DayNumber - startDate.DayNumber + 1;
+        if (durationDays > 365) return RentalErrors.DurationExceedsOneYear; // Đảm bảo khai báo Error này trong RentalErrors
+
+        if (startDate <= todayVn)
+            return Error.Validation("Cart.StartDateInvalid", "Ngày bắt đầu thuê phải từ ngày mai.");
+
+        if (startDate > todayVn.AddMonths(6))
+            return Error.Validation("Cart.AdvanceBookingTooFar", "Chỉ được phép đặt trước tối đa 6 tháng.");
+
+        return Result.Success();
     }
 
     private async Task<RentalCart?> GetActiveCartAsync(

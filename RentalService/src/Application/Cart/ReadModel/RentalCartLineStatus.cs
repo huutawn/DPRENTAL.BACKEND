@@ -7,5 +7,6 @@ public enum RentalCartLineStatus
     InsufficientQuantity,
     Unavailable,
     ListingDisabled,
-    ValidationFailed
+    ValidationFailed,
+    DatePassed,
 }
