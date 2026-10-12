@@ -15,6 +15,7 @@ using Dprental.RentalService.Application.Integration;
 using Dprental.RentalService.Application.Operations;
 using Dprental.RentalService.Application.Payments;
 using Dprental.RentalService.Application.SupplierDecision;
+using Dprental.RentalService.Application.SupplierStatistics;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.Observability;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -48,6 +49,7 @@ builder.Services.AddHttpClient<IInventoryRentalClient, HttpInventoryRentalClient
 builder.Services.AddScoped<IPaymentWorkflowService, PaymentWorkflowService>();
 builder.Services.AddScoped<ISupplierDecisionService, SupplierDecisionService>();
 builder.Services.AddScoped<IExpiryWorkflowService, ExpiryWorkflowService>();
+builder.Services.AddScoped<ISupplierStatisticsService, SupplierStatisticsService>();
 builder.Services.AddScoped<IRefundCompletedConsumer, RefundCompletedConsumer>();
 builder.Services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
 builder.Services.AddSingleton<RentalMetrics>();

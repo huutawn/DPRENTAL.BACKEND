@@ -37,4 +37,10 @@ public interface IRentalOrderRepository
         DateOnly monthEnd,
         IReadOnlyCollection<Dprental.RentalService.Common.Enums.RentalItemStatus> targetStatuses,
         CancellationToken cancellationToken = default);
+
+    Task<SupplierConfirmationStatisticsRecord> GetSupplierConfirmationStatisticsAsync(
+        Guid supplierId,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default);
 }

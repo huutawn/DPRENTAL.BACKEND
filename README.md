@@ -253,3 +253,56 @@ Dịch vụ triển khai mô hình nghiệp vụ canonical theo AGENTS.md và th
   - `rental.release.failures`: Số lần giải phóng allocation thất bại.
   - `rental.refund.failures`: Số lần yêu cầu hoàn tiền thất bại.
   - `rental.operations.uncertain_exhausted`: Số tác vụ hết lượt thử lại nhưng trạng thái chưa rõ (`action`).
+
+## Thống kê xác nhận của Supplier cho Admin (Admin Supplier Confirmation Statistics)
+
+### 1. Endpoint
+
+`GET /api/v1/rental/admin/suppliers/{supplierId}/confirmation-statistics?fromUtc=YYYY-MM-DDTHH:mm:ssZ&toUtc=YYYY-MM-DDTHH:mm:ssZ`
+
+### 2. Định nghĩa bốn chỉ số
+
+| Chỉ số | Điều kiện qualifying transition trong `RentalStateTransition` |
+|---|---|
+| `acceptedCount` | Action `SupplierAccept`, `PendingSupplierConfirmation` → `AwaitingHandover`, actor là supplier sở hữu item (`ActorRole = Supplier`, `ActorId = item.SupplierId`). |
+| `rejectedCount` | Action `SupplierReject`, `PendingSupplierConfirmation` → `Rejected`, actor là supplier sở hữu item (`ActorRole = Supplier`, `ActorId = item.SupplierId`). |
+| `confirmationTimeoutCount` | Action `SupplierTimeout`, `PendingSupplierConfirmation` → `Expired`, actor `System` (`ActorRole = System`). |
+| `cancelAfterAcceptCount` | Transition thực sự chuyển sang `Cancelled` (`ToState = Cancelled`, `FromState <> Cancelled`), actor `Supplier` (`ActorRole = Supplier`, `ActorId = item.SupplierId`), và tồn tại qualifying `SupplierAccept` thành công của cùng item tại thời điểm trước hoặc bằng thời điểm hủy. |
+
+### 3. Quy tắc đếm và Deduplication
+
+- **Đơn vị đếm:** Đếm số lượng `RentalItem` duy nhất (không đếm `RentalOrder`, không nhân `Quantity`, không đếm số lần retry/thao tác).
+- **Deduplication:** Lấy thời điểm qualifying transition đầu tiên (`MIN(OccurredAt)`) của từng item cho chỉ số đó trước khi so khớp khoảng thời gian báo cáo.
+- **Khoảng thời gian:** Nửa mở `[fromUtc, toUtc)`: gồm thời điểm bắt đầu (`>= fromUtc`), không gồm thời điểm kết thúc (`< toUtc`).
+- **Thời điểm tính:** Dùng thời điểm diễn ra sự kiện (`OccurredAt` của transition), không dùng `CreatedAt` của Order.
+- **Bằng chứng độc lập thời gian:** Sự kiện accept diễn ra trước `fromUtc` vẫn là bằng chứng hợp lệ để ghi nhận supplier cancellation diễn ra trong khoảng `[fromUtc, toUtc)`.
+- **Loại trừ sự kiện khác:** Không tính payment timeout, `HoldExpired`, `RefundCompleted`, `OrderRollup` hay `ReplayOperation` vào `confirmationTimeoutCount`. Renter/Admin/System hủy không làm tăng `cancelAfterAcceptCount`. Không tính audit không đổi trạng thái (như `Cancelled` → `Cancelled`).
+
+### 4. Quy tắc thời gian (Timezone & Date)
+
+- `fromUtc` và `toUtc` là tham số bắt buộc theo chuẩn ISO 8601 kèm timezone tường minh (`Z` hoặc offset `±HH:mm`), hỗ trợ phần thập phân giây từ 1 đến 7 chữ số:
+  - `yyyy-MM-ddTHH:mm:ssZ`
+  - `yyyy-MM-ddTHH:mm:ss±HH:mm`
+  - `yyyy-MM-ddTHH:mm:ss.<1–7 chữ số>Z`
+  - `yyyy-MM-ddTHH:mm:ss.<1–7 chữ số>±HH:mm`
+- Cho phép ký tự `t`/`z` viết thường (được chuẩn hóa trước khi parse).
+- Dấu `+` trong query string HTTP cần được URL-encode thành `%2B` (ví dụ: `%2B07:00`) để tránh bị chuyển thành dấu cách.
+- Mọi mốc thời gian được chuẩn hóa về UTC trước khi thực hiện truy vấn cơ sở dữ liệu.
+- Không sử dụng machine local timezone và không tự gán khoảng thời gian mặc định.
+- Error codes trả về:
+  - `MISSING_DATE_RANGE`: Thiếu `fromUtc` hoặc `toUtc`.
+  - `INVALID_DATETIME_FORMAT`: Định dạng không hợp lệ, thiếu timezone, date/time/offset sai hoặc có ký tự thừa.
+  - `INVALID_TIME_RANGE`: Khoảng rỗng hoặc đảo ngược sau khi chuẩn hóa (`fromUtc >= toUtc`).
+  - `INVALID_SUPPLIER_ID`: `supplierId` rỗng (`Guid.Empty`) hoặc không hợp lệ.
+### 5. Phân quyền (Authorization)
+
+- **Chưa đăng nhập:** HTTP 401 (`Auth.Unauthorized`).
+- **Người dùng quản trị (Human Admin):** HTTP 200 (`Result.Success`).
+- **Người dùng thông thường (Renter / Supplier không phải Admin):** HTTP 403 (`Auth.Forbidden`).
+- **Service token:** HTTP 403 (`Auth.ServiceTokenNotAllowed`).
+
+### 6. Giới hạn dữ liệu và History Coverage
+
+- Nguồn dữ liệu hoàn toàn xuất phát từ audit log `RentalStateTransition`. Không sử dụng trạng thái hiện tại (`RentalItem.Status`) làm căn cứ thống kê nhằm tránh sai lệch khi item chuyển trạng thái tiếp theo (`InRental`, `Completed`, `Cancelled`).
+- Hệ thống không tự ý backfill dữ liệu lịch sử hoặc suy đoán actor từ trạng thái hiện tại.
+- **Phạm vi cancellation hiện tại:** Workflow hủy đơn từ phía supplier sau accept chưa được triển khai trong phiên bản này. Chỉ số `cancelAfterAcceptCount` phản ánh số sự kiện hủy hợp lệ được ghi nhận trong audit log và mặc định trả về `0` cho đến khi workflow này được hiện thực hóa ở task riêng. Truy vấn đã được thiết kế sẵn sàng để tự động nhận diện các bản ghi audit khi workflow đó đi vào hoạt động mà không cần thêm pipeline phân tích hay thay đổi database schema.

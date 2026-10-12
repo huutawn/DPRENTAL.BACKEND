@@ -199,4 +199,81 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
 
         return await query.ToListAsync(cancellationToken);
     }
+
+    public async Task<SupplierConfirmationStatisticsRecord> GetSupplierConfirmationStatisticsAsync(
+        Guid supplierId,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default)
+    {
+        const int supplierRole = (int)ActorRole.Supplier;
+        const int systemRole = (int)ActorRole.System;
+
+        var result = await _dbContext.Database.SqlQuery<SupplierConfirmationStatisticsRecord>($"""
+            WITH item_accepted AS (
+                SELECT t."RentalItemId" AS item_id, MIN(t."OccurredAt") AS first_occurred_at
+                FROM rental.rental_state_transitions t
+                INNER JOIN rental.rental_items i ON t."RentalItemId" = i."Id"
+                WHERE i."SupplierId" = {supplierId}
+                  AND t."Action" = 'SupplierAccept'
+                  AND t."FromState" = 'PendingSupplierConfirmation'
+                  AND t."ToState" = 'AwaitingHandover'
+                  AND t."ActorRole" = {supplierRole}
+                  AND t."ActorId" = i."SupplierId"
+                GROUP BY t."RentalItemId"
+            ),
+            item_rejected AS (
+                SELECT t."RentalItemId" AS item_id, MIN(t."OccurredAt") AS first_occurred_at
+                FROM rental.rental_state_transitions t
+                INNER JOIN rental.rental_items i ON t."RentalItemId" = i."Id"
+                WHERE i."SupplierId" = {supplierId}
+                  AND t."Action" = 'SupplierReject'
+                  AND t."FromState" = 'PendingSupplierConfirmation'
+                  AND t."ToState" = 'Rejected'
+                  AND t."ActorRole" = {supplierRole}
+                  AND t."ActorId" = i."SupplierId"
+                GROUP BY t."RentalItemId"
+            ),
+            item_timeout AS (
+                SELECT t."RentalItemId" AS item_id, MIN(t."OccurredAt") AS first_occurred_at
+                FROM rental.rental_state_transitions t
+                INNER JOIN rental.rental_items i ON t."RentalItemId" = i."Id"
+                WHERE i."SupplierId" = {supplierId}
+                  AND t."Action" = 'SupplierTimeout'
+                  AND t."FromState" = 'PendingSupplierConfirmation'
+                  AND t."ToState" = 'Expired'
+                  AND t."ActorRole" = {systemRole}
+                GROUP BY t."RentalItemId"
+            ),
+            item_cancel AS (
+                SELECT t."RentalItemId" AS item_id, MIN(t."OccurredAt") AS first_occurred_at
+                FROM rental.rental_state_transitions t
+                INNER JOIN rental.rental_items i ON t."RentalItemId" = i."Id"
+                WHERE i."SupplierId" = {supplierId}
+                  AND t."ToState" = 'Cancelled'
+                  AND (t."FromState" IS NULL OR t."FromState" <> 'Cancelled')
+                  AND t."ActorRole" = {supplierRole}
+                  AND t."ActorId" = i."SupplierId"
+                  AND EXISTS (
+                      SELECT 1
+                      FROM rental.rental_state_transitions a
+                      WHERE a."RentalItemId" = t."RentalItemId"
+                        AND a."Action" = 'SupplierAccept'
+                        AND a."FromState" = 'PendingSupplierConfirmation'
+                        AND a."ToState" = 'AwaitingHandover'
+                        AND a."ActorRole" = {supplierRole}
+                        AND a."ActorId" = i."SupplierId"
+                        AND a."OccurredAt" <= t."OccurredAt"
+                  )
+                GROUP BY t."RentalItemId"
+            )
+            SELECT
+                (SELECT COUNT(*)::bigint FROM item_accepted WHERE first_occurred_at >= {fromUtc} AND first_occurred_at < {toUtc}) AS "AcceptedCount",
+                (SELECT COUNT(*)::bigint FROM item_rejected WHERE first_occurred_at >= {fromUtc} AND first_occurred_at < {toUtc}) AS "RejectedCount",
+                (SELECT COUNT(*)::bigint FROM item_timeout WHERE first_occurred_at >= {fromUtc} AND first_occurred_at < {toUtc}) AS "ConfirmationTimeoutCount",
+                (SELECT COUNT(*)::bigint FROM item_cancel WHERE first_occurred_at >= {fromUtc} AND first_occurred_at < {toUtc}) AS "CancelAfterAcceptCount"
+        """).FirstOrDefaultAsync(cancellationToken);
+
+        return result ?? new SupplierConfirmationStatisticsRecord(0, 0, 0, 0);
+    }
 }

@@ -178,6 +178,7 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
         modelBuilder.Entity<RentalStateTransition>(b =>
         {
             b.Property(t => t.Id).ValueGeneratedNever();
+            b.HasIndex(t => new { t.RentalItemId, t.Action, t.OccurredAt });
         });
 
         modelBuilder.Entity<RentalOperationReceipt>(b =>

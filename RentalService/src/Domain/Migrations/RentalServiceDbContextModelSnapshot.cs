@@ -233,14 +233,6 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
-                    b.Property<Guid>("MessageId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("MessageType")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
                     b.Property<long?>("KafkaOffset")
                         .HasColumnType("bigint");
 
@@ -251,8 +243,17 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MessageType")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<DateTimeOffset?>("NextRetryAt")
                         .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Payload")
                         .IsRequired()
                         .HasColumnType("text");
@@ -464,6 +465,7 @@ namespace RentalService.Domain.Migrations
 
                     b.Property<bool>("IsSuccess")
                         .HasColumnType("boolean");
+
                     b.Property<bool>("IsTransient")
                         .HasColumnType("boolean");
 
@@ -485,14 +487,15 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
-                    b.Property<Guid>("RentalOrderId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("RefundCompletionJson")
                         .HasColumnType("text");
 
+                    b.Property<Guid>("RentalOrderId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("ResponseJson")
                         .HasColumnType("text");
+
                     b.Property<int>("RetryCount")
                         .HasColumnType("integer");
 
@@ -751,6 +754,8 @@ namespace RentalService.Domain.Migrations
                     b.HasIndex("RentalItemId");
 
                     b.HasIndex("RentalOrderId");
+
+                    b.HasIndex("RentalItemId", "Action", "OccurredAt");
 
                     b.ToTable("rental_state_transitions", "rental");
                 });
