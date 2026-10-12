@@ -100,7 +100,8 @@ public sealed class SupplierConfirmationStatisticsCountingPostgreSqlTests
                 100_000m,
                 200_000m,
                 "group-a",
-                [new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())]);
+                [new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
+                TestListingSnapshots.Default);
 
             var itemBDto = new InitialRentalItemDto(
                 itemB,
@@ -115,7 +116,8 @@ public sealed class SupplierConfirmationStatisticsCountingPostgreSqlTests
                 100_000m,
                 200_000m,
                 "group-b",
-                [new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())]);
+                [new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
+                TestListingSnapshots.Default);
 
             var order = RentalOrder.Create(
                 orderId,

@@ -1,5 +1,6 @@
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Domain.Repositories;
+using Dprental.RentalService.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -21,6 +22,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
         }
 
         services.AddDbContext<RentalServiceDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddScoped<IRentalCartRepository, RentalCartRepository>();
         services.AddScoped<IRentalOrderRepository, RentalOrderRepository>();
         services.AddScoped<IInboxRepository, InboxRepository>();
         services.AddScoped<IOutboxRepository, OutboxRepository>();

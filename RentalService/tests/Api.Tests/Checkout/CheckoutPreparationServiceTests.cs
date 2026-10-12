@@ -44,7 +44,7 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     private Guid AddCartItem(Guid listingId, int quantity, DateOnly start, DateOnly end) =>
-        _cart.AddItem(Guid.NewGuid(), listingId, quantity, start, end, Now).Value.Id;
+        _cart.AddItem(Guid.NewGuid(), listingId, _supplierId, quantity, start, end, Now).Value.Id;
 
     private InventoryListingDto Listing(Guid id) => new(
         id,

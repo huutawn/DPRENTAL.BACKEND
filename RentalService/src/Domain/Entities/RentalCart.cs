@@ -11,6 +11,9 @@ namespace Dprental.RentalService.Domain.Entities;
 [Index(nameof(RenterId))]
 public class RentalCart
 {
+    /// <summary>Maximum rental duration in calendar days, including both endpoints.</summary>
+    public const int MaximumRentalDays = 365;
+
     [Key]
     public Guid Id { get; private set; }
 
@@ -28,10 +31,7 @@ public class RentalCart
     private readonly List<RentalCartItem> _items = [];
     public IReadOnlyCollection<RentalCartItem> Items => _items.AsReadOnly();
 
-    // Constructor for EF Core
-    private RentalCart()
-    {
-    }
+    private RentalCart() { }
 
     private RentalCart(Guid id, Guid renterId, DateTimeOffset utcNow)
     {
@@ -45,46 +45,27 @@ public class RentalCart
 
     public static Result<RentalCart> Create(Guid id, Guid renterId, DateTimeOffset utcNow)
     {
-        if (id == Guid.Empty)
-        {
-            return RentalErrors.CartNotFound;
-        }
-
-        if (renterId == Guid.Empty)
-        {
-            return RentalErrors.CartNotFound;
-        }
-
+        if (id == Guid.Empty) return RentalErrors.CartNotFound;
+        if (renterId == Guid.Empty) return RentalErrors.CartNotFound;
         return new RentalCart(id, renterId, utcNow);
     }
 
     public Result<RentalCartItem> AddItem(
         Guid itemId,
         Guid equipmentListingId,
+        Guid equipmentListingOwnerId,
         int quantity,
         DateOnly expectedStartDate,
         DateOnly expectedEndDate,
         DateTimeOffset utcNow)
     {
-        if (Status != RentalCartStatus.Active)
-        {
-            return RentalErrors.CartNotActive;
-        }
+        if (Status != RentalCartStatus.Active) return RentalErrors.CartNotActive;
+        if (itemId == Guid.Empty || equipmentListingId == Guid.Empty) return RentalErrors.CartItemNotFound;
 
-        if (itemId == Guid.Empty || equipmentListingId == Guid.Empty)
-        {
-            return RentalErrors.CartItemNotFound;
-        }
-
-        if (quantity <= 0)
-        {
-            return RentalErrors.InvalidQuantity;
-        }
-
-        if (expectedStartDate >= expectedEndDate)
-        {
-            return RentalErrors.InvalidRentalPeriod;
-        }
+        Result requestValidation = ValidateRentalRequest(
+            equipmentListingOwnerId, expectedStartDate, expectedEndDate);
+        if (requestValidation.IsFailure) return requestValidation.Error;
+        if (quantity <= 0) return RentalErrors.InvalidQuantity;
 
         RentalCartItem? existing = _items.Find(i =>
             i.EquipmentListingId == equipmentListingId &&
@@ -93,66 +74,115 @@ public class RentalCart
 
         if (existing is not null)
         {
-            existing.AddQuantity(quantity);
+            if (quantity > int.MaxValue - existing.Quantity)
+                return RentalErrors.QuantityOverflow;
+
+            existing.AddQuantity(quantity, utcNow);
             UpdatedAt = utcNow;
             Version++;
             return existing;
         }
 
-        RentalCartItem newItem = new(itemId, Id, equipmentListingId, quantity, expectedStartDate, expectedEndDate);
+        RentalCartItem newItem = new(itemId, Id, equipmentListingId, quantity, expectedStartDate, expectedEndDate, utcNow);
         _items.Add(newItem);
         UpdatedAt = utcNow;
         Version++;
         return newItem;
     }
 
-    public Result UpdateItem(
+    public Result UpdateItemQuantity(
         Guid cartItemId,
+        Guid equipmentListingOwnerId, // Check lại owner
         int newQuantity,
-        DateOnly newStartDate,
-        DateOnly newEndDate,
         DateTimeOffset utcNow)
     {
-        if (Status != RentalCartStatus.Active)
-        {
-            return RentalErrors.CartNotActive;
-        }
-
-        if (newQuantity <= 0)
-        {
-            return RentalErrors.InvalidQuantity;
-        }
-
-        if (newStartDate >= newEndDate)
-        {
-            return RentalErrors.InvalidRentalPeriod;
-        }
+        if (Status != RentalCartStatus.Active) return RentalErrors.CartNotActive;
 
         RentalCartItem? item = _items.Find(i => i.Id == cartItemId);
-        if (item is null)
-        {
-            return RentalErrors.CartItemNotFound;
-        }
+        if (item is null) return RentalErrors.CartItemNotFound;
 
-        item.Update(newQuantity, newStartDate, newEndDate);
+        Result ownership = ValidateListingOwner(equipmentListingOwnerId);
+        if (ownership.IsFailure) return ownership.Error;
+
+        if (newQuantity < 1) return RentalErrors.InvalidQuantity;
+
+        item.UpdateQuantity(newQuantity, utcNow);
         UpdatedAt = utcNow;
         Version++;
         return Result.Success();
     }
 
-    public Result RemoveItem(Guid cartItemId, DateTimeOffset utcNow)
+    public Result UpdateItemDates(
+        Guid cartItemId,
+        Guid equipmentListingOwnerId,
+        DateOnly newStartDate,
+        DateOnly newEndDate,
+        DateTimeOffset utcNow)
     {
-        if (Status != RentalCartStatus.Active)
-        {
-            return RentalErrors.CartNotActive;
-        }
+        if (Status != RentalCartStatus.Active) return RentalErrors.CartNotActive;
 
         RentalCartItem? item = _items.Find(i => i.Id == cartItemId);
-        if (item is null)
+        if (item is null) return RentalErrors.CartItemNotFound;
+
+        Result requestValidation = ValidateRentalRequest(
+            equipmentListingOwnerId, newStartDate, newEndDate);
+        if (requestValidation.IsFailure) return requestValidation.Error;
+
+        RentalCartItem? duplicate = _items.Find(i =>
+            i.Id != cartItemId &&
+            i.EquipmentListingId == item.EquipmentListingId &&
+            i.ExpectedStartDate == newStartDate &&
+            i.ExpectedEndDate == newEndDate);
+
+        if (duplicate is not null)
         {
-            return RentalErrors.CartItemNotFound;
+            if (item.Quantity > int.MaxValue - duplicate.Quantity)
+                return RentalErrors.QuantityOverflow;
+
+            duplicate.AddQuantity(item.Quantity, utcNow);
+            _items.Remove(item);
+        }
+        else
+        {
+            item.UpdateDates(newStartDate, newEndDate, utcNow);
         }
 
+        UpdatedAt = utcNow;
+        Version++;
+        return Result.Success();
+    }
+
+    private Result ValidateRentalRequest(
+        Guid equipmentListingOwnerId,
+        DateOnly startDate,
+        DateOnly endDate)
+    {
+        Result ownership = ValidateListingOwner(equipmentListingOwnerId);
+        if (ownership.IsFailure) return ownership.Error;
+
+        if (startDate > endDate) return RentalErrors.InvalidRentalPeriod;
+        int durationInDays = endDate.DayNumber - startDate.DayNumber + 1;
+        if (durationInDays > MaximumRentalDays)
+        {
+            return RentalErrors.DurationExceedsOneYear;
+        }
+
+        return Result.Success();
+    }
+
+    private Result ValidateListingOwner(Guid equipmentListingOwnerId)
+    {
+        if (equipmentListingOwnerId == Guid.Empty) return RentalErrors.OwnerIdRequired;
+        if (equipmentListingOwnerId == RenterId) return RentalErrors.CannotRentOwnListing;
+        return Result.Success();
+    }
+
+    // Các hàm RemoveItem, ClearItems, CompleteCheckout, Abandon giữ nguyên như cũ...
+    public Result RemoveItem(Guid cartItemId, DateTimeOffset utcNow)
+    {
+        if (Status != RentalCartStatus.Active) return RentalErrors.CartNotActive;
+        RentalCartItem? item = _items.Find(i => i.Id == cartItemId);
+        if (item is null) return RentalErrors.CartItemNotFound;
         _items.Remove(item);
         UpdatedAt = utcNow;
         Version++;
@@ -161,11 +191,7 @@ public class RentalCart
 
     public Result ClearItems(DateTimeOffset utcNow)
     {
-        if (Status != RentalCartStatus.Active)
-        {
-            return RentalErrors.CartNotActive;
-        }
-
+        if (Status != RentalCartStatus.Active) return RentalErrors.CartNotActive;
         _items.Clear();
         UpdatedAt = utcNow;
         Version++;
@@ -174,26 +200,12 @@ public class RentalCart
 
     public Result CompleteCheckout(IEnumerable<Guid> checkedOutCartItemIds, DateTimeOffset utcNow)
     {
-        if (Status != RentalCartStatus.Active)
-        {
-            return RentalErrors.CartNotActive;
-        }
-
+        if (Status != RentalCartStatus.Active) return RentalErrors.CartNotActive;
         ArgumentNullException.ThrowIfNull(checkedOutCartItemIds);
         HashSet<Guid> idSet = checkedOutCartItemIds.ToHashSet();
-
-        if (idSet.Count == 0)
-        {
-            return RentalErrors.CartEmpty;
-        }
-
+        if (idSet.Count == 0) return RentalErrors.CartEmpty;
         _items.RemoveAll(i => idSet.Contains(i.Id));
-
-        if (_items.Count == 0)
-        {
-            Status = RentalCartStatus.CheckedOut;
-        }
-
+        if (_items.Count == 0) Status = RentalCartStatus.CheckedOut;
         UpdatedAt = utcNow;
         Version++;
         return Result.Success();
@@ -201,11 +213,7 @@ public class RentalCart
 
     public Result Abandon(DateTimeOffset utcNow)
     {
-        if (Status != RentalCartStatus.Active)
-        {
-            return RentalErrors.CartNotActive;
-        }
-
+        if (Status != RentalCartStatus.Active) return RentalErrors.CartNotActive;
         Status = RentalCartStatus.Abandoned;
         UpdatedAt = utcNow;
         Version++;

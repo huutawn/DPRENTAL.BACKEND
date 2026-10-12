@@ -1,5 +1,6 @@
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Api.Tests.Domain;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -10,7 +11,49 @@ public static class PostgresTestDatabaseHelper
     public static string BaseConnectionString =>
         Environment.GetEnvironmentVariable("POSTGRESQL_TEST_CONNECTION_STRING")
         ?? Environment.GetEnvironmentVariable("RENTAL_TEST_POSTGRES_CONNECTION")
-        ?? "Host=127.0.0.1;Port=5433;Database=postgres;Username=inventoryservice;Password=inventory_test_secret_123!;Include Error Detail=true";
+        ?? ReadLocalConnectionString();
+
+    private static string ReadLocalConnectionString()
+    {
+        // Resolve from the test assembly so Test Explorer and Git hooks use the same .env.
+        for (DirectoryInfo? directory = new(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            if (!File.Exists(Path.Combine(directory.FullName, "RentalService.sln"))) continue;
+
+            string envPath = Path.Combine(directory.FullName, ".env");
+            if (!File.Exists(envPath)) break;
+
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (string line in File.ReadLines(envPath))
+            {
+                string entry = line.Trim();
+                if (entry.Length == 0 || entry.StartsWith('#')) continue;
+                int separator = entry.IndexOf('=');
+                if (separator < 1) continue;
+                string value = entry[(separator + 1)..].Trim();
+                if (value.Length >= 2 &&
+                    ((value[0] == '"' && value[^1] == '"') || (value[0] == '\'' && value[^1] == '\'')))
+                    value = value[1..^1];
+                values[entry[..separator].Trim()] = value;
+            }
+
+            string Required(string key) => values.TryGetValue(key, out string? value) && !string.IsNullOrWhiteSpace(value)
+                ? value
+                : throw new InvalidOperationException($"Set {key} in the repository .env before running PostgreSQL tests.");
+
+            return new NpgsqlConnectionStringBuilder
+            {
+                Host = "127.0.0.1",
+                Port = int.Parse(Required("POSTGRES_PORT"), System.Globalization.CultureInfo.InvariantCulture),
+                // Test fixtures create isolated databases; only use postgres for administration.
+                Database = "postgres",
+                Username = Required("POSTGRES_USER"),
+                Password = Required("POSTGRES_PASSWORD")
+            }.ConnectionString;
+        }
+
+        throw new InvalidOperationException("Set POSTGRESQL_TEST_CONNECTION_STRING or create the repository .env and start docker compose up -d postgres before running PostgreSQL tests.");
+    }
 
     public static async Task<bool> IsPostgreSqlAvailableAsync(string? baseConnectionString = null)
     {
@@ -95,7 +138,8 @@ public static class PostgresTestDatabaseHelper
             200_000m,
             500_000m,
             $"group-{itemId:N}",
-            assignments);
+            assignments,
+            TestListingSnapshots.Default);
 
         return RentalOrder.Create(
             orderId,
