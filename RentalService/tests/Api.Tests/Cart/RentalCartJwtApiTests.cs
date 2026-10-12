@@ -93,6 +93,7 @@ public sealed class RentalCartJwtApiTests : IClassFixture<RentalCartJwtApiTests.
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
+            builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=rental-test;Username=test;Password=test");
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
                 new Dictionary<string, string?>
                 {
