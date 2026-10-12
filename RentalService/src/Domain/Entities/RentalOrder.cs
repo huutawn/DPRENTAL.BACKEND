@@ -456,6 +456,35 @@ public class RentalOrder
              r.ErrorClassification is RentalOperationReceipt.ClassificationUncertain or RentalOperationReceipt.ClassificationUncertainExhausted) &&
             !r.IsSuccess);
     }
+
+    /// <summary>
+    /// Gắn hóa đơn Payment vào đơn đang chờ thanh toán. Gắn lại đúng hóa đơn cũ là hợp lệ; hóa đơn khác thì từ chối.
+    /// </summary>
+    internal Result AttachInvoice(string invoiceRef, DateTimeOffset utcNow)
+    {
+        if (Status != RentalOrderStatus.PendingPayment)
+        {
+            return Error.Conflict("Order.NotPendingPayment", $"Đơn hàng không ở trạng thái PendingPayment (trạng thái hiện tại: {Status}).");
+        }
+
+        if (string.IsNullOrWhiteSpace(invoiceRef) || invoiceRef.Trim().Length > 256)
+        {
+            return Error.Validation("Order.InvalidInvoiceRef", "InvoiceRef không được rỗng và tối đa 256 ký tự.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(InvoiceRef))
+        {
+            return string.Equals(InvoiceRef, invoiceRef.Trim(), StringComparison.OrdinalIgnoreCase)
+                ? Result.Success()
+                : Error.Conflict("Order.InvoiceAlreadyAttached", "Đơn hàng đã được gắn với một hóa đơn khác.");
+        }
+
+        InvoiceRef = invoiceRef.Trim();
+        UpdatedAt = utcNow;
+        Version++;
+        return Result.Success();
+    }
+
     internal Result MarkAsPaid(string invoiceRef, string paymentRef, DateTimeOffset paidAt, DateTimeOffset utcNow)
     {
         if (Status != RentalOrderStatus.PendingPayment)

@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Operations;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Policies;
 
@@ -16,8 +17,29 @@ public static class CheckoutRules
     /// <summary>Phase 1 chỉ có một cách giao: nhà cung cấp giao tới địa chỉ của người thuê.</summary>
     public const string DeliveryMethod = "Delivery";
 
+    public const int MaxIdempotencyKeyLength = 64;
+
     /// <summary>Thời gian chờ thanh toán, cũng là hạn giữ lịch bên Inventory.</summary>
     public static readonly TimeSpan PaymentWindow = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Mã của một lần checkout, lưu vào RentalOrder.CheckoutOperationId. Gắn Idempotency-Key với renter
+    /// để hai renter gửi trùng key không đụng nhau.
+    /// </summary>
+    public static string DeriveOperationId(Guid renterId, string idempotencyKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(idempotencyKey);
+        return RentalOperationExecutor.ComputeOperationKey("Checkout", $"{renterId}:{idempotencyKey.Trim()}");
+    }
+
+    /// <summary>
+    /// Cùng renter, cùng lần checkout và cùng dòng giỏ luôn ra cùng một RentalItemId, nên lần gửi lại
+    /// dùng lại đúng ExternalReference và Inventory trả về hold cũ thay vì giữ thêm máy.
+    /// </summary>
+    public static Guid DeriveRentalItemId(Guid renterId, string checkoutOperationId, Guid cartItemId) =>
+        Guid.ParseExact(
+            RentalOperationExecutor.ComputeOperationKey("CheckoutRentalItem", $"{renterId}:{checkoutOperationId}:{cartItemId}"),
+            "N");
 
     /// <summary>
     /// Đổi khoảng ngày của dòng giỏ (ngày trả có tính) sang khoảng [từ, đến) của đơn hàng:

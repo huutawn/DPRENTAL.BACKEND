@@ -57,6 +57,10 @@ builder.Services.AddScoped<InventoryRentalCartReader>();
 builder.Services.AddScoped<IRentalListingOwnerProvider>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
 builder.Services.AddScoped<IRentalListingReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
 builder.Services.AddScoped<IRentalAvailabilityReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
+builder.Services.Configure<RentalTermsOptions>(builder.Configuration.GetSection(RentalTermsOptions.SectionName));
+// Bản tạm: checkout trả 503 cho đến khi có hợp đồng đọc Listing đầy đủ với Inventory và hợp đồng với Catalog.
+builder.Services.AddSingleton<IInventoryListingClient, UnavailableInventoryListingClient>();
+builder.Services.AddSingleton<ICatalogReferenceClient, UnavailableCatalogReferenceClient>();
 builder.Services.AddScoped<IPaymentWorkflowService, PaymentWorkflowService>();
 builder.Services.AddScoped<ISupplierDecisionService, SupplierDecisionService>();
 builder.Services.AddScoped<IExpiryWorkflowService, ExpiryWorkflowService>();

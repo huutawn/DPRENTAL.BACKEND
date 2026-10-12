@@ -45,7 +45,7 @@ public sealed class CheckoutHoldOrchestrator : ICheckoutHoldOrchestrator
         List<CheckoutHeldLine> held = [];
         foreach (CheckoutPlanLine line in plan.Lines)
         {
-            Guid rentalItemId = DeriveRentalItemId(plan.RenterId, checkoutOperationId.Trim(), line.CartItemId);
+            Guid rentalItemId = CheckoutRules.DeriveRentalItemId(plan.RenterId, checkoutOperationId.Trim(), line.CartItemId);
             CreateHoldRequest request = new(
                 line.EquipmentListingId,
                 line.Quantity,
@@ -106,15 +106,6 @@ public sealed class CheckoutHoldOrchestrator : ICheckoutHoldOrchestrator
             }
         }
     }
-
-    /// <summary>
-    /// Cùng renter, cùng Idempotency-Key và cùng dòng giỏ luôn ra cùng một RentalItemId, nên lần gửi lại
-    /// dùng lại đúng ExternalReference và Inventory trả về hold cũ thay vì giữ thêm máy.
-    /// </summary>
-    private static Guid DeriveRentalItemId(Guid renterId, string checkoutOperationId, Guid cartItemId) =>
-        Guid.ParseExact(
-            RentalOperationExecutor.ComputeOperationKey("CheckoutRentalItem", $"{renterId}:{checkoutOperationId}:{cartItemId}"),
-            "N");
 
     private static CheckoutHoldConflict MapConflict(CheckoutPlanLine line, Error error) => error.Code switch
     {

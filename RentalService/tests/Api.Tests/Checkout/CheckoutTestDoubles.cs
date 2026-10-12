@@ -1,3 +1,4 @@
+using Dprental.RentalService.Api.Tests.Domain;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
@@ -9,6 +10,73 @@ namespace Dprental.RentalService.Api.Tests.Checkout;
 internal sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
 {
     public override DateTimeOffset GetUtcNow() => utcNow;
+}
+
+internal sealed class AdjustableTimeProvider(DateTimeOffset utcNow) : TimeProvider
+{
+    public DateTimeOffset UtcNow { get; set; } = utcNow;
+
+    public override DateTimeOffset GetUtcNow() => UtcNow;
+}
+
+internal sealed class FakeOrderCodeGenerator : IOrderCodeGenerator
+{
+    private int _issued;
+
+    public Task<string> NextAsync(DateTimeOffset utcNow, CancellationToken cancellationToken = default) =>
+        Task.FromResult($"DH-{utcNow.Year}-{Interlocked.Increment(ref _issued):D6}");
+}
+
+/// <summary>Đơn chờ thanh toán dựng sẵn cho test hóa đơn: tiền thuê 3.600.000, tiền cọc 5.000.000.</summary>
+internal static class CheckoutTestOrders
+{
+    public const decimal TotalRentalAmount = 3_600_000m;
+    public const decimal TotalDepositAmount = 5_000_000m;
+
+    public static RentalOrder CreatePending(Guid renterId, string checkoutOperationId, DateTimeOffset utcNow)
+    {
+        DateOnly start = new(2026, 10, 12);
+        DateOnly end = new(2026, 10, 15);
+
+        return RentalOrder.Create(
+            Guid.NewGuid(),
+            "DH-2026-000042",
+            renterId,
+            "VND",
+            "Delivery",
+            "Nguyễn Văn A",
+            "0901234567",
+            "123 Nguyễn Huệ, Quận 1, Hồ Chí Minh",
+            null,
+            null,
+            "v1.0",
+            "terms/v1.0.pdf",
+            "hash123456",
+            checkoutOperationId,
+            utcNow,
+            [
+                Item("Sony A7 IV", 2, 500_000m, 2_000_000m, "grp-camera"),
+                Item("Ống kính 24-70", 1, 200_000m, 1_000_000m, "grp-lens")
+            ]).Value;
+
+        InitialRentalItemDto Item(string title, int quantity, decimal dailyRate, decimal depositPerUnit, string groupId) => new(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            quantity,
+            start,
+            end,
+            title,
+            null,
+            "Quận 1, TP.HCM",
+            dailyRate,
+            depositPerUnit,
+            groupId,
+            Enumerable.Range(0, quantity)
+                .Select(_ => new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()))
+                .ToList(),
+            TestListingSnapshots.Default);
+    }
 }
 
 internal sealed class FakeCartRepository : IRentalCartRepository
