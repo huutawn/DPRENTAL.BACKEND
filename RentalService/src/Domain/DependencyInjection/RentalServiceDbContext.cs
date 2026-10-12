@@ -25,19 +25,26 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
     public DbSet<RentalInboxMessage> RentalInboxMessages => Set<RentalInboxMessage>();
     public DbSet<RentalOutboxMessage> RentalOutboxMessages => Set<RentalOutboxMessage>();
 
+    public void DiscardChanges() => ChangeTracker.Clear();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.HasDefaultSchema("rental");
 
+        // Bộ đếm cho mã đơn hàng DH-YYYY-NNNNNN.
+        modelBuilder.HasSequence<long>("order_code_seq", "rental");
+
         // RentalCart & RentalCartItem
         modelBuilder.Entity<RentalCart>(b =>
         {
+            // Dòng bị gỡ khỏi giỏ (RemoveItem, ClearItems, CompleteCheckout) phải được EF xóa;
+            // ClientCascade làm việc đó phía ứng dụng và giữ nguyên ràng buộc FK trong database.
             b.HasMany(c => c.Items)
                 .WithOne(i => i.RentalCart)
                 .HasForeignKey(i => i.RentalCartId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.ClientCascade);
 
             b.Property(c => c.Version)
                 .IsConcurrencyToken();

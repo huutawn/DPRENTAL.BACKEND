@@ -183,11 +183,13 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
                 continue;
             }
 
+            (DateOnly orderStartDate, DateOnly orderEndDate) = CheckoutRules.ToOrderPeriod(item);
+
             // Mỗi dòng được hỏi lịch độc lập để báo lỗi sớm; chống đặt trùng là việc của Inventory lúc hold.
             Result<InventoryListingAvailabilityDto> availabilityResult = await _inventory.CheckAvailabilityAsync(
                 item.EquipmentListingId,
-                item.ExpectedStartDate,
-                item.ExpectedEndDate,
+                orderStartDate,
+                orderEndDate,
                 item.Quantity,
                 cancellationToken);
             if (availabilityResult.IsFailure)
@@ -234,7 +236,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
                 continue;
             }
 
-            lines.Add(BuildLine(item, listing, equipmentTypeName.Trim(), brandName.Trim()));
+            lines.Add(BuildLine(item, orderStartDate, orderEndDate, listing, equipmentTypeName.Trim(), brandName.Trim()));
         }
 
         return new(false, lines, issues);
@@ -242,13 +244,15 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 
     private static CheckoutPlanLine BuildLine(
         RentalCartItem item,
+        DateOnly orderStartDate,
+        DateOnly orderEndDate,
         InventoryListingDto listing,
         string equipmentTypeName,
         string brandName)
     {
         decimal dailyRate = listing.DailyRate!.Value;
         decimal depositPerUnit = listing.DepositPerUnit!.Value;
-        int rentalDays = RentalPricingPolicy.CalculateRentalDays(item.ExpectedStartDate, item.ExpectedEndDate);
+        int rentalDays = RentalPricingPolicy.CalculateRentalDays(orderStartDate, orderEndDate);
 
         RentalItemListingSnapshotDto snapshot = new(
             listing.EquipmentTypeId,
@@ -265,8 +269,8 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             item.EquipmentListingId,
             listing.OwnerUserId,
             item.Quantity,
-            item.ExpectedStartDate,
-            item.ExpectedEndDate,
+            orderStartDate,
+            orderEndDate,
             listing.Title.Trim(),
             listing.PickupLocation!.Trim(),
             listing.SnapshotVersion!.Trim(),

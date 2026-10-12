@@ -14,8 +14,8 @@ public sealed class CheckoutPreparationServiceTests
     // 10:00 ngày 09/10/2026 giờ Việt Nam.
     private static readonly DateTimeOffset Now = new(2026, 10, 9, 3, 0, 0, TimeSpan.Zero);
     private static readonly DateOnly Start = new(2026, 10, 12);
-    // Khoảng thuê [12/10, 15/10) là 3 ngày: 12, 13, 14.
-    private static readonly DateOnly End = new(2026, 10, 15);
+    // Giỏ lưu ngày trả có tính: giao 12/10, trả 14/10 là 3 ngày (12, 13, 14).
+    private static readonly DateOnly End = new(2026, 10, 14);
 
     private readonly Guid _renterId = Guid.NewGuid();
     private readonly Guid _supplierId = Guid.NewGuid();
@@ -146,6 +146,10 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal("listing-v7", line.SnapshotVersion);
         Assert.Equal(2, line.Quantity);
         Assert.Equal(3, line.RentalDays);
+        // Đơn hàng lưu [từ, đến): ngày kết thúc lùi một ngày so với ngày trả trong giỏ.
+        Assert.Equal(new DateOnly(2026, 10, 12), line.ExpectedStartDate);
+        Assert.Equal(new DateOnly(2026, 10, 15), line.ExpectedEndDate);
+        Assert.Equal((new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 15)), Assert.Single(_inventory.AvailabilityPeriods));
         Assert.Equal(500_000m, line.DailyRate);
         Assert.Equal(2_000_000m, line.DepositPerUnit);
         Assert.Equal(3_000_000m, line.RentalAmount);
@@ -211,7 +215,7 @@ public sealed class CheckoutPreparationServiceTests
     [Fact]
     public async Task Prepare_SupportsSingleDayRental()
     {
-        Guid oneDayItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 21));
+        Guid oneDayItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 20));
 
         CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(2_500_000m, oneDayItem));
 
@@ -330,8 +334,8 @@ public sealed class CheckoutPreparationServiceTests
     [Fact]
     public async Task Prepare_RejectsRentalLongerThan30Days_AndStartBeyondSixMonths()
     {
-        Guid tooLong = AddCartItem(_listingId, 1, new(2026, 11, 1), new(2026, 12, 2));
-        Guid thirtyDays = AddCartItem(_listingId, 1, new(2026, 11, 1), new(2026, 12, 1));
+        Guid tooLong = AddCartItem(_listingId, 1, new(2026, 11, 1), new(2026, 12, 1));
+        Guid thirtyDays = AddCartItem(_listingId, 1, new(2026, 11, 1), new(2026, 11, 30));
         Guid tooFar = AddCartItem(_listingId, 1, new(2027, 4, 10), new(2027, 4, 11));
 
         CheckoutPreparationResult result = await CreateService()
@@ -469,7 +473,7 @@ public sealed class CheckoutPreparationServiceTests
     [Fact]
     public async Task Prepare_ReadsEachListingAndCatalogEntryOnce_ForLinesOfTheSameListing()
     {
-        Guid secondItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 22));
+        Guid secondItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 21));
 
         CheckoutPreparationResult result = await CreateService()
             .PrepareAsync(Renter(), Request(7_000_000m + 3_000_000m, _cartItemId, secondItem));

@@ -23,6 +23,8 @@ namespace RentalService.Domain.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.HasSequence("order_code_seq", "rental");
+
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.DeductionProposal", b =>
                 {
                     b.Property<Guid>("Id")
@@ -982,7 +984,7 @@ namespace RentalService.Domain.Migrations
                     b.HasOne("Dprental.RentalService.Domain.Entities.RentalCart", "RentalCart")
                         .WithMany("Items")
                         .HasForeignKey("RentalCartId")
-                        .OnDelete(DeleteBehavior.Restrict)
+                        .OnDelete(DeleteBehavior.ClientCascade)
                         .IsRequired();
 
                     b.Navigation("RentalCart");

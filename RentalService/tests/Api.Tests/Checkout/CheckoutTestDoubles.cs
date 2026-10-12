@@ -109,6 +109,8 @@ internal sealed class FakeInventoryListingClient : IInventoryListingClient
 
     public int AvailabilityCheckCount { get; private set; }
 
+    public List<(DateOnly StartDate, DateOnly EndDate)> AvailabilityPeriods { get; } = [];
+
     public Task<Result<InventoryListingDto?>> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default)
     {
         ListingReadCount++;
@@ -128,6 +130,7 @@ internal sealed class FakeInventoryListingClient : IInventoryListingClient
         CancellationToken cancellationToken = default)
     {
         AvailabilityCheckCount++;
+        AvailabilityPeriods.Add((startDate, endDate));
         if (FailAvailabilityCheck)
         {
             return Task.FromResult(Result.Failure<InventoryListingAvailabilityDto>(Down));
