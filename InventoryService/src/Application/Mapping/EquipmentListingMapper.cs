@@ -29,6 +29,8 @@ public static class EquipmentListingMapper
             listing.OwnerUserId,
             listing.EquipmentTypeId,
             listing.BrandId,
+            listing.Name,
+            listing.Description,
             listing.Model,
             listing.SchemaVersion,
             doc.RootElement.Clone(),

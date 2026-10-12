@@ -86,7 +86,7 @@ public sealed class InventoryAssetsControllerTests
 
         var serviceToken = factory.CreateServiceToken(Guid.NewGuid());
         using var request = new HttpRequestMessage(HttpMethod.Post, "api/v1/inventory/equipment-listings");
-        var validBody = $"{{\"equipmentTypeId\":\"{Guid.NewGuid():D}\",\"brandId\":\"{Guid.NewGuid():D}\",\"model\":\"FX3\",\"serialNumber\":\"FX3-SN-001\",\"schemaVersion\":1,\"rentalRate\":{{\"dailyRate\":100000,\"currency\":\"VND\"}},\"specValues\":{{}}}}";
+        var validBody = $"{{\"equipmentTypeId\":\"{Guid.NewGuid():D}\",\"brandId\":\"{Guid.NewGuid():D}\",\"name\":\"Sony FX3\",\"model\":\"FX3\",\"serialNumber\":\"FX3-SN-001\",\"schemaVersion\":1,\"rentalRate\":{{\"dailyRate\":100000,\"currency\":\"VND\"}},\"specValues\":{{}}}}";
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
         request.Content = new StringContent(validBody, Encoding.UTF8, "application/json");
         using var response = await client.SendAsync(request);
@@ -101,7 +101,7 @@ public sealed class InventoryAssetsControllerTests
 
         var humanToken = factory.CreateHumanToken(Guid.NewGuid(), permissions: []);
         using var request = new HttpRequestMessage(HttpMethod.Post, "api/v1/inventory/equipment-listings");
-        var validBody = $"{{\"equipmentTypeId\":\"{Guid.NewGuid():D}\",\"brandId\":\"{Guid.NewGuid():D}\",\"model\":\"FX3\",\"serialNumber\":\"FX3-SN-001\",\"schemaVersion\":1,\"rentalRate\":{{\"dailyRate\":100000,\"currency\":\"VND\"}},\"specValues\":{{}}}}";
+        var validBody = $"{{\"equipmentTypeId\":\"{Guid.NewGuid():D}\",\"brandId\":\"{Guid.NewGuid():D}\",\"name\":\"Sony FX3\",\"model\":\"FX3\",\"serialNumber\":\"FX3-SN-001\",\"schemaVersion\":1,\"rentalRate\":{{\"dailyRate\":100000,\"currency\":\"VND\"}},\"specValues\":{{}}}}";
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", humanToken);
         request.Content = new StringContent(validBody, Encoding.UTF8, "application/json");
         using var response = await client.SendAsync(request);

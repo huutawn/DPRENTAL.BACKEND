@@ -65,6 +65,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -135,6 +136,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
@@ -205,6 +207,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -253,6 +256,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -327,6 +331,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -374,6 +379,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -454,6 +460,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -600,6 +607,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -668,6 +676,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -729,6 +738,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -899,6 +909,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeIdA,
             brandId = brandId,
+            name = "Camera A",
             model = "Camera A",
             serialNumber = "SN-CONCURRENT-A",
             schemaVersion = 1,
@@ -910,6 +921,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeIdB,
             brandId = brandId,
+            name = "Camera B",
             model = "Camera B",
             serialNumber = "SN-CONCURRENT-B",
             schemaVersion = 1,
@@ -953,6 +965,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = Guid.NewGuid(),
             brandId = Guid.NewGuid(),
+            name = "Model",
             model = "Model",
             schemaVersion = 1,
             specValues = new { },
@@ -1036,6 +1049,8 @@ public sealed partial class CatalogHttpIntegrationTests
                     var listingToModify = await db.EquipmentListings.SingleAsync(l => l.Id == assetId);
                     listingToModify.UpdateDetails(
                         listingToModify.BrandId,
+                        "Modified Name",
+                        listingToModify.Description,
                         "Model Modified by Other",
                         listingToModify.ThumbnailMediaId,
                         listingToModify.SchemaVersion,

@@ -295,7 +295,7 @@ public sealed partial class PostgresIntegrationTests
         {
             var dbListing = await ctx.Listings.GetByIdAsync(listing.Id, ct);
             Assert.NotNull(dbListing);
-            dbListing.UpdateDetails(newBrandId, "Sony FX3 V2", null, 2, "{\"resolution\":\"8K\"}", updateTime);
+            dbListing.UpdateDetails(newBrandId, "Sony FX3 V2", null, "Sony FX3 V2", null, 2, "{\"resolution\":\"8K\"}", updateTime);
             ctx.Listings.Update(dbListing);
             return Result.Success(true);
         });

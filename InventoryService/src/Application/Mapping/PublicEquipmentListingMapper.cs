@@ -35,6 +35,8 @@ public static class PublicEquipmentListingMapper
             listing.Id,
             listing.EquipmentTypeId,
             listing.BrandId,
+            listing.Name,
+            listing.Description,
             listing.Model,
             listing.SchemaVersion,
             sanitizedSpecs,

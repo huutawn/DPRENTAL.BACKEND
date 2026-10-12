@@ -36,11 +36,32 @@ public sealed class EquipmentListingServiceTests
         public Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(id, out var l) && l.Status == EquipmentListingStatus.Active ? l : null);
 
-        public Task<IReadOnlyList<EquipmentListing>> ListForOwnerAsync(Guid ownerUserId, int skip, int take, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<EquipmentListing>>(Store.Values.Where(l => l.OwnerUserId == ownerUserId).Skip(skip).Take(take).ToList());
-
-        public Task<int> CountForOwnerAsync(Guid ownerUserId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Store.Values.Count(l => l.OwnerUserId == ownerUserId));
+        public Task<OwnerEquipmentListingSearchResult> SearchOwnerAsync(OwnerEquipmentListingSearchCriteria criteria, CancellationToken cancellationToken = default)
+        {
+            var q = Store.Values.Where(l => l.OwnerUserId == criteria.OwnerUserId);
+            if (criteria.EquipmentTypeId.HasValue)
+            {
+                q = q.Where(l => l.EquipmentTypeId == criteria.EquipmentTypeId.Value);
+            }
+            if (criteria.BrandId.HasValue)
+            {
+                q = q.Where(l => l.BrandId == criteria.BrandId.Value);
+            }
+            if (criteria.Status.HasValue)
+            {
+                q = q.Where(l => l.Status == criteria.Status.Value);
+            }
+            if (!string.IsNullOrWhiteSpace(criteria.SearchKeyword))
+            {
+                q = q.Where(l => l.Name.Contains(criteria.SearchKeyword!, StringComparison.OrdinalIgnoreCase) ||
+                                 l.Model.Contains(criteria.SearchKeyword!, StringComparison.OrdinalIgnoreCase));
+            }
+            var list = q.OrderByDescending(l => l.CreatedAt).ThenByDescending(l => l.Id).ToList();
+            var items = list.Skip(criteria.Skip).Take(criteria.Take)
+                .Select(l => new OwnerEquipmentListingItem(l, l.Assets.Count(a => a.AcceptingBookings)))
+                .ToList();
+            return Task.FromResult(new OwnerEquipmentListingSearchResult(items, list.Count));
+        }
 
         public Task<int> GetTotalQuantityAsync(Guid listingId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(listingId, out var l) ? l.Assets.Count(a => a.AcceptingBookings) : 0);
@@ -198,10 +219,12 @@ public sealed class EquipmentListingServiceTests
         var request = new CreateEquipmentListingRequest(
             EquipmentTypeId: Guid.NewGuid(),
             BrandId: Guid.NewGuid(),
+            Name: "Sony FX3 kèm phụ kiện",
             Model: "Sony FX3",
             SerialNumber: "FX3-TEST-00001",
             SpecValues: specDoc.RootElement.Clone(),
             RentalRate: new RentalRateDto(500_000m, 3_000_000m, 10_000_000m, "VND"),
+            Description: "Mô tả máy quay",
             SchemaVersion: 1);
 
         var result = await service.CreateListingAsync(request, caller);
@@ -230,7 +253,7 @@ public sealed class EquipmentListingServiceTests
 
         using var specDoc = JsonDocument.Parse("{}");
         var request = new CreateEquipmentListingRequest(
-            Guid.NewGuid(), Guid.NewGuid(), "Model", invalidSerial!, specDoc.RootElement,
+            Guid.NewGuid(), Guid.NewGuid(), "Name", "Model", invalidSerial!, specDoc.RootElement,
             RentalRate: new RentalRateDto(100_000m, null, null, "VND"));
 
         var result = await service.CreateListingAsync(request, caller);
@@ -248,7 +271,7 @@ public sealed class EquipmentListingServiceTests
 
         var listingId = Guid.NewGuid();
         var listing = EquipmentListing.Create(
-            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow).Value;
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow).Value;
         _listingRepo.Add(listing);
 
         var addRequest = new AddListingAssetRequest("FX3-TEST-00002");
@@ -268,7 +291,7 @@ public sealed class EquipmentListingServiceTests
 
         var listingId = Guid.NewGuid();
         var listing = EquipmentListing.Create(
-            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow).Value;
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow).Value;
         _listingRepo.Add(listing);
 
         var patch = new PatchEquipmentListingRequest
@@ -292,7 +315,7 @@ public sealed class EquipmentListingServiceTests
 
         var listingId = Guid.NewGuid();
         var listing = EquipmentListing.Create(
-            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow).Value;
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow).Value;
         _listingRepo.Add(listing);
 
         var newRates = new RentalRateDto(200_000m, 1_200_000m, 4_000_000m, "VND");
@@ -312,12 +335,12 @@ public sealed class EquipmentListingServiceTests
 
         var listingId = Guid.NewGuid();
         var listing = EquipmentListing.Create(
-            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow).Value;
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow).Value;
         _listingRepo.Add(listing);
 
         using var specDoc = JsonDocument.Parse("{}");
         var createReq = new CreateEquipmentListingRequest(
-            Guid.NewGuid(), Guid.NewGuid(), "Model", "SN-1", specDoc.RootElement, new RentalRateDto(100_000m, null, null, "VND"));
+            Guid.NewGuid(), Guid.NewGuid(), "Name", "Model", "SN-1", specDoc.RootElement, new RentalRateDto(100_000m, null, null, "VND"));
 
         var rCreate = await service.CreateListingAsync(createReq, serviceCaller);
         Assert.Equal("FORBIDDEN", rCreate.Error.Code);

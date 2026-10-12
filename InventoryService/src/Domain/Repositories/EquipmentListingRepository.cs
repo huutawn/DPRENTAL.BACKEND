@@ -41,27 +41,121 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<EquipmentListing>> ListForOwnerAsync(
-        Guid ownerUserId,
-        int skip,
-        int take,
+    public async Task<OwnerEquipmentListingSearchResult> SearchOwnerAsync(
+        OwnerEquipmentListingSearchCriteria criteria,
         CancellationToken cancellationToken = default)
     {
-        return await _context.EquipmentListings
-            .Where(l => l.OwnerUserId == ownerUserId)
+        ArgumentNullException.ThrowIfNull(criteria);
+
+        if (_context.Database.IsRelational())
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                IsolationLevel.RepeatableRead,
+                cancellationToken);
+
+            var baseQuery = _context.EquipmentListings
+                .AsNoTracking()
+                .Where(l => l.OwnerUserId == criteria.OwnerUserId);
+            if (criteria.EquipmentTypeId.HasValue)
+            {
+                baseQuery = baseQuery.Where(l => l.EquipmentTypeId == criteria.EquipmentTypeId.Value);
+            }
+
+            if (criteria.BrandId.HasValue)
+            {
+                baseQuery = baseQuery.Where(l => l.BrandId == criteria.BrandId.Value);
+            }
+
+            if (criteria.Status.HasValue)
+            {
+                baseQuery = baseQuery.Where(l => l.Status == criteria.Status.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(criteria.SearchKeyword))
+            {
+                var escaped = EscapeLikePattern(criteria.SearchKeyword);
+                var pattern = $"%{escaped}%";
+                baseQuery = baseQuery.Where(l =>
+                    EF.Functions.ILike(l.Name, pattern, @"\") ||
+                    EF.Functions.ILike(l.Model, pattern, @"\"));
+            }
+
+            int totalCount = await baseQuery.CountAsync(cancellationToken);
+            if (totalCount == 0)
+            {
+                await transaction.CommitAsync(cancellationToken);
+                return new OwnerEquipmentListingSearchResult(Array.Empty<OwnerEquipmentListingItem>(), 0);
+            }
+
+            var rows = await baseQuery
+                .OrderByDescending(l => l.CreatedAt)
+                .ThenByDescending(l => l.Id)
+                .Skip(criteria.Skip)
+                .Take(criteria.Take)
+                .Select(l => new
+                {
+                    Listing = l,
+                    TotalQuantity = l.Assets.Count(a => a.AcceptingBookings)
+                })
+                .ToListAsync(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+
+            var items = rows
+                .Select(r => new OwnerEquipmentListingItem(r.Listing, r.TotalQuantity))
+                .ToList();
+
+            return new OwnerEquipmentListingSearchResult(items, totalCount);
+        }
+
+        var nonRelQuery = _context.EquipmentListings
+            .AsNoTracking()
+            .Where(l => l.OwnerUserId == criteria.OwnerUserId);
+        if (criteria.EquipmentTypeId.HasValue)
+        {
+            nonRelQuery = nonRelQuery.Where(l => l.EquipmentTypeId == criteria.EquipmentTypeId.Value);
+        }
+
+        if (criteria.BrandId.HasValue)
+        {
+            nonRelQuery = nonRelQuery.Where(l => l.BrandId == criteria.BrandId.Value);
+        }
+
+        if (criteria.Status.HasValue)
+        {
+            nonRelQuery = nonRelQuery.Where(l => l.Status == criteria.Status.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(criteria.SearchKeyword))
+        {
+            nonRelQuery = nonRelQuery.Where(l =>
+                l.Name.Contains(criteria.SearchKeyword, StringComparison.OrdinalIgnoreCase) ||
+                l.Model.Contains(criteria.SearchKeyword, StringComparison.OrdinalIgnoreCase));
+        }
+
+        int count = await nonRelQuery.CountAsync(cancellationToken);
+        if (count == 0)
+        {
+            return new OwnerEquipmentListingSearchResult(Array.Empty<OwnerEquipmentListingItem>(), 0);
+        }
+
+        var pagedRows = await nonRelQuery
             .OrderByDescending(l => l.CreatedAt)
             .ThenByDescending(l => l.Id)
-            .Skip(skip)
-            .Take(take)
-            .AsNoTracking()
+            .Skip(criteria.Skip)
+            .Take(criteria.Take)
+            .Select(l => new
+            {
+                Listing = l,
+                TotalQuantity = l.Assets.Count(a => a.AcceptingBookings)
+            })
             .ToListAsync(cancellationToken);
-    }
 
-    /// <inheritdoc />
-    public async Task<int> CountForOwnerAsync(Guid ownerUserId, CancellationToken cancellationToken = default)
-    {
-        return await _context.EquipmentListings
-            .CountAsync(l => l.OwnerUserId == ownerUserId, cancellationToken);
+        var pagedItems = pagedRows
+            .Select(r => new OwnerEquipmentListingItem(r.Listing, r.TotalQuantity))
+            .ToList();
+
+        return new OwnerEquipmentListingSearchResult(pagedItems, count);
     }
 
     /// <inheritdoc />

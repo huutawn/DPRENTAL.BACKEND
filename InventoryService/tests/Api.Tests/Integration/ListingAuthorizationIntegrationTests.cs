@@ -116,6 +116,8 @@ public sealed class ListingAuthorizationIntegrationTests : IClassFixture<Postgre
             Guid.NewGuid(),
             Guid.NewGuid(),
             "Sony FX3 Cinema Line",
+            null,
+            "Sony FX3 Cinema Line",
             1,
             "{}",
             500_000m,
@@ -156,6 +158,7 @@ public sealed class ListingAuthorizationIntegrationTests : IClassFixture<Postgre
         {
             equipmentTypeId = Guid.NewGuid(),
             brandId = Guid.NewGuid(),
+            name = "Service Created Model",
             model = "Service Created Model",
             serialNumber = "FX3-SVC-001",
             schemaVersion = 1,

@@ -377,6 +377,8 @@ public sealed class AvailabilityServiceTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             "Sony FX3",
+            null,
+            "Sony FX3",
             1,
             "{}",
             100_000m,
@@ -543,11 +545,32 @@ public sealed class AvailabilityServiceTests
         public Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(id, out var l) && l.Status == EquipmentListingStatus.Active ? l : null);
 
-        public Task<IReadOnlyList<EquipmentListing>> ListForOwnerAsync(Guid ownerUserId, int skip, int take, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<EquipmentListing>>(Store.Values.Where(l => l.OwnerUserId == ownerUserId).Skip(skip).Take(take).ToList());
-
-        public Task<int> CountForOwnerAsync(Guid ownerUserId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Store.Values.Count(l => l.OwnerUserId == ownerUserId));
+        public Task<OwnerEquipmentListingSearchResult> SearchOwnerAsync(OwnerEquipmentListingSearchCriteria criteria, CancellationToken cancellationToken = default)
+        {
+            var q = Store.Values.Where(l => l.OwnerUserId == criteria.OwnerUserId);
+            if (criteria.EquipmentTypeId.HasValue)
+            {
+                q = q.Where(l => l.EquipmentTypeId == criteria.EquipmentTypeId.Value);
+            }
+            if (criteria.BrandId.HasValue)
+            {
+                q = q.Where(l => l.BrandId == criteria.BrandId.Value);
+            }
+            if (criteria.Status.HasValue)
+            {
+                q = q.Where(l => l.Status == criteria.Status.Value);
+            }
+            if (!string.IsNullOrWhiteSpace(criteria.SearchKeyword))
+            {
+                q = q.Where(l => l.Name.Contains(criteria.SearchKeyword!, StringComparison.OrdinalIgnoreCase) ||
+                                 l.Model.Contains(criteria.SearchKeyword!, StringComparison.OrdinalIgnoreCase));
+            }
+            var list = q.OrderByDescending(l => l.CreatedAt).ThenByDescending(l => l.Id).ToList();
+            var items = list.Skip(criteria.Skip).Take(criteria.Take)
+                .Select(l => new OwnerEquipmentListingItem(l, l.Assets.Count(a => a.AcceptingBookings)))
+                .ToList();
+            return Task.FromResult(new OwnerEquipmentListingSearchResult(items, list.Count));
+        }
 
         public Task<int> GetTotalQuantityAsync(Guid listingId, CancellationToken cancellationToken = default) =>
             Task.FromResult(0);

@@ -101,6 +101,8 @@ public sealed class SharedCalendarIntegrationTests : IClassFixture<PostgresFixtu
             Guid.NewGuid(),
             Guid.NewGuid(),
             "Sony FX3 Cinema Line",
+            null,
+            "Sony FX3 Cinema Line",
             1,
             "{}",
             100_000m,

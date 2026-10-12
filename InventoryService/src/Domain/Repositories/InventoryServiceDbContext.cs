@@ -69,6 +69,8 @@ public sealed class InventoryServiceDbContext : DbContext
             b.ToTable("equipment_listings", SchemaName, t =>
             {
                 t.HasCheckConstraint("ck_equipment_listings_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid AND brand_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+                t.HasCheckConstraint("ck_equipment_listings_name", "name ~ '\\S' AND length(name) <= 200");
+                t.HasCheckConstraint("ck_equipment_listings_description", "description IS NULL OR (description ~ '\\S' AND length(description) <= 2000)");
                 t.HasCheckConstraint("ck_equipment_listings_model", "model ~ '\\S' AND length(model) <= 200");
                 t.HasCheckConstraint("ck_equipment_listings_thumbnail_media_id", "thumbnail_media_id IS NULL OR thumbnail_media_id <> '00000000-0000-0000-0000-000000000000'::uuid");
                 t.HasCheckConstraint("ck_equipment_listings_schema_version", "schema_version >= 1");
@@ -91,7 +93,17 @@ public sealed class InventoryServiceDbContext : DbContext
             b.HasIndex(l => l.DailyRate)
                 .HasDatabaseName("ix_equipment_listings_daily_rate");
 
+            b.Property(l => l.Name)
+                .HasColumnName("name")
+                .HasMaxLength(200)
+                .IsRequired();
+
+            b.Property(l => l.Description)
+                .HasColumnName("description")
+                .HasMaxLength(2000);
+
             b.Property(l => l.Model)
+                .HasColumnName("model")
                 .HasMaxLength(200)
                 .IsRequired();
 

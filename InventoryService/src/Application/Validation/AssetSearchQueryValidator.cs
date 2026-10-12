@@ -63,20 +63,12 @@ public sealed class AssetSearchQueryValidator
         int skip = (int)offset;
         int take = pageSize;
 
-        string? searchKeyword = null;
-        if (q is not null)
+        var keywordResult = ValidateSearchKeyword(q);
+        if (keywordResult.IsFailure)
         {
-            string trimmed = q.Trim();
-            if (trimmed.Length > 200)
-            {
-                return Error.Validation("INVALID_QUERY_PARAMETER", "Từ khóa tìm kiếm tối đa 200 ký tự.");
-            }
-
-            if (trimmed.Length > 0)
-            {
-                searchKeyword = trimmed;
-            }
+            return keywordResult.Error;
         }
+        string? searchKeyword = keywordResult.Value;
 
         if (equipmentTypeId.HasValue && equipmentTypeId.Value == Guid.Empty)
         {
@@ -177,20 +169,12 @@ public sealed class AssetSearchQueryValidator
         int skip = (int)offset;
         int take = pageSize;
 
-        string? searchKeyword = null;
-        if (q is not null)
+        var keywordResult = ValidateSearchKeyword(q);
+        if (keywordResult.IsFailure)
         {
-            string trimmed = q.Trim();
-            if (trimmed.Length > 200)
-            {
-                return Error.Validation("INVALID_QUERY_PARAMETER", "Từ khóa tìm kiếm tối đa 200 ký tự.");
-            }
-
-            if (trimmed.Length > 0)
-            {
-                searchKeyword = trimmed;
-            }
+            return keywordResult.Error;
         }
+        string? searchKeyword = keywordResult.Value;
 
         if (equipmentTypeId.HasValue && equipmentTypeId.Value == Guid.Empty)
         {
@@ -232,5 +216,24 @@ public sealed class AssetSearchQueryValidator
             null,
             null,
             sortOption));
+    }
+
+    /// <summary>
+    /// Xác thực và chuẩn hóa từ khóa tìm kiếm (q): trim, tối đa 200 ký tự; thiếu hoặc rỗng trả về null.
+    /// </summary>
+    public static Result<string?> ValidateSearchKeyword(string? q)
+    {
+        if (q is null)
+        {
+            return Result.Success<string?>(null);
+        }
+
+        string trimmed = q.Trim();
+        if (trimmed.Length > 200)
+        {
+            return Error.Validation("INVALID_QUERY_PARAMETER", "Từ khóa tìm kiếm tối đa 200 ký tự.");
+        }
+
+        return Result.Success<string?>(trimmed.Length > 0 ? trimmed : null);
     }
 }

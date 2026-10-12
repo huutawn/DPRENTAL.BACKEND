@@ -11,10 +11,12 @@ namespace Dprental.InventoryService.Application.DTOs.Listings;
 public sealed record CreateEquipmentListingRequest(
     [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
     [property: JsonPropertyName("brandId")] Guid BrandId,
+    [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("model")] string Model,
     [property: JsonPropertyName("serialNumber")] string SerialNumber,
     [property: JsonPropertyName("specValues")] JsonElement SpecValues,
     [property: JsonPropertyName("rentalRate")] RentalRateDto RentalRate,
+    [property: JsonPropertyName("description")] string? Description = null,
     [property: JsonPropertyName("schemaVersion")] int SchemaVersion = 1,
     [property: JsonPropertyName("thumbnailMediaId")] Guid? ThumbnailMediaId = null
 );

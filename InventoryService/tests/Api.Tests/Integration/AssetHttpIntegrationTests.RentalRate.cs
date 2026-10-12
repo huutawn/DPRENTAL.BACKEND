@@ -34,6 +34,7 @@ public sealed partial class AssetHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3 Cinema Line",
             model = "Sony FX3 Cinema Line",
             serialNumber = "FX3-TEST-SN-001",
             schemaVersion = 1,
@@ -96,6 +97,7 @@ public sealed partial class AssetHttpIntegrationTests
         {
             equipmentTypeId = Guid.NewGuid(),
             brandId = Guid.NewGuid(),
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-TEST-SN-001",
             schemaVersion = 1,
@@ -269,6 +271,7 @@ public sealed partial class AssetHttpIntegrationTests
             {
                 equipmentTypeId = Guid.NewGuid(),
                 brandId = Guid.NewGuid(),
+                name = "Atomic Create Fault Test Listing",
                 model = "Atomic Create Fault Test Listing",
                 serialNumber = failSerial,
                 schemaVersion = 1,
@@ -315,6 +318,7 @@ public sealed partial class AssetHttpIntegrationTests
         {
             equipmentTypeId = Guid.NewGuid(),
             brandId = Guid.NewGuid(),
+            name = "Atomic Add Fault Test Listing",
             model = "Atomic Add Fault Test Listing",
             serialNumber = "VALID-ADD-ONE-UNIT1",
             schemaVersion = 1,

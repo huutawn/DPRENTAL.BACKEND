@@ -32,6 +32,27 @@ public sealed partial class EquipmentListingService
             return Error.Forbidden("FORBIDDEN", "Người dùng không có quyền quản lý kho tài sản.");
         }
         // 2. Local validation
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return Error.Validation("INVALID_NAME", "Tên thiết bị không được để trống.");
+        }
+
+        var trimmedName = request.Name.Trim();
+        if (trimmedName.Length > 200)
+        {
+            return Error.Validation("INVALID_NAME", "Tên thiết bị tối đa 200 ký tự.");
+        }
+
+        string? trimmedDescription = null;
+        if (!string.IsNullOrWhiteSpace(request.Description))
+        {
+            var trimmedDesc = request.Description.Trim();
+            if (trimmedDesc.Length > 2000)
+            {
+                return Error.Validation("INVALID_DESCRIPTION", "Mô tả tối đa 2.000 ký tự.");
+            }
+            trimmedDescription = trimmedDesc;
+        }
         if (string.IsNullOrWhiteSpace(request.SerialNumber))
         {
             return Error.Validation("INVALID_SERIAL_NUMBER", "Số serial là bắt buộc và không được để trống.");
@@ -71,6 +92,8 @@ public sealed partial class EquipmentListingService
 
         var specValuesJson = request.SpecValues.GetRawText();
         var detailsValidation = EquipmentListing.ValidateDetails(
+            trimmedName,
+            trimmedDescription,
             request.Model,
             request.ThumbnailMediaId,
             request.SchemaVersion,
@@ -81,7 +104,7 @@ public sealed partial class EquipmentListingService
             return detailsValidation.Error;
         }
 
-        var (validModel, validThumb, validSchema, validSpecs) = detailsValidation.Value;
+        var (validName, validDesc, validModel, validThumb, validSchema, validSpecs) = detailsValidation.Value;
 
         // 3. Published EquipmentType check
         var catLookup = await _catalogClient.GetPublishedEquipmentTypeAsync(request.EquipmentTypeId, cancellationToken);
@@ -128,6 +151,8 @@ public sealed partial class EquipmentListingService
             caller.UserId!.Value,
             request.EquipmentTypeId,
             request.BrandId,
+            validName,
+            validDesc,
             validModel,
             validSchema,
             validSpecs,
@@ -203,6 +228,27 @@ public sealed partial class EquipmentListingService
         {
             return Error.Forbidden("FORBIDDEN", "Không có quyền chỉnh sửa Listing của người dùng khác.");
         }
+        if (request.IsNameSpecified)
+        {
+            if (string.IsNullOrWhiteSpace(request.Name))
+            {
+                return Error.Validation("INVALID_NAME", "Tên thiết bị không được để trống.");
+            }
+
+            if (request.Name.Trim().Length > 200)
+            {
+                return Error.Validation("INVALID_NAME", "Tên thiết bị tối đa 200 ký tự.");
+            }
+        }
+
+        if (request.IsDescriptionSpecified && request.Description is not null)
+        {
+            if (request.Description.Trim().Length > 2000)
+            {
+                return Error.Validation("INVALID_DESCRIPTION", "Mô tả tối đa 2.000 ký tự.");
+            }
+        }
+
         if (request.IsBrandIdSpecified && (!request.BrandId.HasValue || request.BrandId.Value == Guid.Empty))
         {
             return Error.Validation("INVALID_BRAND_ID", "Brand ID không được để trống hoặc rỗng.");
@@ -234,19 +280,23 @@ public sealed partial class EquipmentListingService
         }
 
         // 2. Merge snapshot với các field được truyền (omitted giữ nguyên)
+        string targetName = request.IsNameSpecified ? request.Name!.Trim() : snapshot.Name;
+        string? targetDescription = request.IsDescriptionSpecified
+            ? (string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim())
+            : snapshot.Description;
         string targetModel = request.IsModelSpecified ? request.Model! : snapshot.Model;
         Guid? targetThumb = request.IsThumbnailMediaIdSpecified ? request.ThumbnailMediaId : snapshot.ThumbnailMediaId;
         int targetSchema = request.IsSchemaVersionSpecified ? request.SchemaVersion!.Value : snapshot.SchemaVersion;
         string targetSpecs = request.IsSpecValuesSpecified ? request.SpecValues!.Value.GetRawText() : snapshot.SpecValues;
 
         // 3. Domain validation cục bộ TRƯỚC KHI gọi Catalog / Media
-        var detailsValidation = EquipmentListing.ValidateDetails(targetModel, targetThumb, targetSchema, targetSpecs);
+        var detailsValidation = EquipmentListing.ValidateDetails(targetName, targetDescription, targetModel, targetThumb, targetSchema, targetSpecs);
         if (detailsValidation.IsFailure)
         {
             return detailsValidation.Error;
         }
 
-        var (validModel, validThumb, validSchema, validSpecs) = detailsValidation.Value;
+        var (validName, validDesc, validModel, validThumb, validSchema, validSpecs) = detailsValidation.Value;
 
         // 4. Downstream validation: Catalog Brand
         if (request.IsBrandIdSpecified)
@@ -324,6 +374,8 @@ public sealed partial class EquipmentListingService
             // Xử lý details update
             var detailsRes = listing.UpdateDetails(
                 request.IsBrandIdSpecified ? request.BrandId : null,
+                validName,
+                validDesc,
                 validModel,
                 validThumb,
                 validSchema,

@@ -17,7 +17,7 @@ Domain sở hữu entities, value objects, domain policies, repository contracts
 
 Hệ thống quản lý 7 bảng thực thể trong schema `inventory`:
 
-1. `EquipmentListing` (`inventory.equipment_listings`): Danh mục niêm yết thiết bị trong kho, thuộc sở hữu cá nhân (`OwnerUserId`), liên kết với loại thiết bị Catalog (`EquipmentTypeId`) cùng thương hiệu chuẩn (`BrandId`), tên model (`Model`), ảnh đại diện (`ThumbnailMediaId`), phiên bản dynamic schema (`SchemaVersion`), thông số kỹ thuật (`SpecValues` lưu JSONB), giá thuê niêm yết (`DailyRate`, `WeeklyRate`, `MonthlyRate`, `Currency = "VND"`), trạng thái (`Status`: Draft=1, Active=2, Inactive=3), `CreatedAt`, `UpdatedAt`, và concurrency token `xmin`.
+1. `EquipmentListing` (`inventory.equipment_listings`): Danh mục niêm yết thiết bị trong kho, thuộc sở hữu cá nhân (`OwnerUserId`), liên kết với loại thiết bị Catalog (`EquipmentTypeId`) cùng thương hiệu chuẩn (`BrandId`), tên hiển thị (`Name`), mô tả (`Description`), tên model kỹ thuật (`Model`), ảnh đại diện (`ThumbnailMediaId`), phiên bản dynamic schema (`SchemaVersion`), thông số kỹ thuật (`SpecValues` lưu JSONB), giá thuê niêm yết (`DailyRate`, `WeeklyRate`, `MonthlyRate`, `Currency = "VND"`), trạng thái (`Status`: Draft=1, Active=2, Inactive=3), `CreatedAt`, `UpdatedAt`, và concurrency token `xmin`.
 2. `InventoryAsset` (`inventory.assets`): Đơn vị thiết bị vật lý thuộc một `EquipmentListing` (`EquipmentListingId`), định danh mã tài sản duy nhất (`AssetCode` = `AST-{AssetId:N}`), số serial (`SerialNumber`), năm sản xuất (`ManufactureYear`), cờ nhận lịch (`AcceptingBookings`), lý do tạm dừng (`SuspensionReason`), `CreatedAt`, `UpdatedAt`, và `xmin`.
 3. `AssetAllocation` (`inventory.asset_allocations`): Lượt phân bổ hoặc giữ chỗ lịch của đơn vị tài sản, gồm nguồn (`SourceSystem`), mã tham chiếu (`ExternalReference`), mã nhóm giữ chỗ (`GroupReference`), khoảng thời gian (`RentalPeriod`), trạng thái (`AllocationStatus`: Held=1, Allocated=2, Cancelled=5, Released=6) và hạn giữ (`HoldExpiresAt`).
 4. `AllocationTransition` (`inventory.allocation_transitions`): Lịch sử chuyển đổi trạng thái của lượt phân bổ (append-only audit log), có thứ tự `Sequence` và `OperationKey` chống trùng lặp.
@@ -80,11 +80,11 @@ Hệ thống áp dụng cơ chế: **PostgreSQL `READ COMMITTED` transaction + a
 
 ### Hợp đồng API Quản lý
 
-1. `POST /api/v1/inventory/equipment-listings`: Tạo mới Listing ở trạng thái Draft kèm đúng 1 đơn vị vật lý ban đầu qua số serial (201 Created + Location header). Bắt buộc `serialNumber` (không rỗng, trim, max 100), từ chối trường `quantity`. Bắt buộc `brandId`, `equipmentTypeId`, `model`, `schemaVersion`, `specValues`, `rentalRate`. Chặn spoofed/unknown body fields (`ownerUserId`, `organizationId`).
+1. `POST /api/v1/inventory/equipment-listings`: Tạo mới Listing ở trạng thái Draft kèm đúng 1 đơn vị vật lý ban đầu qua số serial (201 Created + Location header). Bắt buộc `serialNumber` (không rỗng, trim, max 100), từ chối trường `quantity`. Bắt buộc `name`, `brandId`, `equipmentTypeId`, `model`, `schemaVersion`, `specValues`, `rentalRate`, tùy chọn `description`. Chặn spoofed/unknown body fields (`ownerUserId`, `organizationId`).
 2. `POST /api/v1/inventory/equipment-listings/{id}/assets`: Thêm một đơn vị vật lý mới bằng số serial (`serialNumber`). Trả 201 Created + Location trỏ tới Asset (`/api/v1/inventory/assets/{assetId}`). Từ chối số serial trùng lặp trong cùng Listing với 409 Conflict (`SERIAL_ALREADY_EXISTS`).
-3. `GET /api/v1/inventory/equipment-listings`: Danh sách Listing thuộc sở hữu người dùng phân trang (`page`, `pageSize`, max 100). Trả derived `totalQuantity`.
+3. `GET /api/v1/inventory/equipment-listings`: Danh sách Listing thuộc sở hữu người dùng phân trang (`page`, `pageSize`, max 100, `q` tìm chuỗi con trong `name` hoặc `model`, `equipmentTypeId`, `brandId`, `status`). Trả derived `totalQuantity` (thực hiện qua 2 SELECTs trong RepeatableRead snapshot: count và page projection quantity, không N+1).
 4. `GET /api/v1/inventory/equipment-listings/{id}`: Chi tiết Listing và derived `totalQuantity` (số unit `AcceptingBookings=true`).
-5. `PATCH /api/v1/inventory/equipment-listings/{id}`: Cập nhật thông tin chung và trạng thái với presence tracking cho `brandId`, `model`, `thumbnailMediaId`, `schemaVersion`, `specValues`, `status`. Chuyển sang `Active` bắt buộc phải có ít nhất 1 physical unit đang nhận lịch (`AcceptingBookings=true`). Từ chối `quantity`.
+5. `PATCH /api/v1/inventory/equipment-listings/{id}`: Cập nhật thông tin chung và trạng thái với presence tracking cho `name`, `description`, `brandId`, `model`, `thumbnailMediaId`, `schemaVersion`, `specValues`, `status`. Từ chối `name: null` hoặc rỗng, `description: null` xóa mô tả. Từ chối chuỗi số `status` như `"999"`. Chuyển sang `Active` bắt buộc phải có ít nhất 1 physical unit đang nhận lịch (`AcceptingBookings=true`). Từ chối `quantity`.
 6. `PUT /api/v1/inventory/equipment-listings/{id}/rental-rate`: Cập nhật bảng giá niêm yết của Listing (thay thế toàn bộ). Yêu cầu Human Owner hoặc Admin.
 7. `GET /api/v1/inventory/equipment-listings/{id}/assets`: Danh sách đơn vị vật lý thuộc Listing có phân trang.
 8. `GET /api/v1/inventory/equipment-listings/{id}/calendar?from=&to=`: Lịch dùng chung tổng hợp cấp Listing (cửa sổ tối đa 6 tháng). Cho phép Owner và Admin.
@@ -258,8 +258,8 @@ JWT RS256 lấy keys trực tiếp từ Auth; timeout/cache/maximum usable age c
 
 1. **Phân tách phạm vi (Scope Separation)**:
    - Tách biệt rõ ràng giữa luồng đọc Owner (`IEquipmentListingService`, `IInventoryAssetService`) và luồng công khai (`IPublicEquipmentListingService`, `EquipmentListingSearchCriteria`, `SearchPublicListingsAsync`).
-   - Owner search: Bắt buộc `OwnerUserId`, tìm kiếm Model OR SerialNumber, không có date availability filter.
-   - Public search: Không có caller context hay owner predicate; bắt buộc Listing `status = Active` và `totalQuantity > 0`; tìm kiếm Model-only; hỗ trợ availability filter toàn khoảng thời gian (`from`, `to`, `requestedQuantity`) trước phân trang.
+   - Owner search: Bắt buộc `OwnerUserId`, tìm kiếm chuỗi con trong `Name` OR `Model` (không phân biệt hoa/thường, giữ phân biệt dấu tiếng Việt), hỗ trợ lọc `equipmentTypeId`, `brandId`, `status`, không có date availability filter.
+   - Public search: Không có caller context hay owner predicate; bắt buộc Listing `status = Active` và `totalQuantity > 0`; tìm kiếm chuỗi con trong `Name` OR `Model` (không phân biệt hoa/thường, giữ phân biệt dấu tiếng Việt); hỗ trợ availability filter toàn khoảng thời gian (`from`, `to`, `requestedQuantity`) trước phân trang.
    - Bỏ lọc theo năm sản xuất công khai (`manufactureYear` thuộc từng unit vật lý, không thuộc Listing).
 
 2. **Tái sử dụng bộ lọc dùng chung (Shared Filter Architecture)**:

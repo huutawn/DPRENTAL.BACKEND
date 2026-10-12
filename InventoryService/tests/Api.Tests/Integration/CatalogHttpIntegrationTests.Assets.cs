@@ -77,6 +77,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3 Cinema Line",
             model = "Sony FX3 Cinema Line",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -268,6 +269,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -366,6 +368,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -455,6 +458,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -584,6 +588,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -656,6 +661,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -726,6 +732,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -791,6 +798,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
@@ -866,6 +874,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 3,
@@ -941,6 +950,7 @@ public sealed partial class CatalogHttpIntegrationTests
         {
             equipmentTypeId = eqTypeId,
             brandId = brandId,
+            name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
             schemaVersion = 1,
