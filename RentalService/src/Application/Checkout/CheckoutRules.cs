@@ -13,6 +13,9 @@ public static class CheckoutRules
     public const int BookingHorizonMonths = 6;
     public const string Currency = "VND";
 
+    /// <summary>Thời gian chờ thanh toán, cũng là hạn giữ lịch bên Inventory.</summary>
+    public static readonly TimeSpan PaymentWindow = TimeSpan.FromMinutes(30);
+
     public static CheckoutLineIssue? CheckRentalPeriod(RentalCartItem item, DateOnly today)
     {
         ArgumentNullException.ThrowIfNull(item);

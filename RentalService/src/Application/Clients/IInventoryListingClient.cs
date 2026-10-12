@@ -37,7 +37,8 @@ public sealed record InventoryListingDto(
     decimal? DailyRate,
     decimal? DepositPerUnit,
     string? Currency,
-    string? PickupLocation);
+    string? PickupLocation,
+    string? SnapshotVersion);
 
 public sealed record InventoryListingAvailabilityDto(
     Guid ListingId,

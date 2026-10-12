@@ -6,7 +6,7 @@ namespace Dprental.RentalService.Domain.Policies;
 public static class RentalPricingPolicy
 {
     /// <summary>
-    /// Số ngày thuê của khoảng [expectedStartDate, expectedEndDate): ngày kết thúc không tính (10 → 12 là 2 ngày).
+    /// Số ngày thuê của khoảng [expectedStartDate, expectedEndDate): ngày kết thúc không tính (10 → 12 là 3 ngày).
     /// </summary>
     public static int CalculateRentalDays(DateOnly expectedStartDate, DateOnly expectedEndDate) =>
         expectedEndDate.DayNumber - expectedStartDate.DayNumber;

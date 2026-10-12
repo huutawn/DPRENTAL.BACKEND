@@ -60,7 +60,8 @@ public sealed class CheckoutPreparationServiceTests
         500_000m,
         2_000_000m,
         "VND",
-        "Quận 1, TP.HCM");
+        "Quận 1, TP.HCM",
+        "listing-v7");
 
     private CheckoutRequest Request(decimal expectedTotal = 7_000_000m, params Guid[] cartItemIds) => new(
         cartItemIds.Length == 0 ? [_cartItemId] : cartItemIds,
@@ -142,6 +143,7 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(_supplierId, line.SupplierId);
         Assert.Equal("Sony A7 IV", line.ListingName);
         Assert.Equal("Quận 1, TP.HCM", line.PickupLocation);
+        Assert.Equal("listing-v7", line.SnapshotVersion);
         Assert.Equal(2, line.Quantity);
         Assert.Equal(3, line.RentalDays);
         Assert.Equal(500_000m, line.DailyRate);

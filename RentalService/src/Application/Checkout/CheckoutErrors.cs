@@ -28,6 +28,9 @@ public static class CheckoutErrors
     public static readonly Error PriceChanged =
         Error.Conflict("Checkout.PriceChanged", "Giá vừa thay đổi. Vui lòng xem lại và gửi lại.");
 
+    public static readonly Error HoldFailed =
+        Error.Conflict("Checkout.HoldFailed", "Không giữ được lịch cho toàn bộ thiết bị đã chọn. Chưa có đơn hàng nào được tạo.");
+
     public static readonly Error DependencyUnavailable =
         Error.ServiceUnavailable("Checkout.DependencyUnavailable", "Chưa kiểm tra được thiết bị. Vui lòng thử lại.");
 }

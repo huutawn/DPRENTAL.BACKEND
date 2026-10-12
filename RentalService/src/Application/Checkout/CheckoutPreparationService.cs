@@ -269,6 +269,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             item.ExpectedEndDate,
             listing.Title.Trim(),
             listing.PickupLocation!.Trim(),
+            listing.SnapshotVersion!.Trim(),
             snapshot,
             dailyRate,
             depositPerUnit,
@@ -287,6 +288,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         !string.IsNullOrWhiteSpace(listing.Model) &&
         !string.IsNullOrWhiteSpace(listing.SpecValuesJson) &&
         !string.IsNullOrWhiteSpace(listing.PickupLocation) &&
+        !string.IsNullOrWhiteSpace(listing.SnapshotVersion) &&
         listing.DailyRate is > 0 &&
         listing.DepositPerUnit is >= 0 &&
         string.Equals(listing.Currency, CheckoutRules.Currency, StringComparison.OrdinalIgnoreCase);
