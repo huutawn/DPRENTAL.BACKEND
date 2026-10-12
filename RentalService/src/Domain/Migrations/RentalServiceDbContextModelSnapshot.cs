@@ -786,6 +786,8 @@ namespace RentalService.Domain.Migrations
 
                     b.HasIndex("RentalOrderId");
 
+                    b.HasIndex("RentalItemId", "Action", "OccurredAt");
+
                     b.ToTable("rental_state_transitions", "rental");
                 });
 
