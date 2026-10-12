@@ -21,7 +21,7 @@ public sealed record SupplierRejectRequest(
 /// <param name="RentalItemId">Mã định danh duy nhất của mục thuê (RentalItemId).</param>
 /// <param name="RentalOrderId">Mã định danh đơn thuê chứa mục này.</param>
 /// <param name="OrderCode">Mã đơn thuê hiển thị cho người dùng.</param>
-/// <param name="Status">Trạng thái mới của mục thuê sau quyết định (AWAITING_HANDOVER hoặc REJECTED).</param>
+/// <param name="Status">Trạng thái mới của mục thuê sau quyết định (chuỗi PascalCase AwaitingHandover hoặc Rejected).</param>
 /// <param name="DecisionAt">Thời điểm đưa ra quyết định.</param>
 /// <param name="DecisionBy">Mã định danh người đưa ra quyết định (Supplier).</param>
 /// <param name="DecisionReason">Lý do quyết định (nếu từ chối).</param>

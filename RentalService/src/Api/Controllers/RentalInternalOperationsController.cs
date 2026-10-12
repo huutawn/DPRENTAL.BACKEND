@@ -17,6 +17,7 @@ namespace Dprental.RentalService.Api.Controllers;
 /// </remarks>
 
 [ApiController]
+[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
 [Authorize]
 [Route("internal/orders")]
 public sealed class RentalInternalOperationsController : ControllerBase
@@ -42,7 +43,10 @@ public sealed class RentalInternalOperationsController : ControllerBase
     /// - Kiểm tra lý do replay (<c>request.Reason</c> bắt buộc, tối đa 1000 ký tự) phục vụ nhật ký kiểm toán (audit log).
     /// - Đặt lại trạng thái trong biên nhận tác vụ (<c>RentalOperationReceipt</c>): <c>RetryCount = 0</c>, <c>Status = Pending</c>, <c>NextRetryAt = NOW()</c>.
     /// - Ghi nhận nhật ký kiểm toán hành động replay của Admin.
-    /// - Trả về mã HTTP 202 Accepted kèm thông tin chi tiết tác vụ đã được lên lịch replay.
+    /// - 202 chỉ xác nhận lên lịch; worker thực thi sau. operationId là chuỗi mã tác vụ đã lưu, không bắt buộc GUID.
+    /// - Tác vụ đã Succeeded trả 409 OPERATION_ALREADY_SUCCEEDED; journal thiếu/hỏng trả 422 CORRUPTED_JOURNAL.
+    /// - Retry cùng khóa/lý do được kiểm tra theo audit đã lưu; khóa dùng cho nội dung khác trả 409 IDEMPOTENCY_CONFLICT.
+    /// <para>Ví dụ body: {"reason":"Phụ thuộc đã phục hồi, yêu cầu chạy lại"}.</para>
     /// </remarks>
     /// <param name="orderId">Mã định danh duy nhất của đơn thuê (RentalOrderId) liên quan đến tác vụ.</param>
     /// <param name="operationId">Mã định danh duy nhất của tác vụ (OperationId) cần replay.</param>
@@ -54,8 +58,8 @@ public sealed class RentalInternalOperationsController : ControllerBase
     /// <response code="401">Người dùng chưa được xác thực.</response>
     /// <response code="403">Người gọi không có quyền Admin hoặc là Service token.</response>
     /// <response code="404">Không tìm thấy đơn thuê hoặc tác vụ tương ứng.</response>
-    /// <response code="409">Xung đột khóa Idempotency-Key với nội dung replay khác trước đó.</response>
-    /// <response code="422">Tác vụ không ở trạng thái cho phép replay.</response>
+    /// <response code="409">Tác vụ đã thành công hoặc khóa Idempotency-Key được dùng với nội dung khác.</response>
+    /// <response code="422">Journal bị thiếu hoặc hỏng, không thể replay an toàn.</response>
     /// <returns>Dữ liệu chi tiết về tác vụ đã được lên lịch replay thành công.</returns>
     [HttpPost("{orderId:guid}/operations/{operationId}/replay")]
     [Consumes("application/json")]
