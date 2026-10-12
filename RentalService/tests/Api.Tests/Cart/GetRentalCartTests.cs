@@ -1,5 +1,7 @@
-﻿using Dprental.RentalService.Application.Cart;
-using Dprental.RentalService.Application.Cart.ReadModel;
+using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Cart;
+using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Time.Testing;

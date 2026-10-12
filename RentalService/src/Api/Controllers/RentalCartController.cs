@@ -1,7 +1,8 @@
-﻿using Dprental.RentalService.Api.Filters;
+using Dprental.RentalService.Api.Contracts.Cart;
+using Dprental.RentalService.Application.DTOs.Cart;
+using Dprental.RentalService.Application.Services.Cart;
+using Dprental.RentalService.Api.Filters;
 using Dprental.RentalService.Api.Security;
-using Dprental.RentalService.Application.Cart;
-using Dprental.RentalService.Application.Cart.ReadModel;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;

@@ -1,8 +1,8 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Dprental.RentalService.Application.Cart.ReadModel;
+namespace Dprental.RentalService.Application.Clients;
 
 public interface IRentalAvailabilityReader
 {

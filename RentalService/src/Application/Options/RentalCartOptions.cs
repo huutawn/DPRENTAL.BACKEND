@@ -1,8 +1,9 @@
-﻿using System;
+using Dprental.RentalService.Application.Policies;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Dprental.RentalService.Application.Cart.ReadModel
+namespace Dprental.RentalService.Application.Options
 {
     public sealed class RentalCartOptions : IRentalCartPolicy
     {

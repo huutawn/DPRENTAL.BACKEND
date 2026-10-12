@@ -1,6 +1,5 @@
-﻿using System;
-using Dprental.RentalService.Application.Cart;
-using Dprental.RentalService.Application.Cart.ReadModel;
+using Dprental.RentalService.Application.Services.Cart;
+using System;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Dprental.RentalService.DependencyInjection; // Điều chỉnh namespace theo chuẩn project của bạn

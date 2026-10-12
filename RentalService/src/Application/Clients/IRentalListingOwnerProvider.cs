@@ -1,4 +1,4 @@
-﻿namespace Dprental.RentalService.Application.Cart;
+namespace Dprental.RentalService.Application.Clients;
 
 public interface IRentalListingOwnerProvider
 {

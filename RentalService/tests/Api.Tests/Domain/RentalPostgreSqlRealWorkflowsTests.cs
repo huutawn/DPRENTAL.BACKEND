@@ -24,9 +24,7 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
     private static readonly DateTimeOffset FixedNow = new(2026, 10, 8, 8, 15, 30, TimeSpan.Zero);
 
     private static string BaseConnectionString =>
-        Environment.GetEnvironmentVariable("POSTGRESQL_TEST_CONNECTION_STRING")
-        ?? Environment.GetEnvironmentVariable("RENTAL_TEST_POSTGRES_CONNECTION")
-        ?? "Host=127.0.0.1;Port=5433;Database=postgres;Username=inventoryservice;Password=inventory_test_secret_123!;Include Error Detail=true";
+        Dprental.RentalService.Api.Tests.TestHelpers.PostgresTestDatabaseHelper.BaseConnectionString;
 
     private static async Task<bool> IsPostgreSqlAvailableAsync()
     {
@@ -45,13 +43,17 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
     private static async Task<string> CreateTestDatabaseAsync()
     {
         string dbName = $"rental_rw_{Guid.NewGuid():N}";
+        var databaseConnection = new NpgsqlConnectionStringBuilder(BaseConnectionString)
+        {
+            Database = dbName
+        };
         await using var conn = new NpgsqlConnection(BaseConnectionString);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"CREATE DATABASE \"{dbName}\" OWNER inventoryservice;";
+        cmd.CommandText = $"CREATE DATABASE \"{dbName}\";";
         await cmd.ExecuteNonQueryAsync();
 
-        return $"Host=127.0.0.1;Port=5433;Database={dbName};Username=inventoryservice;Password=inventory_test_secret_123!;Include Error Detail=true";
+        return databaseConnection.ConnectionString;
     }
 
     private static async Task DropTestDatabaseAsync(string connString)

@@ -1,5 +1,4 @@
-using Dprental.RentalService.Application.Cart;
-using Dprental.RentalService.Application.Cart.ReadModel;
+using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Common;

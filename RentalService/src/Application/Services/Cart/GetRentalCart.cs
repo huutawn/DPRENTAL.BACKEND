@@ -1,4 +1,7 @@
-﻿using System.Collections.Generic;
+using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Cart;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Dprental.RentalService.Common;
@@ -6,7 +9,7 @@ using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 
-namespace Dprental.RentalService.Application.Cart.ReadModel;
+namespace Dprental.RentalService.Application.Services.Cart;
 
 public sealed class GetRentalCart(
     IRentalCartRepository carts,

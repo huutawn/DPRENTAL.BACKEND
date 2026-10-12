@@ -1,3 +1,6 @@
+using Dprental.RentalService.Api.Contracts.Cart;
+using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Cart;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -11,8 +14,6 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Dprental.RentalService.Api.Controllers;
-using Dprental.RentalService.Application.Cart;
-using Dprental.RentalService.Application.Cart.ReadModel;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.AspNetCore.Hosting;

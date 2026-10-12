@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-
-namespace Dprental.RentalService.Application.Cart.ReadModel;
+namespace Dprental.RentalService.Application.DTOs.Cart;
 
 public sealed record RentalCartLineReadModel(
     Guid CartItemId,
@@ -15,7 +12,3 @@ public sealed record RentalCartLineReadModel(
     string? CurrentPriceVersion,
     RentalCartLineStatus Status,
     string? Message);
-
-public sealed record RentalCartReadModel(
-    Guid CartId,
-    IReadOnlyList<RentalCartLineReadModel> Items);

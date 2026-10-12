@@ -1,11 +1,12 @@
-﻿using Dprental.RentalService.Common;
+using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
 using System.Security.AccessControl;
 
-namespace Dprental.RentalService.Application.Cart;
+namespace Dprental.RentalService.Application.Services.Cart;
 
 public sealed class RentalCartUseCases(
     IRentalCartRepository carts,

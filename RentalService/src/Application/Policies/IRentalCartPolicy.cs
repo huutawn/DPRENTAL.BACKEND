@@ -1,4 +1,4 @@
-namespace Dprental.RentalService.Application.Cart.ReadModel;
+namespace Dprental.RentalService.Application.Policies;
 
 public interface IRentalCartPolicy
 {

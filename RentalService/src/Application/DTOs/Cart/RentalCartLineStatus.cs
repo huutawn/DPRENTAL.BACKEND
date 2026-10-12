@@ -1,4 +1,4 @@
-﻿namespace Dprental.RentalService.Application.Cart.ReadModel;
+namespace Dprental.RentalService.Application.DTOs.Cart;
 
 public enum RentalCartLineStatus
 {

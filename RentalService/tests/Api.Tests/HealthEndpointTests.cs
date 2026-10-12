@@ -1,6 +1,6 @@
+using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Cart;
 using System.Net;
-using Dprental.RentalService.Application.Cart;
-using Dprental.RentalService.Application.Cart.ReadModel;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;

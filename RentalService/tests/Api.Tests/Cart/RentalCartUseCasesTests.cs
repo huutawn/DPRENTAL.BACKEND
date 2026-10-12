@@ -1,7 +1,8 @@
-﻿using System;
+using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.Services.Cart;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Dprental.RentalService.Application.Cart;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;

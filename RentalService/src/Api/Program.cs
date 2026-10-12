@@ -1,8 +1,9 @@
+using Dprental.RentalService.Application.Options;
+using Dprental.RentalService.Application.Policies;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Dprental.RentalService.Api.Exceptions;
-using Dprental.RentalService.Application.Cart.ReadModel;
 using Dprental.RentalService.Api.Routing;
 using Dprental.RentalService.Api.Security;
 using Dprental.RentalService.Application.IServices;
@@ -24,7 +25,6 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Dprental.RentalService.DependencyInjection;
 using Dprental.RentalService.Domain.DependencyInjection;
-using Dprental.RentalService.Application.Cart;
 using Microsoft.AspNetCore.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
