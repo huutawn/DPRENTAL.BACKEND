@@ -18,6 +18,7 @@ namespace Dprental.RentalService.Api.Controllers;
 /// </remarks>
 
 [ApiController]
+[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
 [Authorize]
 [Route("items")]
 public sealed class RentalItemsController : ControllerBase
@@ -43,7 +44,9 @@ public sealed class RentalItemsController : ControllerBase
     /// - Chuyển trạng thái mục thuê sang <c>AWAITING_HANDOVER</c> (Chờ bàn giao thiết bị).
     /// - Xác nhận phân bổ giữ chỗ thiết bị (Confirm Allocation) tại InventoryService.
     /// - Ghi nhận lịch sử chuyển trạng thái và phát sinh sự kiện Outbox <c>RentalItemConfirmed</c>.
-    /// - Yêu cầu header <c>Idempotency-Key</c> (tối đa 64 ký tự) để chống trùng lặp yêu cầu mạng.
+    /// - Không có request body. Hold phải được gia hạn thành công; chỉ chuyển trạng thái sau xác nhận Inventory hợp lệ.
+    /// - Gửi lại cùng khóa và nội dung sau thành công trả lại phản hồi đã lưu; khóa khác hoặc nội dung khác có thể trả 409.
+    /// - status trong response là chuỗi PascalCase <c>AwaitingHandover</c>; DecisionAt là timestamp có múi giờ.
     /// </remarks>
     /// <param name="itemId">Mã định danh duy nhất của mục thuê (RentalItemId) cần chấp nhận.</param>
     /// <param name="idempotencyKey">Khóa chống trùng lặp gửi qua header HTTP (bắt buộc, tối đa 64 ký tự).</param>
@@ -95,10 +98,12 @@ public sealed class RentalItemsController : ControllerBase
     /// - Kiểm tra quyền sở hữu thiết bị: chỉ Supplier sở hữu mục thuê mới có quyền từ chối.
     /// - Kiểm tra trạng thái: mục thuê phải đang ở trạng thái <c>PENDING_SUPPLIER_CONFIRMATION</c>.
     /// - Chuyển trạng thái mục thuê sang <c>REJECTED</c>.
-    /// - Giải phóng phân bổ giữ chỗ thiết bị (Release Allocation) tại InventoryService.
-    /// - Tạo yêu cầu hoàn trả tiền thuê và cọc 100% cho mục này sang PaymentService.
+    /// - Lên lịch giải phóng phân bổ tại InventoryService; thao tác chạy bất đồng bộ.
+    /// - Lên lịch hoàn trả 100% tiền thuê và cọc cho mục này qua PaymentService sau khi giải phóng thành công; 200 không có nghĩa tiền đã hoàn.
     /// - Ghi nhận lịch sử chuyển trạng thái và phát sinh sự kiện Outbox <c>RentalItemRejected</c>.
-    /// - Yêu cầu header <c>Idempotency-Key</c> (tối đa 64 ký tự).
+    /// - Cùng khóa và nội dung trả lại phản hồi đã lưu; khóa đã dùng với nội dung khác trả 409. Các mục thuê khác không bị từ chối.
+    /// - rejectReason bắt buộc, tối đa 500 ký tự; optionalNote tùy chọn, tối đa 2000 ký tự. status trả về là <c>Rejected</c>.
+    /// <para>Ví dụ body: {"rejectReason":"Không thể bàn giao đúng lịch","optionalNote":null}.</para>
     /// </remarks>
     /// <param name="itemId">Mã định danh duy nhất của mục thuê (RentalItemId) cần từ chối.</param>
     /// <param name="request">Thông tin lý do từ chối (bắt buộc) và ghi chú bổ sung tùy chọn.</param>
@@ -111,8 +116,6 @@ public sealed class RentalItemsController : ControllerBase
     /// <response code="404">Không tìm thấy mục thuê với mã ID đã cho.</response>
     /// <response code="409">Xung đột trạng thái mục thuê hoặc xung đột khóa Idempotency-Key.</response>
     /// <response code="410">Yêu cầu thuê đã quá hạn xác nhận (EXPIRED).</response>
-    /// <response code="422">Không thể xử lý nghiệp vụ từ chối do vi phạm điều kiện chuyển trạng thái.</response>
-    /// <response code="503">Dịch vụ Inventory tạm thời không khả dụng khi giải phóng phân bổ.</response>
     /// <returns>Dữ liệu phản hồi quyết định từ chối mục thuê của Supplier.</returns>
     [HttpPost("{itemId:guid}/reject")]
     [Consumes("application/json")]
@@ -123,8 +126,6 @@ public sealed class RentalItemsController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status410Gone)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> RejectItem(
         [FromRoute] Guid itemId,
         [FromBody] SupplierRejectRequest request,
