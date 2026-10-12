@@ -16,6 +16,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
+using Dprental.RentalService.Api.Tests.Domain;
 
 namespace Dprental.RentalService.Api.Tests.Integration;
 
@@ -53,7 +54,8 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
             200_000m,
             500_000m,
             "grp-01",
-            assignments);
+            assignments,
+            TestListingSnapshots.Default);
 
         var order = RentalOrder.Create(
             orderId,

@@ -270,7 +270,8 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
                 Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1,
                 new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18),
                 "Sony A7", null, "Pickup", 200_000m, 500_000m, "grp-01",
-                [new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())]);
+                [new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
+            TestListingSnapshots.Default);
 
             var order = RentalOrder.Create(orderId, "ORD-CONC-001", Guid.NewGuid(), "VND", "Pickup", "Cust", "0909", "Addr", null, "v1", "doc", "h", "op-c", FixedNow, [item]).Value;
 
@@ -370,7 +371,8 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
                 Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1,
                 new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18),
                 "Sony A7", null, "Pickup", 200_000m, 500_000m, "grp-01",
-                [new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())]);
+                [new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
+            TestListingSnapshots.Default);
 
             var order = RentalOrder.Create(orderId, "ORD-ATOMIC-001", Guid.NewGuid(), "VND", "Pickup", "Cust", "0909", "Addr", null, "v1", "doc", "h", "op-c", FixedNow, [item]).Value;
 

@@ -154,7 +154,8 @@ public sealed class RentalPostgreSqlIntegrationTests
                 200_000m,
                 500_000m,
                 "group-01",
-                [assignmentDto]);
+                [assignmentDto],
+            TestListingSnapshots.Default);
 
             RentalOrder order = RentalOrder.Create(
                 orderId,
@@ -335,7 +336,8 @@ public sealed class RentalPostgreSqlIntegrationTests
                 100_000m,
                 200_000m,
                 "grp",
-                [assignmentDto]);
+                [assignmentDto],
+            TestListingSnapshots.Default);
 
             RentalOrder order = RentalOrder.Create(
                 orderId,

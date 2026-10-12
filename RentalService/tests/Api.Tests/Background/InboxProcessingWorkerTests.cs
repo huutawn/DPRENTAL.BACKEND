@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
+using Dprental.RentalService.Api.Tests.Domain;
 
 namespace Dprental.RentalService.Api.Tests.Background;
 
@@ -67,7 +68,7 @@ public sealed class InboxProcessingWorkerTests
         var order = RentalOrder.Create(
             orderId, "ORD-001", Guid.NewGuid(), "VND", "Standard", "Renter", "0123456789", "Address", null,
             "ORIGINAL_PAYMENT_SOURCE", "v1.0", "DOC-001", "HASH-001", "OP-001", FixedNow,
-            new[] { new InitialRentalItemDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, DateOnly.FromDateTime(DateTime.UtcNow), DateOnly.FromDateTime(DateTime.UtcNow.AddDays(3)), "Listing", null, "Pickup", 500_000m, 1_000_000m, "GRP-001", new[] { new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()) }) }).Value;
+            new[] { new InitialRentalItemDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, DateOnly.FromDateTime(DateTime.UtcNow), DateOnly.FromDateTime(DateTime.UtcNow.AddDays(3)), "Listing", null, "Pickup", 500_000m, 1_000_000m, "GRP-001", new[] { new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()) }, TestListingSnapshots.Default) }).Value;
         db.RentalOrders.Add(order);
 
         var payload = new InvoicePaidPayload(orderId, order.RenterId, "INV-001", "PAY-001", order.TotalPayableAmount, "VND", FixedNow);
@@ -113,7 +114,7 @@ public sealed class InboxProcessingWorkerTests
         var order = RentalOrder.Create(
             orderId, "ORD-002", Guid.NewGuid(), "VND", "Standard", "Renter", "0123456789", "Address", null,
             "ORIGINAL_PAYMENT_SOURCE", "v1.0", "DOC-001", "HASH-001", "OP-002", FixedNow,
-            new[] { new InitialRentalItemDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, DateOnly.FromDateTime(DateTime.UtcNow), DateOnly.FromDateTime(DateTime.UtcNow.AddDays(3)), "Listing", null, "Pickup", 500_000m, 1_000_000m, "GRP-002", new[] { new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()) }) }).Value;
+            new[] { new InitialRentalItemDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, DateOnly.FromDateTime(DateTime.UtcNow), DateOnly.FromDateTime(DateTime.UtcNow.AddDays(3)), "Listing", null, "Pickup", 500_000m, 1_000_000m, "GRP-002", new[] { new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()) }, TestListingSnapshots.Default) }).Value;
         db.RentalOrders.Add(order);
 
         var payload = new InvoicePaidPayload(orderId, order.RenterId, "INV-002", "PAY-002", order.TotalPayableAmount, "VND", FixedNow);

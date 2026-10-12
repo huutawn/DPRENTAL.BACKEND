@@ -32,7 +32,8 @@ public sealed class RentalOrderLifecycleDomainTests
             200_000m,
             500_000m,
             "grp-01",
-            assignments);
+            assignments,
+            TestListingSnapshots.Default);
 
         return RentalOrder.Create(
             orderId,
@@ -73,7 +74,8 @@ public sealed class RentalOrderLifecycleDomainTests
             200_000m,
             500_000m,
             "grp-01",
-            item1Assignments);
+            item1Assignments,
+            TestListingSnapshots.Default);
 
         InitialRentalItemDto item2 = new(
             Guid.NewGuid(),
@@ -88,7 +90,8 @@ public sealed class RentalOrderLifecycleDomainTests
             300_000m,
             600_000m,
             "grp-02",
-            item2Assignments);
+            item2Assignments,
+            TestListingSnapshots.Default);
 
         return RentalOrder.Create(
             orderId,

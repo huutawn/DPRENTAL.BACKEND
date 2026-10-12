@@ -41,7 +41,8 @@ public sealed class RentalOrderPricingAndInvariantsTests
             dailyRate,
             depositPerUnit,
             "hold-group-001",
-            assignments);
+            assignments,
+            TestListingSnapshots.Default);
 
         Result<RentalOrder> orderResult = RentalOrder.Create(
             Guid.NewGuid(),
@@ -116,7 +117,8 @@ public sealed class RentalOrderPricingAndInvariantsTests
             50_000m,
             100_000m,
             "group-1",
-            assignments);
+            assignments,
+            TestListingSnapshots.Default);
 
         Result<RentalOrder> result = RentalOrder.Create(
             Guid.NewGuid(),
@@ -156,7 +158,8 @@ public sealed class RentalOrderPricingAndInvariantsTests
             50_000m,
             100_000m,
             "group-1",
-            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())]);
+            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
+            TestListingSnapshots.Default);
 
         Result<RentalOrder> result = RentalOrder.Create(
             Guid.NewGuid(),
