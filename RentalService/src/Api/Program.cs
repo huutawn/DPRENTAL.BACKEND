@@ -7,6 +7,7 @@ using Dprental.RentalService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Dprental.RentalService.DependencyInjection;
+using Dprental.RentalService.Api.Security;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,8 +24,18 @@ builder.Services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
 
 builder.Services.AddControllers().AddJsonOptions(options =>
     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseUpper)));
-builder.Services.AddAuthentication();
-builder.Services.AddAuthorization();
+builder.Services.AddRentalJwtAuthentication(builder.Configuration);
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentRenter, CurrentRenter>();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("Renter", policy => policy
+        .RequireAuthenticatedUser()
+        .RequireAssertion(context =>
+            Guid.TryParse(context.User.FindFirst("sub")?.Value, out Guid renterId) &&
+            renterId != Guid.Empty &&
+            !string.Equals(context.User.FindFirst("u")?.Value, "svc", StringComparison.Ordinal)));
+});
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddEndpointsApiExplorer();

@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 namespace Dprental.RentalService.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Policy = "Renter")]
 [Route("rental/cart")]
 public sealed class RentalCartController(
     ICurrentRenter currentRenter,

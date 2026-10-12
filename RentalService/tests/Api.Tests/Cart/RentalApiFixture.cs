@@ -78,7 +78,7 @@ public class RentalApiFixture : WebApplicationFactory<Program>
         {
             if (Context.Request.Headers.TryGetValue("X-Test-Renter-Id", out var renterIdStr))
             {
-                var claims = new[] { new Claim(ClaimTypes.NameIdentifier, renterIdStr.ToString()) };
+                var claims = new[] { new Claim("sub", renterIdStr.ToString()) };
                 var identity = new ClaimsIdentity(claims, "TestAuth");
                 var principal = new ClaimsPrincipal(identity);
                 var ticket = new AuthenticationTicket(principal, "TestAuth");
@@ -98,7 +98,7 @@ public class RentalApiFixture : WebApplicationFactory<Program>
         {
             get
             {
-                var val = _accessor.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var val = _accessor.HttpContext?.User?.FindFirst("sub")?.Value;
                 return Guid.TryParse(val, out var id) ? id : Guid.Empty;
             }
         }
