@@ -335,7 +335,10 @@ public sealed class SupplierConfirmationStatisticsQueryAndMigrationPostgreSqlTes
             COPY rental.rental_items (
                 "Id", "RentalOrderId", "EquipmentListingId", "SupplierId", "Quantity",
                 "ExpectedStartDate", "ExpectedEndDate", "ListingTitleSnapshot",
-                "PickupLocationSnapshot", "DailyRateSnapshot", "DepositPerUnitSnapshot",
+                "ListingDescriptionSnapshot", "PickupLocationSnapshot", "EquipmentTypeId",
+                "EquipmentTypeNameSnapshot", "BrandId", "BrandNameSnapshot", "ModelSnapshot",
+                "SpecSchemaVersionSnapshot", "SpecValuesSnapshot", "ThumbnailMediaIdSnapshot",
+                "DailyRateSnapshot", "DepositPerUnitSnapshot",
                 "RentalAmount", "DepositAmount", "Status", "AllocationGroupId"
             ) FROM STDIN (FORMAT BINARY)
         """))
@@ -351,7 +354,16 @@ public sealed class SupplierConfirmationStatisticsQueryAndMigrationPostgreSqlTes
                 await writer.WriteAsync(new DateOnly(2026, 10, 10), NpgsqlDbType.Date);
                 await writer.WriteAsync(new DateOnly(2026, 10, 15), NpgsqlDbType.Date);
                 await writer.WriteAsync("Bulk Item", NpgsqlDbType.Varchar);
+                await writer.WriteNullAsync();
                 await writer.WriteAsync("Location", NpgsqlDbType.Varchar);
+                await writer.WriteAsync(TestListingSnapshots.Default.EquipmentTypeId, NpgsqlDbType.Uuid);
+                await writer.WriteAsync(TestListingSnapshots.Default.EquipmentTypeName, NpgsqlDbType.Varchar);
+                await writer.WriteAsync(TestListingSnapshots.Default.BrandId, NpgsqlDbType.Uuid);
+                await writer.WriteAsync(TestListingSnapshots.Default.BrandName, NpgsqlDbType.Varchar);
+                await writer.WriteAsync(TestListingSnapshots.Default.Model, NpgsqlDbType.Varchar);
+                await writer.WriteAsync(TestListingSnapshots.Default.SpecSchemaVersion, NpgsqlDbType.Integer);
+                await writer.WriteAsync(TestListingSnapshots.Default.SpecValuesJson, NpgsqlDbType.Jsonb);
+                await writer.WriteNullAsync();
                 await writer.WriteAsync(100_000m, NpgsqlDbType.Numeric);
                 await writer.WriteAsync(200_000m, NpgsqlDbType.Numeric);
                 await writer.WriteAsync(500_000m, NpgsqlDbType.Numeric);

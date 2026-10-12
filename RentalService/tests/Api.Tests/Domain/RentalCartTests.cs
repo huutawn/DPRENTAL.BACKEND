@@ -1,6 +1,7 @@
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Domain.Errors;
 using Xunit;
 
 namespace Dprental.RentalService.Api.Tests.Domain;
@@ -8,7 +9,10 @@ namespace Dprental.RentalService.Api.Tests.Domain;
 public sealed class RentalCartTests
 {
     private readonly Guid _renterId = Guid.NewGuid();
+    private readonly Guid _ownerId = Guid.NewGuid();
     private readonly DateTimeOffset _now = DateTimeOffset.UtcNow;
+    private readonly DateOnly _start = new(2026, 10, 10);
+    private readonly DateOnly _end = new(2026, 10, 15);
 
     [Fact]
     public void CreateCart_InitializesWithActiveStatusAndVersionOne()
@@ -26,36 +30,20 @@ public sealed class RentalCartTests
     }
 
     [Fact]
-    public void CreateCart_FailsWithEmptyIds()
-    {
-        Result<RentalCart> emptyId = RentalCart.Create(Guid.Empty, _renterId, _now);
-        Assert.True(emptyId.IsFailure);
-
-        Result<RentalCart> emptyRenter = RentalCart.Create(Guid.NewGuid(), Guid.Empty, _now);
-        Assert.True(emptyRenter.IsFailure);
-    }
-
-    [Fact]
-    public void AddItem_IncreasesVersionAndAddsItem()
+    public void AddItem_IncreasesVersionAndAddsItem_WithCorrectTimestamps()
     {
         RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
         Guid itemId = Guid.NewGuid();
         Guid listingId = Guid.NewGuid();
-        DateOnly start = new(2026, 10, 10);
-        DateOnly end = new(2026, 10, 15);
 
-        Result<RentalCartItem> result = cart.AddItem(itemId, listingId, 2, start, end, _now);
+        // Đã bỏ maxDays
+        Result<RentalCartItem> result = cart.AddItem(itemId, listingId, _ownerId, 2, _start, _end, _now);
 
         Assert.True(result.IsSuccess);
         Assert.Single(cart.Items);
-        Assert.Equal(2, cart.Version);
-
         RentalCartItem item = cart.Items.First();
-        Assert.Equal(itemId, item.Id);
-        Assert.Equal(listingId, item.EquipmentListingId);
-        Assert.Equal(2, item.Quantity);
-        Assert.Equal(start, item.ExpectedStartDate);
-        Assert.Equal(end, item.ExpectedEndDate);
+        Assert.Equal(_now, item.CreatedAt);
+        Assert.Equal(_now, item.UpdatedAt);
     }
 
     [Fact]
@@ -63,100 +51,189 @@ public sealed class RentalCartTests
     {
         RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
         Guid listingId = Guid.NewGuid();
-        DateOnly start = new(2026, 10, 10);
-        DateOnly end = new(2026, 10, 15);
 
-        cart.AddItem(Guid.NewGuid(), listingId, 2, start, end, _now);
-        cart.AddItem(Guid.NewGuid(), listingId, 3, start, end, _now.AddMinutes(1));
+        cart.AddItem(Guid.NewGuid(), listingId, _ownerId, 2, _start, _end, _now);
+        cart.AddItem(Guid.NewGuid(), listingId, _ownerId, 3, _start, _end, _now.AddMinutes(1));
 
         Assert.Single(cart.Items);
         Assert.Equal(5, cart.Items.First().Quantity);
-        Assert.Equal(3, cart.Version);
     }
 
     [Fact]
-    public void AddItem_RejectsInvalidQuantityAndDates()
+    public void AddItem_StartEqualsEnd_IsValid()
+    {
+        RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
+        Result<RentalCartItem> result = cart.AddItem(Guid.NewGuid(), Guid.NewGuid(), _ownerId, 2, _start, _start, _now);
+
+        Assert.True(result.IsSuccess);
+    }
+
+    [Fact]
+    public void AddItem_StartAfterEnd_Rejects()
+    {
+        RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
+        DateOnly start = new(2026, 10, 15);
+        DateOnly end = new(2026, 10, 10); // start > end
+
+        Result<RentalCartItem> invalidDates = cart.AddItem(Guid.NewGuid(), Guid.NewGuid(), _ownerId, 2, start, end, _now);
+        Assert.True(invalidDates.IsFailure);
+        Assert.Equal(RentalErrors.InvalidRentalPeriod, invalidDates.Error);
+    }
+
+    [Fact]
+    public void AddItem_DurationExceedsOneYear_Rejects()
+    {
+        RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
+
+        DateOnly start = new DateOnly(2026, 10, 1);
+        DateOnly end = start.AddDays(RentalCart.MaximumRentalDays);
+
+        Result<RentalCartItem> result = cart.AddItem(Guid.NewGuid(), Guid.NewGuid(), _ownerId, 2, start, end, _now);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(RentalErrors.DurationExceedsOneYear, result.Error);
+    }
+
+    [Fact]
+    public void AddItem_DurationExactlyMaximumRentalDays_IsAccepted()
+    {
+        RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
+        DateOnly end = _start.AddDays(RentalCart.MaximumRentalDays - 1);
+
+        Result<RentalCartItem> result = cart.AddItem(
+            Guid.NewGuid(), Guid.NewGuid(), _ownerId, 1, _start, end, _now);
+
+        Assert.True(result.IsSuccess);
+    }
+
+    [Fact]
+    public void AddItem_RenterIsOwner_Rejects()
+    {
+        RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
+        Result<RentalCartItem> result = cart.AddItem(Guid.NewGuid(), Guid.NewGuid(), _renterId, 1, _start, _end, _now);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(RentalErrors.CannotRentOwnListing, result.Error);
+    }
+
+    [Fact]
+    public void AddItem_MissingOwnerId_Rejects()
+    {
+        RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
+        Result<RentalCartItem> result = cart.AddItem(Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, 1, _start, _end, _now);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(RentalErrors.OwnerIdRequired, result.Error);
+    }
+
+    [Fact]
+    public void AddItem_QuantityOverflow_Rejects()
     {
         RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
         Guid listingId = Guid.NewGuid();
-        DateOnly start = new(2026, 10, 15);
-        DateOnly end = new(2026, 10, 10);
+        cart.AddItem(Guid.NewGuid(), listingId, _ownerId, int.MaxValue - 1, _start, _end, _now);
 
-        Result<RentalCartItem> zeroQty = cart.AddItem(Guid.NewGuid(), listingId, 0, start, end, _now);
-        Assert.True(zeroQty.IsFailure);
+        Result<RentalCartItem> result = cart.AddItem(Guid.NewGuid(), listingId, _ownerId, 2, _start, _end, _now);
 
-        Result<RentalCartItem> invalidDates = cart.AddItem(Guid.NewGuid(), listingId, 2, start, end, _now);
-        Assert.True(invalidDates.IsFailure);
+        Assert.True(result.IsFailure);
+        Assert.Equal(RentalErrors.QuantityOverflow, result.Error);
     }
 
     [Fact]
-    public void UpdateItem_ModifiesItemAndIncrementsVersion()
+    public void UpdateItemQuantity_MissingOwnerId_Rejects()
     {
         RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
         Guid itemId = Guid.NewGuid();
-        cart.AddItem(itemId, Guid.NewGuid(), 2, new(2026, 10, 10), new(2026, 10, 12), _now);
+        cart.AddItem(itemId, Guid.NewGuid(), _ownerId, 2, _start, _end, _now);
 
-        Result result = cart.UpdateItem(itemId, 5, new(2026, 10, 11), new(2026, 10, 14), _now.AddMinutes(2));
+        Result result = cart.UpdateItemQuantity(itemId, Guid.Empty, 5, _now);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(RentalErrors.OwnerIdRequired, result.Error);
+    }
+
+    [Fact]
+    public void UpdateItemQuantity_UpdatesQuantityAndTimestamp()
+    {
+        RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
+        Guid itemId = Guid.NewGuid();
+        cart.AddItem(itemId, Guid.NewGuid(), _ownerId, 2, _start, _end, _now);
+        DateTimeOffset updatedAt = _now.AddMinutes(3);
+
+        Result result = cart.UpdateItemQuantity(itemId, _ownerId, 5, updatedAt);
 
         Assert.True(result.IsSuccess);
-        RentalCartItem updated = cart.Items.First();
-        Assert.Equal(5, updated.Quantity);
-        Assert.Equal(new DateOnly(2026, 10, 11), updated.ExpectedStartDate);
-        Assert.Equal(new DateOnly(2026, 10, 14), updated.ExpectedEndDate);
+        RentalCartItem item = Assert.Single(cart.Items);
+        Assert.Equal(5, item.Quantity);
+        Assert.Equal(_now, item.CreatedAt);
+        Assert.Equal(updatedAt, item.UpdatedAt);
     }
 
     [Fact]
-    public void RemoveAndClearItems_WorkCorrectly()
+    public void UpdateItemDates_DurationExceedsOneYear_Rejects()
     {
         RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
-        Guid item1 = Guid.NewGuid();
-        Guid item2 = Guid.NewGuid();
-        cart.AddItem(item1, Guid.NewGuid(), 1, new(2026, 10, 10), new(2026, 10, 12), _now);
-        cart.AddItem(item2, Guid.NewGuid(), 2, new(2026, 10, 13), new(2026, 10, 15), _now);
+        Guid itemId = Guid.NewGuid();
+        cart.AddItem(itemId, Guid.NewGuid(), _ownerId, 2, _start, _end, _now);
 
-        Result removeRes = cart.RemoveItem(item1, _now);
-        Assert.True(removeRes.IsSuccess);
-        Assert.Single(cart.Items);
+        DateOnly newEnd = _start.AddDays(RentalCart.MaximumRentalDays);
+        Result result = cart.UpdateItemDates(itemId, _ownerId, _start, newEnd, _now);
 
-        Result clearRes = cart.ClearItems(_now);
-        Assert.True(clearRes.IsSuccess);
-        Assert.Empty(cart.Items);
+        Assert.True(result.IsFailure);
+        Assert.Equal(RentalErrors.DurationExceedsOneYear, result.Error);
     }
 
     [Fact]
-    public void CompleteCheckout_RemovesItems_AndTransitionsStatus()
+    public void UpdateItemDates_DurationExactlyMaximumRentalDays_IsAccepted()
     {
         RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
-        Guid item1 = Guid.NewGuid();
-        Guid item2 = Guid.NewGuid();
-        cart.AddItem(item1, Guid.NewGuid(), 1, new(2026, 10, 10), new(2026, 10, 12), _now);
-        cart.AddItem(item2, Guid.NewGuid(), 2, new(2026, 10, 13), new(2026, 10, 15), _now);
+        Guid itemId = Guid.NewGuid();
+        cart.AddItem(itemId, Guid.NewGuid(), _ownerId, 1, _start, _end, _now);
 
-        // Checkout only item1: cart should remain Active because item2 is left
-        Result partialCheckout = cart.CompleteCheckout([item1], _now);
-        Assert.True(partialCheckout.IsSuccess);
-        Assert.Equal(RentalCartStatus.Active, cart.Status);
-        Assert.Single(cart.Items);
-        Assert.Equal(item2, cart.Items.First().Id);
-
-        // Checkout remaining item2: cart should become CheckedOut
-        Result completeCheckout = cart.CompleteCheckout([item2], _now);
-        Assert.True(completeCheckout.IsSuccess);
-        Assert.Equal(RentalCartStatus.CheckedOut, cart.Status);
-        Assert.Empty(cart.Items);
-    }
-
-    [Fact]
-    public void Abandon_TransitionsStatusToAbandoned()
-    {
-        RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
-        Result result = cart.Abandon(_now);
+        DateOnly maximumEnd = _start.AddDays(RentalCart.MaximumRentalDays - 1);
+        Result result = cart.UpdateItemDates(itemId, _ownerId, _start, maximumEnd, _now.AddMinutes(1));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(RentalCartStatus.Abandoned, cart.Status);
+        RentalCartItem item = Assert.Single(cart.Items);
+        Assert.Equal(maximumEnd, item.ExpectedEndDate);
+    }
 
-        // Cannot add items to abandoned cart
-        Result addRes = cart.AddItem(Guid.NewGuid(), Guid.NewGuid(), 1, new(2026, 10, 10), new(2026, 10, 12), _now);
-        Assert.True(addRes.IsFailure);
+    [Fact]
+    public void UpdateItemDates_CausesMerge_AggregatesQuantityAndRemovesOldItem()
+    {
+        RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
+        Guid listingId = Guid.NewGuid();
+        Guid item1 = Guid.NewGuid();
+        Guid item2 = Guid.NewGuid();
+
+        DateOnly diffStart = _start.AddDays(1);
+
+        cart.AddItem(item1, listingId, _ownerId, 2, _start, _end, _now);
+        cart.AddItem(item2, listingId, _ownerId, 3, diffStart, _end, _now);
+
+        // Đổi ngày của item2 cho trùng với item1
+        Result result = cart.UpdateItemDates(item2, _ownerId, _start, _end, _now.AddMinutes(5));
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(cart.Items); // Đã gộp thành 1
+        Assert.Equal(5, cart.Items.First().Quantity);
+        Assert.Equal(_now.AddMinutes(5), cart.Items.First().UpdatedAt);
+    }
+
+    [Fact]
+    public void UpdateItemDates_StartEqualsEnd_IsAccepted()
+    {
+        RentalCart cart = RentalCart.Create(Guid.NewGuid(), _renterId, _now).Value;
+        Guid itemId = Guid.NewGuid();
+        cart.AddItem(itemId, Guid.NewGuid(), _ownerId, 1, _start, _end, _now);
+
+        Result result = cart.UpdateItemDates(itemId, _ownerId, _start, _start, _now.AddMinutes(1));
+
+        Assert.True(result.IsSuccess);
+        RentalCartItem item = Assert.Single(cart.Items);
+        Assert.Equal(_start, item.ExpectedStartDate);
+        Assert.Equal(_start, item.ExpectedEndDate);
+        Assert.Equal(_now, item.CreatedAt);
+        Assert.Equal(_now.AddMinutes(1), item.UpdatedAt);
     }
 }

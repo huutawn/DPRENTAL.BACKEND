@@ -16,12 +16,20 @@ public static class RentalErrors
 
     public static readonly Error CartEmpty =
         Error.Validation("Cart.Empty", "Giỏ thuê không có sản phẩm nào để checkout.");
+    public static readonly Error CannotRentOwnListing =
+        Error.Forbidden("Cart.CannotRentOwnListing", "Người thuê không thể thuê thiết bị do chính mình sở hữu.");
+    public static readonly Error OwnerIdRequired =
+        Error.Validation("Cart.OwnerIdRequired", "Bắt buộc phải cung cấp OwnerId của thiết bị.");
+    public static readonly Error QuantityOverflow =
+        Error.Validation("Cart.QuantityOverflow", "Tổng số lượng vượt quá giới hạn cho phép.");
 
     public static readonly Error InvalidQuantity =
         Error.Validation("Rental.InvalidQuantity", "Số lượng thuê phải lớn hơn 0.");
 
     public static readonly Error InvalidRentalPeriod =
-        Error.Validation("Rental.InvalidPeriod", "Ngày bắt đầu phải trước ngày kết thúc.");
+        Error.Validation("Rental.InvalidPeriod", "Ngày bắt đầu không được sau ngày kết thúc.");
+    public static readonly Error DurationExceedsOneYear =
+        Error.Validation("Rental.DurationExceedsOneYear", "Thời gian thuê không được vượt quá 1 năm.");
 
     // Order Errors
     public static readonly Error OrderNotFound =

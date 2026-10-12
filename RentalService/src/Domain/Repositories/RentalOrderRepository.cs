@@ -78,6 +78,14 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<RentalOrder?> GetPendingPaymentByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalOrders
+            .Where(o => o.RenterId == renterId && o.Status == RentalOrderStatus.PendingPayment)
+            .OrderByDescending(o => o.PaymentDeadline)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<RentalOrder>> GetBySupplierIdAsync(Guid supplierId, CancellationToken cancellationToken = default)
     {
         return await _dbContext.RentalOrders

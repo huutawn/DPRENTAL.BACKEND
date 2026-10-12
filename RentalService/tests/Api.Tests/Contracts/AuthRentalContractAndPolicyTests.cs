@@ -5,6 +5,7 @@ using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Xunit;
+using Dprental.RentalService.Api.Tests.Domain;
 
 namespace Dprental.RentalService.Api.Tests.Contracts;
 
@@ -336,7 +337,8 @@ public sealed class AuthRentalContractAndPolicyTests
             200_000m,
             500_000m,
             "grp-01",
-            [unit]);
+            [unit],
+            TestListingSnapshots.Default);
 
         return RentalOrder.Create(
             orderId,

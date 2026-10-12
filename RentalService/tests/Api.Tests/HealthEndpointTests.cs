@@ -1,6 +1,7 @@
+using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Cart;
 using System.Net;
 using Dprental.RentalService.Domain.DependencyInjection;
-using Dprental.RentalService.Domain.Repositories;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
@@ -61,6 +62,35 @@ public sealed class HealthEndpointTests
 
     private static WebApplicationFactory<Program> CreateFactory() =>
         new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder => builder.UseSetting(
-                "ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test"));
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting(
+                    "ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.ConfigureTestServices(services =>
+                {
+                    var listingDependencies = new TestListingDependencies();
+                    services.AddSingleton<IRentalListingOwnerProvider>(listingDependencies);
+                    services.AddSingleton<IRentalListingReader>(listingDependencies);
+                    services.AddSingleton<IRentalAvailabilityReader>(listingDependencies);
+                });
+            });
+
+    private sealed class TestListingDependencies :
+        IRentalListingOwnerProvider,
+        IRentalListingReader,
+        IRentalAvailabilityReader
+    {
+        public Task<Guid?> GetOwnerIdAsync(Guid equipmentListingId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<Guid?>(null);
+
+        public Task<RentalListingSnapshot?> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<RentalListingSnapshot?>(null);
+
+        public Task<int?> GetAvailableQuantityAsync(
+            Guid listingId,
+            DateOnly startDate,
+            DateOnly endDate,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<int?>(null);
+    }
 }

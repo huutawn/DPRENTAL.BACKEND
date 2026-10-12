@@ -11,9 +11,7 @@ namespace Dprental.RentalService.Api.Tests.Domain;
 public sealed class RentalPostgreSqlIntegrationTests
 {
     private static string BaseConnectionString =>
-        Environment.GetEnvironmentVariable("POSTGRESQL_TEST_CONNECTION_STRING")
-        ?? Environment.GetEnvironmentVariable("RENTAL_TEST_POSTGRES_CONNECTION")
-        ?? "Host=127.0.0.1;Port=5433;Database=postgres;Username=inventoryservice;Password=inventory_test_secret_123!;Include Error Detail=true";
+        Dprental.RentalService.Api.Tests.TestHelpers.PostgresTestDatabaseHelper.BaseConnectionString;
     private static async Task<bool> IsPostgreSqlAvailableAsync()
     {
         try
@@ -31,13 +29,17 @@ public sealed class RentalPostgreSqlIntegrationTests
     private static async Task<string> CreateTestDatabaseAsync()
     {
         string dbName = $"rental_tests_{Guid.NewGuid():N}";
+        var databaseConnection = new NpgsqlConnectionStringBuilder(BaseConnectionString)
+        {
+            Database = dbName
+        };
         await using var conn = new NpgsqlConnection(BaseConnectionString);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"CREATE DATABASE \"{dbName}\" OWNER inventoryservice;";
+        cmd.CommandText = $"CREATE DATABASE \"{dbName}\";";
         await cmd.ExecuteNonQueryAsync();
 
-        return $"Host=127.0.0.1;Port=5433;Database={dbName};Username=inventoryservice;Password=inventory_test_secret_123!;Include Error Detail=true";
+        return databaseConnection.ConnectionString;
     }
 
     private static async Task DropTestDatabaseAsync(string connString)
@@ -83,9 +85,9 @@ public sealed class RentalPostgreSqlIntegrationTests
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
-                SELECT table_name 
-                FROM information_schema.tables 
-                WHERE table_schema = 'rental' 
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'rental'
                 ORDER BY table_name;";
 
             List<string> tables = [];
@@ -154,7 +156,8 @@ public sealed class RentalPostgreSqlIntegrationTests
                 200_000m,
                 500_000m,
                 "group-01",
-                [assignmentDto]);
+                [assignmentDto],
+            TestListingSnapshots.Default);
 
             RentalOrder order = RentalOrder.Create(
                 orderId,
@@ -335,7 +338,8 @@ public sealed class RentalPostgreSqlIntegrationTests
                 100_000m,
                 200_000m,
                 "grp",
-                [assignmentDto]);
+                [assignmentDto],
+            TestListingSnapshots.Default);
 
             RentalOrder order = RentalOrder.Create(
                 orderId,

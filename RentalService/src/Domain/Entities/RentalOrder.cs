@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Common.Utils;
@@ -114,6 +115,36 @@ public class RentalOrder
 
     private RentalOrder()
     {
+    }
+
+    private static bool IsValidListingSnapshot(RentalItemListingSnapshotDto? snapshot)
+    {
+        if (snapshot is null ||
+            snapshot.EquipmentTypeId == Guid.Empty ||
+            snapshot.BrandId == Guid.Empty ||
+            snapshot.ThumbnailMediaId == Guid.Empty ||
+            snapshot.SpecSchemaVersion < 1)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(snapshot.EquipmentTypeName) || snapshot.EquipmentTypeName.Trim().Length > 200 ||
+            string.IsNullOrWhiteSpace(snapshot.BrandName) || snapshot.BrandName.Trim().Length > 200 ||
+            string.IsNullOrWhiteSpace(snapshot.Model) || snapshot.Model.Trim().Length > 200 ||
+            string.IsNullOrWhiteSpace(snapshot.SpecValuesJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(snapshot.SpecValuesJson);
+            return document.RootElement.ValueKind == JsonValueKind.Object;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     public static Result<RentalOrder> Create(
@@ -269,6 +300,11 @@ public class RentalOrder
                 return RentalErrors.InvalidSnapshot;
             }
 
+            if (!IsValidListingSnapshot(itemDto.ListingSnapshot))
+            {
+                return RentalErrors.InvalidSnapshot;
+            }
+
             var assignments = itemDto.Assignments?.ToList() ?? [];
             if (assignments.Count != itemDto.Quantity)
             {
@@ -343,7 +379,8 @@ public class RentalOrder
                 itemDto.DailyRateSnapshot,
                 itemDto.DepositPerUnitSnapshot,
                 itemDto.AllocationGroupId.Trim(),
-                itemDto.Assignments);
+                itemDto.Assignments,
+                itemDto.ListingSnapshot);
 
             order._items.Add(item);
         }

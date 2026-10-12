@@ -189,6 +189,9 @@ namespace RentalService.Domain.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("EquipmentListingId")
                         .HasColumnType("uuid");
 
@@ -203,6 +206,9 @@ namespace RentalService.Domain.Migrations
 
                     b.Property<Guid>("RentalCartId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
@@ -305,6 +311,14 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<Guid>("BrandId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BrandNameSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<decimal>("DailyRateSnapshot")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
@@ -322,6 +336,14 @@ namespace RentalService.Domain.Migrations
 
                     b.Property<Guid>("EquipmentListingId")
                         .HasColumnType("uuid");
+
+                    b.Property<Guid>("EquipmentTypeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EquipmentTypeNameSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<DateOnly>("ExpectedEndDate")
                         .HasColumnType("date");
@@ -356,6 +378,11 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("ModelSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<string>("PickupLocationSnapshot")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -382,6 +409,13 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<int>("SpecSchemaVersionSnapshot")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SpecValuesSnapshot")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
@@ -403,6 +437,9 @@ namespace RentalService.Domain.Migrations
                         .HasColumnType("character varying(2000)");
 
                     b.Property<Guid>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ThumbnailMediaIdSnapshot")
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");

@@ -27,6 +27,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Xunit;
+using Dprental.RentalService.Api.Tests.Domain;
 
 namespace Dprental.RentalService.Api.Tests.Controllers;
 
@@ -115,7 +116,8 @@ public sealed class RentalItemsControllerIntegrationTests
             200_000m,
             500_000m,
             "grp-01",
-            assignments);
+            assignments,
+            TestListingSnapshots.Default);
 
         var order = RentalOrder.Create(
             orderId,

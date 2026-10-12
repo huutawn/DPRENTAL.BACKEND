@@ -21,6 +21,10 @@ public class RentalCartItem
 
     public DateOnly ExpectedEndDate { get; private set; }
 
+    public DateTimeOffset CreatedAt { get; private set; }
+
+    public DateTimeOffset UpdatedAt { get; private set; }
+
     [ForeignKey(nameof(RentalCartId))]
     public RentalCart? RentalCart { get; private set; }
 
@@ -35,7 +39,8 @@ public class RentalCartItem
         Guid equipmentListingId,
         int quantity,
         DateOnly expectedStartDate,
-        DateOnly expectedEndDate)
+        DateOnly expectedEndDate,
+        DateTimeOffset utcNow)
     {
         Id = id;
         RentalCartId = rentalCartId;
@@ -43,17 +48,26 @@ public class RentalCartItem
         Quantity = quantity;
         ExpectedStartDate = expectedStartDate;
         ExpectedEndDate = expectedEndDate;
+        CreatedAt = utcNow;
+        UpdatedAt = utcNow;
     }
 
-    internal void Update(int quantity, DateOnly expectedStartDate, DateOnly expectedEndDate)
+    internal void UpdateQuantity(int quantity, DateTimeOffset utcNow)
     {
         Quantity = quantity;
-        ExpectedStartDate = expectedStartDate;
-        ExpectedEndDate = expectedEndDate;
+        UpdatedAt = utcNow;
     }
 
-    internal void AddQuantity(int delta)
+    internal void UpdateDates(DateOnly expectedStartDate, DateOnly expectedEndDate, DateTimeOffset utcNow)
+    {
+        ExpectedStartDate = expectedStartDate;
+        ExpectedEndDate = expectedEndDate;
+        UpdatedAt = utcNow;
+    }
+
+    internal void AddQuantity(int delta, DateTimeOffset utcNow)
     {
         Quantity += delta;
+        UpdatedAt = utcNow;
     }
 }

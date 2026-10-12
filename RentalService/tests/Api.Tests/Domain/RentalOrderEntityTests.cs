@@ -42,7 +42,8 @@ public sealed class RentalOrderEntityTests
             [
                 new(a1, Guid.NewGuid(), Guid.NewGuid()),
                 new(a2, Guid.NewGuid(), Guid.NewGuid())
-            ]);
+            ],
+            TestListingSnapshots.Default);
 
         Result<RentalOrder> result = RentalOrder.Create(
             orderId,
@@ -249,7 +250,8 @@ public sealed class RentalOrderEntityTests
             100_000m,
             200_000m,
             "grp-01",
-            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())]);
+            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
+            TestListingSnapshots.Default);
 
         Result<RentalOrder> dateResult = RentalOrder.Create(
             Guid.NewGuid(), "ORD-DATE", Guid.NewGuid(), "VND", "Pickup", "Cust", "090", "Addr", null, null, "v1", "doc", "hash", "op-1", _now, [invalidDatesDto]);
@@ -270,7 +272,8 @@ public sealed class RentalOrderEntityTests
             100_000m,
             200_000m,
             "grp-01",
-            []);
+            [],
+            TestListingSnapshots.Default);
 
         Result<RentalOrder> qtyResult = RentalOrder.Create(
             Guid.NewGuid(), "ORD-QTY", Guid.NewGuid(), "VND", "Pickup", "Cust", "090", "Addr", null, null, "v1", "doc", "hash", "op-2", _now, [zeroQtyDto]);
@@ -307,7 +310,8 @@ public sealed class RentalOrderEntityTests
             [
                 new(dupAssignmentId, Guid.NewGuid(), Guid.NewGuid()),
                 new(dupAssignmentId, Guid.NewGuid(), Guid.NewGuid()) // Duplicate assignment ID
-            ]);
+            ],
+            TestListingSnapshots.Default);
 
         Result<RentalOrder> dupAssignResult = RentalOrder.Create(
             Guid.NewGuid(), "ORD-DUP-ASS", Guid.NewGuid(), "VND", "Pickup", "Cust", "090", "Addr", null, null, "v1", "doc", "hash", "op-dup-ass", _now, [itemDupAssignments]);
@@ -333,6 +337,7 @@ public sealed class RentalOrderEntityTests
             dailyRate,
             depositPerUnit,
             "group-sample-01",
-            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())]);
+            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
+            TestListingSnapshots.Default);
     }
 }
