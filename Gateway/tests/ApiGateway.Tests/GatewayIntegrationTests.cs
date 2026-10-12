@@ -105,6 +105,8 @@ public sealed class GatewayIntegrationTests
         Assert.Contains("/catalog/swagger/v1/swagger.json", uiConfiguration);
         Assert.Contains("/swagger/v1/swagger.json", uiConfiguration);
         Assert.Contains("/media/swagger/v1/swagger.json", uiConfiguration);
+        Assert.Contains("RentalService", uiConfiguration);
+        Assert.Contains("/rental/swagger/v1/swagger.json", uiConfiguration);
         Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
 
         using HttpResponseMessage responseRoot = await client.GetAsync("/swagger");
