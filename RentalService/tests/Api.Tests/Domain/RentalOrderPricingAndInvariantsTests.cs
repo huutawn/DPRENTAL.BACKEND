@@ -16,7 +16,7 @@ public sealed class RentalOrderPricingAndInvariantsTests
     public void CreateOrder_CalculatesRentalDays_RentalAmount_AndDepositCorrectly()
     {
         DateOnly start = new(2026, 10, 10);
-        DateOnly end = new(2026, 10, 15); // 6 days, both ends inclusive
+        DateOnly end = new(2026, 10, 15); // 5 days
         int quantity = 3;
         decimal dailyRate = 100_000m;
         decimal depositPerUnit = 500_000m;
@@ -68,8 +68,8 @@ public sealed class RentalOrderPricingAndInvariantsTests
         Assert.Single(order.Items);
         RentalItem item = order.Items.First();
 
-        Assert.Equal(6, item.RentalDays); // 10 → 15 inclusive = 6 days
-        Assert.Equal(100_000m * 3 * 6, item.RentalAmount); // 1,800,000 VND
+        Assert.Equal(5, item.RentalDays); // 15 - 10 = 5 days
+        Assert.Equal(100_000m * 3 * 5, item.RentalAmount); // 1,500,000 VND
         Assert.Equal(500_000m * 3, item.DepositAmount); // 1,500,000 VND
         Assert.Equal(RentalItemStatus.PendingPayment, item.Status);
         Assert.Equal(RentalOrderStatus.PendingPayment, order.Status);

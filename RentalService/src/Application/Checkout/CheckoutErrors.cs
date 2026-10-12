@@ -29,5 +29,5 @@ public static class CheckoutErrors
         Error.Conflict("Checkout.PriceChanged", "Giá vừa thay đổi. Vui lòng xem lại và gửi lại.");
 
     public static readonly Error DependencyUnavailable =
-        Error.Unavailable("Checkout.DependencyUnavailable", "Chưa kiểm tra được thiết bị. Vui lòng thử lại.");
+        Error.ServiceUnavailable("Checkout.DependencyUnavailable", "Chưa kiểm tra được thiết bị. Vui lòng thử lại.");
 }

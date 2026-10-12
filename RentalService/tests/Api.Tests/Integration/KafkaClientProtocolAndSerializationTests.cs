@@ -1,0 +1,119 @@
+using System.Text.Json;
+using Dprental.RentalService.Api.Background;
+using Dprental.RentalService.Application.DTOs.Integration;
+using Dprental.RentalService.Domain.Entities;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+
+namespace Dprental.RentalService.Api.Tests.Integration;
+
+public sealed class KafkaClientProtocolAndSerializationTests
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
+
+    [Fact]
+    public void RentalEventEnvelope_SerializesWithCanonicalFields()
+    {
+        Guid orderId = Guid.NewGuid();
+        Guid itemId = Guid.NewGuid();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        var payload = new RentalItemConfirmedPayload(
+            orderId,
+            itemId,
+            Guid.NewGuid(),
+            now,
+            "REC-CONF-001");
+
+        var envelope = new RentalEventEnvelope<RentalItemConfirmedPayload>(
+            Guid.NewGuid(),
+            RentalEventTypes.RentalItemConfirmed,
+            1,
+            "rental-service",
+            orderId.ToString("D"),
+            now,
+            "corr-123",
+            null,
+            payload);
+
+        string json = JsonSerializer.Serialize(envelope, JsonOptions);
+
+        Assert.Contains("\"messageType\":\"RentalItemConfirmed\"", json);
+        Assert.Contains("\"version\":1", json);
+        Assert.Contains("\"producer\":\"rental-service\"", json);
+        Assert.Contains($"\"aggregateId\":\"{orderId}\"", json);
+        Assert.Contains("\"inventoryConfirmationRef\":\"REC-CONF-001\"", json);
+
+        var deserialized = JsonSerializer.Deserialize<RentalEventEnvelope<RentalItemConfirmedPayload>>(json, JsonOptions);
+        Assert.NotNull(deserialized);
+        Assert.Equal(envelope.MessageId, deserialized.MessageId);
+        Assert.Equal(1, deserialized.Version);
+        Assert.Equal("REC-CONF-001", deserialized.Payload.InventoryConfirmationRef);
+    }
+
+    [Fact]
+    public void DeadLetterPayload_SerializesCorrectlyForDlq()
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        var dlqPayload = new DeadLetterPayload("PaymentEvent", "{bad json}", "MALFORMED_JSON: invalid syntax", now);
+
+        var dlqEnvelope = new RentalEventEnvelope<DeadLetterPayload>(
+            Guid.NewGuid(),
+            RentalEventTypes.DeadLetter,
+            1,
+            "rental-service",
+            "system",
+            now,
+            null,
+            null,
+            dlqPayload);
+
+        string json = JsonSerializer.Serialize(dlqEnvelope, JsonOptions);
+        Assert.Contains("\"messageType\":\"DeadLetter\"", json);
+        Assert.Contains("MALFORMED_JSON", json);
+    }
+
+    [Fact]
+    public void OutboxMessage_PartitionKey_AlwaysMatchesRentalOrderId()
+    {
+        Guid orderId = Guid.NewGuid();
+        var msg = new RentalOutboxMessage(
+            Guid.NewGuid(),
+            "rental.events.v1",
+            orderId.ToString("D"),
+            RentalEventTypes.RentalOrderPaid,
+            "{}",
+            DateTimeOffset.UtcNow);
+
+        Assert.Equal(orderId.ToString("D"), msg.PartitionKey);
+        Assert.Equal("rental.events.v1", msg.Topic);
+        Assert.Equal("Pending", msg.Status);
+    }
+
+    [Fact]
+    public void KafkaPaymentEventsConsumerWorker_InitializesWithoutException_WhenBootstrapServersConfigured()
+    {
+        var services = new ServiceCollection();
+        var sp = services.BuildServiceProvider();
+        var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new[]
+            {
+                new KeyValuePair<string, string?>("Kafka:BootstrapServers", "127.0.0.1:9092"),
+                new KeyValuePair<string, string?>("Kafka:PaymentEventsTopic", "payment.events.v1"),
+                new KeyValuePair<string, string?>("Kafka:ConsumerGroupId", "rental-consumer-test")
+            })
+            .Build();
+
+        var worker = new KafkaPaymentEventsConsumerWorker(scopeFactory, config, NullLogger<KafkaPaymentEventsConsumerWorker>.Instance);
+        Assert.NotNull(worker);
+        worker.Dispose();
+    }
+}

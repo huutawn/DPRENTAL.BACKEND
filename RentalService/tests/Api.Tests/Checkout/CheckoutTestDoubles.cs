@@ -1,5 +1,6 @@
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Common;
+using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 
@@ -57,11 +58,34 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
 
     public Task<bool> UpdateAsync(RentalOrder order, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+
+    public Task<RentalOrder?> GetByIdWithDetailsAsync(Guid id, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<RentalOrder?> GetByItemIdWithDetailsAsync(Guid itemId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<Guid?> GetOrderIdByItemIdAsync(Guid itemId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<IReadOnlyList<Guid>> GetPendingPaymentExpiredOrderIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<IReadOnlyList<Guid>> GetPendingSupplierTimeoutItemIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<IReadOnlyList<RenterCalendarItemRecord>> GetRenterCalendarItemsAsync(
+        Guid renterId,
+        DateOnly monthStart,
+        DateOnly monthEnd,
+        IReadOnlyCollection<RentalItemStatus> targetStatuses,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
 }
 
 internal sealed class FakeInventoryListingClient : IInventoryListingClient
 {
-    private static readonly Error Down = Error.Unavailable("Inventory.Unavailable", "Inventory không phản hồi.");
+    private static readonly Error Down = Error.ServiceUnavailable("Inventory.Unavailable", "Inventory không phản hồi.");
 
     public Dictionary<Guid, InventoryListingDto> Listings { get; } = [];
 
@@ -107,7 +131,7 @@ internal sealed class FakeInventoryListingClient : IInventoryListingClient
 
 internal sealed class FakeCatalogReferenceClient : ICatalogReferenceClient
 {
-    private static readonly Error Down = Error.Unavailable("Catalog.Unavailable", "Catalog không phản hồi.");
+    private static readonly Error Down = Error.ServiceUnavailable("Catalog.Unavailable", "Catalog không phản hồi.");
 
     public Dictionary<Guid, string> EquipmentTypeNames { get; } = [];
 

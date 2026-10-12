@@ -21,7 +21,7 @@ public static class RentalErrors
         Error.Validation("Rental.InvalidQuantity", "Số lượng thuê phải lớn hơn 0.");
 
     public static readonly Error InvalidRentalPeriod =
-        Error.Validation("Rental.InvalidPeriod", "Ngày bắt đầu không được sau ngày kết thúc.");
+        Error.Validation("Rental.InvalidPeriod", "Ngày bắt đầu phải trước ngày kết thúc.");
 
     // Order Errors
     public static readonly Error OrderNotFound =
@@ -81,6 +81,47 @@ public static class RentalErrors
     public static readonly Error ClosureReceiptMissing =
         Error.Conflict("RentalItem.ClosureReceiptMissing", "Chưa nhận đủ xác nhận đóng từ Inventory hoặc Payment.");
 
+
+    public static readonly Error DamageDispositionMissing =
+        Error.Conflict("RentalItem.DamageDispositionMissing", "Thiết bị hư hỏng yêu cầu mã xác nhận phong tỏa/xử lý từ Inventory.");
+
+    public static readonly Error SettlementAmountMismatch =
+        Error.Validation("Payment.SettlementAmountMismatch", "Số tiền quyết toán không khớp với quyết định khấu trừ đã chốt.");
+
+    public static readonly Error InvalidTimeout =
+        Error.Validation("Payment.InvalidTimeout", "Thời hạn xác nhận phải là khoảng thời gian dương.");
+
+    public static readonly Error InvoiceMismatch =
+        Error.Conflict("Payment.InvoiceMismatch", "Mã hóa đơn không khớp với hóa đơn đã tạo của đơn thuê.");
+
+    public static readonly Error PaymentAmountMismatch =
+        Error.Validation("Payment.AmountMismatch", "Số tiền thanh toán không khớp với tổng tiền đơn thuê.");
+
+    public static readonly Error UnitNotReturned =
+        Error.Conflict("RentalItem.UnitNotReturned", "Không thể đóng phân bổ unit chưa được ghi nhận trả hàng.");
+    public static readonly Error InvoiceNotAttached =
+        Error.Conflict("Payment.InvoiceNotAttached", "Đơn thuê chưa được gắn mã hóa đơn từ Payment.");
+
+    public static readonly Error RenterMismatch =
+        Error.Forbidden("Order.RenterMismatch", "Người thanh toán không khớp với người đặt đơn thuê.");
+
+    public static readonly Error PaymentRefMismatch =
+        Error.Conflict("Payment.PaymentRefMismatch", "Mã thanh toán không khớp với thanh toán đã ghi nhận của đơn thuê.");
+
+    public static readonly Error AlreadyPaidWithDifferentRef =
+        Error.Conflict("Payment.AlreadyPaidWithDifferentRef", "Đơn thuê đã được thanh toán với mã thanh toán khác.");
+
+    public static readonly Error InvalidSettlementTime =
+        Error.Validation("Payment.InvalidSettlementTime", "Thời gian xác nhận quyết toán không thể diễn ra trước thời điểm hoàn tất trả hàng.");
+
+    public static readonly Error SettlementImmutable =
+        Error.Conflict("Payment.SettlementImmutable", "Xác nhận quyết toán tài chính đã được ghi nhận trước đó và không thể thay đổi.");
+
+    public static readonly Error AllocationAlreadyClosed =
+        Error.Conflict("RentalItem.AllocationAlreadyClosed", "Phân bổ của unit đã được đóng với thông tin khác.");
+
+    public static readonly Error InventoryClosureImmutable =
+        Error.Conflict("RentalItem.InventoryClosureImmutable", "Xác nhận đóng từ Inventory đã được ghi nhận trước đó và không thể thay đổi.");
     public static readonly Error AllocationNotConfirmed =
         Error.Conflict("RentalItem.AllocationNotConfirmed", "Phân bổ thiết bị chưa được xác nhận.");
     // Assignment & Unit Errors

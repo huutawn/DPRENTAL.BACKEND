@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RentalSettledEventEnvelope",
+  "type": "object",
+  "required": [
+    "messageId",
+    "messageType",
+    "version",
+    "producer",
+    "aggregateId",
+    "occurredAt",
+    "correlationId",
+    "payload"
+  ],
+  "properties": {
+    "messageId": { "type": "string", "format": "uuid" },
+    "messageType": { "type": "string", "const": "RentalSettled" },
+    "version": { "type": "integer", "const": 1 },
+    "producer": { "type": "string" },
+    "aggregateId": { "type": "string", "format": "uuid" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "correlationId": { "type": "string" },
+    "causationId": { "type": ["string", "null"], "format": "uuid" },
+    "payload": {
+      "type": "object",
+      "required": [
+        "rentalOrderId",
+        "rentalItemId",
+        "invoiceRef",
+        "paymentRef",
+        "settlementRef",
+        "operationKey",
+        "finalDeductionAmount",
+        "refundedDepositAmount",
+        "currency",
+        "completedAt"
+      ],
+      "properties": {
+        "rentalOrderId": { "type": "string", "format": "uuid" },
+        "rentalItemId": { "type": "string", "format": "uuid" },
+        "invoiceRef": { "type": "string" },
+        "paymentRef": { "type": "string" },
+        "settlementRef": { "type": "string" },
+        "operationKey": { "type": "string" },
+        "finalDeductionAmount": { "type": "integer", "minimum": 0 },
+        "refundedDepositAmount": { "type": "integer", "minimum": 0 },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+        "refundRef": { "type": ["string", "null"] },
+        "completedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

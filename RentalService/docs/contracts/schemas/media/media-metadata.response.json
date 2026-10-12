@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MediaMetadataResponse",
+  "type": "object",
+  "required": ["mediaId", "visibility", "status"],
+  "properties": {
+    "mediaId": { "type": "string", "format": "uuid" },
+    "visibility": { "type": "string", "enum": ["Private", "Public"] },
+    "status": { "type": "string", "enum": ["Ready", "Uploading", "Processing", "Failed"] },
+    "uploadedByUserId": { "type": ["string", "null"], "format": "uuid" },
+    "createdAt": { "type": "string", "format": "date-time" }
+  }
+}

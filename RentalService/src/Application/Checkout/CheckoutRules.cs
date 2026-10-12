@@ -5,6 +5,7 @@ namespace Dprental.RentalService.Application.Checkout;
 
 /// <summary>
 /// Quy tắc ngày thuê lúc checkout theo SRS Rental: giao từ ngày mai, trong 6 tháng, tối đa 30 ngày.
+/// Khoảng thuê là [ExpectedStartDate, ExpectedEndDate), ngày kết thúc không tính.
 /// </summary>
 public static class CheckoutRules
 {

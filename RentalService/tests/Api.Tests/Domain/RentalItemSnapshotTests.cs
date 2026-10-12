@@ -1,8 +1,8 @@
 using System.Reflection;
 using Dprental.RentalService.Common;
+using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
-using Dprental.RentalService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -19,7 +19,7 @@ public sealed class RentalItemSnapshotTests
         DateOnly start,
         DateOnly end,
         int quantity = 1,
-        string? pickupLocation = "District 1",
+        string pickupLocation = "District 1",
         RentalItemListingSnapshotDto? snapshot = null) =>
         new(
             _itemId,
@@ -81,9 +81,9 @@ public sealed class RentalItemSnapshotTests
     }
 
     [Fact]
-    public void CreateOrder_CountsBothStartAndEndDateAsRentalDays()
+    public void CreateOrder_PricesRentalDaysWithExclusiveEndDate()
     {
-        RentalItem item = CreateOrder(CreateItemDto(new(2026, 10, 12), new(2026, 10, 14), quantity: 2)).Value.Items.Single();
+        RentalItem item = CreateOrder(CreateItemDto(new(2026, 10, 12), new(2026, 10, 15), quantity: 2)).Value.Items.Single();
 
         Assert.Equal(3, item.RentalDays);
         Assert.Equal(500_000m * 2 * 3, item.RentalAmount);
@@ -93,7 +93,7 @@ public sealed class RentalItemSnapshotTests
     [Fact]
     public void CreateOrder_AllowsSingleDayRental()
     {
-        Result<RentalOrder> result = CreateOrder(CreateItemDto(new(2026, 10, 12), new(2026, 10, 12)));
+        Result<RentalOrder> result = CreateOrder(CreateItemDto(new(2026, 10, 12), new(2026, 10, 13)));
 
         Assert.True(result.IsSuccess);
         RentalItem item = result.Value.Items.Single();
@@ -102,21 +102,12 @@ public sealed class RentalItemSnapshotTests
     }
 
     [Fact]
-    public void CreateOrder_RejectsEndDateBeforeStartDate()
+    public void CreateOrder_RejectsEndDateNotAfterStartDate()
     {
-        Result<RentalOrder> result = CreateOrder(CreateItemDto(new(2026, 10, 12), new(2026, 10, 11)));
+        Result<RentalOrder> result = CreateOrder(CreateItemDto(new(2026, 10, 12), new(2026, 10, 12)));
 
         Assert.True(result.IsFailure);
         Assert.Equal(RentalErrors.InvalidRentalPeriod, result.Error);
-    }
-
-    [Fact]
-    public void CreateOrder_AllowsMissingPickupLocation()
-    {
-        Result<RentalOrder> result = CreateOrder(CreateItemDto(new(2026, 10, 12), new(2026, 10, 14), pickupLocation: null));
-
-        Assert.True(result.IsSuccess);
-        Assert.Null(result.Value.Items.Single().PickupLocationSnapshot);
     }
 
     public static TheoryData<RentalItemListingSnapshotDto> InvalidSnapshots()
@@ -164,8 +155,7 @@ public sealed class RentalItemSnapshotTests
         RentalItem item = order.Items.Single();
         var before = CaptureSnapshot(item);
 
-        Assert.True(order.ConfirmPayment("INV-001", "PAY-001", _now.AddMinutes(5), TimeSpan.FromHours(24), "op-pay").IsSuccess);
-        Assert.True(order.SupplierAcceptItem(_itemId, _supplierId, "INV-CONF-001", _now.AddHours(1), "op-accept").IsSuccess);
+        Assert.True(order.MarkAsPaid("INV-001", "PAY-001", _now.AddMinutes(5), _now.AddMinutes(5)).IsSuccess);
 
         Assert.Equal(before, CaptureSnapshot(item));
     }

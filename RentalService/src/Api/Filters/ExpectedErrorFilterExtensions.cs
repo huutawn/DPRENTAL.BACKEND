@@ -27,7 +27,7 @@ public static class ExpectedErrorFilterExtensions
                 ErrorType.Expired => StatusCodes.Status410Gone,
                 ErrorType.Unprocessable => StatusCodes.Status422UnprocessableEntity,
                 ErrorType.Conflict => StatusCodes.Status409Conflict,
-                ErrorType.Unavailable => StatusCodes.Status503ServiceUnavailable,
+                ErrorType.ServiceUnavailable => StatusCodes.Status503ServiceUnavailable,
                 _ => StatusCodes.Status500InternalServerError,
             },
             title: error.Code,

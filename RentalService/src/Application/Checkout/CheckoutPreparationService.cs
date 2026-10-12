@@ -2,7 +2,6 @@ using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.Options;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
-using Dprental.RentalService.Common.Utils;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
@@ -105,7 +104,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             selectedItems.Add(item);
         }
 
-        DateOnly today = BusinessTime.Today(utcNow);
+        DateOnly today = RentalInventoryDateAdapter.ToBusinessDate(utcNow);
         List<CheckoutLineIssue> dateIssues = selectedItems
             .Select(i => CheckoutRules.CheckRentalPeriod(i, today))
             .OfType<CheckoutLineIssue>()
@@ -269,7 +268,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             item.ExpectedStartDate,
             item.ExpectedEndDate,
             listing.Title.Trim(),
-            string.IsNullOrWhiteSpace(listing.PickupLocation) ? null : listing.PickupLocation.Trim(),
+            listing.PickupLocation!.Trim(),
             snapshot,
             dailyRate,
             depositPerUnit,
@@ -287,6 +286,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         !string.IsNullOrWhiteSpace(listing.Title) &&
         !string.IsNullOrWhiteSpace(listing.Model) &&
         !string.IsNullOrWhiteSpace(listing.SpecValuesJson) &&
+        !string.IsNullOrWhiteSpace(listing.PickupLocation) &&
         listing.DailyRate is > 0 &&
         listing.DepositPerUnit is >= 0 &&
         string.Equals(listing.Currency, CheckoutRules.Currency, StringComparison.OrdinalIgnoreCase);

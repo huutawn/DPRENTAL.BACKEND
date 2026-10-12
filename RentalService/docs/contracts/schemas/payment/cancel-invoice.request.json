@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CancelInvoiceRequest",
+  "type": "object",
+  "required": ["rentalOrderId", "invoiceRef", "reason", "operationKey"],
+  "properties": {
+    "rentalOrderId": { "type": "string", "format": "uuid" },
+    "invoiceRef": { "type": "string", "maxLength": 256 },
+    "reason": { "type": "string", "maxLength": 500 },
+    "operationKey": { "type": "string", "maxLength": 64 }
+  }
+}

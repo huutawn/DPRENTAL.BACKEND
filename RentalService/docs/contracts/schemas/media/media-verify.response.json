@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MediaVerifyResponse",
+  "type": "object",
+  "required": ["mediaId", "uploadedByUserId", "status"],
+  "properties": {
+    "mediaId": { "type": "string", "format": "uuid" },
+    "uploadedByUserId": { "type": "string", "format": "uuid" },
+    "status": { "type": "string", "enum": ["PendingUpload", "Ready", "Rejected", "Deleted"] },
+    "originalFileName": { "type": ["string", "null"] },
+    "contentType": { "type": ["string", "null"] },
+    "sizeBytes": { "type": "integer", "minimum": 0 },
+    "createdAtUtc": { "type": "string", "format": "date-time" }
+  }
+}

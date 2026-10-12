@@ -47,9 +47,19 @@ public sealed record InitialRentalItemDto(
     DateOnly ExpectedEndDate,
     string ListingTitleSnapshot,
     string? ListingDescriptionSnapshot,
-    string? PickupLocationSnapshot,
+    string PickupLocationSnapshot,
     decimal DailyRateSnapshot,
     decimal DepositPerUnitSnapshot,
     string AllocationGroupId,
     IEnumerable<InitialRentalUnitAssignmentDto> Assignments,
     RentalItemListingSnapshotDto ListingSnapshot);
+
+public sealed record RentalOperationCommand(
+    int Version,
+    string Action,
+    Guid RentalOrderId,
+    Guid? TargetItemId,
+    string OperationKey,
+    string? TargetGroupOrReference,
+    Guid? ActorId,
+    string? ProviderRequestJson);

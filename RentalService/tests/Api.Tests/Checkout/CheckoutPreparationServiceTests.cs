@@ -14,7 +14,8 @@ public sealed class CheckoutPreparationServiceTests
     // 10:00 ngày 09/10/2026 giờ Việt Nam.
     private static readonly DateTimeOffset Now = new(2026, 10, 9, 3, 0, 0, TimeSpan.Zero);
     private static readonly DateOnly Start = new(2026, 10, 12);
-    private static readonly DateOnly End = new(2026, 10, 14);
+    // Khoảng thuê [12/10, 15/10) là 3 ngày: 12, 13, 14.
+    private static readonly DateOnly End = new(2026, 10, 15);
 
     private readonly Guid _renterId = Guid.NewGuid();
     private readonly Guid _supplierId = Guid.NewGuid();
@@ -111,7 +112,7 @@ public sealed class CheckoutPreparationServiceTests
                     End,
                     "Lens",
                     null,
-                    null,
+                    "Pickup",
                     100_000m,
                     200_000m,
                     "rental-item:previous",
@@ -208,7 +209,7 @@ public sealed class CheckoutPreparationServiceTests
     [Fact]
     public async Task Prepare_SupportsSingleDayRental()
     {
-        Guid oneDayItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 20));
+        Guid oneDayItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 21));
 
         CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(2_500_000m, oneDayItem));
 
@@ -327,8 +328,8 @@ public sealed class CheckoutPreparationServiceTests
     [Fact]
     public async Task Prepare_RejectsRentalLongerThan30Days_AndStartBeyondSixMonths()
     {
-        Guid tooLong = AddCartItem(_listingId, 1, new(2026, 11, 1), new(2026, 12, 1));
-        Guid thirtyDays = AddCartItem(_listingId, 1, new(2026, 11, 1), new(2026, 11, 30));
+        Guid tooLong = AddCartItem(_listingId, 1, new(2026, 11, 1), new(2026, 12, 2));
+        Guid thirtyDays = AddCartItem(_listingId, 1, new(2026, 11, 1), new(2026, 12, 1));
         Guid tooFar = AddCartItem(_listingId, 1, new(2027, 4, 10), new(2027, 4, 11));
 
         CheckoutPreparationResult result = await CreateService()
@@ -440,7 +441,7 @@ public sealed class CheckoutPreparationServiceTests
         CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
 
         Assert.Equal(CheckoutErrors.DependencyUnavailable, result.Error);
-        Assert.Equal(ErrorType.Unavailable, result.Error.Type);
+        Assert.Equal(ErrorType.ServiceUnavailable, result.Error.Type);
     }
 
     [Fact]
@@ -466,7 +467,7 @@ public sealed class CheckoutPreparationServiceTests
     [Fact]
     public async Task Prepare_ReadsEachListingAndCatalogEntryOnce_ForLinesOfTheSameListing()
     {
-        Guid secondItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 21));
+        Guid secondItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 22));
 
         CheckoutPreparationResult result = await CreateService()
             .PrepareAsync(Renter(), Request(7_000_000m + 3_000_000m, _cartItemId, secondItem));

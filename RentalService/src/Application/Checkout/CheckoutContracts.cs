@@ -54,7 +54,7 @@ public sealed record CheckoutPlanLine(
     DateOnly ExpectedStartDate,
     DateOnly ExpectedEndDate,
     string ListingName,
-    string? PickupLocation,
+    string PickupLocation,
     RentalItemListingSnapshotDto ListingSnapshot,
     decimal DailyRate,
     decimal DepositPerUnit,

@@ -10,5 +10,5 @@ public enum ErrorType
     Expired = 5,
     Unprocessable = 6,
     Failure = 7,
-    Unavailable = 8
+    ServiceUnavailable = 8
 }

@@ -11,7 +11,7 @@ public interface IInventoryListingClient
     /// <summary>Đọc Listing hiện tại; trả <c>null</c> khi Listing không tồn tại.</summary>
     Task<Result<InventoryListingDto?>> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default);
 
-    /// <summary>Hỏi số physical asset rảnh xuyên suốt khoảng ngày (hai đầu inclusive).</summary>
+    /// <summary>Hỏi số physical asset rảnh xuyên suốt khoảng ngày thuê [startDate, endDate) theo quy ước của Rental.</summary>
     Task<Result<InventoryListingAvailabilityDto>> CheckAvailabilityAsync(
         Guid listingId,
         DateOnly startDate,
