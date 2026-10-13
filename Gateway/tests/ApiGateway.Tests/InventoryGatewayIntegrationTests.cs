@@ -131,9 +131,9 @@ public sealed class InventoryGatewayIntegrationTests
     }
 
     [Theory]
-    [InlineData("/api/v1/inventory/public/assets")]
-    [InlineData("/api/v1/inventory/public/assets?q=forklift&equipmentTypeId=11111111-1111-1111-1111-111111111111&page=2&pageSize=10&sort=model_asc")]
-    [InlineData("/api/v1/inventory/public/assets/11111111-1111-1111-1111-111111111111")]
+    [InlineData("/api/v1/inventory/public/equipment-listings")]
+    [InlineData("/api/v1/inventory/public/equipment-listings?q=forklift&equipmentTypeId=11111111-1111-1111-1111-111111111111&page=2&pageSize=10&sort=model_asc")]
+    [InlineData("/api/v1/inventory/public/equipment-listings/11111111-1111-1111-1111-111111111111")]
     public async Task PublicInventoryReadsPreservePathAndQueryWithoutAuthentication(string path)
     {
         using RSA signingKey = RSA.Create(2048);
@@ -161,7 +161,7 @@ public sealed class InventoryGatewayIntegrationTests
         using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync("/api/v1/inventory/public/assets/00000000-0000-0000-0000-000000000000");
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/inventory/public/equipment-listings/00000000-0000-0000-0000-000000000000");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
@@ -169,9 +169,9 @@ public sealed class InventoryGatewayIntegrationTests
     }
 
     [Theory]
-    [InlineData("POST", "/api/v1/inventory/public/assets")]
-    [InlineData("PUT", "/api/v1/inventory/public/assets/11111111-1111-1111-1111-111111111111")]
-    [InlineData("DELETE", "/api/v1/inventory/public/assets/11111111-1111-1111-1111-111111111111")]
+    [InlineData("POST", "/api/v1/inventory/public/equipment-listings")]
+    [InlineData("PUT", "/api/v1/inventory/public/equipment-listings/11111111-1111-1111-1111-111111111111")]
+    [InlineData("DELETE", "/api/v1/inventory/public/equipment-listings/11111111-1111-1111-1111-111111111111")]
     public async Task NonGetPublicInventoryRoutesFallThroughToAuthenticatedCatchAll(string method, string path)
     {
         using RSA signingKey = RSA.Create(2048);
@@ -220,11 +220,11 @@ public sealed class InventoryGatewayIntegrationTests
             ));
 
         // Public Inventory routes point to Inventory downstream in Development
-        Assert.Equal("localhost", routeMap["inventory-service-public-assets"].Host);
-        Assert.Equal("43622", routeMap["inventory-service-public-assets"].Port);
+        Assert.Equal("localhost", routeMap["inventory-service-public-equipment-listings"].Host);
+        Assert.Equal("43622", routeMap["inventory-service-public-equipment-listings"].Port);
 
-        Assert.Equal("localhost", routeMap["inventory-service-public-asset-detail"].Host);
-        Assert.Equal("43622", routeMap["inventory-service-public-asset-detail"].Port);
+        Assert.Equal("localhost", routeMap["inventory-service-public-equipment-listing-detail"].Host);
+        Assert.Equal("43622", routeMap["inventory-service-public-equipment-listing-detail"].Port);
 
         // Catalog routes point to Catalog downstream in Development
         Assert.Equal("localhost", routeMap["catalog-service-public-categories"].Host);
@@ -257,11 +257,11 @@ public sealed class InventoryGatewayIntegrationTests
                 Port: r.GetSection("DownstreamHostAndPorts:0:Port").Value
             ));
 
-        Assert.Equal("inventory-service", routeMap["inventory-service-public-assets"].Host);
-        Assert.Equal("8080", routeMap["inventory-service-public-assets"].Port);
+        Assert.Equal("inventory-service", routeMap["inventory-service-public-equipment-listings"].Host);
+        Assert.Equal("8080", routeMap["inventory-service-public-equipment-listings"].Port);
 
-        Assert.Equal("inventory-service", routeMap["inventory-service-public-asset-detail"].Host);
-        Assert.Equal("8080", routeMap["inventory-service-public-asset-detail"].Port);
+        Assert.Equal("inventory-service", routeMap["inventory-service-public-equipment-listing-detail"].Host);
+        Assert.Equal("8080", routeMap["inventory-service-public-equipment-listing-detail"].Port);
 
         Assert.Equal("catalog-service", routeMap["catalog-service-public-categories"].Host);
         Assert.Equal("catalog-service", routeMap["catalog-service"].Host);
