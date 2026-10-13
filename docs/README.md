@@ -4,16 +4,19 @@
 
 | Lớp | Trách nhiệm | Không được chứa |
 | --- | --- | --- |
-| `Common` | Kiểu dữ liệu và concern dùng chung (`Result`, `Error`, enums, utility) | Nghiệp vụ đặc thù domain khác |
-| `Domain` | Entities, repository contracts, EF Core DbContext và repositories như AuthService | HTTP pipeline, controller |
-| `Application` | DTOs, Services, Mapping và điều phối domain | Controller, HTTP pipeline, DbContext |
-| `Api` | Controllers, middleware và DI/composition root | Business logic trực tiếp |
+| `Common` | Kiểu dữ liệu và concern dùng chung (`Result`, `Error`, enums, utility như `VndAmountValidator`) | Nghiệp vụ đặc thù domain khác |
+| `Domain` | Entities (`Invoice`, `InvoiceItem`, `OperationReceipt`, `OutboxMessage`), domain logic, generators | EF Core, Npgsql, HTTP pipeline, controller |
+| `Application` | DTOs, IServices (`IInvoiceService`), Options, Fingerprinting, QR generation | Controller, HTTP pipeline, direct database access |
+| `Infrastructure` | EF Core DbContext (`PaymentServiceDbContext`), Migrations, Services (`InvoiceService`) | Controller, HTTP pipeline |
+| `Api` | Controllers (`InvoicesController`), Background workers (`InvoiceExpiryWorker`), Security (JWT/JWKS), DI/composition root | Business logic trực tiếp |
 
-Domain sở hữu repository contracts, EF Core DbContext và repository implementations theo cấu trúc AuthService. API đăng ký persistence qua `AddPaymentServiceDomainRepositories`.
+Domain hoàn toàn độc lập với EF Core và Npgsql; các entity dùng `DataAnnotations` / `DataAnnotations.Schema` attributes (`[Table]`, `[Key]`, `[Required]`, `[MaxLength]`, `[Column(TypeName = "numeric(18,0)")]`, `[ForeignKey]`, `[InverseProperty]`) thay vì các lớp `IEntityTypeConfiguration` riêng lẻ. Hạ tầng persistence và unique indexes (`InvoiceRef`, `RentalOrderId`, `PaymentCode`, `PaymentRef`, `OperationKey`) được quản lý bởi `PaymentServiceDbContext` trong project `Infrastructure` và đăng ký qua `AddPaymentServiceInfrastructure`.
 
 ## Cấu hình môi trường
 
 `Api/appsettings.Development.json` chỉ chứa giá trị không nhạy cảm. Docker Compose lấy credential local từ `.env`: sao chép `.env.example` thành `.env` và đặt `POSTGRES_PASSWORD` riêng. `.env` đã bị Git bỏ qua. API lấy connection string từ biến môi trường `ConnectionStrings__Postgres`.
+
+Cấu hình merchant tài khoản nhận tiền đặt tại `Payment:Merchant` (`Bank`, `Account`). Cấu hình JWT đặt tại `Authentication:Jwt` (`Issuer`, `ServiceAudience`, `ClientAudience`, `JwksUri`).
 
 ## Chạy API cục bộ
 
@@ -36,3 +39,17 @@ Domain sở hữu repository contracts, EF Core DbContext và repository impleme
    ```
 
    Development lắng nghe tại `https://localhost:56280` và `http://localhost:46280`.
+
+## API Hóa đơn & QR (Payment Contract v1)
+
+- `POST /api/v1/invoices`: Tạo hóa đơn từ danh sách items của `RentalOrder`, hỗ trợ replay an toàn qua `OperationKey`. Yêu cầu service token (`u=svc`, `aud=payment-api`, `s=payment.invoice.write`). Trả về 201 Created khi tạo mới, 200 OK khi replay.
+- `POST /api/v1/invoices/{invoiceRef}/cancel`: Hủy hóa đơn chưa thanh toán. Yêu cầu service token (`u=svc`, `aud=payment-api`, `s=payment.invoice.write`).
+- `GET /api/v1/invoices/{invoiceRef}`: Lấy thông tin thanh toán và URL ảnh VietQR SePay. Yêu cầu renter token (`aud=dprental-clients`, `sub == RenterId`). Trả về 404 nếu không tìm thấy hoặc caller không sở hữu.
+- **Invariants về thời gian, khóa hàng và sự kiện:**
+  - Mọi `DateTimeOffset` lưu trữ trong domain (`PaymentDeadline`, `CreatedAt`, `PaidAt`, `CancelledAt`, `ExpiredAt`) được chuẩn hóa về UTC (`Offset = 0`).
+  - Bước kiểm tra ownership trong `GET` dùng `AsNoTracking()`; mọi cập nhật trạng thái (`Cancel`, `RecordPayment`, `Expiry`) đều lấy khóa hàng PostgreSQL `SELECT ... FOR UPDATE` kèm `ReloadAsync()` từ database trước khi quyết định chuyển trạng thái.
+  - `Create` replay kích hoạt kiểm tra hết hạn dưới khóa hàng trước khi trả response cũ.
+  - `RecordPaymentReceivedAsync` kiểm tra replay `PAID` trước kiểm tra thời gian; với hóa đơn `PENDING`, từ chối `paidAt >= PaymentDeadline` và tự động persist `EXPIRED` nếu thời điểm hiện tại đã qua hạn. `PaymentRef` có unique index để chặn hai hóa đơn dùng chung một mã giao dịch thanh toán.
+  - Sự kiện `InvoicePaid` trong `outbox_messages` luôn có `correlationId` kiểu chuỗi bắt buộc (mặc định bằng `MessageId` dạng UUID).
+
+*Lưu ý:* Tin nhắn Outbox (`InvoicePaid`) cho hóa đơn tổng 0 đã được lưu bền vững vào bảng `outbox_messages` trong cùng transaction, chưa được publish ra Kafka/broker trong vertical slice này. Webhook, publisher và xử lý thanh toán thực tế sẽ thuộc task tích hợp tiếp theo. Không hỗ trợ refund, thẻ tín dụng, ví điện tử, thanh toán định kỳ, trả góp hoặc ngoại tệ.

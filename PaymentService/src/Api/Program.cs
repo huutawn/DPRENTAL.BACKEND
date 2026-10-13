@@ -1,12 +1,44 @@
 using System.IO;
 using Dprental.PaymentService.Api.Exceptions;
-using Dprental.PaymentService.Domain.Repositories;
+using Dprental.PaymentService.Api.Security;
+using Dprental.PaymentService.Application.Options;
+using Dprental.PaymentService.Infrastructure.Persistence;
+using Dprental.PaymentService.Api.Background;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddPaymentServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddPaymentServiceInfrastructure(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddOptions<PaymentMerchantOptions>()
+    .Bind(builder.Configuration.GetSection(PaymentMerchantOptions.SectionName))
+    .ValidateDataAnnotations()
+    .Validate(o => !string.IsNullOrWhiteSpace(o.Bank) && !string.IsNullOrWhiteSpace(o.Account),
+        "Merchant Bank and Account must be non-empty.")
+    .ValidateOnStart();
+
+builder.Services.AddPaymentJwtAuthentication(builder.Configuration);
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("InvoiceServicePolicy", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+            ctx.User.IsServiceToken() &&
+            ctx.User.HasServiceAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ServiceAudience") ?? "payment-api") &&
+            ctx.User.HasScope("payment.invoice.write"));
+    });
+
+    options.AddPolicy("InvoiceRenterPolicy", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+            ctx.User.HasClientAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ClientAudience") ?? "dprental-clients") &&
+            ctx.User.TryGetSubjectUserId(out _));
+    });
+});
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddHostedService<InvoiceExpiryWorker>();
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<PaymentServiceDbContext>(
@@ -38,6 +70,8 @@ if (app.Environment.IsDevelopment())
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 
+app.UseAuthentication();
+app.UseAuthorization();
 HealthCheckOptions livenessOptions = new()
 {
     Predicate = _ => false,

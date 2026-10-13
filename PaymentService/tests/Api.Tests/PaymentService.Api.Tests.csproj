@@ -8,6 +8,8 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="JsonSchema.Net" />
     <PackageReference Include="xunit.runner.visualstudio">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -16,5 +18,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Api/PaymentService.Api.csproj" />
     <ProjectReference Include="../../src/Application/PaymentService.Application.csproj" />
+    <ProjectReference Include="../../src/Domain/PaymentService.Domain.csproj" />
+    <ProjectReference Include="../../src/Infrastructure/PaymentService.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

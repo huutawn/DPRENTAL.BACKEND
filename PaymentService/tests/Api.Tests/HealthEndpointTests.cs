@@ -1,5 +1,5 @@
 using System.Net;
-using Dprental.PaymentService.Domain.Repositories;
+using Dprental.PaymentService.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
