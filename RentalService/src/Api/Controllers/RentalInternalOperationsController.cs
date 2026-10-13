@@ -8,8 +8,16 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Dprental.RentalService.Api.Controllers;
+/// <summary>
+/// Quản lý các thao tác tác vụ nội bộ (Internal Operations) và phục hồi sự cố (Admin Replay).
+/// </summary>
+/// <remarks>
+/// Cung cấp các endpoint nội bộ cho phép Quản trị viên (Admin) can thiệp, chạy lại (replay) các tác vụ
+/// gặp lỗi hoặc bị gián đoạn trong vòng đời xử lý đơn hàng. Yêu cầu quyền Admin và từ chối Service token.
+/// </remarks>
 
 [ApiController]
+[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
 [Authorize]
 [Route("internal/orders")]
 public sealed class RentalInternalOperationsController : ControllerBase
@@ -26,9 +34,35 @@ public sealed class RentalInternalOperationsController : ControllerBase
     }
 
     /// <summary>
-    /// Replay thủ công một operation bởi Admin qua route nội bộ (POST /api/v1/rental/internal/orders/{orderId}/operations/{operationId}/replay).
+    /// Replay thủ công một tác vụ (operation) bởi Quản trị viên (Admin).
     /// </summary>
+    /// <remarks>
+    /// Quy trình nghiệp vụ replay tác vụ của Admin:
+    /// - Xác thực người gọi: Yêu cầu đăng nhập, phải có vai trò <c>Admin</c>, từ chối Service token.
+    /// - Kiểm tra <paramref name="idempotencyKey"/> (bắt buộc, tối đa 64 ký tự).
+    /// - Kiểm tra lý do replay (<c>request.Reason</c> bắt buộc, tối đa 1000 ký tự) phục vụ nhật ký kiểm toán (audit log).
+    /// - Đặt lại trạng thái trong biên nhận tác vụ (<c>RentalOperationReceipt</c>): <c>RetryCount = 0</c>, <c>Status = Pending</c>, <c>NextRetryAt = NOW()</c>.
+    /// - Ghi nhận nhật ký kiểm toán hành động replay của Admin.
+    /// - 202 chỉ xác nhận lên lịch; worker thực thi sau. operationId là chuỗi mã tác vụ đã lưu, không bắt buộc GUID.
+    /// - Tác vụ đã Succeeded trả 409 OPERATION_ALREADY_SUCCEEDED; journal thiếu/hỏng trả 422 CORRUPTED_JOURNAL.
+    /// - Retry cùng khóa/lý do được kiểm tra theo audit đã lưu; khóa dùng cho nội dung khác trả 409 IDEMPOTENCY_CONFLICT.
+    /// <para>Ví dụ body: {"reason":"Phụ thuộc đã phục hồi, yêu cầu chạy lại"}.</para>
+    /// </remarks>
+    /// <param name="orderId">Mã định danh duy nhất của đơn thuê (RentalOrderId) liên quan đến tác vụ.</param>
+    /// <param name="operationId">Mã định danh duy nhất của tác vụ (OperationId) cần replay.</param>
+    /// <param name="request">Thông tin yêu cầu replay chứa lý do thực hiện thao tác của Admin.</param>
+    /// <param name="idempotencyKey">Khóa chống trùng lặp gửi qua header HTTP (bắt buộc, tối đa 64 ký tự).</param>
+    /// <param name="cancellationToken">Token hủy yêu cầu.</param>
+    /// <response code="202">Tác vụ replay đã được tiếp nhận thành công và xếp hàng để chạy lại.</response>
+    /// <response code="400">Thiếu hoặc sai định dạng Idempotency-Key, hoặc lý do replay không hợp lệ/vượt quá 1000 ký tự.</response>
+    /// <response code="401">Người dùng chưa được xác thực.</response>
+    /// <response code="403">Người gọi không có quyền Admin hoặc là Service token.</response>
+    /// <response code="404">Không tìm thấy đơn thuê hoặc tác vụ tương ứng.</response>
+    /// <response code="409">Tác vụ đã thành công hoặc khóa Idempotency-Key được dùng với nội dung khác.</response>
+    /// <response code="422">Journal bị thiếu hoặc hỏng, không thể replay an toàn.</response>
+    /// <returns>Dữ liệu chi tiết về tác vụ đã được lên lịch replay thành công.</returns>
     [HttpPost("{orderId:guid}/operations/{operationId}/replay")]
+    [Consumes("application/json")]
     [ProducesResponseType(typeof(AdminReplayResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]

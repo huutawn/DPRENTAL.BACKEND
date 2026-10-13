@@ -26,6 +26,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Dprental.RentalService.DependencyInjection;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -90,10 +91,47 @@ builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "DPRental - RentalService API",
+        Version = "v1",
+        Description = "API dịch vụ quản lý đơn thuê (RentalService) trong hệ sinh thái DPRental.\n\n"
+            + "Bao gồm các phân hệ nghiệp vụ:\n"
+            + "- **Giỏ hàng thuê (Rental Cart)**: Thêm/sửa/xóa mục thuê, kiểm tra tính khả dụng và biến động giá theo thời gian thực.\n"
+            + "- **Mục đơn thuê (Rental Items)**: Supplier chấp nhận (Accept) hoặc từ chối (Reject) mục thuê sau khi đơn hàng được thanh toán.\n"
+            + "- **Lịch thuê cá nhân (Renter Calendar)**: Renter tra cứu lịch thuê thiết bị theo tháng kèm phân bổ mật độ theo ngày.\n"
+            + "- **Thống kê xác nhận (Supplier Statistics)**: Admin theo dõi số lượng chấp nhận, từ chối, quá hạn xác nhận của Supplier.\n"
+            + "- **Tác vụ nội bộ (Internal Operations)**: Admin thực hiện replay các tác vụ nghiệp vụ gặp lỗi.\n\n"
+            + "**Quy ước**: Các API dùng tiền tố `/api/v1/rental`, xác thực bằng `Authorization: Bearer {token}`. "
+            + "Giỏ hàng nhận ngày `YYYY-MM-DD` theo Asia/Ho_Chi_Minh; timestamp dùng ISO-8601 có múi giờ. "
+            + "Lỗi nghiệp vụ trả ProblemDetails với `title` là mã lỗi và `detail` là mô tả. "
+            + "Lỗi không mong đợi trả 500 với `title=RentalService.Unexpected` và `traceId`; không chứa chi tiết nội bộ. Lỗi xác thực từ middleware có thể không có body. Các API ghi quyết định/replay yêu cầu `Idempotency-Key`. "
+            + "Alias `/rental/cart` vẫn hoạt động và dùng cùng contract với giỏ hàng chuẩn; chỉ đường dẫn chuẩn được hiển thị."
+    });
+
+    // The cart alias remains routable; document each operation only at its canonical URL.
+    options.DocInclusionPredicate((_, api) =>
+        api.RelativePath is not null &&
+        api.RelativePath.StartsWith(ApiRoutes.Prefix + "/", StringComparison.Ordinal));
+
+    options.InferSecuritySchemes();
+
     var apiXml = Path.Combine(AppContext.BaseDirectory, $"{typeof(Program).Assembly.GetName().Name}.xml");
     if (File.Exists(apiXml))
     {
         options.IncludeXmlComments(apiXml, includeControllerXmlComments: true);
+    }
+
+    var appXml = Path.Combine(AppContext.BaseDirectory, "RentalService.Application.xml");
+    if (File.Exists(appXml))
+    {
+        options.IncludeXmlComments(appXml);
+    }
+
+    var domainXml = Path.Combine(AppContext.BaseDirectory, "RentalService.Domain.xml");
+    if (File.Exists(domainXml))
+    {
+        options.IncludeXmlComments(domainXml);
     }
 });
 
