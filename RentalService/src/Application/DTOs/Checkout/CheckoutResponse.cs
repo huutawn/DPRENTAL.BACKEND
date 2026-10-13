@@ -1,8 +1,7 @@
-using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 
-namespace Dprental.RentalService.Api.Contracts.Checkout;
+namespace Dprental.RentalService.Application.DTOs.Checkout;
 
 /// <summary>Đơn hàng vừa tạo (hoặc đã tạo từ lần gửi trước). Không chứa mã máy hay mã giữ lịch nội bộ.</summary>
 /// <param name="OrderId">Mã định danh duy nhất của đơn hàng.</param>

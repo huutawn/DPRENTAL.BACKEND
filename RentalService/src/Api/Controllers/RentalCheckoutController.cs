@@ -1,4 +1,3 @@
-using Dprental.RentalService.Api.Contracts.Checkout;
 using Dprental.RentalService.Api.Filters;
 using Dprental.RentalService.Api.Security;
 using Dprental.RentalService.Application.DTOs.Checkout;
