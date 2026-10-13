@@ -1,6 +1,7 @@
 using Dprental.PaymentService.Api.Tests.TestHelpers;
 using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Domain.Repository;
+using Dprental.PaymentService.Domain.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 

@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
-namespace Dprental.PaymentService.Domain.Repository;
+namespace Dprental.PaymentService.Domain.Persistence;
 
 public sealed class PaymentServiceDbContextFactory : IDesignTimeDbContextFactory<PaymentServiceDbContext>
 {

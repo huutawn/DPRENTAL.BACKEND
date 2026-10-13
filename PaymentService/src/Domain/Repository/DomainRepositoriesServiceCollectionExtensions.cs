@@ -1,6 +1,7 @@
 using Dprental.PaymentService.Domain.IRepository;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Dprental.PaymentService.Domain.Persistence;
 
 namespace Dprental.PaymentService.Domain.Repository;
 

@@ -5,11 +5,11 @@
 | Lớp | Trách nhiệm | Không được chứa |
 | --- | --- | --- |
 | `Common` | Kiểu dữ liệu và concern dùng chung (`Result`, `Error`, enums, utility như `VndAmountValidator`, `VietQrUrlGenerator`, `PaymentCodeGenerator`, `PayloadFingerprinter`) | Application, Domain, HTTP pipeline |
-| `Domain` | Entities (`Invoice`, `InvoiceItem`, `OperationReceipt`, `OutboxMessage`), `IRepository`, `Repository` (EF Core persistence, `PaymentServiceDbContext`, `EfInvoiceRepository`), `Migrations` | Application DTOs, HTTP pipeline, controller |
+| `Domain` | Entities (`Invoice`, `InvoiceItem`, `OperationReceipt`, `OutboxMessage`), `IRepository`, `Repository` (`EfInvoiceRepository`), `Persistence` (`PaymentServiceDbContext`, Factory), `Migrations` | Application DTOs, HTTP pipeline, controller |
 | `Application` | DTOs, IServices (`IInvoiceService`, `IInvoiceCreationService`, `IInvoiceLifecycleService`, `IPaymentRecordingService`), Services, Background workers (`InvoiceExpiryWorker`), Options | Controller, HTTP pipeline, direct DbContext/EF/Npgsql access |
 | `Api` | Controllers (`InvoicesController`), Security (JWT/JWKS), Exception handlers, DI/composition root (`AddPaymentDomainRepositories`, `AddPaymentApplication`) | Business logic trực tiếp |
 
-Hạ tầng persistence và unique indexes (`InvoiceRef`, `RentalOrderId`, `PaymentCode`, `PaymentRef`, `OperationKey`) được quản lý bởi `PaymentServiceDbContext` và `EfInvoiceRepository` trong project `Domain`, đăng ký qua `AddPaymentDomainRepositories`. Tầng `Application` và background worker đăng ký qua `AddPaymentApplication`.
+Hạ tầng persistence và unique indexes (`InvoiceRef`, `RentalOrderId`, `PaymentCode`, `PaymentRef`, `OperationKey`) được quản lý bởi `PaymentServiceDbContext` trong `Domain/Persistence` và `EfInvoiceRepository` trong `Domain/Repository`, đăng ký qua `AddPaymentDomainRepositories`. Tầng `Application` và background worker đăng ký qua `AddPaymentApplication`.
 ## Cấu hình môi trường
 
 `Api/appsettings.Development.json` chỉ chứa giá trị không nhạy cảm. Docker Compose lấy credential local từ `.env`: sao chép `.env.example` thành `.env` và đặt `POSTGRES_PASSWORD` riêng. `.env` đã bị Git bỏ qua. API lấy connection string từ biến môi trường `ConnectionStrings__Postgres`.

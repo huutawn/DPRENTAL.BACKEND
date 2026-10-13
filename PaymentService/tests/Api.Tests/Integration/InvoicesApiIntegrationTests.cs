@@ -11,6 +11,7 @@ using Dprental.PaymentService.Application.DTOs.Invoice;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Domain.Repository;
+using Dprental.PaymentService.Domain.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;

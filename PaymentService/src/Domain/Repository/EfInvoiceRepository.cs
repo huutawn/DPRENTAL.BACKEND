@@ -2,6 +2,7 @@ using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Domain.IRepository;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Dprental.PaymentService.Domain.Persistence;
 
 namespace Dprental.PaymentService.Domain.Repository;
 

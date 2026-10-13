@@ -9,6 +9,7 @@ using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Application.Services;
 using Dprental.PaymentService.Domain.IRepository;
 using Dprental.PaymentService.Domain.Repository;
+using Dprental.PaymentService.Domain.Persistence;
 using Json.Schema;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
