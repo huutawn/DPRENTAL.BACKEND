@@ -1,4 +1,5 @@
-using Dprental.RentalService.Application.Checkout;
+using Dprental.RentalService.Application.DTOs.Checkout;
+using Dprental.RentalService.Application.Validation;
 using Xunit;
 
 namespace Dprental.RentalService.Api.Tests.Checkout;

@@ -58,6 +58,10 @@ builder.Services.AddScoped<InventoryRentalCartReader>();
 builder.Services.AddScoped<IRentalListingOwnerProvider>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
 builder.Services.AddScoped<IRentalListingReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
 builder.Services.AddScoped<IRentalAvailabilityReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
+builder.Services.Configure<RentalTermsOptions>(builder.Configuration.GetSection(RentalTermsOptions.SectionName));
+// Bản tạm: checkout trả 503 cho đến khi có hợp đồng đọc Listing đầy đủ với Inventory và hợp đồng với Catalog.
+builder.Services.AddSingleton<IInventoryListingClient, UnavailableInventoryListingClient>();
+builder.Services.AddSingleton<ICatalogReferenceClient, UnavailableCatalogReferenceClient>();
 builder.Services.AddScoped<IPaymentWorkflowService, PaymentWorkflowService>();
 builder.Services.AddScoped<ISupplierDecisionService, SupplierDecisionService>();
 builder.Services.AddScoped<IExpiryWorkflowService, ExpiryWorkflowService>();
@@ -94,6 +98,7 @@ builder.Services.AddSwaggerGen(options =>
         Description = "API dịch vụ quản lý đơn thuê (RentalService) trong hệ sinh thái DPRental.\n\n"
             + "Bao gồm các phân hệ nghiệp vụ:\n"
             + "- **Giỏ hàng thuê (Rental Cart)**: Thêm/sửa/xóa mục thuê, kiểm tra tính khả dụng và biến động giá theo thời gian thực.\n"
+            + "- **Gửi đơn hàng (Checkout)**: Tạo đơn hàng chờ thanh toán từ các dòng đã chọn trong giỏ, giữ lịch thiết bị và tạo hóa đơn; chống trùng bằng `Idempotency-Key`.\n"
             + "- **Mục đơn thuê (Rental Items)**: Supplier chấp nhận (Accept) hoặc từ chối (Reject) mục thuê sau khi đơn hàng được thanh toán.\n"
             + "- **Lịch thuê cá nhân (Renter Calendar)**: Renter tra cứu lịch thuê thiết bị theo tháng kèm phân bổ mật độ theo ngày.\n"
             + "- **Thống kê xác nhận (Supplier Statistics)**: Admin theo dõi số lượng chấp nhận, từ chối, quá hạn xác nhận của Supplier.\n"

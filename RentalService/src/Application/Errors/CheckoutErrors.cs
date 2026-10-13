@@ -1,6 +1,6 @@
 using Dprental.RentalService.Common;
 
-namespace Dprental.RentalService.Application.Checkout;
+namespace Dprental.RentalService.Application.Errors;
 
 public static class CheckoutErrors
 {
@@ -27,6 +27,29 @@ public static class CheckoutErrors
 
     public static readonly Error PriceChanged =
         Error.Conflict("Checkout.PriceChanged", "Giá vừa thay đổi. Vui lòng xem lại và gửi lại.");
+
+    public static readonly Error HoldFailed =
+        Error.Conflict("Checkout.HoldFailed", "Không giữ được lịch cho toàn bộ thiết bị đã chọn. Chưa có đơn hàng nào được tạo.");
+
+    public static readonly Error OrderNotSaved =
+        Error.Conflict("Checkout.OrderNotSaved", "Chưa tạo được đơn hàng. Vui lòng gửi lại.");
+
+    public static readonly Error InProgress =
+        Error.Conflict("Checkout.InProgress", "Đơn hàng của bạn đang được xử lý. Vui lòng chờ trong giây lát.");
+
+    public static readonly Error IdempotencyKeyReused =
+        Error.Conflict("Checkout.IdempotencyKeyReused", "Idempotency-Key này đã được dùng cho một lần gửi đơn khác.");
+
+    /// <summary>Đơn đã được tạo và đang giữ lịch; gửi lại cùng Idempotency-Key để tạo nốt hóa đơn.</summary>
+    public static readonly Error InvoiceTemporarilyUnavailable =
+        Error.ServiceUnavailable("Checkout.InvoiceTemporarilyUnavailable", "Hệ thống thanh toán đang bận. Đơn hàng đã được tạo và đang giữ lịch, vui lòng thử lại sau ít phút.");
+
+    /// <summary>Payment từ chối tạo hóa đơn; gửi lại cũng không có kết quả khác.</summary>
+    public static readonly Error InvoiceRejected =
+        Error.Conflict("Checkout.InvoiceRejected", "Không tạo được thanh toán cho đơn hàng này. Đơn hàng sẽ tự hủy khi hết hạn thanh toán.");
+
+    public static readonly Error OrderExpired =
+        Error.Expired("Checkout.OrderExpired", "Đơn hàng đã hết hạn thanh toán. Vui lòng đặt lại.");
 
     public static readonly Error DependencyUnavailable =
         Error.ServiceUnavailable("Checkout.DependencyUnavailable", "Chưa kiểm tra được thiết bị. Vui lòng thử lại.");

@@ -24,6 +24,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
         services.AddDbContext<RentalServiceDbContext>(options => options.UseNpgsql(connectionString));
         services.AddScoped<IRentalCartRepository, RentalCartRepository>();
         services.AddScoped<IRentalOrderRepository, RentalOrderRepository>();
+        services.AddScoped<IOrderCodeGenerator, PostgresOrderCodeGenerator>();
         services.AddScoped<IInboxRepository, InboxRepository>();
         services.AddScoped<IOutboxRepository, OutboxRepository>();
         services.AddScoped<IOperationReceiptRepository, OperationReceiptRepository>();
