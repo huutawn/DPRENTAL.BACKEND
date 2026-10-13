@@ -66,8 +66,14 @@ internal sealed class FakePaymentRentalClient : IPaymentRentalClient
         return Tamper is null ? invoice : Tamper(invoice);
     }
 
-    public Task<Result<CancelInvoiceResponse>> CancelInvoiceAsync(CancelInvoiceRequest request, CancellationToken ct = default) =>
-        throw new NotSupportedException();
+    public List<CancelInvoiceRequest> CancelRequests { get; } = [];
+
+    public Task<Result<CancelInvoiceResponse>> CancelInvoiceAsync(CancelInvoiceRequest request, CancellationToken ct = default)
+    {
+        CancelRequests.Add(request);
+        return Task.FromResult(Result.Success(
+            new CancelInvoiceResponse(request.InvoiceRef, true, DateTimeOffset.UnixEpoch, false)));
+    }
 
     public Task<Result<RequestRefundResponse>> RequestRefundAsync(RequestRefundRequest request, CancellationToken ct = default) =>
         throw new NotSupportedException();

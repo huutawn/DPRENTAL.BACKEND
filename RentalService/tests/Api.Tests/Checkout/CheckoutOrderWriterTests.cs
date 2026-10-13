@@ -91,10 +91,14 @@ public sealed class CheckoutOrderWriterTests
     private RentalServiceDbContext NewContext() => new(
         new DbContextOptionsBuilder<RentalServiceDbContext>().UseInMemoryDatabase(_dbName).Options);
 
-    private CheckoutOrderWriter CreateWriter(RentalServiceDbContext context, IUnitOfWork? unitOfWork = null) => new(
-        new RentalOrderRepository(context),
+    private CheckoutOrderWriter CreateWriter(
+        RentalServiceDbContext context,
+        IUnitOfWork? unitOfWork = null,
+        IOrderCodeGenerator? orderCodes = null,
+        IRentalOrderRepository? orders = null) => new(
+        orders ?? new RentalOrderRepository(context),
         new RentalCartRepository(context),
-        _orderCodes,
+        orderCodes ?? _orderCodes,
         _holds,
         unitOfWork ?? context,
         NullLogger<CheckoutOrderWriter>.Instance);
@@ -358,6 +362,91 @@ public sealed class CheckoutOrderWriterTests
     }
 
     [Fact]
+    public async Task CreateOrder_ReleasesHoldsAndRethrows_WhenSavingFailsUnexpectedly()
+    {
+        IReadOnlyList<CheckoutHeldLine> held = await HoldAsync(_plan);
+
+        await using RentalServiceDbContext context = NewContext();
+        CheckoutOrderWriter writer = CreateWriter(
+            context, new ThrowingUnitOfWork(context, () => new InvalidOperationException("Simulated database outage.")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => writer.CreateOrderAsync(_plan, held, OperationId, Now));
+
+        Assert.Equal(
+            held.Select(h => h.AllocationGroupId).Reverse(),
+            _inventory.Releases.Select(r => r.AllocationGroupId));
+        Assert.Equal(0, await CountOrdersAsync());
+        Assert.Equal(4, (await ReloadCartAsync()).Items.Count);
+        Assert.Empty(context.ChangeTracker.Entries());
+    }
+
+    [Fact]
+    public async Task CreateOrder_ReleasesHoldsWithoutTheRequestToken_WhenRenterDisconnectsWhileSaving()
+    {
+        IReadOnlyList<CheckoutHeldLine> held = await HoldAsync(_plan);
+        using CancellationTokenSource requestAborted = new();
+
+        await using RentalServiceDbContext context = NewContext();
+        CheckoutOrderWriter writer = CreateWriter(context, new ThrowingUnitOfWork(context, () =>
+        {
+            requestAborted.Cancel();
+            return new OperationCanceledException(requestAborted.Token);
+        }));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => writer.CreateOrderAsync(_plan, held, OperationId, Now, requestAborted.Token));
+
+        Assert.Equal(3, _inventory.Releases.Count);
+        Assert.All(_inventory.Releases, r => Assert.Equal(CancellationToken.None, r.Token));
+        Assert.Equal(0, await CountOrdersAsync());
+    }
+
+    [Fact]
+    public async Task CreateOrder_ReleasesHoldsAndRethrows_WhenOrderCodeCannotBeIssued()
+    {
+        IReadOnlyList<CheckoutHeldLine> held = await HoldAsync(_plan);
+
+        await using RentalServiceDbContext context = NewContext();
+        CheckoutOrderWriter writer = CreateWriter(context, orderCodes: new FailingOrderCodeGenerator());
+
+        await Assert.ThrowsAsync<TimeoutException>(() => writer.CreateOrderAsync(_plan, held, OperationId, Now));
+
+        Assert.Equal(3, _inventory.Releases.Count);
+        Assert.Equal(0, await CountOrdersAsync());
+        Assert.Equal(4, (await ReloadCartAsync()).Items.Count);
+    }
+
+    [Fact]
+    public async Task CreateOrder_KeepsHolds_WhenSaveReportsFailureButTheOrderWasCommitted()
+    {
+        IReadOnlyList<CheckoutHeldLine> held = await HoldAsync(_plan);
+
+        await using RentalServiceDbContext context = NewContext();
+        CheckoutOrderWriter writer = CreateWriter(context, new CommitThenThrowUnitOfWork(context));
+
+        await Assert.ThrowsAsync<TimeoutException>(() => writer.CreateOrderAsync(_plan, held, OperationId, Now));
+
+        // Đơn đã nằm trong database và đang dùng các hold này: nhả ra là có đơn không còn máy.
+        Assert.Empty(_inventory.Releases);
+        Assert.Equal(1, await CountOrdersAsync());
+    }
+
+    [Fact]
+    public async Task CreateOrder_KeepsHolds_WhenItCannotConfirmWhetherTheOrderWasSaved()
+    {
+        IReadOnlyList<CheckoutHeldLine> held = await HoldAsync(_plan);
+
+        // FakeOrderRepository ném lỗi ở mọi thao tác đọc ghi đơn, như khi database không truy cập được.
+        await using RentalServiceDbContext context = NewContext();
+        CheckoutOrderWriter writer = CreateWriter(context, orders: new FakeOrderRepository());
+
+        await Assert.ThrowsAsync<NotSupportedException>(() => writer.CreateOrderAsync(_plan, held, OperationId, Now));
+
+        Assert.Empty(_inventory.Releases);
+    }
+
+    [Fact]
     public void OrderDeliveryTermsAndAssignmentSnapshots_HaveNoPublicSetter()
     {
         string[] orderProperties =
@@ -403,6 +492,32 @@ public sealed class CheckoutOrderWriterTests
             IssuedCount++;
             return Task.FromResult($"DH-{utcNow.Year}-{IssuedCount:D6}");
         }
+    }
+
+    private sealed class FailingOrderCodeGenerator : IOrderCodeGenerator
+    {
+        public Task<string> NextAsync(DateTimeOffset utcNow, CancellationToken cancellationToken = default) =>
+            throw new TimeoutException("Simulated sequence timeout.");
+    }
+
+    /// <summary>Giả lập lần lưu hỏng vì lý do ngoài dự kiến: không có gì được ghi.</summary>
+    private sealed class ThrowingUnitOfWork(RentalServiceDbContext inner, Func<Exception> failure) : IUnitOfWork
+    {
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => throw failure();
+
+        public void DiscardChanges() => inner.DiscardChanges();
+    }
+
+    /// <summary>Giả lập mất kết nối ngay sau khi database đã commit: dữ liệu đã ghi nhưng lời gọi báo lỗi.</summary>
+    private sealed class CommitThenThrowUnitOfWork(RentalServiceDbContext inner) : IUnitOfWork
+    {
+        public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            await inner.SaveChangesAsync(cancellationToken);
+            throw new TimeoutException("Simulated connection loss after commit.");
+        }
+
+        public void DiscardChanges() => inner.DiscardChanges();
     }
 
     /// <summary>Giả lập database từ chối lần lưu (ví dụ trùng CheckoutOperationId).</summary>

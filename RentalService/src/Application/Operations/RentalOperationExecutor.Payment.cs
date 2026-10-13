@@ -227,36 +227,40 @@ public sealed partial class RentalOperationExecutor
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         if (utcNow < order.PaymentDeadline) return Result.Success();
 
-        // 1. Cancel invoice first
-        string cancelOpKey = ComputeOperationKey("CancelInvoice", order.Id.ToString());
-        var cancelReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == cancelOpKey);
-        if (cancelReceipt == null)
+        // 1. Cancel invoice first. An order whose invoice was never created (Payment was down for the whole
+        //    payment window) has nothing to cancel, and a receipt for it would stay Pending forever.
+        if (!string.IsNullOrWhiteSpace(order.InvoiceRef))
         {
-            cancelReceipt = new RentalOperationReceipt(
-                Guid.NewGuid(),
-                order.Id,
-                cancelOpKey,
-                "CancelInvoice",
-                ComputeOperationKey("CancelInvoice", $"{order.Id}:{order.InvoiceRef}"),
-                isSuccess: false,
-                errorCode: null,
-                errorMessage: null,
-                createdAt: utcNow,
-                status: RentalOperationReceipt.StatusPending,
-                payloadJson: JsonSerializer.Serialize(new CancelInvoiceRequest(order.Id, order.InvoiceRef!, "Payment window expired", cancelOpKey), JsonOptions));
-            order.AddOperationReceipt(cancelReceipt);
-            await CommitLocalChangesAsync(order, cancellationToken);
-        }
-
-        var cancelRes = await CancelInvoiceInternalAsync(order, cancelReceipt, cancelOpKey, cancellationToken);
-        if (cancelRes.IsFailure)
-        {
-            if (string.Equals(cancelRes.Error.Code, PaymentContractSpec.ErrorCodes.InvoiceAlreadyPaid, StringComparison.OrdinalIgnoreCase))
+            string cancelOpKey = ComputeOperationKey("CancelInvoice", order.Id.ToString());
+            var cancelReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == cancelOpKey);
+            if (cancelReceipt == null)
             {
-                _logger.LogInformation("Invoice was already collected for Order {OrderId}. Halting expiry and waiting for InvoicePaid event.", order.Id);
-                return Result.Success(); // Halts expiry! Does NOT release holds or expire order.
+                cancelReceipt = new RentalOperationReceipt(
+                    Guid.NewGuid(),
+                    order.Id,
+                    cancelOpKey,
+                    "CancelInvoice",
+                    ComputeOperationKey("CancelInvoice", $"{order.Id}:{order.InvoiceRef}"),
+                    isSuccess: false,
+                    errorCode: null,
+                    errorMessage: null,
+                    createdAt: utcNow,
+                    status: RentalOperationReceipt.StatusPending,
+                    payloadJson: JsonSerializer.Serialize(new CancelInvoiceRequest(order.Id, order.InvoiceRef, "Payment window expired", cancelOpKey), JsonOptions));
+                order.AddOperationReceipt(cancelReceipt);
+                await CommitLocalChangesAsync(order, cancellationToken);
             }
-            return cancelRes;
+
+            var cancelRes = await CancelInvoiceInternalAsync(order, cancelReceipt, cancelOpKey, cancellationToken);
+            if (cancelRes.IsFailure)
+            {
+                if (string.Equals(cancelRes.Error.Code, PaymentContractSpec.ErrorCodes.InvoiceAlreadyPaid, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation("Invoice was already collected for Order {OrderId}. Halting expiry and waiting for InvoicePaid event.", order.Id);
+                    return Result.Success(); // Halts expiry! Does NOT release holds or expire order.
+                }
+                return cancelRes;
+            }
         }
 
         // 2. Release all allocation groups

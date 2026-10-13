@@ -53,6 +53,32 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         ArgumentNullException.ThrowIfNull(heldLines);
         ArgumentException.ThrowIfNullOrWhiteSpace(checkoutOperationId);
 
+        try
+        {
+            return await SaveOrderAsync(plan, heldLines, checkoutOperationId, utcNow, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // Lỗi ngoài dự kiến (database sập, renter ngắt kết nối giữa chừng): lỗi vẫn được ném ra ngoài,
+            // nhưng hold không được nằm lại mà không có đơn nào dùng.
+            _logger.LogWarning(ex, "Checkout {CheckoutOperationId} hỏng trong lúc lưu đơn hàng.", checkoutOperationId);
+            _unitOfWork.DiscardChanges();
+            if (await IsConfirmedNotSavedAsync(checkoutOperationId))
+            {
+                await _holds.ReleaseAllLinesAsync(heldLines);
+            }
+
+            throw;
+        }
+    }
+
+    private async Task<Result<RentalOrder>> SaveOrderAsync(
+        CheckoutPlan plan,
+        IReadOnlyList<CheckoutHeldLine> heldLines,
+        string checkoutOperationId,
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken)
+    {
         RentalCart? cart = await _carts.GetActiveByRenterIdAsync(plan.RenterId, cancellationToken);
         if (cart is null || cart.Id != plan.CartId)
         {
@@ -118,6 +144,27 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
     {
         await _holds.ReleaseAllLinesAsync(heldLines);
         return error;
+    }
+
+    /// <summary>
+    /// Chỉ trả <c>true</c> khi đọc được database và chắc chắn chưa có đơn của lần checkout này. Lần lưu có thể đã
+    /// thành công dù báo lỗi (mất kết nối sau khi commit), và nhả hold của một đơn đã lưu thì tệ hơn để hold tự hết hạn.
+    /// </summary>
+    private async Task<bool> IsConfirmedNotSavedAsync(string checkoutOperationId)
+    {
+        try
+        {
+            // Không dùng token của request: renter đã ngắt kết nối thì vẫn phải kiểm tra cho xong.
+            return await _orders.GetByCheckoutOperationIdAsync(checkoutOperationId, CancellationToken.None) is null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Không kiểm tra được đơn của checkout {CheckoutOperationId}; hold được giữ nguyên cho đến khi tự hết hạn.",
+                checkoutOperationId);
+            return false;
+        }
     }
 
     private static InitialRentalItemDto ToInitialItem(CheckoutHeldLine held) => new(

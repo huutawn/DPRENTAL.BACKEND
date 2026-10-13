@@ -11,6 +11,7 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
 {
     private readonly Dictionary<string, CreateHoldResponse> _groupsByReference = [];
     private readonly Dictionary<Guid, string> _firstGroupByListing = [];
+    private readonly HashSet<string> _releasedGroups = [];
 
     public List<CreateHoldRequest> HoldRequests { get; } = [];
 
@@ -24,7 +25,18 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
 
     public bool FailRelease { get; set; }
 
+    /// <summary>
+    /// Số máy của từng Listing. Listing có khai báo ở đây thì hold vượt số máy còn trống bị từ chối
+    /// và release trả máy lại; Listing không khai báo thì giữ được không giới hạn.
+    /// </summary>
+    public Dictionary<Guid, int> Capacities { get; } = [];
+
     public int CreatedGroupCount => _groupsByReference.Count;
+
+    /// <summary>Số máy của Listing đang bị giữ bởi các nhóm chưa được nhả.</summary>
+    public int HeldUnits(Guid listingId) => _groupsByReference.Values
+        .Where(g => g.ListingId == listingId && !_releasedGroups.Contains(g.AllocationGroupId))
+        .Sum(g => g.AssignedAssets.Count);
 
     public string GroupIdFor(Guid listingId) => _firstGroupByListing[listingId];
 
@@ -41,6 +53,13 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
         if (_groupsByReference.TryGetValue(request.ExternalReference, out CreateHoldResponse? existing))
         {
             return Task.FromResult(Result.Success(existing with { IsReplay = true }));
+        }
+
+        if (Capacities.TryGetValue(request.ListingId, out int capacity) &&
+            HeldUnits(request.ListingId) + request.Quantity > capacity)
+        {
+            return Task.FromResult(Result.Failure<CreateHoldResponse>(Error.Conflict(
+                InventoryContractSpec.ErrorCodes.InsufficientAvailability, "Không đủ máy trống.")));
         }
 
         int assignedCount = AssignedCountOverrides.GetValueOrDefault(request.ListingId, request.Quantity);
@@ -68,6 +87,10 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
         CancellationToken ct = default)
     {
         Releases.Add(new(allocationGroupId, request, ct));
+        if (!FailRelease)
+        {
+            _releasedGroups.Add(allocationGroupId);
+        }
 
         return Task.FromResult(FailRelease
             ? Result.Failure<ReleaseAllocationResponse>(Error.ServiceUnavailable("Inventory.Unavailable", "Inventory không phản hồi."))

@@ -117,7 +117,12 @@ Dịch vụ triển khai mô hình nghiệp vụ canonical theo AGENTS.md và th
   - `503 Checkout.InvoiceTemporarilyUnavailable`: Payment không phản hồi (server đã tự gọi lại một lần). Gửi lại cùng key chỉ tạo nốt hóa đơn. Nếu người thuê quay lại bằng key mới, hóa đơn của đơn đang chờ cũng được tạo nốt trước khi trả `409 Checkout.PendingOrderExists`.
   - `409 Checkout.InvoiceRejected`: Payment từ chối hoặc trả hóa đơn lệch tổng tiền; gửi lại không có kết quả khác.
   - `410 Checkout.OrderExpired`: đã quá hạn thanh toán.
-  - Đơn không có hóa đơn hết hạn như mọi đơn chờ thanh toán khác: Expiry worker nhả lịch và chuyển đơn sang `Expired`.
+  - Đơn không có hóa đơn hết hạn như mọi đơn chờ thanh toán khác: Expiry worker nhả lịch và chuyển đơn sang `Expired`. Vì không có hóa đơn để hủy nên không gọi Payment và không tạo receipt `CancelInvoice`.
+- Bù trừ khi checkout hỏng giữa chừng (không tạo đơn thì không được để lại hold):
+  - Một dòng không giữ được lịch: nhả các dòng đã giữ theo thứ tự ngược, trả `409 Checkout.HoldFailed` kèm `conflicts`.
+  - Lưu đơn thất bại, kể cả exception ngoài dự kiến như database lỗi hoặc renter ngắt kết nối: nhả toàn bộ hold bằng `CancellationToken.None` rồi mới trả lỗi.
+  - Chỉ nhả khi đọc lại database và chắc chắn chưa có đơn của lần checkout đó. Nếu đơn đã được commit, hoặc không đọc được database để xác nhận, hold được giữ nguyên và tự hết hạn sau 30 phút.
+  - Nhả hold thất bại chỉ ghi log; hold đó tự hết hạn theo `HoldExpiresAt`.
 - Mọi lỗi checkout có `retryable`; tùy lỗi có thêm `fieldErrors`, `lines`, `conflicts`, `currentQuote` hoặc `pendingOrderCode`.
 - Cấu hình: `Rental:Terms:CurrentVersion`, `Rental:Terms:DocumentRef`, `Rental:Terms:ContentHash` (bắt buộc; thiếu thì checkout trả 500).
 - Giới hạn hiện tại: `IInventoryListingClient` và `ICatalogReferenceClient` đang dùng bản tạm (`UnavailableCheckoutClients.cs`) nên gọi thật luôn nhận `503 Checkout.DependencyUnavailable`. Hợp đồng Inventory v1 (`ListingRentalSnapshotDto`) chưa có loại thiết bị, hãng, model, thông số và ảnh mà snapshot của RentalItem cần; Rental cũng chưa có hợp đồng với CatalogService.
