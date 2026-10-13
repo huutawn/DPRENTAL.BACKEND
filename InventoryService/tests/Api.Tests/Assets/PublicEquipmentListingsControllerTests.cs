@@ -4,6 +4,7 @@ using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.IServices;
+using Dprental.InventoryService.Application.Search;
 using Dprental.InventoryService.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -16,15 +17,15 @@ public sealed class PublicEquipmentListingsControllerTests
 {
     private sealed class StubPublicListingService : IPublicEquipmentListingService
     {
-        public Func<ListPublicEquipmentListingsRequest, Task<Result<PagedResponse<PublicEquipmentListingResponse>>>>? ListHandler { get; set; }
+        public Func<ListPublicEquipmentListingsRequest, Task<Result<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>>>? ListHandler { get; set; }
         public Func<Guid, Task<Result<PublicEquipmentListingResponse>>>? GetHandler { get; set; }
 
-        public Task<Result<PagedResponse<PublicEquipmentListingResponse>>> ListPublicListingsAsync(
+        public Task<Result<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>> ListPublicListingsAsync(
             ListPublicEquipmentListingsRequest request,
             CancellationToken cancellationToken = default) =>
             ListHandler != null
                 ? ListHandler(request)
-                : Task.FromResult(Result.Success(new PagedResponse<PublicEquipmentListingResponse>([], 1, 20, 0, 0)));
+                : Task.FromResult(Result.Success(new SearchExecution<PagedResponse<PublicEquipmentListingResponse>>(new PagedResponse<PublicEquipmentListingResponse>([], 1, 20, 0, 0), "postgres")));
 
         public Task<Result<PublicEquipmentListingResponse>> GetPublicListingByIdAsync(
             Guid id,

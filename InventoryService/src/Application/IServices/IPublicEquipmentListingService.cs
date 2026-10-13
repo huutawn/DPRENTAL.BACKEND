@@ -1,5 +1,6 @@
 using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.DTOs.Pagination;
+using Dprental.InventoryService.Application.Search;
 using Dprental.InventoryService.Common;
 
 namespace Dprental.InventoryService.Application.IServices;
@@ -20,7 +21,7 @@ public interface IPublicEquipmentListingService
     /// <summary>
     /// Tìm kiếm và khám phá danh sách EquipmentListing công khai theo bộ lọc và tính khả dụng.
     /// </summary>
-    Task<Result<PagedResponse<PublicEquipmentListingResponse>>> ListPublicListingsAsync(
+    Task<Result<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>> ListPublicListingsAsync(
         ListPublicEquipmentListingsRequest request,
         CancellationToken cancellationToken = default);
 }

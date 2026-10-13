@@ -10,6 +10,8 @@ using Dprental.InventoryService.Application.Validation;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Domain.IRepositories;
 using Microsoft.Extensions.Options;
+using Dprental.InventoryService.Application.Search;
+using Microsoft.Extensions.Logging;
 
 namespace Dprental.InventoryService.Application.Services;
 
@@ -25,6 +27,8 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
     private readonly IInventoryMediaService _mediaService;
     private readonly MediaServiceOptions _mediaOptions;
     private readonly TimeProvider _timeProvider;
+    private readonly IInventorySearchIndexService? _searchIndexService;
+    private readonly ILogger<EquipmentListingService>? _logger;
 
     public EquipmentListingService(
         IEquipmentListingRepository listingRepository,
@@ -33,7 +37,9 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         ICatalogServiceClient catalogClient,
         IInventoryMediaService mediaService,
         IOptions<MediaServiceOptions> mediaOptions,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IInventorySearchIndexService? searchIndexService = null,
+        ILogger<EquipmentListingService>? logger = null)
     {
         _listingRepository = listingRepository ?? throw new ArgumentNullException(nameof(listingRepository));
         _assetRepository = assetRepository ?? throw new ArgumentNullException(nameof(assetRepository));
@@ -43,6 +49,8 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         ArgumentNullException.ThrowIfNull(mediaOptions);
         _mediaOptions = mediaOptions.Value ?? throw new ArgumentException("MediaServiceOptions không được null.", nameof(mediaOptions));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _searchIndexService = searchIndexService;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -80,7 +88,7 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
     }
 
     /// <inheritdoc />
-    public async Task<Result<PagedResponse<EquipmentListingResponse>>> ListOwnerListingsAsync(
+    public async Task<Result<SearchExecution<PagedResponse<EquipmentListingResponse>>>> ListOwnerListingsAsync(
         ListEquipmentListingsRequest request,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default)
@@ -126,14 +134,69 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         }
         int skip = (int)offset;
 
+        AssetSortOption sortOption = !string.IsNullOrWhiteSpace(keywordResult.Value)
+            ? AssetSortOption.Relevance
+            : AssetSortOption.CreatedDesc;
+
+        if (!string.IsNullOrWhiteSpace(request.Sort))
+        {
+            string sortStr = request.Sort.Trim().ToLowerInvariant();
+            sortOption = sortStr switch
+            {
+                "created_desc" => AssetSortOption.CreatedDesc,
+                "created_asc" => AssetSortOption.CreatedAsc,
+                "model_desc" => AssetSortOption.ModelDesc,
+                "model_asc" => AssetSortOption.ModelAsc,
+                "relevance" => AssetSortOption.Relevance,
+                _ => (AssetSortOption)(-1)
+            };
+
+            if ((int)sortOption == -1)
+            {
+                return Error.Validation("INVALID_QUERY_PARAMETER", "Tùy chọn sắp xếp (sort) không hợp lệ.");
+            }
+        }
+
+        IReadOnlyList<Guid>? candidateIds = null;
+        string backend = "postgres";
+
+        if (!string.IsNullOrWhiteSpace(keywordResult.Value) && _searchIndexService != null)
+        {
+            var candidateResult = await _searchIndexService.SearchOwnerListingCandidatesAsync(
+                new OwnerListingSearchIndexQuery(
+                    caller.UserId.Value,
+                    keywordResult.Value,
+                    request.EquipmentTypeId,
+                    request.BrandId,
+                    request.Status.HasValue ? (int)request.Status.Value : null),
+                cancellationToken);
+
+            if (candidateResult.IsSuccess && !candidateResult.Value.IsTruncated)
+            {
+                candidateIds = candidateResult.Value.CandidateIds;
+                backend = "meilisearch";
+            }
+            else
+            {
+                _logger?.LogWarning(
+                    "Meilisearch query failed or candidates truncated for query '{Keyword}'. Falling back to PostgreSQL.",
+                    keywordResult.Value);
+                candidateIds = null;
+                backend = "postgres";
+            }
+        }
+
+
         var criteria = new OwnerEquipmentListingSearchCriteria(
             caller.UserId.Value,
-            keywordResult.Value,
+            candidateIds == null ? keywordResult.Value : null,
             skip,
             pageSize,
             request.EquipmentTypeId,
             request.BrandId,
-            request.Status);
+            request.Status,
+            candidateIds,
+            sortOption);
         var searchResult = await _listingRepository.SearchOwnerAsync(criteria, cancellationToken);
         int totalPages = searchResult.TotalCount == 0 ? 0 : (int)Math.Ceiling((double)searchResult.TotalCount / pageSize);
 
@@ -141,7 +204,8 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
             .Select(item => EquipmentListingMapper.ToResponse(item.Listing, item.TotalQuantity, _mediaOptions.PublicGatewayUrl))
             .ToList();
 
-        return new PagedResponse<EquipmentListingResponse>(items, page, pageSize, searchResult.TotalCount, totalPages);
+        var paged = new PagedResponse<EquipmentListingResponse>(items, page, pageSize, searchResult.TotalCount, totalPages);
+        return new SearchExecution<PagedResponse<EquipmentListingResponse>>(paged, backend);
     }
 
     /// <inheritdoc />

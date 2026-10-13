@@ -57,8 +57,8 @@ public sealed partial class InventoryAssetServiceTests
         var result = await service.ListAssetsAsync(new ListAssetsRequest(Page: 1, PageSize: 20), adminCaller);
 
         Assert.True(result.IsSuccess);
-        Assert.Single(result.Value.Items);
-        Assert.Equal(assetAdmin.Id, result.Value.Items[0].Id);
+        Assert.Single(result.Value.Value.Items);
+        Assert.Equal(assetAdmin.Id, result.Value.Value.Items[0].Id);
     }
 
     [Fact]
@@ -297,8 +297,8 @@ public sealed partial class InventoryAssetServiceTests
             Filters: "[{\"field\":\"capacity\",\"operator\":\"gte\",\"value\":2500}]"), caller);
 
         Assert.True(result.IsSuccess);
-        Assert.Single(result.Value.Items);
-        Assert.Equal(asset2.Id, result.Value.Items[0].Id);
+        Assert.Single(result.Value.Value.Items);
+        Assert.Equal(asset2.Id, result.Value.Value.Items[0].Id);
     }
 
     [Theory]
@@ -366,8 +366,8 @@ public sealed partial class InventoryAssetServiceTests
         var result = await service.ListAssetsAsync(new ListAssetsRequest(Q: "SECRET-MATCH"), caller);
 
         Assert.True(result.IsSuccess);
-        Assert.Single(result.Value.Items);
-        Assert.Equal(asset2.Id, result.Value.Items[0].Id);
+        Assert.Single(result.Value.Value.Items);
+        Assert.Equal(asset2.Id, result.Value.Value.Items[0].Id);
     }
 
     [Fact]
@@ -386,8 +386,8 @@ public sealed partial class InventoryAssetServiceTests
         var result = await service.ListAssetsAsync(new ListAssetsRequest(), callerA);
 
         Assert.True(result.IsSuccess);
-        Assert.Single(result.Value.Items);
-        Assert.Equal(assetA.Id, result.Value.Items[0].Id);
+        Assert.Single(result.Value.Value.Items);
+        Assert.Equal(assetA.Id, result.Value.Value.Items[0].Id);
     }
 
     [Fact]

@@ -28,6 +28,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
 
         services.AddScoped<IOutboxStore, OutboxStore>();
         services.AddScoped<IInboxStore, InboxStore>();
+        services.AddScoped<ISearchProjectionStore, SearchProjectionStore>();
 
         services.AddScoped<IInventoryWriteTransaction, InventoryWriteTransaction>();
 

@@ -47,4 +47,9 @@ public interface IInventoryWriteContext
     /// Đưa thông điệp Outbox vào hàng đợi lưu trữ trong cùng một transaction.
     /// </summary>
     void StageOutbox(OutboxMessage message);
+
+    /// <summary>
+    /// Lấy giá trị revision tuần tự tiếp theo từ sequence search_projection_revision_seq trong transaction hiện tại.
+    /// </summary>
+    Task<long> GetNextSearchRevisionAsync(CancellationToken cancellationToken = default);
 }

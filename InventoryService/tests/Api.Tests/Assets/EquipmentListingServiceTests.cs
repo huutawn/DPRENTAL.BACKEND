@@ -136,6 +136,7 @@ public sealed class EquipmentListingServiceTests
 
         public Task AcquireAssetLocksAsync(IEnumerable<Guid> assetIds, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public void StageOutbox(OutboxMessage message) { }
+        public Task<long> GetNextSearchRevisionAsync(CancellationToken cancellationToken = default) => Task.FromResult(1L);
     }
 
     private sealed class FakeWriteTransaction : IInventoryWriteTransaction

@@ -12,6 +12,8 @@ using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Application.Validation;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Domain.IRepositories;
+using Dprental.InventoryService.Application.Search;
+using Microsoft.Extensions.Logging;
 
 namespace Dprental.InventoryService.Application.Services;
 
@@ -28,6 +30,8 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
     private readonly AssetSearchQueryValidator _queryValidator;
     private readonly AssetSearchFilterResolver _filterResolver;
     private readonly TimeProvider _timeProvider;
+    private readonly IInventorySearchIndexService? _searchIndexService;
+    private readonly ILogger<InventoryAssetService>? _logger;
 
     public InventoryAssetService(
         IInventoryAssetRepository assetRepository,
@@ -36,7 +40,9 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
         IInventoryMediaService mediaService,
         AssetSearchQueryValidator queryValidator,
         AssetSearchFilterResolver filterResolver,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IInventorySearchIndexService? searchIndexService = null,
+        ILogger<InventoryAssetService>? logger = null)
     {
         _assetRepository = assetRepository ?? throw new ArgumentNullException(nameof(assetRepository));
         _writeTransaction = writeTransaction ?? throw new ArgumentNullException(nameof(writeTransaction));
@@ -45,6 +51,8 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
         _queryValidator = queryValidator ?? throw new ArgumentNullException(nameof(queryValidator));
         _filterResolver = filterResolver ?? throw new ArgumentNullException(nameof(filterResolver));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _searchIndexService = searchIndexService;
+        _logger = logger;
     }
 
     /// <summary>
@@ -80,7 +88,7 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
     /// <summary>
     /// Lấy danh sách tài sản phân trang của người dùng hiện tại (JWT sub).
     /// </summary>
-    public async Task<Result<PagedResponse<InventoryAssetResponse>>> ListAssetsAsync(
+    public async Task<Result<SearchExecution<PagedResponse<InventoryAssetResponse>>>> ListAssetsAsync(
         ListAssetsRequest request,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default)
@@ -111,6 +119,38 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
         }
         var validated = valResult.Value;
 
+        IReadOnlyList<Guid>? candidateIds = null;
+        string backend = "postgres";
+
+        if (!string.IsNullOrWhiteSpace(validated.SearchKeyword) && _searchIndexService != null)
+        {
+            var candidateResult = await _searchIndexService.SearchOwnerAssetCandidatesAsync(
+                new OwnerAssetSearchIndexQuery(
+                    ownerUserId,
+                    validated.SearchKeyword,
+                    validated.EquipmentTypeId,
+                    validated.BrandId,
+                    request.AcceptingBookings,
+                    validated.ManufactureYearFrom,
+                    validated.ManufactureYearTo),
+                cancellationToken);
+
+            if (candidateResult.IsSuccess && !candidateResult.Value.IsTruncated)
+            {
+                candidateIds = candidateResult.Value.CandidateIds;
+                backend = "meilisearch";
+            }
+            else
+            {
+                _logger?.LogWarning(
+                    "Meilisearch query failed or candidates truncated for query '{Keyword}'. Falling back to PostgreSQL.",
+                    validated.SearchKeyword);
+                candidateIds = null;
+                backend = "postgres";
+            }
+        }
+
+
         var resolveResult = await _filterResolver.ResolveAsync(
             request.Filters,
             validated.EquipmentTypeId,
@@ -118,11 +158,12 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
                 new OwnerAssetSearchCriteria(
                     ownerUserId,
                     new AssetSearchFilters(
-                        validated.SearchKeyword,
+                        candidateIds == null ? validated.SearchKeyword : null,
                         validated.EquipmentTypeId,
                         validated.BrandId,
                         validated.ManufactureYearFrom,
-                        validated.ManufactureYearTo),
+                        validated.ManufactureYearTo,
+                        CandidateIds: candidateIds),
                     acceptingBookings: request.AcceptingBookings),
                 ct),
             isFieldForbidden: null,
@@ -134,14 +175,15 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
         var resolvedFilters = resolveResult.Value;
 
         var searchFilters = new AssetSearchFilters(
-            SearchKeyword: validated.SearchKeyword,
+            SearchKeyword: candidateIds == null ? validated.SearchKeyword : null,
             EquipmentTypeId: validated.EquipmentTypeId,
             BrandId: validated.BrandId,
             ManufactureYearFrom: validated.ManufactureYearFrom,
             ManufactureYearTo: validated.ManufactureYearTo,
             Sort: validated.Sort,
             CompatibleSchemaVersions: resolvedFilters.CompatibleSchemaVersions,
-            DynamicFilters: resolvedFilters.Criteria);
+            DynamicFilters: resolvedFilters.Criteria,
+            CandidateIds: candidateIds);
 
         var searchCriteria = new OwnerAssetSearchCriteria(
             ownerUserId: ownerUserId,
@@ -154,7 +196,8 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
         var totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling((double)totalCount / validated.Take);
 
         var responseList = items.Select(InventoryAssetMapper.ToResponse).ToList();
-        return Result.Success(new PagedResponse<InventoryAssetResponse>(responseList, request.Page, request.PageSize, totalCount, totalPages));
+        var paged = new PagedResponse<InventoryAssetResponse>(responseList, request.Page, request.PageSize, totalCount, totalPages);
+        return Result.Success(new SearchExecution<PagedResponse<InventoryAssetResponse>>(paged, backend));
     }
 
 

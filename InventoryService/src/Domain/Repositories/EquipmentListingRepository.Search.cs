@@ -32,7 +32,17 @@ public sealed partial class EquipmentListingRepository
 
         var parameters = new List<NpgsqlParameter>();
 
-        if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
+        string joinSql = "";
+        if (filters.CandidateIds != null)
+        {
+            if (filters.CandidateIds.Count == 0)
+            {
+                return Array.Empty<int>();
+            }
+            joinSql = "JOIN unnest(@pCandidateIds) AS cand(id) ON l.id = cand.id";
+            parameters.Add(new NpgsqlParameter("pCandidateIds", filters.CandidateIds.ToArray()));
+        }
+        else if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
         {
             var escaped = EscapeLikePattern(filters.SearchKeyword);
             clauses.Add("(l.name ILIKE @pSearch ESCAPE '\\' OR l.model ILIKE @pSearch ESCAPE '\\')");
@@ -54,6 +64,7 @@ public sealed partial class EquipmentListingRepository
         string whereSql = string.Join(" AND ", clauses);
         string sql = $"""
             SELECT DISTINCT l.schema_version AS "Value" FROM "inventory"."equipment_listings" l
+            {joinSql}
             WHERE {whereSql}
             ORDER BY "Value" ASC
             """;
@@ -69,6 +80,11 @@ public sealed partial class EquipmentListingRepository
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(criteria);
+
+        if (criteria.Filters.CandidateIds != null && criteria.Filters.CandidateIds.Count == 0)
+        {
+            return new PublicEquipmentListingSearchResult(Array.Empty<PublicEquipmentListingItem>(), 0);
+        }
 
         if (_context.Database.IsRelational())
         {
@@ -121,7 +137,21 @@ public sealed partial class EquipmentListingRepository
         var commonParams = new List<NpgsqlParameter>();
 
         var filters = criteria.Filters;
-        if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
+        bool hasCandidates = filters.CandidateIds != null && filters.CandidateIds.Count > 0;
+        string joinSql = "";
+        if (filters.CandidateIds != null)
+        {
+            if (filters.CandidateIds.Count == 0)
+            {
+                clauses.Add("1 = 0");
+            }
+            else
+            {
+                joinSql = "JOIN unnest(@pCandidateIds) WITH ORDINALITY AS cand(id, ord) ON l.id = cand.id";
+                commonParams.Add(new NpgsqlParameter("pCandidateIds", filters.CandidateIds.ToArray()));
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
         {
             var escaped = EscapeLikePattern(filters.SearchKeyword);
             clauses.Add("(l.name ILIKE @pSearch ESCAPE '\\' OR l.model ILIKE @pSearch ESCAPE '\\')");
@@ -231,14 +261,24 @@ public sealed partial class EquipmentListingRepository
 
         string countSql = $"""
             SELECT COUNT(*)::int AS "Value" FROM "inventory"."equipment_listings" l
+            {joinSql}
             WHERE {filterWhere}
             """;
 
-        string orderSql = BuildListingOrderSql(criteria.Filters.Sort);
+        string orderSql = criteria.Filters.Sort switch
+        {
+            AssetSortOption.Relevance when hasCandidates => "ORDER BY cand.ord ASC",
+            AssetSortOption.Relevance => "ORDER BY l.created_at DESC, l.id DESC",
+            AssetSortOption.CreatedAsc => "ORDER BY l.created_at ASC, l.id ASC",
+            AssetSortOption.ModelDesc => "ORDER BY l.model DESC, l.id DESC",
+            AssetSortOption.ModelAsc => "ORDER BY l.model ASC, l.id ASC",
+            _ => "ORDER BY l.created_at DESC, l.id DESC"
+        };
 
         string pageSql = $"""
             SELECT l.id AS "Id", ({totalQtyExpr}) AS "TotalQuantity", ({availableQtyExpr}) AS "AvailableQuantity"
             FROM "inventory"."equipment_listings" l
+            {joinSql}
             WHERE {filterWhere}
             {orderSql}
             LIMIT @pTake OFFSET @pSkip
@@ -254,16 +294,6 @@ public sealed partial class EquipmentListingRepository
         return (countSql, pageSql, countParams, pageParams);
     }
 
-    private static string BuildListingOrderSql(AssetSortOption sort)
-    {
-        return sort switch
-        {
-            AssetSortOption.CreatedAsc => "ORDER BY l.created_at ASC, l.id ASC",
-            AssetSortOption.ModelDesc => "ORDER BY l.model DESC, l.id DESC",
-            AssetSortOption.ModelAsc => "ORDER BY l.model ASC, l.id ASC",
-            _ => "ORDER BY l.created_at DESC, l.id DESC"
-        };
-    }
 
     private static void AppendDynamicFilters(
         List<string> clauses,

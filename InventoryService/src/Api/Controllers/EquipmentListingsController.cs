@@ -74,7 +74,8 @@ public sealed class EquipmentListingsController : ControllerBase
             return this.ToProblem(result.Error);
         }
 
-        return Ok(result.Value);
+        Response.Headers["X-Search-Backend"] = result.Value.SearchBackend;
+        return Ok(result.Value.Value);
     }
 
     /// <summary>

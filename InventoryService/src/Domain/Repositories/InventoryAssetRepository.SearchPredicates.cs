@@ -15,18 +15,6 @@ public sealed partial class InventoryAssetRepository
             .Replace("_", @"\_");
     }
 
-    private static string BuildOrderSql(AssetSortOption sort)
-    {
-        return sort switch
-        {
-            AssetSortOption.CreatedAsc => "ORDER BY a.created_at ASC, a.id ASC",
-            AssetSortOption.ModelDesc => "ORDER BY l.model DESC, a.id DESC",
-            AssetSortOption.ModelAsc => "ORDER BY l.model ASC, a.id ASC",
-            AssetSortOption.ManufactureYearDesc => "ORDER BY a.manufacture_year DESC NULLS LAST, a.id DESC",
-            AssetSortOption.ManufactureYearAsc => "ORDER BY a.manufacture_year ASC NULLS LAST, a.id ASC",
-            _ => "ORDER BY a.created_at DESC, a.id DESC"
-        };
-    }
 
     private static (string WhereSql, List<NpgsqlParameter> Parameters) BuildOwnerPredicates(
         OwnerAssetSearchCriteria criteria,
@@ -49,7 +37,14 @@ public sealed partial class InventoryAssetRepository
         }
 
         var filters = criteria.Filters;
-        if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
+        if (filters.CandidateIds != null)
+        {
+            if (filters.CandidateIds.Count == 0)
+            {
+                clauses.Add("1 = 0");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
         {
             var escaped = EscapeLikePattern(filters.SearchKeyword);
             clauses.Add("(l.model ILIKE @pSearch ESCAPE '\\' OR (a.serial_number IS NOT NULL AND a.serial_number ILIKE @pSearch ESCAPE '\\'))");

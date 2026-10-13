@@ -27,8 +27,22 @@ public static class KafkaServiceCollectionExtensions
 
         // Đăng ký Handler Registry
         var registry = new KafkaHandlerRegistry();
+        registry.Register<SearchProjectionMessageHandler, SearchProjectionChangedPayload>(
+            topic: KafkaTopics.InventoryProjectionEventsV1,
+            messageType: SearchProjectionEvents.ListingMessageType,
+            version: 1,
+            handlerName: nameof(SearchProjectionMessageHandler) + "_Listing",
+            groupId: SearchProjectionMessageHandler.ConsumerGroupId);
+
+        registry.Register<SearchProjectionMessageHandler, SearchProjectionChangedPayload>(
+            topic: KafkaTopics.InventoryProjectionEventsV1,
+            messageType: SearchProjectionEvents.AssetMessageType,
+            version: 1,
+            handlerName: nameof(SearchProjectionMessageHandler) + "_Asset",
+            groupId: SearchProjectionMessageHandler.ConsumerGroupId);
         configureHandlers?.Invoke(registry);
         services.AddSingleton(registry);
+        services.AddScoped<SearchProjectionMessageHandler>();
 
         // Đăng ký Kafka Transport
         services.AddSingleton<KafkaProducer>();

@@ -94,4 +94,19 @@ public sealed class InventoryWriteContext : IInventoryWriteContext
         ArgumentNullException.ThrowIfNull(message);
         _context.OutboxMessages.Add(message);
     }
+
+    private static long _localRevisionSeq = 1000;
+
+    /// <inheritdoc />
+    public async Task<long> GetNextSearchRevisionAsync(CancellationToken cancellationToken = default)
+    {
+        if (_context.Database.IsNpgsql())
+        {
+            return await _context.Database
+                .SqlQueryRaw<long>("SELECT nextval('inventory.search_projection_revision_seq') AS \"Value\"")
+                .SingleAsync(cancellationToken);
+        }
+
+        return Interlocked.Increment(ref _localRevisionSeq);
+    }
 }
