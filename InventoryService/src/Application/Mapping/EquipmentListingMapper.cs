@@ -23,6 +23,7 @@ public static class EquipmentListingMapper
             listing.WeeklyRate,
             listing.MonthlyRate,
             listing.Currency);
+        var media = MediaContentUrlBuilder.BuildList(publicGatewayUrl, listing.MediaIds);
         string? thumbnailUrl = MediaContentUrlBuilder.Build(publicGatewayUrl, listing.ThumbnailMediaId);
         return new EquipmentListingResponse(
             listing.Id,
@@ -32,8 +33,10 @@ public static class EquipmentListingMapper
             listing.Name,
             listing.Description,
             listing.Model,
+            listing.ManufactureYear,
             listing.SchemaVersion,
             doc.RootElement.Clone(),
+            media,
             listing.ThumbnailMediaId,
             thumbnailUrl,
             rentalRateDto,

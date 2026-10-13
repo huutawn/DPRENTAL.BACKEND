@@ -22,7 +22,8 @@ public static class IntegrationTestHelper
         bool acceptingBookings = true,
         string? serialNumber = null,
         int? manufactureYear = null,
-        Guid? thumbnailMediaId = null)
+        Guid? thumbnailMediaId = null,
+        IReadOnlyList<Guid>? mediaIds = null)
     {
         var actualId = assetId ?? Guid.NewGuid();
         var actualNow = now ?? DateTimeOffset.UtcNow;
@@ -30,6 +31,7 @@ public static class IntegrationTestHelper
         var actualEqType = eqTypeId ?? Guid.NewGuid();
         var actualBrand = brandId ?? Guid.NewGuid();
         var actualName = string.IsNullOrWhiteSpace(name) ? model : name;
+        var actualMediaIds = mediaIds ?? (thumbnailMediaId.HasValue ? [thumbnailMediaId.Value] : null);
         var listing = EquipmentListing.Create(
             Guid.NewGuid(),
             actualOwner,
@@ -45,8 +47,9 @@ public static class IntegrationTestHelper
             null,
             "VND",
             actualNow,
+            manufactureYear ?? 2024,
+            actualMediaIds,
             thumbnailMediaId).Value;
-
         listing.UpdateStatus(EquipmentListingStatus.Active, true, actualNow);
         db.EquipmentListings.Add(listing);
 
@@ -85,7 +88,9 @@ public static class IntegrationTestHelper
         EquipmentListingStatus status = EquipmentListingStatus.Active,
         DateTimeOffset? now = null,
         int initialUnits = 1,
-        Guid? thumbnailMediaId = null)
+        Guid? thumbnailMediaId = null,
+        int manufactureYear = 2024,
+        IReadOnlyList<Guid>? mediaIds = null)
     {
         var actualListingId = listingId ?? Guid.NewGuid();
         var actualNow = now ?? DateTimeOffset.UtcNow;
@@ -93,6 +98,7 @@ public static class IntegrationTestHelper
         var actualEqType = eqTypeId ?? Guid.NewGuid();
         var actualBrand = brandId ?? Guid.NewGuid();
         var actualName = string.IsNullOrWhiteSpace(name) ? model : name;
+        var actualMediaIds = mediaIds ?? (thumbnailMediaId.HasValue ? [thumbnailMediaId.Value] : null);
         var listing = EquipmentListing.Create(
             actualListingId,
             actualOwner,
@@ -108,14 +114,15 @@ public static class IntegrationTestHelper
             null,
             "VND",
             actualNow,
+            manufactureYear,
+            actualMediaIds,
             thumbnailMediaId).Value;
-
         db.EquipmentListings.Add(listing);
 
         for (int i = 0; i < initialUnits; i++)
         {
             var uId = Guid.NewGuid();
-            var asset = InventoryAsset.Create(uId, actualListingId, $"SN-{uId:N}", actualNow).Value;
+            var asset = InventoryAsset.Create(uId, actualListingId, $"SN-{uId:N}", actualNow, manufactureYear).Value;
             db.Assets.Add(asset);
             listing.Assets.Add(asset);
         }

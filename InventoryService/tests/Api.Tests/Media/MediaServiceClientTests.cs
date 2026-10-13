@@ -60,7 +60,8 @@ public sealed class MediaServiceClientTests
             {
                 mediaId = mediaId,
                 status = "Ready",
-                uploadedByUserId = uploaderId
+                uploadedByUserId = uploaderId,
+                contentType = "image/png"
             });
 
             return new HttpResponseMessage(HttpStatusCode.OK)
@@ -75,7 +76,7 @@ public sealed class MediaServiceClientTests
         Assert.Equal(mediaId, result.Value.MediaId);
         Assert.Equal("Ready", result.Value.Status);
         Assert.Equal(uploaderId, result.Value.UploadedByUserId);
-
+        Assert.Equal("image/png", result.Value.ContentType);
         // Kiểm tra request HTTP
         Assert.NotNull(capturedRequest);
         Assert.Equal(HttpMethod.Get, capturedRequest.Method);
@@ -219,6 +220,30 @@ public sealed class MediaServiceClientTests
         var resMalformed = await clientMalformed.VerifyAsync(mediaId);
         Assert.True(resMalformed.IsFailure);
         Assert.Equal(ErrorType.Unavailable, resMalformed.Error.Type);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_MissingContentType_ReturnsUnavailable()
+    {
+        var mediaId = Guid.NewGuid();
+        var (client, _) = CreateTestClient((req, ct) =>
+        {
+            var json = JsonSerializer.Serialize(new
+            {
+                mediaId = mediaId,
+                status = "Ready",
+                uploadedByUserId = Guid.NewGuid().ToString("D")
+            });
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            });
+        });
+
+        var result = await client.VerifyAsync(mediaId);
+        Assert.True(result.IsFailure);
+        Assert.Equal("MEDIA_SERVICE_INVALID_RESPONSE", result.Error.Code);
+        Assert.Equal(ErrorType.Unavailable, result.Error.Type);
     }
 
     [Fact]

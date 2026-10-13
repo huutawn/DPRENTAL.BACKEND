@@ -336,7 +336,8 @@ internal static class AllocationTestHelper
             null,
             null,
             "VND",
-            AllocationTestConstants.FixedNow).Value;
+            AllocationTestConstants.FixedNow,
+            2024).Value;
 
         listing.UpdateStatus(EquipmentListingStatus.Active, true, AllocationTestConstants.FixedNow);
         var asset = InventoryAsset.Create(

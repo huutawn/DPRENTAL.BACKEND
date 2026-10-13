@@ -70,7 +70,8 @@ public sealed class InventoryPolicyTests
             null,
             null,
             "VND",
-            now).Value;
+            now,
+            2024).Value;
 
         var asset = InventoryAsset.Create(id, listing.Id, $"SN-{id:N}", now).Value;
         typeof(InventoryAsset).GetProperty(nameof(InventoryAsset.Listing))?.SetValue(asset, listing);

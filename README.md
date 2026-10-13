@@ -74,14 +74,16 @@ dotnet test InventoryService.sln
    - Tên hiển thị (`Name`): Bắt buộc, trim, tối đa 200 ký tự.
    - Mô tả (`Description`): Tùy chọn, tối đa 2.000 ký tự (chuỗi trắng chuẩn hóa thành null).
    - Tên model kỹ thuật (`Model`): Bắt buộc, tối đa 200 ký tự.
-   - Metadata Catalog chuẩn: `EquipmentTypeId`, `BrandId`, `SpecValues` (JSONB), `ThumbnailMediaId`.
+   - Năm sản xuất (`ManufactureYear`): Bắt buộc khi tạo mới (từ 1900 đến năm hiện tại theo múi giờ Việt Nam), dùng làm năm mặc định kế thừa khi tạo đơn vị vật lý.
+   - Danh sách multimedia (`MediaIds`): Lưu bằng cột `uuid[]` có thứ tự (tối đa 20 mục, không trùng, không GUID rỗng, định dạng ảnh hoặc video), cùng lựa chọn ảnh đại diện (`ThumbnailMediaId` phải là ảnh và nằm trong `MediaIds` nếu có).
+   - Metadata Catalog chuẩn: `EquipmentTypeId`, `BrandId`, `SpecValues` (JSONB).
    - Bảng giá niêm yết: `DailyRate`, `WeeklyRate`, `MonthlyRate`, `Currency` (`"VND"`).
    - Vòng đời trạng thái: `Draft` (khởi tạo), `Active` (đang mở thuê), `Inactive` (tạm dừng). Chuyển sang `Active` bắt buộc phải có ít nhất 1 physical unit đang nhận lịch (`AcceptingBookings = true`).
    - Cung ứng phái sinh (`totalQuantity`): Số lượng physical units trực thuộc đang sẵn sàng nhận đặt lịch (`accepting_bookings = true`).
 2. **InventoryAsset (Đơn vị vật lý)**: Đại diện cho từng thiết bị cụ thể trong kho:
    - Định danh duy nhất: `AssetCode` (`AST-{AssetId:N}`) sinh tự động bởi hệ thống.
    - Số serial (`SerialNumber`): Bắt buộc, không được để trống, duy nhất trong cùng Listing (không phân biệt hoa/thường và khoảng trắng đầu cuối).
-   - Năm sản xuất (`ManufactureYear`): Thuộc tính riêng của từng đơn vị vật lý.
+   - Năm sản xuất (`ManufactureYear`): Kế thừa năm của Listing tại thời điểm tạo asset (đọc dưới khóa transaction của Listing); vẫn cho phép PATCH năm riêng trên từng asset mà không ảnh hưởng Listing hay các asset khác.
    - Cờ nhận lịch (`AcceptingBookings`): Khi tắt (`false`), giữ nguyên lịch sử allocation/calendar block nhưng không tính vào `totalQuantity` khả dụng của Listing.
 
 ---
@@ -90,13 +92,13 @@ dotnet test InventoryService.sln
 
 | Method | Endpoint | Yêu cầu quyền | Mô tả |
 |---|---|---|---|
-| `POST` | `/api/v1/inventory/equipment-listings` | `inventory.asset.manage` / Admin | Tạo mới Listing Draft kèm **đúng một unit vật lý ban đầu có serial**, bắt buộc `name` và `model`, tùy chọn `description`. Trả 201 Created + Location. |
+| `POST` | `/api/v1/inventory/equipment-listings` | `inventory.asset.manage` / Admin | Tạo mới Listing Draft kèm **đúng một unit vật lý ban đầu có serial**, bắt buộc `name`, `model` và `manufactureYear`, tùy chọn `description`, `mediaIds` (tối đa 20 ảnh/video) và `thumbnailMediaId` (ảnh thuộc `mediaIds`). Trả 201 Created + Location. |
 | `GET` | `/api/v1/inventory/equipment-listings` | Owner / Admin | Danh sách Listing của current user phân trang (`page`, `pageSize`, `q` tìm kiếm chuỗi con trong `name` hoặc `model`, `equipmentTypeId`, `brandId`, `status`). Hai SELECTs trong RepeatableRead snapshot. |
-| `GET` | `/api/v1/inventory/equipment-listings/{id}` | Owner / Admin | Chi tiết Listing và derived `totalQuantity`. |
-| `PATCH` | `/api/v1/inventory/equipment-listings/{id}` | Owner / Admin | Cập nhật metadata/status (presence tracking cho `name`, `description`, `brandId`, `model`, `thumbnailMediaId`, `schemaVersion`, `specValues`, `status`). Từ chối `name: null` hoặc rỗng, `description: null` xóa mô tả. Từ chối chuỗi số `status` như `"999"`. Từ chối field `quantity`. Draft → Active yêu cầu >= 1 unit accepting bookings. |
+| `GET` | `/api/v1/inventory/equipment-listings/{id}` | Owner / Admin | Chi tiết Listing (bao gồm `manufactureYear`, `media: [{id, url}]`, `thumbnailMediaId`, `thumbnailUrl`) và derived `totalQuantity`. |
+| `PATCH` | `/api/v1/inventory/equipment-listings/{id}` | Owner / Admin | Cập nhật metadata/status (presence tracking cho `name`, `description`, `brandId`, `model`, `manufactureYear`, `mediaIds`, `thumbnailMediaId`, `schemaVersion`, `specValues`, `status`). Từ chối `name: null`, `manufactureYear: null`, `mediaIds: null`; `mediaIds: []` xóa danh sách (nếu xóa media đang làm thumbnail phải đồng thời xóa hoặc đổi thumbnail). Draft → Active yêu cầu >= 1 unit accepting bookings. |
 | `PUT` | `/api/v1/inventory/equipment-listings/{id}/rental-rate` | Owner / Admin | Thay thế toàn bộ bảng giá thuê niêm yết của Listing (VND, số nguyên dương). |
 | `GET` | `/api/v1/inventory/equipment-listings/{id}/assets` | Owner / Admin | Danh sách đơn vị vật lý thuộc Listing có phân trang. |
-| `POST` | `/api/v1/inventory/equipment-listings/{id}/assets` | `inventory.asset.manage` / Admin | Thêm **từng đơn vị vật lý (add-one)** vào Listing bằng `serialNumber`. Trả 201 Created + Location trỏ tới Asset. |
+| `POST` | `/api/v1/inventory/equipment-listings/{id}/assets` | `inventory.asset.manage` / Admin | Thêm **từng đơn vị vật lý (add-one)** vào Listing bằng `serialNumber`; kế thừa `manufactureYear` hiện tại của Listing trong transaction có khóa Listing (từ chối nếu Listing chưa có năm hợp lệ). Trả 201 Created + Location trỏ tới Asset. |
 | `GET` | `/api/v1/inventory/equipment-listings/{id}/calendar?from=&to=` | Owner / Admin | Lịch dùng chung tổng hợp cấp Listing (cửa sổ tối đa 6 tháng). |
 | `POST` | `/api/v1/inventory/equipment-listings/{id}/availability/check` | `AvailabilityRead` | Kiểm tra tính khả dụng toàn khoảng thời gian cho số lượng yêu cầu. |
 | `POST` | `/api/v1/inventory/equipment-listings/{id}/holds` | `inventory.allocation.write` | Tạo giữ chỗ tạm thời theo nhóm (Group Hold) trên Listing. |
@@ -128,11 +130,17 @@ dotnet test InventoryService.sln
   "description": "Máy quay điện ảnh Full-frame chuyên nghiệp kèm cage và pin dự phòng",
   "model": "FX3",
   "serialNumber": "FX3-VN-2026-0001",
+  "manufactureYear": 2024,
   "schemaVersion": 1,
   "specValues": {
     "sensor": "Full-Frame",
     "resolution": "4K"
   },
+  "mediaIds": [
+    "11111111-2222-3333-4444-555555555555",
+    "66666666-7777-8888-9999-aaaaaaaaaaaa"
+  ],
+  "thumbnailMediaId": "11111111-2222-3333-4444-555555555555",
   "rentalRate": {
     "dailyRate": 500000,
     "weeklyRate": 3000000,
@@ -165,7 +173,7 @@ dotnet test InventoryService.sln
 | `GET` | `/api/v1/inventory/public/equipment-listings/{id}` | Đọc chi tiết Listing Active công khai đã làm sạch dữ liệu nhạy cảm. Listing Draft/Inactive trả 404. |
 
 ### Bảo vệ dữ liệu nhạy cảm (Privacy & Security)
-- Phản hồi công khai chỉ hiển thị cấp Listing: `id`, `equipmentTypeId`, `brandId`, `name`, `description`, `model`, `schemaVersion`, `specValues`, `rentalRate`, `thumbnailUrl`, `totalQuantity`, `availableQuantity`.
+- Phản hồi công khai chỉ hiển thị cấp Listing: `id`, `equipmentTypeId`, `brandId`, `name`, `description`, `model`, `manufactureYear`, `schemaVersion`, `specValues`, `rentalRate`, `media` (`[{id, url}]`), `thumbnailUrl`, `totalQuantity`, `availableQuantity`.
 - Tuyệt đối không rò rỉ `serialNumber`, `assetCode`, hay các GUID định danh đơn vị vật lý (`assetId`).
 - Từ chối tham số ngoài whitelist: Việc truyền `manufactureYearFrom` hay `manufactureYearTo` vào endpoint công khai sẽ bị từ chối `400 INVALID_QUERY_PARAMETER` (năm sản xuất thuộc từng unit vật lý, không thuộc Listing).
 

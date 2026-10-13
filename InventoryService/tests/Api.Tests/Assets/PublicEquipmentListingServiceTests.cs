@@ -150,7 +150,7 @@ public sealed class PublicEquipmentListingServiceTests
         var id = Guid.NewGuid();
         var listing = EquipmentListing.Create(
             id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-            "Model Draft", null, "Model Draft", 1, "{}", 100_000m, null, null, "VND", FixedNow).Value;
+            "Model Draft", null, "Model Draft", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
         _repo.Add(listing);
 
         var result = await service.GetPublicListingByIdAsync(id);
@@ -166,7 +166,7 @@ public sealed class PublicEquipmentListingServiceTests
         var id = Guid.NewGuid();
         var listing = EquipmentListing.Create(
             id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-            "Model Active", null, "Model Active", 1, "{\"spec\":\"val\"}", 100_000m, null, null, "VND", FixedNow).Value;
+            "Model Active", null, "Model Active", 1, "{\"spec\":\"val\"}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
         listing.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
 
         var asset1 = InventoryAsset.Create(Guid.NewGuid(), id, "SN-PUB-1", FixedNow).Value;

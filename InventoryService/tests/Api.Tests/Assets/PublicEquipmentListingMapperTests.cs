@@ -18,7 +18,7 @@ public sealed class PublicEquipmentListingMapperTests
         var eqTypeId = Guid.NewGuid();
         var brandId = Guid.NewGuid();
         var thumbId = Guid.NewGuid();
-
+        var videoId = Guid.NewGuid();
         var rawSpecs = """
             {
                 "liftCapacityKg": 2500,
@@ -49,8 +49,9 @@ public sealed class PublicEquipmentListingMapperTests
             10_000_000m,
             "VND",
             FixedNow,
+            2023,
+            [videoId, thumbId],
             thumbId).Value;
-
         var gatewayUrl = "https://gateway.example.com/";
         var response = PublicEquipmentListingMapper.ToResponse(listing, totalQuantity: 10, availableQuantity: 7, gatewayUrl);
 
@@ -60,6 +61,7 @@ public sealed class PublicEquipmentListingMapperTests
         Assert.Equal("Xe nâng dầu Toyota 2.5T", response.Name);
         Assert.Equal("Xe nâng hoạt động tốt", response.Description);
         Assert.Equal("Toyota 8FD25", response.Model);
+        Assert.Equal(2023, response.ManufactureYear);
         Assert.Equal(2, response.SchemaVersion);
         Assert.Equal(10, response.TotalQuantity);
         Assert.Equal(7, response.AvailableQuantity);
@@ -70,8 +72,12 @@ public sealed class PublicEquipmentListingMapperTests
         Assert.Equal(10_000_000m, response.RentalRate.MonthlyRate);
         Assert.Equal("VND", response.RentalRate.Currency);
 
+        Assert.Equal(2, response.Media.Count);
+        Assert.Equal(videoId, response.Media[0].Id);
+        Assert.Equal($"https://gateway.example.com/api/v1/media/{videoId:D}/content", response.Media[0].Url);
+        Assert.Equal(thumbId, response.Media[1].Id);
+        Assert.Equal($"https://gateway.example.com/api/v1/media/{thumbId:D}/content", response.Media[1].Url);
         Assert.Equal($"https://gateway.example.com/api/v1/media/{thumbId:D}/content", response.ThumbnailUrl);
-
         var specs = response.SpecValues;
         Assert.Equal(2500, specs.GetProperty("liftCapacityKg").GetInt32());
         Assert.Equal("diesel", specs.GetProperty("fuelType").GetString());

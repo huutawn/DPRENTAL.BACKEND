@@ -44,7 +44,7 @@ public sealed class InventoryAssetsControllerTests
     private sealed class StubMediaClient : IMediaServiceClient
     {
         public Task<Result<MediaVerificationInfo>> VerifyAsync(Guid mediaId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"))));
+            Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"), "image/jpeg")));
 
         public Task<Result<MediaVisibilityInfo>> SetPublicAsync(Guid mediaId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new MediaVisibilityInfo(mediaId, "Public")));

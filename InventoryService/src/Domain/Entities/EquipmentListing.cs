@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Enums;
-
+using Dprental.InventoryService.Common.Utils;
 namespace Dprental.InventoryService.Domain.Entities;
 
 /// <summary>
@@ -17,7 +17,8 @@ public sealed class EquipmentListing
     public const string DefaultCurrency = "VND";
     public const decimal MinRate = 1m;
     public const decimal MaxRate = 999_999_999_999_999_999m;
-
+    public const int MinManufactureYear = 1900;
+    public const int MaxMediaCount = 20;
     [Key]
     [Column("id")]
     public Guid Id { get; private set; }
@@ -42,15 +43,20 @@ public sealed class EquipmentListing
     [Column("model")]
     [MaxLength(200)]
     public string Model { get; private set; } = string.Empty;
+    [Column("manufacture_year")]
+    public int? ManufactureYear { get; private set; }
+
     [Column("schema_version")]
     public int SchemaVersion { get; private set; }
 
     [Column("spec_values", TypeName = "jsonb")]
     public string SpecValues { get; private set; } = "{}";
 
+    [Column("media_ids", TypeName = "uuid[]")]
+    public Guid[] MediaIds { get; private set; } = Array.Empty<Guid>();
+
     [Column("thumbnail_media_id")]
     public Guid? ThumbnailMediaId { get; private set; }
-
     [Column("daily_rate", TypeName = "numeric(18,0)")]
     public decimal DailyRate { get; private set; }
 
@@ -87,19 +93,21 @@ public sealed class EquipmentListing
         Guid id,
         Guid ownerUserId,
         Guid equipmentTypeId,
-Guid brandId,
-string name,
-string? description,
-string model,
-int schemaVersion,
-string specValues,
-Guid? thumbnailMediaId,
-decimal dailyRate,
-decimal? weeklyRate,
-decimal? monthlyRate,
-string currency,
-EquipmentListingStatus status,
-DateTimeOffset now)
+        Guid brandId,
+        string name,
+        string? description,
+        string model,
+        int? manufactureYear,
+        int schemaVersion,
+        string specValues,
+        Guid[] mediaIds,
+        Guid? thumbnailMediaId,
+        decimal dailyRate,
+        decimal? weeklyRate,
+        decimal? monthlyRate,
+        string currency,
+        EquipmentListingStatus status,
+        DateTimeOffset now)
     {
         Id = id;
         OwnerUserId = ownerUserId;
@@ -108,8 +116,10 @@ DateTimeOffset now)
         Name = name;
         Description = description;
         Model = model;
+        ManufactureYear = manufactureYear;
         SchemaVersion = schemaVersion;
         SpecValues = specValues;
+        MediaIds = mediaIds;
         ThumbnailMediaId = thumbnailMediaId;
         DailyRate = dailyRate;
         WeeklyRate = weeklyRate;
@@ -128,17 +138,19 @@ DateTimeOffset now)
         Guid id,
         Guid ownerUserId,
         Guid equipmentTypeId,
-Guid brandId,
-string name,
-string? description,
-string model,
-int schemaVersion,
-string specValues,
+        Guid brandId,
+        string name,
+        string? description,
+        string model,
+        int schemaVersion,
+        string specValues,
         decimal dailyRate,
         decimal? weeklyRate,
         decimal? monthlyRate,
         string currency,
         DateTimeOffset now,
+        int? manufactureYear,
+        IReadOnlyList<Guid>? mediaIds = null,
         Guid? thumbnailMediaId = null)
     {
         if (id == Guid.Empty)
@@ -161,19 +173,25 @@ string specValues,
             return Error.Validation("INVALID_BRAND_ID", "Brand ID không được rỗng.");
         }
 
+        var yearValidation = ValidateManufactureYear(manufactureYear, now);
+        if (yearValidation.IsFailure)
+        {
+            return yearValidation.Error;
+        }
+
         var rateValidation = ValidateRateValues(dailyRate, weeklyRate, monthlyRate, currency);
         if (rateValidation.IsFailure)
         {
             return rateValidation.Error;
         }
 
-        var detailsValidation = ValidateDetails(name, description, model, thumbnailMediaId, schemaVersion, specValues);
+        var detailsValidation = ValidateDetails(name, description, model, mediaIds, thumbnailMediaId, schemaVersion, specValues);
         if (detailsValidation.IsFailure)
         {
             return detailsValidation.Error;
         }
 
-        var (validName, validDesc, validModel, validThumb, validSchema, validSpecs) = detailsValidation.Value;
+        var (validName, validDesc, validModel, validMediaIds, validThumb, validSchema, validSpecs) = detailsValidation.Value;
 
         return new EquipmentListing(
             id,
@@ -183,8 +201,10 @@ string specValues,
             validName,
             validDesc,
             validModel,
+            yearValidation.Value,
             validSchema,
             validSpecs,
+            validMediaIds,
             validThumb,
             dailyRate,
             weeklyRate,
@@ -195,13 +215,15 @@ string specValues,
     }
 
     /// <summary>
-    /// Cập nhật thông tin chi tiết và thông số kỹ thuật của Listing.
+    /// Cập nhật thông tin chi tiết, năm sản xuất, danh sách media và thông số kỹ thuật của Listing.
     /// </summary>
     public Result UpdateDetails(
         Guid? brandId,
-string name,
-string? description,
-string model,
+        string name,
+        string? description,
+        string model,
+        int? manufactureYear,
+        IReadOnlyList<Guid>? mediaIds,
         Guid? thumbnailMediaId,
         int schemaVersion,
         string specValues,
@@ -212,21 +234,37 @@ string model,
             return Error.Validation("INVALID_BRAND_ID", "Brand ID không được rỗng.");
         }
 
-        var validation = ValidateDetails(name, description, model, thumbnailMediaId, schemaVersion, specValues);
+        if (manufactureYear.HasValue)
+        {
+            var yearValidation = ValidateManufactureYear(manufactureYear.Value, now);
+            if (yearValidation.IsFailure)
+            {
+                return yearValidation.Error;
+            }
+        }
+
+        var validation = ValidateDetails(name, description, model, mediaIds, thumbnailMediaId, schemaVersion, specValues);
         if (validation.IsFailure)
         {
             return validation.Error;
         }
 
-        var (validName, validDesc, validModel, validThumb, validSchema, validSpecs) = validation.Value;
+        var (validName, validDesc, validModel, validMediaIds, validThumb, validSchema, validSpecs) = validation.Value;
 
         if (brandId.HasValue)
         {
             BrandId = brandId.Value;
         }
+
+        if (manufactureYear.HasValue)
+        {
+            ManufactureYear = manufactureYear.Value;
+        }
+
         Name = validName;
         Description = validDesc;
         Model = validModel;
+        MediaIds = validMediaIds;
         ThumbnailMediaId = validThumb;
         SchemaVersion = validSchema;
         SpecValues = validSpecs;
@@ -289,10 +327,30 @@ string model,
         return Result.Success();
     }
 
-    public static Result<(string Name, string? Description, string Model, Guid? ThumbnailMediaId, int SchemaVersion, string SpecValues)> ValidateDetails(
+    /// <summary>
+    /// Kiểm tra năm sản xuất hợp lệ dùng chung cho Listing và Asset (1900 đến năm hiện tại theo múi giờ Việt Nam).
+    /// </summary>
+    public static Result<int> ValidateManufactureYear(int? manufactureYear, DateTimeOffset now)
+    {
+        if (!manufactureYear.HasValue)
+        {
+            return Error.Validation("INVALID_MANUFACTURE_YEAR", "Năm sản xuất là bắt buộc.");
+        }
+
+        var maxYear = BusinessDateTime.ToVietnamDate(now).Year;
+        if (manufactureYear.Value < MinManufactureYear || manufactureYear.Value > maxYear)
+        {
+            return Error.Validation("INVALID_MANUFACTURE_YEAR", $"Năm sản xuất phải từ {MinManufactureYear} đến {maxYear}.");
+        }
+
+        return Result.Success(manufactureYear.Value);
+    }
+
+    public static Result<(string Name, string? Description, string Model, Guid[] MediaIds, Guid? ThumbnailMediaId, int SchemaVersion, string SpecValues)> ValidateDetails(
         string name,
         string? description,
         string model,
+        IReadOnlyList<Guid>? mediaIds,
         Guid? thumbnailMediaId,
         int schemaVersion,
         string specValues)
@@ -318,6 +376,7 @@ string model,
             }
             trimmedDescription = trimmedDesc;
         }
+
         if (string.IsNullOrWhiteSpace(model))
         {
             return Error.Validation("INVALID_MODEL", "Model không được để trống.");
@@ -329,9 +388,37 @@ string model,
             return Error.Validation("INVALID_MODEL", "Model tối đa 200 ký tự.");
         }
 
-        if (thumbnailMediaId.HasValue && thumbnailMediaId.Value == Guid.Empty)
+        var normalizedMediaIds = mediaIds is { Count: > 0 } ? mediaIds.ToArray() : Array.Empty<Guid>();
+        if (normalizedMediaIds.Length > MaxMediaCount)
         {
-            return Error.Validation("INVALID_THUMBNAIL_MEDIA_ID", "Thumbnail Media ID không được rỗng.");
+            return Error.Validation("MEDIA_LIMIT_EXCEEDED", $"Danh sách media tối đa {MaxMediaCount} mục.");
+        }
+
+        var seenMedia = new HashSet<Guid>(normalizedMediaIds.Length);
+        foreach (var mediaId in normalizedMediaIds)
+        {
+            if (mediaId == Guid.Empty)
+            {
+                return Error.Validation("INVALID_MEDIA_ID", "Media ID không được rỗng.");
+            }
+
+            if (!seenMedia.Add(mediaId))
+            {
+                return Error.Validation("DUPLICATE_MEDIA_ID", "Danh sách media không được chứa ID trùng lặp.");
+            }
+        }
+
+        if (thumbnailMediaId.HasValue)
+        {
+            if (thumbnailMediaId.Value == Guid.Empty)
+            {
+                return Error.Validation("INVALID_THUMBNAIL_MEDIA_ID", "Thumbnail Media ID không được rỗng.");
+            }
+
+            if (!seenMedia.Contains(thumbnailMediaId.Value))
+            {
+                return Error.Validation("INVALID_THUMBNAIL_MEDIA_ID", "Ảnh đại diện (thumbnailMediaId) phải nằm trong danh sách media của Listing.");
+            }
         }
 
         if (schemaVersion < 1)
@@ -357,7 +444,7 @@ string model,
             return Error.Validation("INVALID_SPEC_VALUES", "Spec values không đúng định dạng JSON.");
         }
 
-        return Result.Success((trimmedName, trimmedDescription, trimmedModel, thumbnailMediaId, schemaVersion, specValues));
+        return Result.Success((trimmedName, trimmedDescription, trimmedModel, normalizedMediaIds, thumbnailMediaId, schemaVersion, specValues));
     }
 
     public static Result ValidateRateValues(

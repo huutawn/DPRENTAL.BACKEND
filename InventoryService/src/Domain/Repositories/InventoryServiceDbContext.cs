@@ -72,6 +72,8 @@ public sealed class InventoryServiceDbContext : DbContext
                 t.HasCheckConstraint("ck_equipment_listings_name", "name ~ '\\S' AND length(name) <= 200");
                 t.HasCheckConstraint("ck_equipment_listings_description", "description IS NULL OR (description ~ '\\S' AND length(description) <= 2000)");
                 t.HasCheckConstraint("ck_equipment_listings_model", "model ~ '\\S' AND length(model) <= 200");
+                t.HasCheckConstraint("ck_equipment_listings_manufacture_year", "manufacture_year IS NULL OR manufacture_year >= 1900");
+                t.HasCheckConstraint("ck_equipment_listings_media_ids", "cardinality(media_ids) <= 20 AND array_position(media_ids, NULL) IS NULL AND NOT ('00000000-0000-0000-0000-000000000000'::uuid = ANY(media_ids)) AND (thumbnail_media_id IS NULL OR thumbnail_media_id = ANY(media_ids))");
                 t.HasCheckConstraint("ck_equipment_listings_thumbnail_media_id", "thumbnail_media_id IS NULL OR thumbnail_media_id <> '00000000-0000-0000-0000-000000000000'::uuid");
                 t.HasCheckConstraint("ck_equipment_listings_schema_version", "schema_version >= 1");
                 t.HasCheckConstraint("ck_equipment_listings_spec_values_object", "jsonb_typeof(spec_values) = 'object'");
@@ -107,6 +109,15 @@ public sealed class InventoryServiceDbContext : DbContext
                 .HasMaxLength(200)
                 .IsRequired();
 
+
+            b.Property(l => l.ManufactureYear)
+                .HasColumnName("manufacture_year");
+
+            b.Property(l => l.MediaIds)
+                .HasColumnName("media_ids")
+                .HasColumnType("uuid[]")
+                .HasDefaultValueSql("'{}'::uuid[]")
+                .IsRequired();
             b.Property(l => l.SpecValues)
                 .HasColumnType("jsonb")
                 .IsRequired();

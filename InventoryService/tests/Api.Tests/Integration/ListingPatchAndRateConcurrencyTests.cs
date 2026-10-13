@@ -73,7 +73,7 @@ public sealed class ListingPatchAndRateConcurrencyTests : IClassFixture<Postgres
         public Task<Result<MediaVerificationInfo>> VerifyAsync(Guid mediaId, CancellationToken cancellationToken = default)
         {
             VerifyCalls++;
-            return Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"))));
+            return Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"), "image/jpeg")));
         }
 
         public Task<Result<MediaVisibilityInfo>> SetPublicAsync(Guid mediaId, CancellationToken cancellationToken = default) =>
@@ -134,6 +134,8 @@ public sealed class ListingPatchAndRateConcurrencyTests : IClassFixture<Postgres
             10_000_000m,
             "VND",
             FixedNow,
+            2024,
+            thumbId.HasValue ? [thumbId.Value] : null,
             thumbId).Value;
 
         listing.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);

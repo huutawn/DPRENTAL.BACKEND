@@ -126,9 +126,11 @@ public sealed class PublicEquipmentListingsControllerTests
             "Name X",
             "Desc X",
             "Model X",
+            2024,
             1,
             doc.RootElement.Clone(),
             new RentalRateDto(100_000m, null, null, "VND"),
+            [],
             null,
             5,
             3);

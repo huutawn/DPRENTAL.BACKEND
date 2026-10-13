@@ -71,7 +71,7 @@ public sealed class ListingAuthorizationIntegrationTests : IClassFixture<Postgre
         public Task<Result<MediaVerificationInfo>> VerifyAsync(Guid mediaId, CancellationToken cancellationToken = default)
         {
             VerifyCalls++;
-            return Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"))));
+            return Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"), "image/jpeg")));
         }
 
         public Task<Result<MediaVisibilityInfo>> SetPublicAsync(Guid mediaId, CancellationToken cancellationToken = default) =>
@@ -124,7 +124,8 @@ public sealed class ListingAuthorizationIntegrationTests : IClassFixture<Postgre
             null,
             null,
             "VND",
-            FixedNow).Value;
+            FixedNow,
+            2024).Value;
 
         listing.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
         db.EquipmentListings.Add(listing);
@@ -161,6 +162,7 @@ public sealed class ListingAuthorizationIntegrationTests : IClassFixture<Postgre
             name = "Service Created Model",
             model = "Service Created Model",
             serialNumber = "FX3-SVC-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }

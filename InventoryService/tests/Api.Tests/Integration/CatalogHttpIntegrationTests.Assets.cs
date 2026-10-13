@@ -80,6 +80,7 @@ public sealed partial class CatalogHttpIntegrationTests
             name = "Sony FX3 Cinema Line",
             model = "Sony FX3 Cinema Line",
             serialNumber = "FX3-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame", resolution = "4K" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" },
@@ -265,6 +266,7 @@ public sealed partial class CatalogHttpIntegrationTests
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
             secFactory.CreateHumanToken(ownerId, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
 
+        var thumbId = Guid.NewGuid();
         var payload = new
         {
             equipmentTypeId = eqTypeId,
@@ -272,10 +274,12 @@ public sealed partial class CatalogHttpIntegrationTests
             name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" },
-            thumbnailMediaId = Guid.NewGuid()
+            mediaIds = new[] { thumbId },
+            thumbnailMediaId = thumbId
         };
 
         var response = await client.PostAsync("api/v1/inventory/equipment-listings",
@@ -371,6 +375,7 @@ public sealed partial class CatalogHttpIntegrationTests
             name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
@@ -461,6 +466,7 @@ public sealed partial class CatalogHttpIntegrationTests
             name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { resolution = 123 },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
@@ -584,6 +590,7 @@ public sealed partial class CatalogHttpIntegrationTests
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
             secFactory.CreateHumanToken(ownerId, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
 
+        var thumbId = Guid.NewGuid();
         var payload = new
         {
             equipmentTypeId = eqTypeId,
@@ -591,10 +598,12 @@ public sealed partial class CatalogHttpIntegrationTests
             name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" },
-            thumbnailMediaId = Guid.NewGuid()
+            mediaIds = new[] { thumbId },
+            thumbnailMediaId = thumbId
         };
 
         var response = await client.PostAsync("api/v1/inventory/equipment-listings",
@@ -657,6 +666,7 @@ public sealed partial class CatalogHttpIntegrationTests
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
             secFactory.CreateHumanToken(ownerId, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
 
+        var thumbId = Guid.NewGuid();
         var payload = new
         {
             equipmentTypeId = eqTypeId,
@@ -664,10 +674,12 @@ public sealed partial class CatalogHttpIntegrationTests
             name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" },
-            thumbnailMediaId = Guid.NewGuid()
+            mediaIds = new[] { thumbId },
+            thumbnailMediaId = thumbId
         };
 
         var response = await client.PostAsync("api/v1/inventory/equipment-listings",
@@ -735,6 +747,7 @@ public sealed partial class CatalogHttpIntegrationTests
             name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
@@ -801,6 +814,7 @@ public sealed partial class CatalogHttpIntegrationTests
             name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
@@ -877,6 +891,7 @@ public sealed partial class CatalogHttpIntegrationTests
             name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 3,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
@@ -953,6 +968,7 @@ public sealed partial class CatalogHttpIntegrationTests
             name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }

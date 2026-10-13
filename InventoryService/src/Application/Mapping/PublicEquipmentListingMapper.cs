@@ -29,6 +29,7 @@ public static class PublicEquipmentListingMapper
             listing.MonthlyRate,
             listing.Currency);
 
+        var media = MediaContentUrlBuilder.BuildList(publicGatewayUrl, listing.MediaIds);
         string? thumbnailUrl = MediaContentUrlBuilder.Build(publicGatewayUrl, listing.ThumbnailMediaId);
 
         return new PublicEquipmentListingResponse(
@@ -38,9 +39,11 @@ public static class PublicEquipmentListingMapper
             listing.Name,
             listing.Description,
             listing.Model,
+            listing.ManufactureYear,
             listing.SchemaVersion,
             sanitizedSpecs,
             rentalRateDto,
+            media,
             thumbnailUrl,
             totalQuantity,
             availableQuantity);

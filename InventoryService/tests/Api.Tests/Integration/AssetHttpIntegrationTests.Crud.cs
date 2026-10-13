@@ -38,6 +38,7 @@ public sealed partial class AssetHttpIntegrationTests
             name = "Sony FX3 Cinema Line",
             model = "Sony FX3 Cinema Line",
             serialNumber = "FX3-TEST-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { resolution = "4K", fps = 120 },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
@@ -96,6 +97,7 @@ public sealed partial class AssetHttpIntegrationTests
             model = "Sony FX3 Cinema Line",
             quantity = 1,
             serialNumber = "FX3-TEST-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { resolution = "4K" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
@@ -126,6 +128,7 @@ public sealed partial class AssetHttpIntegrationTests
             name = "Sony FX3 Cinema Line",
             model = "Sony FX3 Cinema Line",
             serialNumber = "FX3-UNIT-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { resolution = "4K" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
@@ -259,6 +262,7 @@ public sealed partial class AssetHttpIntegrationTests
             name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-TEST-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
@@ -302,6 +306,7 @@ public sealed partial class AssetHttpIntegrationTests
             name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-TEST-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }

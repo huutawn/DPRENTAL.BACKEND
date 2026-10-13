@@ -60,7 +60,7 @@ public sealed class GroupHoldAndLockCoordinationIntegrationTests : IClassFixture
     private sealed class StubMediaClient : IMediaServiceClient
     {
         public Task<Result<MediaVerificationInfo>> VerifyAsync(Guid mediaId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"))));
+            Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"), "image/jpeg")));
 
         public Task<Result<MediaVisibilityInfo>> SetPublicAsync(Guid mediaId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new MediaVisibilityInfo(mediaId, "Public")));
@@ -109,7 +109,8 @@ public sealed class GroupHoldAndLockCoordinationIntegrationTests : IClassFixture
             null,
             null,
             "VND",
-            FixedNow).Value;
+            FixedNow,
+            2024).Value;
 
         listing.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
         db.EquipmentListings.Add(listing);
