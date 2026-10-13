@@ -1,21 +1,15 @@
 using System.IO;
 using Dprental.PaymentService.Api.Exceptions;
 using Dprental.PaymentService.Api.Security;
-using Dprental.PaymentService.Application.Options;
-using Dprental.PaymentService.Infrastructure.Persistence;
-using Dprental.PaymentService.Api.Background;
+using Dprental.PaymentService.Application.DependencyInjection;
+using Dprental.PaymentService.Domain.Repository;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddPaymentServiceInfrastructure(builder.Configuration.GetConnectionString("Postgres"));
-builder.Services.AddOptions<PaymentMerchantOptions>()
-    .Bind(builder.Configuration.GetSection(PaymentMerchantOptions.SectionName))
-    .ValidateDataAnnotations()
-    .Validate(o => !string.IsNullOrWhiteSpace(o.Bank) && !string.IsNullOrWhiteSpace(o.Account),
-        "Merchant Bank and Account must be non-empty.")
-    .ValidateOnStart();
+builder.Services.AddPaymentDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddPaymentApplication(builder.Configuration);
 
 builder.Services.AddPaymentJwtAuthentication(builder.Configuration);
 builder.Services.AddAuthorization(options =>
@@ -37,8 +31,6 @@ builder.Services.AddAuthorization(options =>
             ctx.User.TryGetSubjectUserId(out _));
     });
 });
-builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddHostedService<InvoiceExpiryWorker>();
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<PaymentServiceDbContext>(

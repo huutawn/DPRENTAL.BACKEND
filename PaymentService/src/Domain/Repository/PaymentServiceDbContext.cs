@@ -1,7 +1,7 @@
 using Dprental.PaymentService.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
-namespace Dprental.PaymentService.Infrastructure.Persistence;
+namespace Dprental.PaymentService.Domain.Repository;
 
 public sealed class PaymentServiceDbContext : DbContext
 {

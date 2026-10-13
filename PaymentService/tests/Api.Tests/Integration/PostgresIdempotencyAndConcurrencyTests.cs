@@ -6,8 +6,9 @@ using Dprental.PaymentService.Application.DTOs.Invoice;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Common;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Infrastructure.Persistence;
-using Dprental.PaymentService.Infrastructure.Services;
+using Dprental.PaymentService.Application.Services;
+using Dprental.PaymentService.Domain.IRepository;
+using Dprental.PaymentService.Domain.Repository;
 using Json.Schema;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -25,6 +26,24 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             Bank = "MBBank",
             Account = "0383799632"
         });
+    private static InvoiceService CreateInvoiceService(
+        PaymentServiceDbContext ctx,
+        IOptions<PaymentMerchantOptions> merchantOptions,
+        TimeProvider? timeProvider = null) =>
+        CreateInvoiceService(new EfInvoiceRepository(ctx), merchantOptions, timeProvider);
+
+    private static InvoiceService CreateInvoiceService(
+        IInvoiceRepository repo,
+        IOptions<PaymentMerchantOptions> merchantOptions,
+        TimeProvider? timeProvider = null)
+    {
+        var tp = timeProvider ?? TimeProvider.System;
+        var lifecycle = new InvoiceLifecycleService(repo, tp);
+        var creation = new InvoiceCreationService(repo, merchantOptions, lifecycle, tp);
+        var recording = new PaymentRecordingService(repo, tp);
+        return new InvoiceService(creation, lifecycle, recording);
+    }
+
 
     private const string InvoicePaidEventSchemaJson = """
     {
@@ -100,7 +119,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             await ctx.Database.MigrateAsync();
 
             var fakeTime = new FakeTimeProvider(new DateTimeOffset(2026, 10, 12, 10, 0, 0, TimeSpan.Zero));
-            var service = new InvoiceService(ctx, MerchantOptions, fakeTime);
+            var service = CreateInvoiceService(ctx, MerchantOptions, fakeTime);
 
             Guid orderId = Guid.NewGuid();
             Guid renterId = Guid.NewGuid();
@@ -141,7 +160,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             var nowPlus7 = new DateTimeOffset(2026, 10, 12, 17, 0, 0, offsetPlus7);
             var deadlinePlus7 = new DateTimeOffset(2026, 10, 12, 17, 30, 0, offsetPlus7);
             var fakeTime = new FakeTimeProvider(nowPlus7.ToUniversalTime());
-            var service = new InvoiceService(ctx, MerchantOptions, fakeTime);
+            var service = CreateInvoiceService(ctx, MerchantOptions, fakeTime);
 
             Guid orderId = Guid.NewGuid();
             Guid renterId = Guid.NewGuid();
@@ -200,7 +219,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             await ctx.Database.MigrateAsync();
 
             var fakeTime = new FakeTimeProvider(new DateTimeOffset(2026, 10, 12, 10, 0, 0, TimeSpan.Zero));
-            var service = new InvoiceService(ctx, MerchantOptions, fakeTime);
+            var service = CreateInvoiceService(ctx, MerchantOptions, fakeTime);
 
             Guid orderId = Guid.NewGuid();
             var req = new CreateInvoiceRequest(
@@ -247,7 +266,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             var startTime = new DateTimeOffset(2026, 10, 12, 10, 0, 0, TimeSpan.Zero);
             var deadline = startTime.AddMinutes(30);
             var fakeTime = new FakeTimeProvider(startTime);
-            var service = new InvoiceService(ctx, MerchantOptions, fakeTime);
+            var service = CreateInvoiceService(ctx, MerchantOptions, fakeTime);
 
             // Case 1: PaidAt before deadline -> succeeds, emits valid InvoicePaid outbox, and replays even after deadline
             Guid order1 = Guid.NewGuid();
@@ -310,7 +329,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             await using var ctx = new PaymentServiceDbContext(options);
             await ctx.Database.MigrateAsync();
 
-            var service = new InvoiceService(ctx, MerchantOptions);
+            var service = CreateInvoiceService(ctx, MerchantOptions);
             string opKey = "op-conflict-001";
             var deadline = DateTimeOffset.UtcNow.AddMinutes(30);
 
@@ -347,7 +366,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             await using var ctx = new PaymentServiceDbContext(options);
             await ctx.Database.MigrateAsync();
 
-            var service = new InvoiceService(ctx, MerchantOptions);
+            var service = CreateInvoiceService(ctx, MerchantOptions);
             Guid sharedOrderId = Guid.NewGuid();
             var deadline = DateTimeOffset.UtcNow.AddMinutes(30);
 
@@ -398,7 +417,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             var tasks = Enumerable.Range(0, parallelism).Select(async _ =>
             {
                 await using var threadCtx = new PaymentServiceDbContext(options);
-                var svc = new InvoiceService(threadCtx, MerchantOptions);
+                var svc = CreateInvoiceService(threadCtx, MerchantOptions);
                 return await svc.CreateInvoiceAsync(req);
             }).ToArray();
 
@@ -434,7 +453,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             await using var ctx = new PaymentServiceDbContext(options);
             await ctx.Database.MigrateAsync();
 
-            var service = new InvoiceService(ctx, MerchantOptions);
+            var service = CreateInvoiceService(ctx, MerchantOptions);
             Guid orderId = Guid.NewGuid();
             Guid renterId = Guid.NewGuid();
             var req = new CreateInvoiceRequest(
@@ -490,7 +509,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             await ctx.Database.MigrateAsync();
 
             var fakeTime = new FakeTimeProvider(new DateTimeOffset(2026, 10, 12, 10, 0, 0, TimeSpan.Zero));
-            var service = new InvoiceService(ctx, MerchantOptions, fakeTime);
+            var service = CreateInvoiceService(ctx, MerchantOptions, fakeTime);
 
             Guid orderId = Guid.NewGuid();
             var req = new CreateInvoiceRequest(
@@ -542,7 +561,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
                 var setupTime = new FakeTimeProvider(startTime);
-                var setupSvc = new InvoiceService(setupCtx, MerchantOptions, setupTime);
+                var setupSvc = CreateInvoiceService(setupCtx, MerchantOptions, setupTime);
                 var createRes = await setupSvc.CreateInvoiceAsync(new CreateInvoiceRequest(
                     orderId, "ORD-GET-RACE-001", renterId, "VND", deadline,
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -553,15 +572,16 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             // Prepare GET service at a time just past deadline so it attempts on-read expiry after reading PENDING
             await using var getCtx = new PaymentServiceDbContext(options);
             var getTime = new FakeTimeProvider(deadline.AddSeconds(5));
-            var getSvc = new InvoiceService(getCtx, MerchantOptions, getTime);
+            var getRepo = new TestInvoiceRepositoryDecorator(new EfInvoiceRepository(getCtx));
+            var getSvc = CreateInvoiceService(getRepo, MerchantOptions, getTime);
 
             // When GET has already read PENDING (AsNoTracking) and is about to acquire the row lock,
             // commit the payment in a separate DbContext!
-            getSvc.OnBeforeAcquireGetLockForTest = async ct =>
+            getRepo.OnBeforeFindInvoiceWithRowLock = async ct =>
             {
                 await using var payCtx = new PaymentServiceDbContext(options);
                 var payTime = new FakeTimeProvider(deadline.AddSeconds(-10));
-                var paySvc = new InvoiceService(payCtx, MerchantOptions, payTime);
+                var paySvc = CreateInvoiceService(payCtx, MerchantOptions, payTime);
                 var payRes = await paySvc.RecordPaymentReceivedAsync(
                     invoiceRef, "PAY-DURING-GET-001", 500_000m, "VND", deadline.AddSeconds(-10), ct);
                 Assert.True(payRes.IsSuccess);
@@ -604,7 +624,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
 
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var setupSvc = new InvoiceService(setupCtx, MerchantOptions);
+                var setupSvc = CreateInvoiceService(setupCtx, MerchantOptions);
                 var res1 = await setupSvc.CreateInvoiceAsync(new CreateInvoiceRequest(
                     Guid.NewGuid(), "ORD-DUP-PAY-1", Guid.NewGuid(), "VND", deadline,
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -624,14 +644,14 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             var task1 = Task.Run(async () =>
             {
                 await using var ctx1 = new PaymentServiceDbContext(options);
-                var svc1 = new InvoiceService(ctx1, MerchantOptions);
+                var svc1 = CreateInvoiceService(ctx1, MerchantOptions);
                 return await svc1.RecordPaymentReceivedAsync(invRef1, sharedPaymentRef, 500_000m, "VND", paidAt);
             });
 
             var task2 = Task.Run(async () =>
             {
                 await using var ctx2 = new PaymentServiceDbContext(options);
-                var svc2 = new InvoiceService(ctx2, MerchantOptions);
+                var svc2 = CreateInvoiceService(ctx2, MerchantOptions);
                 return await svc2.RecordPaymentReceivedAsync(invRef2, sharedPaymentRef, 500_000m, "VND", paidAt);
             });
 
@@ -674,7 +694,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             string invoiceRef;
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var svc = new InvoiceService(setupCtx, MerchantOptions);
+                var svc = CreateInvoiceService(setupCtx, MerchantOptions);
                 var createRes = await svc.CreateInvoiceAsync(new CreateInvoiceRequest(
                     orderId, "ORD-RACE-001", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 300_000m, 100_000m)],
@@ -686,7 +706,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             var cancelTask = Task.Run(async () =>
             {
                 await using var ctxA = new PaymentServiceDbContext(options);
-                var svcA = new InvoiceService(ctxA, MerchantOptions);
+                var svcA = CreateInvoiceService(ctxA, MerchantOptions);
                 return await svcA.CancelInvoiceAsync(
                     invoiceRef,
                     new CancelInvoiceRequest(orderId, invoiceRef, "Renter cancel", "op-cancel-race"));
@@ -696,7 +716,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             var payTask = Task.Run(async () =>
             {
                 await using var ctxB = new PaymentServiceDbContext(options);
-                var svcB = new InvoiceService(ctxB, MerchantOptions);
+                var svcB = CreateInvoiceService(ctxB, MerchantOptions);
                 return await svcB.RecordPaymentReceivedAsync(
                     invoiceRef, "PAY-RACE-001", 400_000m, "VND", DateTimeOffset.UtcNow);
             });
@@ -756,7 +776,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             string invoiceRef;
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var setupSvc = new InvoiceService(setupCtx, MerchantOptions, fakeTime);
+                var setupSvc = CreateInvoiceService(setupCtx, MerchantOptions, fakeTime);
                 var createRes = await setupSvc.CreateInvoiceAsync(new CreateInvoiceRequest(
                     orderId, "ORD-LOCK-WAIT-EXP", Guid.NewGuid(), "VND", deadline,
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -787,7 +807,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             var recordTask = Task.Run(async () =>
             {
                 await using var payCtx = new PaymentServiceDbContext(options);
-                var paySvc = new InvoiceService(payCtx, MerchantOptions, fakeTime);
+                var paySvc = CreateInvoiceService(payCtx, MerchantOptions, fakeTime);
                 return await paySvc.RecordPaymentReceivedAsync(
                     invoiceRef, "PAY-LOCK-WAIT-EXP", 500_000m, "VND", validPaidAt);
             });
@@ -840,7 +860,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             string invoiceRef;
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var setupSvc = new InvoiceService(setupCtx, MerchantOptions, fakeTime);
+                var setupSvc = CreateInvoiceService(setupCtx, MerchantOptions, fakeTime);
                 var createRes = await setupSvc.CreateInvoiceAsync(new CreateInvoiceRequest(
                     orderId, "ORD-LOCK-WAIT-OK", Guid.NewGuid(), "VND", deadline,
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -871,7 +891,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             var recordTask = Task.Run(async () =>
             {
                 await using var payCtx = new PaymentServiceDbContext(options);
-                var paySvc = new InvoiceService(payCtx, MerchantOptions, fakeTime);
+                var paySvc = CreateInvoiceService(payCtx, MerchantOptions, fakeTime);
                 return await paySvc.RecordPaymentReceivedAsync(
                     invoiceRef, "PAY-LOCK-WAIT-OK", 500_000m, "VND", validPaidAt);
             });
@@ -894,7 +914,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
 
             // 5. Advance time past deadline and replay RecordPaymentReceivedAsync: must still succeed without adding outbox
             fakeTime.Advance(TimeSpan.FromMinutes(30)); // now = startTime + 45m > deadline
-            var replaySvc = new InvoiceService(verifyCtx, MerchantOptions, fakeTime);
+            var replaySvc = CreateInvoiceService(verifyCtx, MerchantOptions, fakeTime);
             var replayRes = await replaySvc.RecordPaymentReceivedAsync(
                 invoiceRef, "PAY-LOCK-WAIT-OK", 500_000m, "VND", validPaidAt);
             Assert.True(replayRes.IsSuccess);

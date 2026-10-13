@@ -7,11 +7,10 @@ Dịch vụ PaymentService cho hệ sinh thái DPRENTAL, được xây dựng b�
 ```text
 PaymentService/
   src/
-    Common/          # Kiểu dùng chung, Result/Error, VndAmountValidator
-    Domain/          # Entities (Invoice, InvoiceItem, OperationReceipt, OutboxMessage), domain utils
-    Application/     # DTOs, IServices (IInvoiceService), Options, Fingerprinter, VietQR
-    Infrastructure/  # EF Core DbContext, Migrations, InvoiceService implementation
-    Api/             # Controllers, Filters, JWT Auth, Background Workers, HTTP composition root
+    Common/          # Kiểu dùng chung, Result/Error, Utils (VndAmountValidator, VietQrUrlGenerator, PaymentCodeGenerator, PayloadFingerprinter)
+    Domain/          # Entities, IRepository, Repository (EF Core DbContext, EfInvoiceRepository), Migrations
+    Application/     # DTOs, IServices, Services (InvoiceService, Creation, Lifecycle, Recording), Background (InvoiceExpiryWorker), Options
+    Api/             # Controllers, Filters, JWT Auth, HTTP composition root
   tests/             # Kiểm thử đơn vị và tích hợp (PostgreSQL 17)
 Directory.Build.props
 Directory.Packages.props

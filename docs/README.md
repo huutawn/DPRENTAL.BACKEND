@@ -4,14 +4,12 @@
 
 | Lớp | Trách nhiệm | Không được chứa |
 | --- | --- | --- |
-| `Common` | Kiểu dữ liệu và concern dùng chung (`Result`, `Error`, enums, utility như `VndAmountValidator`) | Nghiệp vụ đặc thù domain khác |
-| `Domain` | Entities (`Invoice`, `InvoiceItem`, `OperationReceipt`, `OutboxMessage`), domain logic, generators | EF Core, Npgsql, HTTP pipeline, controller |
-| `Application` | DTOs, IServices (`IInvoiceService`), Options, Fingerprinting, QR generation | Controller, HTTP pipeline, direct database access |
-| `Infrastructure` | EF Core DbContext (`PaymentServiceDbContext`), Migrations, Services (`InvoiceService`) | Controller, HTTP pipeline |
-| `Api` | Controllers (`InvoicesController`), Background workers (`InvoiceExpiryWorker`), Security (JWT/JWKS), DI/composition root | Business logic trực tiếp |
+| `Common` | Kiểu dữ liệu và concern dùng chung (`Result`, `Error`, enums, utility như `VndAmountValidator`, `VietQrUrlGenerator`, `PaymentCodeGenerator`, `PayloadFingerprinter`) | Application, Domain, HTTP pipeline |
+| `Domain` | Entities (`Invoice`, `InvoiceItem`, `OperationReceipt`, `OutboxMessage`), `IRepository`, `Repository` (EF Core persistence, `PaymentServiceDbContext`, `EfInvoiceRepository`), `Migrations` | Application DTOs, HTTP pipeline, controller |
+| `Application` | DTOs, IServices (`IInvoiceService`, `IInvoiceCreationService`, `IInvoiceLifecycleService`, `IPaymentRecordingService`), Services, Background workers (`InvoiceExpiryWorker`), Options | Controller, HTTP pipeline, direct DbContext/EF/Npgsql access |
+| `Api` | Controllers (`InvoicesController`), Security (JWT/JWKS), Exception handlers, DI/composition root (`AddPaymentDomainRepositories`, `AddPaymentApplication`) | Business logic trực tiếp |
 
-Domain hoàn toàn độc lập với EF Core và Npgsql; các entity dùng `DataAnnotations` / `DataAnnotations.Schema` attributes (`[Table]`, `[Key]`, `[Required]`, `[MaxLength]`, `[Column(TypeName = "numeric(18,0)")]`, `[ForeignKey]`, `[InverseProperty]`) thay vì các lớp `IEntityTypeConfiguration` riêng lẻ. Hạ tầng persistence và unique indexes (`InvoiceRef`, `RentalOrderId`, `PaymentCode`, `PaymentRef`, `OperationKey`) được quản lý bởi `PaymentServiceDbContext` trong project `Infrastructure` và đăng ký qua `AddPaymentServiceInfrastructure`.
-
+Hạ tầng persistence và unique indexes (`InvoiceRef`, `RentalOrderId`, `PaymentCode`, `PaymentRef`, `OperationKey`) được quản lý bởi `PaymentServiceDbContext` và `EfInvoiceRepository` trong project `Domain`, đăng ký qua `AddPaymentDomainRepositories`. Tầng `Application` và background worker đăng ký qua `AddPaymentApplication`.
 ## Cấu hình môi trường
 
 `Api/appsettings.Development.json` chỉ chứa giá trị không nhạy cảm. Docker Compose lấy credential local từ `.env`: sao chép `.env.example` thành `.env` và đặt `POSTGRES_PASSWORD` riêng. `.env` đã bị Git bỏ qua. API lấy connection string từ biến môi trường `ConnectionStrings__Postgres`.

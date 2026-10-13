@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace Dprental.PaymentService.Application.Utils;
+namespace Dprental.PaymentService.Common.Utils;
 
 public static class VietQrUrlGenerator
 {

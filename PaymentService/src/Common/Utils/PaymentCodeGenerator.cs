@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 
-namespace Dprental.PaymentService.Domain.Utils;
+namespace Dprental.PaymentService.Common.Utils;
 
 /// <summary>
 /// Sinh mã thanh toán chuẩn SePay/VietQR theo mẫu: DPR {10 ký tự alphabet không chứa 0/1/I/O}.

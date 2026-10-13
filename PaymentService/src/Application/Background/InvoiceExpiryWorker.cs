@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Dprental.PaymentService.Api.Background;
+namespace Dprental.PaymentService.Application.Background;
 
 [SuppressMessage("Usage", "CA1848:Use the LoggerMessage delegates", Justification = "Background worker.")]
 public sealed class InvoiceExpiryWorker : BackgroundService
@@ -31,6 +31,9 @@ public sealed class InvoiceExpiryWorker : BackgroundService
         _interval = TimeSpan.FromSeconds(Math.Max(1, intervalSeconds));
         _batchSize = configuration.GetValue("Workers:InvoiceExpiry:BatchSize", 100);
     }
+
+    public TimeSpan Interval => _interval;
+    public int BatchSize => _batchSize;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -70,7 +73,7 @@ public sealed class InvoiceExpiryWorker : BackgroundService
         _logger.LogInformation("InvoiceExpiryWorker stopped.");
     }
 
-    private async Task ProcessBatchAsync(CancellationToken cancellationToken)
+    internal async Task ProcessBatchAsync(CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var invoiceService = scope.ServiceProvider.GetRequiredService<IInvoiceService>();

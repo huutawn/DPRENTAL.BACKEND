@@ -1,4 +1,4 @@
-using Dprental.PaymentService.Domain.Utils;
+using Dprental.PaymentService.Common.Utils;
 using Xunit;
 
 namespace Dprental.PaymentService.Api.Tests.Unit;

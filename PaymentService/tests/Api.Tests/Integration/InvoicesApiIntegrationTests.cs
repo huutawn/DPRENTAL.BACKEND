@@ -10,7 +10,7 @@ using Dprental.PaymentService.Api.Tests.TestHelpers;
 using Dprental.PaymentService.Application.DTOs.Invoice;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Infrastructure.Persistence;
+using Dprental.PaymentService.Domain.Repository;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;

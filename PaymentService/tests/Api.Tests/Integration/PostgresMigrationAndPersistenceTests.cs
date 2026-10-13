@@ -2,7 +2,7 @@ using System.Text.Json;
 using Dprental.PaymentService.Api.Tests.TestHelpers;
 using Dprental.PaymentService.Application.DTOs.Events;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Infrastructure.Persistence;
+using Dprental.PaymentService.Domain.Repository;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;

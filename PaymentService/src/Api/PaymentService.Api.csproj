@@ -12,8 +12,8 @@
     <PackageReference Include="Swashbuckle.AspNetCore" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../Application/PaymentService.Application.csproj" />
+    <ProjectReference Include="../Common/PaymentService.Common.csproj" />
     <ProjectReference Include="../Domain/PaymentService.Domain.csproj" />
-    <ProjectReference Include="../Infrastructure/PaymentService.Infrastructure.csproj" />
+    <ProjectReference Include="../Application/PaymentService.Application.csproj" />
   </ItemGroup>
 </Project>

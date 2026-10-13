@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace PaymentService.Infrastructure.Migrations
+namespace Dprental.PaymentService.Domain.Migrations
 {
     /// <inheritdoc />
     public partial class InitialCreate : Migration
