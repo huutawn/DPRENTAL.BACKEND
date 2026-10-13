@@ -9,7 +9,9 @@ namespace Dprental.RentalService.Application.Checkout;
 /// </summary>
 public interface ICheckoutInvoiceIssuer
 {
-    /// <param name="order">Đơn đã nạp đủ RentalItem và đang được DbContext của request theo dõi.</param>
+    /// <summary>
+    /// <paramref name="order"/> phải đã nạp đủ RentalItem và đang được DbContext của request theo dõi.
+    /// </summary>
     /// <returns>
     /// Thành công khi đơn có hóa đơn. Thất bại là một trong <see cref="CheckoutErrors.InvoiceTemporarilyUnavailable"/>,
     /// <see cref="CheckoutErrors.InvoiceRejected"/> hoặc <see cref="CheckoutErrors.OrderExpired"/>; đơn hàng vẫn được giữ nguyên.

@@ -11,7 +11,9 @@ namespace Dprental.RentalService.Application.Checkout;
 /// </summary>
 public interface ICheckoutOrderWriter
 {
-    /// <param name="utcNow">Phải là cùng thời điểm đã dùng khi giữ lịch để hạn thanh toán trùng hạn giữ.</param>
+    /// <summary>
+    /// <paramref name="utcNow"/> phải là cùng thời điểm đã dùng khi giữ lịch để hạn thanh toán trùng hạn giữ.
+    /// </summary>
     Task<Result<RentalOrder>> CreateOrderAsync(
         CheckoutPlan plan,
         IReadOnlyList<CheckoutHeldLine> heldLines,

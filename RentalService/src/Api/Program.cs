@@ -98,6 +98,7 @@ builder.Services.AddSwaggerGen(options =>
         Description = "API dịch vụ quản lý đơn thuê (RentalService) trong hệ sinh thái DPRental.\n\n"
             + "Bao gồm các phân hệ nghiệp vụ:\n"
             + "- **Giỏ hàng thuê (Rental Cart)**: Thêm/sửa/xóa mục thuê, kiểm tra tính khả dụng và biến động giá theo thời gian thực.\n"
+            + "- **Gửi đơn hàng (Checkout)**: Tạo đơn hàng chờ thanh toán từ các dòng đã chọn trong giỏ, giữ lịch thiết bị và tạo hóa đơn; chống trùng bằng `Idempotency-Key`.\n"
             + "- **Mục đơn thuê (Rental Items)**: Supplier chấp nhận (Accept) hoặc từ chối (Reject) mục thuê sau khi đơn hàng được thanh toán.\n"
             + "- **Lịch thuê cá nhân (Renter Calendar)**: Renter tra cứu lịch thuê thiết bị theo tháng kèm phân bổ mật độ theo ngày.\n"
             + "- **Thống kê xác nhận (Supplier Statistics)**: Admin theo dõi số lượng chấp nhận, từ chối, quá hạn xác nhận của Supplier.\n"

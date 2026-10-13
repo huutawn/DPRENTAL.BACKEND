@@ -5,6 +5,16 @@ using Dprental.RentalService.Domain.Entities;
 namespace Dprental.RentalService.Api.Contracts.Checkout;
 
 /// <summary>Đơn hàng vừa tạo (hoặc đã tạo từ lần gửi trước). Không chứa mã máy hay mã giữ lịch nội bộ.</summary>
+/// <param name="OrderId">Mã định danh duy nhất của đơn hàng.</param>
+/// <param name="OrderCode">Mã đơn hàng hiển thị cho người dùng, dạng DH-YYYY-NNNNNN.</param>
+/// <param name="Status">Trạng thái đơn hàng; đơn mới tạo là PENDING_PAYMENT.</param>
+/// <param name="PaymentDeadline">Hạn thanh toán, cũng là hạn giữ lịch (thời điểm gửi đơn + 30 phút).</param>
+/// <param name="InvoiceRef">Mã hóa đơn bên PaymentService, dùng để thanh toán.</param>
+/// <param name="Currency">Loại tiền của đơn hàng (VND).</param>
+/// <param name="TotalRentalAmount">Tổng tiền thuê của mọi dòng.</param>
+/// <param name="TotalDepositAmount">Tổng tiền cọc của mọi dòng.</param>
+/// <param name="TotalAmount">Số tiền phải thanh toán = tổng tiền thuê + tổng tiền cọc.</param>
+/// <param name="IsReplay">true khi đơn đã được tạo từ lần gửi trước với cùng Idempotency-Key.</param>
 public sealed record CheckoutResponse(
     Guid OrderId,
     string OrderCode,
