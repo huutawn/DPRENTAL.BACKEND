@@ -18,6 +18,12 @@ public sealed class CatalogGatewayIntegrationTests
     [InlineData("/api/v1/catalog/categories/11111111-1111-1111-1111-111111111111")]
     [InlineData("/api/v1/catalog/equipment-types?keyword=crane&categoryId=11111111-1111-1111-1111-111111111111&page=2&pageSize=10&sort=name_asc")]
     [InlineData("/api/v1/catalog/equipment-types/11111111-1111-1111-1111-111111111111")]
+    [InlineData("/api/v1/catalog/brands")]
+    [InlineData("/api/v1/catalog/brands?keyword=crane&page=2&pageSize=10&sort=name_asc")]
+    [InlineData("/api/v1/catalog/brands/11111111-1111-1111-1111-111111111111")]
+    [InlineData("/api/v1/catalog/equipment-types/11111111-1111-1111-1111-111111111111/schema")]
+    [InlineData("/api/v1/catalog/equipment-types/11111111-1111-1111-1111-111111111111/schemas/1")]
+    [InlineData("/api/v1/catalog/equipment-types/11111111-1111-1111-1111-111111111111/spec-schemas/1")]
     public async Task PublicReadsPreservePathAndQueryWithoutAuthentication(string path)
     {
         using RSA key = RSA.Create(2048);
@@ -38,6 +44,15 @@ public sealed class CatalogGatewayIntegrationTests
     [InlineData("POST", "/api/v1/catalog/categories")]
     [InlineData("PATCH", "/api/v1/catalog/categories/11111111-1111-1111-1111-111111111111")]
     [InlineData("GET", "/api/v1/catalog/equipment-types/admin/export")]
+    [InlineData("POST", "/api/v1/catalog/brands")]
+    [InlineData("PATCH", "/api/v1/catalog/brands/11111111-1111-1111-1111-111111111111")]
+    [InlineData("POST", "/api/v1/catalog/brands/11111111-1111-1111-1111-111111111111/disable")]
+    [InlineData("POST", "/api/v1/catalog/brands/11111111-1111-1111-1111-111111111111/enable")]
+    [InlineData("GET", "/api/v1/catalog/admin/brands")]
+    [InlineData("GET", "/api/v1/catalog/admin/brands/11111111-1111-1111-1111-111111111111")]
+    [InlineData("GET", "/api/v1/catalog/brands/11111111-1111-1111-1111-111111111111/enable")]
+    [InlineData("POST", "/api/v1/catalog/equipment-types/11111111-1111-1111-1111-111111111111/spec-schemas/1/publish")]
+    [InlineData("POST", "/api/v1/catalog/equipment-types/11111111-1111-1111-1111-111111111111/specifications/validate")]
     public async Task ProtectedRoutesRequireBearerAndRejectWrongAudience(string method, string path)
     {
         using RSA key = RSA.Create(2048);
@@ -55,6 +70,48 @@ public sealed class CatalogGatewayIntegrationTests
         using HttpResponseMessage invalidResponse = await client.SendAsync(invalid);
         Assert.Equal(HttpStatusCode.Unauthorized, invalidResponse.StatusCode);
         Assert.Null(upstream.LastRequest);
+    }
+
+    [Fact]
+    public async Task PublicSchemaBatchPreservesBodyWithoutAuthentication()
+    {
+        using RSA key = RSA.Create(2048);
+        await using LoopbackTestService upstream = new(CreateJwks(key, "key-1"));
+        using var factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+        const string path = "/api/v1/catalog/equipment-types/11111111-1111-1111-1111-111111111111/schemas/batch";
+        const string body = "{\"versions\":[1,2]}";
+        using StringContent content = new(body, Encoding.UTF8, "application/json");
+
+        using HttpResponseMessage response = await client.PostAsync(path, content);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(path, upstream.LastRequest?.Path);
+        Assert.Equal(body, upstream.LastRequest?.Body);
+        Assert.True(string.IsNullOrEmpty(upstream.LastRequest?.Authorization));
+    }
+
+    [Theory]
+    [InlineData(400)]
+    [InlineData(404)]
+    public async Task PublicBrandErrorsArePreserved(int statusCode)
+    {
+        using RSA key = RSA.Create(2048);
+        const string body = "{\"title\":\"Brand.TestError\"}";
+        await using LoopbackTestService upstream = new(CreateJwks(key, "key-1"))
+        {
+            ResponseStatusCode = statusCode,
+            ResponseBody = body,
+            ResponseContentType = "application/problem+json"
+        };
+        using var factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/catalog/brands?unknown=value");
+
+        Assert.Equal(statusCode, (int)response.StatusCode);
+        Assert.Equal(body, await response.Content.ReadAsStringAsync());
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
     }
 
     [Theory]

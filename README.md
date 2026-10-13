@@ -18,10 +18,21 @@ Gateway/
 ```
 Gateway nhận JWT được AuthService ký và chỉ tải public key từ JWKS. Không đặt private key, token, hoặc password vào `appsettings*.json`.
 
+## Inventory public API
+
+GET `/api/v1/inventory/public/equipment-listings` và GET
+`/api/v1/inventory/public/equipment-listings/{id}` cho phép anonymous.
+Hai route này thay thế đường dẫn `/public/assets` đã được InventoryService loại bỏ.
+
 ## CatalogService
 
 Gateway chuyển tiếp nguyên path/query/body của `/api/v1/catalog` tới `catalog-service:8080`.
-Bốn route GET công khai là categories, categories/{id}, equipment-types và equipment-types/{id}.
+Các route GET công khai là categories, categories/{id}, brands, brands/{id}, equipment-types,
+equipment-types/{id}, equipment-types/{id}/schema, equipment-types/{id}/schemas/{version}
+và equipment-types/{id}/spec-schemas/{version}.
+POST equipment-types/{id}/schemas/batch cũng cho phép anonymous vì đây là truy vấn chỉ đọc.
+Các route public chỉ mở đúng HTTP method và path; admin, ghi dữ liệu và validate specifications vẫn yêu cầu JWT.
+Route mới được nối cuối danh sách; appsettings.Development.json giữ override theo cùng index để không đổi đích của route hiện có.
 Template detail kết thúc bằng `/` để Ocelot chỉ match một segment ID; URL caller không cần slash cuối.
 Các request Catalog còn lại yêu cầu JWT Bearer với audience `Gateway:Authentication:Jwt:Audience`;
 Catalog tự kiểm tra role `Admin` cho POST/PATCH/publish/disable. Gateway không thêm nghiệp vụ Catalog.
