@@ -1,5 +1,10 @@
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Checkout;
+using Dprental.RentalService.Application.Errors;
+using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.Options;
+using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Application.Validation;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
@@ -8,7 +13,7 @@ using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Domain.Policies;
 using Microsoft.Extensions.Options;
 
-namespace Dprental.RentalService.Application.Checkout;
+namespace Dprental.RentalService.Application.Services.Checkout;
 
 public sealed class CheckoutPreparationService : ICheckoutPreparationService
 {

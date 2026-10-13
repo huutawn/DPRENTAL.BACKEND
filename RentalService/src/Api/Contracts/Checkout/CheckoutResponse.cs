@@ -1,4 +1,4 @@
-using Dprental.RentalService.Application.Checkout;
+using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 

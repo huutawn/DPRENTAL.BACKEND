@@ -1,8 +1,9 @@
+using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.Operations;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Policies;
 
-namespace Dprental.RentalService.Application.Checkout;
+namespace Dprental.RentalService.Application.Policies;
 
 /// <summary>
 /// Quy tắc ngày thuê lúc checkout theo SRS Rental: giao từ ngày mai, trong 6 tháng, tối đa 30 ngày.

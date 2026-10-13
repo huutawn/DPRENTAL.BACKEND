@@ -1,7 +1,9 @@
 using Dprental.RentalService.Api.Tests.Domain;
-using Dprental.RentalService.Application.Checkout;
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.Errors;
+using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;

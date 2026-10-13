@@ -1,7 +1,8 @@
+using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
 
-namespace Dprental.RentalService.Application.Checkout;
+namespace Dprental.RentalService.Application.DTOs.Checkout;
 
 /// <summary>
 /// Kết quả của một lần gửi checkout. Khi thất bại, ngoài <see cref="Error"/> còn mang chi tiết của bước bị lỗi

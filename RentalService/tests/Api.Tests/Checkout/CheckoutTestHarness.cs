@@ -1,8 +1,9 @@
 using Dprental.RentalService.Api.Tests.TestHelpers;
-using Dprental.RentalService.Application.Checkout;
+using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.Expiry;
 using Dprental.RentalService.Application.Operations;
 using Dprental.RentalService.Application.Options;
+using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;

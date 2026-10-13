@@ -1,7 +1,8 @@
 using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Common;
 
-namespace Dprental.RentalService.Application.Checkout;
+namespace Dprental.RentalService.Application.DTOs.Checkout;
 
 /// <summary>Một dòng đã giữ lịch thành công, đủ dữ liệu để tạo RentalItem và RentalUnitAssignment.</summary>
 public sealed record CheckoutHeldLine(

@@ -1,8 +1,12 @@
+using Dprental.RentalService.Application.DTOs.Checkout;
+using Dprental.RentalService.Application.Errors;
+using Dprental.RentalService.Application.IServices.Checkout;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 
-namespace Dprental.RentalService.Application.Checkout;
+namespace Dprental.RentalService.Application.Services.Checkout;
 
 public sealed class CheckoutService : ICheckoutService
 {

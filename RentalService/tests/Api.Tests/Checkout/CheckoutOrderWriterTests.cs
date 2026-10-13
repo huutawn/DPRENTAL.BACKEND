@@ -1,7 +1,9 @@
 using System.Reflection;
 using System.Text.Json;
 using Dprental.RentalService.Api.Tests.Domain;
-using Dprental.RentalService.Application.Checkout;
+using Dprental.RentalService.Application.DTOs.Checkout;
+using Dprental.RentalService.Application.Errors;
+using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;

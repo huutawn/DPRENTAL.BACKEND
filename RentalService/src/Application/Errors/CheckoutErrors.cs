@@ -1,6 +1,6 @@
 using Dprental.RentalService.Common;
 
-namespace Dprental.RentalService.Application.Checkout;
+namespace Dprental.RentalService.Application.Errors;
 
 public static class CheckoutErrors
 {

@@ -1,4 +1,6 @@
-namespace Dprental.RentalService.Application.Checkout;
+using Dprental.RentalService.Application.DTOs.Checkout;
+
+namespace Dprental.RentalService.Application.IServices.Checkout;
 
 /// <summary>
 /// Giữ lịch Inventory cho mọi dòng của một lần checkout theo kiểu all-or-nothing:

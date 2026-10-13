@@ -1,7 +1,8 @@
-using Dprental.RentalService.Application.Checkout;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Payment;
+using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.Operations;
+using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;

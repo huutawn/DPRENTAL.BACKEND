@@ -1,7 +1,9 @@
 using Dprental.RentalService.Api.Contracts.Checkout;
 using Dprental.RentalService.Api.Filters;
 using Dprental.RentalService.Api.Security;
-using Dprental.RentalService.Application.Checkout;
+using Dprental.RentalService.Application.DTOs.Checkout;
+using Dprental.RentalService.Application.IServices.Checkout;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Microsoft.AspNetCore.Authorization;

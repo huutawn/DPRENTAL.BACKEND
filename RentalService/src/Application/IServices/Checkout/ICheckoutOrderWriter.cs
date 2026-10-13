@@ -1,7 +1,8 @@
+using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
 
-namespace Dprental.RentalService.Application.Checkout;
+namespace Dprental.RentalService.Application.IServices.Checkout;
 
 /// <summary>
 /// Lưu RentalOrder, RentalItem, RentalUnitAssignment, RentalTermsAcceptance và cập nhật giỏ trong một transaction

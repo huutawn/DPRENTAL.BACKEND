@@ -1,4 +1,5 @@
-using Dprental.RentalService.Application.Checkout;
+using Dprental.RentalService.Application.IServices.Checkout;
+using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Application.Services.Cart;
 using System;
 using Microsoft.Extensions.DependencyInjection;

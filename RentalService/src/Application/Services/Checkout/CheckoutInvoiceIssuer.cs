@@ -1,6 +1,8 @@
 #pragma warning disable CA1848, CA1873
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Payment;
+using Dprental.RentalService.Application.Errors;
+using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.Operations;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
@@ -9,7 +11,7 @@ using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
-namespace Dprental.RentalService.Application.Checkout;
+namespace Dprental.RentalService.Application.Services.Checkout;
 
 public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
 {

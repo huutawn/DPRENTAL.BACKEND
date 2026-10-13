@@ -1,7 +1,8 @@
+using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
 
-namespace Dprental.RentalService.Application.Checkout;
+namespace Dprental.RentalService.Application.IServices.Checkout;
 
 /// <summary>
 /// Tạo hóa đơn Payment cho đơn đang chờ thanh toán và gắn InvoiceRef vào đơn.

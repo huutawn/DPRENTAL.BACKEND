@@ -1,8 +1,11 @@
 using Dprental.RentalService.Api.Tests.TestHelpers;
-using Dprental.RentalService.Application.Checkout;
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Payment;
+using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.Options;
+using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;

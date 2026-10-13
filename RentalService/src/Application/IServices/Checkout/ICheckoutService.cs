@@ -1,4 +1,6 @@
-namespace Dprental.RentalService.Application.Checkout;
+using Dprental.RentalService.Application.DTOs.Checkout;
+
+namespace Dprental.RentalService.Application.IServices.Checkout;
 
 /// <summary>
 /// Gửi đơn hàng từ giỏ: chuẩn bị, giữ lịch, lưu đơn rồi tạo hóa đơn. Gửi lại với cùng Idempotency-Key

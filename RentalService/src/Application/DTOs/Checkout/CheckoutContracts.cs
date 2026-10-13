@@ -1,6 +1,6 @@
 using Dprental.RentalService.Domain.Entities;
 
-namespace Dprental.RentalService.Application.Checkout;
+namespace Dprental.RentalService.Application.DTOs.Checkout;
 
 /// <summary>Danh tính renter lấy từ JWT (<c>sub</c>, <c>pc</c>), không nhận từ request body.</summary>
 public sealed record CheckoutRenterContext(Guid RenterId, bool IsProfileCompleted);

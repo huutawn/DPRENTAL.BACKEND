@@ -1,11 +1,14 @@
 #pragma warning disable CA1848, CA1873
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.Operations;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Microsoft.Extensions.Logging;
 
-namespace Dprental.RentalService.Application.Checkout;
+namespace Dprental.RentalService.Application.Services.Checkout;
 
 public sealed class CheckoutHoldOrchestrator : ICheckoutHoldOrchestrator
 {
