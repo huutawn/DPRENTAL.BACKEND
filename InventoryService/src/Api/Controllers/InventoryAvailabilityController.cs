@@ -32,6 +32,7 @@ public sealed class InventoryAvailabilityController : ControllerBase
     /// <param name="request">Thông tin danh sách assetIds và khoảng thời gian.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <returns>Danh sách các assetId khả dụng, không khả dụng và không tìm thấy.</returns>
+    [AllowAnonymous]
     [HttpPost("availability/check")]
     [ProducesResponseType(typeof(CheckAvailabilityBatchResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
@@ -53,6 +54,7 @@ public sealed class InventoryAvailabilityController : ControllerBase
     /// <summary>
     /// Kiểm tra tính khả dụng của một EquipmentListing trong khoảng thời gian đề xuất.
     /// </summary>
+    [AllowAnonymous]
     [HttpPost("equipment-listings/{listingId:guid}/availability/check")]
     [ProducesResponseType(typeof(CheckListingAvailabilityResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
@@ -82,6 +84,7 @@ public sealed class InventoryAvailabilityController : ControllerBase
     /// <param name="to">Ngày kết thúc cửa sổ truy vấn (inclusive).</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <returns>Dữ liệu trạng thái booking và các khoảng ngày bận.</returns>
+    [AllowAnonymous]
     [HttpGet("assets/{assetId:guid}/busy-ranges")]
     [ProducesResponseType(typeof(AssetBusyRangesResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]

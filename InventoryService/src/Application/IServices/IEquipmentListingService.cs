@@ -2,6 +2,7 @@ using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.Security;
+using Dprental.InventoryService.Application.Search;
 using Dprental.InventoryService.Common;
 
 namespace Dprental.InventoryService.Application.IServices;
@@ -30,7 +31,7 @@ public interface IEquipmentListingService
     /// <summary>
     /// Lấy danh sách phân trang các EquipmentListing thuộc sở hữu của người dùng hiện tại.
     /// </summary>
-    Task<Result<PagedResponse<EquipmentListingResponse>>> ListOwnerListingsAsync(
+    Task<Result<SearchExecution<PagedResponse<EquipmentListingResponse>>>> ListOwnerListingsAsync(
         ListEquipmentListingsRequest request,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);

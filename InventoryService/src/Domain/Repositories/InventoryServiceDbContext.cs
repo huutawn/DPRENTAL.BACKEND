@@ -51,6 +51,19 @@ public sealed class InventoryServiceDbContext : DbContext
     /// Bảng kiểm soát tính duy nhất khi tiếp nhận thông điệp (Transactional Inbox).
     /// </summary>
     public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
+    /// <summary>
+    /// Bảng quản lý hàng đợi công việc đồng bộ chỉ mục tìm kiếm (Search Projection Jobs).
+    /// </summary>
+    public DbSet<SearchProjectionJob> SearchProjectionJobs => Set<SearchProjectionJob>();
+    /// <summary>
+    /// Bảng quản lý generation và readiness của chỉ mục tìm kiếm live.
+    /// </summary>
+    public DbSet<SearchGeneration> SearchGenerations => Set<SearchGeneration>();
+
+    /// <summary>
+    /// Bảng quản lý các đợt chạy backfill và staging swap.
+    /// </summary>
+    public DbSet<SearchBackfillRun> SearchBackfillRuns => Set<SearchBackfillRun>();
 
     public InventoryServiceDbContext(DbContextOptions<InventoryServiceDbContext> options) : base(options)
     {
@@ -58,6 +71,9 @@ public sealed class InventoryServiceDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.HasSequence<long>("search_projection_revision_seq", SchemaName)
+            .StartsAt(1)
+            .IncrementsBy(1);
         base.OnModelCreating(modelBuilder);
 
         // Thiết lập schema mặc định là "inventory"
@@ -288,6 +304,33 @@ public sealed class InventoryServiceDbContext : DbContext
 
             b.HasIndex(i => new { i.Status, i.NextAttemptAt })
                 .HasDatabaseName("ix_inbox_messages_status_next_attempt");
+        });
+
+        // 7. Cấu hình thực thể SearchProjectionJob
+        modelBuilder.Entity<SearchProjectionJob>(b =>
+        {
+            b.ToTable("search_projection_jobs", SchemaName);
+            b.HasKey(j => j.Id);
+            b.HasIndex(j => new { j.EntityType, j.EntityId })
+                .IsUnique()
+                .HasDatabaseName("ix_search_projection_jobs_entity");
+            b.HasIndex(j => new { j.Status, j.NextAttemptAt, j.LockLeaseExpiresAt })
+                .HasDatabaseName("ix_search_projection_jobs_claim");
+        });
+
+        // 8. Cấu hình thực thể SearchGeneration
+        modelBuilder.Entity<SearchGeneration>(b =>
+        {
+            b.ToTable("search_generations", SchemaName);
+            b.HasKey(g => g.Id);
+        });
+
+        // 9. Cấu hình thực thể SearchBackfillRun
+        modelBuilder.Entity<SearchBackfillRun>(b =>
+        {
+            b.ToTable("search_backfill_runs", SchemaName);
+            b.HasKey(r => r.RunId);
+            b.HasIndex(r => r.Status).HasDatabaseName("ix_search_backfill_runs_status");
         });
 
     }

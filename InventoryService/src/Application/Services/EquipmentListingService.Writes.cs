@@ -7,6 +7,7 @@ using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Domain.Entities;
+using Dprental.InventoryService.Application.Kafka.Outbox;
 
 namespace Dprental.InventoryService.Application.Services;
 
@@ -190,11 +191,15 @@ public sealed partial class EquipmentListingService
             return assetResult.Error;
         }
         var asset = assetResult.Value;
-        var txResult = await _writeTransaction.ExecuteListingWriteAsync(listingId, (ctx, _) =>
+        var txResult = await _writeTransaction.ExecuteListingWriteAsync(listingId, async (ctx, ct) =>
         {
             ctx.Listings.Add(listing);
             ctx.Assets.Add(asset);
-            return Task.FromResult(Result.Success(listing));
+            var revListing = await ctx.GetNextSearchRevisionAsync(ct);
+            var revAsset = await ctx.GetNextSearchRevisionAsync(ct);
+            ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", revListing, false, now));
+            ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(asset.Id, "Upsert", revAsset, now));
+            return Result.Success(listing);
         }, cancellationToken);
 
         if (txResult.IsFailure)
@@ -431,6 +436,11 @@ public sealed partial class EquipmentListingService
             {
                 return detailsRes.Error;
             }
+
+            var revision = await ctx.GetNextSearchRevisionAsync(ct);
+            bool needsFanout = request.IsBrandIdSpecified || request.IsModelSpecified || request.IsManufactureYearSpecified;
+            ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", revision, needsFanout, now));
+
             return Result.Success(listing);
         }, cancellationToken);
 
@@ -613,6 +623,10 @@ public sealed partial class EquipmentListingService
 
             var newAsset = assetRes.Value;
             ctx.Assets.Add(newAsset);
+            var revAsset = await ctx.GetNextSearchRevisionAsync(ct);
+            var revListing = await ctx.GetNextSearchRevisionAsync(ct);
+            ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(newAsset.Id, "Upsert", revAsset, now));
+            ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", revListing, false, now));
             return Result.Success(newAsset);
         }, cancellationToken);
 

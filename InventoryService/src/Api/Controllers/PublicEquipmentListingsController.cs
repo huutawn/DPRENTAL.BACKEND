@@ -1,5 +1,6 @@
 using Dprental.InventoryService.Api.Filters;
 using Dprental.InventoryService.Application.DTOs.Listings;
+using Dprental.InventoryService.Application.DTOs.Availability;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Common;
@@ -111,7 +112,8 @@ public sealed class PublicEquipmentListingsController : ControllerBase
             return this.ToProblem(result.Error);
         }
 
-        return Ok(result.Value);
+        Response.Headers["X-Search-Backend"] = result.Value.SearchBackend;
+        return Ok(result.Value.Value);
     }
 
     /// <summary>
@@ -125,6 +127,28 @@ public sealed class PublicEquipmentListingsController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _publicListingService.GetPublicListingByIdAsync(id, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
+    }
+
+    /// <summary>
+    /// Kiểm tra tính khả dụng công khai của một EquipmentListing trong khoảng thời gian đề xuất.
+    /// </summary>
+    [HttpPost("{id:guid}/availability/check")]
+    [ProducesResponseType(typeof(CheckListingAvailabilityResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CheckAvailability(
+        [FromRoute] Guid id,
+        [FromBody] CheckListingAvailabilityRequest request,
+        [FromServices] IInventoryAvailabilityService availabilityService,
+        CancellationToken cancellationToken)
+    {
+        var result = await availabilityService.CheckListingAvailabilityAsync(id, request, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);

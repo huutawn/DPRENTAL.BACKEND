@@ -183,6 +183,7 @@ public sealed partial class InventoryAssetServiceTests
         public IAssetAllocationRepository Allocations => throw new NotImplementedException();
         public ICalendarBlockRepository CalendarBlocks => throw new NotImplementedException();
         public List<OutboxMessage> StagedOutbox { get; } = new();
+        public Task<long> GetNextSearchRevisionAsync(CancellationToken cancellationToken = default) => Task.FromResult(1L);
 
         public FakeWriteContext(Guid assetId, IInventoryAssetRepository assets)
         {

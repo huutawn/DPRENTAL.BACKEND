@@ -47,6 +47,11 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
     {
         ArgumentNullException.ThrowIfNull(criteria);
 
+        if (criteria.CandidateIds != null && criteria.CandidateIds.Count == 0)
+        {
+            return new OwnerEquipmentListingSearchResult(Array.Empty<OwnerEquipmentListingItem>(), 0);
+        }
+
         if (_context.Database.IsRelational())
         {
             await using var transaction = await _context.Database.BeginTransactionAsync(
@@ -71,7 +76,11 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
                 baseQuery = baseQuery.Where(l => l.Status == criteria.Status.Value);
             }
 
-            if (!string.IsNullOrWhiteSpace(criteria.SearchKeyword))
+            if (criteria.CandidateIds != null)
+            {
+                baseQuery = baseQuery.Where(l => criteria.CandidateIds.Contains(l.Id));
+            }
+            else if (!string.IsNullOrWhiteSpace(criteria.SearchKeyword))
             {
                 var escaped = EscapeLikePattern(criteria.SearchKeyword);
                 var pattern = $"%{escaped}%";
@@ -80,32 +89,73 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
                     EF.Functions.ILike(l.Model, pattern, @"\"));
             }
 
-            int totalCount = await baseQuery.CountAsync(cancellationToken);
-            if (totalCount == 0)
+            if (criteria.Sort == AssetSortOption.Relevance && criteria.CandidateIds != null)
             {
-                await transaction.CommitAsync(cancellationToken);
-                return new OwnerEquipmentListingSearchResult(Array.Empty<OwnerEquipmentListingItem>(), 0);
-            }
-
-            var rows = await baseQuery
-                .OrderByDescending(l => l.CreatedAt)
-                .ThenByDescending(l => l.Id)
-                .Skip(criteria.Skip)
-                .Take(criteria.Take)
-                .Select(l => new
+                var matchingIds = (await baseQuery.Select(l => l.Id).ToListAsync(cancellationToken)).ToHashSet();
+                var orderedMatchingIds = criteria.CandidateIds.Where(id => matchingIds.Contains(id)).ToList();
+                int totalCount = orderedMatchingIds.Count;
+                if (totalCount == 0)
                 {
-                    Listing = l,
-                    TotalQuantity = l.Assets.Count(a => a.AcceptingBookings)
-                })
-                .ToListAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                    return new OwnerEquipmentListingSearchResult(Array.Empty<OwnerEquipmentListingItem>(), 0);
+                }
 
-            await transaction.CommitAsync(cancellationToken);
+                var pagedIds = orderedMatchingIds.Skip(criteria.Skip).Take(criteria.Take).ToList();
+                var relCandidateRows = await _context.EquipmentListings
+                    .AsNoTracking()
+                    .Where(l => pagedIds.Contains(l.Id))
+                    .Select(l => new
+                    {
+                        Listing = l,
+                        TotalQuantity = l.Assets.Count(a => a.AcceptingBookings)
+                    })
+                    .ToListAsync(cancellationToken);
 
-            var items = rows
-                .Select(r => new OwnerEquipmentListingItem(r.Listing, r.TotalQuantity))
-                .ToList();
+                await transaction.CommitAsync(cancellationToken);
 
-            return new OwnerEquipmentListingSearchResult(items, totalCount);
+                var rowMap = relCandidateRows.ToDictionary(r => r.Listing.Id);
+                var items = pagedIds
+                    .Where(id => rowMap.ContainsKey(id))
+                    .Select(id => new OwnerEquipmentListingItem(rowMap[id].Listing, rowMap[id].TotalQuantity))
+                    .ToList();
+
+                return new OwnerEquipmentListingSearchResult(items, totalCount);
+            }
+            else
+            {
+                int totalCount = await baseQuery.CountAsync(cancellationToken);
+                if (totalCount == 0)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                    return new OwnerEquipmentListingSearchResult(Array.Empty<OwnerEquipmentListingItem>(), 0);
+                }
+
+                var orderedQuery = criteria.Sort switch
+                {
+                    AssetSortOption.CreatedAsc => baseQuery.OrderBy(l => l.CreatedAt).ThenBy(l => l.Id),
+                    AssetSortOption.ModelDesc => baseQuery.OrderByDescending(l => l.Model).ThenByDescending(l => l.Id),
+                    AssetSortOption.ModelAsc => baseQuery.OrderBy(l => l.Model).ThenBy(l => l.Id),
+                    _ => baseQuery.OrderByDescending(l => l.CreatedAt).ThenByDescending(l => l.Id)
+                };
+
+                var rows = await orderedQuery
+                    .Skip(criteria.Skip)
+                    .Take(criteria.Take)
+                    .Select(l => new
+                    {
+                        Listing = l,
+                        TotalQuantity = l.Assets.Count(a => a.AcceptingBookings)
+                    })
+                    .ToListAsync(cancellationToken);
+
+                await transaction.CommitAsync(cancellationToken);
+
+                var items = rows
+                    .Select(r => new OwnerEquipmentListingItem(r.Listing, r.TotalQuantity))
+                    .ToList();
+
+                return new OwnerEquipmentListingSearchResult(items, totalCount);
+            }
         }
 
         var nonRelQuery = _context.EquipmentListings
@@ -126,7 +176,11 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
             nonRelQuery = nonRelQuery.Where(l => l.Status == criteria.Status.Value);
         }
 
-        if (!string.IsNullOrWhiteSpace(criteria.SearchKeyword))
+        if (criteria.CandidateIds != null)
+        {
+            nonRelQuery = nonRelQuery.Where(l => criteria.CandidateIds.Contains(l.Id));
+        }
+        else if (!string.IsNullOrWhiteSpace(criteria.SearchKeyword))
         {
             nonRelQuery = nonRelQuery.Where(l =>
                 l.Name.Contains(criteria.SearchKeyword, StringComparison.OrdinalIgnoreCase) ||

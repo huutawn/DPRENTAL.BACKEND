@@ -10,6 +10,7 @@ using Dprental.InventoryService.Application.Caching;
 using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Application.Kafka.DependencyInjection;
 using Dprental.InventoryService.Domain.Repositories;
+using Dprental.InventoryService.Api.Search;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -28,6 +29,8 @@ builder.Services.AddInventoryValkeyCache(builder.Configuration);
 // Domain clients (MediaService & CatalogService): Options validation and typed HTTP clients
 builder.Services.AddInventoryClients(builder.Configuration);
 
+// Meilisearch: Search client and index services
+builder.Services.AddInventoryMeilisearch(builder.Configuration);
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<InventoryServiceDbContext>(
         "postgres",

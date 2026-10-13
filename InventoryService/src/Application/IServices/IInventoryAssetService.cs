@@ -1,5 +1,6 @@
 using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Pagination;
+using Dprental.InventoryService.Application.Search;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 
@@ -15,7 +16,7 @@ public interface IInventoryAssetService
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);
 
-    Task<Result<PagedResponse<InventoryAssetResponse>>> ListAssetsAsync(
+    Task<Result<SearchExecution<PagedResponse<InventoryAssetResponse>>>> ListAssetsAsync(
         ListAssetsRequest request,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);

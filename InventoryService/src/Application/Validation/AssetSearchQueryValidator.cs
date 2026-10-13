@@ -105,7 +105,10 @@ public sealed class AssetSearchQueryValidator
             }
         }
 
-        AssetSortOption sortOption = AssetSortOption.CreatedDesc;
+        AssetSortOption sortOption = !string.IsNullOrWhiteSpace(searchKeyword)
+            ? AssetSortOption.Relevance
+            : AssetSortOption.CreatedDesc;
+
         if (!string.IsNullOrWhiteSpace(sort))
         {
             string sortStr = sort.Trim().ToLowerInvariant();
@@ -117,6 +120,7 @@ public sealed class AssetSearchQueryValidator
                 "model_asc" => AssetSortOption.ModelAsc,
                 "manufacture_year_desc" => AssetSortOption.ManufactureYearDesc,
                 "manufacture_year_asc" => AssetSortOption.ManufactureYearAsc,
+                "relevance" => AssetSortOption.Relevance,
                 _ => (AssetSortOption)(-1)
             };
 
@@ -186,7 +190,10 @@ public sealed class AssetSearchQueryValidator
             return Error.Validation("INVALID_QUERY_PARAMETER", "BrandId không được là Guid rỗng.");
         }
 
-        AssetSortOption sortOption = AssetSortOption.CreatedDesc;
+        AssetSortOption sortOption = !string.IsNullOrWhiteSpace(searchKeyword)
+            ? AssetSortOption.Relevance
+            : AssetSortOption.CreatedDesc;
+
         if (!string.IsNullOrWhiteSpace(sort))
         {
             string sortStr = sort.Trim().ToLowerInvariant();
@@ -196,6 +203,7 @@ public sealed class AssetSearchQueryValidator
                 "created_asc" => AssetSortOption.CreatedAsc,
                 "model_desc" => AssetSortOption.ModelDesc,
                 "model_asc" => AssetSortOption.ModelAsc,
+                "relevance" => AssetSortOption.Relevance,
                 _ => (AssetSortOption)(-1)
             };
 

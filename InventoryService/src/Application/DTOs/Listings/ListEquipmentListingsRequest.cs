@@ -12,5 +12,6 @@ public sealed record ListEquipmentListingsRequest(
     string? Q = null,
     Guid? EquipmentTypeId = null,
     Guid? BrandId = null,
-    EquipmentListingStatus? Status = null
+    EquipmentListingStatus? Status = null,
+    string? Sort = null
 );

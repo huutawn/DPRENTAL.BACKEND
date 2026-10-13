@@ -77,7 +77,9 @@ public sealed record OwnerEquipmentListingSearchCriteria(
     int Take,
     Guid? EquipmentTypeId = null,
     Guid? BrandId = null,
-    EquipmentListingStatus? Status = null);
+    EquipmentListingStatus? Status = null,
+    IReadOnlyList<Guid>? CandidateIds = null,
+    AssetSortOption Sort = AssetSortOption.CreatedDesc);
 
 /// <summary>
 /// Đại diện một Listing thuộc người sở hữu cùng số lượng thiết bị vật lý đang nhận đặt lịch.

@@ -10,7 +10,8 @@ public enum AssetSortOption
     ModelDesc = 2,
     ModelAsc = 3,
     ManufactureYearDesc = 4,
-    ManufactureYearAsc = 5
+    ManufactureYearAsc = 5,
+    Relevance = 6
 }
 
 /// <summary>
@@ -33,4 +34,5 @@ public sealed record AssetSearchFilters(
     int? ManufactureYearTo = null,
     AssetSortOption Sort = AssetSortOption.CreatedDesc,
     IReadOnlyList<int>? CompatibleSchemaVersions = null,
-    IReadOnlyList<AssetDynamicFilterCriterion>? DynamicFilters = null);
+    IReadOnlyList<AssetDynamicFilterCriterion>? DynamicFilters = null,
+    IReadOnlyList<Guid>? CandidateIds = null);
