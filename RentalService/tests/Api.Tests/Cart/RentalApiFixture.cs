@@ -1,3 +1,4 @@
+using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Options;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Clients;
@@ -42,7 +43,7 @@ public class RentalApiFixture : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseSetting("ConnectionStrings:Postgres", Dprental.RentalService.Api.Tests.TestHelpers.PostgresTestDatabaseHelper.BaseConnectionString);
+        builder.UseSetting("ConnectionStrings:Postgres", PostgresTestDatabaseHelper.BaseConnectionString);
         builder.ConfigureTestServices(services =>
         {
             // 1. Vượt qua [Authorize] bằng TestAuthHandler

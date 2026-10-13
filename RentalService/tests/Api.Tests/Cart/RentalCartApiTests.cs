@@ -1,4 +1,4 @@
-using Dprental.RentalService.Api.Contracts.Cart;
+using Dprental.RentalService.Application.DTOs.Cart;
 using System;
 using System.Net;
 using System.Net.Http;
@@ -138,10 +138,13 @@ public class RentalCartApiTests : IClassFixture<RentalApiFixture>
             $"rental/cart/items/{itemId}", new UpdateCartItemRequest(5, DateOnly.FromDateTime(DateTime.UtcNow).AddDays(10), DateOnly.FromDateTime(DateTime.UtcNow).AddDays(12)));
         using var invalidQuantityPatch = await _renter1Client.PatchAsJsonAsync(
             $"rental/cart/items/{itemId}", new UpdateCartItemRequest(0, null, null));
+        using var emptyPatch = await _renter1Client.PatchAsJsonAsync(
+            $"rental/cart/items/{itemId}", new UpdateCartItemRequest(null, null, null));
 
         Assert.Equal(HttpStatusCode.BadRequest, partialDatePatch.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, combinedPatch.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, invalidQuantityPatch.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, emptyPatch.StatusCode);
 
         using var getResponse = await _renter1Client.GetAsync("rental/cart");
         await EnsureSuccessAsync(getResponse);

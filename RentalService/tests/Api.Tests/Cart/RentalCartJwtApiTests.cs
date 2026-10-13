@@ -1,4 +1,3 @@
-using Dprental.RentalService.Api.Contracts.Cart;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Cart;
 using System;

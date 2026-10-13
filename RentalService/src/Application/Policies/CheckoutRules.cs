@@ -1,5 +1,5 @@
 using Dprental.RentalService.Application.DTOs.Checkout;
-using Dprental.RentalService.Application.Operations;
+using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Policies;
 

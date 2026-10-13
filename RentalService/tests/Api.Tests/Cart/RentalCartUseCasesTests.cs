@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.Services.Cart;
 using System;
@@ -90,5 +91,91 @@ public sealed class RentalCartUseCasesTests
 
         Assert.True(result.IsFailure);
         Assert.Equal(RentalErrors.CartNotFound, result.Error);
+    }
+
+    [Fact]
+    public async Task UpdateCartItem_MissingAllFields_ReturnsInvalidCartUpdate()
+    {
+        var request = new UpdateCartItemRequest(null, null, null);
+        var result = await _sut.UpdateCartItemAsync(_renterId, Guid.NewGuid(), request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(RentalErrors.InvalidCartUpdate, result.Error);
+    }
+
+    [Fact]
+    public async Task UpdateCartItem_OnlyStartDate_ReturnsInvalidCartUpdate()
+    {
+        var request = new UpdateCartItemRequest(null, _validStartDate, null);
+        var result = await _sut.UpdateCartItemAsync(_renterId, Guid.NewGuid(), request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(RentalErrors.InvalidCartUpdate, result.Error);
+    }
+
+    [Fact]
+    public async Task UpdateCartItem_OnlyEndDate_ReturnsInvalidCartUpdate()
+    {
+        var request = new UpdateCartItemRequest(null, null, _validEndDate);
+        var result = await _sut.UpdateCartItemAsync(_renterId, Guid.NewGuid(), request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(RentalErrors.InvalidCartUpdate, result.Error);
+    }
+
+    [Fact]
+    public async Task UpdateCartItem_BothQuantityAndDates_ReturnsInvalidCartUpdate()
+    {
+        var request = new UpdateCartItemRequest(5, _validStartDate, _validEndDate);
+        var result = await _sut.UpdateCartItemAsync(_renterId, Guid.NewGuid(), request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(RentalErrors.InvalidCartUpdate, result.Error);
+    }
+
+    [Fact]
+    public async Task UpdateCartItem_ValidQuantity_DispatchesToQuantityUpdate()
+    {
+        var cart = RentalCart.Create(Guid.NewGuid(), _renterId, _timeProvider.GetUtcNow()).Value;
+        Guid cartItemId = Guid.NewGuid();
+        cart.AddItem(cartItemId, _listingId, _ownerId, 1, _validStartDate, _validEndDate, _timeProvider.GetUtcNow());
+
+        _cartRepoMock.Setup(x => x.GetActiveByRenterIdAsync(_renterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cart);
+        _ownerProviderMock.Setup(x => x.GetOwnerIdAsync(_listingId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(_ownerId);
+        _cartRepoMock.Setup(x => x.UpdateAsync(cart, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var request = new UpdateCartItemRequest(3, null, null);
+        var result = await _sut.UpdateCartItemAsync(_renterId, cartItemId, request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(3, cart.Items.First(i => i.Id == cartItemId).Quantity);
+    }
+
+    [Fact]
+    public async Task UpdateCartItem_ValidDates_DispatchesToDatesUpdate()
+    {
+        var cart = RentalCart.Create(Guid.NewGuid(), _renterId, _timeProvider.GetUtcNow()).Value;
+        Guid cartItemId = Guid.NewGuid();
+        cart.AddItem(cartItemId, _listingId, _ownerId, 1, _validStartDate, _validEndDate, _timeProvider.GetUtcNow());
+
+        _cartRepoMock.Setup(x => x.GetActiveByRenterIdAsync(_renterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cart);
+        _ownerProviderMock.Setup(x => x.GetOwnerIdAsync(_listingId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(_ownerId);
+        _cartRepoMock.Setup(x => x.UpdateAsync(cart, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        DateOnly newStart = _validStartDate.AddDays(2);
+        DateOnly newEnd = _validEndDate.AddDays(2);
+        var request = new UpdateCartItemRequest(null, newStart, newEnd);
+        var result = await _sut.UpdateCartItemAsync(_renterId, cartItemId, request);
+
+        Assert.True(result.IsSuccess);
+        var updated = cart.Items.First(i => i.Id == cartItemId);
+        Assert.Equal(newStart, updated.ExpectedStartDate);
+        Assert.Equal(newEnd, updated.ExpectedEndDate);
     }
 }

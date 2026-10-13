@@ -1,10 +1,9 @@
 ﻿using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
-using Dprental.RentalService.Domain.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 
-namespace Dprental.RentalService.Infrastructure.Persistence.Repositories;
+namespace Dprental.RentalService.Domain.Repositories;
 
 public sealed class RentalCartRepository(RentalServiceDbContext dbContext) : IRentalCartRepository
 {

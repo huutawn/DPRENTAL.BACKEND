@@ -1,6 +1,6 @@
 using Dprental.RentalService.Api.Filters;
 using Dprental.RentalService.Application.DTOs.Operations;
-using Dprental.RentalService.Application.Operations;
+using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Microsoft.AspNetCore.Authorization;
@@ -20,6 +20,7 @@ namespace Dprental.RentalService.Api.Controllers;
 [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
 [Authorize]
 [Route("internal/orders")]
+[ApiExplorerSettings(IgnoreApi = true)]
 public sealed class RentalInternalOperationsController : ControllerBase
 {
     private readonly IRentalOperationExecutor _operationExecutor;

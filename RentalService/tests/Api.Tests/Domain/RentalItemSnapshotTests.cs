@@ -1,6 +1,7 @@
 using System.Reflection;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.DependencyInjection;
+using Dprental.RentalService.Domain.Repositories;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
 using Microsoft.EntityFrameworkCore;

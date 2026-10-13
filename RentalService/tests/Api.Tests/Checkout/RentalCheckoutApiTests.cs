@@ -9,6 +9,7 @@ using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.Security.Jwt;
 using Dprental.RentalService.Domain.DependencyInjection;
+using Dprental.RentalService.Domain.Repositories;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.AspNetCore.Authentication;

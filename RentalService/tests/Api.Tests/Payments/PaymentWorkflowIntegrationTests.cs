@@ -1,12 +1,12 @@
 using System.Text.Json;
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Clients;
-using Dprental.RentalService.Application.Operations;
+using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Domain.Repositories;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
-using Dprental.RentalService.Application.Payments;
+using Dprental.RentalService.Application.Services.Payments;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;

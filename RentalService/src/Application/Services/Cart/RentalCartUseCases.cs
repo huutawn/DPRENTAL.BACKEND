@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
@@ -74,6 +75,33 @@ public sealed class RentalCartUseCases(
 
         return added.Value;
     }
+    public async Task<Result> UpdateCartItemAsync(
+        Guid renterId,
+        Guid cartItemId,
+        UpdateCartItemRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        bool hasAnyDate = request.ExpectedStartDate is not null || request.ExpectedEndDate is not null;
+        bool hasBothDates = request.ExpectedStartDate is not null && request.ExpectedEndDate is not null;
+        bool hasQuantity = request.Quantity is not null;
+
+        if ((hasAnyDate && !hasBothDates) || hasQuantity == hasBothDates)
+        {
+            return RentalErrors.InvalidCartUpdate;
+        }
+
+        if (hasQuantity)
+        {
+            return await UpdateCartItemQuantityAsync(
+                renterId, cartItemId, request.Quantity.GetValueOrDefault(), cancellationToken);
+        }
+
+        return await UpdateCartItemDatesAsync(
+            renterId, cartItemId, request.ExpectedStartDate.GetValueOrDefault(), request.ExpectedEndDate.GetValueOrDefault(), cancellationToken);
+    }
+
 
     public async Task<Result> UpdateCartItemQuantityAsync(
         Guid renterId,
