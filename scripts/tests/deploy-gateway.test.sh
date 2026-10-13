@@ -80,6 +80,9 @@ cat > "$fake_bin/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$CURL_LOG"
+if [ "${FAIL_BRANDS:-}" = 1 ] && [[ "$*" == *'/api/v1/catalog/brands'* ]]; then
+  exit 22
+fi
 EOF
 chmod +x "$fake_bin/curl"
 
@@ -110,6 +113,7 @@ assert_not_contains 'recreate auth-service' "$docker_log"
 
 assert_contains 'exec -T gateway wget --quiet --tries=1 --spider http://127.0.0.1:8080/health/ready' "$docker_log"
 assert_contains 'https://dev-api.example.test/health/ready' "$curl_log"
+assert_contains 'https://dev-api.example.test/api/v1/catalog/brands' "$curl_log"
 assert_contains "Gateway revision $release_sha đã healthy" "$deploy_log"
 
 PATH="$fake_bin:$PATH" \
@@ -139,5 +143,14 @@ fi
 if PATH="$fake_bin:$PATH" DPR_DEPLOY_DIRECTORY="$deploy_directory" GITHUB_SHA=invalid "$deployer" >/dev/null 2>&1; then
   fail 'GITHUB_SHA không hợp lệ lại được chấp nhận.'
 fi
+
+if PATH="$fake_bin:$PATH" \
+  DOCKER_LOG="$docker_log" DOCKER_CONFIG_LOG="$docker_config_log" CURL_LOG="$curl_log" \
+  DPR_DEPLOY_DIRECTORY="$deploy_directory" GHCR_USERNAME=example GHCR_TOKEN=test-token \
+  EXPECTED_GHCR_TOKEN=test-token FAIL_BRANDS=1 GATEWAY_DEPLOY_HEALTH_INTERVAL_SECONDS=0 \
+  bash -s -- "$release_sha" < "$deployer" > "$deploy_log" 2>&1; then
+  fail 'Health pass nhưng API brands lỗi lại được chấp nhận.'
+fi
+assert_contains 'API brands anonymous qua Gateway thất bại' "$deploy_log"
 
 printf 'Đã đạt regression test cho script triển khai Gateway.\n'

@@ -271,6 +271,9 @@ Dockerfile ở repository root xây dựng runtime image tối giản cho Gatewa
 docker build --target runtime -t ghcr.io/<org>/dprental-gateway:<git-sha> .
 ```
 
+Image Docker loại bỏ `appsettings.Development.json` chứa localhost/port dành cho chạy trực tiếp trên máy.
+Container dùng địa chỉ service từ `appsettings.json` và biến môi trường, kể cả khi bật Development để xem Swagger.
+
 Runtime lắng nghe cổng `8080`, chạy non-root user `$APP_UID` và tích hợp sẵn `HEALTHCHECK` tự động thăm dò endpoint `/health/ready`.
 
 ## CI/CD Gateway cho dev
@@ -295,7 +298,7 @@ DEV_VPS_PORT              # tùy chọn, mặc định 22
 
 Workflow nạp deploy key vào `ssh-agent` qua stdin và kiểm tra host key đã lưu trong `DEV_VPS_KNOWN_HOSTS`. Nó truyền `GITHUB_TOKEN` cùng deploy script qua stdin của kết nối SSH, không đặt token trong câu lệnh SSH. Trên VPS, script đăng nhập GHCR bằng Docker config tạm rồi thực thi [deploy-gateway.sh](scripts/deploy-gateway.sh) từ commit đang phát hành. Docker credential tạm bị xóa ngay khi script kết thúc; user SSH của workflow cần quyền đọc `.env` và ghi `release.env`.
 
-Script cập nhật **chỉ duy nhất biến `GATEWAY_IMAGE`** trong `/opt/dprental/dev/release.env`, bảo toàn nguyên vẹn mọi image khác (`AUTH_SERVICE_IMAGE`, `AUTH_MIGRATOR_IMAGE`...). Nó pull duy nhất image `gateway`, khởi động lại container với `--no-deps --force-recreate gateway`, chờ Gateway đạt trạng thái healthy và thực hiện kiểm thử khói (smoke tests) cả nội bộ lẫn qua domain công khai.
+Script cập nhật **chỉ duy nhất biến `GATEWAY_IMAGE`** trong `/opt/dprental/dev/release.env`, bảo toàn nguyên vẹn mọi image khác (`AUTH_SERVICE_IMAGE`, `AUTH_MIGRATOR_IMAGE`...). Nó pull duy nhất image `gateway`, khởi động lại container với `--no-deps --force-recreate gateway`, chờ Gateway đạt trạng thái healthy và thực hiện kiểm thử khói (smoke tests) health cả nội bộ lẫn qua domain công khai và GET brands anonymous.
 
 Ví dụ cấp quyền ghi `release.env` cho user GitHub Actions trên VPS (thay `deploy` bằng user thực tế):
 
