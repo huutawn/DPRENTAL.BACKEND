@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
+using Dprental.RentalService.Application.DTOs.Checkout;
 
-namespace Dprental.RentalService.Application.Checkout;
+namespace Dprental.RentalService.Application.Validation;
 
 /// <summary>
 /// Kiểm tra định dạng request checkout theo bảng 12 SRS Rental. Không gọi DB hay service khác.

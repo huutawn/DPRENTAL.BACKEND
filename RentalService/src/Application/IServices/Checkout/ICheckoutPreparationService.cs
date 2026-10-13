@@ -1,4 +1,6 @@
-namespace Dprental.RentalService.Application.Checkout;
+using Dprental.RentalService.Application.DTOs.Checkout;
+
+namespace Dprental.RentalService.Application.IServices.Checkout;
 
 /// <summary>
 /// Bước đầu của checkout: validate renter, giỏ, Listing, giá, lịch, điều khoản, nơi giao và dựng snapshot.

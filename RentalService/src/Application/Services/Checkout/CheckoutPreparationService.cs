@@ -1,5 +1,10 @@
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Checkout;
+using Dprental.RentalService.Application.Errors;
+using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.Options;
+using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Application.Validation;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
@@ -8,7 +13,7 @@ using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Domain.Policies;
 using Microsoft.Extensions.Options;
 
-namespace Dprental.RentalService.Application.Checkout;
+namespace Dprental.RentalService.Application.Services.Checkout;
 
 public sealed class CheckoutPreparationService : ICheckoutPreparationService
 {
@@ -183,11 +188,13 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
                 continue;
             }
 
+            (DateOnly orderStartDate, DateOnly orderEndDate) = CheckoutRules.ToOrderPeriod(item);
+
             // Mỗi dòng được hỏi lịch độc lập để báo lỗi sớm; chống đặt trùng là việc của Inventory lúc hold.
             Result<InventoryListingAvailabilityDto> availabilityResult = await _inventory.CheckAvailabilityAsync(
                 item.EquipmentListingId,
-                item.ExpectedStartDate,
-                item.ExpectedEndDate,
+                orderStartDate,
+                orderEndDate,
                 item.Quantity,
                 cancellationToken);
             if (availabilityResult.IsFailure)
@@ -234,7 +241,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
                 continue;
             }
 
-            lines.Add(BuildLine(item, listing, equipmentTypeName.Trim(), brandName.Trim()));
+            lines.Add(BuildLine(item, orderStartDate, orderEndDate, listing, equipmentTypeName.Trim(), brandName.Trim()));
         }
 
         return new(false, lines, issues);
@@ -242,13 +249,15 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 
     private static CheckoutPlanLine BuildLine(
         RentalCartItem item,
+        DateOnly orderStartDate,
+        DateOnly orderEndDate,
         InventoryListingDto listing,
         string equipmentTypeName,
         string brandName)
     {
         decimal dailyRate = listing.DailyRate!.Value;
         decimal depositPerUnit = listing.DepositPerUnit!.Value;
-        int rentalDays = RentalPricingPolicy.CalculateRentalDays(item.ExpectedStartDate, item.ExpectedEndDate);
+        int rentalDays = RentalPricingPolicy.CalculateRentalDays(orderStartDate, orderEndDate);
 
         RentalItemListingSnapshotDto snapshot = new(
             listing.EquipmentTypeId,
@@ -265,10 +274,11 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             item.EquipmentListingId,
             listing.OwnerUserId,
             item.Quantity,
-            item.ExpectedStartDate,
-            item.ExpectedEndDate,
+            orderStartDate,
+            orderEndDate,
             listing.Title.Trim(),
             listing.PickupLocation!.Trim(),
+            listing.SnapshotVersion!.Trim(),
             snapshot,
             dailyRate,
             depositPerUnit,
@@ -287,6 +297,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         !string.IsNullOrWhiteSpace(listing.Model) &&
         !string.IsNullOrWhiteSpace(listing.SpecValuesJson) &&
         !string.IsNullOrWhiteSpace(listing.PickupLocation) &&
+        !string.IsNullOrWhiteSpace(listing.SnapshotVersion) &&
         listing.DailyRate is > 0 &&
         listing.DepositPerUnit is >= 0 &&
         string.Equals(listing.Currency, CheckoutRules.Currency, StringComparison.OrdinalIgnoreCase);
