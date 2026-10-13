@@ -2,8 +2,9 @@
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Common;
+using Microsoft.Extensions.Logging;
 
-namespace Dprental.RentalService.Api.Clients;
+namespace Dprental.RentalService.Application.Clients;
 
 /// <summary>
 /// Bản tạm của <see cref="IInventoryListingClient"/>: hợp đồng v1 với Inventory (ListingRentalSnapshotDto) chưa có

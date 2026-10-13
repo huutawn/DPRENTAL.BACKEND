@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Dprental.RentalService.Api.Background;
+using Dprental.RentalService.Application.Background;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.IServices.Integration;
 using Dprental.RentalService.Application.Services.Integration;

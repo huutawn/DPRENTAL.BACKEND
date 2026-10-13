@@ -4,6 +4,10 @@
     <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Confluent.Kafka" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../Domain/RentalService.Domain.csproj" />
   </ItemGroup>
 </Project>

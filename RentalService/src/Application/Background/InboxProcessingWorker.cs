@@ -1,34 +1,47 @@
 #pragma warning disable CA1848, CA1873
-using Dprental.RentalService.Application.IServices.Operations;
+using System.Text.Json;
+using Dprental.RentalService.Application.DTOs.Integration;
+using Dprental.RentalService.Application.DTOs.Payment;
+using Dprental.RentalService.Application.IServices.Integration;
+using Dprental.RentalService.Application.IServices.Payments;
+using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Dprental.RentalService.Api.Background;
+namespace Dprental.RentalService.Application.Background;
 
-public sealed class OperationRecoveryWorker : BackgroundService
+public sealed class InboxProcessingWorker : BackgroundService
 {
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<OperationRecoveryWorker> _logger;
-    private readonly TimeSpan _pollingInterval;
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
 
-    public OperationRecoveryWorker(
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ILogger<InboxProcessingWorker> _logger;
+    private readonly TimeSpan _pollingInterval;
+    private readonly string _dlqTopic;
+
+    public InboxProcessingWorker(
         IServiceScopeFactory scopeFactory,
         IConfiguration configuration,
-        ILogger<OperationRecoveryWorker> logger)
+        ILogger<InboxProcessingWorker> logger)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        int pollSeconds = configuration.GetValue("Workers:OperationRecovery:PollingIntervalSeconds", 15);
+        int pollSeconds = configuration.GetValue("Workers:InboxProcessor:PollingIntervalSeconds", 15);
         _pollingInterval = TimeSpan.FromSeconds(Math.Max(1, pollSeconds));
+        _dlqTopic = configuration["Kafka:PaymentDlqTopic"] ?? "payment.events.v1.dlq";
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("OperationRecoveryWorker started with polling interval {Interval}s", _pollingInterval.TotalSeconds);
+        _logger.LogInformation("InboxProcessingWorker started with polling interval {Interval}s", _pollingInterval.TotalSeconds);
 
         try
         {
@@ -51,7 +64,7 @@ public sealed class OperationRecoveryWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error in OperationRecoveryWorker loop");
+                _logger.LogWarning(ex, "Error in InboxProcessingWorker loop");
             }
 
             try
@@ -64,18 +77,18 @@ public sealed class OperationRecoveryWorker : BackgroundService
             }
         }
 
-        _logger.LogInformation("OperationRecoveryWorker stopping");
+        _logger.LogInformation("InboxProcessingWorker stopping");
     }
 
     public async Task<int> ProcessBatchAsync(CancellationToken cancellationToken)
     {
         DateTimeOffset utcNow = DateTimeOffset.UtcNow;
-        IReadOnlyList<OperationReceiptDescriptor> descriptors;
+        IReadOnlyList<InboxMessageDescriptor> descriptors;
 
         using (var scope = _scopeFactory.CreateScope())
         {
-            var receiptRepository = scope.ServiceProvider.GetRequiredService<IOperationReceiptRepository>();
-            descriptors = await receiptRepository.GetPendingOperationDescriptorsAsync(utcNow, 50, cancellationToken);
+            var inboxRepository = scope.ServiceProvider.GetRequiredService<IInboxRepository>();
+            descriptors = await inboxRepository.GetPendingRetryDescriptorsAsync(utcNow, 50, cancellationToken);
         }
 
         if (descriptors.Count == 0)
@@ -83,16 +96,16 @@ public sealed class OperationRecoveryWorker : BackgroundService
             return 0;
         }
 
-        _logger.LogInformation("OperationRecoveryWorker recovering {Count} pending operations", descriptors.Count);
+        _logger.LogInformation("InboxProcessingWorker processing {Count} pending inbox messages", descriptors.Count);
 
         int processed = 0;
         foreach (var descriptor in descriptors)
         {
             try
             {
-                using var opScope = _scopeFactory.CreateScope();
-                var executor = opScope.ServiceProvider.GetRequiredService<IRentalOperationExecutor>();
-                var result = await executor.ExecuteScheduledOperationAsync(descriptor, cancellationToken);
+                using var messageScope = _scopeFactory.CreateScope();
+                var dispatcher = messageScope.ServiceProvider.GetRequiredService<IPaymentEventsDispatcher>();
+                var result = await dispatcher.ProcessInboxMessageAsync(descriptor.Id, cancellationToken);
                 if (result.IsSuccess)
                 {
                     processed++;
@@ -100,7 +113,7 @@ public sealed class OperationRecoveryWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to recover operation {OpId} ({Action})", descriptor.OperationId, descriptor.Action);
+                _logger.LogWarning(ex, "Lỗi xử lý Inbox message {Id}", descriptor.Id);
             }
         }
 

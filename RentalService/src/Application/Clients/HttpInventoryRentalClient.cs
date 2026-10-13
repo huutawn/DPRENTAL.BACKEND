@@ -9,7 +9,7 @@ using Dprental.RentalService.Common;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace Dprental.RentalService.Api.Clients;
+namespace Dprental.RentalService.Application.Clients;
 
 public sealed class HttpInventoryRentalClient : IInventoryRentalClient
 {

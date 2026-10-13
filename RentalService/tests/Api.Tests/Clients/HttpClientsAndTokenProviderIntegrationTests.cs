@@ -1,7 +1,5 @@
 using System.Net;
 using System.Text.Json;
-using Dprental.RentalService.Api.Clients;
-using Dprental.RentalService.Api.Security;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;

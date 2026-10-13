@@ -1,4 +1,4 @@
-using Dprental.RentalService.Api.Background;
+using Dprental.RentalService.Application.Background;
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.IServices.Expiry;
 using Dprental.RentalService.Application.IServices.SupplierStatistics;

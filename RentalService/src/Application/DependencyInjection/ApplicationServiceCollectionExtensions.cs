@@ -1,3 +1,5 @@
+using System.Net.Http;
+using Dprental.RentalService.Application.Background;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.IServices.Calendar;
 using Dprental.RentalService.Application.IServices.Checkout;
@@ -10,6 +12,7 @@ using Dprental.RentalService.Application.IServices.SupplierStatistics;
 using Dprental.RentalService.Application.Observability;
 using Dprental.RentalService.Application.Options;
 using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Calendar;
 using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Application.Services.Checkout;
@@ -38,6 +41,16 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IRentalListingReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
         services.AddScoped<IRentalAvailabilityReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
 
+        // External Clients
+        services.AddHttpClient<IServiceTokenProvider, AuthServiceTokenProvider>()
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+        services.AddHttpClient<IPaymentRentalClient, HttpPaymentRentalClient>()
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+        services.AddHttpClient<IInventoryRentalClient, HttpInventoryRentalClient>()
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+        services.AddSingleton<IInventoryListingClient, UnavailableInventoryListingClient>();
+        services.AddSingleton<ICatalogReferenceClient, UnavailableCatalogReferenceClient>();
+
         // Checkout
         services.AddScoped<ICheckoutPreparationService, CheckoutPreparationService>();
         services.AddScoped<ICheckoutHoldOrchestrator, CheckoutHoldOrchestrator>();
@@ -64,6 +77,13 @@ public static class ApplicationServiceCollectionExtensions
         // Integration
         services.AddScoped<IRefundCompletedConsumer, RefundCompletedConsumer>();
         services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
+
+        // Background Workers
+        services.AddHostedService<OutboxPublisherWorker>();
+        services.AddHostedService<OperationRecoveryWorker>();
+        services.AddHostedService<ExpiryScannerWorker>();
+        services.AddHostedService<KafkaPaymentEventsConsumerWorker>();
+        services.AddHostedService<InboxProcessingWorker>();
 
         // Observability & TimeProvider
         services.AddSingleton<RentalMetrics>();

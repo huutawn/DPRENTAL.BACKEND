@@ -1,8 +1,6 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Dprental.RentalService.Api.Background;
-using Dprental.RentalService.Api.Clients;
 using Dprental.RentalService.Api.Exceptions;
 using Dprental.RentalService.Api.Routing;
 using Dprental.RentalService.Api.Security;
@@ -35,21 +33,7 @@ builder.Services.AddScoped<IRentalCallerContext>(sp =>
     var http = sp.GetRequiredService<IHttpContextAccessor>();
     return RentalCallerContext.FromClaimsPrincipal(http.HttpContext?.User);
 });
-builder.Services.AddHttpClient<IServiceTokenProvider, AuthServiceTokenProvider>()
-    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
-builder.Services.AddHttpClient<IPaymentRentalClient, HttpPaymentRentalClient>()
-    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
-builder.Services.AddHttpClient<IInventoryRentalClient, HttpInventoryRentalClient>()
-    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
 builder.Services.Configure<RentalTermsOptions>(builder.Configuration.GetSection(RentalTermsOptions.SectionName));
-// Bản tạm: checkout trả 503 cho đến khi có hợp đồng đọc Listing đầy đủ với Inventory và hợp đồng với Catalog.
-builder.Services.AddSingleton<IInventoryListingClient, UnavailableInventoryListingClient>();
-builder.Services.AddSingleton<ICatalogReferenceClient, UnavailableCatalogReferenceClient>();
-builder.Services.AddHostedService<OutboxPublisherWorker>();
-builder.Services.AddHostedService<OperationRecoveryWorker>();
-builder.Services.AddHostedService<ExpiryScannerWorker>();
-builder.Services.AddHostedService<KafkaPaymentEventsConsumerWorker>();
-builder.Services.AddHostedService<InboxProcessingWorker>();
 builder.Services.AddScoped<ICurrentRenter, CurrentRenter>();
 builder.Services.AddAuthorization(options =>
 {

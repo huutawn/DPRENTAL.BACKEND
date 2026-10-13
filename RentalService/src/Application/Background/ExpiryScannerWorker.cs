@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Dprental.RentalService.Api.Background;
+namespace Dprental.RentalService.Application.Background;
 
 public sealed class ExpiryScannerWorker : BackgroundService
 {

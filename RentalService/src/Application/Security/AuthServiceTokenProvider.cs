@@ -9,7 +9,7 @@ using Dprental.RentalService.Common;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace Dprental.RentalService.Api.Security;
+namespace Dprental.RentalService.Application.Security;
 
 public sealed class AuthServiceTokenProvider : IServiceTokenProvider, IDisposable
 {

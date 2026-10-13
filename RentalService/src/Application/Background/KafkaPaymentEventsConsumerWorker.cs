@@ -3,11 +3,12 @@ using Confluent.Kafka;
 using Dprental.RentalService.Application.IServices.Integration;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Dprental.RentalService.Api.Background;
+namespace Dprental.RentalService.Application.Background;
 
 public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
 {
