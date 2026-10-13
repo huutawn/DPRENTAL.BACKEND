@@ -15,6 +15,9 @@ public sealed class EquipmentListingDomainTests
     [Fact]
     public void Create_ValidAllFields_SucceedsWithDraftStatus()
     {
+        var media1 = Guid.NewGuid();
+        var media2 = Guid.NewGuid();
+
         var result = EquipmentListing.Create(
             TestListingId,
             TestOwnerId,
@@ -29,7 +32,10 @@ public sealed class EquipmentListingDomainTests
             3_000_000m,
             10_000_000m,
             "VND",
-            FixedNow);
+            FixedNow,
+            2024,
+            [media1, media2],
+            media2);
 
         Assert.True(result.IsSuccess);
         var listing = result.Value;
@@ -40,6 +46,9 @@ public sealed class EquipmentListingDomainTests
         Assert.Equal("Sony FX3 kèm bộ phụ kiện", listing.Name);
         Assert.Equal("Mô tả máy quay FX3", listing.Description);
         Assert.Equal("Sony FX3", listing.Model);
+        Assert.Equal(2024, listing.ManufactureYear);
+        Assert.Equal([media1, media2], listing.MediaIds);
+        Assert.Equal(media2, listing.ThumbnailMediaId);
         Assert.Equal(1, listing.SchemaVersion);
         Assert.Equal(EquipmentListingStatus.Draft, listing.Status);
         Assert.Equal(500_000m, listing.DailyRate);
@@ -67,7 +76,8 @@ public sealed class EquipmentListingDomainTests
             null,
             null,
             "VND",
-            FixedNow);
+            FixedNow,
+            2024);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_LISTING_ID", result.Error.Code);
@@ -90,12 +100,12 @@ public sealed class EquipmentListingDomainTests
             null,
             null,
             "VND",
-            FixedNow);
+            FixedNow,
+            2024);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_BRAND_ID", result.Error.Code);
     }
-
     [Fact]
     public void Create_InvalidDailyRate_FailsValidation()
     {
@@ -113,7 +123,8 @@ public sealed class EquipmentListingDomainTests
             null,
             null,
             "VND",
-            FixedNow);
+            FixedNow,
+            2024);
 
         Assert.True(resultNegative.IsFailure);
         Assert.Equal("INVALID_DAILY_RATE", resultNegative.Error.Code);
@@ -132,7 +143,8 @@ public sealed class EquipmentListingDomainTests
             null,
             null,
             "VND",
-            FixedNow);
+            FixedNow,
+            2024);
 
         Assert.True(resultFractional.IsFailure);
         Assert.Equal("INVALID_DAILY_RATE", resultFractional.Error.Code);
@@ -155,7 +167,8 @@ public sealed class EquipmentListingDomainTests
             null,
             null,
             "USD",
-            FixedNow);
+            FixedNow,
+            2024);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_CURRENCY", result.Error.Code);
@@ -178,7 +191,8 @@ public sealed class EquipmentListingDomainTests
             null,
             null,
             "VND",
-            FixedNow).Value;
+            FixedNow,
+            2024).Value;
 
         var result = listing.UpdateStatus(EquipmentListingStatus.Active, hasUnitAcceptingBookings: false, FixedNow);
 
@@ -204,7 +218,8 @@ public sealed class EquipmentListingDomainTests
             null,
             null,
             "VND",
-            FixedNow).Value;
+            FixedNow,
+            2024).Value;
 
         var result = listing.UpdateStatus(EquipmentListingStatus.Active, hasUnitAcceptingBookings: true, FixedNow);
 
@@ -229,7 +244,8 @@ public sealed class EquipmentListingDomainTests
             null,
             null,
             "VND",
-            FixedNow).Value;
+            FixedNow,
+            2024).Value;
 
         var updateTime = FixedNow.AddHours(2);
         var result = listing.UpdateRentalRate(600_000m, 3_500_000m, 12_000_000m, "VND", updateTime);
@@ -258,17 +274,23 @@ public sealed class EquipmentListingDomainTests
             null,
             null,
             "VND",
-            FixedNow).Value;
+            FixedNow,
+            2022).Value;
 
         var newBrand = Guid.NewGuid();
+        var mediaA = Guid.NewGuid();
+        var mediaB = Guid.NewGuid();
         var updateTime = FixedNow.AddHours(1);
-        var result = listing.UpdateDetails(newBrand, "Sony FX3 v2 Name", "New Desc", "Sony FX3 v2", null, 2, "{\"version\":2}", updateTime);
+        var result = listing.UpdateDetails(newBrand, "Sony FX3 v2 Name", "New Desc", "Sony FX3 v2", 2025, [mediaB, mediaA], mediaA, 2, "{\"version\":2}", updateTime);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(newBrand, listing.BrandId);
         Assert.Equal("Sony FX3 v2 Name", listing.Name);
         Assert.Equal("New Desc", listing.Description);
         Assert.Equal("Sony FX3 v2", listing.Model);
+        Assert.Equal(2025, listing.ManufactureYear);
+        Assert.Equal([mediaB, mediaA], listing.MediaIds);
+        Assert.Equal(mediaA, listing.ThumbnailMediaId);
         Assert.Equal(2, listing.SchemaVersion);
         Assert.Equal("{\"version\":2}", listing.SpecValues);
         Assert.Equal(updateTime, listing.UpdatedAt);
@@ -282,7 +304,7 @@ public sealed class EquipmentListingDomainTests
     {
         var result = EquipmentListing.Create(
             TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
-            invalidName!, null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow);
+            invalidName!, null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow, 2024);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_NAME", result.Error.Code);
@@ -294,7 +316,7 @@ public sealed class EquipmentListingDomainTests
         var longName = new string('A', 201);
         var result = EquipmentListing.Create(
             TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
-            longName, null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow);
+            longName, null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow, 2024);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_NAME", result.Error.Code);
@@ -306,7 +328,7 @@ public sealed class EquipmentListingDomainTests
         var longDesc = new string('B', 2001);
         var result = EquipmentListing.Create(
             TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
-            "Valid Name", longDesc, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow);
+            "Valid Name", longDesc, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow, 2024);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_DESCRIPTION", result.Error.Code);
@@ -317,7 +339,7 @@ public sealed class EquipmentListingDomainTests
     {
         var result = EquipmentListing.Create(
             TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
-            "Valid Name", "   ", "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow);
+            "Valid Name", "   ", "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow, 2024);
 
         Assert.True(result.IsSuccess);
         Assert.Null(result.Value.Description);
@@ -328,11 +350,74 @@ public sealed class EquipmentListingDomainTests
     {
         var listing = EquipmentListing.Create(
             TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
-            "Valid Name", null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow).Value;
+            "Valid Name", null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow, 2024).Value;
 
         var result = listing.UpdateStatus((EquipmentListingStatus)999, false, FixedNow);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_STATUS", result.Error.Code);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(1899)]
+    [InlineData(2027)]
+    public void Create_InvalidManufactureYear_FailsValidation(int? invalidYear)
+    {
+        var result = EquipmentListing.Create(
+            TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Valid Name", null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow, invalidYear);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_MANUFACTURE_YEAR", result.Error.Code);
+    }
+
+    [Fact]
+    public void ValidateManufactureYear_UsesVietnamTimeZoneBoundary()
+    {
+        // 2026-12-31 18:00:00 UTC == 2027-01-01 01:00:00 ICT (Vietnam)
+        var utcNewYearEveInVietnamNewYear = new DateTimeOffset(2026, 12, 31, 18, 0, 0, TimeSpan.Zero);
+
+        var validInVietnam2027 = EquipmentListing.ValidateManufactureYear(2027, utcNewYearEveInVietnamNewYear);
+        Assert.True(validInVietnam2027.IsSuccess);
+        Assert.Equal(2027, validInVietnam2027.Value);
+
+        var invalidInVietnam2028 = EquipmentListing.ValidateManufactureYear(2028, utcNewYearEveInVietnamNewYear);
+        Assert.True(invalidInVietnam2028.IsFailure);
+        Assert.Equal("INVALID_MANUFACTURE_YEAR", invalidInVietnam2028.Error.Code);
+    }
+
+    [Fact]
+    public void ValidateDetails_MediaIdsAndThumbnailRules_Enforced()
+    {
+        var id1 = Guid.NewGuid();
+        var id2 = Guid.NewGuid();
+
+        // 1. Empty GUID in mediaIds
+        var emptyInList = EquipmentListing.ValidateDetails("Name", null, "Model", [id1, Guid.Empty], null, 1, "{}");
+        Assert.True(emptyInList.IsFailure);
+        Assert.Equal("INVALID_MEDIA_ID", emptyInList.Error.Code);
+
+        // 2. Duplicate GUID in mediaIds
+        var dupInList = EquipmentListing.ValidateDetails("Name", null, "Model", [id1, id2, id1], null, 1, "{}");
+        Assert.True(dupInList.IsFailure);
+        Assert.Equal("DUPLICATE_MEDIA_ID", dupInList.Error.Code);
+
+        // 3. Exceeding 20 items
+        var twentyOneIds = Enumerable.Range(0, 21).Select(_ => Guid.NewGuid()).ToList();
+        var tooMany = EquipmentListing.ValidateDetails("Name", null, "Model", twentyOneIds, null, 1, "{}");
+        Assert.True(tooMany.IsFailure);
+        Assert.Equal("MEDIA_LIMIT_EXCEEDED", tooMany.Error.Code);
+
+        // 4. Exactly 20 items succeeds
+        var twentyIds = twentyOneIds.Take(20).ToList();
+        var twentyOk = EquipmentListing.ValidateDetails("Name", null, "Model", twentyIds, twentyIds[19], 1, "{}");
+        Assert.True(twentyOk.IsSuccess);
+        Assert.Equal(20, twentyOk.Value.MediaIds.Length);
+
+        // 5. Thumbnail not in mediaIds fails
+        var thumbOutside = EquipmentListing.ValidateDetails("Name", null, "Model", [id1], id2, 1, "{}");
+        Assert.True(thumbOutside.IsFailure);
+        Assert.Equal("INVALID_THUMBNAIL_MEDIA_ID", thumbOutside.Error.Code);
     }
 }

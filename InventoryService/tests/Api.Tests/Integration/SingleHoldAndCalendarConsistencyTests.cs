@@ -56,7 +56,7 @@ public sealed class SingleHoldAndCalendarConsistencyTests : IClassFixture<Postgr
     private sealed class StubMediaClient : IMediaServiceClient
     {
         public Task<Result<MediaVerificationInfo>> VerifyAsync(Guid mediaId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"))));
+            Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"), "image/jpeg")));
 
         public Task<Result<MediaVisibilityInfo>> SetPublicAsync(Guid mediaId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new MediaVisibilityInfo(mediaId, "Public")));
@@ -116,7 +116,8 @@ public sealed class SingleHoldAndCalendarConsistencyTests : IClassFixture<Postgr
             null,
             null,
             "VND",
-            FixedNow).Value;
+            FixedNow,
+            2024).Value;
 
         if (status == EquipmentListingStatus.Active)
         {

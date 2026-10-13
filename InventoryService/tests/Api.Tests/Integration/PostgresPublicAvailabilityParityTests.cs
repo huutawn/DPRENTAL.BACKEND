@@ -46,7 +46,7 @@ public sealed class PostgresPublicAvailabilityParityTests : IClassFixture<Postgr
 
             var listing = EquipmentListing.Create(
                 listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), $"Scenario_{i}", null, $"Scenario_{i}", 1, "{}",
-                100_000m, null, null, "VND", FixedEvaluationNow).Value;
+                100_000m, null, null, "VND", FixedEvaluationNow, 2024).Value;
             listing.UpdateStatus(EquipmentListingStatus.Active, true, FixedEvaluationNow);
 
             var asset = InventoryAsset.Create(assetId, listingId, $"SN-{assetId:N}", FixedEvaluationNow).Value;
@@ -236,7 +236,7 @@ public sealed class PostgresPublicAvailabilityParityTests : IClassFixture<Postgr
 
         var l1Id = Guid.NewGuid();
         var a1Id = Guid.NewGuid();
-        var l1 = EquipmentListing.Create(l1Id, ownerId, Guid.NewGuid(), Guid.NewGuid(), "SingleDay_Blocked", null, "SingleDay_Blocked", 1, "{}", 100_000m, null, null, "VND", FixedEvaluationNow).Value;
+        var l1 = EquipmentListing.Create(l1Id, ownerId, Guid.NewGuid(), Guid.NewGuid(), "SingleDay_Blocked", null, "SingleDay_Blocked", 1, "{}", 100_000m, null, null, "VND", FixedEvaluationNow, 2024).Value;
         l1.UpdateStatus(EquipmentListingStatus.Active, true, FixedEvaluationNow);
         var a1 = InventoryAsset.Create(a1Id, l1Id, "SN-A1", FixedEvaluationNow).Value;
         l1.Assets.Add(a1);
@@ -245,7 +245,7 @@ public sealed class PostgresPublicAvailabilityParityTests : IClassFixture<Postgr
 
         var l2Id = Guid.NewGuid();
         var a2Id = Guid.NewGuid();
-        var l2 = EquipmentListing.Create(l2Id, ownerId, Guid.NewGuid(), Guid.NewGuid(), "SingleDay_Adjacent", null, "SingleDay_Adjacent", 1, "{}", 100_000m, null, null, "VND", FixedEvaluationNow).Value;
+        var l2 = EquipmentListing.Create(l2Id, ownerId, Guid.NewGuid(), Guid.NewGuid(), "SingleDay_Adjacent", null, "SingleDay_Adjacent", 1, "{}", 100_000m, null, null, "VND", FixedEvaluationNow, 2024).Value;
         l2.UpdateStatus(EquipmentListingStatus.Active, true, FixedEvaluationNow);
         var a2 = InventoryAsset.Create(a2Id, l2Id, "SN-A2", FixedEvaluationNow).Value;
         l2.Assets.Add(a2);

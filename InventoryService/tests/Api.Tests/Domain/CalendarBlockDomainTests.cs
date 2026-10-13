@@ -34,7 +34,8 @@ public sealed class CalendarBlockDomainTests
             null,
             null,
             "VND",
-            _now).Value;
+            _now,
+            2024).Value;
 
         var asset = InventoryAsset.Create(_assetId, listing.Id, "SN-CAL-1", _now).Value;
         typeof(InventoryAsset).GetProperty(nameof(InventoryAsset.Listing))?.SetValue(asset, listing);

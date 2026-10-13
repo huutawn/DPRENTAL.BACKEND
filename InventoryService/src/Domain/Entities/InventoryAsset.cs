@@ -159,10 +159,10 @@ public sealed class InventoryAsset
 
         if (manufactureYear.HasValue)
         {
-            var maxYear = BusinessDateTime.ToVietnamDate(now).Year;
-            if (manufactureYear.Value < 1900 || manufactureYear.Value > maxYear)
+            var yearValidation = EquipmentListing.ValidateManufactureYear(manufactureYear.Value, now);
+            if (yearValidation.IsFailure)
             {
-                return Error.Validation("INVALID_MANUFACTURE_YEAR", $"Năm sản xuất phải từ 1900 đến {maxYear}.");
+                return yearValidation.Error;
             }
         }
 

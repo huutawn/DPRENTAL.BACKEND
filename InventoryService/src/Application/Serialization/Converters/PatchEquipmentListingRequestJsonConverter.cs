@@ -17,6 +17,8 @@ public sealed class PatchEquipmentListingRequestJsonConverter : JsonConverter<Pa
         "name",
         "description",
         "model",
+        "manufactureYear",
+        "mediaIds",
         "thumbnailMediaId",
         "schemaVersion",
         "specValues",
@@ -125,6 +127,55 @@ public sealed class PatchEquipmentListingRequestJsonConverter : JsonConverter<Pa
                     else
                     {
                         throw new JsonException("Thuộc tính 'model' phải là kiểu chuỗi.");
+                    }
+                    break;
+
+                case "manufactureyear":
+                    request.IsManufactureYearSpecified = true;
+                    if (reader.TokenType == JsonTokenType.Null)
+                    {
+                        request.ManufactureYear = null;
+                    }
+                    else if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var mYear))
+                    {
+                        request.ManufactureYear = mYear;
+                    }
+                    else
+                    {
+                        throw new JsonException("Thuộc tính 'manufactureYear' phải là số nguyên hoặc null.");
+                    }
+                    break;
+
+                case "mediaids":
+                    request.IsMediaIdsSpecified = true;
+                    if (reader.TokenType == JsonTokenType.Null)
+                    {
+                        request.MediaIds = null;
+                    }
+                    else if (reader.TokenType == JsonTokenType.StartArray)
+                    {
+                        var mediaIds = new List<Guid>();
+                        while (reader.Read())
+                        {
+                            if (reader.TokenType == JsonTokenType.EndArray)
+                            {
+                                break;
+                            }
+
+                            if (reader.TokenType == JsonTokenType.String && reader.TryGetGuid(out var mediaGuid))
+                            {
+                                mediaIds.Add(mediaGuid);
+                            }
+                            else
+                            {
+                                throw new JsonException("Phần tử trong 'mediaIds' phải là chuỗi GUID hợp lệ.");
+                            }
+                        }
+                        request.MediaIds = mediaIds;
+                    }
+                    else
+                    {
+                        throw new JsonException("Thuộc tính 'mediaIds' phải là mảng GUID hợp lệ.");
                     }
                     break;
 
@@ -260,6 +311,36 @@ public sealed class PatchEquipmentListingRequestJsonConverter : JsonConverter<Pa
         if (value.IsModelSpecified)
         {
             writer.WriteString("model", value.Model);
+        }
+
+        if (value.IsManufactureYearSpecified)
+        {
+            if (value.ManufactureYear == null)
+            {
+                writer.WriteNull("manufactureYear");
+            }
+            else
+            {
+                writer.WriteNumber("manufactureYear", value.ManufactureYear.Value);
+            }
+        }
+
+        if (value.IsMediaIdsSpecified)
+        {
+            if (value.MediaIds == null)
+            {
+                writer.WriteNull("mediaIds");
+            }
+            else
+            {
+                writer.WritePropertyName("mediaIds");
+                writer.WriteStartArray();
+                foreach (var id in value.MediaIds)
+                {
+                    writer.WriteStringValue(id);
+                }
+                writer.WriteEndArray();
+            }
         }
 
         if (value.IsThumbnailMediaIdSpecified)

@@ -304,7 +304,7 @@ public sealed partial class InventoryAssetServiceTests
             VerifyCalls++;
             return VerifyHandler is not null
                 ? VerifyHandler(mediaId)
-                : Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"))));
+                : Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"), "image/jpeg")));
         }
 
         public Task<Result<MediaVisibilityInfo>> SetPublicAsync(Guid mediaId, CancellationToken cancellationToken = default) =>
@@ -377,6 +377,8 @@ public sealed partial class InventoryAssetServiceTests
             null,
             "VND",
             actualNow,
+            manufactureYear ?? 2024,
+            thumbnailMediaId.HasValue ? [thumbnailMediaId.Value] : null,
             thumbnailMediaId).Value;
 
         var actualSerial = string.IsNullOrWhiteSpace(serialNumber) ? $"SN-{actualId:N}" : serialNumber;

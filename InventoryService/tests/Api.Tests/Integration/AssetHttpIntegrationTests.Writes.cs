@@ -202,6 +202,7 @@ public sealed partial class AssetHttpIntegrationTests
             name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-TEST-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
@@ -247,6 +248,7 @@ public sealed partial class AssetHttpIntegrationTests
             name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-TEST-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
@@ -297,6 +299,7 @@ public sealed partial class AssetHttpIntegrationTests
             name = "Sony FX3",
             model = "Sony FX3",
             serialNumber = "FX3-TEST-SN-001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }

@@ -28,6 +28,14 @@ public sealed class PatchEquipmentListingRequest
     public string? Model { get; set; }
 
     [JsonIgnore]
+    public bool IsManufactureYearSpecified { get; set; }
+    public int? ManufactureYear { get; set; }
+
+    [JsonIgnore]
+    public bool IsMediaIdsSpecified { get; set; }
+    public IReadOnlyList<Guid>? MediaIds { get; set; }
+
+    [JsonIgnore]
     public bool IsThumbnailMediaIdSpecified { get; set; }
     public Guid? ThumbnailMediaId { get; set; }
 
@@ -49,6 +57,8 @@ public sealed class PatchEquipmentListingRequest
         !IsNameSpecified &&
         !IsDescriptionSpecified &&
         !IsModelSpecified &&
+        !IsManufactureYearSpecified &&
+        !IsMediaIdsSpecified &&
         !IsThumbnailMediaIdSpecified &&
         !IsSchemaVersionSpecified &&
         !IsSpecValuesSpecified &&

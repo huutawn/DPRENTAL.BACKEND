@@ -74,6 +74,13 @@ public sealed partial class EquipmentListingService
             return Error.Validation("INVALID_BRAND_ID", "Brand ID không được để trống hoặc rỗng.");
         }
 
+        var now = _timeProvider.GetUtcNow();
+        var yearValidation = EquipmentListing.ValidateManufactureYear(request.ManufactureYear, now);
+        if (yearValidation.IsFailure)
+        {
+            return yearValidation.Error;
+        }
+
         if (request.RentalRate is null)
         {
             return Error.Validation("RENTAL_RATE_REQUIRED", "Thông tin giá thuê (rentalRate) là bắt buộc.");
@@ -95,6 +102,7 @@ public sealed partial class EquipmentListingService
             trimmedName,
             trimmedDescription,
             request.Model,
+            request.MediaIds,
             request.ThumbnailMediaId,
             request.SchemaVersion,
             specValuesJson);
@@ -104,7 +112,7 @@ public sealed partial class EquipmentListingService
             return detailsValidation.Error;
         }
 
-        var (validName, validDesc, validModel, validThumb, validSchema, validSpecs) = detailsValidation.Value;
+        var (validName, validDesc, validModel, validMediaIds, validThumb, validSchema, validSpecs) = detailsValidation.Value;
 
         // 3. Published EquipmentType check
         var catLookup = await _catalogClient.GetPublishedEquipmentTypeAsync(request.EquipmentTypeId, cancellationToken);
@@ -132,19 +140,23 @@ public sealed partial class EquipmentListingService
             return specResult.Error;
         }
 
-        // 6. Media preparation (nếu có thumbnail)
-        if (validThumb.HasValue)
+        // 6. Media preparation (xác minh danh sách media và thumbnail ngoài transaction)
+        if (validMediaIds.Length > 0 || validThumb.HasValue)
         {
-            var mediaResult = await _mediaService.PreparePublicAsync(validThumb.Value, caller, cancellationToken);
+            var mediaResult = await _mediaService.PreparePublicAsync(
+                validMediaIds,
+                validThumb,
+                caller,
+                cancellationToken: cancellationToken);
             if (mediaResult.IsFailure)
             {
                 return mediaResult.Error;
             }
         }
 
-        // 7. Atomic write transaction: tạo Listing Draft và đúng 1 physical asset ban đầu
+        // 7. Atomic write transaction: tạo Listing Draft và đúng 1 physical asset ban đầu kế thừa năm sản xuất của Listing
         var listingId = Guid.NewGuid();
-        var now = _timeProvider.GetUtcNow();
+        now = _timeProvider.GetUtcNow();
 
         var listingResult = EquipmentListing.Create(
             listingId,
@@ -161,6 +173,8 @@ public sealed partial class EquipmentListingService
             request.RentalRate.MonthlyRate,
             request.RentalRate.Currency!,
             now,
+            yearValidation.Value,
+            validMediaIds,
             validThumb);
 
         if (listingResult.IsFailure)
@@ -170,12 +184,11 @@ public sealed partial class EquipmentListingService
 
         var listing = listingResult.Value;
         var assetId = Guid.NewGuid();
-        var assetResult = InventoryAsset.Create(assetId, listingId, normalizedSerial, now);
+        var assetResult = InventoryAsset.Create(assetId, listingId, normalizedSerial, now, listing.ManufactureYear);
         if (assetResult.IsFailure)
         {
             return assetResult.Error;
         }
-
         var asset = assetResult.Value;
         var txResult = await _writeTransaction.ExecuteListingWriteAsync(listingId, (ctx, _) =>
         {
@@ -259,6 +272,21 @@ public sealed partial class EquipmentListingService
             return Error.Validation("INVALID_MODEL", "Model không được để trống.");
         }
 
+        var preflightNow = _timeProvider.GetUtcNow();
+        if (request.IsManufactureYearSpecified)
+        {
+            var yearValidation = EquipmentListing.ValidateManufactureYear(request.ManufactureYear, preflightNow);
+            if (yearValidation.IsFailure)
+            {
+                return yearValidation.Error;
+            }
+        }
+
+        if (request.IsMediaIdsSpecified && request.MediaIds is null)
+        {
+            return Error.Validation("INVALID_MEDIA_IDS", "Danh sách media (mediaIds) không được là null.");
+        }
+
         if (request.IsSchemaVersionSpecified && !request.SchemaVersion.HasValue)
         {
             return Error.Validation("INVALID_SCHEMA_VERSION", "Schema Version phải là số nguyên dương lớn hơn hoặc bằng 1.");
@@ -285,18 +313,27 @@ public sealed partial class EquipmentListingService
             ? (string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim())
             : snapshot.Description;
         string targetModel = request.IsModelSpecified ? request.Model! : snapshot.Model;
+        int? targetManufactureYear = request.IsManufactureYearSpecified ? request.ManufactureYear : snapshot.ManufactureYear;
+        IReadOnlyList<Guid> targetMediaIds = request.IsMediaIdsSpecified ? request.MediaIds! : snapshot.MediaIds;
         Guid? targetThumb = request.IsThumbnailMediaIdSpecified ? request.ThumbnailMediaId : snapshot.ThumbnailMediaId;
         int targetSchema = request.IsSchemaVersionSpecified ? request.SchemaVersion!.Value : snapshot.SchemaVersion;
         string targetSpecs = request.IsSpecValuesSpecified ? request.SpecValues!.Value.GetRawText() : snapshot.SpecValues;
 
         // 3. Domain validation cục bộ TRƯỚC KHI gọi Catalog / Media
-        var detailsValidation = EquipmentListing.ValidateDetails(targetName, targetDescription, targetModel, targetThumb, targetSchema, targetSpecs);
+        var detailsValidation = EquipmentListing.ValidateDetails(
+            targetName,
+            targetDescription,
+            targetModel,
+            targetMediaIds,
+            targetThumb,
+            targetSchema,
+            targetSpecs);
         if (detailsValidation.IsFailure)
         {
             return detailsValidation.Error;
         }
 
-        var (validName, validDesc, validModel, validThumb, validSchema, validSpecs) = detailsValidation.Value;
+        var (validName, validDesc, validModel, validMediaIds, validThumb, validSchema, validSpecs) = detailsValidation.Value;
 
         // 4. Downstream validation: Catalog Brand
         if (request.IsBrandIdSpecified)
@@ -323,10 +360,16 @@ public sealed partial class EquipmentListingService
             }
         }
 
-        // 6. Media preparation (nếu thumbnail đổi thành Guid mới)
-        if (request.IsThumbnailMediaIdSpecified && validThumb.HasValue && validThumb != snapshot.ThumbnailMediaId)
+        // 6. Media preparation ngoài transaction (xác minh media mới và thumbnail được chọn)
+        if (request.IsMediaIdsSpecified || request.IsThumbnailMediaIdSpecified)
         {
-            var mediaResult = await _mediaService.PreparePublicAsync(validThumb.Value, caller, cancellationToken);
+            var mediaResult = await _mediaService.PreparePublicAsync(
+                validMediaIds,
+                validThumb,
+                caller,
+                snapshot.MediaIds,
+                snapshot.ThumbnailMediaId,
+                cancellationToken);
             if (mediaResult.IsFailure)
             {
                 return mediaResult.Error;
@@ -377,6 +420,8 @@ public sealed partial class EquipmentListingService
                 validName,
                 validDesc,
                 validModel,
+                request.IsManufactureYearSpecified ? targetManufactureYear : null,
+                validMediaIds,
                 validThumb,
                 validSchema,
                 validSpecs,
@@ -386,7 +431,6 @@ public sealed partial class EquipmentListingService
             {
                 return detailsRes.Error;
             }
-
             return Result.Success(listing);
         }, cancellationToken);
 
@@ -534,7 +578,6 @@ public sealed partial class EquipmentListingService
         {
             return Error.Forbidden("FORBIDDEN", "Không có quyền thêm thiết bị cho Listing của người dùng khác.");
         }
-        var now = _timeProvider.GetUtcNow();
         var txResult = await _writeTransaction.ExecuteListingWriteAsync(id, async (ctx, ct) =>
         {
             var listing = await ctx.Listings.GetByIdAsync(id, ct);
@@ -547,6 +590,14 @@ public sealed partial class EquipmentListingService
             {
                 return Error.Forbidden("FORBIDDEN", "Không có quyền thêm thiết bị cho Listing của người dùng khác.");
             }
+
+            var now = _timeProvider.GetUtcNow();
+            var yearValidation = EquipmentListing.ValidateManufactureYear(listing.ManufactureYear, now);
+            if (yearValidation.IsFailure)
+            {
+                return yearValidation.Error;
+            }
+
             bool serialExists = await ctx.Assets.ExistsSerialInListingAsync(id, normalizedSerial, null, ct);
             if (serialExists)
             {
@@ -554,7 +605,7 @@ public sealed partial class EquipmentListingService
             }
 
             var assetId = Guid.NewGuid();
-            var assetRes = InventoryAsset.Create(assetId, id, normalizedSerial, now);
+            var assetRes = InventoryAsset.Create(assetId, id, normalizedSerial, now, yearValidation.Value);
             if (assetRes.IsFailure)
             {
                 return assetRes.Error;

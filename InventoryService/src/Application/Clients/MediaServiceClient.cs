@@ -49,7 +49,8 @@ public sealed class MediaServiceClient : IMediaServiceClient
     private sealed record RemoteMediaVerificationResponse(
         Guid MediaId,
         string Status,
-        string UploadedByUserId
+        string UploadedByUserId,
+        string? ContentType
     );
 
     private sealed record RemoteMediaVisibilityResponse(
@@ -88,12 +89,14 @@ public sealed class MediaServiceClient : IMediaServiceClient
                 }
 
                 if (parsed is null || parsed.MediaId == Guid.Empty ||
-                    string.IsNullOrWhiteSpace(parsed.Status) || string.IsNullOrWhiteSpace(parsed.UploadedByUserId))
+                    string.IsNullOrWhiteSpace(parsed.Status) ||
+                    string.IsNullOrWhiteSpace(parsed.UploadedByUserId) ||
+                    string.IsNullOrWhiteSpace(parsed.ContentType))
                 {
                     return Error.Unavailable("MEDIA_SERVICE_INVALID_RESPONSE", "Phản hồi verify từ MediaService thiếu các trường dữ liệu bắt buộc.");
                 }
 
-                return Result.Success(new MediaVerificationInfo(parsed.MediaId, parsed.Status, parsed.UploadedByUserId));
+                return Result.Success(new MediaVerificationInfo(parsed.MediaId, parsed.Status, parsed.UploadedByUserId, parsed.ContentType));
             }
 
             return MapHttpError(response.StatusCode, "verify");

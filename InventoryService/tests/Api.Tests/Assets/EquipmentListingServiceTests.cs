@@ -176,8 +176,15 @@ public sealed class EquipmentListingServiceTests
 
     private sealed class FakeMediaService : IInventoryMediaService
     {
-        public Task<Result<MediaReferenceResponse?>> PreparePublicAsync(Guid? mediaId, IInventoryCallerContext caller, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success<MediaReferenceResponse?>(mediaId.HasValue ? new MediaReferenceResponse(mediaId.Value, "https://gateway.example/content") : null));
+        public Task<Result<IReadOnlyList<MediaReferenceResponse>>> PreparePublicAsync(
+            IReadOnlyList<Guid> mediaIds,
+            Guid? thumbnailMediaId,
+            IInventoryCallerContext caller,
+            IReadOnlyCollection<Guid>? existingMediaIds = null,
+            Guid? existingThumbnailMediaId = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success<IReadOnlyList<MediaReferenceResponse>>(
+                mediaIds.Select(id => new MediaReferenceResponse(id, $"https://gateway.example/api/v1/media/{id:D}/content")).ToList()));
     }
 
     private readonly FakeListingRepository _listingRepo = new();
@@ -216,6 +223,8 @@ public sealed class EquipmentListingServiceTests
         var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
 
         using var specDoc = JsonDocument.Parse("{\"sensor\":\"Full-Frame\"}");
+        var media1 = Guid.NewGuid();
+        var media2 = Guid.NewGuid();
         var request = new CreateEquipmentListingRequest(
             EquipmentTypeId: Guid.NewGuid(),
             BrandId: Guid.NewGuid(),
@@ -224,8 +233,11 @@ public sealed class EquipmentListingServiceTests
             SerialNumber: "FX3-TEST-00001",
             SpecValues: specDoc.RootElement.Clone(),
             RentalRate: new RentalRateDto(500_000m, 3_000_000m, 10_000_000m, "VND"),
+            ManufactureYear: 2024,
             Description: "Mô tả máy quay",
-            SchemaVersion: 1);
+            SchemaVersion: 1,
+            MediaIds: [media2, media1],
+            ThumbnailMediaId: media1);
 
         var result = await service.CreateListingAsync(request, caller);
 
@@ -233,13 +245,20 @@ public sealed class EquipmentListingServiceTests
         var response = result.Value;
         Assert.Equal(ownerId, response.OwnerUserId);
         Assert.Equal("Sony FX3", response.Model);
+        Assert.Equal(2024, response.ManufactureYear);
+        Assert.Equal(2, response.Media.Count);
+        Assert.Equal(media2, response.Media[0].Id);
+        Assert.Equal(media1, response.Media[1].Id);
+        Assert.Equal(media1, response.ThumbnailMediaId);
         Assert.Equal("Draft", response.Status);
         Assert.Equal(1, response.TotalQuantity);
 
-        // Verify stored in repositories
+        // Verify stored in repositories and first asset inherited manufactureYear
         Assert.True(_listingRepo.Store.ContainsKey(response.Id));
-        Assert.Equal(1, _assetRepo.Store.Values.Count(a => a.EquipmentListingId == response.Id));
-        Assert.All(_assetRepo.Store.Values.Where(a => a.EquipmentListingId == response.Id), a => Assert.True(a.AcceptingBookings));
+        var assets = _assetRepo.Store.Values.Where(a => a.EquipmentListingId == response.Id).ToList();
+        Assert.Single(assets);
+        Assert.True(assets[0].AcceptingBookings);
+        Assert.Equal(2024, assets[0].ManufactureYear);
     }
 
     [Theory]
@@ -254,8 +273,8 @@ public sealed class EquipmentListingServiceTests
         using var specDoc = JsonDocument.Parse("{}");
         var request = new CreateEquipmentListingRequest(
             Guid.NewGuid(), Guid.NewGuid(), "Name", "Model", invalidSerial!, specDoc.RootElement,
-            RentalRate: new RentalRateDto(100_000m, null, null, "VND"));
-
+            RentalRate: new RentalRateDto(100_000m, null, null, "VND"),
+            ManufactureYear: 2024);
         var result = await service.CreateListingAsync(request, caller);
 
         Assert.True(result.IsFailure);
@@ -271,7 +290,7 @@ public sealed class EquipmentListingServiceTests
 
         var listingId = Guid.NewGuid();
         var listing = EquipmentListing.Create(
-            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow).Value;
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2023).Value;
         _listingRepo.Add(listing);
 
         var addRequest = new AddListingAssetRequest("FX3-TEST-00002");
@@ -279,6 +298,7 @@ public sealed class EquipmentListingServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal("FX3-TEST-00002", result.Value.SerialNumber);
+        Assert.Equal(2023, result.Value.ManufactureYear);
         Assert.Equal(1, _assetRepo.Store.Values.Count(a => a.EquipmentListingId == listingId));
     }
 
@@ -291,7 +311,7 @@ public sealed class EquipmentListingServiceTests
 
         var listingId = Guid.NewGuid();
         var listing = EquipmentListing.Create(
-            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow).Value;
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
         _listingRepo.Add(listing);
 
         var patch = new PatchEquipmentListingRequest
@@ -315,7 +335,7 @@ public sealed class EquipmentListingServiceTests
 
         var listingId = Guid.NewGuid();
         var listing = EquipmentListing.Create(
-            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow).Value;
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
         _listingRepo.Add(listing);
 
         var newRates = new RentalRateDto(200_000m, 1_200_000m, 4_000_000m, "VND");
@@ -335,12 +355,12 @@ public sealed class EquipmentListingServiceTests
 
         var listingId = Guid.NewGuid();
         var listing = EquipmentListing.Create(
-            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow).Value;
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
         _listingRepo.Add(listing);
 
         using var specDoc = JsonDocument.Parse("{}");
         var createReq = new CreateEquipmentListingRequest(
-            Guid.NewGuid(), Guid.NewGuid(), "Name", "Model", "SN-1", specDoc.RootElement, new RentalRateDto(100_000m, null, null, "VND"));
+            Guid.NewGuid(), Guid.NewGuid(), "Name", "Model", "SN-1", specDoc.RootElement, new RentalRateDto(100_000m, null, null, "VND"), 2024);
 
         var rCreate = await service.CreateListingAsync(createReq, serviceCaller);
         Assert.Equal("FORBIDDEN", rCreate.Error.Code);
@@ -362,5 +382,110 @@ public sealed class EquipmentListingServiceTests
 
         var rAssets = await service.GetListingAssetsAsync(listingId, 1, 20, serviceCaller);
         Assert.Equal("FORBIDDEN", rAssets.Error.Code);
+    }
+
+    [Fact]
+    public async Task PatchListingManufactureYear_OnlyAffectsSubsequentAssets_AndLegacyNullYearBlocksAddAssetUntilPatched()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
+
+        var listingId = Guid.NewGuid();
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2021).Value;
+        // Simulate legacy listing with null ManufactureYear
+        typeof(EquipmentListing).GetProperty(nameof(EquipmentListing.ManufactureYear))!.SetValue(listing, null);
+        _listingRepo.Add(listing);
+
+        // 1. Add asset when listing ManufactureYear is null -> rejected
+        var addBlocked = await service.AddAssetAsync(listingId, new AddListingAssetRequest("SN-BLOCKED"), caller);
+        Assert.True(addBlocked.IsFailure);
+        Assert.Equal("INVALID_MANUFACTURE_YEAR", addBlocked.Error.Code);
+
+        // 2. Patch listing with valid ManufactureYear = 2022
+        var patchYear = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest
+        {
+            IsManufactureYearSpecified = true,
+            ManufactureYear = 2022
+        }, caller);
+        Assert.True(patchYear.IsSuccess);
+        Assert.Equal(2022, patchYear.Value.ManufactureYear);
+
+        // 3. Add asset 1 -> inherits 2022
+        var asset1 = await service.AddAssetAsync(listingId, new AddListingAssetRequest("SN-001"), caller);
+        Assert.True(asset1.IsSuccess);
+        Assert.Equal(2022, asset1.Value.ManufactureYear);
+
+        // 4. Patch listing ManufactureYear = 2025 -> asset 1 remains 2022, new asset 2 gets 2025
+        var patchYear2 = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest
+        {
+            IsManufactureYearSpecified = true,
+            ManufactureYear = 2025
+        }, caller);
+        Assert.True(patchYear2.IsSuccess);
+        Assert.Equal(2022, _assetRepo.Store[asset1.Value.Id].ManufactureYear);
+
+        var asset2 = await service.AddAssetAsync(listingId, new AddListingAssetRequest("SN-002"), caller);
+        Assert.True(asset2.IsSuccess);
+        Assert.Equal(2025, asset2.Value.ManufactureYear);
+    }
+
+    [Fact]
+    public async Task PatchListingMedia_EnforcesOmittedNullEmptyAndThumbnailCoherence()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
+        var m1 = Guid.NewGuid();
+        var m2 = Guid.NewGuid();
+
+        var listingId = Guid.NewGuid();
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024, [m1, m2], m1).Value;
+        _listingRepo.Add(listing);
+
+        // 1. mediaIds: null is rejected
+        var resNullMedia = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest
+        {
+            IsMediaIdsSpecified = true,
+            MediaIds = null
+        }, caller);
+        Assert.True(resNullMedia.IsFailure);
+        Assert.Equal("INVALID_MEDIA_IDS", resNullMedia.Error.Code);
+
+        // 2. Removing m1 (current thumbnail) without clearing or changing thumbnail is rejected
+        var resRemoveThumbWithoutClearing = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest
+        {
+            IsMediaIdsSpecified = true,
+            MediaIds = [m2]
+        }, caller);
+        Assert.True(resRemoveThumbWithoutClearing.IsFailure);
+        Assert.Equal("INVALID_THUMBNAIL_MEDIA_ID", resRemoveThumbWithoutClearing.Error.Code);
+
+        // 3. Removing m1 while selecting m2 as thumbnail succeeds
+        var resSelectNewThumb = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest
+        {
+            IsMediaIdsSpecified = true,
+            MediaIds = [m2],
+            IsThumbnailMediaIdSpecified = true,
+            ThumbnailMediaId = m2
+        }, caller);
+        Assert.True(resSelectNewThumb.IsSuccess);
+        Assert.Single(resSelectNewThumb.Value.Media);
+        Assert.Equal(m2, resSelectNewThumb.Value.ThumbnailMediaId);
+
+        // 4. Clearing mediaIds: [] along with thumbnailMediaId: null succeeds
+        var resClearAll = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest
+        {
+            IsMediaIdsSpecified = true,
+            MediaIds = [],
+            IsThumbnailMediaIdSpecified = true,
+            ThumbnailMediaId = null
+        }, caller);
+        Assert.True(resClearAll.IsSuccess);
+        Assert.Empty(resClearAll.Value.Media);
+        Assert.Null(resClearAll.Value.ThumbnailMediaId);
+        Assert.Null(resClearAll.Value.ThumbnailUrl);
     }
 }

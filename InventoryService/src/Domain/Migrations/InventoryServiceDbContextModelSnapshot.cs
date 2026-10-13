@@ -293,6 +293,17 @@ namespace InventoryService.Domain.Migrations
                     b.Property<Guid>("EquipmentTypeId")
                         .HasColumnType("uuid")
                         .HasColumnName("equipment_type_id");
+
+                    b.Property<int?>("ManufactureYear")
+                        .HasColumnType("integer")
+                        .HasColumnName("manufacture_year");
+
+                    b.Property<Guid[]>("MediaIds")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid[]")
+                        .HasColumnName("media_ids")
+                        .HasDefaultValueSql("'{}'::uuid[]");
                     b.Property<string>("Model")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -371,6 +382,10 @@ namespace InventoryService.Domain.Migrations
 
                             t.HasCheckConstraint("ck_equipment_listings_description", "description IS NULL OR (description ~ '\\S' AND length(description) <= 2000)");
 
+
+                            t.HasCheckConstraint("ck_equipment_listings_manufacture_year", "manufacture_year IS NULL OR manufacture_year >= 1900");
+
+                            t.HasCheckConstraint("ck_equipment_listings_media_ids", "cardinality(media_ids) <= 20 AND array_position(media_ids, NULL) IS NULL AND NOT ('00000000-0000-0000-0000-000000000000'::uuid = ANY(media_ids)) AND (thumbnail_media_id IS NULL OR thumbnail_media_id = ANY(media_ids))");
                             t.HasCheckConstraint("ck_equipment_listings_model", "model ~ '\\S' AND length(model) <= 200");
 
                             t.HasCheckConstraint("ck_equipment_listings_name", "name ~ '\\S' AND length(name) <= 200");

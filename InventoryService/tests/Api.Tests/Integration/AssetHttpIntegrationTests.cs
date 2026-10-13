@@ -88,7 +88,7 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
             VerifyCalls++;
             return VerifyHandler is not null
                 ? VerifyHandler(mediaId)
-                : Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"))));
+                : Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"), "image/jpeg")));
         }
 
         public Task<Result<MediaVisibilityInfo>> SetPublicAsync(Guid mediaId, CancellationToken cancellationToken = default) =>

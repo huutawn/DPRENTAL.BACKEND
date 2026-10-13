@@ -59,15 +59,50 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
 
     private sealed class StubMediaClient : IMediaServiceClient
     {
-        public Task<Result<MediaVerificationInfo>> VerifyAsync(Guid mediaId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"))));
+        public Dictionary<Guid, (string Status, Guid UploaderId, string ContentType)> MediaStore { get; } = new();
+        public string DefaultContentType { get; set; } = "image/jpeg";
+        public Guid? DefaultUploaderId { get; set; }
+        public Error? ForcedVerifyError { get; set; }
+        public Error? ForcedPublishError { get; set; }
+        public int VerifyCalls { get; private set; }
+        public int SetPublicCalls { get; private set; }
 
-        public Task<Result<MediaVisibilityInfo>> SetPublicAsync(Guid mediaId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success(new MediaVisibilityInfo(mediaId, "Public")));
+        public Task<Result<MediaVerificationInfo>> VerifyAsync(Guid mediaId, CancellationToken cancellationToken = default)
+        {
+            VerifyCalls++;
+            if (ForcedVerifyError is not null)
+            {
+                return Task.FromResult(Result.Failure<MediaVerificationInfo>(ForcedVerifyError));
+            }
+
+            if (MediaStore.TryGetValue(mediaId, out var entry))
+            {
+                return Task.FromResult(Result.Success(new MediaVerificationInfo(
+                    mediaId,
+                    entry.Status,
+                    entry.UploaderId.ToString("D"),
+                    entry.ContentType)));
+            }
+
+            var uploader = (DefaultUploaderId ?? Guid.NewGuid()).ToString("D");
+            return Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", uploader, DefaultContentType)));
+        }
+
+        public Task<Result<MediaVisibilityInfo>> SetPublicAsync(Guid mediaId, CancellationToken cancellationToken = default)
+        {
+            SetPublicCalls++;
+            if (ForcedPublishError is not null)
+            {
+                return Task.FromResult(Result.Failure<MediaVisibilityInfo>(ForcedPublishError));
+            }
+
+            return Task.FromResult(Result.Success(new MediaVisibilityInfo(mediaId, "Public")));
+        }
     }
 
     private (Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> App, Dprental.InventoryService.Api.Tests.Security.InventorySecurityTestFactory SecFactory) CreateFactory(
-        TestTimeProvider? clock = null)
+        TestTimeProvider? clock = null,
+        StubMediaClient? mediaClient = null)
     {
         var testClock = clock ?? new TestTimeProvider(FixedNow);
         var secFactory = new Dprental.InventoryService.Api.Tests.Security.InventorySecurityTestFactory(_fixture.ConnectionString, testClock);
@@ -82,12 +117,11 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
                 services.AddSingleton<ICatalogServiceClient>(new StubCatalogClient());
 
                 services.RemoveAll<IMediaServiceClient>();
-                services.AddSingleton<IMediaServiceClient>(new StubMediaClient());
+                services.AddSingleton<IMediaServiceClient>(mediaClient ?? new StubMediaClient());
             });
         });
         return (app, secFactory);
     }
-
     private InventoryServiceDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
@@ -115,6 +149,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             name = "Sony FX3 Batch 5",
             model = "Sony FX3 Batch 5",
             serialNumber = "FX3-TEST-00001",
+            manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
             rentalRate = new { dailyRate = 500_000m, currency = "VND" }
@@ -538,5 +573,249 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
         var okResp = await client.PatchAsync($"api/v1/inventory/assets/{a2Id:D}",
             new StringContent("{\"serialNumber\":\"SERIAL-CCC\"}", Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.OK, okResp.StatusCode);
+    }
+
+    [Fact]
+    public async Task MultimediaAndManufactureYear_Create_AddAsset_Patch_PublicAndOwnerResponses_AndValidationRejections()
+    {
+        var mediaClient = new StubMediaClient();
+        var (app, secFactory) = CreateFactory(mediaClient: mediaClient);
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        var otherUser = Guid.NewGuid();
+        var admin = Guid.NewGuid();
+        mediaClient.DefaultUploaderId = owner;
+
+        var ownerToken = secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+
+        var vid1 = Guid.NewGuid();
+        var img1 = Guid.NewGuid();
+        var img2 = Guid.NewGuid();
+        mediaClient.MediaStore[vid1] = ("Ready", owner, "video/mp4");
+        mediaClient.MediaStore[img1] = ("Ready", owner, "image/png");
+        mediaClient.MediaStore[img2] = ("Ready", owner, "image/webp");
+
+        // 1. Tạo listing có nhiều ảnh/video, giữ đúng thứ tự và thumbnail; asset đầu tiên nhận đúng năm
+        var createPayload = new
+        {
+            equipmentTypeId = Guid.NewGuid(),
+            brandId = Guid.NewGuid(),
+            name = "Sony FX3 Cinema Multimedia",
+            model = "Sony FX3",
+            serialNumber = "FX3-MM-001",
+            manufactureYear = 2023,
+            schemaVersion = 1,
+            specValues = new { sensor = "Full-Frame" },
+            mediaIds = new[] { vid1, img1, img2 },
+            thumbnailMediaId = img2,
+            rentalRate = new { dailyRate = 500_000m, currency = "VND" }
+        };
+
+        var createResp = await client.PostAsync("api/v1/inventory/equipment-listings",
+            new StringContent(JsonSerializer.Serialize(createPayload), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Created, createResp.StatusCode);
+        var created = await createResp.Content.ReadFromJsonAsync<EquipmentListingResponse>();
+        Assert.NotNull(created);
+        Assert.Equal(2023, created.ManufactureYear);
+        Assert.Equal(3, created.Media.Count);
+        Assert.Equal([vid1, img1, img2], created.Media.Select(m => m.Id).ToArray());
+        Assert.Equal(img2, created.ThumbnailMediaId);
+        Assert.EndsWith($"/api/v1/media/{img2:D}/content", created.ThumbnailUrl);
+
+        // Kiểm tra asset đầu tiên nhận đúng năm 2023
+        var assetsResp1 = await client.GetFromJsonAsync<PagedResponse<InventoryAssetResponse>>(
+            $"api/v1/inventory/equipment-listings/{created.Id:D}/assets");
+        Assert.NotNull(assetsResp1);
+        Assert.Single(assetsResp1.Items);
+        var firstAssetId = assetsResp1.Items[0].Id;
+        Assert.Equal(2023, assetsResp1.Items[0].ManufactureYear);
+
+        // 2. Thêm asset thứ 2 nhận năm hiện tại của listing (2023)
+        var addAsset2Resp = await client.PostAsync($"api/v1/inventory/equipment-listings/{created.Id:D}/assets",
+            new StringContent("{\"serialNumber\":\"FX3-MM-002\"}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Created, addAsset2Resp.StatusCode);
+        var asset2 = await addAsset2Resp.Content.ReadFromJsonAsync<InventoryAssetResponse>();
+        Assert.NotNull(asset2);
+        Assert.Equal(2023, asset2.ManufactureYear);
+
+        // 3. Sửa năm listing sang 2025 và bật Active; không đổi asset cũ; asset mới nhận 2025
+        var patchYearAndActive = new { manufactureYear = 2025, status = "Active" };
+        var patchResp1 = await client.PatchAsync($"api/v1/inventory/equipment-listings/{created.Id:D}",
+            new StringContent(JsonSerializer.Serialize(patchYearAndActive), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, patchResp1.StatusCode);
+        var patchedListing = await patchResp1.Content.ReadFromJsonAsync<EquipmentListingResponse>();
+        Assert.NotNull(patchedListing);
+        Assert.Equal(2025, patchedListing.ManufactureYear);
+        // mediaIds & thumbnailMediaId omitted -> giữ nguyên
+        Assert.Equal([vid1, img1, img2], patchedListing.Media.Select(m => m.Id).ToArray());
+        Assert.Equal(img2, patchedListing.ThumbnailMediaId);
+
+        var addAsset3Resp = await client.PostAsync($"api/v1/inventory/equipment-listings/{created.Id:D}/assets",
+            new StringContent("{\"serialNumber\":\"FX3-MM-003\"}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Created, addAsset3Resp.StatusCode);
+        var asset3 = await addAsset3Resp.Content.ReadFromJsonAsync<InventoryAssetResponse>();
+        Assert.NotNull(asset3);
+        Assert.Equal(2025, asset3.ManufactureYear);
+
+        // Sửa năm riêng của asset đầu tiên sang 2020 vẫn hoạt động; asset 2 vẫn là 2023
+        var patchAsset1Resp = await client.PatchAsync($"api/v1/inventory/assets/{firstAssetId:D}",
+            new StringContent("{\"manufactureYear\":2020}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, patchAsset1Resp.StatusCode);
+        var updatedAsset1 = await patchAsset1Resp.Content.ReadFromJsonAsync<InventoryAssetResponse>();
+        Assert.Equal(2020, updatedAsset1!.ManufactureYear);
+
+        var asset2Reloaded = await client.GetFromJsonAsync<InventoryAssetResponse>($"api/v1/inventory/assets/{asset2.Id:D}");
+        Assert.Equal(2023, asset2Reloaded!.ManufactureYear);
+
+        // 4. Kiểm tra phản hồi Public trả về media theo thứ tự, manufactureYear và thumbnailUrl
+        using var anonClient = app.CreateClient();
+        var publicDetail = await anonClient.GetFromJsonAsync<PublicEquipmentListingResponse>(
+            $"api/v1/inventory/public/equipment-listings/{created.Id:D}");
+        Assert.NotNull(publicDetail);
+        Assert.Equal(2025, publicDetail.ManufactureYear);
+        Assert.Equal([vid1, img1, img2], publicDetail.Media.Select(m => m.Id).ToArray());
+        Assert.Equal(patchedListing.ThumbnailUrl, publicDetail.ThumbnailUrl);
+
+        // 5. Từ chối năm thiếu/sai, media trùng/rỗng, >20, thumbnail ngoài danh sách hoặc là video, media không Ready/sai owner, lỗi MediaService
+        // 5a. Năm thiếu hoặc ngoài khoảng
+        var missingYearPayload = new
+        {
+            equipmentTypeId = Guid.NewGuid(),
+            brandId = Guid.NewGuid(),
+            name = "Missing Year",
+            model = "FX3",
+            serialNumber = "SN-BAD-YEAR",
+            specValues = new { },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" }
+        };
+        var missingYearResp = await client.PostAsync("api/v1/inventory/equipment-listings",
+            new StringContent(JsonSerializer.Serialize(missingYearPayload), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, missingYearResp.StatusCode);
+
+        // 5b. Thumbnail là video -> 400 BadRequest
+        var videoThumbPatch = new { thumbnailMediaId = vid1 };
+        var videoThumbResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{created.Id:D}",
+            new StringContent(JsonSerializer.Serialize(videoThumbPatch), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, videoThumbResp.StatusCode);
+
+        // 5c. Xóa media đang làm thumbnail mà không xóa/đổi thumbnail -> 400 BadRequest
+        var removeThumbMediaPatch = new { mediaIds = new[] { vid1, img1 } };
+        var removeThumbMediaResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{created.Id:D}",
+            new StringContent(JsonSerializer.Serialize(removeThumbMediaPatch), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, removeThumbMediaResp.StatusCode);
+
+        // 5d. PATCH mediaIds: null hoặc manufactureYear: null -> 400 BadRequest
+        var nullMediaResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{created.Id:D}",
+            new StringContent("{\"mediaIds\":null}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, nullMediaResp.StatusCode);
+
+        var nullYearResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{created.Id:D}",
+            new StringContent("{\"manufactureYear\":null}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, nullYearResp.StatusCode);
+
+        // 5e. Media không Ready (409) và sai chủ sở hữu (403) và lỗi MediaService (503) không ghi DB
+        var notReadyId = Guid.NewGuid();
+        var wrongOwnerId = Guid.NewGuid();
+        mediaClient.MediaStore[notReadyId] = ("PendingUpload", owner, "image/jpeg");
+        mediaClient.MediaStore[wrongOwnerId] = ("Ready", otherUser, "image/jpeg");
+
+        var notReadyResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{created.Id:D}",
+            new StringContent(JsonSerializer.Serialize(new { mediaIds = new[] { img2, notReadyId } }), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Conflict, notReadyResp.StatusCode);
+
+        var wrongOwnerResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{created.Id:D}",
+            new StringContent(JsonSerializer.Serialize(new { mediaIds = new[] { img2, wrongOwnerId } }), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Forbidden, wrongOwnerResp.StatusCode);
+
+        mediaClient.ForcedVerifyError = Error.Unavailable("MEDIA_SERVICE_UNAVAILABLE", "MediaService down");
+        var unavailableMediaId = Guid.NewGuid();
+        var unavailableResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{created.Id:D}",
+            new StringContent(JsonSerializer.Serialize(new { mediaIds = new[] { img2, unavailableMediaId } }), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, unavailableResp.StatusCode);
+        mediaClient.ForcedVerifyError = null;
+
+        // Đảm bảo DB vẫn giữ nguyên [vid1, img1, img2] sau các lỗi media
+        await using (var db = CreateDbContext())
+        {
+            var dbListing = await db.EquipmentListings.AsNoTracking().SingleAsync(l => l.Id == created.Id);
+            Assert.Equal([vid1, img1, img2], dbListing.MediaIds);
+            Assert.Equal(img2, dbListing.ThumbnailMediaId);
+        }
+
+        // 6. PATCH mediaIds: [] kèm thumbnailMediaId: null xóa toàn bộ danh sách media
+        var clearMediaResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{created.Id:D}",
+            new StringContent("{\"mediaIds\":[],\"thumbnailMediaId\":null}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, clearMediaResp.StatusCode);
+        var clearedListing = await clearMediaResp.Content.ReadFromJsonAsync<EquipmentListingResponse>();
+        Assert.Empty(clearedListing!.Media);
+        Assert.Null(clearedListing.ThumbnailMediaId);
+        Assert.Null(clearedListing.ThumbnailUrl);
+
+        // 7. Quyền Admin được phép PATCH năm và media (do admin upload), người dùng khác bị 403
+        using var otherClient = app.CreateClient();
+        otherClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            secFactory.CreateHumanToken(otherUser, permissions: [InventoryAccessEvaluator.PermissionAssetManage]));
+        var forbiddenPatch = await otherClient.PatchAsync($"api/v1/inventory/equipment-listings/{created.Id:D}",
+            new StringContent("{\"manufactureYear\":2022}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenPatch.StatusCode);
+
+        using var adminClient = app.CreateClient();
+        adminClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            secFactory.CreateAdminToken(admin));
+        var adminImg = Guid.NewGuid();
+        mediaClient.MediaStore[adminImg] = ("Ready", admin, "image/jpeg");
+        var adminPatch = await adminClient.PatchAsync($"api/v1/inventory/equipment-listings/{created.Id:D}",
+            new StringContent(JsonSerializer.Serialize(new { manufactureYear = 2024, mediaIds = new[] { adminImg }, thumbnailMediaId = adminImg }), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, adminPatch.StatusCode);
+    }
+
+    [Fact]
+    public async Task ConcurrentAddAssetAndPatchManufactureYear_SerializesViaListingAdvisoryLock_ConsistentYearInheritance()
+    {
+        var (app, secFactory) = CreateFactory();
+        await using var _ = app;
+        await using var __ = secFactory;
+
+        var owner = Guid.NewGuid();
+        Guid listingId;
+        await using (var db = CreateDbContext())
+        {
+            var l = await IntegrationTestHelper.InsertTestListingAsync(db, ownerId: owner, model: "Concurrent Year Test", initialUnits: 1, manufactureYear: 2021);
+            listingId = l.Id;
+        }
+
+        var token = secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        using var clientAdd = app.CreateClient();
+        using var clientPatch = app.CreateClient();
+        clientAdd.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        clientPatch.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var addTask = clientAdd.PostAsync($"api/v1/inventory/equipment-listings/{listingId:D}/assets",
+            new StringContent("{\"serialNumber\":\"SN-CONC-YEAR-1\"}", Encoding.UTF8, "application/json"));
+        var patchTask = clientPatch.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
+            new StringContent("{\"manufactureYear\":2025}", Encoding.UTF8, "application/json"));
+
+        await Task.WhenAll(addTask, patchTask);
+
+        var addResp = await addTask;
+        var patchResp = await patchTask;
+
+        Assert.Equal(HttpStatusCode.Created, addResp.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, patchResp.StatusCode);
+
+        var addedAsset = await addResp.Content.ReadFromJsonAsync<InventoryAssetResponse>();
+        Assert.NotNull(addedAsset);
+        Assert.Contains(addedAsset.ManufactureYear, new int?[] { 2021, 2025 });
+
+        // Any asset added after the concurrent pair completes must deterministically inherit 2025
+        var addAfterResp = await clientAdd.PostAsync($"api/v1/inventory/equipment-listings/{listingId:D}/assets",
+            new StringContent("{\"serialNumber\":\"SN-CONC-YEAR-2\"}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Created, addAfterResp.StatusCode);
+        var addedAfterAsset = await addAfterResp.Content.ReadFromJsonAsync<InventoryAssetResponse>();
+        Assert.Equal(2025, addedAfterAsset!.ManufactureYear);
     }
 }

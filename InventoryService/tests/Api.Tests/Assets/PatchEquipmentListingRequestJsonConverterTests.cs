@@ -119,4 +119,86 @@ public sealed class PatchEquipmentListingRequestJsonConverterTests
         Assert.Contains("\"name\":\"Sony FX3 v2\"", json);
         Assert.Contains("\"description\":null", json);
     }
+
+    [Fact]
+    public void Read_MediaIdsAndManufactureYear_SetsPresenceAndPreservesOrder()
+    {
+        var m1 = Guid.NewGuid();
+        var m2 = Guid.NewGuid();
+        var json = $$"""
+            {
+                "manufactureYear": 2024,
+                "mediaIds": ["{{m2}}", "{{m1}}"]
+            }
+            """;
+
+        var request = JsonSerializer.Deserialize<PatchEquipmentListingRequest>(json, Options);
+
+        Assert.NotNull(request);
+        Assert.True(request.IsManufactureYearSpecified);
+        Assert.Equal(2024, request.ManufactureYear);
+        Assert.True(request.IsMediaIdsSpecified);
+        Assert.NotNull(request.MediaIds);
+        Assert.Equal([m2, m1], request.MediaIds);
+        Assert.False(request.IsEmpty);
+    }
+
+    [Fact]
+    public void Read_EmptyMediaIdsArray_SetsPresenceWithEmptyList()
+    {
+        var json = "{\"mediaIds\":[]}";
+        var request = JsonSerializer.Deserialize<PatchEquipmentListingRequest>(json, Options);
+
+        Assert.NotNull(request);
+        Assert.True(request.IsMediaIdsSpecified);
+        Assert.NotNull(request.MediaIds);
+        Assert.Empty(request.MediaIds);
+        Assert.False(request.IsEmpty);
+    }
+
+    [Fact]
+    public void Read_NullMediaIdsAndNullManufactureYear_SetsPresenceWithNull()
+    {
+        var json = """
+            {
+                "manufactureYear": null,
+                "mediaIds": null
+            }
+            """;
+
+        var request = JsonSerializer.Deserialize<PatchEquipmentListingRequest>(json, Options);
+
+        Assert.NotNull(request);
+        Assert.True(request.IsManufactureYearSpecified);
+        Assert.Null(request.ManufactureYear);
+        Assert.True(request.IsMediaIdsSpecified);
+        Assert.Null(request.MediaIds);
+    }
+
+    [Theory]
+    [InlineData("{\"mediaIds\":\"not-an-array\"}")]
+    [InlineData("{\"mediaIds\":[\"not-a-guid\"]}")]
+    [InlineData("{\"manufactureYear\":\"2024\"}")]
+    public void Read_InvalidMediaIdsOrManufactureYearType_ThrowsJsonException(string json)
+    {
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<PatchEquipmentListingRequest>(json, Options));
+    }
+
+    [Fact]
+    public void Write_IncludesMediaIdsAndManufactureYearWhenSpecified()
+    {
+        var m1 = Guid.NewGuid();
+        var request = new PatchEquipmentListingRequest
+        {
+            IsManufactureYearSpecified = true,
+            ManufactureYear = 2025,
+            IsMediaIdsSpecified = true,
+            MediaIds = [m1]
+        };
+
+        var json = JsonSerializer.Serialize(request, Options);
+
+        Assert.Contains("\"manufactureYear\":2025", json);
+        Assert.Contains($"\"mediaIds\":[\"{m1:D}\"]", json);
+    }
 }

@@ -89,7 +89,7 @@ public sealed class PostgresEquipmentListingContentAndSearchTests : IClassFixtur
         public Task<Result<MediaVerificationInfo>> VerifyAsync(Guid mediaId, CancellationToken cancellationToken = default)
         {
             VerifyCalls++;
-            return Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"))));
+            return Task.FromResult(Result.Success(new MediaVerificationInfo(mediaId, "Ready", Guid.NewGuid().ToString("D"), "image/jpeg")));
         }
 
         public Task<Result<MediaVisibilityInfo>> SetPublicAsync(Guid mediaId, CancellationToken cancellationToken = default)
@@ -234,6 +234,118 @@ public sealed class PostgresEquipmentListingContentAndSearchTests : IClassFixtur
                         ({Guid.NewGuid()}, {ownerId}, {eqTypeId}, {brandId}, 'Valid Name', '   ', 'Model', 1, {emptyJson}::jsonb, 500000, 'VND', 1, NOW(), NOW());
                     """);
             });
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Migration_BackfillsMediaIdsAndManufactureYear_EnforcesConstraints_AndSupportsRollback()
+    {
+        var fixture = new PostgresFixture { TargetMigration = "20261012000000_AddEquipmentListingNameAndDescription" };
+        await fixture.InitializeAsync();
+
+        try
+        {
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
+                .UseNpgsql(fixture.ConnectionString, o => o.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
+                .Options;
+
+            await using var db = new InventoryServiceDbContext(options);
+
+            var ownerId = Guid.NewGuid();
+            var eqTypeId = Guid.NewGuid();
+            var brandId = Guid.NewGuid();
+            var emptyJson = "{}";
+
+            // Listing 1: has thumbnail_media_id and 2 assets at different times (earliest has 2021, later has 2024)
+            var listing1Id = Guid.NewGuid();
+            var thumb1 = Guid.NewGuid();
+            var l1AssetEarlyId = Guid.NewGuid();
+            var l1AssetLateId = Guid.NewGuid();
+
+            // Listing 2: no thumbnail, 2 assets with identical created_at (tie-break by id ASC: smaller id has 2019, larger id has 2023)
+            var listing2Id = Guid.NewGuid();
+            var l2AssetSmallId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+            var l2AssetLargeId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+
+            // Listing 3: earliest asset has manufacture_year = NULL, later asset has 2025 -> listing manufacture_year must remain NULL
+            var listing3Id = Guid.NewGuid();
+
+            // Listing 4: no assets at all -> listing manufacture_year must remain NULL, media_ids = {}
+            var listing4Id = Guid.NewGuid();
+
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "inventory"."equipment_listings"
+                    ("id", "owner_user_id", "equipment_type_id", "brand_id", "name", "model", "schema_version", "spec_values", "thumbnail_media_id", "daily_rate", "currency", "status", "created_at", "updated_at")
+                VALUES
+                    ({listing1Id}, {ownerId}, {eqTypeId}, {brandId}, 'Listing 1', 'FX3', 1, {emptyJson}::jsonb, {thumb1}, 500000, 'VND', 2, NOW(), NOW()),
+                    ({listing2Id}, {ownerId}, {eqTypeId}, {brandId}, 'Listing 2', 'FX6', 1, {emptyJson}::jsonb, NULL, 500000, 'VND', 2, NOW(), NOW()),
+                    ({listing3Id}, {ownerId}, {eqTypeId}, {brandId}, 'Listing 3', 'FX9', 1, {emptyJson}::jsonb, NULL, 500000, 'VND', 1, NOW(), NOW()),
+                    ({listing4Id}, {ownerId}, {eqTypeId}, {brandId}, 'Listing 4', 'A7S3', 1, {emptyJson}::jsonb, NULL, 500000, 'VND', 1, NOW(), NOW());
+
+                INSERT INTO "inventory"."assets"
+                    ("id", "equipment_listing_id", "asset_code", "serial_number", "manufacture_year", "accepting_bookings", "created_at", "updated_at")
+                VALUES
+                    ({l1AssetEarlyId}, {listing1Id}, {"AST-" + l1AssetEarlyId.ToString("N")}, 'L1-SN-1', 2021, TRUE, '2026-01-01T00:00:00Z'::timestamptz, '2026-01-01T00:00:00Z'::timestamptz),
+                    ({l1AssetLateId}, {listing1Id}, {"AST-" + l1AssetLateId.ToString("N")}, 'L1-SN-2', 2024, TRUE, '2026-02-01T00:00:00Z'::timestamptz, '2026-02-01T00:00:00Z'::timestamptz),
+                    ({l2AssetLargeId}, {listing2Id}, {"AST-" + l2AssetLargeId.ToString("N")}, 'L2-SN-2', 2023, TRUE, '2026-03-01T10:00:00Z'::timestamptz, '2026-03-01T10:00:00Z'::timestamptz),
+                    ({l2AssetSmallId}, {listing2Id}, {"AST-" + l2AssetSmallId.ToString("N")}, 'L2-SN-1', 2019, TRUE, '2026-03-01T10:00:00Z'::timestamptz, '2026-03-01T10:00:00Z'::timestamptz),
+                    ({Guid.NewGuid()}, {listing3Id}, {"AST-" + Guid.NewGuid().ToString("N")}, 'L3-SN-1', NULL, TRUE, '2026-01-01T00:00:00Z'::timestamptz, '2026-01-01T00:00:00Z'::timestamptz),
+                    ({Guid.NewGuid()}, {listing3Id}, {"AST-" + Guid.NewGuid().ToString("N")}, 'L3-SN-2', 2025, TRUE, '2026-02-01T00:00:00Z'::timestamptz, '2026-02-01T00:00:00Z'::timestamptz);
+                """);
+
+            var migrator = db.GetService<IMigrator>();
+            await migrator.MigrateAsync("20261013000000_AddEquipmentListingMediaAndManufactureYear");
+
+            // Verify backfilled values via EF Core
+            var l1 = await db.EquipmentListings.AsNoTracking().SingleAsync(l => l.Id == listing1Id);
+            Assert.Equal([thumb1], l1.MediaIds);
+            Assert.Equal(thumb1, l1.ThumbnailMediaId);
+            Assert.Equal(2021, l1.ManufactureYear);
+
+            // Verify asset years were NOT modified by migration
+            var l1LateAsset = await db.Assets.AsNoTracking().SingleAsync(a => a.Id == l1AssetLateId);
+            Assert.Equal(2024, l1LateAsset.ManufactureYear);
+
+            var l2 = await db.EquipmentListings.AsNoTracking().SingleAsync(l => l.Id == listing2Id);
+            Assert.Empty(l2.MediaIds);
+            Assert.Null(l2.ThumbnailMediaId);
+            Assert.Equal(2019, l2.ManufactureYear);
+
+            var l3 = await db.EquipmentListings.AsNoTracking().SingleAsync(l => l.Id == listing3Id);
+            Assert.Empty(l3.MediaIds);
+            Assert.Null(l3.ManufactureYear);
+
+            var l4 = await db.EquipmentListings.AsNoTracking().SingleAsync(l => l.Id == listing4Id);
+            Assert.Empty(l4.MediaIds);
+            Assert.Null(l4.ManufactureYear);
+
+            // Verify DB constraints on manufacture_year (< 1900 rejected)
+            await Assert.ThrowsAsync<PostgresException>(async () =>
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    UPDATE "inventory"."equipment_listings"
+                    SET "manufacture_year" = 1899
+                    WHERE "id" = {listing1Id};
+                    """);
+            });
+
+            // Verify DB constraint: thumbnail_media_id must be in media_ids
+            await Assert.ThrowsAsync<PostgresException>(async () =>
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    UPDATE "inventory"."equipment_listings"
+                    SET "media_ids" = ARRAY[]::uuid[]
+                    WHERE "id" = {listing1Id};
+                    """);
+            });
+
+            // Verify Down rollback and re-migrate
+            await migrator.MigrateAsync("20261012000000_AddEquipmentListingNameAndDescription");
+            await migrator.MigrateAsync("20261013000000_AddEquipmentListingMediaAndManufactureYear");
         }
         finally
         {
