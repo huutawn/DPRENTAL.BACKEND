@@ -1,5 +1,6 @@
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
+using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.Options;

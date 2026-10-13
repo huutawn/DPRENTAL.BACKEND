@@ -1,5 +1,5 @@
 using Dprental.RentalService.Application.DTOs.Calendar;
-using Dprental.RentalService.Application.IServices;
+using Dprental.RentalService.Application.IServices.Calendar;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Microsoft.AspNetCore.Authorization;

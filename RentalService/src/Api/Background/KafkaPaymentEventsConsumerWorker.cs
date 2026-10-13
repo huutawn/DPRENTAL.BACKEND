@@ -1,6 +1,6 @@
 #pragma warning disable CA1848, CA1873
 using Confluent.Kafka;
-using Dprental.RentalService.Application.Integration;
+using Dprental.RentalService.Application.IServices.Integration;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Microsoft.Extensions.DependencyInjection;

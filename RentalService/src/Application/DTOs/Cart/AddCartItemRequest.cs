@@ -1,4 +1,4 @@
-namespace Dprental.RentalService.Api.Contracts.Cart;
+namespace Dprental.RentalService.Application.DTOs.Cart;
 
 /// <summary>
 /// DTO yêu cầu thêm một mục thiết bị vào giỏ hàng của người thuê.

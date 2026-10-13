@@ -1,5 +1,6 @@
 #pragma warning disable CA1848, CA1873
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Common;
 
 namespace Dprental.RentalService.Api.Clients;

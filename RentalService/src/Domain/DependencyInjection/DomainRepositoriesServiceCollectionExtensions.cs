@@ -1,6 +1,5 @@
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Domain.Repositories;
-using Dprental.RentalService.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 

@@ -2,8 +2,8 @@
 using System.Text.Json;
 using Dprental.RentalService.Application.DTOs.Integration;
 using Dprental.RentalService.Application.DTOs.Payment;
-using Dprental.RentalService.Application.Integration;
-using Dprental.RentalService.Application.Payments;
+using Dprental.RentalService.Application.IServices.Integration;
+using Dprental.RentalService.Application.IServices.Payments;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Configuration;

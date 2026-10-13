@@ -1,5 +1,5 @@
 #pragma warning disable CA1848, CA1873
-using Dprental.RentalService.Application.Expiry;
+using Dprental.RentalService.Application.IServices.Expiry;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

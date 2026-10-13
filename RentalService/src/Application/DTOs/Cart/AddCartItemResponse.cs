@@ -1,6 +1,6 @@
 using System;
 
-namespace Dprental.RentalService.Api.Contracts.Cart;
+namespace Dprental.RentalService.Application.DTOs.Cart;
 
 /// <summary>
 /// DTO phản hồi sau khi thêm một mục thiết bị vào giỏ hàng thành công.

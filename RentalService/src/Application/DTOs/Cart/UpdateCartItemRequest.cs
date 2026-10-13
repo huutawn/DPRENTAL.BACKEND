@@ -1,4 +1,4 @@
-namespace Dprental.RentalService.Api.Contracts.Cart;
+namespace Dprental.RentalService.Application.DTOs.Cart;
 
 /// <summary>
 /// DTO yêu cầu cập nhật mục trong giỏ hàng.

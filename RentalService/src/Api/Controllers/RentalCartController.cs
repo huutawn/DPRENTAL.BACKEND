@@ -1,4 +1,3 @@
-using Dprental.RentalService.Api.Contracts.Cart;
 using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Api.Filters;
@@ -147,36 +146,10 @@ public sealed class RentalCartController(
         [FromBody] UpdateCartItemRequest request,
         CancellationToken cancellationToken)
     {
-        bool hasAnyDate = request.ExpectedStartDate is not null || request.ExpectedEndDate is not null;
-        bool hasBothDates = request.ExpectedStartDate is not null && request.ExpectedEndDate is not null;
-        bool hasQuantity = request.Quantity is not null;
+        var result = await cartUseCases.UpdateCartItemAsync(
+            currentRenter.RenterId, id, request, cancellationToken);
 
-        if ((hasAnyDate && !hasBothDates) || hasQuantity == hasBothDates)
-        {
-            return BadRequest(new ProblemDetails
-            {
-                Status = StatusCodes.Status400BadRequest,
-                Title = "Cart.InvalidUpdate",
-                Detail = "Cung cấp Quantity hoặc cả ExpectedStartDate và ExpectedEndDate; mỗi PATCH chỉ cập nhật một loại thông tin."
-            });
-        }
-
-        if (hasQuantity)
-        {
-            var qtyResult = await cartUseCases.UpdateCartItemQuantityAsync(
-                currentRenter.RenterId, id, request.Quantity.GetValueOrDefault(), cancellationToken);
-
-            if (qtyResult.IsFailure) return this.ToProblem(qtyResult.Error);
-        }
-        else
-        {
-            var datesResult = await cartUseCases.UpdateCartItemDatesAsync(
-                currentRenter.RenterId, id, request.ExpectedStartDate.GetValueOrDefault(), request.ExpectedEndDate.GetValueOrDefault(), cancellationToken);
-
-            if (datesResult.IsFailure) return this.ToProblem(datesResult.Error);
-        }
-
-        return NoContent();
+        return result.IsFailure ? this.ToProblem(result.Error) : NoContent();
     }
 
 
