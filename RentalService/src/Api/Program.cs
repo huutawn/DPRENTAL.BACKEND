@@ -1,31 +1,19 @@
-using Dprental.RentalService.Application.Options;
-using Dprental.RentalService.Application.Policies;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Dprental.RentalService.Api.Exceptions;
 using Dprental.RentalService.Api.Routing;
 using Dprental.RentalService.Api.Security;
-using Dprental.RentalService.Application.IServices;
-using Dprental.RentalService.Application.Security;
-using Dprental.RentalService.Application.Services;
-using Dprental.RentalService.Domain.Repositories;
-using Dprental.RentalService.Api.Background;
-using Dprental.RentalService.Api.Clients;
 using Dprental.RentalService.Application.Clients;
-using Dprental.RentalService.Application.Expiry;
-using Dprental.RentalService.Application.Integration;
-using Dprental.RentalService.Application.Operations;
-using Dprental.RentalService.Application.Payments;
-using Dprental.RentalService.Application.SupplierDecision;
-using Dprental.RentalService.Application.SupplierStatistics;
-using Dprental.RentalService.Domain.IRepositories;
-using Dprental.RentalService.Application.Observability;
+using Dprental.RentalService.Application.DependencyInjection;
+using Dprental.RentalService.Application.Options;
+using Dprental.RentalService.Application.Security;
+using Dprental.RentalService.Domain.DependencyInjection;
+using Dprental.RentalService.Domain.Repositories;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Dprental.RentalService.DependencyInjection;
-using Dprental.RentalService.Domain.DependencyInjection;
-using Microsoft.AspNetCore.Authorization;
+using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -45,31 +33,7 @@ builder.Services.AddScoped<IRentalCallerContext>(sp =>
     var http = sp.GetRequiredService<IHttpContextAccessor>();
     return RentalCallerContext.FromClaimsPrincipal(http.HttpContext?.User);
 });
-builder.Services.AddScoped<IRentalCalendarService, RentalCalendarService>();
-builder.Services.AddScoped<IRentalOperationExecutor, RentalOperationExecutor>();
-builder.Services.AddHttpClient<IServiceTokenProvider, AuthServiceTokenProvider>()
-    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
-builder.Services.AddHttpClient<IPaymentRentalClient, HttpPaymentRentalClient>()
-    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
-builder.Services.AddHttpClient<IInventoryRentalClient, HttpInventoryRentalClient>()
-    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
-builder.Services.AddScoped<InventoryRentalCartReader>();
-builder.Services.AddScoped<IRentalListingOwnerProvider>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
-builder.Services.AddScoped<IRentalListingReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
-builder.Services.AddScoped<IRentalAvailabilityReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
-builder.Services.AddScoped<IPaymentWorkflowService, PaymentWorkflowService>();
-builder.Services.AddScoped<ISupplierDecisionService, SupplierDecisionService>();
-builder.Services.AddScoped<IExpiryWorkflowService, ExpiryWorkflowService>();
-builder.Services.AddScoped<ISupplierStatisticsService, SupplierStatisticsService>();
-builder.Services.AddScoped<IRefundCompletedConsumer, RefundCompletedConsumer>();
-builder.Services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
-builder.Services.AddSingleton<RentalMetrics>();
-builder.Services.AddHostedService<OutboxPublisherWorker>();
-builder.Services.AddHostedService<OperationRecoveryWorker>();
-builder.Services.AddHostedService<ExpiryScannerWorker>();
-builder.Services.AddHostedService<KafkaPaymentEventsConsumerWorker>();
-builder.Services.AddHostedService<InboxProcessingWorker>();
-builder.Services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
+builder.Services.Configure<RentalTermsOptions>(builder.Configuration.GetSection(RentalTermsOptions.SectionName));
 builder.Services.AddScoped<ICurrentRenter, CurrentRenter>();
 builder.Services.AddAuthorization(options =>
 {
@@ -86,10 +50,35 @@ builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "DPRental - RentalService API",
+        Version = "v1"
+    });
+
+    // The cart alias remains routable; document each operation only at its canonical URL.
+    options.DocInclusionPredicate((_, api) =>
+        api.RelativePath is not null &&
+        api.RelativePath.StartsWith(ApiRoutes.Prefix + "/", StringComparison.Ordinal));
+
+    options.InferSecuritySchemes();
+
     var apiXml = Path.Combine(AppContext.BaseDirectory, $"{typeof(Program).Assembly.GetName().Name}.xml");
     if (File.Exists(apiXml))
     {
         options.IncludeXmlComments(apiXml, includeControllerXmlComments: true);
+    }
+
+    var appXml = Path.Combine(AppContext.BaseDirectory, "RentalService.Application.xml");
+    if (File.Exists(appXml))
+    {
+        options.IncludeXmlComments(appXml);
+    }
+
+    var domainXml = Path.Combine(AppContext.BaseDirectory, "RentalService.Domain.xml");
+    if (File.Exists(domainXml))
+    {
+        options.IncludeXmlComments(domainXml);
     }
 });
 

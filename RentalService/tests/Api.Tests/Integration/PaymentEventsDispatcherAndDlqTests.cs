@@ -1,6 +1,8 @@
 using Dprental.RentalService.Application.DTOs.Payment;
-using Dprental.RentalService.Application.Integration;
-using Dprental.RentalService.Application.Payments;
+using Dprental.RentalService.Application.IServices.Integration;
+using Dprental.RentalService.Application.IServices.Payments;
+using Dprental.RentalService.Application.Services.Integration;
+using Dprental.RentalService.Application.Services.Payments;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Entities;

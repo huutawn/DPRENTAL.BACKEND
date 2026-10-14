@@ -1,7 +1,10 @@
-using Dprental.RentalService.Api.Background;
+using Dprental.RentalService.Application.Background;
 using Dprental.RentalService.Api.Tests.TestHelpers;
-using Dprental.RentalService.Application.Expiry;
-using Dprental.RentalService.Application.SupplierStatistics;
+using Dprental.RentalService.Application.IServices.Expiry;
+using Dprental.RentalService.Application.IServices.SupplierStatistics;
+using Dprental.RentalService.Application.Services.Expiry;
+using Dprental.RentalService.Application.Services.SupplierStatistics;
+using Dprental.RentalService.Domain.Repositories;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.AspNetCore.Mvc.Testing;

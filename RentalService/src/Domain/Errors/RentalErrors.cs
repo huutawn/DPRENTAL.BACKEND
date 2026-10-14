@@ -22,6 +22,8 @@ public static class RentalErrors
         Error.Validation("Cart.OwnerIdRequired", "Bắt buộc phải cung cấp OwnerId của thiết bị.");
     public static readonly Error QuantityOverflow =
         Error.Validation("Cart.QuantityOverflow", "Tổng số lượng vượt quá giới hạn cho phép.");
+    public static readonly Error InvalidCartUpdate =
+        Error.Validation("Cart.InvalidUpdate", "Cung cấp Quantity hoặc cả ExpectedStartDate và ExpectedEndDate; mỗi PATCH chỉ cập nhật một loại thông tin.");
 
     public static readonly Error InvalidQuantity =
         Error.Validation("Rental.InvalidQuantity", "Số lượng thuê phải lớn hơn 0.");

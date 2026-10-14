@@ -2,6 +2,7 @@ using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Cart;
 using System.Net;
 using Dprental.RentalService.Domain.DependencyInjection;
+using Dprental.RentalService.Domain.Repositories;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;

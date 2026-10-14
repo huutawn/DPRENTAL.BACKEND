@@ -1,0 +1,191 @@
+#pragma warning disable CA1848, CA1873
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using Dprental.RentalService.Application.DTOs.Checkout;
+using Dprental.RentalService.Application.Errors;
+using Dprental.RentalService.Application.IServices.Checkout;
+using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Common;
+using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Domain.Errors;
+using Dprental.RentalService.Domain.IRepositories;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace Dprental.RentalService.Application.Services.Checkout;
+
+public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
+{
+    // Giữ nguyên chữ có dấu để chuỗi không phình quá giới hạn 256 ký tự của RefundDestinationRef.
+    private static readonly JsonSerializerOptions RefundDestinationJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
+    private readonly IRentalOrderRepository _orders;
+    private readonly IRentalCartRepository _carts;
+    private readonly IOrderCodeGenerator _orderCodes;
+    private readonly ICheckoutHoldOrchestrator _holds;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILogger<CheckoutOrderWriter> _logger;
+
+    public CheckoutOrderWriter(
+        IRentalOrderRepository orders,
+        IRentalCartRepository carts,
+        IOrderCodeGenerator orderCodes,
+        ICheckoutHoldOrchestrator holds,
+        IUnitOfWork unitOfWork,
+        ILogger<CheckoutOrderWriter> logger)
+    {
+        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
+        _carts = carts ?? throw new ArgumentNullException(nameof(carts));
+        _orderCodes = orderCodes ?? throw new ArgumentNullException(nameof(orderCodes));
+        _holds = holds ?? throw new ArgumentNullException(nameof(holds));
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    public async Task<Result<RentalOrder>> CreateOrderAsync(
+        CheckoutPlan plan,
+        IReadOnlyList<CheckoutHeldLine> heldLines,
+        string checkoutOperationId,
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(heldLines);
+        ArgumentException.ThrowIfNullOrWhiteSpace(checkoutOperationId);
+
+        try
+        {
+            return await SaveOrderAsync(plan, heldLines, checkoutOperationId, utcNow, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // Lỗi ngoài dự kiến (database sập, renter ngắt kết nối giữa chừng): lỗi vẫn được ném ra ngoài,
+            // nhưng hold không được nằm lại mà không có đơn nào dùng.
+            _logger.LogWarning(ex, "Checkout {CheckoutOperationId} hỏng trong lúc lưu đơn hàng.", checkoutOperationId);
+            _unitOfWork.DiscardChanges();
+            if (await IsConfirmedNotSavedAsync(checkoutOperationId))
+            {
+                await _holds.ReleaseAllLinesAsync(heldLines);
+            }
+
+            throw;
+        }
+    }
+
+    private async Task<Result<RentalOrder>> SaveOrderAsync(
+        CheckoutPlan plan,
+        IReadOnlyList<CheckoutHeldLine> heldLines,
+        string checkoutOperationId,
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken)
+    {
+        RentalCart? cart = await _carts.GetActiveByRenterIdAsync(plan.RenterId, cancellationToken);
+        if (cart is null || cart.Id != plan.CartId)
+        {
+            return await FailAsync(heldLines, RentalErrors.CartNotFound);
+        }
+
+        string orderCode = await _orderCodes.NextAsync(utcNow, cancellationToken);
+
+        Result<RentalOrder> order = RentalOrder.Create(
+            Guid.NewGuid(),
+            orderCode,
+            plan.RenterId,
+            plan.Currency,
+            CheckoutRules.DeliveryMethod,
+            plan.Delivery.RecipientName!,
+            plan.Delivery.RecipientPhone!,
+            $"{plan.Delivery.AddressDetail}, {plan.Delivery.Province}",
+            plan.Delivery.Note,
+            JsonSerializer.Serialize(plan.RefundAccount, RefundDestinationJsonOptions),
+            plan.TermsVersion,
+            plan.TermsDocumentRef,
+            plan.TermsContentHash,
+            checkoutOperationId,
+            utcNow,
+            heldLines.Select(ToInitialItem));
+        if (order.IsFailure)
+        {
+            return await FailAsync(heldLines, order.Error);
+        }
+
+        Result cartResult = cart.CompleteCheckout(plan.Lines.Select(l => l.CartItemId), utcNow);
+        if (cartResult.IsFailure)
+        {
+            _unitOfWork.DiscardChanges();
+            return await FailAsync(heldLines, cartResult.Error);
+        }
+
+        await _orders.CreateAsync(order.Value, cancellationToken);
+        try
+        {
+            // Đơn, dòng thuê, phân bổ máy, điều khoản và thay đổi của giỏ được ghi trong cùng một transaction.
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex)
+        {
+            _unitOfWork.DiscardChanges();
+
+            // Lần gửi trùng (double-click) dùng chung hold với đơn đã tạo: trả đơn đó và không được nhả hold.
+            RentalOrder? existing = await _orders.GetByCheckoutOperationIdAsync(checkoutOperationId, cancellationToken);
+            if (existing is not null && existing.RenterId == plan.RenterId)
+            {
+                return existing;
+            }
+
+            _logger.LogWarning(ex, "Không lưu được đơn hàng cho checkout {CheckoutOperationId}.", checkoutOperationId);
+            return await FailAsync(heldLines, CheckoutErrors.OrderNotSaved);
+        }
+
+        return order;
+    }
+
+    private async Task<Result<RentalOrder>> FailAsync(IReadOnlyList<CheckoutHeldLine> heldLines, Error error)
+    {
+        await _holds.ReleaseAllLinesAsync(heldLines);
+        return error;
+    }
+
+    /// <summary>
+    /// Chỉ trả <c>true</c> khi đọc được database và chắc chắn chưa có đơn của lần checkout này. Lần lưu có thể đã
+    /// thành công dù báo lỗi (mất kết nối sau khi commit), và nhả hold của một đơn đã lưu thì tệ hơn để hold tự hết hạn.
+    /// </summary>
+    private async Task<bool> IsConfirmedNotSavedAsync(string checkoutOperationId)
+    {
+        try
+        {
+            // Không dùng token của request: renter đã ngắt kết nối thì vẫn phải kiểm tra cho xong.
+            return await _orders.GetByCheckoutOperationIdAsync(checkoutOperationId, CancellationToken.None) is null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Không kiểm tra được đơn của checkout {CheckoutOperationId}; hold được giữ nguyên cho đến khi tự hết hạn.",
+                checkoutOperationId);
+            return false;
+        }
+    }
+
+    private static InitialRentalItemDto ToInitialItem(CheckoutHeldLine held) => new(
+        held.RentalItemId,
+        held.Line.EquipmentListingId,
+        held.Line.SupplierId,
+        held.Line.Quantity,
+        held.Line.ExpectedStartDate,
+        held.Line.ExpectedEndDate,
+        held.Line.ListingName,
+        null,
+        held.Line.PickupLocation,
+        held.Line.DailyRate,
+        held.Line.DepositPerUnit,
+        held.AllocationGroupId,
+        held.AssignedAssets
+            .Select(a => new InitialRentalUnitAssignmentDto(Guid.NewGuid(), a.AssetId, a.AllocationId))
+            .ToList(),
+        held.Line.ListingSnapshot);
+}

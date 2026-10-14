@@ -1,4 +1,3 @@
-using Dprental.RentalService.Api.Contracts.Cart;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Cart;
 using System;
@@ -93,6 +92,7 @@ public sealed class RentalCartJwtApiTests : IClassFixture<RentalCartJwtApiTests.
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
+            builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=rental-test;Username=test;Password=test");
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
                 new Dictionary<string, string?>
                 {

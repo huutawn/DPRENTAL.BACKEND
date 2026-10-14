@@ -63,13 +63,11 @@ Application trả `Result` cho lỗi dự kiến; controller dùng `this.ToProbl
 `GlobalExceptionHandler` đã đăng ký tại API, trả 500 ProblemDetails kèm `traceId`,
 không trả exception message hoặc payload; request bị hủy không chuyển thành lỗi nghiệp vụ.
 
-`Domain/IRepositories/IRepo<TEntity, TKey>` là contract CRUD có CancellationToken,
-không phụ thuộc EF/HTTP. Repository theo aggregate chỉ kế thừa khi cần đủ các thao tác;
-nếu không, định nghĩa contract nhỏ theo use case. Implementation persistence ở
-`Domain/Repositories` theo bố cục hiện tại của AuthService; không sinh generic EF
-repository hoặc entity nghiệp vụ giả. `GetAllAsync` chỉ dùng cho tập dữ liệu nhỏ;
-với dữ liệu lớn, contract chuyên biệt phải hỗ trợ phân trang.
-
+Các repository contract định nghĩa theo từng aggregate/use case trong `Domain/IRepositories`,
+có `CancellationToken` và không phụ thuộc EF/HTTP hay generic CRUD abstraction thừa.
+Implementation persistence đặt tại `Domain/Repositories` theo bố cục kiến trúc của service;
+không sinh generic EF repository hoặc entity nghiệp vụ giả. Các query dữ liệu lớn
+phải hỗ trợ phân trang.
 Template test kiểm tra Result invariant, ánh xạ error và exception qua HTTP ở
 Production, gồm fallback khi client không nhận JSON. Không sao chép mã lỗi,
 constraint database hay dependency đặc thù nghiệp vụ AuthService.
@@ -79,7 +77,7 @@ constraint database hay dependency đặc thù nghiệp vụ AuthService.
 Dịch vụ triển khai mô hình nghiệp vụ canonical theo AGENTS.md và thiết kế mới:
 - Toàn bộ ValueObjects đã được inline vào các entities sở hữu kèm DataAnnotations và Fluent API trong `RentalServiceDbContext`.
 - Các enums nghiệp vụ (`RentalCartStatus`, `RentalOrderStatus`, `RentalItemStatus`, `RentalUnitAssignmentStatus`, `UnitCondition`, `DeductionProposalStatus`, `DisputeStatus`, `ActorRole`) và `ErrorType` được đặt tập trung tại `Common/Enums`.
-- Ngoại lệ kiến trúc: `RentalServiceDbContext`, design-time factory và DI registration đặt tại `Domain/DependencyInjection`, repository contracts tại `Domain/IRepositories`, repository implementations tại `Domain/Repositories`, migrations tại `Domain/Migrations`. Không tạo folder `Persistence` hoặc project `Infrastructure`.
+- Ngoại lệ kiến trúc: `RentalServiceDbContext` và design-time factory đặt tại `Domain/Repositories`, DI registration đặt tại `Domain/DependencyInjection`, repository contracts tại `Domain/IRepositories`, repository implementations tại `Domain/Repositories`, migrations tại `Domain/Migrations`. Không tạo folder `Persistence` hoặc project `Infrastructure`.
 - Hai Aggregate Roots:
   1. `RentalCart`: Quản lý các dòng `RentalCartItem`, checkout all-or-nothing, abandon và optimistic concurrency qua `Version`.
   2. `RentalOrder`: Quản lý `RentalItem`, `RentalUnitAssignment`, `RentalStateTransition`, `RentalTermsAcceptance`, `HandoverRecord`, `ReturnRecord`, `DeductionProposal`, `Dispute`, `RentalOperationReceipt`. Trạng thái `RentalOrderStatus.Paid = 9` (loại bỏ `PendingSupplierConfirmation` khỏi Order enum; Item vẫn giữ trạng thái này).
@@ -97,6 +95,35 @@ Dịch vụ triển khai mô hình nghiệp vụ canonical theo AGENTS.md và th
   - Các trạng thái RentalItem được hiển thị: `AwaitingHandover`, `InRental`, `PendingSettlement`, `Completed`.
   - Ngày thuê được lưu end-exclusive trong Rental và tự động chuyển đổi sang end-inclusive cho calendar projection.
   - Tuyệt đối không để lộ thông tin physical asset, serial number, allocation reference hoặc lịch bảo trì của Supplier.
+
+## API Checkout (gửi đơn hàng từ giỏ)
+
+- Endpoint: `POST /api/v1/rental/checkout`
+- Yêu cầu xác thực: JWT Bearer Token của người thuê. `RenterId` lấy từ `sub`, trạng thái hồ sơ lấy từ `pc`; không nhận từ body.
+- Header bắt buộc: `Idempotency-Key` (tối đa 64 ký tự). Client sinh một key mới cho mỗi lần bấm "Đặt hàng" và dùng lại đúng key đó khi gửi lại.
+- Body: `cartItemIds`, `delivery`, `refundAccount`, `termsVersion`, `termsAccepted`, `expectedTotalAmount`.
+- Luồng xử lý: khóa theo người thuê → tìm đơn theo key → chuẩn bị (đọc lại Listing, giá, lịch) → Inventory giữ lịch tất cả các dòng → lưu đơn và dọn giỏ trong một transaction → tạo hóa đơn bên Payment (`Σ RentalAmount + Σ DepositAmount`) và gắn `InvoiceRef`.
+- Kết quả:
+  - `201`: đơn mới ở trạng thái `PENDING_PAYMENT`, `paymentDeadline` = thời điểm gửi + 30 phút, đã có `invoiceRef`.
+  - `200` + `isReplay: true`: key này đã tạo đơn từ lần gửi trước; trả lại đúng đơn đó, không giữ thêm lịch và không tạo thêm hóa đơn.
+  - Response không chứa `AssetId`, `AllocationId` hay `AllocationGroupId`.
+- Idempotency:
+  - Key được gắn với người thuê (`CheckoutRules.DeriveOperationId`), nên hai người thuê trùng key không đụng nhau.
+  - Cùng key nhưng khác danh sách dòng giỏ: `409 Checkout.IdempotencyKeyReused`.
+  - Mỗi người thuê chỉ có một checkout chạy tại một thời điểm (PostgreSQL advisory lock theo `RenterId`). Request đến sau chờ tối đa 10 giây, quá hạn nhận `409 Checkout.InProgress`.
+- Khi không tạo được hóa đơn, đơn và lịch đã giữ được giữ nguyên; lỗi trả kèm `orderCode`, `paymentDeadline` và `retryable`:
+  - `503 Checkout.InvoiceTemporarilyUnavailable`: Payment không phản hồi (server đã tự gọi lại một lần). Gửi lại cùng key chỉ tạo nốt hóa đơn. Nếu người thuê quay lại bằng key mới, hóa đơn của đơn đang chờ cũng được tạo nốt trước khi trả `409 Checkout.PendingOrderExists`.
+  - `409 Checkout.InvoiceRejected`: Payment từ chối hoặc trả hóa đơn lệch tổng tiền; gửi lại không có kết quả khác.
+  - `410 Checkout.OrderExpired`: đã quá hạn thanh toán.
+  - Đơn không có hóa đơn hết hạn như mọi đơn chờ thanh toán khác: Expiry worker nhả lịch và chuyển đơn sang `Expired`. Vì không có hóa đơn để hủy nên không gọi Payment và không tạo receipt `CancelInvoice`.
+- Bù trừ khi checkout hỏng giữa chừng (không tạo đơn thì không được để lại hold):
+  - Một dòng không giữ được lịch: nhả các dòng đã giữ theo thứ tự ngược, trả `409 Checkout.HoldFailed` kèm `conflicts`.
+  - Lưu đơn thất bại, kể cả exception ngoài dự kiến như database lỗi hoặc renter ngắt kết nối: nhả toàn bộ hold bằng `CancellationToken.None` rồi mới trả lỗi.
+  - Chỉ nhả khi đọc lại database và chắc chắn chưa có đơn của lần checkout đó. Nếu đơn đã được commit, hoặc không đọc được database để xác nhận, hold được giữ nguyên và tự hết hạn sau 30 phút.
+  - Nhả hold thất bại chỉ ghi log; hold đó tự hết hạn theo `HoldExpiresAt`.
+- Mọi lỗi checkout có `retryable`; tùy lỗi có thêm `fieldErrors`, `lines`, `conflicts`, `currentQuote` hoặc `pendingOrderCode`.
+- Cấu hình: `Rental:Terms:CurrentVersion`, `Rental:Terms:DocumentRef`, `Rental:Terms:ContentHash` (bắt buộc; thiếu thì checkout trả 500).
+- Giới hạn hiện tại: `IInventoryListingClient` và `ICatalogReferenceClient` đang dùng bản tạm (`UnavailableCheckoutClients.cs`) nên gọi thật luôn nhận `503 Checkout.DependencyUnavailable`. Hợp đồng Inventory v1 (`ListingRentalSnapshotDto`) chưa có loại thiết bị, hãng, model, thông số và ảnh mà snapshot của RentalItem cần; Rental cũng chưa có hợp đồng với CatalogService.
 
 ## Payment và Supplier Confirmation Workflow
 
