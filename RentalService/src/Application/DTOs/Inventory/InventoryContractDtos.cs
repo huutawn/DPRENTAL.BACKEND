@@ -38,6 +38,34 @@ public sealed record ListingAvailabilityCheckResponse(
     DateOnly From,
     DateOnly To);
 
+// 1b. GetListingRentalSnapshots (theo danh sách): checkout đọc mọi Listing của giỏ trong một lần gọi.
+public sealed record ListingRentalSnapshotsRequest(
+    IReadOnlyList<Guid> ListingIds);
+
+public sealed record ListingRentalSnapshotsResponse(
+    IReadOnlyList<ListingRentalSnapshotDto> Items,
+    IReadOnlyList<Guid> NotFoundListingIds);
+
+// 2b. CheckListingAvailabilityBatch (theo danh sách): mỗi dòng có Listing, khoảng ngày [From, To) và số lượng riêng.
+public sealed record ListingAvailabilityBatchLine(
+    Guid ListingId,
+    DateOnly From,
+    DateOnly To,
+    int Quantity);
+
+public sealed record ListingAvailabilityBatchRequest(
+    IReadOnlyList<ListingAvailabilityBatchLine> Lines);
+
+public sealed record ListingAvailabilityBatchResult(
+    Guid ListingId,
+    DateOnly From,
+    DateOnly To,
+    int AvailableQuantity,
+    bool IsAvailable);
+
+public sealed record ListingAvailabilityBatchResponse(
+    IReadOnlyList<ListingAvailabilityBatchResult> Results);
+
 // 3. CreateHold
 public sealed record CreateHoldRequest(
     Guid ListingId,

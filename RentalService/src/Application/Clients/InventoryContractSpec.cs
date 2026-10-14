@@ -17,6 +17,10 @@ public static class InventoryContractSpec
         public static string CheckAvailability(Guid listingId) =>
             $"/equipment-listings/{listingId}/availability/check";
 
+        public const string ListingRentalSnapshots = "/equipment-listings/rental-snapshots";
+
+        public const string CheckAvailabilityBatch = "/equipment-listings/availability/check-batch";
+
         public static string CreateHold(Guid listingId) =>
             $"/equipment-listings/{listingId}/holds";
 

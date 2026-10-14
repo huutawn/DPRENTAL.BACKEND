@@ -183,6 +183,7 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
 
 /// <summary>
 /// Inventory giả phục vụ bước chuẩn bị checkout: đọc thông tin máy (rental-snapshot) và hỏi lịch trống.
+/// ListingReadCount và AvailabilityCheckCount đếm số lần gọi Inventory, không phải số Listing hay số dòng.
 /// </summary>
 internal sealed class FakeInventoryListingClient : IInventoryRentalClient
 {
@@ -201,6 +202,44 @@ internal sealed class FakeInventoryListingClient : IInventoryRentalClient
     public int AvailabilityCheckCount { get; private set; }
 
     public List<(DateOnly StartDate, DateOnly EndDate)> AvailabilityPeriods { get; } = [];
+
+    public List<Guid> RequestedListingIds { get; } = [];
+
+    public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(
+        ListingRentalSnapshotsRequest request,
+        CancellationToken ct = default)
+    {
+        ListingReadCount++;
+        RequestedListingIds.AddRange(request.ListingIds);
+        if (FailListingRead)
+        {
+            return Task.FromResult(Result.Failure<ListingRentalSnapshotsResponse>(Down));
+        }
+
+        List<ListingRentalSnapshotDto> found = request.ListingIds.Where(Listings.ContainsKey).Select(id => Listings[id]).ToList();
+        List<Guid> notFound = request.ListingIds.Where(id => !Listings.ContainsKey(id)).ToList();
+        return Task.FromResult(Result.Success(new ListingRentalSnapshotsResponse(found, notFound)));
+    }
+
+    public Task<Result<ListingAvailabilityBatchResponse>> CheckListingAvailabilityBatchAsync(
+        ListingAvailabilityBatchRequest request,
+        CancellationToken ct = default)
+    {
+        AvailabilityCheckCount++;
+        AvailabilityPeriods.AddRange(request.Lines.Select(l => (l.From, l.To)));
+        if (FailAvailabilityCheck)
+        {
+            return Task.FromResult(Result.Failure<ListingAvailabilityBatchResponse>(Down));
+        }
+
+        return Task.FromResult(Result.Success(new ListingAvailabilityBatchResponse(request.Lines
+            .Select(l =>
+            {
+                int available = AvailableQuantities.GetValueOrDefault(l.ListingId);
+                return new ListingAvailabilityBatchResult(l.ListingId, l.From, l.To, available, available >= l.Quantity);
+            })
+            .ToList())));
+    }
 
     public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default)
     {

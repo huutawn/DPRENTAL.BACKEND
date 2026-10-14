@@ -214,7 +214,9 @@ public sealed class CheckoutServiceTests
         Assert.Equal(2, _inventory.HoldRequests.Count);
         Assert.Equal(2, _inventory.CreatedGroupCount);
         Assert.Single(_payment.InvoiceRequests);
-        Assert.Equal(2, _listings.ListingReadCount);
+        // Lần gửi đầu đọc cả hai Listing trong một lần gọi; lần gửi lại không đọc Inventory.
+        Assert.Equal(1, _listings.ListingReadCount);
+        Assert.Equal(2, _listings.RequestedListingIds.Count);
     }
 
     [Fact]

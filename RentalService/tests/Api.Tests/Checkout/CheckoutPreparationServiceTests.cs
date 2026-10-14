@@ -76,10 +76,10 @@ public sealed class CheckoutPreparationServiceTests
 
     private CheckoutRenterContext Renter(bool profileCompleted = true) => new(_renterId, profileCompleted);
 
-    private CheckoutPreparationService CreateService(DateTimeOffset? utcNow = null) => new(
+    private CheckoutPreparationService CreateService(DateTimeOffset? utcNow = null, IInventoryRentalClient? inventory = null) => new(
         _carts,
         _orders,
-        _inventory,
+        inventory ?? _inventory,
         _catalog,
         Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
         {
@@ -496,7 +496,7 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Fact]
-    public async Task Prepare_ReadsEachListingAndCatalogEntryOnce_ForLinesOfTheSameListing()
+    public async Task Prepare_CallsInventoryOnceForListingsAndOnceForAvailability_WholeCart()
     {
         Guid secondItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 21));
 
@@ -505,8 +505,81 @@ public sealed class CheckoutPreparationServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(2, result.Plan.Lines.Count);
+        // Một lần gọi cho Listing (hai dòng cùng Listing nên chỉ hỏi một mã), một lần gọi cho lịch của cả hai dòng.
         Assert.Equal(1, _inventory.ListingReadCount);
-        Assert.Equal(2, _inventory.AvailabilityCheckCount);
+        Assert.Equal([_listingId], _inventory.RequestedListingIds);
+        Assert.Equal(1, _inventory.AvailabilityCheckCount);
+        Assert.Equal(2, _inventory.AvailabilityPeriods.Count);
         Assert.Equal(2, _catalog.CallCount);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenInventoryOmitsAListingFromBothResultsAndNotFound_ReportsDependencyUnavailable()
+    {
+        BrokenInventory inventory = new(_inventory) { DropSnapshots = true };
+
+        CheckoutPreparationResult result = await CreateService(inventory: inventory).PrepareAsync(Renter(), Request());
+
+        Assert.Equal(CheckoutErrors.DependencyUnavailable, result.Error);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenInventoryReturnsAListingThatWasNotAskedFor_ReportsDependencyUnavailable()
+    {
+        BrokenInventory inventory = new(_inventory) { ExtraSnapshot = Listing(Guid.NewGuid()) };
+
+        CheckoutPreparationResult result = await CreateService(inventory: inventory).PrepareAsync(Renter(), Request());
+
+        Assert.Equal(CheckoutErrors.DependencyUnavailable, result.Error);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenInventoryOmitsTheAvailabilityOfALine_ReportsDependencyUnavailable()
+    {
+        BrokenInventory inventory = new(_inventory) { DropAvailability = true };
+
+        CheckoutPreparationResult result = await CreateService(inventory: inventory).PrepareAsync(Renter(), Request());
+
+        Assert.Equal(CheckoutErrors.DependencyUnavailable, result.Error);
+    }
+
+    /// <summary>Bọc Inventory giả để trả kết quả sai hợp đồng.</summary>
+    private sealed class BrokenInventory(FakeInventoryListingClient inner) : IInventoryRentalClient
+    {
+        public bool DropSnapshots { get; init; }
+
+        public ListingRentalSnapshotDto? ExtraSnapshot { get; init; }
+
+        public bool DropAvailability { get; init; }
+
+        public async Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default)
+        {
+            Result<ListingRentalSnapshotsResponse> result = await inner.GetListingRentalSnapshotsAsync(request, ct);
+            if (DropSnapshots)
+            {
+                return Result.Success(new ListingRentalSnapshotsResponse([], []));
+            }
+
+            return ExtraSnapshot is null
+                ? result
+                : Result.Success(result.Value with { Items = [.. result.Value.Items, ExtraSnapshot] });
+        }
+
+        public async Task<Result<ListingAvailabilityBatchResponse>> CheckListingAvailabilityBatchAsync(ListingAvailabilityBatchRequest request, CancellationToken ct = default)
+        {
+            Result<ListingAvailabilityBatchResponse> result = await inner.CheckListingAvailabilityBatchAsync(request, ct);
+            return DropAvailability ? Result.Success(new ListingAvailabilityBatchResponse([])) : result;
+        }
+
+        public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(string allocationGroupId, ConfirmAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<ReleaseAllocationResponse>> ReleaseAllocationAsync(string allocationGroupId, ReleaseAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<CancelAllocationResponse>> CancelAllocationAsync(string allocationGroupId, CancelAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<MarkAssetsOverdueResponse>> MarkAssetsOverdueAsync(string allocationGroupId, MarkAssetsOverdueRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<MarkAssetsReturnedResponse>> MarkAssetsReturnedAsync(string allocationGroupId, MarkAssetsReturnedRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<BlockDamagedAssetsResponse>> BlockDamagedAssetsAsync(string allocationGroupId, BlockDamagedAssetsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

@@ -107,6 +107,12 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
     public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) =>
         Listings?.CheckListingAvailabilityAsync(request, ct) ?? throw new NotSupportedException();
 
+    public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) =>
+        Listings?.GetListingRentalSnapshotsAsync(request, ct) ?? throw new NotSupportedException();
+
+    public Task<Result<ListingAvailabilityBatchResponse>> CheckListingAvailabilityBatchAsync(ListingAvailabilityBatchRequest request, CancellationToken ct = default) =>
+        Listings?.CheckListingAvailabilityBatchAsync(request, ct) ?? throw new NotSupportedException();
+
     public Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) =>
         throw new NotSupportedException();
 

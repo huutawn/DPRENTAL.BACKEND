@@ -60,6 +60,35 @@ public sealed class InventoryRentalConsumerContractTests
 
         Assert.Equal("/allocation-groups/group-test-01/block-damaged",
             InventoryContractSpec.Routes.BlockDamaged(groupId));
+
+        Assert.Equal("/equipment-listings/rental-snapshots", InventoryContractSpec.Routes.ListingRentalSnapshots);
+        Assert.Equal("/equipment-listings/availability/check-batch", InventoryContractSpec.Routes.CheckAvailabilityBatch);
+    }
+
+    [Fact]
+    public void BatchContracts_UseTheAgreedJsonShape()
+    {
+        Guid listingId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+
+        string snapshotsRequest = JsonSerializer.Serialize(new ListingRentalSnapshotsRequest([listingId]), JsonOptions);
+        string availabilityRequest = JsonSerializer.Serialize(new ListingAvailabilityBatchRequest(
+            [new ListingAvailabilityBatchLine(listingId, new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 15), 2)]), JsonOptions);
+
+        Assert.Equal("""{"listingIds":["11111111-1111-1111-1111-111111111111"]}""", snapshotsRequest);
+        Assert.Equal(
+            """{"lines":[{"listingId":"11111111-1111-1111-1111-111111111111","from":"2026-10-12","to":"2026-10-15","quantity":2}]}""",
+            availabilityRequest);
+
+        ListingRentalSnapshotsResponse? snapshots = JsonSerializer.Deserialize<ListingRentalSnapshotsResponse>(
+            """{"items":[],"notFoundListingIds":["11111111-1111-1111-1111-111111111111"]}""", JsonOptions);
+        ListingAvailabilityBatchResponse? availability = JsonSerializer.Deserialize<ListingAvailabilityBatchResponse>(
+            """{"results":[{"listingId":"11111111-1111-1111-1111-111111111111","from":"2026-10-12","to":"2026-10-15","availableQuantity":3,"isAvailable":true}]}""",
+            JsonOptions);
+
+        Assert.Equal([listingId], snapshots!.NotFoundListingIds);
+        ListingAvailabilityBatchResult result = Assert.Single(availability!.Results);
+        Assert.Equal(3, result.AvailableQuantity);
+        Assert.True(result.IsAvailable);
     }
 
     // 2. Listing Snapshot Fixture & Serialization
@@ -337,6 +366,8 @@ public sealed class InventoryRentalConsumerContractTests
         public Func<string, MarkAssetsReturnedRequest, Task<Result<MarkAssetsReturnedResponse>>>? MarkReturnedHandler { get; set; }
         public Func<string, BlockDamagedAssetsRequest, Task<Result<BlockDamagedAssetsResponse>>>? BlockDamagedHandler { get; set; }
 
+        public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<ListingAvailabilityBatchResponse>> CheckListingAvailabilityBatchAsync(ListingAvailabilityBatchRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) =>
             GetSnapshotHandler?.Invoke(listingId) ?? Task.FromResult(Result.Failure<ListingRentalSnapshotDto>(Error.NotFound("NotConfigured", "Stub not configured.")));
 
