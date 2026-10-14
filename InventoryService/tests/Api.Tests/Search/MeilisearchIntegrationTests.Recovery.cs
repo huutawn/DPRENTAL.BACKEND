@@ -217,6 +217,25 @@ public sealed partial class MeilisearchIntegrationTests
             Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(string.Empty) });
     }
 
+    [Fact]
+    public async Task OutOfOrderMetadataEvent_PreservesFanoutWithoutRegressingDesiredState()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var listing = Guid.NewGuid();
+        await _store.UpsertJobAsync("EquipmentListing", listing, "Upsert", 11, false, now);
+        var token = Guid.NewGuid();
+        var failed = Assert.Single(await _store.ClaimPendingBatchAsync(1, token, TimeSpan.FromSeconds(30), now));
+        Assert.True(await _store.MarkFailedAsync(failed.Id, token, 11, "test failure", now.AddSeconds(60), now));
+        await _store.UpsertJobAsync("EquipmentListing", listing, "Delete", 10, true, now);
+        var job = Assert.Single(await _store.ClaimPendingBatchAsync(1, Guid.NewGuid(), TimeSpan.FromSeconds(30), now));
+        Assert.Equal(11, job.DesiredRevision);
+        Assert.Equal(0, job.RetryCount);
+        Assert.Equal("Upsert", job.Action);
+        Assert.Equal(10, job.FanoutRequestedRevision);
+        Assert.Equal(11, job.FanoutRevision);
+        Assert.False(job.FanoutCompleted);
+    }
+
     private ServiceProvider BuildSearchProvider()
     {
         var services = new ServiceCollection();

@@ -24,20 +24,25 @@ public sealed partial class SearchProjectionStore(InventoryServiceDbContext cont
                     CASE WHEN @fanout THEN @revision ELSE 0 END, 0, FALSE, FALSE, FALSE,
                     'Pending', 0, ARRAY[]::integer[], @now, @now)
             ON CONFLICT (entity_type, entity_id) DO UPDATE SET
-                action = EXCLUDED.action,
-                desired_revision = EXCLUDED.desired_revision,
+                action = CASE WHEN EXCLUDED.desired_revision > inventory.search_projection_jobs.desired_revision
+                              THEN EXCLUDED.action ELSE inventory.search_projection_jobs.action END,
+                desired_revision = GREATEST(EXCLUDED.desired_revision, inventory.search_projection_jobs.desired_revision),
                 status = CASE WHEN inventory.search_projection_jobs.status = 'Processing' THEN 'Processing'
                               WHEN EXCLUDED.desired_revision > inventory.search_projection_jobs.applied_revision
+                                   OR EXCLUDED.fanout_requested_revision > inventory.search_projection_jobs.fanout_applied_revision
                               THEN 'Pending' ELSE inventory.search_projection_jobs.status END,
                 retry_count = CASE WHEN EXCLUDED.desired_revision > inventory.search_projection_jobs.desired_revision
+                                   OR EXCLUDED.fanout_requested_revision > inventory.search_projection_jobs.fanout_requested_revision
                                    THEN 0 ELSE inventory.search_projection_jobs.retry_count END,
                 next_attempt_at = CASE WHEN EXCLUDED.desired_revision > inventory.search_projection_jobs.desired_revision
+                                       OR EXCLUDED.fanout_requested_revision > inventory.search_projection_jobs.fanout_requested_revision
                                        THEN NULL ELSE inventory.search_projection_jobs.next_attempt_at END,
                 needs_asset_fanout = inventory.search_projection_jobs.needs_asset_fanout OR EXCLUDED.needs_asset_fanout,
                 fanout_requested_revision = GREATEST(inventory.search_projection_jobs.fanout_requested_revision,
                                                     EXCLUDED.fanout_requested_revision),
                 updated_at = EXCLUDED.updated_at
-            WHERE EXCLUDED.desired_revision > inventory.search_projection_jobs.desired_revision;
+            WHERE EXCLUDED.desired_revision > inventory.search_projection_jobs.desired_revision
+               OR EXCLUDED.fanout_requested_revision > inventory.search_projection_jobs.fanout_requested_revision;
             """;
         await context.Database.ExecuteSqlRawAsync(sql, new NpgsqlParameter[]
         {
