@@ -156,4 +156,5 @@ public class RentalUnitAssignment
             InventoryDispositionRef = dispositionRef;
         }
     }
+
 }

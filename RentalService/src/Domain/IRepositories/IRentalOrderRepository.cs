@@ -45,4 +45,5 @@ public interface IRentalOrderRepository
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
         CancellationToken cancellationToken = default);
+
 }

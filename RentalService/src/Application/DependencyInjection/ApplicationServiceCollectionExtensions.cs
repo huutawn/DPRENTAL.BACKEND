@@ -42,6 +42,8 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IRentalAvailabilityReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
 
         // External Clients
+        services.AddHttpClient<IRentalMediaClient, HttpRentalMediaClient>()
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddHttpClient<IServiceTokenProvider, AuthServiceTokenProvider>()
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddHttpClient<IPaymentRentalClient, HttpPaymentRentalClient>()
@@ -57,6 +59,9 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<ICheckoutOrderWriter, CheckoutOrderWriter>();
         services.AddScoped<ICheckoutInvoiceIssuer, CheckoutInvoiceIssuer>();
         services.AddScoped<ICheckoutService, CheckoutService>();
+
+        services.AddScoped<Dprental.RentalService.Application.IServices.Returns.IReturnService,
+            Dprental.RentalService.Application.Services.Returns.ReturnService>();
 
         // Calendar
         services.AddScoped<IRentalCalendarService, RentalCalendarService>();
