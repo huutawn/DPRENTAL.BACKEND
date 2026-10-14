@@ -175,6 +175,7 @@ public sealed partial class InventoryAssetServiceTests
 
     private sealed class FakeWriteContext : IInventoryWriteContext
     {
+        public Guid? SearchBackfillRunId => null;
         public Guid AssetId { get; }
         public IInventoryAssetRepository Assets { get; }
         public Guid? ListingId => null;

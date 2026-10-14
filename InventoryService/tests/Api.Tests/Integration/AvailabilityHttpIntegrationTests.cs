@@ -97,11 +97,11 @@ public sealed class AvailabilityHttpIntegrationTests : IClassFixture<PostgresFix
             new DateOnly(2026, 10, 10),
             new DateOnly(2026, 10, 15));
 
-        // 1. Unauthenticated -> 401
+        // Public availability remains accessible without authentication.
         using var noAuthResp = await client.PostAsJsonAsync("/api/v1/inventory/availability/check", requestBody);
-        Assert.Equal(HttpStatusCode.Unauthorized, noAuthResp.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, noAuthResp.StatusCode);
 
-        // 2. Service token with old scope inventory.calendar.read only -> 403
+        // Public read does not require an operational scope.
         var calReadServiceToken = factory.CreateServiceToken(Guid.NewGuid(), scopes: ScopeCalendarReadArray);
         using var calReq = new HttpRequestMessage(HttpMethod.Post, "/api/v1/inventory/availability/check")
         {
@@ -109,9 +109,9 @@ public sealed class AvailabilityHttpIntegrationTests : IClassFixture<PostgresFix
         };
         calReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", calReadServiceToken);
         using var calResp = await client.SendAsync(calReq);
-        Assert.Equal(HttpStatusCode.Forbidden, calResp.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, calResp.StatusCode);
 
-        // 3. Service token with write-only scope inventory.allocation.write -> 403
+        // Write-only service token may use the same public read.
         var allocWriteToken = factory.CreateServiceToken(Guid.NewGuid(), scopes: ScopeAllocationWriteArray);
         using var writeReq = new HttpRequestMessage(HttpMethod.Post, "/api/v1/inventory/availability/check")
         {
@@ -119,7 +119,7 @@ public sealed class AvailabilityHttpIntegrationTests : IClassFixture<PostgresFix
         };
         writeReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", allocWriteToken);
         using var writeResp = await client.SendAsync(writeReq);
-        Assert.Equal(HttpStatusCode.Forbidden, writeResp.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, writeResp.StatusCode);
 
         // 4. Human authenticated token -> 200
         var humanToken = factory.CreateHumanToken(Guid.NewGuid());
@@ -256,16 +256,16 @@ public sealed class AvailabilityHttpIntegrationTests : IClassFixture<PostgresFix
         var ownerId = Guid.NewGuid();
         var asset = await SeedAssetAsync(ownerId);
 
-        // 1. Unauthenticated -> 401
+        // Public availability remains accessible without authentication.
         using var unauthResp = await client.GetAsync($"/api/v1/inventory/assets/{asset.Id}/busy-ranges?from=2026-10-01&to=2026-10-31");
-        Assert.Equal(HttpStatusCode.Unauthorized, unauthResp.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, unauthResp.StatusCode);
 
-        // 2. Service token lacking availability read scope -> 403
+        // Public busy ranges do not require an operational scope.
         var calReadToken = factory.CreateServiceToken(Guid.NewGuid(), scopes: ScopeCalendarReadArray);
         using var reqCal = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/inventory/assets/{asset.Id}/busy-ranges?from=2026-10-01&to=2026-10-31");
         reqCal.Headers.Authorization = new AuthenticationHeaderValue("Bearer", calReadToken);
         using var respCal = await client.SendAsync(reqCal);
-        Assert.Equal(HttpStatusCode.Forbidden, respCal.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, respCal.StatusCode);
 
         // 3. Service with availability.read -> 200
         var availToken = factory.CreateServiceToken(Guid.NewGuid(), scopes: ScopeAvailabilityReadArray);

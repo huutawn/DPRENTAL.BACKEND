@@ -109,6 +109,16 @@ public sealed class InventorySecurityTestFactory : WebApplicationFactory<Program
                 }
             }
 
+            // HTTP repository tests own DB seeding; background indexing would race that setup.
+            for (int i = services.Count - 1; i >= 0; i--)
+            {
+                var descriptor = services[i];
+                if (descriptor.ServiceType == typeof(Microsoft.Extensions.Hosting.IHostedService) &&
+                    (descriptor.ImplementationType == typeof(Dprental.InventoryService.Application.Search.Workers.SearchProjectionWorker) ||
+                     descriptor.ImplementationType == typeof(Dprental.InventoryService.Application.Search.Workers.SearchBootstrapHostedService)))
+                    services.RemoveAt(i);
+            }
+            services.RemoveAll<Dprental.InventoryService.Application.Search.IInventorySearchIndexService>();
             if (_timeProvider is not null)
             {
                 services.RemoveAll<TimeProvider>();

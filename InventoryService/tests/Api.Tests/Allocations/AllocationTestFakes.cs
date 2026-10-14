@@ -220,6 +220,8 @@ internal sealed class FakeWriteContext : IInventoryWriteContext
     public IAssetAllocationRepository Allocations { get; }
     public ICalendarBlockRepository CalendarBlocks { get; }
     public List<OutboxMessage> StagedOutbox { get; } = new();
+    public Guid? SearchBackfillRunId => null;
+
     public Task<long> GetNextSearchRevisionAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(1L);
 

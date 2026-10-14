@@ -280,3 +280,71 @@ JWT RS256 lấy keys trực tiếp từ Auth; timeout/cache/maximum usable age c
    - Public List có dynamic filter: 4 truy vấn PostgreSQL (Distinct schema versions + Count + Page), đúng 1 Catalog batch HTTP request, 0 Media HTTP.
    - Số lượng truy vấn hoàn toàn độc lập với kích thước trang (`pageSize` 1, 20 hay 100).
    - Thumbnail URL được format cục bộ thông qua `MediaContentUrlBuilder` và `PublicGatewayUrl`.
+
+## Inventory search runtime and recovery
+
+Search adapters, provisioning, backfill, bootstrap and the projection worker live in
+`Application/Search`. Api only registers Application dependencies and maps the existing
+HTTP responses. Routes, query parameters and JSON payloads are unchanged. PostgreSQL
+owns authorization, filters, availability, exact counts and pagination. Keyword queries
+use ordered candidate IDs only when the generation is ready; no keyword, unavailable
+indexes, transient failures and truncation use the existing SQL query. Invalid credentials
+or index settings return the existing unavailable error format with HTTP 503.
+
+`ISearchProjectionStore` owns PostgreSQL access and short atomic state updates. Application
+has no EF/Npgsql reference in its compiled assembly. The worker acquires the shared index
+writer lock before claiming one job at a time, renews its lease and binds asynchronous
+task IDs to the submitted revision. New desired revisions cannot acknowledge older task
+results. Fan-out cursors belong to a revision and restart for later metadata updates.
+Retries are bounded at ten attempts. A request whose acceptance cannot be determined
+sets `SEARCH_SUBMISSION_UNKNOWN`; further index writes stop and search uses SQL.
+
+Online backfill uses uniquely named staging indexes. Metadata mutations acquire a shared
+transaction advisory barrier and attach the current run ID to their transactional Outbox
+event. Replay reads all committed events, including unpublished events, and records
+per-event receipts after successful index tasks. It does not use a timestamp or publication
+cursor. The final mutation barrier has a five-second deadline; it retries catch-up before
+cutover if that deadline expires. The writer lock remains held until the persisted swap
+task reaches a terminal state. A restart recovers its UID from task history using the
+unique staging names and never blindly submits a second swap. Interrupted builds before
+swap are abandoned and rebuilt into fresh staging indexes.
+
+Upgrade handling: drain/stop old Inventory replicas before applying
+`20261014011834_HardenSearchProjectionRecovery`; old projectors do not participate in the
+new mutation barrier. The forward migration preserves pending task IDs, invalidates the
+old readiness flag, abandons pre-swap legacy runs and requires a fresh backfill. Bootstrap
+is owned and cancelled by the host, retries transient failures and periodically detects
+missing indexes. Search stays on PostgreSQL until the fresh swap succeeds.
+
+For `SEARCH_SUBMISSION_UNKNOWN`, stop Inventory index writers, inspect Meilisearch task
+history and wait for every possibly accepted live-index request to become terminal.
+Do not clear the marker or retry the write until request acceptance has been reconciled.
+An operator may then attach the confirmed task IDs to the correct submission revision;
+if correspondence cannot be established, discard that job's submission only after proving
+there are no outstanding live writes, invalidate readiness and rebuild from PostgreSQL.
+Failed jobs and unresolved swap runs are retained for diagnostics. Old staging indexes
+from abandoned builds require operator cleanup once their tasks are terminal; automatic
+cleanup only removes the previous live indexes after a confirmed successful swap.
+
+Tests require real PostgreSQL (default port 5433), Kafka (29092) and Meilisearch v1.55.0
+(7700). The Meilisearch suite fails when its dependency is absent. HTTP repository fixtures
+exclude indexing workers so seed data cannot race background snapshots; dedicated search
+tests cover the real worker, backfill and Kafka pipeline.
+
+The scale test defaults to 1,000 listings / 10,000 assets. To measure the larger dataset:
+
+```bash
+INVENTORY_SEARCH_SCALE_LISTINGS=100000 \
+INVENTORY_SEARCH_BENCHMARK_REPORT=/tmp/inventory-search-benchmark.json \
+dotnet test InventoryService.sln --filter FullyQualifiedName~Scale_Backfill
+```
+
+The report contains backfill elapsed time and measured p50/p95 of candidate search plus
+PostgreSQL availability/count/pagination. These are local measurements, not a production
+latency guarantee.
+
+[Measured large-dataset report](inventory-search-benchmark.json): 100,000 listings,
+1,000,000 assets; backfill 363 seconds; 30 selective candidate + SQL samples yielded
+p50 7.95 ms and p95 9.89 ms on the local Docker test environment. Broad queries still
+truncate at 5,000 candidates and require PostgreSQL fallback; this measurement does not
+represent their latency or concurrent production traffic.

@@ -10,7 +10,7 @@ using Dprental.InventoryService.Application.Caching;
 using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Application.Kafka.DependencyInjection;
 using Dprental.InventoryService.Domain.Repositories;
-using Dprental.InventoryService.Api.Search;
+using Dprental.InventoryService.Application.Search.DependencyInjection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 

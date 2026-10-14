@@ -120,6 +120,7 @@ public sealed class EquipmentListingServiceTests
 
     private sealed class FakeWriteContext : IInventoryWriteContext
     {
+        public Guid? SearchBackfillRunId => null;
         public Guid AssetId => Guid.Empty;
         public Guid? ListingId { get; }
         public IEquipmentListingRepository Listings { get; }

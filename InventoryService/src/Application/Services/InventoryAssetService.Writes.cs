@@ -96,7 +96,7 @@ public sealed partial class InventoryAssetService
                 return updateResult.Error;
             }
             var revAsset = await ctx.GetNextSearchRevisionAsync(ct);
-            ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(asset.Id, "Upsert", revAsset, now));
+            ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(asset.Id, "Upsert", revAsset, now, ctx.SearchBackfillRunId));
             return Result.Success(asset);
         }, cancellationToken);
 
@@ -178,8 +178,8 @@ public sealed partial class InventoryAssetService
 
             var revAsset = await ctx.GetNextSearchRevisionAsync(ct);
             var revListing = await ctx.GetNextSearchRevisionAsync(ct);
-            ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(asset.Id, "Upsert", revAsset, now));
-            ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(asset.EquipmentListingId, "Upsert", revListing, false, now));
+            ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(asset.Id, "Upsert", revAsset, now, ctx.SearchBackfillRunId));
+            ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(asset.EquipmentListingId, "Upsert", revListing, false, now, ctx.SearchBackfillRunId));
 
             return Result.Success(asset);
         }, cancellationToken);

@@ -95,18 +95,16 @@ public sealed class InventoryWriteContext : IInventoryWriteContext
         _context.OutboxMessages.Add(message);
     }
 
-    private static long _localRevisionSeq = 1000;
+    public Guid? SearchBackfillRunId { get; private set; }
 
-    /// <inheritdoc />
     public async Task<long> GetNextSearchRevisionAsync(CancellationToken cancellationToken = default)
     {
-        if (_context.Database.IsNpgsql())
-        {
-            return await _context.Database
-                .SqlQueryRaw<long>("SELECT nextval('inventory.search_projection_revision_seq') AS \"Value\"")
-                .SingleAsync(cancellationToken);
-        }
-
-        return Interlocked.Increment(ref _localRevisionSeq);
+        await _context.Database.ExecuteSqlRawAsync(
+            "SELECT pg_advisory_xact_lock_shared({0})", [SearchCoordination.MutationBarrierKey], cancellationToken);
+        SearchBackfillRunId = await _context.SearchGenerations.AsNoTracking()
+            .Where(g => g.Id == SearchGeneration.DefaultSingletonId).Select(g => g.ActiveRunId)
+            .FirstOrDefaultAsync(cancellationToken);
+        return await _context.Database.SqlQueryRaw<long>(
+            "SELECT nextval('inventory.search_projection_revision_seq') AS \"Value\"").SingleAsync(cancellationToken);
     }
 }

@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Api.Tests.Integration;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -5,7 +6,9 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.Search;
-using Dprental.InventoryService.Api.Search;
+using Dprental.InventoryService.Application.Search.Adapters;
+using Dprental.InventoryService.Application.Search.Workers;
+using Dprental.InventoryService.Application.Search.DependencyInjection;
 using Dprental.InventoryService.Application.Search.Models;
 using Meilisearch;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -20,7 +23,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Dprental.InventoryService.Api.Tests.Search;
 
-public sealed class MeilisearchIntegrationTests : IAsyncLifetime
+public sealed partial class MeilisearchIntegrationTests : IAsyncLifetime, IAsyncDisposable
 {
     private const string MeiliUrl = "http://localhost:7700";
     private const string MasterKey = "dev_meili_master_key_32_chars_long";
@@ -28,8 +31,10 @@ public sealed class MeilisearchIntegrationTests : IAsyncLifetime
     private readonly MeilisearchClient _client;
     private readonly MeilisearchOptions _options;
     private readonly MeilisearchIndexProvisioner _provisioner;
-    private readonly MeilisearchInventoryIndexService _searchService;
-    private readonly bool _isMeiliAvailable;
+    private MeilisearchInventoryIndexService _searchService = null!;
+    private readonly PostgresFixture _postgres = new();
+    private InventoryServiceDbContext _db = null!;
+    private SearchProjectionStore _store = null!;
 
     public MeilisearchIntegrationTests()
     {
@@ -51,39 +56,37 @@ public sealed class MeilisearchIntegrationTests : IAsyncLifetime
             optionsWrapper,
             NullLogger<MeilisearchIndexProvisioner>.Instance);
 
-        _searchService = new MeilisearchInventoryIndexService(
-            _client,
-            optionsWrapper,
-            NullLogger<MeilisearchInventoryIndexService>.Instance);
-
-        try
-        {
-            _isMeiliAvailable = _client.IsHealthyAsync().GetAwaiter().GetResult();
-        }
-        catch
-        {
-            _isMeiliAvailable = false;
-        }
     }
 
     public async Task InitializeAsync()
     {
-        if (!_isMeiliAvailable) return;
+        Assert.True(await _client.IsHealthyAsync(), "Real Meilisearch is required; this suite must not silently skip.");
+        await _postgres.InitializeAsync();
+        _db = new InventoryServiceDbContext(new DbContextOptionsBuilder<InventoryServiceDbContext>()
+            .UseNpgsql(_postgres.ConnectionString).Options);
+        _store = new SearchProjectionStore(_db);
+        var generation = SearchGeneration.CreateInitial(_options.PublicListingsIndex, _options.OwnerListingsIndex, _options.OwnerAssetsIndex, DateTimeOffset.UtcNow);
+        generation.MarkReady(DateTimeOffset.UtcNow);
+        await _store.SaveGenerationAsync(generation);
+        _searchService = new MeilisearchInventoryIndexService(_client, _store,
+            Options.Create(_options), NullLogger<MeilisearchInventoryIndexService>.Instance);
         await _provisioner.EnsureIndexesAndSettingsAsync();
     }
 
     public async Task DisposeAsync()
     {
-        if (!_isMeiliAvailable) return;
-        try { await _client.DeleteIndexAsync(_options.PublicListingsIndex); } catch { }
-        try { await _client.DeleteIndexAsync(_options.OwnerListingsIndex); } catch { }
-        try { await _client.DeleteIndexAsync(_options.OwnerAssetsIndex); } catch { }
+        await _client.DeleteIndexAsync(_options.PublicListingsIndex);
+        await _client.DeleteIndexAsync(_options.OwnerListingsIndex);
+        await _client.DeleteIndexAsync(_options.OwnerAssetsIndex);
+        await _db.DisposeAsync();
+        await _postgres.DisposeAsync();
     }
+
+    ValueTask IAsyncDisposable.DisposeAsync() => new(DisposeAsync());
 
     [Fact]
     public async Task Provisioner_ConfiguresSettingsAndTypoTolerance()
     {
-        if (!_isMeiliAvailable) return;
 
         var assetIndex = _client.Index(_options.OwnerAssetsIndex);
         var settings = await assetIndex.GetSettingsAsync();
@@ -98,7 +101,6 @@ public sealed class MeilisearchIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task VietnameseSearch_AccentedAndUnaccented_MatchesCorrectly()
     {
-        if (!_isMeiliAvailable) return;
 
         var publicIndex = _client.Index(_options.PublicListingsIndex);
         var doc1 = new PublicListingIndexDocument
@@ -170,7 +172,6 @@ public sealed class MeilisearchIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task SerialNumberSearch_TypoToleranceDisabled_RequiresExactMatch()
     {
-        if (!_isMeiliAvailable) return;
 
         var ownerId = Guid.NewGuid();
         var assetIndex = _client.Index(_options.OwnerAssetsIndex);
@@ -219,6 +220,7 @@ public sealed class MeilisearchIntegrationTests : IAsyncLifetime
         var badClient = new MeilisearchClient(badOptions.Url, badOptions.ApiKey);
         var badService = new MeilisearchInventoryIndexService(
             badClient,
+            _store,
             Microsoft.Extensions.Options.Options.Create(badOptions),
             NullLogger<MeilisearchInventoryIndexService>.Instance);
 
@@ -236,11 +238,9 @@ public sealed class MeilisearchIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task SearchProjectionMessageHandler_StoresJob_AndWorkerSyncsToMeilisearch()
     {
-        if (!_isMeiliAvailable) return;
 
-        var dbName = $"test_sync_db_{Guid.NewGuid():N}";
         var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
-            .UseInMemoryDatabase(databaseName: dbName)
+            .UseNpgsql(_postgres.ConnectionString)
             .Options;
         await using var db = new InventoryServiceDbContext(options);
         var listingId = Guid.NewGuid();
@@ -298,8 +298,9 @@ public sealed class MeilisearchIntegrationTests : IAsyncLifetime
 
         // 2. Worker processes job
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-        services.AddDbContext<InventoryServiceDbContext>(o => o.UseInMemoryDatabase(dbName));
+        services.AddDbContext<InventoryServiceDbContext>(o => o.UseNpgsql(_postgres.ConnectionString));
         services.AddScoped<ISearchProjectionStore, SearchProjectionStore>();
+        services.AddSingleton<IInventoryIndexProvisioner>(_provisioner);
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
 
@@ -310,12 +311,7 @@ public sealed class MeilisearchIntegrationTests : IAsyncLifetime
             TimeProvider.System,
             NullLogger<SearchProjectionWorker>.Instance);
 
-        // Process 1 batch using internal ProcessBatchAsync via reflection
-        var method = typeof(SearchProjectionWorker)
-            .GetMethod("ProcessBatchAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        Assert.NotNull(method);
-        var task = (Task<int>)method.Invoke(worker, new object[] { CancellationToken.None })!;
-        int processed = await task;
+        int processed = await worker.ProcessBatchAsync(CancellationToken.None);
         Assert.Equal(1, processed);
         var finishedJob = await db.SearchProjectionJobs.AsNoTracking().FirstOrDefaultAsync(j => j.EntityId == listingId);
         Assert.NotNull(finishedJob);
@@ -330,11 +326,9 @@ public sealed class MeilisearchIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task OnlineBackfill_WithAtomicSwap_PopulatesLiveIndexesAndMarksReady()
     {
-        if (!_isMeiliAvailable) return;
 
-        var dbName = $"test_backfill_db_{Guid.NewGuid():N}";
         var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
-            .UseInMemoryDatabase(databaseName: dbName)
+            .UseNpgsql(_postgres.ConnectionString)
             .Options;
         await using var db = new InventoryServiceDbContext(options);
         var now = DateTimeOffset.UtcNow;
@@ -364,8 +358,9 @@ public sealed class MeilisearchIntegrationTests : IAsyncLifetime
         await db.SaveChangesAsync();
 
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-        services.AddDbContext<InventoryServiceDbContext>(o => o.UseInMemoryDatabase(dbName));
+        services.AddDbContext<InventoryServiceDbContext>(o => o.UseNpgsql(_postgres.ConnectionString));
         services.AddScoped<ISearchProjectionStore, SearchProjectionStore>();
+        services.AddSingleton<IInventoryIndexProvisioner>(_provisioner);
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
 
@@ -396,11 +391,9 @@ public sealed class MeilisearchIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Worker_AssetFanout_EnqueuesChildAssetJobs()
     {
-        if (!_isMeiliAvailable) return;
 
-        var dbName = $"test_fanout_db_{Guid.NewGuid():N}";
         var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
-            .UseInMemoryDatabase(databaseName: dbName)
+            .UseNpgsql(_postgres.ConnectionString)
             .Options;
         await using var db = new InventoryServiceDbContext(options);
         var now = DateTimeOffset.UtcNow;
@@ -437,8 +430,9 @@ public sealed class MeilisearchIntegrationTests : IAsyncLifetime
         await store.UpsertJobAsync("EquipmentListing", listingId, "Upsert", desiredRevision: 10, needsAssetFanout: true, now);
 
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-        services.AddDbContext<InventoryServiceDbContext>(o => o.UseInMemoryDatabase(dbName));
+        services.AddDbContext<InventoryServiceDbContext>(o => o.UseNpgsql(_postgres.ConnectionString));
         services.AddScoped<ISearchProjectionStore, SearchProjectionStore>();
+        services.AddSingleton<IInventoryIndexProvisioner>(_provisioner);
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
 
@@ -449,10 +443,7 @@ public sealed class MeilisearchIntegrationTests : IAsyncLifetime
             TimeProvider.System,
             NullLogger<SearchProjectionWorker>.Instance);
 
-        var method = typeof(SearchProjectionWorker)
-            .GetMethod("ProcessBatchAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        Assert.NotNull(method);
-        await (Task<int>)method.Invoke(worker, new object[] { CancellationToken.None })!;
+        await worker.ProcessBatchAsync(CancellationToken.None);
 
         // Verify child jobs were enqueued for both assets
         var childJobs = await db.SearchProjectionJobs

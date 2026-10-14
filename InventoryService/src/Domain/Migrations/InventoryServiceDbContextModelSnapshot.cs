@@ -609,12 +609,49 @@ namespace InventoryService.Domain.Migrations
                     b.ToTable("outbox_messages", "inventory");
                 });
 
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.SearchBackfillReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("message_id");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("run_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId", "MessageId")
+                        .IsUnique();
+
+                    b.ToTable("search_backfill_receipts", "inventory");
+                });
+
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.SearchBackfillRun", b =>
                 {
                     b.Property<Guid>("RunId")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("run_id");
+
+                    b.Property<int>("ActiveSlot")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("integer")
+                        .HasColumnName("active_slot")
+                        .HasComputedColumnSql("1", true);
+
+                    b.Property<Guid?>("AssetCursor")
+                        .HasColumnType("uuid")
+                        .HasColumnName("asset_cursor");
+
+                    b.Property<bool>("AssetsLoaded")
+                        .HasColumnType("boolean")
+                        .HasColumnName("assets_loaded");
 
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone")
@@ -623,6 +660,14 @@ namespace InventoryService.Domain.Migrations
                     b.Property<string>("ErrorMessage")
                         .HasColumnType("text")
                         .HasColumnName("error_message");
+
+                    b.Property<Guid?>("ListingCursor")
+                        .HasColumnType("uuid")
+                        .HasColumnName("listing_cursor");
+
+                    b.Property<bool>("ListingsLoaded")
+                        .HasColumnType("boolean")
+                        .HasColumnName("listings_loaded");
 
                     b.Property<string>("StagingOwnerAssetsIndex")
                         .IsRequired()
@@ -666,6 +711,11 @@ namespace InventoryService.Domain.Migrations
 
                     b.HasKey("RunId");
 
+                    b.HasIndex("ActiveSlot")
+                        .IsUnique()
+                        .HasDatabaseName("ux_search_backfill_active")
+                        .HasFilter("status IN ('Building', 'CatchingUp', 'Swapping')");
+
                     b.HasIndex("Status")
                         .HasDatabaseName("ix_search_backfill_runs_status");
 
@@ -684,6 +734,10 @@ namespace InventoryService.Domain.Migrations
                     b.Property<Guid?>("ActiveRunId")
                         .HasColumnType("uuid")
                         .HasColumnName("active_run_id");
+
+                    b.Property<string>("ErrorCode")
+                        .HasColumnType("text")
+                        .HasColumnName("error_code");
 
                     b.Property<bool>("IsReady")
                         .HasColumnType("boolean")
@@ -755,6 +809,10 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("text")
                         .HasColumnName("error_message");
 
+                    b.Property<long>("FanoutAppliedRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("fanout_applied_revision");
+
                     b.Property<bool>("FanoutCompleted")
                         .HasColumnType("boolean")
                         .HasColumnName("fanout_completed");
@@ -762,6 +820,14 @@ namespace InventoryService.Domain.Migrations
                     b.Property<Guid?>("FanoutCursor")
                         .HasColumnType("uuid")
                         .HasColumnName("fanout_cursor");
+
+                    b.Property<long>("FanoutRequestedRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("fanout_requested_revision");
+
+                    b.Property<long?>("FanoutRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("fanout_revision");
 
                     b.Property<DateTimeOffset?>("LockLeaseExpiresAt")
                         .HasColumnType("timestamp with time zone")
@@ -797,6 +863,22 @@ namespace InventoryService.Domain.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("status");
+
+                    b.Property<bool>("SubmissionComplete")
+                        .HasColumnType("boolean")
+                        .HasColumnName("submission_complete");
+
+                    b.Property<long?>("SubmissionRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("submission_revision");
+
+                    b.Property<bool>("SubmissionStarted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("submission_started");
+
+                    b.Property<bool>("SubmissionUncertain")
+                        .HasColumnType("boolean")
+                        .HasColumnName("submission_uncertain");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")

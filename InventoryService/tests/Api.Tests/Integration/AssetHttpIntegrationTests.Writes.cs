@@ -100,7 +100,7 @@ public sealed partial class AssetHttpIntegrationTests
         // Verify Outbox message emitted atomically
         await using (var db = CreateDbContext())
         {
-            var outboxMessages = await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync();
+            var outboxMessages = await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D") && m.Topic == "inventory.asset.events.v1").ToListAsync();
             Assert.Single(outboxMessages);
             Assert.Equal("inventory.asset.events.v1", outboxMessages[0].Topic);
         }
@@ -118,7 +118,7 @@ public sealed partial class AssetHttpIntegrationTests
         // Verify 2nd Outbox message emitted and allocations/blocks still intact
         await using (var db = CreateDbContext())
         {
-            var outboxMessages = await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D")).ToListAsync();
+            var outboxMessages = await db.OutboxMessages.Where(m => m.KafkaKey == asset.Id.ToString("D") && m.Topic == "inventory.asset.events.v1").ToListAsync();
             Assert.Equal(2, outboxMessages.Count);
 
             var allocs = await db.AssetAllocations.Where(a => a.AssetId == asset.Id).ToListAsync();

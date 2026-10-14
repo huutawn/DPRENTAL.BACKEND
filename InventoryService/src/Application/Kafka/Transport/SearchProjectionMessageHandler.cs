@@ -42,6 +42,9 @@ public sealed class SearchProjectionMessageHandler : IMessageHandler<SearchProje
             return Error.Validation("INVALID_PAYLOAD", "Payload không được để trống.");
         }
 
+        if (payload.Revision <= 0)
+            return Error.Validation("INVALID_REVISION", "Revision phải lớn hơn không.");
+
         // Validate entity type, ID và action tại consumer
         if (string.IsNullOrWhiteSpace(payload.EntityType) || payload.EntityId == Guid.Empty || string.IsNullOrWhiteSpace(payload.Action))
         {
