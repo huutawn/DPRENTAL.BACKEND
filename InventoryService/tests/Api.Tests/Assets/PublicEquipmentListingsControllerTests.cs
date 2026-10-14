@@ -33,6 +33,16 @@ public sealed class PublicEquipmentListingsControllerTests
             GetHandler != null
                 ? GetHandler(id)
                 : Task.FromResult(Result.Failure<PublicEquipmentListingResponse>(Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.")));
+
+        public Func<Task<Result<EquipmentListingStatisticsResponse>>>? StatisticsHandler { get; set; }
+
+        public Task<Result<EquipmentListingStatisticsResponse>> GetStatisticsAsync(
+            CancellationToken cancellationToken = default) =>
+            StatisticsHandler != null
+                ? StatisticsHandler()
+                : Task.FromResult(Result.Success(new EquipmentListingStatisticsResponse(
+                    new Dictionary<Guid, int>(),
+                    new Dictionary<Guid, int>())));
     }
 
     private readonly StubPublicListingService _stubService = new();
@@ -141,5 +151,30 @@ public sealed class PublicEquipmentListingsControllerTests
         var result = await _controller.GetById(id, CancellationToken.None);
         var okResult = Assert.IsType<OkObjectResult>(result);
         Assert.Equal(response, okResult.Value);
+    }
+
+    [Fact]
+    public async Task GetStatistics_NoQueryParameters_Returns200()
+    {
+        _controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext()
+        };
+
+        var typeId = Guid.NewGuid();
+        var brandId = Guid.NewGuid();
+        var stats = new EquipmentListingStatisticsResponse(
+            new Dictionary<Guid, int> { [typeId] = 5 },
+            new Dictionary<Guid, int> { [brandId] = 5 });
+
+        _stubService.StatisticsHandler = () => Task.FromResult(Result.Success(stats));
+
+        var result = await _controller.GetStatistics(CancellationToken.None);
+
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(StatusCodes.Status200OK, okResult.StatusCode);
+        var response = Assert.IsType<EquipmentListingStatisticsResponse>(okResult.Value);
+        Assert.Equal(5, response.ByEquipmentType[typeId]);
+        Assert.Equal(5, response.ByBrand[brandId]);
     }
 }

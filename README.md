@@ -246,3 +246,42 @@ Các tính năng sau tiếp tục được giữ ngoài phạm vi MVP hiện t�
 - **Bulk import serial**: Nhập hàng loạt số serial qua file CSV/Excel.
 - **Group allocate / Group release nguyên tử**: Chuyển trạng thái phân bổ hoặc giải phóng đồng loạt cho cả nhóm giữ chỗ (hiện tại xử lý theo từng unit allocation).
 - **Location-based discovery**: Lọc và tìm kiếm thiết bị theo khoảng cách địa lý / vị trí kho bãi.
+
+
+## Thống kê discovery và lọc category
+
+- `GET /api/v1/inventory/public/equipment-listings/statistics` là anonymous, chỉ đếm
+  listing Active; không chấp nhận query parameter.
+- `GET /api/v1/inventory/equipment-listings/statistics?status=Active` yêu cầu JWT human,
+  owner lấy từ sub kể cả Admin; service token trả 403. Không truyền status thì tính
+  mọi trạng thái. Query lạ hoặc scalar lặp trả 400.
+- Response giữ `{ byEquipmentType: { "<uuid>": count }, byBrand: { "<uuid>": count } }`.
+  Mỗi listing tính một, không phụ thuộc số physical unit. Hai chiều được tổng hợp từ
+  cùng một SELECT PostgreSQL và cùng snapshot.
+- Public listing list nhận `categoryId`, lấy đủ các trang type Published từ Catalog
+  (100 type/trang). Nếu equipmentTypeId không thuộc category thì tìm toàn category.
+  Lỗi HTTP hoặc pagination contract không hợp lệ trả 503, không trả kết quả thiếu.
+  Toàn bộ vòng phân trang dùng chung deadline `CatalogService:TimeoutSeconds` (mặc định 10 giây).
+  Category rỗng vẫn kiểm tra ngày thuê, requestedQuantity và dynamic filters.
+
+### Kiểm thử hai API process thật
+
+Yêu cầu .NET 10 SDK, dotnet-ef 10, OpenSSL, Docker và PostgreSQL test container
+`catalogservice-pg-test` (PostgreSQL 17, cổng 5436, user/password test `postgres`).
+Catalog PostgreSQL test fixture có thể tạo container này. Trong workspace có cả hai repo:
+
+```bash
+dotnet build ../CatalogService/CatalogService.sln
+dotnet build InventoryService.sln
+dotnet build ../Gateway/Gateway/Gateway.sln
+python3 scripts/test-catalog-inventory.py
+```
+
+Có thể override `CONTRACT_TEST_PG_CONTAINER`, `CONTRACT_TEST_PG_PORT`,
+`CONTRACT_TEST_PG_USER`, `CONTRACT_TEST_PG_PASSWORD` bằng environment.
+Harness tạo hai database `contract_*_<uuid>`, migrate, seed dữ liệu test riêng, chạy hai
+binary API thực, Gateway và JWKS test. Nó kiểm tra category 101 type (tin ở trang hai), số đếm
+public/mine, Bearer/cookie, ưu tiên header, owner/Admin, service token, validation và
+Inventory outage. Smoke test cũng đi qua Gateway thực. Process, database và khóa RSA tạm được thu hồi khi kết thúc.
+Không trỏ harness vào PostgreSQL production. Meilisearch/Kafka không bị mock; các
+request discovery này không dùng search keyword và không cần search index sẵn sàng.

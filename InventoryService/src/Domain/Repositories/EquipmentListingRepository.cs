@@ -41,6 +41,48 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
     }
 
     /// <inheritdoc />
+    public async Task<EquipmentListingStatisticsResult> GetListingStatisticsAsync(
+        EquipmentListingStatisticsCriteria criteria,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(criteria);
+
+        var baseQuery = _context.EquipmentListings
+            .AsNoTracking();
+
+        if (criteria.OwnerUserId.HasValue)
+        {
+            baseQuery = baseQuery.Where(l => l.OwnerUserId == criteria.OwnerUserId.Value);
+        }
+
+        if (criteria.Status.HasValue)
+        {
+            baseQuery = baseQuery.Where(l => l.Status == criteria.Status.Value);
+        }
+
+        var groupedCounts = await baseQuery
+            .GroupBy(l => new { l.EquipmentTypeId, l.BrandId })
+            .Select(g => new
+            {
+                g.Key.EquipmentTypeId,
+                g.Key.BrandId,
+                Count = g.Count()
+            })
+            .ToListAsync(cancellationToken);
+
+        var byEquipmentType = new Dictionary<Guid, int>();
+        var byBrand = new Dictionary<Guid, int>();
+
+        foreach (var item in groupedCounts)
+        {
+            byEquipmentType[item.EquipmentTypeId] = byEquipmentType.GetValueOrDefault(item.EquipmentTypeId, 0) + item.Count;
+            byBrand[item.BrandId] = byBrand.GetValueOrDefault(item.BrandId, 0) + item.Count;
+        }
+
+        return new EquipmentListingStatisticsResult(byEquipmentType, byBrand);
+    }
+
+    /// <inheritdoc />
     public async Task<OwnerEquipmentListingSearchResult> SearchOwnerAsync(
         OwnerEquipmentListingSearchCriteria criteria,
         CancellationToken cancellationToken = default)

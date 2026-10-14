@@ -54,6 +54,18 @@ public sealed partial class EquipmentListingRepository
             clauses.Add("l.equipment_type_id = @pEquipmentTypeId");
             parameters.Add(new NpgsqlParameter("pEquipmentTypeId", filters.EquipmentTypeId.Value));
         }
+        else if (filters.EquipmentTypeIds != null)
+        {
+            if (filters.EquipmentTypeIds.Count == 0)
+            {
+                clauses.Add("1 = 0");
+            }
+            else
+            {
+                clauses.Add("l.equipment_type_id = ANY(@pEquipmentTypeIds)");
+                parameters.Add(new NpgsqlParameter("pEquipmentTypeIds", filters.EquipmentTypeIds.ToArray()));
+            }
+        }
 
         if (filters.BrandId.HasValue)
         {
@@ -162,6 +174,18 @@ public sealed partial class EquipmentListingRepository
         {
             clauses.Add("l.equipment_type_id = @pEquipmentTypeId");
             commonParams.Add(new NpgsqlParameter("pEquipmentTypeId", filters.EquipmentTypeId.Value));
+        }
+        else if (filters.EquipmentTypeIds != null)
+        {
+            if (filters.EquipmentTypeIds.Count == 0)
+            {
+                clauses.Add("1 = 0");
+            }
+            else
+            {
+                clauses.Add("l.equipment_type_id = ANY(@pEquipmentTypeIds)");
+                commonParams.Add(new NpgsqlParameter("pEquipmentTypeIds", filters.EquipmentTypeIds.ToArray()));
+            }
         }
 
         if (filters.BrandId.HasValue)

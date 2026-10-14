@@ -294,6 +294,9 @@ public sealed partial class InventoryAssetServiceTests
                     1,
                     [new CatalogBatchSchemaItemResponse(1, [])])));
         }
+
+        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
     }
 
     private sealed class FakeMediaClient : IMediaServiceClient

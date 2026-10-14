@@ -22,6 +22,7 @@ public sealed class PublicEquipmentListingsController : ControllerBase
     private static readonly HashSet<string> AllowedListQueryKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "q",
+        "categoryId",
         "equipmentTypeId",
         "brandId",
         "sort",
@@ -71,7 +72,7 @@ public sealed class PublicEquipmentListingsController : ControllerBase
         {
             return this.ToProblem(Error.Validation(
                 "INVALID_QUERY_PARAMETER",
-                $"Query parameter '{invalidQueryKeys[0]}' không được hỗ trợ. Endpoint danh sách công khai chỉ chấp nhận: q, equipmentTypeId, brandId, sort, filters, from, to, requestedQuantity, page, pageSize."));
+                $"Query parameter '{invalidQueryKeys[0]}' không được hỗ trợ. Endpoint danh sách công khai chỉ chấp nhận: q, categoryId, equipmentTypeId, brandId, sort, filters, from, to, requestedQuantity, page, pageSize."));
         }
 
         // 3. Yêu cầu from và to phải được cung cấp đồng thời; từ chối chuỗi rỗng
@@ -149,6 +150,30 @@ public sealed class PublicEquipmentListingsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await availabilityService.CheckListingAvailabilityAsync(id, request, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
+    }
+
+    /// <summary>
+    /// Thống kê số lượng listing đang hoạt động (Active) trên toàn hệ thống nhóm theo equipmentTypeId và brandId.
+    /// </summary>
+    [HttpGet("statistics")]
+    [ProducesResponseType(typeof(EquipmentListingStatisticsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetStatistics(CancellationToken cancellationToken = default)
+    {
+
+        if (Request.Query.Count != 0)
+        {
+            return this.ToProblem(Error.Validation("INVALID_QUERY_PARAMETER", "Tham số thống kê không hợp lệ."));
+        }
+
+        var result = await _publicListingService.GetStatisticsAsync(cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);

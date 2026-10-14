@@ -4,6 +4,7 @@ using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Application.Search;
 using Dprental.InventoryService.Common;
+using Dprental.InventoryService.Common.Enums;
 
 namespace Dprental.InventoryService.Application.IServices;
 
@@ -70,6 +71,14 @@ public interface IEquipmentListingService
         Guid id,
         int page,
         int pageSize,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Thống kê số lượng listing của người dùng hiện tại nhóm theo equipmentTypeId và brandId, lọc trạng thái tùy chọn.
+    /// </summary>
+    Task<Result<EquipmentListingStatisticsResponse>> GetOwnerStatisticsAsync(
+        EquipmentListingStatus? status,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);
 }

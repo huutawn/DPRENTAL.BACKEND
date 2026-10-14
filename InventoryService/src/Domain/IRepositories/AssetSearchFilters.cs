@@ -35,4 +35,5 @@ public sealed record AssetSearchFilters(
     AssetSortOption Sort = AssetSortOption.CreatedDesc,
     IReadOnlyList<int>? CompatibleSchemaVersions = null,
     IReadOnlyList<AssetDynamicFilterCriterion>? DynamicFilters = null,
-    IReadOnlyList<Guid>? CandidateIds = null);
+    IReadOnlyList<Guid>? CandidateIds = null,
+    IReadOnlyList<Guid>? EquipmentTypeIds = null);

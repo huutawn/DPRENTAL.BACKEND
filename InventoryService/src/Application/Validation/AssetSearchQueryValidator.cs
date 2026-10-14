@@ -17,7 +17,8 @@ public sealed record ValidatedAssetSearchQuery(
     Guid? BrandId,
     int? ManufactureYearFrom,
     int? ManufactureYearTo,
-    AssetSortOption Sort);
+    AssetSortOption Sort,
+    Guid? CategoryId = null);
 
 /// <summary>
 /// Validator dùng chung cho các tham số tìm kiếm, phân trang và sắp xếp danh sách tài sản.
@@ -152,7 +153,8 @@ public sealed class AssetSearchQueryValidator
         string? q,
         Guid? equipmentTypeId,
         Guid? brandId,
-        string? sort)
+        string? sort,
+        Guid? categoryId = null)
     {
         if (page < 1)
         {
@@ -190,6 +192,11 @@ public sealed class AssetSearchQueryValidator
             return Error.Validation("INVALID_QUERY_PARAMETER", "BrandId không được là Guid rỗng.");
         }
 
+        if (categoryId.HasValue && categoryId.Value == Guid.Empty)
+        {
+            return Error.Validation("INVALID_QUERY_PARAMETER", "CategoryId không hợp lệ.");
+        }
+
         AssetSortOption sortOption = !string.IsNullOrWhiteSpace(searchKeyword)
             ? AssetSortOption.Relevance
             : AssetSortOption.CreatedDesc;
@@ -223,7 +230,8 @@ public sealed class AssetSearchQueryValidator
             brandId,
             null,
             null,
-            sortOption));
+            sortOption,
+            categoryId));
     }
 
     /// <summary>

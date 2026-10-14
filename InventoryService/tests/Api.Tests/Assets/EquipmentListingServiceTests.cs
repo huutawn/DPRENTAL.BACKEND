@@ -35,6 +35,21 @@ public sealed class EquipmentListingServiceTests
 
         public Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(id, out var l) && l.Status == EquipmentListingStatus.Active ? l : null);
+        public Task<EquipmentListingStatisticsResult> GetListingStatisticsAsync(EquipmentListingStatisticsCriteria criteria, CancellationToken cancellationToken = default)
+        {
+            var q = Store.Values.AsEnumerable();
+            if (criteria.OwnerUserId.HasValue)
+            {
+                q = q.Where(l => l.OwnerUserId == criteria.OwnerUserId.Value);
+            }
+            if (criteria.Status.HasValue)
+            {
+                q = q.Where(l => l.Status == criteria.Status.Value);
+            }
+            var byType = q.GroupBy(l => l.EquipmentTypeId).ToDictionary(g => g.Key, g => g.Count());
+            var byBrand = q.GroupBy(l => l.BrandId).ToDictionary(g => g.Key, g => g.Count());
+            return Task.FromResult(new EquipmentListingStatisticsResult(byType, byBrand));
+        }
 
         public Task<OwnerEquipmentListingSearchResult> SearchOwnerAsync(OwnerEquipmentListingSearchCriteria criteria, CancellationToken cancellationToken = default)
         {
@@ -174,6 +189,9 @@ public sealed class EquipmentListingServiceTests
 
         public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(equipmentTypeId, 1, [])));
+
+        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
     }
 
     private sealed class FakeMediaService : IInventoryMediaService
@@ -489,5 +507,99 @@ public sealed class EquipmentListingServiceTests
         Assert.Empty(resClearAll.Value.Media);
         Assert.Null(resClearAll.Value.ThumbnailMediaId);
         Assert.Null(resClearAll.Value.ThumbnailUrl);
+    }
+
+    [Fact]
+    public async Task OwnerStatistics_ServiceToken_Returns403Forbidden()
+    {
+        var service = CreateService();
+        var caller = new TestCaller { IsService = true };
+
+        var result = await service.GetOwnerStatisticsAsync(null, caller, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("SERVICE_TOKEN_REJECTED", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task OwnerStatistics_Unauthenticated_Returns401Unauthorized()
+    {
+        var service = CreateService();
+        var caller = new TestCaller { IsAuthenticated = false, UserId = null };
+
+        var result = await service.GetOwnerStatisticsAsync(null, caller, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("AUTH_REQUIRED", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task OwnerStatistics_Admin_CountsOnlyTheirOwnListings()
+    {
+        var adminId = Guid.NewGuid();
+        var otherUserId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+        var brandId = Guid.NewGuid();
+
+        var adminListing = EquipmentListing.Create(
+            Guid.NewGuid(), adminId, typeId, brandId, "Admin Listing", null, "Model A", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        _listingRepo.Add(adminListing);
+
+        var otherListing = EquipmentListing.Create(
+            Guid.NewGuid(), otherUserId, typeId, brandId, "Other Listing", null, "Model B", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        _listingRepo.Add(otherListing);
+
+        var service = CreateService();
+        var adminCaller = new TestCaller { IsAdmin = true, UserId = adminId, IsAuthenticated = true, IsService = false };
+
+        var result = await service.GetOwnerStatisticsAsync(null, adminCaller, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value.ByEquipmentType[typeId]);
+        Assert.Equal(1, result.Value.ByBrand[brandId]);
+    }
+
+    [Fact]
+    public async Task OwnerStatistics_WithStatusFilter_FiltersByStatus()
+    {
+        var userId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+        var brandId = Guid.NewGuid();
+
+        var draftListing = EquipmentListing.Create(
+            Guid.NewGuid(), userId, typeId, brandId, "Draft Listing", null, "Model A", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        _listingRepo.Add(draftListing);
+
+        var activeListing = EquipmentListing.Create(
+            Guid.NewGuid(), userId, typeId, brandId, "Active Listing", null, "Model B", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        activeListing.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+        _listingRepo.Add(activeListing);
+
+        var service = CreateService();
+        var caller = CreateHumanCaller(userId);
+
+        var activeResult = await service.GetOwnerStatisticsAsync(EquipmentListingStatus.Active, caller, CancellationToken.None);
+        Assert.True(activeResult.IsSuccess);
+        Assert.Equal(1, activeResult.Value.ByEquipmentType[typeId]);
+
+        var draftResult = await service.GetOwnerStatisticsAsync(EquipmentListingStatus.Draft, caller, CancellationToken.None);
+        Assert.True(draftResult.IsSuccess);
+        Assert.Equal(1, draftResult.Value.ByEquipmentType[typeId]);
+
+        var allResult = await service.GetOwnerStatisticsAsync(null, caller, CancellationToken.None);
+        Assert.True(allResult.IsSuccess);
+        Assert.Equal(2, allResult.Value.ByEquipmentType[typeId]);
+    }
+
+    [Fact]
+    public async Task OwnerStatistics_InvalidStatus_Returns400Validation()
+    {
+        var service = CreateService();
+        var caller = CreateHumanCaller(Guid.NewGuid());
+
+        var result = await service.GetOwnerStatisticsAsync((EquipmentListingStatus)999, caller, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_QUERY_PARAMETER", result.Error.Code);
     }
 }
