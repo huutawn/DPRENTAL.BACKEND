@@ -1,5 +1,7 @@
 using System.Net.Http;
 using Dprental.RentalService.Application.Background;
+using Dprental.RentalService.Application.Kafka.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.IServices.Calendar;
 using Dprental.RentalService.Application.IServices.Checkout;
@@ -30,7 +32,7 @@ namespace Dprental.RentalService.Application.DependencyInjection;
 
 public static class ApplicationServiceCollectionExtensions
 {
-    public static IServiceCollection AddRentalServiceApplication(this IServiceCollection services)
+    public static IServiceCollection AddRentalServiceApplication(this IServiceCollection services, IConfiguration? configuration = null)
     {
         // Cart Use Cases & Read Models
         services.AddScoped<RentalCartUseCases>();
@@ -83,14 +85,13 @@ public static class ApplicationServiceCollectionExtensions
 
         // Integration
         services.AddScoped<IRefundCompletedConsumer, RefundCompletedConsumer>();
-        services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
 
-        // Background Workers
-        services.AddHostedService<OutboxPublisherWorker>();
+        // Kafka subsystem (producers, consumers, workers, options)
+        services.AddKafka(configuration ?? new ConfigurationBuilder().Build());
+
+        // Non-Kafka Background Workers
         services.AddHostedService<OperationRecoveryWorker>();
         services.AddHostedService<ExpiryScannerWorker>();
-        services.AddHostedService<KafkaPaymentEventsConsumerWorker>();
-        services.AddHostedService<InboxProcessingWorker>();
 
         // Observability & TimeProvider
         services.AddSingleton<RentalMetrics>();

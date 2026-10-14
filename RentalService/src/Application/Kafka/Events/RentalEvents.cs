@@ -1,29 +1,34 @@
-using System.Text.Json.Serialization;
+using System.ComponentModel.DataAnnotations;
+using Dprental.RentalService.Common.Utils;
 
-namespace Dprental.RentalService.Application.DTOs.Integration;
+namespace Dprental.RentalService.Application.Kafka.Events;
 
-public sealed record RentalEventEnvelope<TPayload>(
-    [property: JsonPropertyName("messageId")] Guid MessageId,
-    [property: JsonPropertyName("messageType")] string MessageType,
-    [property: JsonPropertyName("version")] int Version,
-    [property: JsonPropertyName("producer")] string Producer,
-    [property: JsonPropertyName("aggregateId")] string AggregateId,
-    [property: JsonPropertyName("occurredAt")] DateTimeOffset OccurredAt,
-    [property: JsonPropertyName("correlationId")] string? CorrelationId,
-    [property: JsonPropertyName("causationId")] Guid? CausationId,
-    [property: JsonPropertyName("payload")] TPayload Payload);
+/// <summary>
+/// Published to rental.events.v1 when a RentalOrder is created in PENDING_PAYMENT state.
+/// Intended for Notification and Reporting services.
+/// Excludes physical identity (AssetId, SerialNumber) and personal delivery/contact snapshots.
+/// </summary>
+public sealed record RentalOrderCreatedPayload(
+    [Required] Guid RentalOrderId,
+    [Required] string OrderCode,
+    [Required] Guid RenterId,
+    [Required] string Currency,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal TotalRentalAmount,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal TotalDepositAmount,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal TotalPayableAmount,
+    [Required] DateTimeOffset PaymentDeadline,
+    [Required] DateTimeOffset CreatedAt,
+    [Required] IReadOnlyList<RentalOrderCreatedItemPayload> Items);
 
-public static class RentalEventTypes
-{
-    public const string RentalOrderPaid = "RentalOrderPaid";
-    public const string RentalSupplierConfirmationRequested = "RentalSupplierConfirmationRequested";
-    public const string RentalItemConfirmed = "RentalItemConfirmed";
-    public const string RentalItemRejected = "RentalItemRejected";
-    public const string RentalItemExpired = "RentalItemExpired";
-    public const string RentalOrderExpired = "RentalOrderExpired";
-    public const string LatePaymentRefundRequested = "LatePaymentRefundRequested";
-    public const string DeadLetter = "DeadLetter";
-}
+public sealed record RentalOrderCreatedItemPayload(
+    [Required] Guid RentalItemId,
+    [Required] Guid EquipmentListingId,
+    [Required] Guid SupplierId,
+    [Range(1, 100)] int Quantity,
+    [Required] DateOnly ExpectedStartDate,
+    [Required] DateOnly ExpectedEndDate,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RentalAmount,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal DepositAmount);
 
 public sealed record RentalSupplierConfirmationRequestedPayload(
     Guid RentalOrderId,

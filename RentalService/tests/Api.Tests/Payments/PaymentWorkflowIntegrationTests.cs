@@ -6,6 +6,8 @@ using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Domain.Repositories;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.Services.Payments;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
@@ -166,7 +168,7 @@ public sealed class PaymentWorkflowIntegrationTests
         var paymentClient = new StubPaymentClient();
         var service = CreateWorkflowService(db, inventoryClient, paymentClient);
 
-        var envelope = new PaymentEventEnvelope<InvoicePaidPayload>(
+        var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
             Guid.NewGuid(),
             "InvoicePaid",
             1,
@@ -213,7 +215,7 @@ public sealed class PaymentWorkflowIntegrationTests
         var paymentClient = new StubPaymentClient();
         var service = CreateWorkflowService(db, inventoryClient, paymentClient);
 
-        var envelope = new PaymentEventEnvelope<InvoicePaidPayload>(
+        var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
             Guid.NewGuid(),
             "InvoicePaid",
             1,
@@ -254,7 +256,7 @@ public sealed class PaymentWorkflowIntegrationTests
         var service = CreateWorkflowService(db, inventoryClient, paymentClient);
 
         // Wrong amount
-        var envelope = new PaymentEventEnvelope<InvoicePaidPayload>(
+        var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
             Guid.NewGuid(),
             "InvoicePaid",
             1,
@@ -297,7 +299,7 @@ public sealed class PaymentWorkflowIntegrationTests
         var inventoryClient = new StubInventoryClient();
         var service = CreateWorkflowService(db, inventoryClient, paymentClient, FixedNow.AddHours(2));
 
-        var envelope = new PaymentEventEnvelope<InvoicePaidPayload>(
+        var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
             Guid.NewGuid(),
             "InvoicePaid",
             1,
@@ -351,7 +353,7 @@ public sealed class PaymentWorkflowIntegrationTests
 
         var service = CreateWorkflowService(db, inventoryClient, paymentClient);
 
-        var envelope = new PaymentEventEnvelope<InvoicePaidPayload>(
+        var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
             Guid.NewGuid(),
             "InvoicePaid",
             1,
