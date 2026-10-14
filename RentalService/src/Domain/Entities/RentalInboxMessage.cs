@@ -84,6 +84,7 @@ public class RentalInboxMessage
         int? kafkaPartition = null,
         long? kafkaOffset = null)
     {
+        Id = id != Guid.Empty ? id : Guid.NewGuid();
         MessageId = messageId;
         MessageType = messageType;
         Producer = producer;

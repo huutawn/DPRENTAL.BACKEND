@@ -1,7 +1,8 @@
 #pragma warning disable CA1848, CA1873
 using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
-using Dprental.RentalService.Application.DTOs.Integration;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.DTOs.Supplier;
@@ -318,9 +319,9 @@ public sealed partial class RentalOperationExecutor
                 payloadJson: JsonSerializer.Serialize(refundCmd, JsonOptions));
             order.AddOperationReceipt(refundReceipt);
         }
-        var notifyEnvelope = new RentalEventEnvelope<RentalItemRejectedPayload>(
+        var notifyEnvelope = new KafkaMessageEnvelope<RentalItemRejectedPayload>(
             Guid.NewGuid(),
-            RentalEventTypes.RentalItemRejected,
+            KafkaContractSpec.EventTypes.RentalItemRejected,
             1,
             "rental-service",
             order.Id.ToString("D"),
@@ -333,7 +334,7 @@ public sealed partial class RentalOperationExecutor
             notifyEnvelope.MessageId,
             _rentalEventsTopic,
             order.Id.ToString("D"),
-            RentalEventTypes.RentalItemRejected,
+            KafkaContractSpec.EventTypes.RentalItemRejected,
             JsonSerializer.Serialize(notifyEnvelope, JsonOptions),
             utcNow);
 
@@ -426,9 +427,9 @@ public sealed partial class RentalOperationExecutor
         string apiResponseJson = JsonSerializer.Serialize(response, JsonOptions);
         receipt.MarkSucceeded(utcNow, responseJson, apiResponseJson);
 
-        var notifyEnvelope = new RentalEventEnvelope<RentalItemConfirmedPayload>(
+        var notifyEnvelope = new KafkaMessageEnvelope<RentalItemConfirmedPayload>(
             Guid.NewGuid(),
-            RentalEventTypes.RentalItemConfirmed,
+            KafkaContractSpec.EventTypes.RentalItemConfirmed,
             1,
             "rental-service",
             order.Id.ToString("D"),
@@ -441,7 +442,7 @@ public sealed partial class RentalOperationExecutor
             notifyEnvelope.MessageId,
             _rentalEventsTopic,
             order.Id.ToString("D"),
-            RentalEventTypes.RentalItemConfirmed,
+            KafkaContractSpec.EventTypes.RentalItemConfirmed,
             JsonSerializer.Serialize(notifyEnvelope, JsonOptions),
             utcNow);
 

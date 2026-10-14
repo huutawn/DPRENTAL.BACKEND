@@ -2,8 +2,9 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Dprental.RentalService.Application.DTOs.Integration;
 using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.IServices.Operations;
@@ -62,7 +63,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
 
     public async Task<Result> ApplyInvoicePaidStagedAsync(
         RentalOrder order,
-        PaymentEventEnvelope<InvoicePaidPayload> envelope,
+        KafkaMessageEnvelope<InvoicePaidPayload> envelope,
         RentalInboxMessage inboxMessage,
         CancellationToken cancellationToken = default)
     {
@@ -185,9 +186,9 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                 }
             }
 
-            var outboxEnvelope = new RentalEventEnvelope<LatePaymentRefundRequestedPayload>(
+            var outboxEnvelope = new KafkaMessageEnvelope<LatePaymentRefundRequestedPayload>(
                 Guid.NewGuid(),
-                RentalEventTypes.LatePaymentRefundRequested,
+                KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
                 1,
                 "rental-service",
                 order.Id.ToString("D"),
@@ -206,7 +207,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                 outboxEnvelope.MessageId,
                 _rentalEventsTopic,
                 order.Id.ToString("D"),
-                RentalEventTypes.LatePaymentRefundRequested,
+                KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
                 JsonSerializer.Serialize(outboxEnvelope, JsonOptions),
                 utcNow);
 
@@ -254,7 +255,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
     }
 
     public async Task<Result> ProcessInvoicePaidAsync(
-        PaymentEventEnvelope<InvoicePaidPayload> envelope,
+        KafkaMessageEnvelope<InvoicePaidPayload> envelope,
         CancellationToken cancellationToken = default)
     {
         var envValidation = ValidateEnvelope(envelope);
@@ -336,7 +337,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         return Result.Success();
     }
 
-    private static Result ValidateEnvelope(PaymentEventEnvelope<InvoicePaidPayload> envelope)
+    private static Result ValidateEnvelope(KafkaMessageEnvelope<InvoicePaidPayload> envelope)
     {
         if (envelope == null) return Error.Validation("INVALID_ENVELOPE", "Envelope không được rỗng.");
         if (envelope.Version != 1) return Error.Validation("UNSUPPORTED_VERSION", $"Chỉ hỗ trợ envelope version 1 (nhận {envelope.Version}).");

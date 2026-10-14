@@ -1,8 +1,8 @@
-using Dprental.RentalService.Application.DTOs.Payment;
+using Dprental.RentalService.Application.Kafka.Consumers;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.IServices.Integration;
 using Dprental.RentalService.Application.IServices.Payments;
-using Dprental.RentalService.Application.Services.Integration;
-using Dprental.RentalService.Application.Services.Payments;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Entities;
@@ -47,7 +47,7 @@ public sealed class PaymentEventsDispatcherAndDlqTests
         public bool ProcessCalled { get; set; }
         public Task<Result> ApplyInvoicePaidStagedAsync(
             RentalOrder order,
-            PaymentEventEnvelope<InvoicePaidPayload> envelope,
+            KafkaMessageEnvelope<InvoicePaidPayload> envelope,
             RentalInboxMessage inboxMessage,
             CancellationToken cancellationToken = default)
         {
@@ -55,7 +55,7 @@ public sealed class PaymentEventsDispatcherAndDlqTests
             return Task.FromResult(Result.Success());
         }
 
-        public Task<Result> ProcessInvoicePaidAsync(PaymentEventEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default)
+        public Task<Result> ProcessInvoicePaidAsync(KafkaMessageEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default)
         {
             ProcessCalled = true;
             return Task.FromResult(Result.Success());
@@ -67,7 +67,7 @@ public sealed class PaymentEventsDispatcherAndDlqTests
         public bool ProcessCalled { get; set; }
         public Task<Result> ApplyRefundCompletedStagedAsync(
             RentalOrder order,
-            PaymentEventEnvelope<RefundCompletedPayload> envelope,
+            KafkaMessageEnvelope<RefundCompletedPayload> envelope,
             RentalInboxMessage inboxMessage,
             CancellationToken cancellationToken = default)
         {
@@ -75,7 +75,7 @@ public sealed class PaymentEventsDispatcherAndDlqTests
             return Task.FromResult(Result.Success());
         }
 
-        public Task<Result> ProcessRefundCompletedAsync(PaymentEventEnvelope<RefundCompletedPayload> envelope, CancellationToken cancellationToken = default)
+        public Task<Result> ProcessRefundCompletedAsync(KafkaMessageEnvelope<RefundCompletedPayload> envelope, CancellationToken cancellationToken = default)
         {
             ProcessCalled = true;
             return Task.FromResult(Result.Success());

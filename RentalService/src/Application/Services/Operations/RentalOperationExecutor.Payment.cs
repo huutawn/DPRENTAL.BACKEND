@@ -1,7 +1,8 @@
 #pragma warning disable CA1848, CA1873
 using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
-using Dprental.RentalService.Application.DTOs.Integration;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Common;
@@ -308,9 +309,9 @@ public sealed partial class RentalOperationExecutor
         utcNow = _timeProvider.GetUtcNow();
         order.MarkPaymentExpired(utcNow, operationKey);
 
-        var outboxEnvelope = new RentalEventEnvelope<RentalOrderExpiredPayload>(
+        var outboxEnvelope = new KafkaMessageEnvelope<RentalOrderExpiredPayload>(
             Guid.NewGuid(),
-            RentalEventTypes.RentalOrderExpired,
+            KafkaContractSpec.EventTypes.RentalOrderExpired,
             1,
             "rental-service",
             order.Id.ToString("D"),
@@ -323,7 +324,7 @@ public sealed partial class RentalOperationExecutor
             outboxEnvelope.MessageId,
             _rentalEventsTopic,
             order.Id.ToString("D"),
-            RentalEventTypes.RentalOrderExpired,
+            KafkaContractSpec.EventTypes.RentalOrderExpired,
             JsonSerializer.Serialize(outboxEnvelope, JsonOptions),
             utcNow);
 

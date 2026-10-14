@@ -3,10 +3,12 @@ using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
+using Dprental.RentalService.Application.Kafka.Consumers;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.DTOs.Supplier;
 using Dprental.RentalService.Application.IServices.Integration;
 using Dprental.RentalService.Application.IServices.Payments;
-using Dprental.RentalService.Application.Services.Integration;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Services.Payments;
 using Dprental.RentalService.Common;
@@ -122,13 +124,13 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
     private sealed class TrackingPaymentWorkflow : IPaymentWorkflowService
     {
         public bool ApplyCalled { get; set; }
-        public Task<Result> ApplyInvoicePaidStagedAsync(RentalOrder order, PaymentEventEnvelope<InvoicePaidPayload> envelope, RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default)
+        public Task<Result> ApplyInvoicePaidStagedAsync(RentalOrder order, KafkaMessageEnvelope<InvoicePaidPayload> envelope, RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default)
         {
             ApplyCalled = true;
             return Task.FromResult(Result.Success());
         }
 
-        public Task<Result> ProcessInvoicePaidAsync(PaymentEventEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default)
+        public Task<Result> ProcessInvoicePaidAsync(KafkaMessageEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default)
         {
             ApplyCalled = true;
             return Task.FromResult(Result.Success());
@@ -138,13 +140,13 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
     private sealed class TrackingRefundConsumer : IRefundCompletedConsumer
     {
         public bool ApplyCalled { get; set; }
-        public Task<Result> ApplyRefundCompletedStagedAsync(RentalOrder order, PaymentEventEnvelope<RefundCompletedPayload> envelope, RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default)
+        public Task<Result> ApplyRefundCompletedStagedAsync(RentalOrder order, KafkaMessageEnvelope<RefundCompletedPayload> envelope, RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default)
         {
             ApplyCalled = true;
             return Task.FromResult(Result.Success());
         }
 
-        public Task<Result> ProcessRefundCompletedAsync(PaymentEventEnvelope<RefundCompletedPayload> envelope, CancellationToken cancellationToken = default)
+        public Task<Result> ProcessRefundCompletedAsync(KafkaMessageEnvelope<RefundCompletedPayload> envelope, CancellationToken cancellationToken = default)
         {
             ApplyCalled = true;
             return Task.FromResult(Result.Success());
