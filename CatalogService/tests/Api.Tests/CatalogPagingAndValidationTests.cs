@@ -182,7 +182,8 @@ public sealed class CatalogPagingAndValidationTests
             canonicalRules,
             new Dprental.CatalogService.Api.Security.CatalogCallerContext(
                 (System.Security.Claims.ClaimsPrincipal?)null),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<EquipmentTypeService>.Instance);
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<EquipmentTypeService>.Instance,
+            new TestJwks.StubInventoryClient());
 
         var badRequest = new GetEquipmentTypesRequest { Page = 0 };
 
@@ -277,7 +278,7 @@ public sealed class CatalogPagingAndValidationTests
     {
         public int SearchCallCount { get; private set; }
 
-        public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(GetEquipmentTypesRequest request, CancellationToken cancellationToken = default)
+        public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(GetEquipmentTypesRequest request, IReadOnlyDictionary<Guid, int> listingCounts, CancellationToken cancellationToken = default)
         {
             SearchCallCount++;
             return Task.FromResult(new PagedResult<EquipmentTypeListItemDto>([], 1, 20, 0));
@@ -305,8 +306,8 @@ public sealed class CatalogPagingAndValidationTests
             throw new NotImplementedException();
         public Task<EquipmentType?> GetWithSchemaAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult<EquipmentType?>(null);
-public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<EquipmentTypeSpecSchemaDto>>([]);
+        public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+                    Task.FromResult<IReadOnlyList<EquipmentTypeSpecSchemaDto>>([]);
 
         public Task<EquipmentTypeSpecSchemaDto?> GetSpecSchemaAsync(Guid equipmentTypeId, int version, CancellationToken cancellationToken = default) =>
             Task.FromResult<EquipmentTypeSpecSchemaDto?>(null);
@@ -332,6 +333,9 @@ public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid 
 
     private sealed class FakeCategoryRepository : ICategoryRepository
     {
+        public Task<IReadOnlyList<CategoryWithPublishedTypes>> GetActiveCategoriesWithPublishedTypesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<CategoryWithPublishedTypes>>([]);
+
         public Task<PagedResult<Category>> SearchAsync(CategorySearchQuery query, CancellationToken cancellationToken = default) =>
             Task.FromResult(new PagedResult<Category>([], query.Page, query.PageSize, 0));
 
@@ -347,8 +351,6 @@ public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid 
         public Task UpdateAsync(Category category, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
-        public Task<IEnumerable<Category>> GetAllActiveAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IEnumerable<Category>>([]);
     }
 
     private sealed class DummyMediaServiceClient : Dprental.CatalogService.Application.Clients.IMediaServiceClient

@@ -22,7 +22,9 @@ public sealed partial class BrandService(
     BrandListQueryValidator listQueryValidator,
     CreateBrandRequestValidator createValidator,
     UpdateBrandRequestValidator updateValidator,
-    ILogger<BrandService> logger) : IBrandService
+    ILogger<BrandService> logger,
+    IInventoryServiceClient inventoryClient,
+    ICatalogCallerContext? callerContext = null) : IBrandService
 {
     public async Task<Result<PagedResult<BrandDto>>> SearchPublicAsync(
         GetBrandsRequest request,
@@ -30,12 +32,29 @@ public sealed partial class BrandService(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var validationResult = listQueryValidator.Validate(request.Page, request.PageSize, request.Keyword, request.Sort);
+        var validationResult = listQueryValidator.ValidateDiscovery(request);
         if (validationResult.IsFailure)
         {
             return validationResult.Error;
         }
 
+        string scope = string.IsNullOrWhiteSpace(request.Scope) ? "public" : request.Scope.Trim().ToLowerInvariant();
+        if (scope == "mine")
+        {
+            if (callerContext == null || !callerContext.IsAuthenticated || !callerContext.UserId.HasValue)
+            {
+                return Error.Unauthorized("AUTH_REQUIRED", "Yêu cầu đăng nhập để truy cập scope=mine.");
+            }
+        }
+
+        string? effectiveListingStatus = request.ListingStatus;
+        var statsResult = await inventoryClient.GetListingStatisticsAsync(scope, effectiveListingStatus, cancellationToken);
+        if (statsResult.IsFailure)
+        {
+            return statsResult.Error;
+        }
+
+        var listingCounts = statsResult.Value.ByBrand;
         string? codeKeyword = string.IsNullOrWhiteSpace(request.Keyword) ? null : request.Keyword.Trim();
         string? nameKeyword = string.IsNullOrWhiteSpace(request.Keyword) ? null : BrandValidationRules.NormalizeName(request.Keyword);
 
@@ -43,14 +62,15 @@ public sealed partial class BrandService(
         {
             Keyword = codeKeyword,
             NameKeyword = nameKeyword,
-            IsActive = true, // Public list luôn chỉ lấy Brand đang active
+            IsActive = true,
             Page = request.Page,
             PageSize = request.PageSize,
-            Sort = request.Sort
+            Sort = request.Sort,
+            ListingCounts = listingCounts
         };
 
         var pagedEntities = await repository.SearchAsync(query, cancellationToken);
-        var dtos = pagedEntities.Items.Select(BrandDto.FromEntity).ToList();
+        var dtos = pagedEntities.Items.Select(b => BrandDto.FromEntity(b, listingCounts.GetValueOrDefault(b.Id, 0))).ToList();
 
         return new PagedResult<BrandDto>(dtos, pagedEntities.Page, pagedEntities.PageSize, pagedEntities.TotalCount);
     }
@@ -81,7 +101,7 @@ public sealed partial class BrandService(
         };
 
         var pagedEntities = await repository.SearchAsync(query, cancellationToken);
-        var dtos = pagedEntities.Items.Select(BrandDto.FromEntity).ToList();
+        var dtos = pagedEntities.Items.Select(b => BrandDto.FromEntity(b)).ToList();
 
         return new PagedResult<BrandDto>(dtos, pagedEntities.Page, pagedEntities.PageSize, pagedEntities.TotalCount);
     }

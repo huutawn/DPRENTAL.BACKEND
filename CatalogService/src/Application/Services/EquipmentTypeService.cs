@@ -21,7 +21,8 @@ public sealed partial class EquipmentTypeService(
     UpdateEquipmentTypeRequestValidator updateValidator,
     CanonicalEquipmentTypeRules canonicalRules,
     ICatalogCallerContext caller,
-    ILogger<EquipmentTypeService> logger) : IEquipmentTypeService
+    ILogger<EquipmentTypeService> logger,
+    IInventoryServiceClient inventoryClient) : IEquipmentTypeService
 {
     public async Task<Result<PagedResult<EquipmentTypeListItemDto>>> SearchAsync(
         GetEquipmentTypesRequest request,
@@ -34,9 +35,24 @@ public sealed partial class EquipmentTypeService(
         {
             return validationResult.Error;
         }
+        string scope = string.IsNullOrWhiteSpace(request.Scope) ? "public" : request.Scope.Trim().ToLowerInvariant();
+        if (scope == "mine")
+        {
+            if (!caller.IsAuthenticated || !caller.UserId.HasValue)
+            {
+                return Error.Unauthorized("AUTH_REQUIRED", "Yêu cầu đăng nhập để truy cập scope=mine.");
+            }
+        }
 
+        string? effectiveListingStatus = request.ListingStatus;
+        var statsResult = await inventoryClient.GetListingStatisticsAsync(scope, effectiveListingStatus, cancellationToken);
+        if (statsResult.IsFailure)
+        {
+            return statsResult.Error;
+        }
+        var listingCounts = statsResult.Value.ByEquipmentType;
 
-        PagedResult<EquipmentTypeListItemDto> pagedResult = await repository.SearchPublishedAsync(request, cancellationToken);
+        PagedResult<EquipmentTypeListItemDto> pagedResult = await repository.SearchPublishedAsync(request, listingCounts, cancellationToken);
         return EnrichList(pagedResult);
     }
 

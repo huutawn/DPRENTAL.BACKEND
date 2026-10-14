@@ -22,6 +22,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
         dbContext = new CatalogServiceDbContext(options);
         repository = new EquipmentTypeRepository(dbContext);
     }
+    private static readonly Dictionary<Guid, int> EmptyListingCounts = new();
 
     public async Task InitializeAsync()
     {
@@ -69,7 +70,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
             PageSize = 2
         };
 
-        PagedResult<EquipmentTypeListItemDto> result = await repository.SearchPublishedAsync(request);
+        PagedResult<EquipmentTypeListItemDto> result = await repository.SearchPublishedAsync(request, EmptyListingCounts);
 
         Assert.Equal(5, result.TotalCount);
         Assert.Equal(3, result.TotalPages);
@@ -119,7 +120,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
         eq2.Publish(DateTime.UtcNow);
         await dbContext.SaveChangesAsync();
         // 1. Search Category 1 -> Phải trả về đúng 2 equipment, không trùng lặp row
-        var result = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { CategoryId = cat1.Id, Page = 1, PageSize = 10 });
+        var result = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { CategoryId = cat1.Id, Page = 1, PageSize = 10 }, EmptyListingCounts);
         Assert.Equal(2, result.TotalCount);
         Assert.Equal(2, result.Items.Count);
         Assert.Equal(2, result.Items.Select(i => i.Id).Distinct().Count());
@@ -142,15 +143,15 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
         await CreateEquipmentTypeAsync("CAM-CANON-002", "Canon EOS R5", cat.Id, EquipmentTypeStatus.Published, description: "Quay phim 8K chuyên nghiệp");
         await CreateEquipmentTypeAsync("CAM-BMPCC-003", "Blackmagic Pocket 6K", cat.Id, EquipmentTypeStatus.Published, description: "EF mount cinema camera");
 
-        var resCode = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Keyword = "sony-001" });
+        var resCode = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Keyword = "sony-001" }, EmptyListingCounts);
         Assert.Single(resCode.Items);
         Assert.Equal("CAM-SONY-001", resCode.Items[0].Code);
 
-        var resName = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Keyword = "alpha" });
+        var resName = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Keyword = "alpha" }, EmptyListingCounts);
         Assert.Single(resName.Items);
         Assert.Equal("SONY Alpha A7 IV", resName.Items[0].Name);
 
-        var resDesc = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Keyword = "cinema" });
+        var resDesc = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Keyword = "cinema" }, EmptyListingCounts);
         Assert.Single(resDesc.Items);
         Assert.Equal("Blackmagic Pocket 6K", resDesc.Items[0].Name);
     }
@@ -164,17 +165,17 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
         var eq2 = await CreateEquipmentTypeAsync("LENS-002", "Lens B", cat.Id, EquipmentTypeStatus.Published);
         var eq3 = await CreateEquipmentTypeAsync("LENS-003", "Lens C", cat.Id, EquipmentTypeStatus.Published);
 
-        var ascResult = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Sort = "name_asc" });
+        var ascResult = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Sort = "name_asc" }, EmptyListingCounts);
         Assert.Equal(eq1.Id, ascResult.Items[0].Id);
         Assert.Equal(eq2.Id, ascResult.Items[1].Id);
         Assert.Equal(eq3.Id, ascResult.Items[2].Id);
 
-        var descResult = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Sort = "name_desc" });
+        var descResult = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Sort = "name_desc" }, EmptyListingCounts);
         Assert.Equal(eq3.Id, descResult.Items[0].Id);
         Assert.Equal(eq2.Id, descResult.Items[1].Id);
         Assert.Equal(eq1.Id, descResult.Items[2].Id);
 
-        var defaultResult = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest());
+        var defaultResult = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Sort = "newest" }, EmptyListingCounts);
         Assert.Equal(eq3.Id, defaultResult.Items[0].Id);
     }
 
@@ -220,13 +221,13 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
         await dbContext.SaveChangesAsync();
 
         // Sort theo name_asc: Name giống nhau -> tie-breaker Id tăng dần
-        var ascRes = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Sort = "name_asc" });
+        var ascRes = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Sort = "name_asc" }, EmptyListingCounts);
         Assert.Equal(2, ascRes.Items.Count);
         Assert.Equal(id1, ascRes.Items[0].Id);
         Assert.Equal(id2, ascRes.Items[1].Id);
 
         // Sort mặc định (CreatedAt giảm dần): CreatedAt giống nhau -> tie-breaker Id tăng dần
-        var defRes = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest());
+        var defRes = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Sort = "newest" }, EmptyListingCounts);
         Assert.Equal(2, defRes.Items.Count);
         Assert.Equal(id1, defRes.Items[0].Id);
         Assert.Equal(id2, defRes.Items[1].Id);
@@ -248,7 +249,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
         );
         await dbContext.SaveChangesAsync();
 
-        var searchResult = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Keyword = "Wireless" });
+        var searchResult = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Keyword = "Wireless" }, EmptyListingCounts);
         Assert.Single(searchResult.Items);
         Assert.Equal(mediaThumb, searchResult.Items[0].ThumbnailMediaId);
 
@@ -275,7 +276,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
         );
         await dbContext.SaveChangesAsync();
 
-        var res = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Keyword = "Acoustic" });
+        var res = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Keyword = "Acoustic" }, EmptyListingCounts);
         Assert.Single(res.Items);
         Assert.Equal(mediaLowOrder, res.Items[0].ThumbnailMediaId);
     }
@@ -289,7 +290,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime, IDisposable
         EquipmentType disabled = await CreateEquipmentTypeAsync("DRONE-002", "Drone Disabled", cat.Id, EquipmentTypeStatus.Disabled);
         EquipmentType published = await CreateEquipmentTypeAsync("DRONE-003", "Drone Pub", cat.Id, EquipmentTypeStatus.Published);
 
-        var result = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Keyword = "Drone" });
+        var result = await repository.SearchPublishedAsync(new GetEquipmentTypesRequest { Keyword = "Drone" }, EmptyListingCounts);
         Assert.Single(result.Items);
         Assert.Equal(published.Id, result.Items[0].Id);
 

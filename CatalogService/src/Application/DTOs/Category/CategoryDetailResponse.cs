@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace CatalogService.Application.DTOs.Category;
 
 public sealed record CategoryDetailResponse(
@@ -7,5 +9,6 @@ public sealed record CategoryDetailResponse(
     string? Description,
     bool IsActive,
     Guid? ImageMediaId,
-    string? ImageUrl
+    string? ImageUrl,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? ListingCount = null
 );

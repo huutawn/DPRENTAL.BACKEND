@@ -17,12 +17,10 @@ namespace Dprental.CatalogService.Api.Controllers;
 [Produces("application/json")]
 public sealed class BrandsController(IBrandService service, ICatalogCallerContext caller) : ControllerBase
 {
+
     private static readonly HashSet<string> PublicAllowedQueryKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "keyword",
-        "page",
-        "pageSize",
-        "sort"
+        "keyword", "page", "pageSize", "sort", "scope", "listingStatus"
     };
 
     private static readonly HashSet<string> AdminAllowedQueryKeys = new(StringComparer.OrdinalIgnoreCase)
@@ -39,11 +37,15 @@ public sealed class BrandsController(IBrandService service, ICatalogCallerContex
     [HttpGet]
     [ProducesResponseType<PagedResult<BrandDto>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<PagedResult<BrandDto>>> SearchPublic(
         [FromQuery] GetBrandsRequest request,
         CancellationToken cancellationToken)
     {
-        if (Request.Query.Keys.Any(k => !PublicAllowedQueryKeys.Contains(k)))
+
+        if (Request.Query.Any(q => !PublicAllowedQueryKeys.Contains(q.Key) || q.Value.Count != 1))
         {
             return this.ToProblem(CatalogErrors.Brand.InvalidQuery);
         }

@@ -13,4 +13,5 @@ public sealed record BrandSearchQuery
     public int Page { get; init; } = PageRequest.DefaultPage;
     public int PageSize { get; init; } = PageRequest.DefaultPageSize;
     public string? Sort { get; init; }
+    public IReadOnlyDictionary<Guid, int>? ListingCounts { get; init; }
 }

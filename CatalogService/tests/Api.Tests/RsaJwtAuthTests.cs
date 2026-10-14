@@ -344,7 +344,7 @@ public sealed class RsaJwtAuthTests
 
     internal sealed class FakeEquipmentTypeRepository : IEquipmentTypeRepository
     {
-        public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(GetEquipmentTypesRequest request, CancellationToken cancellationToken = default) =>
+        public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(GetEquipmentTypesRequest request, IReadOnlyDictionary<Guid, int> listingCounts, CancellationToken cancellationToken = default) =>
             Task.FromResult(new PagedResult<EquipmentTypeListItemDto>([], 1, 20, 0));
 
         public Task<EquipmentTypeDetailDto?> GetPublishedByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
@@ -369,8 +369,8 @@ public sealed class RsaJwtAuthTests
             throw new NotImplementedException();
         public Task<EquipmentType?> GetWithSchemaAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult<EquipmentType?>(null);
-public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<EquipmentTypeSpecSchemaDto>>([]);
+        public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+                    Task.FromResult<IReadOnlyList<EquipmentTypeSpecSchemaDto>>([]);
 
         public Task<EquipmentTypeSpecSchemaDto?> GetSpecSchemaAsync(Guid equipmentTypeId, int version, CancellationToken cancellationToken = default) =>
             Task.FromResult<EquipmentTypeSpecSchemaDto?>(null);

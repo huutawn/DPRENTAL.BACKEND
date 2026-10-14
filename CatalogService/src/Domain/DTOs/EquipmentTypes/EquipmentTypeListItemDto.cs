@@ -8,4 +8,5 @@ public sealed record EquipmentTypeListItemDto(
     IReadOnlyList<CategoryDto> Categories,
     Guid? ThumbnailMediaId,
     string? ThumbnailUrl,
-    int? CurrentSchemaVersion = null);
+    int? CurrentSchemaVersion = null,
+    int ListingCount = 0);

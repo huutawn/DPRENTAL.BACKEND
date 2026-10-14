@@ -8,6 +8,9 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 
+using Dprental.CatalogService.Application.Clients;
+using Dprental.CatalogService.Common;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Dprental.CatalogService.Api.Tests;
 
 /// <summary>Giả lập JWKS endpoint của AuthService cho test, không mở cổng mạng thật.</summary>
@@ -20,8 +23,12 @@ public static class TestJwks
     {
         builder.UseSetting("Auth:Jwt:JwksUri", Uri);
         builder.ConfigureTestServices(services =>
+        {
             services.AddHttpClient(JwtBearerServiceCollectionExtensions.JwksHttpClientName)
-                .ConfigurePrimaryHttpMessageHandler(() => handler ?? new StubJwksHandler()));
+                .ConfigurePrimaryHttpMessageHandler(() => handler ?? new StubJwksHandler());
+            services.RemoveAll<IInventoryServiceClient>();
+            services.AddSingleton<IInventoryServiceClient>(new StubInventoryClient());
+        });
         return builder;
     }
 
@@ -79,5 +86,15 @@ public static class TestJwks
 
             return Task.FromResult(response);
         }
+    }
+    public sealed class StubInventoryClient : IInventoryServiceClient
+    {
+        public Task<Result<InventoryListingStatisticsDto>> GetListingStatisticsAsync(
+            string scope,
+            string? listingStatus,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(new InventoryListingStatisticsDto(
+                new Dictionary<Guid, int>(),
+                new Dictionary<Guid, int>())));
     }
 }

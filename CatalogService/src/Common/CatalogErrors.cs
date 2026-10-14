@@ -189,6 +189,18 @@ public static class CatalogErrors
             Error.Unavailable(CatalogErrorCode.Media.ServiceUnavailable, "Dịch vụ MediaService tạm thời không khả dụng.");
     }
 
+    public static class Inventory
+    {
+        public static readonly Error ServiceUnavailable =
+            Error.Unavailable(CatalogErrorCode.Inventory.ServiceUnavailable, "InventoryService không khả dụng hoặc hết thời gian chờ.");
+
+        public static readonly Error Unauthorized =
+            Error.Unauthorized(CatalogErrorCode.Inventory.Unauthorized, "Yêu cầu không được xác thực bởi InventoryService.");
+
+        public static readonly Error Forbidden =
+            Error.Forbidden(CatalogErrorCode.Inventory.Forbidden, "Truy cập bị từ chối bởi InventoryService.");
+    }
+
 
     public static class Catalog
     {

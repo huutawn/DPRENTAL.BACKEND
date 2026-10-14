@@ -19,7 +19,25 @@ public sealed class EquipmentTypeListQueryValidator(IOptions<CatalogDiscoveryOpt
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        return Validate(request.Page, request.PageSize, request.Keyword, request.Sort);
+        Result pagingResult = PaginationValidationHelper.Validate(request.Page, request.PageSize);
+        if (pagingResult.IsFailure)
+        {
+            return pagingResult;
+        }
+
+        int maxKeywordLength = options.Value.MaxKeywordLength;
+        if (request.Keyword?.Trim().Length > maxKeywordLength)
+        {
+            return Result.Failure(CatalogErrors.EquipmentType.InvalidKeyword);
+        }
+
+        Result sortResult = DiscoveryQueryValidationHelper.ValidateDiscoverySort(request.Sort, CatalogErrors.EquipmentType.InvalidSort);
+        if (sortResult.IsFailure)
+        {
+            return sortResult;
+        }
+
+        return DiscoveryQueryValidationHelper.ValidateScopeAndListingStatus(request.Scope, request.ListingStatus);
     }
 
     /// <summary>Kiểm tra truy vấn danh sách quản trị và trả về tập trạng thái cần lọc (rỗng nghĩa là mọi trạng thái).</summary>

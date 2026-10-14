@@ -280,7 +280,8 @@ public sealed class BrandPostgreSqlIntegrationTests : IAsyncLifetime, IDisposabl
             new Application.Validators.BrandListQueryValidator(options),
             new Application.Validators.CreateBrandRequestValidator(),
             new Application.Validators.UpdateBrandRequestValidator(),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<Application.Services.BrandService>.Instance);
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Application.Services.BrandService>.Instance,
+            new TestJwks.StubInventoryClient());
 
         await repository.AddAsync(new Brand
         {
