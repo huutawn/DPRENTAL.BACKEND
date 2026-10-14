@@ -197,8 +197,8 @@ public sealed partial class EquipmentListingService
             ctx.Assets.Add(asset);
             var revListing = await ctx.GetNextSearchRevisionAsync(ct);
             var revAsset = await ctx.GetNextSearchRevisionAsync(ct);
-            ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", revListing, false, now));
-            ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(asset.Id, "Upsert", revAsset, now));
+            ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", revListing, false, now, ctx.SearchBackfillRunId));
+            ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(asset.Id, "Upsert", revAsset, now, ctx.SearchBackfillRunId));
             return Result.Success(listing);
         }, cancellationToken);
 
@@ -439,7 +439,7 @@ public sealed partial class EquipmentListingService
 
             var revision = await ctx.GetNextSearchRevisionAsync(ct);
             bool needsFanout = request.IsBrandIdSpecified || request.IsModelSpecified || request.IsManufactureYearSpecified;
-            ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", revision, needsFanout, now));
+            ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", revision, needsFanout, now, ctx.SearchBackfillRunId));
 
             return Result.Success(listing);
         }, cancellationToken);
@@ -625,8 +625,8 @@ public sealed partial class EquipmentListingService
             ctx.Assets.Add(newAsset);
             var revAsset = await ctx.GetNextSearchRevisionAsync(ct);
             var revListing = await ctx.GetNextSearchRevisionAsync(ct);
-            ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(newAsset.Id, "Upsert", revAsset, now));
-            ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", revListing, false, now));
+            ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(newAsset.Id, "Upsert", revAsset, now, ctx.SearchBackfillRunId));
+            ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", revListing, false, now, ctx.SearchBackfillRunId));
             return Result.Success(newAsset);
         }, cancellationToken);
 

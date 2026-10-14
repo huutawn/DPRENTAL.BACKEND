@@ -51,11 +51,38 @@ public sealed class SearchBackfillRun
     [Column("swap_task_uid")]
     public int? SwapTaskUid { get; private set; }
 
+    [Column("listing_cursor")]
+    public Guid? ListingCursor { get; private set; }
+
+    [Column("asset_cursor")]
+    public Guid? AssetCursor { get; private set; }
+
+    [Column("listings_loaded")]
+    public bool ListingsLoaded { get; private set; }
+
+    [Column("assets_loaded")]
+    public bool AssetsLoaded { get; private set; }
+
     [Column("error_message")]
     public string? ErrorMessage { get; private set; }
 
     [Column("updated_at")]
     public DateTimeOffset UpdatedAt { get; private set; }
+
+    public void AdvanceListings(Guid? cursor, bool completed, DateTimeOffset now)
+    { ListingCursor = cursor; ListingsLoaded = completed; UpdatedAt = now; }
+
+    public void AdvanceAssets(Guid? cursor, bool completed, DateTimeOffset now)
+    { AssetCursor = cursor; AssetsLoaded = completed; UpdatedAt = now; }
+
+    public void Transition(string status, DateTimeOffset now, string? error = null)
+    {
+        Status = status; UpdatedAt = now; ErrorMessage = error;
+        if (status is StatusCompleted or StatusFailed) CompletedAt = now;
+    }
+
+    public void RecordSwap(int uid, DateTimeOffset now)
+    { SwapTaskUid = uid; UpdatedAt = now; }
 
     private SearchBackfillRun() { }
 

@@ -79,6 +79,27 @@ public sealed class SearchProjectionJob
     [Column("pending_task_uids", TypeName = "integer[]")]
     public int[] PendingTaskUids { get; private set; } = Array.Empty<int>();
 
+    [Column("submission_revision")]
+    public long? SubmissionRevision { get; private set; }
+
+    [Column("submission_started")]
+    public bool SubmissionStarted { get; private set; }
+
+    [Column("submission_uncertain")]
+    public bool SubmissionUncertain { get; private set; }
+
+    [Column("submission_complete")]
+    public bool SubmissionComplete { get; private set; }
+
+    [Column("fanout_revision")]
+    public long? FanoutRevision { get; private set; }
+
+    [Column("fanout_requested_revision")]
+    public long FanoutRequestedRevision { get; private set; }
+
+    [Column("fanout_applied_revision")]
+    public long FanoutAppliedRevision { get; private set; }
+
     [Column("created_at")]
     public DateTimeOffset CreatedAt { get; private set; }
 
@@ -112,6 +133,7 @@ public sealed class SearchProjectionJob
             ProcessingRevision = null,
             AppliedRevision = 0,
             NeedsAssetFanout = needsAssetFanout,
+            FanoutRequestedRevision = needsAssetFanout ? desiredRevision : 0,
             FanoutCursor = null,
             FanoutCompleted = !needsAssetFanout,
             Status = StatusPending,

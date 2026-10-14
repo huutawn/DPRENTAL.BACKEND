@@ -171,6 +171,10 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
                     request.Status.HasValue ? (int)request.Status.Value : null),
                 cancellationToken);
 
+            if (candidateResult.IsFailure && candidateResult.Error.Code is
+                "SEARCH_CREDENTIALS_INVALID" or "SEARCH_CONFIGURATION_INVALID")
+                return candidateResult.Error;
+
             if (candidateResult.IsSuccess && !candidateResult.Value.IsTruncated)
             {
                 candidateIds = candidateResult.Value.CandidateIds;

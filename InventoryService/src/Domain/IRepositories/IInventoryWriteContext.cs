@@ -51,5 +51,7 @@ public interface IInventoryWriteContext
     /// <summary>
     /// Lấy giá trị revision tuần tự tiếp theo từ sequence search_projection_revision_seq trong transaction hiện tại.
     /// </summary>
+    Guid? SearchBackfillRunId { get; }
+
     Task<long> GetNextSearchRevisionAsync(CancellationToken cancellationToken = default);
 }

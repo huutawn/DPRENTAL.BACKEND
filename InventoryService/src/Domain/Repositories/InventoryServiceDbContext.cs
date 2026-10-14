@@ -58,6 +58,8 @@ public sealed class InventoryServiceDbContext : DbContext
     /// <summary>
     /// Bảng quản lý generation và readiness của chỉ mục tìm kiếm live.
     /// </summary>
+    public DbSet<SearchBackfillReceipt> SearchBackfillReceipts => Set<SearchBackfillReceipt>();
+
     public DbSet<SearchGeneration> SearchGenerations => Set<SearchGeneration>();
 
     /// <summary>
@@ -317,6 +319,12 @@ public sealed class InventoryServiceDbContext : DbContext
             b.HasIndex(j => new { j.Status, j.NextAttemptAt, j.LockLeaseExpiresAt })
                 .HasDatabaseName("ix_search_projection_jobs_claim");
         });
+
+        modelBuilder.Entity<SearchBackfillReceipt>().HasIndex(r => new { r.RunId, r.MessageId }).IsUnique();
+        modelBuilder.Entity<SearchBackfillRun>().Property<int>("ActiveSlot").HasColumnName("active_slot").HasComputedColumnSql("1", stored: true);
+        modelBuilder.Entity<SearchBackfillRun>().HasIndex("ActiveSlot")
+            .HasDatabaseName("ux_search_backfill_active").IsUnique()
+            .HasFilter("status IN ('Building', 'CatchingUp', 'Swapping')");
 
         // 8. Cấu hình thực thể SearchGeneration
         modelBuilder.Entity<SearchGeneration>(b =>

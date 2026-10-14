@@ -8,11 +8,6 @@ namespace Dprental.InventoryService.Domain.IRepositories;
 public interface ISearchProjectionStore
 {
     /// <summary>
-    /// Lấy giá trị revision tiếp theo từ sequence search_projection_revision_seq.
-    /// </summary>
-    Task<long> GetNextRevisionAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Ghi nhận hoặc cập nhật desired_revision cho entity; bảo vệ lease đang chạy nếu job đang Processing.
     /// </summary>
     Task UpsertJobAsync(
@@ -47,19 +42,20 @@ public interface ISearchProjectionStore
     /// <summary>
     /// Lưu danh sách Meilisearch task UID ngay sau khi submit để phục hồi khi restart/timeout.
     /// </summary>
-    Task SavePendingTasksAsync(
-        Guid jobId,
-        Guid leaseToken,
-        IReadOnlyList<int> taskUids,
-        DateTimeOffset now,
+    Task<bool> SaveSubmissionAsync(Guid jobId, Guid leaseToken, long revision,
+        IReadOnlyList<int> taskUids, bool uncertain, bool complete, DateTimeOffset now,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> ResetSubmissionAsync(Guid jobId, Guid leaseToken, DateTimeOffset now,
         CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Lưu tiến độ duyệt keyset fan-out asset con.
     /// </summary>
-    Task SaveFanoutProgressAsync(
+    Task<bool> SaveFanoutProgressAsync(
         Guid jobId,
         Guid leaseToken,
+        long revision,
         Guid? nextCursor,
         bool completed,
         DateTimeOffset now,
@@ -106,4 +102,13 @@ public interface ISearchProjectionStore
     /// Lưu hoặc cập nhật đợt chạy backfill.
     /// </summary>
     Task SaveBackfillRunAsync(SearchBackfillRun run, CancellationToken cancellationToken = default);
+    Task<IAsyncDisposable?> TryAcquireCoordinationAsync(long key, CancellationToken cancellationToken = default);
+    Task<List<EquipmentListing>> ReadListingsAsync(Guid? cursor, int limit, IReadOnlyList<Guid>? ids = null, CancellationToken cancellationToken = default);
+    Task<List<InventoryAsset>> ReadAssetsAsync(Guid? cursor, int limit, IReadOnlyList<Guid>? ids = null,
+        IReadOnlyList<Guid>? listingIds = null, CancellationToken cancellationToken = default);
+    Task<List<OutboxMessage>> ReadBackfillJournalAsync(Guid runId, string topic, int limit, CancellationToken cancellationToken = default);
+    Task RecordBackfillReceiptsAsync(Guid runId, IReadOnlyList<Guid> messageIds, CancellationToken cancellationToken = default);
+    Task SaveBackfillStateAsync(SearchBackfillRun run, SearchGeneration generation, CancellationToken cancellationToken = default);
+    Task<bool> HasUncertainSubmissionsAsync(CancellationToken cancellationToken = default);
+    Task<List<int>> ReadPendingTaskIdsAsync(CancellationToken cancellationToken = default);
 }

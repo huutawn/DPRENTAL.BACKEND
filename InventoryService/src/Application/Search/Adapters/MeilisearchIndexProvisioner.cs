@@ -5,7 +5,7 @@ using Meilisearch;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Dprental.InventoryService.Api.Search;
+namespace Dprental.InventoryService.Application.Search.Adapters;
 
 /// <summary>
 /// Khởi tạo và cấu hình các chỉ mục Meilisearch cho InventoryService theo quy chuẩn nghiệp vụ duy nhất.
@@ -32,16 +32,33 @@ public sealed class MeilisearchIndexProvisioner : IInventoryIndexProvisioner
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        await ConfigurePublicListingsIndexAsync(cancellationToken);
-        await ConfigureOwnerListingsIndexAsync(cancellationToken);
-        await ConfigureOwnerAssetsIndexAsync(cancellationToken);
+        await ConfigureIndexesAsync(_options.PublicListingsIndex, _options.OwnerListingsIndex,
+            _options.OwnerAssetsIndex, cancellationToken);
 
         _logger.LogInformation("Hoàn tất cấu hình chỉ mục Meilisearch.");
     }
 
-    private async Task ConfigurePublicListingsIndexAsync(CancellationToken cancellationToken)
+    public async Task ConfigureIndexesAsync(string publicIndex, string ownerListingsIndex, string ownerAssetsIndex,
+        CancellationToken cancellationToken = default)
     {
-        var indexUid = _options.PublicListingsIndex;
+        await ConfigurePublicListingsIndexAsync(publicIndex, cancellationToken);
+        await ConfigureOwnerListingsIndexAsync(ownerListingsIndex, cancellationToken);
+        await ConfigureOwnerAssetsIndexAsync(ownerAssetsIndex, cancellationToken);
+    }
+
+    public async Task<bool> LiveIndexesExistAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            foreach (var uid in new[] { _options.PublicListingsIndex, _options.OwnerListingsIndex, _options.OwnerAssetsIndex })
+                await _client.GetIndexAsync(uid, cancellationToken);
+            return true;
+        }
+        catch (MeilisearchApiError ex) when (ex.Code == "index_not_found") { return false; }
+    }
+
+    private async Task ConfigurePublicListingsIndexAsync(string indexUid, CancellationToken cancellationToken)
+    {
         var index = await GetOrCreateIndexAsync(indexUid, "id", cancellationToken);
 
         int maxHits = Math.Max(100000, _options.CandidateLimit);
@@ -62,9 +79,8 @@ public sealed class MeilisearchIndexProvisioner : IInventoryIndexProvisioner
         await WaitForTaskStrictAsync(task.TaskUid, cancellationToken);
     }
 
-    private async Task ConfigureOwnerListingsIndexAsync(CancellationToken cancellationToken)
+    private async Task ConfigureOwnerListingsIndexAsync(string indexUid, CancellationToken cancellationToken)
     {
-        var indexUid = _options.OwnerListingsIndex;
         var index = await GetOrCreateIndexAsync(indexUid, "id", cancellationToken);
 
         int maxHits = Math.Max(100000, _options.CandidateLimit);
@@ -85,9 +101,8 @@ public sealed class MeilisearchIndexProvisioner : IInventoryIndexProvisioner
         await WaitForTaskStrictAsync(task.TaskUid, cancellationToken);
     }
 
-    private async Task ConfigureOwnerAssetsIndexAsync(CancellationToken cancellationToken)
+    private async Task ConfigureOwnerAssetsIndexAsync(string indexUid, CancellationToken cancellationToken)
     {
-        var indexUid = _options.OwnerAssetsIndex;
         var index = await GetOrCreateIndexAsync(indexUid, "id", cancellationToken);
 
         int maxHits = Math.Max(100000, _options.CandidateLimit);

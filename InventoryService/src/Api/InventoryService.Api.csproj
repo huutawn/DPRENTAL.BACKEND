@@ -10,7 +10,6 @@
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Swashbuckle.AspNetCore" />
-    <PackageReference Include="MeiliSearch" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Application/InventoryService.Application.csproj" />

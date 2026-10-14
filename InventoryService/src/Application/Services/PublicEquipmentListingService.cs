@@ -147,6 +147,10 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
                     BrandId: validated.BrandId),
                 cancellationToken);
 
+            if (candidateResult.IsFailure && candidateResult.Error.Code is
+                "SEARCH_CREDENTIALS_INVALID" or "SEARCH_CONFIGURATION_INVALID")
+                return candidateResult.Error;
+
             if (candidateResult.IsSuccess && !candidateResult.Value.IsTruncated)
             {
                 candidateIds = candidateResult.Value.CandidateIds;

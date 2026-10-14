@@ -4,28 +4,32 @@ using Dprental.InventoryService.Application.Search;
 using Dprental.InventoryService.Application.Search.Models;
 using Dprental.InventoryService.Common;
 using Meilisearch;
+using Dprental.InventoryService.Domain.IRepositories;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using AppResult = Dprental.InventoryService.Common.Result;
 using ResultCandidate = Dprental.InventoryService.Common.Result<Dprental.InventoryService.Application.Search.CandidateSearchResult>;
 
-namespace Dprental.InventoryService.Api.Search;
+namespace Dprental.InventoryService.Application.Search.Adapters;
 
 /// <summary>
-/// Triển khai IInventorySearchIndexService tại tầng Api/Search gọi Meilisearch HTTP SDK.
+/// Triển khai IInventorySearchIndexService tại tầng Application/Search gọi Meilisearch HTTP SDK.
 /// </summary>
 public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexService
 {
     private readonly MeilisearchClient _client;
+    private readonly ISearchProjectionStore _store;
     private readonly MeilisearchOptions _options;
     private readonly ILogger<MeilisearchInventoryIndexService> _logger;
 
     public MeilisearchInventoryIndexService(
         MeilisearchClient client,
+        ISearchProjectionStore store,
         IOptions<MeilisearchOptions> options,
         ILogger<MeilisearchInventoryIndexService> logger)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
+        _store = store ?? throw new ArgumentNullException(nameof(store));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -46,6 +50,11 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
 
         try
         {
+            var generation = await _store.GetGenerationAsync(cancellationToken);
+            if (generation?.ErrorCode is "SEARCH_CREDENTIALS_INVALID" or "SEARCH_CONFIGURATION_INVALID")
+                return Error.Unavailable(generation.ErrorCode, "Dịch vụ tìm kiếm chưa được cấu hình hợp lệ.");
+            if (generation?.IsReady != true)
+                return Error.Unavailable("SEARCH_NOT_READY", "Chỉ mục tìm kiếm chưa sẵn sàng.");
             var normalizedQ = NormalizeSearchText(query.Keyword);
             var filterClauses = new List<string>();
 
@@ -66,6 +75,7 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
             var searchQuery = new SearchQuery
             {
                 Filter = filterString,
+                AttributesToRetrieve = ["id"],
                 Limit = candidateLimit
             };
 
@@ -81,10 +91,15 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
             _logger.LogCritical(ex, "LỖI BẢO MẬT/CẤU HÌNH: Meilisearch credentials hoặc quyền truy cập không hợp lệ: {Code}", ex.Code);
             return Error.Unavailable("SEARCH_CREDENTIALS_INVALID", "Dịch vụ chỉ mục tìm kiếm tạm thời không khả dụng.");
         }
+        catch (MeilisearchApiError ex) when (ex.Code.StartsWith("invalid_search_", StringComparison.Ordinal) || ex.Code == "invalid_settings")
+        {
+            _logger.LogError("Invalid search index configuration: {Code}", ex.Code);
+            return Error.Unavailable("SEARCH_CONFIGURATION_INVALID", "Dịch vụ tìm kiếm chưa được cấu hình hợp lệ.");
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Lỗi truy vấn chỉ mục Meilisearch cho Public Listings với từ khóa '{Keyword}'. Chuyển sang SQL fallback.", query.Keyword);
-            return Error.Failure("MEILISEARCH_QUERY_FAILED", ex.Message);
+            return Error.Unavailable("MEILISEARCH_QUERY_FAILED", "Dịch vụ tìm kiếm tạm thời không khả dụng.");
         }
     }
 
@@ -104,6 +119,11 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
 
         try
         {
+            var generation = await _store.GetGenerationAsync(cancellationToken);
+            if (generation?.ErrorCode is "SEARCH_CREDENTIALS_INVALID" or "SEARCH_CONFIGURATION_INVALID")
+                return Error.Unavailable(generation.ErrorCode, "Dịch vụ tìm kiếm chưa được cấu hình hợp lệ.");
+            if (generation?.IsReady != true)
+                return Error.Unavailable("SEARCH_NOT_READY", "Chỉ mục tìm kiếm chưa sẵn sàng.");
             var normalizedQ = NormalizeSearchText(query.Keyword);
             var filterClauses = new List<string>
             {
@@ -132,6 +152,7 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
             var searchQuery = new SearchQuery
             {
                 Filter = filterString,
+                AttributesToRetrieve = ["id"],
                 Limit = candidateLimit
             };
 
@@ -147,10 +168,15 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
             _logger.LogCritical(ex, "LỖI BẢO MẬT/CẤU HÌNH: Meilisearch credentials hoặc quyền truy cập không hợp lệ: {Code}", ex.Code);
             return Error.Unavailable("SEARCH_CREDENTIALS_INVALID", "Dịch vụ chỉ mục tìm kiếm tạm thời không khả dụng.");
         }
+        catch (MeilisearchApiError ex) when (ex.Code.StartsWith("invalid_search_", StringComparison.Ordinal) || ex.Code == "invalid_settings")
+        {
+            _logger.LogError("Invalid search index configuration: {Code}", ex.Code);
+            return Error.Unavailable("SEARCH_CONFIGURATION_INVALID", "Dịch vụ tìm kiếm chưa được cấu hình hợp lệ.");
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Lỗi truy vấn chỉ mục Meilisearch cho Owner Listings với từ khóa '{Keyword}'. Chuyển sang SQL fallback.", query.Keyword);
-            return Error.Failure("MEILISEARCH_QUERY_FAILED", ex.Message);
+            return Error.Unavailable("MEILISEARCH_QUERY_FAILED", "Dịch vụ tìm kiếm tạm thời không khả dụng.");
         }
     }
 
@@ -170,6 +196,11 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
 
         try
         {
+            var generation = await _store.GetGenerationAsync(cancellationToken);
+            if (generation?.ErrorCode is "SEARCH_CREDENTIALS_INVALID" or "SEARCH_CONFIGURATION_INVALID")
+                return Error.Unavailable(generation.ErrorCode, "Dịch vụ tìm kiếm chưa được cấu hình hợp lệ.");
+            if (generation?.IsReady != true)
+                return Error.Unavailable("SEARCH_NOT_READY", "Chỉ mục tìm kiếm chưa sẵn sàng.");
             var normalizedQ = NormalizeSearchText(query.Keyword);
             var filterClauses = new List<string>
             {
@@ -208,6 +239,7 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
             var searchQuery = new SearchQuery
             {
                 Filter = filterString,
+                AttributesToRetrieve = ["id"],
                 Limit = candidateLimit,
                 MatchingStrategy = "all"
             };
@@ -224,10 +256,15 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
             _logger.LogCritical(ex, "LỖI BẢO MẬT/CẤU HÌNH: Meilisearch credentials hoặc quyền truy cập không hợp lệ: {Code}", ex.Code);
             return Error.Unavailable("SEARCH_CREDENTIALS_INVALID", "Dịch vụ chỉ mục tìm kiếm tạm thời không khả dụng.");
         }
+        catch (MeilisearchApiError ex) when (ex.Code.StartsWith("invalid_search_", StringComparison.Ordinal) || ex.Code == "invalid_settings")
+        {
+            _logger.LogError("Invalid search index configuration: {Code}", ex.Code);
+            return Error.Unavailable("SEARCH_CONFIGURATION_INVALID", "Dịch vụ tìm kiếm chưa được cấu hình hợp lệ.");
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Lỗi truy vấn chỉ mục Meilisearch cho Owner Assets với từ khóa '{Keyword}'. Chuyển sang SQL fallback.", query.Keyword);
-            return Error.Failure("MEILISEARCH_QUERY_FAILED", ex.Message);
+            return Error.Unavailable("MEILISEARCH_QUERY_FAILED", "Dịch vụ tìm kiếm tạm thời không khả dụng.");
         }
     }
 
@@ -238,6 +275,7 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
         {
             return await _client.IsHealthyAsync(cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch
         {
             return false;
@@ -252,7 +290,8 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
     private static bool IsCredentialOrPermissionError(MeilisearchApiError ex)
     {
         return string.Equals(ex.Code, "invalid_api_key", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(ex.Code, "missing_authorization_header", StringComparison.OrdinalIgnoreCase);
+               string.Equals(ex.Code, "missing_authorization_header", StringComparison.OrdinalIgnoreCase) ||
+               ex.Code is "401" or "403" or "Unauthorized" or "Forbidden";
     }
 
     private static ResultCandidate ProcessHits<TDoc>(

@@ -36,6 +36,9 @@ public sealed class SearchGeneration
     [Column("active_run_id")]
     public Guid? ActiveRunId { get; private set; }
 
+    [Column("error_code")]
+    public string? ErrorCode { get; private set; }
+
     [Column("updated_at")]
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -62,6 +65,14 @@ public sealed class SearchGeneration
     public void MarkReady(DateTimeOffset now)
     {
         IsReady = true;
+        ErrorCode = null;
+        UpdatedAt = now;
+    }
+
+    public void MarkUnavailable(string? errorCode, DateTimeOffset now)
+    {
+        IsReady = false;
+        ErrorCode = errorCode;
         UpdatedAt = now;
     }
 

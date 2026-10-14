@@ -1,14 +1,16 @@
 using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.Search;
 using Meilisearch;
+using Dprental.InventoryService.Application.Search.Adapters;
+using Dprental.InventoryService.Application.Search.Workers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
-namespace Dprental.InventoryService.Api.Search;
+namespace Dprental.InventoryService.Application.Search.DependencyInjection;
 
 /// <summary>
-/// Mở rộng IServiceCollection đăng ký hạ tầng Meilisearch tại tầng Api/Search.
+/// Mở rộng IServiceCollection đăng ký hạ tầng Meilisearch tại tầng Application/Search.
 /// </summary>
 public static class MeilisearchServiceCollectionExtensions
 {
@@ -31,7 +33,7 @@ public static class MeilisearchServiceCollectionExtensions
             .ValidateOnStart();
 
         // HttpClient với timeout 5 giây
-        services.AddHttpClient<MeilisearchClient>((sp, client) =>
+        services.AddHttpClient("InventoryMeilisearch", (sp, client) =>
         {
             var options = sp.GetRequiredService<IOptions<MeilisearchOptions>>().Value;
             if (Uri.TryCreate(options.Url, UriKind.Absolute, out var uri))
@@ -45,7 +47,7 @@ public static class MeilisearchServiceCollectionExtensions
         {
             var options = sp.GetRequiredService<IOptions<MeilisearchOptions>>().Value;
             var factory = sp.GetRequiredService<IHttpClientFactory>();
-            var httpClient = factory.CreateClient(typeof(MeilisearchClient).FullName ?? nameof(MeilisearchClient));
+            var httpClient = factory.CreateClient("InventoryMeilisearch");
             if (httpClient.BaseAddress is null)
             {
                 httpClient.BaseAddress = Uri.TryCreate(options.Url, UriKind.Absolute, out var uri)

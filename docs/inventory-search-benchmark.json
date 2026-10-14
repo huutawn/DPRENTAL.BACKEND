@@ -1,0 +1,10 @@
+{
+  "listings": 100000,
+  "assets": 1000000,
+  "samples": 30,
+  "backfillSeconds": 363.0071261,
+  "searchAndSqlP50Ms": 7.952,
+  "searchAndSqlP95Ms": 9.8916,
+  "candidateLimit": 5000,
+  "measuredAtUtc": "2026-10-14T01:39:03.064685+00:00"
+}
