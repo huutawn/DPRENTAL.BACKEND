@@ -8,6 +8,7 @@ using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
+using Dprental.RentalService.Domain.Policies;
 
 namespace Dprental.RentalService.Application.Services.Cart;
 
@@ -51,9 +52,9 @@ public sealed class GetRentalCart(
             }
 
             // MỚI: Kiểm tra ngày thuê (DatePassed và 6 tháng)
-            if (item.ExpectedStartDate <= todayVn)
+            if (RentalBookingPolicy.IsStartDateTooSoon(item.ExpectedStartDate, todayVn))
             {
-                lines.Add(CreateFailedLine(item, RentalCartLineStatus.DatePassed, "Ngày bắt đầu thuê đã qua. Hãy chọn ngày từ ngày mai."));
+                lines.Add(CreateFailedLine(item, RentalCartLineStatus.DatePassed, RentalBookingPolicy.TooSoonMessage(todayVn)));
                 continue;
             }
             if (item.ExpectedStartDate > maxAdvanceDate)

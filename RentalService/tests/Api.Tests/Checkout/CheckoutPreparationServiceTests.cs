@@ -30,7 +30,6 @@ public sealed class CheckoutPreparationServiceTests
     private readonly FakeCartRepository _carts = new();
     private readonly FakeOrderRepository _orders = new();
     private readonly FakeInventoryListingClient _inventory = new();
-    private readonly FakeCatalogReferenceClient _catalog = new();
     private readonly RentalCart _cart;
     private readonly Guid _cartItemId;
 
@@ -42,8 +41,6 @@ public sealed class CheckoutPreparationServiceTests
 
         _inventory.Listings[_listingId] = Listing(_listingId);
         _inventory.AvailableQuantities[_listingId] = 10;
-        _catalog.EquipmentTypeNames[_equipmentTypeId] = "Máy ảnh";
-        _catalog.BrandNames[_brandId] = "Sony";
     }
 
     private Guid AddCartItem(Guid listingId, int quantity, DateOnly start, DateOnly end) =>
@@ -64,7 +61,9 @@ public sealed class CheckoutPreparationServiceTests
         2_000_000m,
         "VND",
         "Quận 1, TP.HCM",
-        "listing-v7");
+        "listing-v7",
+        equipmentTypeName: " Máy ảnh ",
+        brandName: " Sony ");
 
     private CheckoutRequest Request(decimal expectedTotal = 7_000_000m, params Guid[] cartItemIds) => new(
         cartItemIds.Length == 0 ? [_cartItemId] : cartItemIds,
@@ -80,7 +79,6 @@ public sealed class CheckoutPreparationServiceTests
         _carts,
         _orders,
         inventory ?? _inventory,
-        _catalog,
         Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
         {
             CurrentVersion = "v1.0",
@@ -157,6 +155,7 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(2_000_000m, line.DepositPerUnit);
         Assert.Equal(3_000_000m, line.RentalAmount);
         Assert.Equal(4_000_000m, line.DepositAmount);
+        // Tên loại thiết bị và tên hãng lấy từ Inventory (đã cắt khoảng trắng), không gọi Catalog.
         Assert.Equal(
             new RentalItemListingSnapshotDto(
                 _equipmentTypeId, "Máy ảnh", _brandId, "Sony", "A7 IV", 3, """{"sensor":"full-frame"}""", _thumbnailMediaId),
@@ -324,10 +323,25 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Fact]
-    public async Task Prepare_AcceptsStartDateThatIsTomorrowInVietnamTime()
+    public async Task Prepare_RejectsStartDateLessThanThreeDaysAheadInVietnamTime()
     {
-        // 16:30 UTC ngày 11/10 là 23:30 ngày 11/10 giờ Việt Nam, nên ngày giao 12/10 là "ngày mai".
-        DateTimeOffset beforeMidnightIct = new(2026, 10, 11, 16, 30, 0, TimeSpan.Zero);
+        // 17:30 UTC ngày 09/10 là 00:30 ngày 10/10 giờ Việt Nam: ngày thuê sớm nhất là 13/10, nên 12/10 bị chặn.
+        DateTimeOffset justAfterMidnightIct = new(2026, 10, 9, 17, 30, 0, TimeSpan.Zero);
+
+        CheckoutPreparationResult result = await CreateService(justAfterMidnightIct).PrepareAsync(Renter(), Request());
+
+        Assert.Equal(CheckoutErrors.InvalidRentalDates, result.Error);
+        CheckoutLineIssue issue = Assert.Single(result.LineIssues);
+        Assert.Equal(CheckoutLineIssueCode.StartDateNotInFuture, issue.Code);
+        Assert.Equal("Phải đặt trước ít nhất 3 ngày, ngày bắt đầu thuê sớm nhất là 13/10/2026.", issue.Message);
+        Assert.Equal(0, _inventory.ListingReadCount);
+    }
+
+    [Fact]
+    public async Task Prepare_AcceptsStartDateExactlyThreeDaysAheadInVietnamTime()
+    {
+        // 16:30 UTC ngày 09/10 là 23:30 ngày 09/10 giờ Việt Nam: ngày thuê sớm nhất là 12/10.
+        DateTimeOffset beforeMidnightIct = new(2026, 10, 9, 16, 30, 0, TimeSpan.Zero);
 
         CheckoutPreparationResult result = await CreateService(beforeMidnightIct).PrepareAsync(Renter(), Request());
 
@@ -404,7 +418,7 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(CheckoutLineIssueCode.ListingUnavailable, Assert.Single(result.LineIssues).Code);
     }
 
-    public static TheoryData<string> IncompleteSnapshotFields => ["EquipmentTypeId", "BrandId", "Model", "SpecSchemaVersion", "SpecValuesJson", "PickupLocation", "Currency"];
+    public static TheoryData<string> IncompleteSnapshotFields => ["EquipmentTypeId", "EquipmentTypeName", "BrandId", "BrandName", "Model","SpecSchemaVersion", "SpecValuesJson", "PickupLocation", "Currency"];
 
     [Theory]
     [MemberData(nameof(IncompleteSnapshotFields))]
@@ -414,7 +428,9 @@ public sealed class CheckoutPreparationServiceTests
         _inventory.Listings[_listingId] = missingField switch
         {
             "EquipmentTypeId" => listing with { EquipmentTypeId = Guid.Empty },
+            "EquipmentTypeName" => listing with { EquipmentTypeName = " " },
             "BrandId" => listing with { BrandId = Guid.Empty },
+            "BrandName" => listing with { BrandName = null! },
             "Model" => listing with { Model = null! },
             "SpecSchemaVersion" => listing with { SpecSchemaVersion = 0 },
             "SpecValuesJson" => listing with { SpecValuesJson = "" },
@@ -438,17 +454,6 @@ public sealed class CheckoutPreparationServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(0m, result.Plan.TotalDepositAmount);
-    }
-
-    [Fact]
-    public async Task Prepare_RejectsListingWhoseBrandIsNoLongerPublicInCatalog()
-    {
-        _catalog.BrandNames.Clear();
-
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
-
-        Assert.Equal(CheckoutErrors.ItemsUnavailable, result.Error);
-        Assert.Equal(CheckoutLineIssueCode.ListingUnavailable, Assert.Single(result.LineIssues).Code);
     }
 
     [Fact]
@@ -486,16 +491,6 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Fact]
-    public async Task Prepare_ReturnsDependencyUnavailable_WhenCatalogFails()
-    {
-        _catalog.Fail = true;
-
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
-
-        Assert.Equal(CheckoutErrors.DependencyUnavailable, result.Error);
-    }
-
-    [Fact]
     public async Task Prepare_CallsInventoryOnceForListingsAndOnceForAvailability_WholeCart()
     {
         Guid secondItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 21));
@@ -510,7 +505,6 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal([_listingId], _inventory.RequestedListingIds);
         Assert.Equal(1, _inventory.AvailabilityCheckCount);
         Assert.Equal(2, _inventory.AvailabilityPeriods.Count);
-        Assert.Equal(2, _catalog.CallCount);
     }
 
     [Fact]

@@ -29,7 +29,6 @@ public sealed class CheckoutServicePostgreSqlTests
     private readonly Guid _equipmentTypeId = Guid.NewGuid();
     private readonly Guid _brandId = Guid.NewGuid();
     private readonly FakeInventoryListingClient _listings = new();
-    private readonly FakeCatalogReferenceClient _catalog = new();
     private readonly FakeInventoryRentalClient _inventory = new();
     private readonly FakePaymentRentalClient _payment = new();
 
@@ -124,8 +123,6 @@ public sealed class CheckoutServicePostgreSqlTests
             "Quận 1, TP.HCM",
             "listing-v1");
         _listings.AvailableQuantities[_listingId] = 10;
-        _catalog.EquipmentTypeNames[_equipmentTypeId] = "Máy ảnh";
-        _catalog.BrandNames[_brandId] = "Sony";
 
         return cartItemId;
     }
@@ -146,7 +143,6 @@ public sealed class CheckoutServicePostgreSqlTests
                 carts,
                 orders,
                 _listings,
-                _catalog,
                 Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
                 {
                     CurrentVersion = "v1.0",

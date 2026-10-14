@@ -3,8 +3,9 @@ using Dprental.RentalService.Common.Enums;
 namespace Dprental.RentalService.Application.DTOs.Inventory;
 
 // 1. GetListingRentalSnapshot
-// Sáu trường cuối (loại, hãng, model, thông số, ảnh) được thêm theo thỏa thuận với Inventory ngày 14/10/2026
-// để checkout chụp đủ snapshot của RentalItem. Tên loại thiết bị và tên hãng vẫn tra ở CatalogService.
+// Các trường từ EquipmentTypeId trở đi (loại, hãng, model, thông số, ảnh) được thêm theo thỏa thuận với Inventory
+// ngày 14/10/2026 để checkout chụp đủ snapshot của RentalItem. Inventory trả luôn tên loại thiết bị và tên hãng,
+// Rental không gọi CatalogService.
 public sealed record ListingRentalSnapshotDto(
     Guid ListingId,
     Guid SupplierId,
@@ -18,7 +19,9 @@ public sealed record ListingRentalSnapshotDto(
     string SnapshotVersion,
     DateTimeOffset CapturedAt,
     Guid EquipmentTypeId,
+    string EquipmentTypeName,
     Guid BrandId,
+    string BrandName,
     string Model,
     int SpecSchemaVersion,
     string SpecValuesJson,

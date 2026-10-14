@@ -32,15 +32,7 @@ internal sealed class CheckoutTestHarness
     private readonly Guid _equipmentTypeId = Guid.NewGuid();
     private readonly Guid _brandId = Guid.NewGuid();
 
-    public CheckoutTestHarness()
-    {
-        Catalog.EquipmentTypeNames[_equipmentTypeId] = "Máy ảnh";
-        Catalog.BrandNames[_brandId] = "Sony";
-    }
-
     public FakeInventoryListingClient Listings { get; } = new();
-
-    public FakeCatalogReferenceClient Catalog { get; } = new();
 
     public FakeInventoryRentalClient Inventory { get; } = new();
 
@@ -125,7 +117,6 @@ internal sealed class CheckoutTestHarness
                 carts,
                 orders,
                 Listings,
-                Catalog,
                 Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
                 {
                     CurrentVersion = "v1.0",

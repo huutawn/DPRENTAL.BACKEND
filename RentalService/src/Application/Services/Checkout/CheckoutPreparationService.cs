@@ -21,7 +21,6 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     private readonly IRentalCartRepository _carts;
     private readonly IRentalOrderRepository _orders;
     private readonly IInventoryRentalClient _inventory;
-    private readonly ICatalogReferenceClient _catalog;
     private readonly RentalTermsOptions _terms;
     private readonly TimeProvider _timeProvider;
 
@@ -32,7 +31,6 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         IRentalCartRepository carts,
         IRentalOrderRepository orders,
         IInventoryRentalClient inventory,
-        ICatalogReferenceClient catalog,
         IOptions<RentalTermsOptions> termsOptions,
         TimeProvider timeProvider)
     {
@@ -41,7 +39,6 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         _carts = carts ?? throw new ArgumentNullException(nameof(carts));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
-        _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _terms = termsOptions.Value;
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
@@ -151,7 +148,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     }
 
     /// <summary>
-    /// Đọc lại Listing và lịch trống của mọi dòng, mỗi việc một lần gọi Inventory theo danh sách, rồi tra tên loại/hãng.
+    /// Đọc lại Listing (kèm tên loại thiết bị và tên hãng) và lịch trống của mọi dòng, mỗi việc một lần gọi Inventory theo danh sách.
     /// Lỗi của mọi dòng được gom lại để trả một lần, theo thứ tự dòng trong giỏ.
     /// </summary>
     private async Task<LineBuildOutcome> BuildLinesAsync(
@@ -211,10 +208,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             }
         }
 
-        // 3. Tên loại thiết bị và hãng: mỗi mã chỉ tra một lần.
         List<CheckoutPlanLine> lines = [];
-        Dictionary<Guid, string?> equipmentTypeNames = [];
-        Dictionary<Guid, string?> brandNames = [];
         foreach (var (item, listing, orderStartDate, orderEndDate) in candidates)
         {
             if (!availability.TryGetValue((item.EquipmentListingId, orderStartDate, orderEndDate), out ListingAvailabilityBatchResult? lineAvailability))
@@ -230,38 +224,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
                 continue;
             }
 
-            if (!equipmentTypeNames.TryGetValue(listing.EquipmentTypeId, out string? equipmentTypeName))
-            {
-                Result<string?> typeResult = await _catalog.GetEquipmentTypeNameAsync(listing.EquipmentTypeId, cancellationToken);
-                if (typeResult.IsFailure)
-                {
-                    return LineBuildOutcome.Unavailable;
-                }
-
-                equipmentTypeName = typeResult.Value;
-                equipmentTypeNames[listing.EquipmentTypeId] = equipmentTypeName;
-            }
-
-            if (!brandNames.TryGetValue(listing.BrandId, out string? brandName))
-            {
-                Result<string?> brandResult = await _catalog.GetBrandNameAsync(listing.BrandId, cancellationToken);
-                if (brandResult.IsFailure)
-                {
-                    return LineBuildOutcome.Unavailable;
-                }
-
-                brandName = brandResult.Value;
-                brandNames[listing.BrandId] = brandName;
-            }
-
-            if (string.IsNullOrWhiteSpace(equipmentTypeName) || string.IsNullOrWhiteSpace(brandName))
-            {
-                issues.Add(new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.ListingUnavailable,
-                    "Thiết bị không còn cho thuê."));
-                continue;
-            }
-
-            lines.Add(BuildLine(item, orderStartDate, orderEndDate, listing, equipmentTypeName.Trim(), brandName.Trim()));
+            lines.Add(BuildLine(item, orderStartDate, orderEndDate, listing));
         }
 
         Dictionary<Guid, int> cartOrder = items.Select((item, index) => (item.Id, index)).ToDictionary(x => x.Id, x => x.index);
@@ -301,9 +264,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         RentalCartItem item,
         DateOnly orderStartDate,
         DateOnly orderEndDate,
-        ListingRentalSnapshotDto listing,
-        string equipmentTypeName,
-        string brandName)
+        ListingRentalSnapshotDto listing)
     {
         decimal dailyRate = listing.DailyRate;
         decimal depositPerUnit = listing.DepositPerUnit;
@@ -311,9 +272,9 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 
         RentalItemListingSnapshotDto snapshot = new(
             listing.EquipmentTypeId,
-            equipmentTypeName,
+            listing.EquipmentTypeName.Trim(),
             listing.BrandId,
-            brandName,
+            listing.BrandName.Trim(),
             listing.Model.Trim(),
             listing.SpecSchemaVersion,
             listing.SpecValuesJson.Trim(),
@@ -342,6 +303,8 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         listing.EquipmentTypeId != Guid.Empty &&
         listing.BrandId != Guid.Empty &&
         listing.SpecSchemaVersion >= 1 &&
+        !string.IsNullOrWhiteSpace(listing.EquipmentTypeName) &&
+        !string.IsNullOrWhiteSpace(listing.BrandName) &&
         !string.IsNullOrWhiteSpace(listing.DisplayName) &&
         !string.IsNullOrWhiteSpace(listing.Model) &&
         !string.IsNullOrWhiteSpace(listing.SpecValuesJson) &&

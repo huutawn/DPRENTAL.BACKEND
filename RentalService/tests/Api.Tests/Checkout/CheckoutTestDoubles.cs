@@ -299,7 +299,9 @@ internal static class TestListings
         decimal depositPerUnit,
         string currency,
         string pickupLocation,
-        string snapshotVersion) => new(
+        string snapshotVersion,
+        string equipmentTypeName = "Máy ảnh",
+        string brandName = "Sony") => new(
         listingId,
         supplierId,
         displayName,
@@ -312,38 +314,11 @@ internal static class TestListings
         snapshotVersion,
         DateTimeOffset.UnixEpoch,
         equipmentTypeId,
+        equipmentTypeName,
         brandId,
+        brandName,
         model,
         specSchemaVersion,
         specValuesJson,
         thumbnailMediaId);
-}
-
-internal sealed class FakeCatalogReferenceClient : ICatalogReferenceClient
-{
-    private static readonly Error Down = Error.ServiceUnavailable("Catalog.Unavailable", "Catalog không phản hồi.");
-
-    public Dictionary<Guid, string> EquipmentTypeNames { get; } = [];
-
-    public Dictionary<Guid, string> BrandNames { get; } = [];
-
-    public bool Fail { get; set; }
-
-    public int CallCount { get; private set; }
-
-    public Task<Result<string?>> GetEquipmentTypeNameAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default)
-    {
-        CallCount++;
-        return Task.FromResult(Fail
-            ? Result.Failure<string?>(Down)
-            : Result.Success(EquipmentTypeNames.GetValueOrDefault(equipmentTypeId)));
-    }
-
-    public Task<Result<string?>> GetBrandNameAsync(Guid brandId, CancellationToken cancellationToken = default)
-    {
-        CallCount++;
-        return Task.FromResult(Fail
-            ? Result.Failure<string?>(Down)
-            : Result.Success(BrandNames.GetValueOrDefault(brandId)));
-    }
 }

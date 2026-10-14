@@ -61,7 +61,7 @@ public sealed class RentalCheckoutController(
     /// <response code="404">Không tìm thấy giỏ hàng hoặc dòng giỏ đã chọn.</response>
     /// <response code="409">Điều khoản đã đổi phiên bản, đang có đơn chưa thanh toán, thiết bị không còn cho thuê hoặc không đủ số lượng, giá thay đổi, không giữ được lịch, đơn đang được xử lý, Idempotency-Key đã dùng cho yêu cầu khác, hoặc PaymentService từ chối tạo hóa đơn.</response>
     /// <response code="410">Đơn hàng của Idempotency-Key này đã quá hạn thanh toán (Checkout.OrderExpired).</response>
-    /// <response code="503">InventoryService, CatalogService hoặc PaymentService tạm thời không khả dụng. Với Checkout.InvoiceTemporarilyUnavailable, đơn đã được tạo và đang giữ lịch.</response>
+    /// <response code="503">InventoryService hoặc PaymentService tạm thời không khả dụng. Với Checkout.InvoiceTemporarilyUnavailable, đơn đã được tạo và đang giữ lịch.</response>
     /// <returns>Đơn hàng chờ thanh toán kèm mã hóa đơn và hạn thanh toán.</returns>
     [HttpPost]
     [Consumes("application/json")]

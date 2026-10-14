@@ -14,7 +14,6 @@ using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.DTOs.Integration;
 using Microsoft.Extensions.Configuration;
-using Dprental.RentalService.Application.Kafka.Contracts;
 
 namespace Dprental.RentalService.Application.Services.Returns;
 

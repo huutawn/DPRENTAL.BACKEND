@@ -50,7 +50,6 @@ public sealed class CheckoutServiceTests
     private readonly Guid _tripodListingId = Guid.NewGuid();
 
     private readonly FakeInventoryListingClient _listings = new();
-    private readonly FakeCatalogReferenceClient _catalog = new();
     private readonly FakeInventoryRentalClient _inventory = new();
     private readonly FakePaymentRentalClient _payment = new();
     private readonly FakeOrderCodeGenerator _orderCodes = new();
@@ -75,8 +74,6 @@ public sealed class CheckoutServiceTests
         AddListing(_cameraListingId, "Sony A7 IV", 500_000m, 2_000_000m);
         AddListing(_lensListingId, "Ống kính 24-70", 200_000m, 1_000_000m);
         AddListing(_tripodListingId, "Chân máy", 100_000m, 500_000m);
-        _catalog.EquipmentTypeNames[_equipmentTypeId] = "Máy ảnh";
-        _catalog.BrandNames[_brandId] = "Sony";
     }
 
     private void AddListing(Guid listingId, string title, decimal dailyRate, decimal depositPerUnit)
@@ -127,7 +124,6 @@ public sealed class CheckoutServiceTests
                 carts,
                 orders,
                 _listings,
-                _catalog,
                 Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
                 {
                     CurrentVersion = "v1.0",

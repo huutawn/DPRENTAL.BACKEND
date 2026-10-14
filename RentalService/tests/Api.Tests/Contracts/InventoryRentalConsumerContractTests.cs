@@ -111,7 +111,9 @@ public sealed class InventoryRentalConsumerContractTests
             "v1.0",
             _fixedTime,
             Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+            "Máy quay phim",
             Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+            "Sony",
             "FX3",
             2,
             """{"sensor":"full-frame"}""",
@@ -132,7 +134,9 @@ public sealed class InventoryRentalConsumerContractTests
         Assert.Contains("\"dailyRate\":500000", json);
         Assert.Contains("\"snapshotVersion\":\"v1.0\"", json);
         Assert.Contains("\"equipmentTypeId\":\"cccccccc-cccc-cccc-cccc-cccccccccccc\"", json);
+        Assert.Contains("\"equipmentTypeName\":", json);
         Assert.Contains("\"brandId\":\"dddddddd-dddd-dddd-dddd-dddddddddddd\"", json);
+        Assert.Contains("\"brandName\":\"Sony\"", json);
         Assert.Contains("\"model\":\"FX3\"", json);
         Assert.Contains("\"specSchemaVersion\":2", json);
         Assert.Contains("\"specValuesJson\":", json);

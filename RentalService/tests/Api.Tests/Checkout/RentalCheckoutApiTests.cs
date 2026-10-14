@@ -7,6 +7,7 @@ using System.Text.Json;
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
+using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.Security.Jwt;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Repositories;
@@ -179,12 +180,14 @@ public sealed class RentalCheckoutApiTests
     }
 
     [Fact]
-    public async Task Submit_Returns503_WhileCatalogAdapterIsNotAvailable()
+    public async Task Submit_Returns503_WhenInventoryOmitsEquipmentTypeOrBrandName()
     {
-        using CheckoutApiFactory factory = new() { UseRegisteredCatalogPort = true };
+        using CheckoutApiFactory factory = new();
         using HttpClient client = factory.CreateRenterClient("key-1");
+        CheckoutRequest request = factory.Request();
+        factory.ChangeListing(listing => listing with { BrandName = "" });
 
-        using HttpResponseMessage response = await client.PostAsJsonAsync(Route, factory.Request());
+        using HttpResponseMessage response = await client.PostAsJsonAsync(Route, request);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         JsonElement problem = await ReadAsync(response);
@@ -201,7 +204,6 @@ public sealed class RentalCheckoutApiTests
         private readonly string _dbName = Guid.NewGuid().ToString("N");
         private readonly Guid _listingId = Guid.NewGuid();
         private readonly FakeInventoryListingClient _listings = new();
-        private readonly FakeCatalogReferenceClient _catalog = new();
         private bool _seeded;
 
         public Guid RenterId { get; } = Guid.NewGuid();
@@ -212,8 +214,9 @@ public sealed class RentalCheckoutApiTests
 
         public FakePaymentRentalClient Payment { get; } = new();
 
-        /// <summary>Giữ nguyên cổng tra tên ở Catalog mà Program đăng ký (bản tạm luôn báo 503), không thay bằng bản giả.</summary>
-        public bool UseRegisteredCatalogPort { get; init; }
+        /// <summary>Sửa thông tin máy mà Inventory giả trả về (gọi sau <see cref="Request"/>, khi dữ liệu đã được tạo).</summary>
+        public void ChangeListing(Func<ListingRentalSnapshotDto, ListingRentalSnapshotDto> change) =>
+            _listings.Listings[_listingId] = change(_listings.Listings[_listingId]);
 
         public CheckoutRequest Request(decimal expectedTotal = Total)
         {
@@ -267,12 +270,6 @@ public sealed class RentalCheckoutApiTests
                 services.RemoveAll<IPaymentRentalClient>();
                 services.AddSingleton<IPaymentRentalClient>(Payment);
 
-                if (!UseRegisteredCatalogPort)
-                {
-                    services.RemoveAll<ICatalogReferenceClient>();
-                    services.AddSingleton<ICatalogReferenceClient>(_catalog);
-                }
-
                 services.AddAuthentication("TestScheme")
                     .AddScheme<AuthenticationSchemeOptions, HeaderAuthHandler>("TestScheme", _ => { });
             });
@@ -317,8 +314,6 @@ public sealed class RentalCheckoutApiTests
                 "Quận 1, TP.HCM",
                 "listing-v1");
             _listings.AvailableQuantities[_listingId] = 10;
-            _catalog.EquipmentTypeNames[equipmentTypeId] = "Máy ảnh";
-            _catalog.BrandNames[brandId] = "Sony";
         }
     }
 

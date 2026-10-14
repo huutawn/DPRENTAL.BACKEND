@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
+using Dprental.RentalService.Domain.Policies;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Xunit;
@@ -37,8 +38,21 @@ public sealed class RentalCartUseCasesTests
 
         var todayVn = DateOnly.FromDateTime(nowUtc.AddHours(7).DateTime);
 
-        _validStartDate = todayVn.AddDays(1); // Ngày hợp lệ là ngày mai
-        _validEndDate = todayVn.AddDays(5);   // Ngày kết thúc hợp lệ là 3 ngày sau
+        _validStartDate = RentalBookingPolicy.EarliestStartDate(todayVn); // Sớm nhất: hôm nay + 3 ngày
+        _validEndDate = todayVn.AddDays(5);
+    }
+
+    [Fact]
+    public async Task AddCartItem_StartDateLessThanThreeDaysAhead_ReturnsStartDateInvalid()
+    {
+        _ownerProviderMock.Setup(x => x.GetOwnerIdAsync(_listingId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(_ownerId);
+
+        var result = await _sut.AddCartItemAsync(_renterId, _listingId, 1, _validStartDate.AddDays(-1), _validEndDate);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Cart.StartDateInvalid", result.Error.Code);
+        _cartRepoMock.Verify(x => x.CreateAsync(It.IsAny<RentalCart>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

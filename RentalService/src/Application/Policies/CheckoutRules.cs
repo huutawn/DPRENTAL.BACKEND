@@ -6,7 +6,8 @@ using Dprental.RentalService.Domain.Policies;
 namespace Dprental.RentalService.Application.Policies;
 
 /// <summary>
-/// Quy tắc ngày thuê lúc checkout theo SRS Rental: giao từ ngày mai, trong 6 tháng, tối đa 30 ngày.
+/// Quy tắc ngày thuê lúc checkout: đặt trước ít nhất <see cref="RentalBookingPolicy.MinimumLeadDays"/> ngày
+/// (SRS cũ ghi "từ ngày mai"), trong 6 tháng, tối đa 30 ngày.
 /// Giỏ lưu ngày trả có tính (giao 10, trả 12 là 3 ngày); đơn hàng lưu khoảng [từ, đến) không tính ngày cuối.
 /// </summary>
 public static class CheckoutRules
@@ -56,10 +57,10 @@ public static class CheckoutRules
     {
         ArgumentNullException.ThrowIfNull(item);
 
-        if (item.ExpectedStartDate <= today)
+        if (RentalBookingPolicy.IsStartDateTooSoon(item.ExpectedStartDate, today))
         {
             return new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.StartDateNotInFuture,
-                "Ngày giao dự kiến phải từ ngày mai trở đi.");
+                RentalBookingPolicy.TooSoonMessage(today));
         }
 
         if (item.ExpectedStartDate > today.AddMonths(BookingHorizonMonths))
