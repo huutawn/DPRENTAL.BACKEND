@@ -226,6 +226,9 @@ public sealed class InventoryGatewayIntegrationTests
         Assert.Equal("localhost", routeMap["inventory-service-public-equipment-listing-detail"].Host);
         Assert.Equal("43622", routeMap["inventory-service-public-equipment-listing-detail"].Port);
 
+
+        Assert.Equal("localhost", routeMap["inventory-service-public-equipment-listings-statistics"].Host);
+        Assert.Equal("43622", routeMap["inventory-service-public-equipment-listings-statistics"].Port);
         // Catalog routes point to Catalog downstream in Development
         Assert.Equal("localhost", routeMap["catalog-service-public-categories"].Host);
         Assert.Equal("47297", routeMap["catalog-service-public-categories"].Port);
@@ -263,7 +266,51 @@ public sealed class InventoryGatewayIntegrationTests
         Assert.Equal("inventory-service", routeMap["inventory-service-public-equipment-listing-detail"].Host);
         Assert.Equal("8080", routeMap["inventory-service-public-equipment-listing-detail"].Port);
 
+        Assert.Equal("inventory-service", routeMap["inventory-service-public-equipment-listings-statistics"].Host);
+        Assert.Equal("8080", routeMap["inventory-service-public-equipment-listings-statistics"].Port);
+
         Assert.Equal("catalog-service", routeMap["catalog-service-public-categories"].Host);
         Assert.Equal("catalog-service", routeMap["catalog-service"].Host);
+    }
+
+    [Fact]
+    public async Task PublicInventoryStatisticsRouteProxiesAnonymously()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackTestService upstream = new(CreateJwks(signingKey, "key-1"))
+        {
+            ResponseBody = "{\"byEquipmentType\":{},\"byBrand\":{}}",
+            ResponseContentType = "application/json"
+        };
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/inventory/public/equipment-listings/statistics");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("/api/v1/inventory/public/equipment-listings/statistics", upstream.LastRequest?.Path);
+    }
+
+    [Fact]
+    public async Task PrivateInventoryStatisticsRouteProxiesWithBearerToken()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackTestService upstream = new(CreateJwks(signingKey, "key-1"))
+        {
+            ResponseBody = "{\"byEquipmentType\":{},\"byBrand\":{}}",
+            ResponseContentType = "application/json"
+        };
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        string token = CreateToken(signingKey, "key-1", Issuer, HumanAudience, Guid.NewGuid().ToString("D"));
+        using HttpRequestMessage request = new(HttpMethod.Get, "/api/v1/inventory/equipment-listings/statistics");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("/api/v1/inventory/equipment-listings/statistics", upstream.LastRequest?.Path);
+        Assert.Equal($"Bearer {token}", upstream.LastRequest?.Authorization);
     }
 }
