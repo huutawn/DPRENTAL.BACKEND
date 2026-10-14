@@ -7,6 +7,7 @@ using Dprental.RentalService.Application.IServices.Expiry;
 using Dprental.RentalService.Application.IServices.Integration;
 using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.IServices.Payments;
+using Dprental.RentalService.Application.IServices.Returns;
 using Dprental.RentalService.Application.IServices.SupplierDecision;
 using Dprental.RentalService.Application.IServices.SupplierStatistics;
 using Dprental.RentalService.Application.Observability;
@@ -20,6 +21,7 @@ using Dprental.RentalService.Application.Services.Expiry;
 using Dprental.RentalService.Application.Services.Integration;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Services.Payments;
+using Dprental.RentalService.Application.Services.Returns;
 using Dprental.RentalService.Application.Services.SupplierDecision;
 using Dprental.RentalService.Application.Services.SupplierStatistics;
 using Microsoft.Extensions.DependencyInjection;
@@ -42,6 +44,8 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IRentalAvailabilityReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
 
         // External Clients
+        services.AddHttpClient<IRentalMediaClient, HttpRentalMediaClient>()
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddHttpClient<IServiceTokenProvider, AuthServiceTokenProvider>()
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddHttpClient<IPaymentRentalClient, HttpPaymentRentalClient>()
@@ -57,6 +61,9 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<ICheckoutOrderWriter, CheckoutOrderWriter>();
         services.AddScoped<ICheckoutInvoiceIssuer, CheckoutInvoiceIssuer>();
         services.AddScoped<ICheckoutService, CheckoutService>();
+
+        // Returns
+        services.AddScoped<IReturnService, ReturnService>();
 
         // Calendar
         services.AddScoped<IRentalCalendarService, RentalCalendarService>();
