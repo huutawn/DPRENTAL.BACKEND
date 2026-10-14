@@ -7,6 +7,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
+using Microsoft.Extensions.Options;
+using Dprental.RentalService.Application.Kafka.Configuration;
 
 namespace Dprental.RentalService.Api.Tests.Integration;
 
@@ -104,16 +106,15 @@ public sealed class KafkaClientProtocolAndSerializationTests
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new[]
-            {
-                new KeyValuePair<string, string?>("Kafka:BootstrapServers", "127.0.0.1:9092"),
-                new KeyValuePair<string, string?>("Kafka:PaymentEventsTopic", "payment.events.v1"),
-                new KeyValuePair<string, string?>("Kafka:ConsumerGroupId", "rental-consumer-test")
-            })
-            .Build();
+        var options = Options.Create(new KafkaOptions
+        {
+            Enabled = false,
+            BootstrapServers = "127.0.0.1:9092",
+            PaymentEventsTopic = "payment.events.v1",
+            ConsumerGroupId = "rental-consumer-test"
+        });
 
-        var worker = new KafkaPaymentEventsConsumerWorker(scopeFactory, config, NullLogger<KafkaPaymentEventsConsumerWorker>.Instance);
+        var worker = new KafkaPaymentEventsConsumerWorker(scopeFactory, options, NullLogger<KafkaPaymentEventsConsumerWorker>.Instance);
         Assert.NotNull(worker);
         worker.Dispose();
     }

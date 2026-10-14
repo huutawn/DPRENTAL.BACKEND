@@ -12,11 +12,21 @@ using Dprental.RentalService.Application.IServices.Payments;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Services.Payments;
 using Dprental.RentalService.Common;
+using CommonError = Dprental.RentalService.Common.Error;
+using Dprental.RentalService.Domain.IRepositories;
+using Microsoft.Extensions.DependencyInjection;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Moq;
+using Confluent.Kafka;
+using Dprental.RentalService.Application.Kafka.Workers;
+using Dprental.RentalService.Application.Kafka.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Dprental.RentalService.Application.Kafka.Configuration;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -109,18 +119,23 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
         IPaymentWorkflowService paymentWorkflow,
         IRefundCompletedConsumer refundConsumer)
     {
+        var outboxRepo = new OutboxRepository(db);
+        var options = Options.Create(new KafkaOptions
+        {
+            PaymentEventsTopic = "payment.events.v1",
+            PaymentDlqTopic = "payment.events.v1.dlq"
+        });
         return new PaymentEventsDispatcher(
             new InboxRepository(db),
             new RentalOrderRepository(db),
             new FakeOrderLockManager(),
             paymentWorkflow,
             refundConsumer,
-            new OutboxRepository(db),
+            new KafkaOutboxWriter(outboxRepo),
             db,
-            new ConfigurationBuilder().Build(),
+            options,
             NullLogger<PaymentEventsDispatcher>.Instance);
     }
-
     private sealed class TrackingPaymentWorkflow : IPaymentWorkflowService
     {
         public bool ApplyCalled { get; set; }
@@ -136,6 +151,7 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
             return Task.FromResult(Result.Success());
         }
     }
+
 
     private sealed class TrackingRefundConsumer : IRefundCompletedConsumer
     {
@@ -256,8 +272,8 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
         """;
 
         var secondResult = await dispatcher.ReceiveMessageAsync(conflictingJson, "payment.events.v1", 0, 2, CancellationToken.None);
-        Assert.True(secondResult.IsFailure);
-        Assert.Equal("MESSAGE_CONFLICT", secondResult.Error.Code);
+        Assert.True(secondResult.IsSuccess);
+        Assert.Equal(KafkaIntakeDisposition.DlqStored, secondResult.Value);
 
         // Must be routed to payment.events.v1.dlq
         var dlqMessage = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "DeadLetter");
@@ -277,16 +293,16 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
         string malformed = "this is malformed non-json record";
 
         var res1 = await dispatcher.ReceiveMessageAsync(malformed, "payment.events.v1", 1, 42, CancellationToken.None);
-        Assert.True(res1.IsFailure);
-        Assert.Equal("MALFORMED_JSON", res1.Error.Code);
+        Assert.True(res1.IsSuccess);
+        Assert.Equal(KafkaIntakeDisposition.DlqStored, res1.Value);
 
         int dlqCountAfterFirst = await db.RentalOutboxMessages.CountAsync(m => m.MessageType == "DeadLetter");
         Assert.Equal(1, dlqCountAfterFirst);
 
         // Redelivery of SAME record with SAME topic, partition, offset -> should not create duplicate DLQ outbox message
         var res2 = await dispatcher.ReceiveMessageAsync(malformed, "payment.events.v1", 1, 42, CancellationToken.None);
-        Assert.True(res2.IsFailure);
-
+        Assert.True(res2.IsSuccess);
+        Assert.Equal(KafkaIntakeDisposition.DlqStored, res2.Value);
         int dlqCountAfterSecond = await db.RentalOutboxMessages.CountAsync(m => m.MessageType == "DeadLetter");
         Assert.Equal(1, dlqCountAfterSecond);
     }
@@ -399,6 +415,212 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
         Assert.True(result.IsFailure);
         Assert.Equal(ErrorType.Conflict, result.Error.Type);
         Assert.Equal("UNCERTAIN_EXHAUSTED", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Consumer_IntakeFailureAtOffsetN_DoesNotCommit_AndSeeksBackToN()
+    {
+        string topic = "payment.events.v1";
+        var tp = new TopicPartition(topic, 0);
+        var tpo = new TopicPartitionOffset(tp, new Offset(10));
+
+        var mockConsumer = new Mock<IConsumer<string, string>>();
+        mockConsumer.Setup(c => c.Assignment).Returns(new List<TopicPartition> { tp });
+
+        var consumeResult = new ConsumeResult<string, string>
+        {
+            Topic = topic,
+            Partition = 0,
+            Offset = 10,
+            Message = new Message<string, string>
+            {
+                Key = "order-1",
+                Value = "{}"
+            }
+        };
+
+        mockConsumer.Setup(c => c.Consume(It.IsAny<TimeSpan>())).Returns(consumeResult);
+        mockConsumer.Setup(c => c.Seek(It.IsAny<TopicPartitionOffset>()));
+        mockConsumer.Setup(c => c.Commit(It.IsAny<ConsumeResult<string, string>>()));
+
+        // Dispatcher that returns a failure (e.g. database error)
+        var mockDispatcher = new Mock<IPaymentEventsDispatcher>();
+        mockDispatcher.Setup(d => d.ReceiveMessageAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Failure<KafkaIntakeDisposition>(CommonError.Failure("DB_ERROR", "Simulated DB failure")));
+
+        var services = new ServiceCollection();
+        services.AddScoped<IPaymentEventsDispatcher>(_ => mockDispatcher.Object);
+        var sp = services.BuildServiceProvider();
+        var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+
+        var options = Options.Create(new KafkaOptions
+        {
+            Enabled = true,
+            BootstrapServers = "127.0.0.1:9092",
+            PaymentEventsTopic = topic
+        });
+
+        using var worker = new KafkaPaymentEventsConsumerWorker(
+            scopeFactory,
+            mockConsumer.Object,
+            options,
+            NullLogger<KafkaPaymentEventsConsumerWorker>.Instance);
+
+        var result = await worker.ConsumeNextMessageAsync(CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        // Verified: Seek was called with Offset 10!
+        mockConsumer.Verify(c => c.Seek(It.Is<TopicPartitionOffset>(x => x.Offset.Value == 10)), Times.Once);
+        // Verified: Commit was NEVER called! Offset N is NOT committed, preventing N+1 from advancing past N!
+        mockConsumer.Verify(c => c.Commit(It.IsAny<ConsumeResult<string, string>>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Consumer_MalformedJsonTypes_AllRouteToDlq_DoNotBreakLoop()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        var dispatcher = CreateDispatcher(db, new TrackingPaymentWorkflow(), new TrackingRefundConsumer());
+
+        string[] invalidPayloads = new[]
+        {
+            "[1, 2, 3]", // Root is array instead of object
+            """{"messageType": 123, "messageId": "00000000-0000-0000-0000-000000000001"}""", // messageType is number
+            """{"messageType": "InvoicePaid", "messageId": true}""", // messageId is boolean
+            """{"messageType": "InvoicePaid", "messageId": "00000000-0000-0000-0000-000000000001", "version": "v1"}""", // version is string
+            """{"messageType": "InvoicePaid", "messageId": "00000000-0000-0000-0000-000000000001", "version": 1, "producer": 99}""", // producer is number
+            """{"messageType": "InvoicePaid", "messageId": "00000000-0000-0000-0000-000000000001", "version": 1, "producer": "payment-service", "aggregateId": "not-a-guid"}""", // aggregateId invalid
+            """{"messageType": "InvoicePaid", "messageId": "00000000-0000-0000-0000-000000000001", "version": 1, "producer": "payment-service", "aggregateId": "00000000-0000-0000-0000-000000000002", "payload": "just a string"}""" // payload is string
+        };
+
+        for (int i = 0; i < invalidPayloads.Length; i++)
+        {
+            var res = await dispatcher.ReceiveMessageAsync(invalidPayloads[i], "payment.events.v1", 0, 500 + i);
+            Assert.True(res.IsSuccess);
+            Assert.Equal(KafkaIntakeDisposition.DlqStored, res.Value);
+        }
+
+        int dlqCount = await db.RentalOutboxMessages.CountAsync(m => m.MessageType == "DeadLetter");
+        Assert.Equal(invalidPayloads.Length, dlqCount);
+    }
+
+    [Fact]
+    public async Task Consumer_Cancellation_DoesNotRouteToDlqOrCommit()
+    {
+        string topic = "payment.events.v1";
+        var tp = new TopicPartition(topic, 0);
+
+        var mockConsumer = new Mock<IConsumer<string, string>>();
+        mockConsumer.Setup(c => c.Assignment).Returns(new List<TopicPartition> { tp });
+        mockConsumer.Setup(c => c.Consume(It.IsAny<TimeSpan>())).Returns(new ConsumeResult<string, string>
+        {
+            Topic = topic,
+            Partition = 0,
+            Offset = 20,
+            Message = new Message<string, string> { Key = "k", Value = "{}" }
+        });
+
+        var mockDispatcher = new Mock<IPaymentEventsDispatcher>();
+        var services = new ServiceCollection();
+        services.AddScoped<IPaymentEventsDispatcher>(_ => mockDispatcher.Object);
+        var sp = services.BuildServiceProvider();
+        var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+
+        var options = Options.Create(new KafkaOptions { Enabled = true, BootstrapServers = "127.0.0.1:9092", PaymentEventsTopic = topic });
+        using var worker = new KafkaPaymentEventsConsumerWorker(scopeFactory, mockConsumer.Object, options, NullLogger<KafkaPaymentEventsConsumerWorker>.Instance);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel(); // Already cancelled
+
+        var result = await worker.ConsumeNextMessageAsync(cts.Token);
+
+        Assert.True(result.IsFailure);
+        mockConsumer.Verify(c => c.Commit(It.IsAny<ConsumeResult<string, string>>()), Times.Never);
+        mockDispatcher.Verify(d => d.ReceiveMessageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task KafkaWorkers_WhenDisabled_DoNotProcessBacklogOrClaimOrTouchOutbox()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+
+        // Seed pending outbox message
+        Guid outboxId = Guid.NewGuid();
+        var outboxMsg = new RentalOutboxMessage(
+            outboxId,
+            "rental.events.v1",
+            "key-1",
+            "TestEvent",
+            "{}",
+            DateTimeOffset.UtcNow);
+        db.RentalOutboxMessages.Add(outboxMsg);
+
+        // Seed pending inbox message
+        Guid inboxId = Guid.NewGuid();
+        var inboxMsg = new RentalInboxMessage(
+            inboxId,
+            Guid.NewGuid(),
+            "InvoicePaid",
+            "payment-service",
+            Guid.NewGuid().ToString("D"),
+            null,
+            null,
+            "{}",
+            DateTimeOffset.UtcNow);
+        db.RentalInboxMessages.Add(inboxMsg);
+
+        await db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(TimeProvider.System);
+        services.AddDbContext<RentalServiceDbContext>(options => options.UseInMemoryDatabase(dbName));
+        services.AddScoped<IInboxRepository, InboxRepository>();
+        services.AddScoped<IOutboxRepository, OutboxRepository>();
+        services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<RentalServiceDbContext>());
+        services.AddScoped<IRentalOrderRepository, RentalOrderRepository>();
+        services.AddScoped<IOrderLockManager, FakeOrderLockManager>();
+        services.AddSingleton<IPaymentWorkflowService>(new TrackingPaymentWorkflow());
+        services.AddSingleton<IRefundCompletedConsumer>(new TrackingRefundConsumer());
+
+        // AddKafka with Enabled = false (disabled)
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new[]
+            {
+                new KeyValuePair<string, string?>("Kafka:Enabled", "false")
+            })
+            .Build();
+        services.AddKafka(config);
+
+        var sp = services.BuildServiceProvider();
+        var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+        var disabledOptions = Options.Create(new KafkaOptions { Enabled = false });
+
+        var publisherWorker = new OutboxPublisherWorker(scopeFactory, disabledOptions, NullLogger<OutboxPublisherWorker>.Instance);
+        var inboxWorker = new InboxProcessingWorker(scopeFactory, disabledOptions, NullLogger<InboxProcessingWorker>.Instance);
+        var consumerWorker = new KafkaPaymentEventsConsumerWorker(scopeFactory, disabledOptions, NullLogger<KafkaPaymentEventsConsumerWorker>.Instance);
+
+        int published = await publisherWorker.ProcessBatchAsync(CancellationToken.None);
+        int processed = await inboxWorker.ProcessBatchAsync(CancellationToken.None);
+        var consumeResult = await consumerWorker.ConsumeNextMessageAsync(CancellationToken.None);
+
+        Assert.Equal(0, published);
+        Assert.Equal(0, processed);
+        Assert.True(consumeResult.IsSuccess);
+
+        // Verify Outbox message was NOT claimed, status was NOT changed, retry count NOT incremented
+        await using var verifyDb = CreateDbContext(dbName);
+        var verifiedOutbox = await verifyDb.RentalOutboxMessages.FirstAsync(m => m.Id == outboxId);
+        Assert.Equal("Pending", verifiedOutbox.Status);
+        Assert.Null(verifiedOutbox.LockedBy);
+        Assert.Equal(0, verifiedOutbox.RetryCount);
+
+        // Verify Inbox message was NOT processed, status was NOT changed, retry count NOT incremented
+        var verifiedInbox = await verifyDb.RentalInboxMessages.FirstAsync(m => m.Id == inboxId);
+        Assert.Equal(RentalInboxMessage.StatusReceived, verifiedInbox.Status);
+        Assert.Equal(0, verifiedInbox.RetryCount);
     }
 
     private sealed class StubInventoryClient : IInventoryRentalClient

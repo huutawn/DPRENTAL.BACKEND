@@ -7,6 +7,7 @@ using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Dprental.RentalService.Application.Kafka.Producers;
 
@@ -18,21 +19,31 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly IOutboxRepository _outboxRepository;
+    private readonly IKafkaOutboxWriter _outboxWriter;
     private readonly KafkaOptions _kafkaOptions;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<InventoryCommandProducer> _logger;
 
+    [ActivatorUtilitiesConstructor]
     public InventoryCommandProducer(
-        IOutboxRepository outboxRepository,
+        IKafkaOutboxWriter outboxWriter,
         IOptions<KafkaOptions> kafkaOptions,
         TimeProvider? timeProvider = null,
         ILogger<InventoryCommandProducer>? logger = null)
     {
-        _outboxRepository = outboxRepository ?? throw new ArgumentNullException(nameof(outboxRepository));
+        _outboxWriter = outboxWriter ?? throw new ArgumentNullException(nameof(outboxWriter));
         _kafkaOptions = kafkaOptions?.Value ?? new KafkaOptions();
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<InventoryCommandProducer>.Instance;
+    }
+
+    internal InventoryCommandProducer(
+        IOutboxRepository outboxRepository,
+        IOptions<KafkaOptions> kafkaOptions,
+        TimeProvider? timeProvider = null,
+        ILogger<InventoryCommandProducer>? logger = null)
+        : this(new KafkaOutboxWriter(outboxRepository), kafkaOptions, timeProvider, logger)
+    {
     }
 
     public async Task<Result<ProducerEnqueueResult>> EnqueueCreateHoldAsync(
@@ -101,32 +112,7 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
             causationId,
             command);
 
-        string payloadJson = JsonSerializer.Serialize(envelope, JsonOptions);
-
-        var outboxMessage = new RentalOutboxMessage(
-            messageId,
-            topic,
-            partitionKey,
-            KafkaContractSpec.CommandTypes.CreateHold,
-            payloadJson,
-            utcNow);
-
-        var enqueueResult = await _outboxRepository.EnqueueAtomicAsync(outboxMessage, cancellationToken);
-        if (enqueueResult.IsFailure)
-        {
-            _logger.LogWarning("Failed to enqueue CreateHold command {MessageId}: {Error}", messageId, enqueueResult.Error.Message);
-            return enqueueResult.Error;
-        }
-
-        _logger.LogInformation("Enqueued CreateHold command {MessageId} for Order {OrderId} (Replay={IsReplay})",
-            messageId, command.RentalOrderId, enqueueResult.Value.IsReplay);
-
-        return new ProducerEnqueueResult(
-            messageId,
-            enqueueResult.Value.IsReplay,
-            KafkaContractSpec.CommandTypes.CreateHold,
-            topic,
-            partitionKey);
+        return await _outboxWriter.EnqueueAsync(topic, partitionKey, envelope, cancellationToken);
     }
 
     public async Task<Result<ProducerEnqueueResult>> EnqueueReleaseAllocationAsync(
@@ -180,31 +166,6 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
             causationId,
             command);
 
-        string payloadJson = JsonSerializer.Serialize(envelope, JsonOptions);
-
-        var outboxMessage = new RentalOutboxMessage(
-            messageId,
-            topic,
-            partitionKey,
-            KafkaContractSpec.CommandTypes.ReleaseAllocation,
-            payloadJson,
-            utcNow);
-
-        var enqueueResult = await _outboxRepository.EnqueueAtomicAsync(outboxMessage, cancellationToken);
-        if (enqueueResult.IsFailure)
-        {
-            _logger.LogWarning("Failed to enqueue ReleaseAllocation command {MessageId}: {Error}", messageId, enqueueResult.Error.Message);
-            return enqueueResult.Error;
-        }
-
-        _logger.LogInformation("Enqueued ReleaseAllocation command {MessageId} for Order {OrderId} (Replay={IsReplay})",
-            messageId, command.RentalOrderId, enqueueResult.Value.IsReplay);
-
-        return new ProducerEnqueueResult(
-            messageId,
-            enqueueResult.Value.IsReplay,
-            KafkaContractSpec.CommandTypes.ReleaseAllocation,
-            topic,
-            partitionKey);
+        return await _outboxWriter.EnqueueAsync(topic, partitionKey, envelope, cancellationToken);
     }
 }

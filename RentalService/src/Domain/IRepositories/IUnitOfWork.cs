@@ -1,5 +1,11 @@
 namespace Dprental.RentalService.Domain.IRepositories;
 
+public interface IUnitOfWorkTransaction : IAsyncDisposable
+{
+    Task CommitAsync(CancellationToken cancellationToken = default);
+    Task RollbackAsync(CancellationToken cancellationToken = default);
+}
+
 /// <summary>
 /// Contract Unit of Work để quản lý giao dịch và lưu thay đổi aggregate.
 /// </summary>
@@ -12,4 +18,9 @@ public interface IUnitOfWork
     /// trong cùng request không ghi lại dữ liệu hỏng.
     /// </summary>
     void DiscardChanges();
+
+    /// <summary>
+    /// Bắt đầu một transaction mới trên Unit of Work.
+    /// </summary>
+    Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);
 }

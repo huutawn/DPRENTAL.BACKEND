@@ -8,4 +8,4 @@ public record RecordReturnResponse(
     int RemainingUnits,
     RentalItemStatus Status,
     DateTimeOffset? DeductionDeadline
-);  
+);

@@ -20,6 +20,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
+using Dprental.RentalService.Api.Tests.Domain;
 
 namespace Dprental.RentalService.Api.Tests.Integration;
 
@@ -100,6 +101,7 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
 
         Guid messageId = Guid.NewGuid();
         Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
 
         string json1 = $$"""
         {
@@ -112,7 +114,7 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
             "correlationId": "corr-1",
             "payload": {
                 "rentalOrderId": "{{orderId}}",
-                "renterId": "{{Guid.NewGuid()}}",
+                "renterId": "{{renterId}}",
                 "invoiceRef": "INV-001",
                 "paymentRef": "PAY-001",
                 "paidAmount": 1000000,
@@ -131,7 +133,7 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
                 "paidAmount": 1000000,
                 "paymentRef": "PAY-001",
                 "invoiceRef": "INV-001",
-                "renterId": "{{Guid.NewGuid()}}",
+                "renterId": "{{renterId}}",
                 "rentalOrderId": "{{orderId}}"
             },
             "correlationId": "corr-1",
@@ -146,10 +148,12 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
 
         var res1 = await dispatcher.ReceiveMessageAsync(json1);
         Assert.True(res1.IsSuccess);
+        Assert.Equal(KafkaIntakeDisposition.InboxStored, res1.Value);
 
-        // Deduplication using canonical JSON: matches existing inbox payload
-        var res2 = await dispatcher.ReceiveMessageAsync(json1);
+        // Deduplication using canonical JSON: matches existing inbox payload even when reversed
+        var res2 = await dispatcher.ReceiveMessageAsync(json2);
         Assert.True(res2.IsSuccess);
+        Assert.Equal(KafkaIntakeDisposition.Duplicate, res2.Value);
 
         int count = await db.RentalInboxMessages.CountAsync(m => m.MessageId == messageId);
         Assert.Equal(1, count);
@@ -218,9 +222,8 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
         Assert.True(res1.IsSuccess);
 
         var res2 = await dispatcher.ReceiveMessageAsync(jsonConflicting);
-        Assert.True(res2.IsFailure);
-        Assert.Equal("MESSAGE_CONFLICT", res2.Error.Code);
-
+        Assert.True(res2.IsSuccess);
+        Assert.Equal(KafkaIntakeDisposition.DlqStored, res2.Value);
         // Verify routed to DLQ Outbox
         var dlqMsg = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "DeadLetter");
         Assert.NotNull(dlqMsg);
@@ -228,13 +231,25 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
     }
 
     [Fact]
-    public async Task ProcessInboxMessage_UnderOrderLock_ReReadsInbox_PreventsDuplicateProcessing()
+    public async Task ProcessInboxMessage_UnderOrderLock_ConcurrentContention_WorkflowRunsExactlyOnce()
     {
         string dbName = Guid.NewGuid().ToString("N");
-        await using var db = CreateDbContext(dbName);
+        await using var initDb = CreateDbContext(dbName);
 
         Guid orderId = Guid.NewGuid();
         Guid msgId = Guid.NewGuid();
+        Guid itemId = Guid.NewGuid();
+        DateTimeOffset fixedNow = new(2026, 10, 14, 8, 0, 0, TimeSpan.Zero);
+
+        var order = RentalOrder.Create(
+            orderId, "ORD-CONC-01", Guid.NewGuid(), "VND", "Standard", "Renter", "0123456789", "Address", null,
+            "ORIGINAL_PAYMENT_SOURCE", "v1.0", "DOC-001", "HASH-001", "OP-CONC", fixedNow,
+            new[] { new InitialRentalItemDto(itemId, Guid.NewGuid(), Guid.NewGuid(), 1, DateOnly.FromDateTime(DateTime.UtcNow), DateOnly.FromDateTime(DateTime.UtcNow.AddDays(3)), "Listing", null, "Pickup", 500_000m, 1_000_000m, "GRP-CONC", new[] { new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()) }, TestListingSnapshots.Default) }).Value;
+        initDb.RentalOrders.Add(order);
+
+        var payload = new InvoicePaidPayload(orderId, order.RenterId, "INV-CONC", "PAY-CONC", order.TotalPayableAmount, "VND", fixedNow);
+        var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
+            msgId, "InvoicePaid", 1, "payment-service", orderId.ToString("D"), fixedNow, "corr", null, payload);
 
         var inboxMsg = new RentalInboxMessage(
             Guid.NewGuid(),
@@ -244,39 +259,128 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
             orderId.ToString("D"),
             null,
             null,
-            "{}",
-            DateTimeOffset.UtcNow);
+            JsonSerializer.Serialize(envelope),
+            fixedNow);
 
-        db.RentalInboxMessages.Add(inboxMsg);
-        await db.SaveChangesAsync();
+        initDb.RentalInboxMessages.Add(inboxMsg);
+        await initDb.SaveChangesAsync();
 
         int executionCount = 0;
         var workflow = new StubPaymentWorkflow
         {
-            Handler = _ =>
+            Handler = async _ =>
             {
-                executionCount++;
-                return Task.FromResult(Result.Success());
+                Interlocked.Increment(ref executionCount);
+                await Task.Delay(50);
+                return Result.Success();
             }
         };
+
+        var lockManager = new Dprental.RentalService.Api.Tests.TestHelpers.FakeOrderLockManager();
+
+        await using var db1 = CreateDbContext(dbName);
+        var dispatcher1 = new PaymentEventsDispatcher(
+            new InboxRepository(db1),
+            new RentalOrderRepository(db1),
+            lockManager,
+            workflow,
+            new StubRefundConsumer(),
+            new OutboxRepository(db1),
+            db1,
+            Options.Create(new KafkaOptions()));
+
+        await using var db2 = CreateDbContext(dbName);
+        var dispatcher2 = new PaymentEventsDispatcher(
+            new InboxRepository(db2),
+            new RentalOrderRepository(db2),
+            lockManager,
+            workflow,
+            new StubRefundConsumer(),
+            new OutboxRepository(db2),
+            db2,
+            Options.Create(new KafkaOptions()));
+
+        var task1 = Task.Run(() => dispatcher1.ProcessInboxMessageAsync(inboxMsg.Id));
+        var task2 = Task.Run(() => dispatcher2.ProcessInboxMessageAsync(inboxMsg.Id));
+
+        var results = await Task.WhenAll(task1, task2);
+
+        Assert.All(results, r => Assert.True(r.IsSuccess));
+        Assert.Equal(1, executionCount);
+
+        await using var verifyDb = CreateDbContext(dbName);
+        var finalMsg = await verifyDb.RentalInboxMessages.FirstAsync(m => m.Id == inboxMsg.Id);
+        Assert.Equal("Processed", finalMsg.Status);
+    }
+
+    [Fact]
+    public async Task DLQ_Redelivery_DoesNotCreateAdditionalOutboxRecord()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
 
         var dispatcher = new PaymentEventsDispatcher(
             new InboxRepository(db),
             new RentalOrderRepository(db),
             new Dprental.RentalService.Api.Tests.TestHelpers.FakeOrderLockManager(),
-            workflow,
+            new StubPaymentWorkflow(),
             new StubRefundConsumer(),
             new OutboxRepository(db),
             db,
-            Options.Create(new KafkaOptions()));
+            Options.Create(new KafkaOptions { PaymentEventsTopic = "payment.events.v1", PaymentDlqTopic = "payment.events.v1.dlq" }));
 
-        // Mark as already Processed before second worker processes it
-        inboxMsg.MarkProcessed(DateTimeOffset.UtcNow);
-        await db.SaveChangesAsync();
+        string malformed = "{ this is malformed json }";
 
-        var result = await dispatcher.ProcessInboxMessageAsync(inboxMsg.Id);
-        Assert.True(result.IsSuccess);
-        Assert.Equal(0, executionCount); // Re-read caught Processed status, workflow was not called!
+        // First delivery: routes to DLQ
+        var res1 = await dispatcher.ReceiveMessageAsync(malformed, topic: "payment.events.v1", partition: 0, offset: 100);
+        Assert.True(res1.IsSuccess);
+        Assert.Equal(KafkaIntakeDisposition.DlqStored, res1.Value);
+
+        int dlqCount1 = await db.RentalOutboxMessages.CountAsync(m => m.MessageType == "DeadLetter");
+        Assert.Equal(1, dlqCount1);
+
+        // Redelivery of exact same message at same coordinates: recognized as DLQ replay, does not create duplicate
+        var res2 = await dispatcher.ReceiveMessageAsync(malformed, topic: "payment.events.v1", partition: 0, offset: 100);
+        Assert.True(res2.IsSuccess);
+        Assert.Equal(KafkaIntakeDisposition.DlqStored, res2.Value);
+
+        int dlqCount2 = await db.RentalOutboxMessages.CountAsync(m => m.MessageType == "DeadLetter");
+        Assert.Equal(1, dlqCount2);
+    }
+
+    [Fact]
+    public async Task DLQ_DifferentInvalidRecords_WithSameOriginalMessageId_AreNotMerged()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+
+        var dispatcher = new PaymentEventsDispatcher(
+            new InboxRepository(db),
+            new RentalOrderRepository(db),
+            new Dprental.RentalService.Api.Tests.TestHelpers.FakeOrderLockManager(),
+            new StubPaymentWorkflow(),
+            new StubRefundConsumer(),
+            new OutboxRepository(db),
+            db,
+            Options.Create(new KafkaOptions { PaymentEventsTopic = "payment.events.v1", PaymentDlqTopic = "payment.events.v1.dlq" }));
+
+        Guid originalMessageId = Guid.NewGuid();
+
+        Guid aggId1 = Guid.NewGuid();
+        Guid aggId2 = Guid.NewGuid();
+        string msg1 = $"{{\"messageId\":\"{originalMessageId}\",\"version\":999,\"messageType\":\"InvoicePaid\",\"producer\":\"payment-service\",\"aggregateId\":\"{aggId1}\",\"payload\":{{}}}}";
+        string msg2 = $"{{\"messageId\":\"{originalMessageId}\",\"version\":888,\"messageType\":\"InvoicePaid\",\"producer\":\"payment-service\",\"aggregateId\":\"{aggId2}\",\"payload\":{{}}}}";
+        var res1 = await dispatcher.ReceiveMessageAsync(msg1, topic: "payment.events.v1", partition: 0, offset: 200);
+        Assert.True(res1.IsSuccess);
+        Assert.Equal(KafkaIntakeDisposition.DlqStored, res1.Value);
+
+        var res2 = await dispatcher.ReceiveMessageAsync(msg2, topic: "payment.events.v1", partition: 0, offset: 201);
+        Assert.True(res2.IsSuccess);
+        Assert.Equal(KafkaIntakeDisposition.DlqStored, res2.Value);
+
+        // Both invalid records must exist as distinct DLQ records; not merged!
+        int dlqCount = await db.RentalOutboxMessages.CountAsync(m => m.MessageType == "DeadLetter");
+        Assert.Equal(2, dlqCount);
     }
 
     [Fact]
@@ -330,8 +434,6 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
             return Task.FromResult<RentalOutboxMessage?>(null);
         }
 
-        public Task<IReadOnlyList<RentalOutboxMessage>> ClaimPendingBatchAsync(string claimToken, TimeSpan leaseDuration, int batchSize, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<RentalOutboxMessage>>([_message]);
 
         public Task<Result<OutboxEnqueueResult>> EnqueueAtomicAsync(RentalOutboxMessage message, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new OutboxEnqueueResult(message, false)));

@@ -9,7 +9,7 @@ public interface IPaymentEventsDispatcher
     /// and durably persists it to the Inbox table or DLQ.
     /// Returns Failure if persistence fails, so the Kafka offset is NOT committed.
     /// </summary>
-    Task<Result> ReceiveMessageAsync(
+    Task<Result<KafkaIntakeDisposition>> ReceiveMessageAsync(
         string messageJson,
         string? topic = null,
         int? partition = null,
@@ -24,10 +24,4 @@ public interface IPaymentEventsDispatcher
         Guid inboxMessageId,
         CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Direct dispatch entrypoint (used in testing and synchronous fallbacks).
-    /// </summary>
-    Task<Result> DispatchRawMessageAsync(
-        string messageJson,
-        CancellationToken cancellationToken = default);
 }

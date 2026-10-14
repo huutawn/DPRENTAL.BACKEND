@@ -1,6 +1,7 @@
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Dprental.RentalService.Domain.Repositories;
 
@@ -26,6 +27,38 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
     public DbSet<RentalOutboxMessage> RentalOutboxMessages => Set<RentalOutboxMessage>();
 
     public void DiscardChanges() => ChangeTracker.Clear();
+
+    public async Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+    {
+        if (Database.IsRelational())
+        {
+            var tx = await Database.BeginTransactionAsync(cancellationToken);
+            return new RelationalUnitOfWorkTransaction(tx);
+        }
+
+        return new NoOpUnitOfWorkTransaction();
+    }
+
+    private sealed class RelationalUnitOfWorkTransaction : IUnitOfWorkTransaction
+    {
+        private readonly IDbContextTransaction _tx;
+
+        public RelationalUnitOfWorkTransaction(IDbContextTransaction tx)
+        {
+            _tx = tx ?? throw new ArgumentNullException(nameof(tx));
+        }
+
+        public Task CommitAsync(CancellationToken cancellationToken = default) => _tx.CommitAsync(cancellationToken);
+        public Task RollbackAsync(CancellationToken cancellationToken = default) => _tx.RollbackAsync(cancellationToken);
+        public ValueTask DisposeAsync() => _tx.DisposeAsync();
+    }
+
+    private sealed class NoOpUnitOfWorkTransaction : IUnitOfWorkTransaction
+    {
+        public Task CommitAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task RollbackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

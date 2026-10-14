@@ -61,6 +61,10 @@ public sealed class KafkaOptionsValidator : IValidateOptions<KafkaOptions>
         {
             failures.Add("LeaseDurationSeconds must be greater than zero.");
         }
+        else if (options.DeliveryTimeoutSeconds > 0 && options.LeaseDurationSeconds < options.DeliveryTimeoutSeconds + 5)
+        {
+            failures.Add("LeaseDurationSeconds must be at least 5 seconds greater than DeliveryTimeoutSeconds.");
+        }
 
         if (options.MaxBatchPerRound <= 0)
         {

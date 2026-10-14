@@ -15,6 +15,9 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
+using Dprental.RentalService.Application.Kafka.Configuration;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 using Dprental.RentalService.Api.Tests.Domain;
@@ -92,12 +95,13 @@ public sealed class InboxProcessingWorkerTests
         services.AddSingleton<IOrderLockManager, Dprental.RentalService.Api.Tests.TestHelpers.FakeOrderLockManager>();
         services.AddSingleton<IPaymentWorkflowService>(new StubPaymentWorkflow());
         services.AddSingleton<IRefundCompletedConsumer>(new StubRefundConsumer());
+        services.AddScoped<IKafkaOutboxWriter, KafkaOutboxWriter>();
         services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
-        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton(Options.Create(new KafkaOptions { Enabled = true }));
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var worker = new InboxProcessingWorker(scopeFactory, new ConfigurationBuilder().Build(), NullLogger<InboxProcessingWorker>.Instance);
+        var worker = new InboxProcessingWorker(scopeFactory, Options.Create(new KafkaOptions { Enabled = true }), NullLogger<InboxProcessingWorker>.Instance);
         int processed = await worker.ProcessBatchAsync(CancellationToken.None);
 
         Assert.Equal(1, processed);
@@ -143,12 +147,13 @@ public sealed class InboxProcessingWorkerTests
         services.AddSingleton<IOrderLockManager, Dprental.RentalService.Api.Tests.TestHelpers.FakeOrderLockManager>();
         services.AddSingleton<IPaymentWorkflowService>(paymentWorkflow);
         services.AddSingleton<IRefundCompletedConsumer>(new StubRefundConsumer());
+        services.AddScoped<IKafkaOutboxWriter, KafkaOutboxWriter>();
         services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
-        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton(Options.Create(new KafkaOptions { Enabled = true }));
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var worker = new InboxProcessingWorker(scopeFactory, new ConfigurationBuilder().Build(), NullLogger<InboxProcessingWorker>.Instance);
+        var worker = new InboxProcessingWorker(scopeFactory, Options.Create(new KafkaOptions { Enabled = true }), NullLogger<InboxProcessingWorker>.Instance);
         int processed = await worker.ProcessBatchAsync(CancellationToken.None);
 
         Assert.Equal(0, processed);
