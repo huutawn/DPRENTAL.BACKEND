@@ -3,7 +3,6 @@ using Confluent.Kafka;
 using Dprental.RentalService.Application.Kafka.Configuration;
 using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Domain.IRepositories;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -28,53 +27,14 @@ public sealed class OutboxPublisherWorker : BackgroundService
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options?.Value ?? new KafkaOptions();
-
-        if (transport != null)
-        {
-            _transport = transport;
-        }
-        else if (_options.Enabled && !string.IsNullOrWhiteSpace(_options.BootstrapServers))
-        {
-            try
-            {
-                var transportLogger = scopeFactory.CreateScope().ServiceProvider
-                    .GetService<ILogger<KafkaProducerTransport>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<KafkaProducerTransport>.Instance;
-                _transport = new KafkaProducerTransport(options ?? Microsoft.Extensions.Options.Options.Create(_options), transportLogger);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Không thể khởi tạo Kafka Producer với BootstrapServers {Servers}", _options.BootstrapServers);
-            }
-        }
-    }
-
-    // Overload for backward-compatibility with tests using IConfiguration
-    internal OutboxPublisherWorker(
-        IServiceScopeFactory scopeFactory,
-        IConfiguration configuration,
-        ILogger<OutboxPublisherWorker> logger,
-        IKafkaProducerTransport? transport = null)
-        : this(
-            scopeFactory,
-            Microsoft.Extensions.Options.Options.Create(new KafkaOptions
-            {
-                Enabled = !string.IsNullOrWhiteSpace(configuration["Kafka:BootstrapServers"]),
-                BootstrapServers = configuration["Kafka:BootstrapServers"] ?? string.Empty,
-                DeliveryTimeoutSeconds = configuration.GetValue("Kafka:DeliveryTimeoutSeconds", 10),
-                LeaseDurationSeconds = configuration.GetValue("Kafka:LeaseDurationSeconds", 30),
-                MaxBatchPerRound = configuration.GetValue("Kafka:MaxBatchPerRound", 50),
-                OutboxPollingIntervalSeconds = configuration.GetValue("Workers:OutboxPublisher:PollingIntervalSeconds", 15)
-            }),
-            logger,
-            transport)
-    {
+        _transport = transport;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!_options.Enabled && _transport == null)
+        if (!_options.Enabled)
         {
-            _logger.LogInformation("Kafka is disabled and no transport supplied; OutboxPublisherWorker will remain inactive");
+            _logger.LogInformation("Kafka is disabled; OutboxPublisherWorker will remain inactive");
             return;
         }
 
@@ -121,9 +81,15 @@ public sealed class OutboxPublisherWorker : BackgroundService
     /// <summary>
     /// Processes up to MaxBatchPerRound (default 50) messages per round by claiming one message
     /// at a time immediately before publishing, ensuring leases do not expire during the batch.
+    /// When Kafka is disabled, does not process backlog, claim messages, increment retries or touch Outbox.
     /// </summary>
     public async Task<int> ProcessBatchAsync(CancellationToken cancellationToken)
     {
+        if (!_options.Enabled)
+        {
+            return 0;
+        }
+
         int maxMessages = Math.Max(1, _options.MaxBatchPerRound);
         int publishedCount = 0;
         var leaseDuration = TimeSpan.FromSeconds(Math.Max(5, _options.LeaseDurationSeconds));
@@ -217,11 +183,5 @@ public sealed class OutboxPublisherWorker : BackgroundService
         }
 
         await base.StopAsync(cancellationToken);
-    }
-
-    public override void Dispose()
-    {
-        _transport?.Dispose();
-        base.Dispose();
     }
 }

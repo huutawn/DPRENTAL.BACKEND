@@ -507,6 +507,8 @@ public sealed class CheckoutOrderWriterTests
         public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => throw failure();
 
         public void DiscardChanges() => inner.DiscardChanges();
+        public Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
+            inner.BeginTransactionAsync(cancellationToken);
     }
 
     /// <summary>Giả lập mất kết nối ngay sau khi database đã commit: dữ liệu đã ghi nhưng lời gọi báo lỗi.</summary>
@@ -519,6 +521,8 @@ public sealed class CheckoutOrderWriterTests
         }
 
         public void DiscardChanges() => inner.DiscardChanges();
+        public Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
+            inner.BeginTransactionAsync(cancellationToken);
     }
 
     /// <summary>Giả lập database từ chối lần lưu (ví dụ trùng CheckoutOperationId).</summary>
@@ -528,5 +532,7 @@ public sealed class CheckoutOrderWriterTests
             throw new DbUpdateException("Simulated unique violation.");
 
         public void DiscardChanges() => inner.DiscardChanges();
+        public Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
+            inner.BeginTransactionAsync(cancellationToken);
     }
 }

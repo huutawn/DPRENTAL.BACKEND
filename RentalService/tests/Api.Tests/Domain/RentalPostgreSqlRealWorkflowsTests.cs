@@ -342,15 +342,20 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
                 var outboxRepo = new OutboxRepository(ctx);
                 string worker1 = "worker-1";
 
-                // Worker 1 claims batch with 10s lease
-                var claimed = await outboxRepo.ClaimPendingBatchAsync(worker1, TimeSpan.FromSeconds(10), 50);
+                // Worker 1 claims messages one by one with 10s lease
+                var claimed = new List<RentalOutboxMessage>();
+                for (int i = 0; i < 3; i++)
+                {
+                    var msg = await outboxRepo.ClaimNextPendingAsync(worker1, TimeSpan.FromSeconds(10));
+                    if (msg != null) claimed.Add(msg);
+                }
                 Assert.Equal(3, claimed.Count);
                 Assert.All(claimed, m => Assert.Equal(worker1, m.LockedBy));
 
-                // Worker 2 attempts to claim -> must return 0 because all 3 are locked!
+                // Worker 2 attempts to claim -> must return null because all 3 are locked!
                 string worker2 = "worker-2";
-                var claimedByWorker2 = await outboxRepo.ClaimPendingBatchAsync(worker2, TimeSpan.FromSeconds(10), 50);
-                Assert.Empty(claimedByWorker2);
+                var claimedByWorker2 = await outboxRepo.ClaimNextPendingAsync(worker2, TimeSpan.FromSeconds(10));
+                Assert.Null(claimedByWorker2);
             }
         }
         finally

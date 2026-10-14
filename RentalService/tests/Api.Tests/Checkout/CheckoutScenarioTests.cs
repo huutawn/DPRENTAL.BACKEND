@@ -206,5 +206,7 @@ public sealed class CheckoutScenarioTests
             throw new InvalidOperationException("Simulated database outage.");
 
         public void DiscardChanges() => inner.DiscardChanges();
+        public Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
+            inner.BeginTransactionAsync(cancellationToken);
     }
 }
