@@ -197,7 +197,7 @@ services:
     volumes:
       - meilisearch-data:/meili_data
     healthcheck:
-      test: [CMD-SHELL, "wget -q --spider http://localhost:7700/health"]
+      test: [CMD-SHELL, "wget -q --spider http://127.0.0.1:7700/health"]
       interval: 5s
       timeout: 5s
       retries: 12
