@@ -32,6 +32,9 @@ public static class KafkaServiceCollectionExtensions
             return new KafkaProducerTransport(options, logger);
         });
 
+        // Register shared outbox writer
+        services.AddScoped<IKafkaOutboxWriter, KafkaOutboxWriter>();
+
         // Register business producers
         services.AddScoped<IInventoryCommandProducer, InventoryCommandProducer>();
         services.AddScoped<IPaymentCommandProducer, PaymentCommandProducer>();

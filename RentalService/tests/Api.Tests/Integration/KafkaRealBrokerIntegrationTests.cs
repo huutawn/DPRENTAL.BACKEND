@@ -24,8 +24,7 @@ namespace Dprental.RentalService.Api.Tests.Integration;
 
 public sealed class KafkaRealBrokerIntegrationTests
 {
-    private const string KafkaBroker = "127.0.0.1:29092";
-    private const string PaymentTopic = "payment.events.v1";
+    private const string EnvKafkaBootstrapServers = "RENTAL_TEST_KAFKA_BOOTSTRAP_SERVERS";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -33,13 +32,23 @@ public sealed class KafkaRealBrokerIntegrationTests
         PropertyNameCaseInsensitive = true
     };
 
-    private static async Task<bool> IsKafkaAvailableAsync()
+    private static string? GetConfiguredBroker()
+    {
+        return Environment.GetEnvironmentVariable(EnvKafkaBootstrapServers);
+    }
+
+    private static async Task<bool> CanConnectToBrokerAsync(string bootstrapServers)
     {
         try
         {
+            var hostPort = bootstrapServers.Split(',')[0].Trim();
+            var parts = hostPort.Split(':');
+            string host = parts[0];
+            int port = parts.Length > 1 && int.TryParse(parts[1], out int p) ? p : 9092;
+
             using var client = new TcpClient();
-            var connectTask = client.ConnectAsync("127.0.0.1", 29092);
-            var delayTask = Task.Delay(1000);
+            var connectTask = client.ConnectAsync(host, port);
+            var delayTask = Task.Delay(2000);
             if (await Task.WhenAny(connectTask, delayTask) == connectTask && client.Connected)
             {
                 return true;
@@ -51,12 +60,20 @@ public sealed class KafkaRealBrokerIntegrationTests
             return false;
         }
     }
+
     [Fact]
     public async Task RealKafkaBrokerAndPostgreSql_PublishConsumeRedelivery_EndToEnd()
     {
-        if (!await IsKafkaAvailableAsync())
+        string? bootstrapServers = GetConfiguredBroker();
+        if (string.IsNullOrWhiteSpace(bootstrapServers))
         {
-            // Skip if real Kafka container is not running
+            // Skipped because RENTAL_TEST_KAFKA_BOOTSTRAP_SERVERS is not configured.
+            return;
+        }
+
+        if (!await CanConnectToBrokerAsync(bootstrapServers))
+        {
+            Assert.Fail($"Kafka broker is configured via RENTAL_TEST_KAFKA_BOOTSTRAP_SERVERS='{bootstrapServers}' but could not be reached.");
             return;
         }
 
@@ -98,23 +115,25 @@ public sealed class KafkaRealBrokerIntegrationTests
 
             string messageJson = JsonSerializer.Serialize(envelope, JsonOptions);
 
+            string testTopic = $"test-payment-events-{Guid.NewGuid():N}";
+            string testGroup = $"rental-test-group-{Guid.NewGuid():N}";
+
             var kafkaOptions = new KafkaOptions
             {
                 Enabled = true,
-                BootstrapServers = KafkaBroker,
-                PaymentEventsTopic = PaymentTopic,
-                ConsumerGroupId = $"rental-test-group-{Guid.NewGuid():N}",
+                BootstrapServers = bootstrapServers,
+                PaymentEventsTopic = testTopic,
+                ConsumerGroupId = testGroup,
                 DeliveryTimeoutSeconds = 10,
                 ConsumeTimeoutMilliseconds = 500
             };
-
             // 1. Publish to real Kafka broker via KafkaProducerTransport
             using var transport = new KafkaProducerTransport(
                 Options.Create(kafkaOptions),
                 NullLogger<KafkaProducerTransport>.Instance);
 
             var deliveryResult = await transport.ProduceAsync(
-                PaymentTopic,
+                testTopic,
                 orderId.ToString("D"),
                 messageJson,
                 CancellationToken.None);
@@ -131,6 +150,7 @@ public sealed class KafkaRealBrokerIntegrationTests
             services.AddScoped<IRentalOrderRepository, RentalOrderRepository>();
             services.AddScoped<IOrderLockManager, FakeOrderLockManager>();
             services.AddScoped<IOutboxRepository, OutboxRepository>();
+            services.AddScoped<IKafkaOutboxWriter, KafkaOutboxWriter>();
             services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<RentalServiceDbContext>());
             services.AddSingleton<IPaymentWorkflowService, StubPaymentWorkflow>();
             services.AddSingleton<IRefundCompletedConsumer, StubRefundConsumer>();
@@ -162,14 +182,14 @@ public sealed class KafkaRealBrokerIntegrationTests
             Assert.Equal(messageId, inboxMessage.MessageId);
             Assert.Equal(KafkaContractSpec.EventTypes.InvoicePaid, inboxMessage.MessageType);
             Assert.Equal("Received", inboxMessage.Status);
-            Assert.Equal(PaymentTopic, inboxMessage.KafkaTopic);
+            Assert.Equal(testTopic, inboxMessage.KafkaTopic);
             Assert.NotNull(inboxMessage.KafkaOffset);
 
             // 5. Redelivery verification: Dispatch same message directly or consume again
             using (var directScope = scopeFactory.CreateScope())
             {
                 var dispatcher = directScope.ServiceProvider.GetRequiredService<IPaymentEventsDispatcher>();
-                var redeliveryResult = await dispatcher.ReceiveMessageAsync(messageJson, PaymentTopic, inboxMessage.KafkaPartition, inboxMessage.KafkaOffset);
+                var redeliveryResult = await dispatcher.ReceiveMessageAsync(messageJson, testTopic, inboxMessage.KafkaPartition, inboxMessage.KafkaOffset);
                 Assert.True(redeliveryResult.IsSuccess); // Idempotent duplicate recognized
             }
 

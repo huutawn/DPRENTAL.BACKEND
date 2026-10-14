@@ -14,11 +14,6 @@ public interface IOutboxRepository
         TimeSpan leaseDuration,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<RentalOutboxMessage>> ClaimPendingBatchAsync(
-        string claimToken,
-        TimeSpan leaseDuration,
-        int batchSize,
-        CancellationToken cancellationToken = default);
 
     Task<Result<OutboxEnqueueResult>> EnqueueAtomicAsync(
         RentalOutboxMessage message,

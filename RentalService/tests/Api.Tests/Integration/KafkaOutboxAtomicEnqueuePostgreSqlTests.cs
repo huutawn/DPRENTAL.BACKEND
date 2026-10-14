@@ -5,6 +5,11 @@ using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
+using System.Text.Json;
+using Dprental.RentalService.Application.Kafka.Configuration;
+using Dprental.RentalService.Application.Kafka.Events;
+using Microsoft.Extensions.Options;
+using System.Globalization;
 
 namespace Dprental.RentalService.Api.Tests.Integration;
 
@@ -86,33 +91,165 @@ public sealed class KafkaOutboxAtomicEnqueuePostgreSqlTests
             await db.Database.MigrateAsync();
 
             var repository = new OutboxRepository(db);
+            var writer = new KafkaOutboxWriter(repository);
             Guid orderId = Guid.NewGuid();
             string opKey = "checkout:order-2";
             Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId("rental-service", "CreateHold", opKey);
 
-            var originalMsg = new RentalOutboxMessage(
+            var originalEnvelope = new KafkaMessageEnvelope<JsonElement>(
                 messageId,
-                KafkaContractSpec.Topics.InventoryCommands,
-                orderId.ToString("D"),
                 KafkaContractSpec.CommandTypes.CreateHold,
-                """{"rentalOrderId":"123","quantity":2}""",
-                DateTimeOffset.UtcNow);
+                KafkaContractSpec.CurrentEnvelopeVersion,
+                "rental-service",
+                orderId.ToString("D"),
+                DateTimeOffset.UtcNow,
+                null,
+                null,
+                JsonDocument.Parse("""{"rentalOrderId":"123","quantity":2}""").RootElement);
 
-            var res1 = await repository.EnqueueAtomicAsync(originalMsg);
+            var res1 = await writer.EnqueueAsync(KafkaContractSpec.Topics.InventoryCommands, orderId.ToString("D"), originalEnvelope);
             Assert.True(res1.IsSuccess);
 
             // Conflicting payload
-            var conflictingMsg = new RentalOutboxMessage(
+            var conflictingEnvelope = new KafkaMessageEnvelope<JsonElement>(
                 messageId,
-                KafkaContractSpec.Topics.InventoryCommands,
-                orderId.ToString("D"),
                 KafkaContractSpec.CommandTypes.CreateHold,
-                """{"rentalOrderId":"123","quantity":999}""",
-                DateTimeOffset.UtcNow);
+                KafkaContractSpec.CurrentEnvelopeVersion,
+                "rental-service",
+                orderId.ToString("D"),
+                DateTimeOffset.UtcNow,
+                null,
+                null,
+                JsonDocument.Parse("""{"rentalOrderId":"123","quantity":999}""").RootElement);
 
-            var res2 = await repository.EnqueueAtomicAsync(conflictingMsg);
+            var res2 = await writer.EnqueueAsync(KafkaContractSpec.Topics.InventoryCommands, orderId.ToString("D"), conflictingEnvelope);
             Assert.True(res2.IsFailure);
             Assert.Equal("OUTBOX_MESSAGE_CONFLICT", res2.Error.Code);
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task EnqueueAtomic_DoesNotFlushUnrelatedTrackedChanges()
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+
+        try
+        {
+            await using var db = new RentalServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(connectionString));
+            await db.Database.MigrateAsync();
+
+            var repository = new OutboxRepository(db);
+
+            // Add an unrelated tracked entity to db ChangeTracker without saving
+            Guid unrelatedCartId = Guid.NewGuid();
+            var cart = RentalCart.Create(unrelatedCartId, Guid.NewGuid(), DateTimeOffset.UtcNow).Value;
+            await db.RentalCarts.AddAsync(cart);
+            Assert.Equal(EntityState.Added, db.Entry(cart).State);
+
+            // Enqueue outbox message
+            Guid messageId = Guid.NewGuid();
+            var outboxMsg = new RentalOutboxMessage(
+                messageId,
+                "rental.events.v1",
+                "cart-1",
+                "CartCreated",
+                "{}",
+                DateTimeOffset.UtcNow);
+
+            var enqueueResult = await repository.EnqueueAtomicAsync(outboxMsg);
+            Assert.True(enqueueResult.IsSuccess);
+
+            // Cart must STILL be uncommitted in the database
+            await using var verifyDb = new RentalServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(connectionString));
+            var persistedCart = await verifyDb.RentalCarts.FirstOrDefaultAsync(c => c.Id == unrelatedCartId);
+            Assert.Null(persistedCart);
+
+            // Outbox message MUST be persisted
+            var persistedOutbox = await verifyDb.RentalOutboxMessages.FirstOrDefaultAsync(m => m.Id == messageId);
+            Assert.NotNull(persistedOutbox);
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task Producer_AfterAdvancingTimeProvider_SamePayloadReturnsReplay_DifferentPayloadReturnsConflict()
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+
+        try
+        {
+            await using var db = new RentalServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(connectionString));
+            await db.Database.MigrateAsync();
+
+            var repository = new OutboxRepository(db);
+            var writer = new KafkaOutboxWriter(repository);
+            var timeProvider = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow);
+
+            var options = Options.Create(new KafkaOptions
+            {
+                Enabled = true,
+                RentalEventsTopic = "rental.events.v1"
+            });
+
+            var producer = new RentalEventProducer(writer, options, timeProvider);
+
+            Guid orderId = Guid.NewGuid();
+            Guid renterId = Guid.NewGuid();
+            var payload = new RentalOrderCreatedPayload(
+                RentalOrderId: orderId,
+                OrderCode: "DH-2026-000001",
+                RenterId: renterId,
+                Currency: "VND",
+                TotalRentalAmount: 1000000,
+                TotalDepositAmount: 500000,
+                TotalPayableAmount: 1500000,
+                PaymentDeadline: timeProvider.GetUtcNow().AddMinutes(30),
+                CreatedAt: timeProvider.GetUtcNow(),
+                Items: new[]
+                {
+                    new RentalOrderCreatedItemPayload(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, DateOnly.FromDateTime(DateTime.UtcNow), DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2)), 1000000, 500000)
+                });
+
+            // 1. Initial enqueue at T1
+            var res1 = await producer.EnqueueRentalOrderCreatedAsync(payload);
+            Assert.True(res1.IsSuccess);
+            Assert.False(res1.Value.IsReplay);
+
+            var stored1 = await db.RentalOutboxMessages.FirstAsync(m => m.Id == res1.Value.MessageId);
+            DateTimeOffset originalOccurredAt = DateTimeOffset.Parse(
+                JsonDocument.Parse(stored1.Payload).RootElement.GetProperty("occurredAt").GetString()!,
+                CultureInfo.InvariantCulture);
+
+            // 2. Advance time by 2 hours
+            timeProvider.Advance(TimeSpan.FromHours(2));
+
+            // 3. Replay with exact same payload at T2
+            var res2 = await producer.EnqueueRentalOrderCreatedAsync(payload);
+            Assert.True(res2.IsSuccess);
+            Assert.True(res2.Value.IsReplay);
+            Assert.Equal(res1.Value.MessageId, res2.Value.MessageId);
+
+            await using var verifyDb = new RentalServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(connectionString));
+            var stored2 = await verifyDb.RentalOutboxMessages.FirstAsync(m => m.Id == res1.Value.MessageId);
+            DateTimeOffset preservedOccurredAt = DateTimeOffset.Parse(
+                JsonDocument.Parse(stored2.Payload).RootElement.GetProperty("occurredAt").GetString()!,
+                CultureInfo.InvariantCulture);
+            Assert.Equal(originalOccurredAt, preservedOccurredAt);
+
+            // 4. Same messageId deterministic key, but different payload (different amount)
+            var conflictingPayload = payload with { TotalPayableAmount = 9999999 };
+            var res3 = await producer.EnqueueRentalOrderCreatedAsync(conflictingPayload);
+            Assert.True(res3.IsFailure);
+            Assert.Equal("OUTBOX_MESSAGE_CONFLICT", res3.Error.Code);
         }
         finally
         {

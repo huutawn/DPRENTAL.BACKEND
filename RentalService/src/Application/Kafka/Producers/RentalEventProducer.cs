@@ -7,6 +7,7 @@ using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Kafka.Producers;
@@ -19,21 +20,31 @@ public sealed class RentalEventProducer : IRentalEventProducer
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly IOutboxRepository _outboxRepository;
+    private readonly IKafkaOutboxWriter _outboxWriter;
     private readonly KafkaOptions _kafkaOptions;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RentalEventProducer> _logger;
 
+    [ActivatorUtilitiesConstructor]
     public RentalEventProducer(
-        IOutboxRepository outboxRepository,
+        IKafkaOutboxWriter outboxWriter,
         IOptions<KafkaOptions> kafkaOptions,
         TimeProvider? timeProvider = null,
         ILogger<RentalEventProducer>? logger = null)
     {
-        _outboxRepository = outboxRepository ?? throw new ArgumentNullException(nameof(outboxRepository));
+        _outboxWriter = outboxWriter ?? throw new ArgumentNullException(nameof(outboxWriter));
         _kafkaOptions = kafkaOptions?.Value ?? new KafkaOptions();
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<RentalEventProducer>.Instance;
+    }
+
+    internal RentalEventProducer(
+         IOutboxRepository outboxRepository,
+         IOptions<KafkaOptions> kafkaOptions,
+         TimeProvider? timeProvider = null,
+         ILogger<RentalEventProducer>? logger = null)
+        : this(new KafkaOutboxWriter(outboxRepository), kafkaOptions, timeProvider, logger)
+    {
     }
 
     public async Task<Result<ProducerEnqueueResult>> EnqueueRentalOrderCreatedAsync(
@@ -92,31 +103,6 @@ public sealed class RentalEventProducer : IRentalEventProducer
             causationId,
             payload);
 
-        string payloadJson = JsonSerializer.Serialize(envelope, JsonOptions);
-
-        var outboxMessage = new RentalOutboxMessage(
-            messageId,
-            topic,
-            partitionKey,
-            KafkaContractSpec.EventTypes.RentalOrderCreated,
-            payloadJson,
-            utcNow);
-
-        var enqueueResult = await _outboxRepository.EnqueueAtomicAsync(outboxMessage, cancellationToken);
-        if (enqueueResult.IsFailure)
-        {
-            _logger.LogWarning("Failed to enqueue RentalOrderCreated event {MessageId}: {Error}", messageId, enqueueResult.Error.Message);
-            return enqueueResult.Error;
-        }
-
-        _logger.LogInformation("Enqueued RentalOrderCreated event {MessageId} for Order {OrderId} (Replay={IsReplay})",
-            messageId, payload.RentalOrderId, enqueueResult.Value.IsReplay);
-
-        return new ProducerEnqueueResult(
-            messageId,
-            enqueueResult.Value.IsReplay,
-            KafkaContractSpec.EventTypes.RentalOrderCreated,
-            topic,
-            partitionKey);
+        return await _outboxWriter.EnqueueAsync(topic, partitionKey, envelope, cancellationToken);
     }
 }

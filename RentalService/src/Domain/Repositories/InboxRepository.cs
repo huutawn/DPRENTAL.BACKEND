@@ -25,6 +25,23 @@ public sealed class InboxRepository : IInboxRepository
             .FirstOrDefaultAsync(m => m.Id == id, cancellationToken);
     }
 
+    public async Task<InboxMessageDescriptor?> GetDescriptorByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalInboxMessages
+            .AsNoTracking()
+            .Where(m => m.Id == id)
+            .Select(m => new InboxMessageDescriptor(
+                m.Id,
+                m.MessageId,
+                m.MessageType,
+                m.AggregateId,
+                m.Status,
+                m.RetryCount,
+                m.NextRetryAt,
+                m.ReceivedAt))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<InboxMessageDescriptor>> GetPendingRetryDescriptorsAsync(
         DateTimeOffset utcNow,
         int batchSize,

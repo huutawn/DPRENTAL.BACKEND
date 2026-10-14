@@ -18,6 +18,8 @@ public interface IInboxRepository
 
     Task<RentalInboxMessage?> GetByIdForProcessingAsync(Guid id, CancellationToken cancellationToken = default);
 
+    Task<InboxMessageDescriptor?> GetDescriptorByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<InboxMessageDescriptor>> GetPendingRetryDescriptorsAsync(
         DateTimeOffset utcNow,
         int batchSize,
