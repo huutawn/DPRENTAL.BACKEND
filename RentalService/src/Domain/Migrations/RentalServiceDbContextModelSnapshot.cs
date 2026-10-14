@@ -404,6 +404,9 @@ namespace RentalService.Domain.Migrations
                     b.Property<Guid>("RentalOrderId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("RentalSubOrderId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset?>("ReturnsCompletedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -449,6 +452,8 @@ namespace RentalService.Domain.Migrations
                     b.HasIndex("DeductionDeadline");
 
                     b.HasIndex("RentalOrderId");
+
+                    b.HasIndex("RentalSubOrderId");
 
                     b.HasIndex("Status");
 
@@ -799,6 +804,39 @@ namespace RentalService.Domain.Migrations
                     b.ToTable("rental_state_transitions", "rental");
                 });
 
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.RentalSubOrder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("RentalOrderId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SubOrderCode")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubOrderCode")
+                        .IsUnique();
+
+                    b.HasIndex("RentalOrderId", "SupplierId")
+                        .IsUnique();
+
+                    b.HasIndex("SupplierId", "CreatedAt");
+
+                    b.ToTable("rental_sub_orders", "rental");
+                });
+
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.RentalTermsAcceptance", b =>
                 {
                     b.Property<Guid>("Id")
@@ -998,7 +1036,15 @@ namespace RentalService.Domain.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Dprental.RentalService.Domain.Entities.RentalSubOrder", "RentalSubOrder")
+                        .WithMany("Items")
+                        .HasForeignKey("RentalSubOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("RentalOrder");
+
+                    b.Navigation("RentalSubOrder");
                 });
 
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.RentalOperationReceipt", b =>
@@ -1025,6 +1071,17 @@ namespace RentalService.Domain.Migrations
                         .IsRequired();
 
                     b.Navigation("RentalItem");
+
+                    b.Navigation("RentalOrder");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.RentalSubOrder", b =>
+                {
+                    b.HasOne("Dprental.RentalService.Domain.Entities.RentalOrder", "RentalOrder")
+                        .WithMany("SubOrders")
+                        .HasForeignKey("RentalOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("RentalOrder");
                 });
@@ -1119,7 +1176,14 @@ namespace RentalService.Domain.Migrations
 
                     b.Navigation("StateTransitions");
 
+                    b.Navigation("SubOrders");
+
                     b.Navigation("TermsAcceptance");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.RentalSubOrder", b =>
+                {
+                    b.Navigation("Items");
                 });
 
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRecord", b =>

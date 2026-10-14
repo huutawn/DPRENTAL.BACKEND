@@ -187,6 +187,7 @@ internal sealed class CheckoutTestHarness
         await using RentalServiceDbContext context = NewContext();
         return await context.RentalOrders
             .Include(o => o.Items).ThenInclude(i => i.UnitAssignments)
+            .Include(o => o.SubOrders)
             .OrderBy(o => o.OrderCode)
             .ToListAsync();
     }

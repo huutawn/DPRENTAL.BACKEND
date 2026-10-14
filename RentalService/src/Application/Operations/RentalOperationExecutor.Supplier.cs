@@ -38,7 +38,6 @@ public sealed partial class RentalOperationExecutor
         string normalizedKey = idempotencyKey.Trim();
         string structuredFingerprint = ComputeFingerprint(new { Action = "SupplierAccept", ItemId = itemId, SupplierId = supplierId });
         string legacyFingerprint = ComputeFingerprint($"accept:{itemId}:{supplierId}");
-        string fingerprint = structuredFingerprint;
 
         // 1. Replay check on existing receipt with same key
         var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == normalizedKey);
@@ -112,32 +111,7 @@ public sealed partial class RentalOperationExecutor
         }
 
         // 5. Claim intent in journal before HTTP call
-        var confirmReq = new ConfirmAllocationRequest(normalizedKey);
-        var command = new RentalOperationCommand(
-            1,
-            "SupplierAccept",
-            order.Id,
-            item.Id,
-            normalizedKey,
-            item.AllocationGroupId,
-            supplierId,
-            JsonSerializer.Serialize(confirmReq, JsonOptions));
-
-        string commandJson = JsonSerializer.Serialize(command, JsonOptions);
-
-        var receipt = existingReceipt ?? new RentalOperationReceipt(
-            Guid.NewGuid(),
-            order.Id,
-            normalizedKey,
-            "SupplierAccept",
-            fingerprint,
-            isSuccess: false,
-            errorCode: null,
-            errorMessage: null,
-            createdAt: utcNow,
-            status: RentalOperationReceipt.StatusProcessing,
-            targetItemId: item.Id,
-            payloadJson: commandJson);
+        var receipt = existingReceipt ?? NewAcceptIntent(order, item, supplierId, normalizedKey, utcNow);
 
         if (existingReceipt == null)
         {
@@ -151,6 +125,42 @@ public sealed partial class RentalOperationExecutor
 
         // 6. Execute ConfirmAllocation core
         return await ConfirmAllocationCoreAsync(order, item, receipt, normalizedKey, supplierId, isReconciliation: false, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phiếu "đang nhận" (Processing) ghi vào journal trước khi gọi Inventory ConfirmAllocation.
+    /// </summary>
+    private static RentalOperationReceipt NewAcceptIntent(
+        RentalOrder order,
+        RentalItem item,
+        Guid supplierId,
+        string operationKey,
+        DateTimeOffset utcNow)
+    {
+        var confirmReq = new ConfirmAllocationRequest(operationKey);
+        var command = new RentalOperationCommand(
+            1,
+            "SupplierAccept",
+            order.Id,
+            item.Id,
+            operationKey,
+            item.AllocationGroupId,
+            supplierId,
+            JsonSerializer.Serialize(confirmReq, JsonOptions));
+
+        return new RentalOperationReceipt(
+            Guid.NewGuid(),
+            order.Id,
+            operationKey,
+            "SupplierAccept",
+            ComputeFingerprint(new { Action = "SupplierAccept", ItemId = item.Id, SupplierId = supplierId }),
+            isSuccess: false,
+            errorCode: null,
+            errorMessage: null,
+            createdAt: utcNow,
+            status: RentalOperationReceipt.StatusProcessing,
+            targetItemId: item.Id,
+            payloadJson: JsonSerializer.Serialize(command, JsonOptions));
     }
 
     public async Task<Result<SupplierDecisionResponse>> ExecuteSupplierRejectAsync(
@@ -231,7 +241,26 @@ public sealed partial class RentalOperationExecutor
             return Error.Expired("SUPPLIER_DEADLINE_EXPIRED", "Đã quá thời hạn xác nhận của supplier.");
         }
 
-        // Apply reject
+        var response = await ApplySupplierRejectAsync(order, item, supplierId, reason, note, normalizedKey, fingerprint, utcNow, cancellationToken);
+        await CommitLocalChangesAsync(order, cancellationToken);
+
+        return response;
+    }
+
+    /// <summary>
+    /// Chuyển một dòng sang Rejected, ghi receipt, lên lịch nhả lịch và hoàn tiền, thêm outbox; chưa commit.
+    /// </summary>
+    private async Task<SupplierDecisionResponse> ApplySupplierRejectAsync(
+        RentalOrder order,
+        RentalItem item,
+        Guid supplierId,
+        string reason,
+        string? note,
+        string normalizedKey,
+        string fingerprint,
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken)
+    {
         item.ApplySupplierReject(supplierId, utcNow, reason, note, normalizedKey);
         order.EvaluateOrderStatusRollup(utcNow, normalizedKey);
 
@@ -338,7 +367,6 @@ public sealed partial class RentalOperationExecutor
             utcNow);
 
         await _outboxRepository.AddAsync(outbox, cancellationToken);
-        await CommitLocalChangesAsync(order, cancellationToken);
 
         return response;
     }

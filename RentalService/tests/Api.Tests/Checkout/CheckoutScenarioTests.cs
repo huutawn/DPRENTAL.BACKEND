@@ -52,6 +52,15 @@ public sealed class CheckoutScenarioTests
         Assert.Equal(450_000m, lightLine.RentalAmount);
         Assert.Equal(300_000m, lightLine.DepositAmount);
         Assert.Equal(order.Items.Single(i => i.SupplierId == lightSupplier).Id, lightLine.RentalItemId);
+
+        // Lưu cùng đơn: mỗi supplier một đơn con, đánh số theo thứ tự dòng trong giỏ.
+        Assert.Equal(2, order.SubOrders.Count);
+        RentalSubOrder cameraSubOrder = order.SubOrders.Single(s => s.SupplierId == cameraSupplier);
+        RentalSubOrder lightSubOrder = order.SubOrders.Single(s => s.SupplierId == lightSupplier);
+        Assert.Equal($"{order.OrderCode}-01", cameraSubOrder.SubOrderCode);
+        Assert.Equal($"{order.OrderCode}-02", lightSubOrder.SubOrderCode);
+        Assert.Equal(cameraSubOrder.Id, order.Items.Single(i => i.SupplierId == cameraSupplier).RentalSubOrderId);
+        Assert.Equal(lightSubOrder.Id, order.Items.Single(i => i.SupplierId == lightSupplier).RentalSubOrderId);
     }
 
     [Fact]

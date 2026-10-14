@@ -99,7 +99,7 @@ builder.Services.AddSwaggerGen(options =>
             + "Bao gồm các phân hệ nghiệp vụ:\n"
             + "- **Giỏ hàng thuê (Rental Cart)**: Thêm/sửa/xóa mục thuê, kiểm tra tính khả dụng và biến động giá theo thời gian thực.\n"
             + "- **Gửi đơn hàng (Checkout)**: Tạo đơn hàng chờ thanh toán từ các dòng đã chọn trong giỏ, giữ lịch thiết bị và tạo hóa đơn; chống trùng bằng `Idempotency-Key`.\n"
-            + "- **Mục đơn thuê (Rental Items)**: Supplier chấp nhận (Accept) hoặc từ chối (Reject) mục thuê sau khi đơn hàng được thanh toán.\n"
+            + "- **Đơn hàng (Orders)**: Renter xem đơn cha gồm mọi đơn con và thiết bị; Supplier xem đơn con chỉ gồm thiết bị của mình sau khi đơn đã thanh toán, rồi nhận (Accept) hoặc từ chối (Reject) cả đơn con.\n"
             + "- **Lịch thuê cá nhân (Renter Calendar)**: Renter tra cứu lịch thuê thiết bị theo tháng kèm phân bổ mật độ theo ngày.\n"
             + "- **Thống kê xác nhận (Supplier Statistics)**: Admin theo dõi số lượng chấp nhận, từ chối, quá hạn xác nhận của Supplier.\n"
             + "- **Tác vụ nội bộ (Internal Operations)**: Admin thực hiện replay các tác vụ nghiệp vụ gặp lỗi.\n\n"

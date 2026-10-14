@@ -13,6 +13,7 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
     public DbSet<RentalCart> RentalCarts => Set<RentalCart>();
     public DbSet<RentalCartItem> RentalCartItems => Set<RentalCartItem>();
     public DbSet<RentalOrder> RentalOrders => Set<RentalOrder>();
+    public DbSet<RentalSubOrder> RentalSubOrders => Set<RentalSubOrder>();
     public DbSet<RentalItem> RentalItems => Set<RentalItem>();
     public DbSet<RentalUnitAssignment> RentalUnitAssignments => Set<RentalUnitAssignment>();
     public DbSet<RentalStateTransition> RentalStateTransitions => Set<RentalStateTransition>();
@@ -78,6 +79,11 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
                 .HasForeignKey(i => i.RentalOrderId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            b.HasMany(o => o.SubOrders)
+                .WithOne(s => s.RentalOrder)
+                .HasForeignKey(s => s.RentalOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             b.HasMany(o => o.StateTransitions)
                 .WithOne(t => t.RentalOrder)
                 .HasForeignKey(t => t.RentalOrderId)
@@ -86,6 +92,15 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
             b.HasMany(o => o.OperationReceipts)
                 .WithOne(r => r.RentalOrder)
                 .HasForeignKey(r => r.RentalOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // RentalSubOrder: phần của đơn thuộc về một nhà cung cấp
+        modelBuilder.Entity<RentalSubOrder>(b =>
+        {
+            b.HasMany(s => s.Items)
+                .WithOne(i => i.RentalSubOrder)
+                .HasForeignKey(i => i.RentalSubOrderId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

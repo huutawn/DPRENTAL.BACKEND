@@ -187,11 +187,11 @@ public sealed class SupplierDecisionIntegrationTests
     }
 
     [Fact]
-    public async Task AcceptItem_ValidSupplier_Returns200AndAwaitingHandover()
+    public async Task AcceptSubOrder_ValidSupplier_Returns200AndAwaitingHandover()
     {
         string dbName = Guid.NewGuid().ToString("N");
         Guid supplierId = Guid.NewGuid();
-        Guid itemId;
+        Guid subOrderId;
         Guid orderId;
         IReadOnlyCollection<RentalUnitAssignment> assignments;
 
@@ -199,7 +199,7 @@ public sealed class SupplierDecisionIntegrationTests
         {
             var (order, item) = CreatePaidOrderWithItem(supplierId);
             orderId = order.Id;
-            itemId = item.Id;
+            subOrderId = item.RentalSubOrderId;
             assignments = item.UnitAssignments.ToList();
             seedDb.RentalOrders.Add(order);
             await seedDb.SaveChangesAsync();
@@ -219,10 +219,11 @@ public sealed class SupplierDecisionIntegrationTests
         var service = CreateDecisionService(db, inventoryClient);
 
         var caller = CreateUserCaller(supplierId);
-        var result = await service.AcceptItemAsync(itemId, "idemp-accept-1", caller);
+        var result = await service.AcceptSubOrderAsync(subOrderId, "idemp-accept-1", caller);
         Assert.True(result.IsSuccess);
         Assert.Equal("AwaitingHandover", result.Value.Status);
-        Assert.Equal(supplierId, result.Value.DecisionBy);
+        Assert.Equal(subOrderId, result.Value.SubOrderId);
+        Assert.Equal(supplierId, Assert.Single(result.Value.Items).DecisionBy);
 
         var reloadedOrder = await db.RentalOrders.Include(o => o.Items).FirstAsync(o => o.Id == orderId);
         Assert.Equal(RentalItemStatus.AwaitingHandover, reloadedOrder.Items.First().Status);
@@ -232,7 +233,7 @@ public sealed class SupplierDecisionIntegrationTests
     }
 
     [Fact]
-    public async Task AcceptItem_WrongSupplier_ReturnsForbidden()
+    public async Task AcceptSubOrder_WrongSupplier_ReturnsNotFound()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -245,14 +246,14 @@ public sealed class SupplierDecisionIntegrationTests
         var service = CreateDecisionService(db, new StubInventoryClient());
 
         var strangerCaller = CreateUserCaller(strangerSupplierId);
-        var result = await service.AcceptItemAsync(item.Id, "idemp-1", strangerCaller);
+        var result = await service.AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-1", strangerCaller);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("SUPPLIER_MISMATCH", result.Error.Code);
+        Assert.Equal("SUB_ORDER_NOT_FOUND", result.Error.Code);
     }
 
     [Fact]
-    public async Task AcceptItem_ServiceCaller_ReturnsUnauthorized()
+    public async Task AcceptSubOrder_ServiceCaller_ReturnsUnauthorized()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -264,14 +265,14 @@ public sealed class SupplierDecisionIntegrationTests
         var service = CreateDecisionService(db, new StubInventoryClient());
 
         var serviceCaller = CreateServiceCaller();
-        var result = await service.AcceptItemAsync(item.Id, "idemp-1", serviceCaller);
+        var result = await service.AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-1", serviceCaller);
 
         Assert.True(result.IsFailure);
         Assert.Equal("AUTH_REQUIRED", result.Error.Code);
     }
 
     [Fact]
-    public async Task AcceptItem_AdminCallerNotOwner_ReturnsForbidden()
+    public async Task AcceptSubOrder_AdminCallerNotOwner_ReturnsNotFound()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -285,14 +286,14 @@ public sealed class SupplierDecisionIntegrationTests
 
         // Admin caller who is NOT the supplier
         var adminCaller = CreateUserCaller(adminId, roles: ["admin", "adm"]);
-        var result = await service.AcceptItemAsync(item.Id, "idemp-1", adminCaller);
+        var result = await service.AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-1", adminCaller);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("SUPPLIER_MISMATCH", result.Error.Code);
+        Assert.Equal("SUB_ORDER_NOT_FOUND", result.Error.Code);
     }
 
     [Fact]
-    public async Task AcceptItem_ReplaySameKey_Returns200OK()
+    public async Task AcceptSubOrder_ReplaySameKey_Returns200OK()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -313,22 +314,22 @@ public sealed class SupplierDecisionIntegrationTests
         var service = CreateDecisionService(db, inventoryClient);
 
         var caller = CreateUserCaller(supplierId);
-        var first = await service.AcceptItemAsync(item.Id, "idemp-replay-1", caller);
+        var first = await service.AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-replay-1", caller);
         Assert.True(first.IsSuccess);
 
         // Replay with exact same key
-        var second = await service.AcceptItemAsync(item.Id, "idemp-replay-1", caller);
+        var second = await service.AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-replay-1", caller);
         Assert.True(second.IsSuccess);
         Assert.Equal("AwaitingHandover", second.Value.Status);
 
         // Different key after decision -> 409 Conflict
-        var differentKey = await service.AcceptItemAsync(item.Id, "idemp-diff-key", caller);
+        var differentKey = await service.AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-diff-key", caller);
         Assert.True(differentKey.IsFailure);
         Assert.Equal("ITEM_ALREADY_DECIDED", differentKey.Error.Code);
     }
 
     [Fact]
-    public async Task AcceptItem_DeadlineExpired_ReturnsExpired()
+    public async Task AcceptSubOrder_DeadlineExpired_ReturnsExpired()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -341,14 +342,14 @@ public sealed class SupplierDecisionIntegrationTests
         var service = CreateDecisionService(db, new StubInventoryClient());
 
         var caller = CreateUserCaller(supplierId);
-        var result = await service.AcceptItemAsync(item.Id, "idemp-1", caller);
+        var result = await service.AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-1", caller);
 
         Assert.True(result.IsFailure);
         Assert.Equal("SUPPLIER_DEADLINE_EXPIRED", result.Error.Code);
     }
 
     [Fact]
-    public async Task AcceptItem_InventoryReturnsInvalidUnits_ReturnsUnprocessable_AndDoesNotTransitionState()
+    public async Task AcceptSubOrder_InventoryReturnsInvalidUnits_ReturnsUnprocessable_AndDoesNotTransitionState()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -370,7 +371,7 @@ public sealed class SupplierDecisionIntegrationTests
         var service = CreateDecisionService(db, inventoryClient);
 
         var caller = CreateUserCaller(supplierId);
-        var result = await service.AcceptItemAsync(item.Id, "idemp-1", caller);
+        var result = await service.AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-1", caller);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_ALLOCATION", result.Error.Code);
@@ -381,7 +382,7 @@ public sealed class SupplierDecisionIntegrationTests
     }
 
     [Fact]
-    public async Task RejectItem_ValidReason_TransitionsToRejected_ReleasesUnits_SchedulesRefund()
+    public async Task RejectSubOrder_ValidReason_TransitionsToRejected_ReleasesUnits_SchedulesRefund()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -400,11 +401,11 @@ public sealed class SupplierDecisionIntegrationTests
 
         var caller = CreateUserCaller(supplierId);
         var req = new SupplierRejectRequest("Equipment is undergoing maintenance", "Apologies for the inconvenience");
-        var result = await service.RejectItemAsync(item.Id, req, "idemp-rej-1", caller);
+        var result = await service.RejectSubOrderAsync(item.RentalSubOrderId, req, "idemp-rej-1", caller);
 
         Assert.True(result.IsSuccess);
         Assert.Equal("Rejected", result.Value.Status);
-        Assert.Equal("Equipment is undergoing maintenance", result.Value.DecisionReason);
+        Assert.Equal("Equipment is undergoing maintenance", Assert.Single(result.Value.Items).DecisionReason);
 
         var reloaded = await db.RentalItems.Include(i => i.UnitAssignments).FirstAsync(i => i.Id == item.Id);
         Assert.Equal(RentalItemStatus.Rejected, reloaded.Status);
@@ -427,7 +428,7 @@ public sealed class SupplierDecisionIntegrationTests
     }
 
     [Fact]
-    public async Task RejectItem_InvalidReason_ReturnsValidationError()
+    public async Task RejectSubOrder_InvalidReason_ReturnsValidationError()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -440,7 +441,7 @@ public sealed class SupplierDecisionIntegrationTests
 
         var caller = CreateUserCaller(supplierId);
         var req = new SupplierRejectRequest(""); // Empty reason
-        var result = await service.RejectItemAsync(item.Id, req, "idemp-rej-empty", caller);
+        var result = await service.RejectSubOrderAsync(item.RentalSubOrderId, req, "idemp-rej-empty", caller);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_REJECT_REASON", result.Error.Code);

@@ -159,6 +159,25 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
         IReadOnlyCollection<RentalItemStatus> targetStatuses,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+
+    public Task<RentalSubOrder?> GetSubOrderByIdAsync(Guid subOrderId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(
+        Guid renterId, int skip, int take, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<RentalOrder?> GetRenterOrderWithSubOrdersAsync(
+        Guid orderId, Guid renterId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(
+        Guid supplierId, int skip, int take, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<RentalSubOrder?> GetPaidSubOrderForSupplierAsync(
+        Guid subOrderId, Guid supplierId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
 }
 
 internal sealed class FakeInventoryListingClient : IInventoryListingClient

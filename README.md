@@ -83,6 +83,23 @@ Dịch vụ triển khai mô hình nghiệp vụ canonical theo AGENTS.md và th
 - Hai Aggregate Roots:
   1. `RentalCart`: Quản lý các dòng `RentalCartItem`, checkout all-or-nothing, abandon và optimistic concurrency qua `Version`.
   2. `RentalOrder`: Quản lý `RentalItem`, `RentalUnitAssignment`, `RentalStateTransition`, `RentalTermsAcceptance`, `HandoverRecord`, `ReturnRecord`, `DeductionProposal`, `Dispute`, `RentalOperationReceipt`. Trạng thái `RentalOrderStatus.Paid = 9` (loại bỏ `PendingSupplierConfirmation` khỏi Order enum; Item vẫn giữ trạng thái này).
+- Đơn con (`RentalSubOrder`, bảng `rental_sub_orders`): khi tạo đơn, các `RentalItem` được gom theo `SupplierId`, mỗi supplier một đơn con với mã `{OrderCode}-NN` đánh số theo thứ tự dòng đầu tiên của supplier đó (ví dụ `DH-2026-000001-01`). Mỗi `RentalItem` có `RentalSubOrderId`. Đơn con không lưu trạng thái riêng: trạng thái vẫn nằm trên từng `RentalItem`, trạng thái hiển thị của đơn con tính từ các dòng (`SubOrderStatusPolicy`). Supplier nhận hoặc từ chối cả đơn con nên các dòng của một đơn con được quyết định cùng nhau. Hóa đơn gửi Payment không đổi.
+  - Migration `AddRentalSubOrders` tạo đơn con cho các đơn đã có (đánh số theo `SupplierId`), gắn từng dòng vào đơn con rồi mới đặt `RentalSubOrderId` là NOT NULL. Rollback xóa bảng và cột.
+
+## API Xem đơn hàng (đơn cha cho Renter, đơn con cho Supplier)
+
+- Người thuê (`[Authorize(Policy = "Renter")]`, danh tính từ `sub`):
+  - `GET /api/v1/rental/orders?page=1&pageSize=20`: đơn của chính mình, mới nhất trước, kèm tổng tiền thuê, tổng cọc, số dòng, số đơn con.
+  - `GET /api/v1/rental/orders/{orderId}`: đơn cha kèm thông tin nhận máy, `invoiceRef`, tổng tiền và mọi đơn con cùng thiết bị. Đơn của người khác trả `404 Order.NotFound`.
+- Nhà cung cấp (người dùng đã đăng nhập, danh tính từ `sub` giống API nhận/từ chối):
+  - `GET /api/v1/rental/supplier/sub-orders?page=1&pageSize=20`: đơn con của chính mình, mới nhất trước.
+  - `GET /api/v1/rental/supplier/sub-orders/{subOrderId}`: chỉ thiết bị của mình, mã đơn cha và thông tin nhận máy (tên, số điện thoại, địa chỉ) để giao máy. Đơn con của supplier khác trả `404 SubOrder.NotFound`.
+  - Chỉ thấy đơn đã thanh toán đúng hạn (`PaymentConfirmedAt` có giá trị và không phải thanh toán trễ); đơn chưa thanh toán trả `404`.
+- Không API nào trả tài khoản nhận hoàn tiền, `AssetId`, `AllocationId` hay `AllocationGroupId`. Supplier không thấy thiết bị của supplier khác hay tổng tiền cả đơn.
+- Ngày thuê trả ra gồm ngày đầu và ngày dùng cuối (có tính), giống giỏ hàng; Rental lưu end-exclusive.
+- `page` nhỏ hơn 1 được đổi thành 1; `pageSize` được giới hạn trong 1–100. Service token nhận `403`.
+- Supplier nhận hoặc từ chối cả đơn con qua `POST /api/v1/rental/supplier/sub-orders/{subOrderId}/accept|reject` (xem mục Supplier Decision API).
+
 ## API Lịch thuê cá nhân (Renter Calendar)
 
 - Endpoint: `GET /api/v1/rental/me/calendar?month=YYYY-MM&page=1&pageSize=50`
@@ -139,12 +156,16 @@ Dịch vụ triển khai mô hình nghiệp vụ canonical theo AGENTS.md và th
 - Late payment: thanh toán đến sau hạn hoặc trên Order `Expired/Cancelled` giữ trạng thái kết thúc, ghi nhận payment reference, cờ `LatePaymentRefundRequired = true` và yêu cầu hoàn tiền toàn bộ.
 
 ### 2. Supplier Decision API
-- `POST /api/v1/rental/items/{itemId}/accept`
-- `POST /api/v1/rental/items/{itemId}/reject`
-- Yêu cầu JWT human (`JWT.sub == item.SupplierId`) và header `Idempotency-Key` (tối đa 64 ký tự). Admin hoặc service token bị từ chối (403 Forbidden).
-- **Accept:** ghi nhận intent trong journal `RentalOperationReceipt` (`Status = Processing`), commit local trước khi gọi `ConfirmAllocation` (timeout 10s). Xác thực receipt reference, group ID và toàn bộ assigned units từ Inventory; hợp lệ chuyển item `AwaitingHandover`, cập nhật rollup order status và phát Outbox event `RentalItemConfirmed`. Phản hồi không để lộ thông tin physical asset/serial number/allocation ID. Lỗi dependency tạm thời trả 503 để worker phục hồi.
-- **Reject:** body gồm `rejectReason` (bắt buộc, tối đa 500 ký tự) và `optionalNote` (tùy chọn, tối đa 2.000 ký tự). Chuyển item `Rejected`, giải phóng unit assignments, lên lịch release allocation và refund (`RentalAmount + DepositAmount` của riêng item), phát Outbox event `RentalItemRejected`.
-- Replay cùng key và payload trả lại kết quả cũ (200 OK); key khác sau khi đã quyết định hoặc payload khác trả 409 Conflict.
+- `POST /api/v1/rental/supplier/sub-orders/{subOrderId}/accept`
+- `POST /api/v1/rental/supplier/sub-orders/{subOrderId}/reject`
+- Supplier nhận hoặc từ chối **cả đơn con**, không quyết định riêng từng `RentalItem` (API `/items/{itemId}/accept|reject` đã bị bỏ). Đơn con của supplier khác trong cùng đơn hàng không bị ảnh hưởng.
+- Yêu cầu JWT human (`JWT.sub == subOrder.SupplierId`) và header `Idempotency-Key` (tối đa 64 ký tự). Đơn con của supplier khác trả `404 SUB_ORDER_NOT_FOUND`; service token trả 401.
+- Mỗi item trong đơn con có khóa idempotency riêng suy ra từ `(subOrderId, Idempotency-Key, itemId)`, nên journal, recovery worker và thống kê vẫn làm việc theo từng item như trước.
+- Khi thanh toán, mọi item của một đơn con nhận chung `SupplierConfirmationDeadline` sớm nhất, nên cả đơn con hết hạn xác nhận cùng lúc.
+- **Accept:** kiểm tra mọi item trước khi gọi Inventory (đơn `Paid`, item `PendingSupplierConfirmation`, chưa quá hạn, hold đã gia hạn); một item không đạt thì không xác nhận item nào. Sau đó ghi intent `SupplierAccept` (`Status = Processing`) cho **mọi item trong cùng một commit**, rồi lần lượt gọi `ConfirmAllocation` cho từng item, xác thực receipt reference, group ID và toàn bộ assigned units, chuyển item `AwaitingHandover`, cập nhật rollup order status và phát Outbox event `RentalItemConfirmed`. Lỗi dependency giữa chừng trả 503; các item đã xác nhận giữ nguyên, `OperationRecoveryWorker` tự chốt nốt item còn lại, hoặc gửi lại cùng key.
+- **Thời gian ân hạn cho worker:** khi thanh toán, hold được gia hạn tới `SupplierConfirmationDeadline + 5 phút` (`RentalItem.ConfirmationGracePeriod`), nhưng không quá 23:59:59 đêm trước ngày giao theo giờ Việt Nam. Supplier vẫn phải bấm nhận trước hạn; vì intent của mọi item đã ghi trước hạn, Expiry worker không hủy item còn đang chốt mà reconcile nó trong 5 phút đó. Chỉ khi Inventory lỗi quá thời gian ân hạn (hoặc từ chối hẳn) thì đơn con mới bị nhận dở và cần Admin xử lý.
+- **Reject:** body gồm `rejectReason` (bắt buộc, tối đa 500 ký tự) và `optionalNote` (tùy chọn, tối đa 2.000 ký tự). Mọi item của đơn con chuyển `Rejected` trong cùng một lần commit; với từng item lên lịch release allocation và refund (`RentalAmount + DepositAmount` của item đó) và phát Outbox event `RentalItemRejected`.
+- Replay cùng key và payload trả lại kết quả cũ (200 OK); key khác sau khi đã quyết định trả `409 ITEM_ALREADY_DECIDED`, cùng key nhưng payload khác trả `409 IDEMPOTENCY_CONFLICT`.
 
 ### 3. Expiry và Refund
 - **Payment timeout:** gọi `CancelInvoice`. `INVOICE_ALREADY_PAID` dừng expiry và chờ payment event đã validate. Hủy thành công thì giải phóng toàn bộ holds và chuyển Order/Items sang `Expired`.

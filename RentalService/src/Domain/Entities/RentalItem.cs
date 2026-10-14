@@ -19,6 +19,8 @@ public partial class RentalItem
 
     public Guid RentalOrderId { get; private set; }
 
+    public Guid RentalSubOrderId { get; private set; }
+
     public Guid EquipmentListingId { get; private set; }
 
     public Guid SupplierId { get; private set; }
@@ -134,6 +136,9 @@ public partial class RentalItem
     [ForeignKey(nameof(RentalOrderId))]
     public RentalOrder? RentalOrder { get; private set; }
 
+    [ForeignKey(nameof(RentalSubOrderId))]
+    public RentalSubOrder? RentalSubOrder { get; private set; }
+
     private readonly List<RentalUnitAssignment> _unitAssignments = [];
     public IReadOnlyCollection<RentalUnitAssignment> UnitAssignments => _unitAssignments.AsReadOnly();
 
@@ -151,6 +156,7 @@ public partial class RentalItem
     internal RentalItem(
         Guid id,
         Guid rentalOrderId,
+        Guid rentalSubOrderId,
         Guid equipmentListingId,
         Guid supplierId,
         int quantity,
@@ -167,6 +173,7 @@ public partial class RentalItem
     {
         Id = id;
         RentalOrderId = rentalOrderId;
+        RentalSubOrderId = rentalSubOrderId;
         EquipmentListingId = equipmentListingId;
         SupplierId = supplierId;
         Quantity = quantity;
@@ -257,11 +264,31 @@ public partial class RentalItem
         return plus24hUtc < cutoffUtc ? plus24hUtc : cutoffUtc;
     }
 
-    internal void RecordPaid(DateTimeOffset paidAt)
+    /// <summary>
+    /// Thời gian hold còn sống sau hạn xác nhận, để worker chốt nốt các mục supplier đã bấm nhận trước hạn.
+    /// </summary>
+    public static readonly TimeSpan ConfirmationGracePeriod = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Hold được gia hạn tới hạn xác nhận cộng <see cref="ConfirmationGracePeriod"/>,
+    /// nhưng phải hết trước 00:00 ngày giao theo giờ Việt Nam như luật của Inventory.
+    /// </summary>
+    public static DateTimeOffset CalculateConfirmationHoldExpiry(DateTimeOffset supplierConfirmationDeadline, DateOnly expectedStartDate)
+    {
+        TimeSpan vnOffset = TimeSpan.FromHours(7);
+        DateTimeOffset startOfDayVn = new(expectedStartDate.Year, expectedStartDate.Month, expectedStartDate.Day, 0, 0, 0, vnOffset);
+        DateTimeOffset lastSecondBeforeStartUtc = startOfDayVn.AddSeconds(-1).ToUniversalTime();
+        DateTimeOffset withGraceUtc = supplierConfirmationDeadline.ToUniversalTime() + ConfirmationGracePeriod;
+
+        return withGraceUtc < lastSecondBeforeStartUtc ? withGraceUtc : lastSecondBeforeStartUtc;
+    }
+
+    /// <param name="supplierConfirmationDeadline">Hạn xác nhận chung của cả đơn con chứa dòng này.</param>
+    internal void RecordPaid(DateTimeOffset supplierConfirmationDeadline)
     {
         if (!SupplierConfirmationDeadline.HasValue)
         {
-            SupplierConfirmationDeadline = CalculateSupplierConfirmationDeadline(paidAt, ExpectedStartDate);
+            SupplierConfirmationDeadline = supplierConfirmationDeadline;
         }
         Status = RentalItemStatus.PendingSupplierConfirmation;
     }

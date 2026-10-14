@@ -1,5 +1,7 @@
 using Dprental.RentalService.Application.IServices.Checkout;
+using Dprental.RentalService.Application.IServices.Orders;
 using Dprental.RentalService.Application.Services.Checkout;
+using Dprental.RentalService.Application.Services.Orders;
 using Dprental.RentalService.Application.Services.Cart;
 using System;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,6 +24,9 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<ICheckoutOrderWriter, CheckoutOrderWriter>();
         services.AddScoped<ICheckoutInvoiceIssuer, CheckoutInvoiceIssuer>();
         services.AddScoped<ICheckoutService, CheckoutService>();
+
+        services.AddScoped<IRenterOrderQueryService, RenterOrderQueryService>();
+        services.AddScoped<ISupplierSubOrderQueryService, SupplierSubOrderQueryService>();
 
         // Đăng ký TimeProvider chung
         services.AddSingleton(TimeProvider.System);

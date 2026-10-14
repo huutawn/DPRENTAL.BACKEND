@@ -96,6 +96,9 @@ public class RentalOrder
     private readonly List<RentalItem> _items = [];
     public IReadOnlyCollection<RentalItem> Items => _items.AsReadOnly();
 
+    private readonly List<RentalSubOrder> _subOrders = [];
+    public IReadOnlyCollection<RentalSubOrder> SubOrders => _subOrders.AsReadOnly();
+
     [NotMapped]
     public decimal TotalRentalAmount => _items.Sum(i => i.RentalAmount);
 
@@ -363,11 +366,26 @@ public class RentalOrder
             termsContentHash.Trim(),
             utcNow);
 
+        // Mỗi nhà cung cấp một đơn con, đánh số theo thứ tự xuất hiện đầu tiên trong đơn.
+        Dictionary<Guid, RentalSubOrder> subOrdersBySupplier = [];
         foreach (var itemDto in itemsList)
         {
+            if (!subOrdersBySupplier.TryGetValue(itemDto.SupplierId, out RentalSubOrder? subOrder))
+            {
+                subOrder = new RentalSubOrder(
+                    Guid.NewGuid(),
+                    id,
+                    itemDto.SupplierId,
+                    RentalSubOrder.BuildCode(order.OrderCode, subOrdersBySupplier.Count + 1),
+                    utcNow);
+                subOrdersBySupplier.Add(itemDto.SupplierId, subOrder);
+                order._subOrders.Add(subOrder);
+            }
+
             RentalItem item = new(
                 itemDto.Id,
                 id,
+                subOrder.Id,
                 itemDto.EquipmentListingId,
                 itemDto.SupplierId,
                 itemDto.Quantity,
@@ -383,6 +401,7 @@ public class RentalOrder
                 itemDto.ListingSnapshot);
 
             order._items.Add(item);
+            subOrder.AddItem(item);
         }
 
         order.AddOperationReceipt(new RentalOperationReceipt(
@@ -498,9 +517,15 @@ public class RentalOrder
         PaymentRef = paymentRef;
         PaymentConfirmedAt = paidAt;
         UpdatedAt = utcNow;
-        foreach (var item in _items)
+        // Supplier nhận hoặc từ chối cả đơn con, nên mọi dòng của đơn con dùng chung hạn sớm nhất.
+        foreach (var subOrderItems in _items.GroupBy(i => i.RentalSubOrderId))
         {
-            item.RecordPaid(paidAt);
+            DateTimeOffset deadline = subOrderItems.Min(i =>
+                RentalItem.CalculateSupplierConfirmationDeadline(paidAt, i.ExpectedStartDate));
+            foreach (var item in subOrderItems)
+            {
+                item.RecordPaid(deadline);
+            }
         }
 
         AddStateTransition(new RentalStateTransition(

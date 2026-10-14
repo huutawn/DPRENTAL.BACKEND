@@ -172,7 +172,7 @@ public sealed class RentalItemsControllerIntegrationTests
             });
 
         using var client = factory.CreateClient();
-        var response = await client.PostAsync($"/api/v1/rental/items/{Guid.NewGuid()}/accept", null);
+        var response = await client.PostAsync($"/api/v1/rental/supplier/sub-orders/{Guid.NewGuid()}/accept", null);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -209,7 +209,7 @@ public sealed class RentalItemsControllerIntegrationTests
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
         // No Idempotency-Key header
-        var response = await client.PostAsync($"/api/v1/rental/items/{Guid.NewGuid()}/accept", null);
+        var response = await client.PostAsync($"/api/v1/rental/supplier/sub-orders/{Guid.NewGuid()}/accept", null);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -268,10 +268,10 @@ public sealed class RentalItemsControllerIntegrationTests
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
         client.DefaultRequestHeaders.Add("Idempotency-Key", "idemp-ctrl-accept-1");
 
-        var response = await client.PostAsync($"/api/v1/rental/items/{item.Id}/accept", null);
+        var response = await client.PostAsync($"/api/v1/rental/supplier/sub-orders/{item.RentalSubOrderId}/accept", null);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<SupplierDecisionResponse>();
+        var body = await response.Content.ReadFromJsonAsync<SubOrderDecisionResponse>();
         Assert.NotNull(body);
         Assert.Equal("AwaitingHandover", body.Status);
     }
@@ -324,12 +324,12 @@ public sealed class RentalItemsControllerIntegrationTests
         client.DefaultRequestHeaders.Add("Idempotency-Key", "idemp-ctrl-rej-1");
 
         var req = new SupplierRejectRequest("Equipment is broken", "Will be repaired next week");
-        var response = await client.PostAsJsonAsync($"/api/v1/rental/items/{item.Id}/reject", req);
+        var response = await client.PostAsJsonAsync($"/api/v1/rental/supplier/sub-orders/{item.RentalSubOrderId}/reject", req);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<SupplierDecisionResponse>();
+        var body = await response.Content.ReadFromJsonAsync<SubOrderDecisionResponse>();
         Assert.NotNull(body);
         Assert.Equal("Rejected", body.Status);
-        Assert.Equal("Equipment is broken", body.DecisionReason);
+        Assert.Equal("Equipment is broken", Assert.Single(body.Items).DecisionReason);
     }
 }

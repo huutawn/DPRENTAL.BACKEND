@@ -199,6 +199,48 @@ public sealed class PaymentWorkflowIntegrationTests
     }
 
     [Fact]
+    public async Task ProcessInvoicePaid_ExtendsHoldFiveMinutesPastTheSupplierDeadline()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
+        var order = CreateOrder(orderId, renterId, dailyRate: 200_000m, depositPerUnit: 500_000m, quantity: 2);
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        DateTimeOffset? requestedHoldExpiry = null;
+        var inventoryClient = new StubInventoryClient
+        {
+            ExtendHoldHandler = (groupId, req) =>
+            {
+                requestedHoldExpiry = req.NewHoldExpiresAt;
+                return Task.FromResult(Result.Success(new ExtendHoldResponse("REC-001", groupId, req.NewHoldExpiresAt, FixedNow, false)));
+            }
+        };
+        var service = CreateWorkflowService(db, inventoryClient, new StubPaymentClient());
+
+        var envelope = new PaymentEventEnvelope<InvoicePaidPayload>(
+            Guid.NewGuid(),
+            "InvoicePaid",
+            1,
+            "payment-service",
+            orderId.ToString("D"),
+            FixedNow,
+            "corr-hold",
+            null,
+            new InvoicePaidPayload(orderId, renterId, "INV-001", "PAY-001", order.TotalPayableAmount, "VND", FixedNow));
+
+        var result = await service.ProcessInvoicePaidAsync(envelope);
+
+        Assert.True(result.IsSuccess);
+        var item = (await db.RentalOrders.Include(o => o.Items).FirstAsync(o => o.Id == orderId)).Items.First();
+        // Supplier vẫn phải quyết định trước hạn; hold còn thêm 5 phút để worker chốt nốt đơn con đã bấm nhận trước hạn.
+        Assert.Equal(FixedNow.AddHours(24), item.SupplierConfirmationDeadline);
+        Assert.Equal(FixedNow.AddHours(24).AddMinutes(5), requestedHoldExpiry);
+    }
+
+    [Fact]
     public async Task ProcessInvoicePaid_ReplayedMessage_ReturnsSuccessWithoutDuplication()
     {
         string dbName = Guid.NewGuid().ToString("N");

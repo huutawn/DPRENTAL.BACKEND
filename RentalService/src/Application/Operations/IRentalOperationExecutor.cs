@@ -46,6 +46,22 @@ public interface IRentalOperationExecutor
         string idempotencyKey,
         CancellationToken cancellationToken = default);
 
+    Task<Result<IReadOnlyList<SupplierDecisionResponse>>> ExecuteSubOrderAcceptAsync(
+        Guid orderId,
+        Guid subOrderId,
+        Guid supplierId,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<IReadOnlyList<SupplierDecisionResponse>>> ExecuteSubOrderRejectAsync(
+        Guid orderId,
+        Guid subOrderId,
+        Guid supplierId,
+        string reason,
+        string? note,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default);
+
     Task<Result> ExecuteCancelInvoiceAsync(
         Guid orderId,
         string operationKey,
