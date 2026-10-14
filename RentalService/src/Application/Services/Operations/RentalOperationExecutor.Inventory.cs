@@ -1,7 +1,8 @@
 #pragma warning disable CA1848, CA1873
 using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
-using Dprental.RentalService.Application.DTOs.Integration;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Common;
@@ -96,9 +97,9 @@ public sealed partial class RentalOperationExecutor
 
             receipt.MarkSucceeded(utcNow, JsonSerializer.Serialize(holdData, JsonOptions));
 
-            var notifyEnvelope = new RentalEventEnvelope<RentalSupplierConfirmationRequestedPayload>(
+            var notifyEnvelope = new KafkaMessageEnvelope<RentalSupplierConfirmationRequestedPayload>(
                 Guid.NewGuid(),
-                RentalEventTypes.RentalSupplierConfirmationRequested,
+                KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested,
                 1,
                 "rental-service",
                 order.Id.ToString("D"),
@@ -117,7 +118,7 @@ public sealed partial class RentalOperationExecutor
                 notifyEnvelope.MessageId,
                 _rentalEventsTopic,
                 order.Id.ToString("D"),
-                RentalEventTypes.RentalSupplierConfirmationRequested,
+                KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested,
                 JsonSerializer.Serialize(notifyEnvelope, JsonOptions),
                 utcNow);
 

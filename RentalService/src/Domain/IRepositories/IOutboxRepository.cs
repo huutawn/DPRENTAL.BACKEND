@@ -1,13 +1,22 @@
+using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
 
 namespace Dprental.RentalService.Domain.IRepositories;
 
+public sealed record OutboxEnqueueResult(
+    RentalOutboxMessage Message,
+    bool IsReplay);
+
 public interface IOutboxRepository
 {
-    Task<IReadOnlyList<RentalOutboxMessage>> ClaimPendingBatchAsync(
+    Task<RentalOutboxMessage?> ClaimNextPendingAsync(
         string claimToken,
         TimeSpan leaseDuration,
-        int batchSize,
+        CancellationToken cancellationToken = default);
+
+
+    Task<Result<OutboxEnqueueResult>> EnqueueAtomicAsync(
+        RentalOutboxMessage message,
         CancellationToken cancellationToken = default);
 
     Task AddAsync(RentalOutboxMessage message, CancellationToken cancellationToken = default);

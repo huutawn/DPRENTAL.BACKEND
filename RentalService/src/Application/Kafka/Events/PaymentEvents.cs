@@ -2,26 +2,10 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 using Dprental.RentalService.Common.Utils;
 
-namespace Dprental.RentalService.Application.DTOs.Payment;
+namespace Dprental.RentalService.Application.Kafka.Events;
 
 /// <summary>
-/// Canonical standard integration event envelope for Payment domain events.
-/// Schema Version: 1, Partition Key: AggregateId (RentalOrderId).
-/// </summary>
-public sealed record PaymentEventEnvelope<TPayload>(
-    [property: JsonPropertyName("messageId")] Guid MessageId,
-    [property: JsonPropertyName("messageType")] string MessageType,
-    [property: JsonPropertyName("version")] int Version,
-    [property: JsonPropertyName("producer")] string Producer,
-    [property: JsonPropertyName("aggregateId")] string AggregateId,
-    [property: JsonPropertyName("occurredAt")] DateTimeOffset OccurredAt,
-    [property: JsonPropertyName("correlationId")] string CorrelationId,
-    [property: JsonPropertyName("causationId")] Guid? CausationId,
-    [property: JsonPropertyName("payload")] TPayload Payload
-);
-
-/// <summary>
-/// Event payload for InvoicePaid event.
+/// Event payload for InvoicePaid event from payment-service.
 /// </summary>
 public sealed record InvoicePaidPayload(
     [Required] Guid RentalOrderId,
@@ -45,7 +29,7 @@ public sealed record RefundCompletedItemPayload(
 }
 
 /// <summary>
-/// Event payload for RefundCompleted event.
+/// Event payload for RefundCompleted event from payment-service.
 /// </summary>
 public sealed record RefundCompletedPayload(
     [Required] Guid RentalOrderId,
@@ -59,7 +43,7 @@ public sealed record RefundCompletedPayload(
     [Required] DateTimeOffset CompletedAt);
 
 /// <summary>
-/// Event payload for RentalSettled event.
+/// Event payload for RentalSettled event from payment-service.
 /// </summary>
 public sealed record RentalSettledPayload(
     [Required] Guid RentalOrderId,

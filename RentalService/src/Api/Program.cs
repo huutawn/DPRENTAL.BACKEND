@@ -18,7 +18,7 @@ using Microsoft.OpenApi;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRentalServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
-builder.Services.AddRentalServiceApplication();
+builder.Services.AddRentalServiceApplication(builder.Configuration);
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<RentalServiceDbContext>(

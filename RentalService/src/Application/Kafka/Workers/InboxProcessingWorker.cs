@@ -1,46 +1,41 @@
 #pragma warning disable CA1848, CA1873
-using System.Text.Json;
-using Dprental.RentalService.Application.DTOs.Integration;
-using Dprental.RentalService.Application.DTOs.Payment;
-using Dprental.RentalService.Application.IServices.Integration;
-using Dprental.RentalService.Application.IServices.Payments;
-using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Application.Kafka.Configuration;
+using Dprental.RentalService.Application.Kafka.Consumers;
 using Dprental.RentalService.Domain.IRepositories;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
-namespace Dprental.RentalService.Application.Background;
+namespace Dprental.RentalService.Application.Kafka.Workers;
 
 public sealed class InboxProcessingWorker : BackgroundService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true
-    };
-
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<InboxProcessingWorker> _logger;
+    private readonly KafkaOptions _kafkaOptions;
     private readonly TimeSpan _pollingInterval;
-    private readonly string _dlqTopic;
 
+    [ActivatorUtilitiesConstructor]
     public InboxProcessingWorker(
         IServiceScopeFactory scopeFactory,
-        IConfiguration configuration,
+        IOptions<KafkaOptions> options,
         ILogger<InboxProcessingWorker> logger)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
-        int pollSeconds = configuration.GetValue("Workers:InboxProcessor:PollingIntervalSeconds", 15);
-        _pollingInterval = TimeSpan.FromSeconds(Math.Max(1, pollSeconds));
-        _dlqTopic = configuration["Kafka:PaymentDlqTopic"] ?? "payment.events.v1.dlq";
+        _kafkaOptions = options?.Value ?? new KafkaOptions();
+        _pollingInterval = TimeSpan.FromSeconds(Math.Max(1, _kafkaOptions.InboxPollingIntervalSeconds));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!_kafkaOptions.Enabled)
+        {
+            _logger.LogInformation("Kafka is disabled; InboxProcessingWorker will remain inactive");
+            return;
+        }
+
         _logger.LogInformation("InboxProcessingWorker started with polling interval {Interval}s", _pollingInterval.TotalSeconds);
 
         try
@@ -82,6 +77,11 @@ public sealed class InboxProcessingWorker : BackgroundService
 
     public async Task<int> ProcessBatchAsync(CancellationToken cancellationToken)
     {
+        if (!_kafkaOptions.Enabled)
+        {
+            return 0;
+        }
+
         DateTimeOffset utcNow = DateTimeOffset.UtcNow;
         IReadOnlyList<InboxMessageDescriptor> descriptors;
 

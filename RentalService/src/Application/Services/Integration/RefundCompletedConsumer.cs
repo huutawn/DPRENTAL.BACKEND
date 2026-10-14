@@ -2,6 +2,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
@@ -45,7 +47,7 @@ public sealed class RefundCompletedConsumer : IRefundCompletedConsumer
 
     public async Task<Result> ApplyRefundCompletedStagedAsync(
         RentalOrder order,
-        PaymentEventEnvelope<RefundCompletedPayload> envelope,
+        KafkaMessageEnvelope<RefundCompletedPayload> envelope,
         RentalInboxMessage inboxMessage,
         CancellationToken cancellationToken = default)
     {
@@ -214,7 +216,7 @@ public sealed class RefundCompletedConsumer : IRefundCompletedConsumer
     }
 
     public async Task<Result> ProcessRefundCompletedAsync(
-        PaymentEventEnvelope<RefundCompletedPayload> envelope,
+        KafkaMessageEnvelope<RefundCompletedPayload> envelope,
         CancellationToken cancellationToken = default)
     {
         if (envelope == null || envelope.Payload == null)

@@ -1,6 +1,7 @@
 #pragma warning disable CA1848, CA1873
 using System.Text.Json;
-using Dprental.RentalService.Application.DTOs.Integration;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.IServices.Expiry;
@@ -198,9 +199,9 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
                         payloadJson: JsonSerializer.Serialize(refundCmd, JsonOptions));
                     order.AddOperationReceipt(refundReceipt);
                 }
-                var outboxEnvelope = new RentalEventEnvelope<RentalItemExpiredPayload>(
+                var outboxEnvelope = new KafkaMessageEnvelope<RentalItemExpiredPayload>(
                     Guid.NewGuid(),
-                    RentalEventTypes.RentalItemExpired,
+                    KafkaContractSpec.EventTypes.RentalItemExpired,
                     1,
                     "rental-service",
                     order.Id.ToString("D"),
@@ -213,7 +214,7 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
                     outboxEnvelope.MessageId,
                     _rentalEventsTopic,
                     order.Id.ToString("D"),
-                    RentalEventTypes.RentalItemExpired,
+                    KafkaContractSpec.EventTypes.RentalItemExpired,
                     JsonSerializer.Serialize(outboxEnvelope, JsonOptions),
                     utcNow);
 

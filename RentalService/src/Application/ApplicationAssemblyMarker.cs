@@ -1,3 +1,7 @@
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("RentalService.Api.Tests")]
+
 namespace Dprental.RentalService.Application;
 
 /// <summary>

@@ -1,3 +1,5 @@
+using Dprental.RentalService.Common;
+using Dprental.RentalService.Common.Utils;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
@@ -14,10 +16,9 @@ public sealed class OutboxRepository : IOutboxRepository
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     }
 
-    public async Task<IReadOnlyList<RentalOutboxMessage>> ClaimPendingBatchAsync(
+    public async Task<RentalOutboxMessage?> ClaimNextPendingAsync(
         string claimToken,
         TimeSpan leaseDuration,
-        int batchSize,
         CancellationToken cancellationToken = default)
     {
         DateTimeOffset utcNow = DateTimeOffset.UtcNow;
@@ -34,48 +35,177 @@ public sealed class OutboxRepository : IOutboxRepository
                       AND (""ScheduledAt"" IS NULL OR ""ScheduledAt"" <= NOW())
                       AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" <= NOW())
                     ORDER BY ""CreatedAt""
-                    LIMIT {batchSize}
+                    LIMIT 1
                     FOR UPDATE SKIP LOCKED")
                 .ToListAsync(cancellationToken);
 
-            if (messages.Count > 0)
+            if (messages.Count == 0)
             {
-                var ids = messages.Select(m => m.Id).ToList();
-                await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
-                    UPDATE rental.rental_outbox_messages
-                    SET ""LockedBy"" = {claimToken},
-                        ""LockedUntilUtc"" = NOW() + ({leaseDuration.TotalSeconds} * interval '1 second')
-                    WHERE ""Id"" = ANY({ids})", cancellationToken);
-
-                foreach (var msg in messages)
-                {
-                    msg.Claim(claimToken, leaseUntil);
-                }
+                await tx.CommitAsync(cancellationToken);
+                return null;
             }
+
+            var message = messages[0];
+            await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+                UPDATE rental.rental_outbox_messages
+                SET ""LockedBy"" = {claimToken},
+                    ""LockedUntilUtc"" = NOW() + ({leaseDuration.TotalSeconds} * interval '1 second')
+                WHERE ""Id"" = {message.Id}", cancellationToken);
+
+            message.Claim(claimToken, leaseUntil);
             await tx.CommitAsync(cancellationToken);
-            return messages;
+            return message;
         }
         else
         {
-            var messages = await _dbContext.RentalOutboxMessages
+            var message = await _dbContext.RentalOutboxMessages
                 .Where(m => m.Status == "Pending" &&
                             (m.ScheduledAt == null || m.ScheduledAt <= utcNow) &&
                             (m.LockedUntilUtc == null || m.LockedUntilUtc <= utcNow))
                 .OrderBy(m => m.CreatedAt)
-                .Take(batchSize)
-                .ToListAsync(cancellationToken);
+                .FirstOrDefaultAsync(cancellationToken);
 
-            foreach (var msg in messages)
+            if (message != null)
             {
-                msg.Claim(claimToken, leaseUntil);
-            }
-
-            if (messages.Count > 0)
-            {
+                message.Claim(claimToken, leaseUntil);
                 await _dbContext.SaveChangesAsync(cancellationToken);
             }
 
-            return messages;
+            return message;
+        }
+    }
+
+
+    public async Task<Result<OutboxEnqueueResult>> EnqueueAtomicAsync(
+        RentalOutboxMessage message,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+
+        if (_dbContext.Database.IsRelational())
+        {
+            bool hasCallerTx = _dbContext.Database.CurrentTransaction != null;
+            if (hasCallerTx)
+            {
+                return await ExecuteInsertOnConflictAsync(message, cancellationToken);
+            }
+            else
+            {
+                await using var tx = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+                var result = await ExecuteInsertOnConflictAsync(message, cancellationToken);
+                if (result.IsSuccess)
+                {
+                    await tx.CommitAsync(cancellationToken);
+                }
+                else
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                }
+                return result;
+            }
+        }
+        else
+        {
+            var existing = await _dbContext.RentalOutboxMessages
+                .AsNoTracking()
+                .FirstOrDefaultAsync(m => m.Id == message.Id, cancellationToken);
+
+            if (existing != null)
+            {
+                return new OutboxEnqueueResult(existing, IsReplay: true);
+            }
+
+            try
+            {
+                await _dbContext.RentalOutboxMessages.AddAsync(message, cancellationToken);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                return new OutboxEnqueueResult(message, IsReplay: false);
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                _dbContext.Entry(message).State = EntityState.Detached;
+                var concurrent = await _dbContext.RentalOutboxMessages
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(m => m.Id == message.Id, cancellationToken);
+
+                if (concurrent != null)
+                {
+                    return new OutboxEnqueueResult(concurrent, IsReplay: true);
+                }
+
+                return Error.Failure("OUTBOX_ENQUEUE_FAILED", "Failed to enqueue outbox message concurrently.");
+            }
+        }
+    }
+
+    private async Task<Result<OutboxEnqueueResult>> ExecuteInsertOnConflictAsync(
+        RentalOutboxMessage message,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            int rows = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+                INSERT INTO rental.rental_outbox_messages (
+                    ""Id"",
+                    ""Topic"",
+                    ""PartitionKey"",
+                    ""MessageType"",
+                    ""Payload"",
+                    ""Status"",
+                    ""CreatedAt"",
+                    ""ScheduledAt"",
+                    ""PublishedAt"",
+                    ""LastAttemptedAt"",
+                    ""LockedBy"",
+                    ""LockedUntilUtc"",
+                    ""RetryCount"",
+                    ""ErrorMessage""
+                ) VALUES (
+                    {message.Id},
+                    {message.Topic},
+                    {message.PartitionKey},
+                    {message.MessageType},
+                    {message.Payload},
+                    {message.Status},
+                    {message.CreatedAt},
+                    {message.ScheduledAt},
+                    {message.PublishedAt},
+                    {message.LastAttemptedAt},
+                    {message.LockedBy},
+                    {message.LockedUntilUtc},
+                    {message.RetryCount},
+                    {message.ErrorMessage}
+                )
+                ON CONFLICT (""Id"") DO NOTHING;", cancellationToken);
+
+            if (rows > 0)
+            {
+                return new OutboxEnqueueResult(message, IsReplay: false);
+            }
+
+            var existing = await _dbContext.RentalOutboxMessages
+                .AsNoTracking()
+                .FirstOrDefaultAsync(m => m.Id == message.Id, cancellationToken);
+
+            if (existing != null)
+            {
+                return new OutboxEnqueueResult(existing, IsReplay: true);
+            }
+
+            return Error.Failure("OUTBOX_NOT_FOUND_AFTER_CONFLICT", $"MessageId '{message.Id}' had conflict but could not be read.");
+        }
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        {
+            var existing = await _dbContext.RentalOutboxMessages
+                .AsNoTracking()
+                .FirstOrDefaultAsync(m => m.Id == message.Id, cancellationToken);
+
+            if (existing != null)
+            {
+                return new OutboxEnqueueResult(existing, IsReplay: true);
+            }
+
+            return Error.Failure("OUTBOX_NOT_FOUND_AFTER_CONFLICT", $"MessageId '{message.Id}' had unique violation but could not be read.");
         }
     }
 
@@ -164,5 +294,11 @@ public sealed class OutboxRepository : IOutboxRepository
             await _dbContext.SaveChangesAsync(cancellationToken);
             return true;
         }
+    }
+
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+    {
+        return ex.InnerException is Npgsql.PostgresException pgEx && pgEx.SqlState == "23505";
     }
 }

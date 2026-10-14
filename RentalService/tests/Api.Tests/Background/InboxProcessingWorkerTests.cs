@@ -1,8 +1,9 @@
 using System.Text.Json;
-using Dprental.RentalService.Application.Background;
-using Dprental.RentalService.Application.DTOs.Payment;
+using Dprental.RentalService.Application.Kafka.Workers;
+using Dprental.RentalService.Application.Kafka.Consumers;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.IServices.Integration;
-using Dprental.RentalService.Application.Services.Integration;
 using Dprental.RentalService.Application.IServices.Payments;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.DependencyInjection;
@@ -14,6 +15,9 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
+using Dprental.RentalService.Application.Kafka.Configuration;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 using Dprental.RentalService.Api.Tests.Domain;
@@ -34,16 +38,16 @@ public sealed class InboxProcessingWorkerTests
 
     private sealed class StubPaymentWorkflow : IPaymentWorkflowService
     {
-        public Func<PaymentEventEnvelope<InvoicePaidPayload>, Task<Result>>? Handler { get; set; }
+        public Func<KafkaMessageEnvelope<InvoicePaidPayload>, Task<Result>>? Handler { get; set; }
 
         public Task<Result> ApplyInvoicePaidStagedAsync(
             RentalOrder order,
-            PaymentEventEnvelope<InvoicePaidPayload> envelope,
+            KafkaMessageEnvelope<InvoicePaidPayload> envelope,
             RentalInboxMessage inboxMessage,
             CancellationToken cancellationToken = default) =>
             Handler != null ? Handler(envelope) : Task.FromResult(Result.Success());
 
-        public Task<Result> ProcessInvoicePaidAsync(PaymentEventEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default) =>
+        public Task<Result> ProcessInvoicePaidAsync(KafkaMessageEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default) =>
             Handler != null ? Handler(envelope) : Task.FromResult(Result.Success());
     }
 
@@ -51,12 +55,12 @@ public sealed class InboxProcessingWorkerTests
     {
         public Task<Result> ApplyRefundCompletedStagedAsync(
             RentalOrder order,
-            PaymentEventEnvelope<RefundCompletedPayload> envelope,
+            KafkaMessageEnvelope<RefundCompletedPayload> envelope,
             RentalInboxMessage inboxMessage,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success());
 
-        public Task<Result> ProcessRefundCompletedAsync(PaymentEventEnvelope<RefundCompletedPayload> envelope, CancellationToken cancellationToken = default) =>
+        public Task<Result> ProcessRefundCompletedAsync(KafkaMessageEnvelope<RefundCompletedPayload> envelope, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success());
     }
 
@@ -74,7 +78,7 @@ public sealed class InboxProcessingWorkerTests
         db.RentalOrders.Add(order);
 
         var payload = new InvoicePaidPayload(orderId, order.RenterId, "INV-001", "PAY-001", order.TotalPayableAmount, "VND", FixedNow);
-        var envelope = new PaymentEventEnvelope<InvoicePaidPayload>(
+        var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
             Guid.NewGuid(), "InvoicePaid", 1, "payment-service", orderId.ToString("D"), FixedNow, "corr", null, payload);
 
         var inboxMsg = new RentalInboxMessage(
@@ -91,12 +95,13 @@ public sealed class InboxProcessingWorkerTests
         services.AddSingleton<IOrderLockManager, Dprental.RentalService.Api.Tests.TestHelpers.FakeOrderLockManager>();
         services.AddSingleton<IPaymentWorkflowService>(new StubPaymentWorkflow());
         services.AddSingleton<IRefundCompletedConsumer>(new StubRefundConsumer());
+        services.AddScoped<IKafkaOutboxWriter, KafkaOutboxWriter>();
         services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
-        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton(Options.Create(new KafkaOptions { Enabled = true }));
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var worker = new InboxProcessingWorker(scopeFactory, new ConfigurationBuilder().Build(), NullLogger<InboxProcessingWorker>.Instance);
+        var worker = new InboxProcessingWorker(scopeFactory, Options.Create(new KafkaOptions { Enabled = true }), NullLogger<InboxProcessingWorker>.Instance);
         int processed = await worker.ProcessBatchAsync(CancellationToken.None);
 
         Assert.Equal(1, processed);
@@ -120,7 +125,7 @@ public sealed class InboxProcessingWorkerTests
         db.RentalOrders.Add(order);
 
         var payload = new InvoicePaidPayload(orderId, order.RenterId, "INV-002", "PAY-002", order.TotalPayableAmount, "VND", FixedNow);
-        var envelope = new PaymentEventEnvelope<InvoicePaidPayload>(
+        var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
             Guid.NewGuid(), "InvoicePaid", 1, "payment-service", orderId.ToString("D"), FixedNow, "corr", null, payload);
 
         var inboxMsg = new RentalInboxMessage(
@@ -142,12 +147,13 @@ public sealed class InboxProcessingWorkerTests
         services.AddSingleton<IOrderLockManager, Dprental.RentalService.Api.Tests.TestHelpers.FakeOrderLockManager>();
         services.AddSingleton<IPaymentWorkflowService>(paymentWorkflow);
         services.AddSingleton<IRefundCompletedConsumer>(new StubRefundConsumer());
+        services.AddScoped<IKafkaOutboxWriter, KafkaOutboxWriter>();
         services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
-        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton(Options.Create(new KafkaOptions { Enabled = true }));
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var worker = new InboxProcessingWorker(scopeFactory, new ConfigurationBuilder().Build(), NullLogger<InboxProcessingWorker>.Instance);
+        var worker = new InboxProcessingWorker(scopeFactory, Options.Create(new KafkaOptions { Enabled = true }), NullLogger<InboxProcessingWorker>.Instance);
         int processed = await worker.ProcessBatchAsync(CancellationToken.None);
 
         Assert.Equal(0, processed);

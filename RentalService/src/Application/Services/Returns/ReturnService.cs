@@ -13,6 +13,7 @@ using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.DTOs.Integration;
 using Microsoft.Extensions.Configuration;
+using Dprental.RentalService.Application.Kafka.Contracts;
 
 namespace Dprental.RentalService.Application.Services.Returns;
 
@@ -42,11 +43,16 @@ public sealed class ReturnService(IRentalOrderRepository repository, IOrderLockM
         string key = idempotencyKey.Trim();
         string payload = JsonSerializer.Serialize(new
         {
-            ItemId = itemId, SupplierId = supplierId,
-            ActualReturnAt = request.ActualReturnAt.ToUniversalTime(), request.Note,
+            ItemId = itemId,
+            SupplierId = supplierId,
+            ActualReturnAt = request.ActualReturnAt.ToUniversalTime(),
+            request.Note,
             Units = request.Units.OrderBy(u => u.RentalUnitAssignmentId).Select(u => new
             {
-                u.RentalUnitAssignmentId, u.Condition, u.Description, MediaIds = u.MediaIds.OrderBy(id => id)
+                u.RentalUnitAssignmentId,
+                u.Condition,
+                u.Description,
+                MediaIds = u.MediaIds.OrderBy(id => id)
             })
         });
         string fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
@@ -89,7 +95,7 @@ public sealed class ReturnService(IRentalOrderRepository repository, IOrderLockM
         order.IncrementVersion();
         try
         {
-            var envelope = new RentalEventEnvelope<RentalUnitsReturnedPayload>(Guid.NewGuid(), "RentalUnitsReturned",
+            var envelope = new KafkaMessageEnvelope<RentalUnitsReturnedPayload>(Guid.NewGuid(), "RentalUnitsReturned",
                 1, "rental-service", order.Id.ToString("D"), now, key, null,
                 new RentalUnitsReturnedPayload(order.Id, item.Id, recorded.Value.Id,
                     request.ActualReturnAt.ToUniversalTime(), now,
