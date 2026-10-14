@@ -33,6 +33,21 @@ public sealed class PublicEquipmentListingServiceTests
 
         public Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(id, out var l) && l.Status == EquipmentListingStatus.Active ? l : null);
+        public Task<EquipmentListingStatisticsResult> GetListingStatisticsAsync(EquipmentListingStatisticsCriteria criteria, CancellationToken cancellationToken = default)
+        {
+            var q = Store.Values.AsEnumerable();
+            if (criteria.OwnerUserId.HasValue)
+            {
+                q = q.Where(l => l.OwnerUserId == criteria.OwnerUserId.Value);
+            }
+            if (criteria.Status.HasValue)
+            {
+                q = q.Where(l => l.Status == criteria.Status.Value);
+            }
+            var byType = q.GroupBy(l => l.EquipmentTypeId).ToDictionary(g => g.Key, g => g.Count());
+            var byBrand = q.GroupBy(l => l.BrandId).ToDictionary(g => g.Key, g => g.Count());
+            return Task.FromResult(new EquipmentListingStatisticsResult(byType, byBrand));
+        }
 
         public Task<OwnerEquipmentListingSearchResult> SearchOwnerAsync(OwnerEquipmentListingSearchCriteria criteria, CancellationToken cancellationToken = default)
         {
@@ -77,6 +92,14 @@ public sealed class PublicEquipmentListingServiceTests
                 matching = matching.Where(l => l.Name.Contains(criteria.Filters.SearchKeyword, StringComparison.OrdinalIgnoreCase) ||
                                                l.Model.Contains(criteria.Filters.SearchKeyword, StringComparison.OrdinalIgnoreCase));
             }
+            if (criteria.Filters.EquipmentTypeId.HasValue)
+            {
+                matching = matching.Where(l => l.EquipmentTypeId == criteria.Filters.EquipmentTypeId.Value);
+            }
+            else if (criteria.Filters.EquipmentTypeIds != null)
+            {
+                matching = matching.Where(l => criteria.Filters.EquipmentTypeIds.Contains(l.EquipmentTypeId));
+            }
 
             var list = matching.ToList();
             var paged = list.Skip(criteria.Skip).Take(criteria.Take).Select(l => new PublicEquipmentListingItem(l, 5, 3)).ToList();
@@ -103,6 +126,13 @@ public sealed class PublicEquipmentListingServiceTests
 
         public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(equipmentTypeId, 1, [])));
+
+        public Func<Guid, Task<Result<IReadOnlyList<Guid>>>>? GetByCategoryHandler { get; set; }
+
+        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
+            GetByCategoryHandler != null
+                ? GetByCategoryHandler(categoryId)
+                : Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
     }
 
     private readonly FakePublicListingRepository _repo = new();
@@ -120,7 +150,8 @@ public sealed class PublicEquipmentListingServiceTests
             queryValidator,
             filterResolver,
             mediaOptions,
-            _clock);
+            _clock,
+            catalogClient: _catalogClient);
     }
 
     [Fact]
@@ -193,5 +224,158 @@ public sealed class PublicEquipmentListingServiceTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_QUERY_PARAMETER", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task GetStatistics_ReturnsActiveListingsOnly()
+    {
+        var typeId = Guid.NewGuid();
+        var brandId = Guid.NewGuid();
+
+        var draftListing = EquipmentListing.Create(
+            Guid.NewGuid(), Guid.NewGuid(), typeId, brandId, "Draft", null, "Draft", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        _repo.Add(draftListing);
+
+        var activeListing = EquipmentListing.Create(
+            Guid.NewGuid(), Guid.NewGuid(), typeId, brandId, "Active", null, "Active", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        activeListing.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+        _repo.Add(activeListing);
+
+        var service = CreateService();
+        var result = await service.GetStatisticsAsync(CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value.ByEquipmentType[typeId]);
+        Assert.Equal(1, result.Value.ByBrand[brandId]);
+    }
+
+    [Fact]
+    public async Task List_CategoryAndTypeFilter_WhenTypeNotInCate_FallsBackToCategory()
+    {
+        var categoryId = Guid.NewGuid();
+        var typeInCate = Guid.NewGuid();
+        var typeNotInCate = Guid.NewGuid();
+        var brandId = Guid.NewGuid();
+
+        _catalogClient.GetByCategoryHandler = _ => Task.FromResult(Result.Success<IReadOnlyList<Guid>>([typeInCate]));
+
+        var listingInCate = EquipmentListing.Create(
+            Guid.NewGuid(), Guid.NewGuid(), typeInCate, brandId, "In Cate", null, "In Cate", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        listingInCate.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+        _repo.Add(listingInCate);
+
+        var service = CreateService();
+
+        // Request categoryId + typeNotInCate -> falls back to typeInCate from categoryId
+        var request = new ListPublicEquipmentListingsRequest(
+            CategoryId: categoryId,
+            EquipmentTypeId: typeNotInCate);
+
+        var result = await service.ListPublicListingsAsync(request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value.Value.TotalCount);
+        Assert.Equal(listingInCate.Id, result.Value.Value.Items[0].Id);
+    }
+
+    [Fact]
+    public async Task List_CategoryAndTypeFilter_WhenTypeInCate_FiltersByType()
+    {
+        var categoryId = Guid.NewGuid();
+        var typeA = Guid.NewGuid();
+        var typeB = Guid.NewGuid();
+        var brandId = Guid.NewGuid();
+
+        _catalogClient.GetByCategoryHandler = _ => Task.FromResult(Result.Success<IReadOnlyList<Guid>>([typeA, typeB]));
+
+        var listingA = EquipmentListing.Create(
+            Guid.NewGuid(), Guid.NewGuid(), typeA, brandId, "Type A", null, "Type A", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        listingA.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+        _repo.Add(listingA);
+
+        var listingB = EquipmentListing.Create(
+            Guid.NewGuid(), Guid.NewGuid(), typeB, brandId, "Type B", null, "Type B", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        listingB.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+        _repo.Add(listingB);
+
+        var service = CreateService();
+
+        // Request categoryId + typeA -> filters only typeA
+        var request = new ListPublicEquipmentListingsRequest(
+            CategoryId: categoryId,
+            EquipmentTypeId: typeA);
+
+        var result = await service.ListPublicListingsAsync(request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value.Value.TotalCount);
+        Assert.Equal(listingA.Id, result.Value.Value.Items[0].Id);
+    }
+
+    [Fact]
+    public async Task List_CategoryOnly_FiltersAllTypesInCategory()
+    {
+        var categoryId = Guid.NewGuid();
+        var typeA = Guid.NewGuid();
+        var typeB = Guid.NewGuid();
+        var typeC = Guid.NewGuid();
+        var brandId = Guid.NewGuid();
+
+        _catalogClient.GetByCategoryHandler = _ => Task.FromResult(Result.Success<IReadOnlyList<Guid>>([typeA, typeB]));
+
+        var listingA = EquipmentListing.Create(
+            Guid.NewGuid(), Guid.NewGuid(), typeA, brandId, "Type A", null, "Type A", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        listingA.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+        _repo.Add(listingA);
+
+        var listingB = EquipmentListing.Create(
+            Guid.NewGuid(), Guid.NewGuid(), typeB, brandId, "Type B", null, "Type B", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        listingB.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+        _repo.Add(listingB);
+
+        var listingC = EquipmentListing.Create(
+            Guid.NewGuid(), Guid.NewGuid(), typeC, brandId, "Type C", null, "Type C", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        listingC.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+        _repo.Add(listingC);
+
+        var service = CreateService();
+
+        var request = new ListPublicEquipmentListingsRequest(
+            CategoryId: categoryId);
+
+        var result = await service.ListPublicListingsAsync(request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(2, result.Value.Value.TotalCount);
+    }
+
+    [Fact]
+    public async Task List_EmptyCategory_WithInvalidInputs_StillValidatesAndReturns400()
+    {
+        var categoryId = Guid.NewGuid();
+        _catalogClient.GetByCategoryHandler = _ => Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
+
+        var service = CreateService();
+
+        // 1. Invalid date window: from > to
+        var requestInvalidDates = new ListPublicEquipmentListingsRequest(
+            CategoryId: categoryId,
+            From: new DateOnly(2026, 10, 20),
+            To: new DateOnly(2026, 10, 10));
+
+        var resultDates = await service.ListPublicListingsAsync(requestInvalidDates);
+        Assert.True(resultDates.IsFailure);
+        Assert.Equal("INVALID_DATE_ORDER", resultDates.Error.Code);
+
+        // 2. Invalid requestedQuantity: < 1
+        var requestInvalidQty = new ListPublicEquipmentListingsRequest(
+            CategoryId: categoryId,
+            From: new DateOnly(2026, 10, 10),
+            To: new DateOnly(2026, 10, 15),
+            RequestedQuantity: 0);
+
+        var resultQty = await service.ListPublicListingsAsync(requestInvalidQty);
+        Assert.True(resultQty.IsFailure);
+        Assert.Equal("INVALID_QUERY_PARAMETER", resultQty.Error.Code);
     }
 }

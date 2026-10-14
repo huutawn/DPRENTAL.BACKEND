@@ -76,6 +76,9 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
                     1,
                     [new CatalogBatchSchemaItemResponse(1, [])])));
         }
+
+        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
     }
 
     private sealed class StubMediaClient : IMediaServiceClient

@@ -8,6 +8,7 @@ using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Application.Validation;
 using Dprental.InventoryService.Common;
+using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Domain.IRepositories;
 using Microsoft.Extensions.Options;
 using Dprental.InventoryService.Application.Search;
@@ -259,5 +260,36 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
 
         var items = assets.Select(InventoryAssetMapper.ToResponse).ToList();
         return new PagedResponse<InventoryAssetResponse>(items, normalizedPage, normalizedPageSize, totalCount, totalPages);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<EquipmentListingStatisticsResponse>> GetOwnerStatisticsAsync(
+        EquipmentListingStatus? status,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (caller.IsAuthenticated && caller.IsService)
+        {
+            return Error.Forbidden("SERVICE_TOKEN_REJECTED", "Service token không được phép truy cập thống kê cá nhân.");
+        }
+
+        if (!caller.IsAuthenticated || !caller.UserId.HasValue)
+        {
+            return Error.Unauthorized("AUTH_REQUIRED", "Yêu cầu đăng nhập.");
+        }
+
+        if (status.HasValue && !Enum.IsDefined(status.Value))
+        {
+            return Error.Validation("INVALID_QUERY_PARAMETER", "Trạng thái không hợp lệ.");
+        }
+
+        var criteria = new EquipmentListingStatisticsCriteria(
+            OwnerUserId: caller.UserId.Value,
+            Status: status);
+
+        var result = await _listingRepository.GetListingStatisticsAsync(criteria, cancellationToken);
+        return Result.Success(new EquipmentListingStatisticsResponse(result.ByEquipmentType, result.ByBrand));
     }
 }

@@ -44,6 +44,11 @@ public interface IEquipmentListingRepository : IRepo<EquipmentListing, Guid>
     Task<EquipmentListing?> GetCalendarSnapshotAsync(Guid listingId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Thống kê tổng hợp số lượng listing theo equipmentTypeId và brandId trên PostgreSQL.
+    /// </summary>
+    Task<EquipmentListingStatisticsResult> GetListingStatisticsAsync(EquipmentListingStatisticsCriteria criteria, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Đưa Listing mới vào hàng đợi lưu trữ.
     /// </summary>
     void Add(EquipmentListing listing);

@@ -39,6 +39,21 @@ internal sealed class FakeListingRepository : IEquipmentListingRepository
 
     public Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         Task.FromResult(Store.TryGetValue(id, out var l) && l.Status == EquipmentListingStatus.Active ? l : null);
+    public Task<EquipmentListingStatisticsResult> GetListingStatisticsAsync(EquipmentListingStatisticsCriteria criteria, CancellationToken cancellationToken = default)
+    {
+        var q = Store.Values.AsEnumerable();
+        if (criteria.OwnerUserId.HasValue)
+        {
+            q = q.Where(l => l.OwnerUserId == criteria.OwnerUserId.Value);
+        }
+        if (criteria.Status.HasValue)
+        {
+            q = q.Where(l => l.Status == criteria.Status.Value);
+        }
+        var byType = q.GroupBy(l => l.EquipmentTypeId).ToDictionary(g => g.Key, g => g.Count());
+        var byBrand = q.GroupBy(l => l.BrandId).ToDictionary(g => g.Key, g => g.Count());
+        return Task.FromResult(new EquipmentListingStatisticsResult(byType, byBrand));
+    }
 
     public Task<OwnerEquipmentListingSearchResult> SearchOwnerAsync(OwnerEquipmentListingSearchCriteria criteria, CancellationToken cancellationToken = default)
     {

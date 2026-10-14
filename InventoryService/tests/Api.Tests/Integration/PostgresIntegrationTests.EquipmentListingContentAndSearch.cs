@@ -31,7 +31,7 @@ using Xunit;
 
 namespace Dprental.InventoryService.Api.Tests.Integration;
 
-public sealed class PostgresEquipmentListingContentAndSearchTests : IClassFixture<PostgresFixture>
+public sealed partial class PostgresEquipmentListingContentAndSearchTests : IClassFixture<PostgresFixture>
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 10, 12, 10, 0, 0, TimeSpan.Zero);
     private readonly PostgresFixture _fixture;
@@ -81,6 +81,9 @@ public sealed class PostgresEquipmentListingContentAndSearchTests : IClassFixtur
                 new CatalogBatchSchemaItemResponse(1, [])
             ])));
         }
+
+        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
     }
 
     private sealed class TrackingMediaClient : IMediaServiceClient

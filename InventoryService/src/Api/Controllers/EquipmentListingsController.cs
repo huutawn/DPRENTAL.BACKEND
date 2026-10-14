@@ -6,6 +6,7 @@ using Dprental.InventoryService.Application.DTOs.Calendar;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
+using Dprental.InventoryService.Common.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -221,5 +222,31 @@ public sealed class EquipmentListingsController : ControllerBase
             controllerName: "InventoryAssets",
             routeValues: new { assetId = result.Value.Id },
             value: result.Value);
+    }
+
+    /// <summary>
+    /// Thống kê số lượng listing của người dùng hiện tại nhóm theo equipmentTypeId và brandId, lọc trạng thái tùy chọn.
+    /// </summary>
+    [HttpGet("statistics")]
+    [ProducesResponseType(typeof(EquipmentListingStatisticsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GetStatistics(
+        [FromQuery] EquipmentListingStatus? status,
+        CancellationToken cancellationToken = default)
+    {
+
+        if (Request.Query.Any(q => !string.Equals(q.Key, "status", StringComparison.OrdinalIgnoreCase) || q.Value.Count != 1))
+        {
+            return this.ToProblem(Error.Validation("INVALID_QUERY_PARAMETER", "Tham số thống kê không hợp lệ."));
+        }
+        var result = await _listingService.GetOwnerStatisticsAsync(status, _callerContext, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
     }
 }

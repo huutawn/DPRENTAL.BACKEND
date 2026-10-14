@@ -5,6 +5,7 @@ namespace Dprental.InventoryService.Application.DTOs.Listings;
 /// </summary>
 public sealed record ListPublicEquipmentListingsRequest(
     string? Q = null,
+    Guid? CategoryId = null,
     Guid? EquipmentTypeId = null,
     Guid? BrandId = null,
     string? Sort = null,

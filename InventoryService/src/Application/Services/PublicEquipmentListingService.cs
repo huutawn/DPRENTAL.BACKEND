@@ -1,4 +1,5 @@
 using Dprental.InventoryService.Application.DTOs.Listings;
+using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Mapping;
@@ -24,6 +25,7 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
     private readonly AssetSearchQueryValidator _queryValidator;
     private readonly AssetSearchFilterResolver _filterResolver;
     private readonly MediaServiceOptions _mediaOptions;
+    private readonly ICatalogServiceClient? _catalogClient;
     private readonly TimeProvider _timeProvider;
     private readonly IInventorySearchIndexService? _searchIndexService;
     private readonly ILogger<PublicEquipmentListingService>? _logger;
@@ -34,13 +36,15 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
         IOptions<MediaServiceOptions> mediaOptions,
         TimeProvider? timeProvider = null,
         IInventorySearchIndexService? searchIndexService = null,
-        ILogger<PublicEquipmentListingService>? logger = null)
+        ILogger<PublicEquipmentListingService>? logger = null,
+        ICatalogServiceClient? catalogClient = null)
     {
         _listingRepository = listingRepository ?? throw new ArgumentNullException(nameof(listingRepository));
         _queryValidator = queryValidator ?? throw new ArgumentNullException(nameof(queryValidator));
         _filterResolver = filterResolver ?? throw new ArgumentNullException(nameof(filterResolver));
         ArgumentNullException.ThrowIfNull(mediaOptions);
         _mediaOptions = mediaOptions.Value ?? throw new ArgumentException("MediaServiceOptions không được null.", nameof(mediaOptions));
+        _catalogClient = catalogClient;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _searchIndexService = searchIndexService;
         _logger = logger;
@@ -81,6 +85,18 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
     }
 
     /// <inheritdoc />
+    public async Task<Result<EquipmentListingStatisticsResponse>> GetStatisticsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var criteria = new EquipmentListingStatisticsCriteria(
+            OwnerUserId: null,
+            Status: EquipmentListingStatus.Active);
+
+        var result = await _listingRepository.GetListingStatisticsAsync(criteria, cancellationToken);
+        return Result.Success(new EquipmentListingStatisticsResponse(result.ByEquipmentType, result.ByBrand));
+    }
+
+    /// <inheritdoc />
     public async Task<Result<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>> ListPublicListingsAsync(
         ListPublicEquipmentListingsRequest request,
         CancellationToken cancellationToken = default)
@@ -93,7 +109,8 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
             request.Q,
             request.EquipmentTypeId,
             request.BrandId,
-            request.Sort);
+            request.Sort,
+            request.CategoryId);
 
         if (valResult.IsFailure)
         {
@@ -101,6 +118,45 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
         }
 
         var validated = valResult.Value;
+
+        Guid? effectiveEquipmentTypeId = validated.EquipmentTypeId;
+        IReadOnlyList<Guid>? effectiveEquipmentTypeIds = null;
+
+        if (validated.CategoryId.HasValue)
+        {
+            if (_catalogClient is null)
+            {
+                return Error.Unavailable("CATALOG_SERVICE_UNAVAILABLE", "CatalogService client chưa được cấu hình.");
+            }
+
+            var categoryTypeIdsResult = await _catalogClient.GetEquipmentTypeIdsByCategoryAsync(validated.CategoryId.Value, cancellationToken);
+            if (categoryTypeIdsResult.IsFailure)
+            {
+                return categoryTypeIdsResult.Error;
+            }
+
+            var categoryTypeIds = categoryTypeIdsResult.Value;
+
+            if (validated.EquipmentTypeId.HasValue)
+            {
+                if (categoryTypeIds.Contains(validated.EquipmentTypeId.Value))
+                {
+                    effectiveEquipmentTypeId = validated.EquipmentTypeId.Value;
+                    effectiveEquipmentTypeIds = null;
+                }
+                else
+                {
+                    effectiveEquipmentTypeId = null;
+                    effectiveEquipmentTypeIds = categoryTypeIds;
+                }
+            }
+            else
+            {
+                effectiveEquipmentTypeId = null;
+                effectiveEquipmentTypeIds = categoryTypeIds;
+            }
+
+        }
 
         DateOnly? availabilityFrom = null;
         DateOnly? availabilityTo = null;
@@ -143,7 +199,7 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
             var candidateResult = await _searchIndexService.SearchPublicListingCandidatesAsync(
                 new PublicListingSearchIndexQuery(
                     Keyword: validated.SearchKeyword,
-                    EquipmentTypeId: validated.EquipmentTypeId,
+                    EquipmentTypeId: effectiveEquipmentTypeId,
                     BrandId: validated.BrandId),
                 cancellationToken);
 
@@ -170,13 +226,14 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
 
         var resolveResult = await _filterResolver.ResolveAsync(
             request.Filters,
-            validated.EquipmentTypeId,
+            effectiveEquipmentTypeId,
             ct => _listingRepository.GetDistinctSchemaVersionsPublicAsync(
                 new AssetSearchFilters(
                     SearchKeyword: candidateIds == null ? validated.SearchKeyword : null,
-                    EquipmentTypeId: validated.EquipmentTypeId,
+                    EquipmentTypeId: effectiveEquipmentTypeId,
                     BrandId: validated.BrandId,
-                    CandidateIds: candidateIds),
+                    CandidateIds: candidateIds,
+                    EquipmentTypeIds: effectiveEquipmentTypeIds),
                 ct),
             isFieldForbidden: PublicAssetDataPolicy.IsReservedPropertyName,
             cancellationToken);
@@ -186,17 +243,29 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
             return resolveResult.Error;
         }
 
+        if (effectiveEquipmentTypeIds is not null && effectiveEquipmentTypeIds.Count == 0)
+        {
+            var emptyPaged = new PagedResponse<PublicEquipmentListingResponse>(
+                Array.Empty<PublicEquipmentListingResponse>(),
+                request.Page,
+                request.PageSize,
+                0,
+                0);
+            return Result.Success(new SearchExecution<PagedResponse<PublicEquipmentListingResponse>>(emptyPaged, backend));
+        }
+
         var resolvedFilters = resolveResult.Value;
         var evaluationNowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
 
         var searchFilters = new AssetSearchFilters(
             SearchKeyword: candidateIds == null ? validated.SearchKeyword : null,
-            EquipmentTypeId: validated.EquipmentTypeId,
+            EquipmentTypeId: effectiveEquipmentTypeId,
             BrandId: validated.BrandId,
             Sort: validated.Sort,
             CompatibleSchemaVersions: resolvedFilters.CompatibleSchemaVersions,
             DynamicFilters: resolvedFilters.Criteria,
-            CandidateIds: candidateIds);
+            CandidateIds: candidateIds,
+            EquipmentTypeIds: effectiveEquipmentTypeIds);
         var searchCriteria = new EquipmentListingSearchCriteria(
             filters: searchFilters,
             availabilityFrom: availabilityFrom,

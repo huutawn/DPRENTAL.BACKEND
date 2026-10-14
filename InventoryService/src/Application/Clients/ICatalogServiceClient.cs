@@ -29,4 +29,9 @@ public interface ICatalogServiceClient
     /// Lấy batch specification schemas của loại thiết bị từ CatalogService (gồm current schema và các version được yêu cầu).
     /// </summary>
     Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy danh sách ID các loại thiết bị đã công khai thuộc một danh mục (Category).
+    /// </summary>
+    Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default);
 }

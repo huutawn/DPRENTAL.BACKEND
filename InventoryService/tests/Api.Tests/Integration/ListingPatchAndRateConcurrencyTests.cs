@@ -64,6 +64,9 @@ public sealed class ListingPatchAndRateConcurrencyTests : IClassFixture<Postgres
 
         public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(equipmentTypeId, 1, [new CatalogBatchSchemaItemResponse(1, [])])));
+
+        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
     }
 
     private sealed class TrackingMediaClient : IMediaServiceClient
@@ -344,6 +347,8 @@ public sealed class ListingPatchAndRateConcurrencyTests : IClassFixture<Postgres
 
         public Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             _inner.GetPublicByIdAsync(id, cancellationToken);
+        public Task<EquipmentListingStatisticsResult> GetListingStatisticsAsync(EquipmentListingStatisticsCriteria criteria, CancellationToken cancellationToken = default) =>
+            _inner.GetListingStatisticsAsync(criteria, cancellationToken);
 
         public Task<OwnerEquipmentListingSearchResult> SearchOwnerAsync(OwnerEquipmentListingSearchCriteria criteria, CancellationToken cancellationToken = default) =>
             _inner.SearchOwnerAsync(criteria, cancellationToken);

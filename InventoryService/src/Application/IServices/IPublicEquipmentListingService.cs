@@ -24,4 +24,10 @@ public interface IPublicEquipmentListingService
     Task<Result<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>> ListPublicListingsAsync(
         ListPublicEquipmentListingsRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Thống kê số lượng listing đang hoạt động (Active) trên toàn hệ thống nhóm theo equipmentTypeId và brandId.
+    /// </summary>
+    Task<Result<EquipmentListingStatisticsResponse>> GetStatisticsAsync(
+        CancellationToken cancellationToken = default);
 }
