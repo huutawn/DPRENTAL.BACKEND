@@ -14,6 +14,8 @@ using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.DTOs.Integration;
 using Microsoft.Extensions.Configuration;
 using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.Services.Operations;
 
 namespace Dprental.RentalService.Application.Services.Returns;
 
@@ -92,6 +94,7 @@ public sealed class ReturnService(IRentalOrderRepository repository, IOrderLockM
         order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id, key, "RecordReturn",
             fingerprint, true, null, null, now, targetItemId: item.Id, payloadJson: payload,
             apiResponseJson: JsonSerializer.Serialize(response)));
+        ScheduleInventoryReturn(order, item, recorded.Value, now);
         order.IncrementVersion();
         try
         {
@@ -112,5 +115,48 @@ public sealed class ReturnService(IRentalOrderRepository repository, IOrderLockM
             throw;
         }
         return response;
+    }
+
+    internal static void ScheduleInventoryReturn(RentalOrder order, RentalItem item,
+        ReturnRecord record, DateTimeOffset now)
+    {
+        var returned = item.UnitAssignments
+            .Where(a => a.ReturnRecordId == record.Id)
+            .OrderBy(a => a.AllocationId)
+            .ToArray();
+        var normal = returned.Where(a => a.ReturnCondition == UnitCondition.Normal).ToArray();
+        var damaged = returned.Where(a => a.ReturnCondition == UnitCondition.Damaged).ToArray();
+
+        void AddReceipt(string operationId, string action, object request, string? prerequisite = null)
+        {
+            string requestJson = JsonSerializer.Serialize(request);
+            order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id,
+                operationId, action, RentalOperationExecutor.ComputeFingerprint(requestJson),
+                isSuccess: false, errorCode: null, errorMessage: null, createdAt: now,
+                status: RentalOperationReceipt.StatusPending, targetItemId: item.Id,
+                payloadJson: requestJson, prerequisiteOperationId: prerequisite));
+        }
+
+        if (normal.Length > 0)
+        {
+            string id = $"return:{record.Id:N}:normal";
+            AddReceipt(id, RentalItem.MarkReturnedAction,
+                new MarkAssetsReturnedRequest(record.Id, record.ActualReturnAt,
+                    normal.Select(a => new ReturnedUnitItemRequest(a.AllocationId, UnitCondition.Normal)).ToArray(),
+                    RentalOperationExecutor.ComputeOperationKey(RentalItem.MarkReturnedAction, id)));
+        }
+
+        if (damaged.Length > 0)
+        {
+            string blockId = $"return:{record.Id:N}:block";
+            AddReceipt(blockId, RentalItem.BlockDamagedAction,
+                new BlockDamagedAssetsRequest(damaged.Select(a => a.AllocationId).ToArray(),
+                    record.Id, "Returned damaged", RentalOperationExecutor.ComputeOperationKey(RentalItem.BlockDamagedAction, blockId)));
+            string closeId = $"return:{record.Id:N}:damaged";
+            AddReceipt(closeId, RentalItem.MarkReturnedAction,
+                new MarkAssetsReturnedRequest(record.Id, record.ActualReturnAt,
+                    damaged.Select(a => new ReturnedUnitItemRequest(a.AllocationId, UnitCondition.Damaged)).ToArray(),
+                    RentalOperationExecutor.ComputeOperationKey(RentalItem.MarkReturnedAction, closeId)), blockId);
+        }
     }
 }

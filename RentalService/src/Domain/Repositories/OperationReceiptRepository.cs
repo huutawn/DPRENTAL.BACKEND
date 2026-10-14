@@ -21,12 +21,19 @@ public sealed class OperationReceiptRepository : IOperationReceiptRepository
     }
 
     public async Task<IReadOnlyList<OperationReceiptDescriptor>> GetPendingOperationDescriptorsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
+        => await GetPendingOperationDescriptorsExcludingActionsAsync(utcNow, batchSize, [], cancellationToken);
+
+    public async Task<IReadOnlyList<OperationReceiptDescriptor>> GetPendingOperationDescriptorsExcludingActionsAsync(
+        DateTimeOffset utcNow, int batchSize, IReadOnlyCollection<string> excludedActions,
+        CancellationToken cancellationToken = default)
     {
+        string[] excluded = excludedActions.ToArray();
         return await _dbContext.RentalOperationReceipts
             .AsNoTracking()
             .Where(r => (r.Status == RentalOperationReceipt.StatusPending || r.Status == RentalOperationReceipt.StatusProcessing) &&
                         r.RetryCount < 10 &&
-                        (r.NextRetryAt == null || r.NextRetryAt <= utcNow))
+                        (r.NextRetryAt == null || r.NextRetryAt <= utcNow) &&
+                        !excluded.Contains(r.Action))
             .OrderBy(r => r.CreatedAt)
             .Take(batchSize)
             .Select(r => new OperationReceiptDescriptor(
