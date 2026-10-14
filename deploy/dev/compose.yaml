@@ -66,9 +66,11 @@ services:
       Gateway__Security__RequestSize__MaxRequestBodySizeBytes: ${MAX_REQUEST_BODY_SIZE_BYTES:-10485760}
       Gateway__Security__RequestSize__MediaUploadMaxRequestBodySizeBytes: ${MEDIA_UPLOAD_MAX_REQUEST_BODY_SIZE_BYTES:-26214400}
       Gateway__Traffic__Resilience__DefaultTimeoutSeconds: ${DEFAULT_TIMEOUT_SECONDS:-10}
-      Gateway__Traffic__RateLimiting__Anonymous__PermitLimit: ${RATE_LIMIT_ANONYMOUS_PERMIT:-20}
-      Gateway__Traffic__RateLimiting__Authenticated__PermitLimit: ${RATE_LIMIT_AUTHENTICATED_PERMIT:-100}
-      Gateway__Traffic__RateLimiting__Sensitive__PermitLimit: ${RATE_LIMIT_SENSITIVE_PERMIT:-5}
+      Gateway__Security__RateLimiting__UserReadLimit: ${GATEWAY_RATE_LIMIT_USER_READ:-3000}
+      Gateway__Security__RateLimiting__UserWriteLimit: ${GATEWAY_RATE_LIMIT_USER_WRITE:-3000}
+      Gateway__Security__RateLimiting__IpReadLimit: ${GATEWAY_RATE_LIMIT_IP_READ:-3000}
+      Gateway__Security__RateLimiting__IpWriteLimit: ${GATEWAY_RATE_LIMIT_IP_WRITE:-3000}
+      Gateway__Security__RateLimiting__WindowSeconds: 60
       Telemetry__Tracing__SamplingRatio: ${TRACING_SAMPLING_RATIO:-0.1}
       Telemetry__Otlp__TracesEndpoint: ${OTLP_TRACES_ENDPOINT:-}
     depends_on:
