@@ -152,6 +152,9 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
 
     public Task<IReadOnlyList<Guid>> GetPendingSupplierTimeoutItemIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+    public Task<IReadOnlyList<Guid>> GetOverdueUnprotectedOrderIdsAsync(
+    DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
+    Task.FromResult<IReadOnlyList<Guid>>([]);
 
     public Task<IReadOnlyList<RenterCalendarItemRecord>> GetRenterCalendarItemsAsync(
         Guid renterId,

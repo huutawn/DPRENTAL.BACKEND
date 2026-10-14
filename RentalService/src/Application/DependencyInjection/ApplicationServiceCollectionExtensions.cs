@@ -1,4 +1,3 @@
-using System.Net.Http;
 using Dprental.RentalService.Application.Background;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.IServices.Calendar;
@@ -6,6 +5,7 @@ using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.IServices.Expiry;
 using Dprental.RentalService.Application.IServices.Integration;
 using Dprental.RentalService.Application.IServices.Operations;
+using Dprental.RentalService.Application.IServices.Overdue;
 using Dprental.RentalService.Application.IServices.Payments;
 using Dprental.RentalService.Application.IServices.Returns;
 using Dprental.RentalService.Application.IServices.SupplierDecision;
@@ -25,6 +25,8 @@ using Dprental.RentalService.Application.Services.Returns;
 using Dprental.RentalService.Application.Services.SupplierDecision;
 using Dprental.RentalService.Application.Services.SupplierStatistics;
 using Microsoft.Extensions.DependencyInjection;
+using System.Net.Http;
+using Dprental.RentalService.Application.Services.Overdue;
 
 namespace Dprental.RentalService.Application.DependencyInjection;
 
@@ -91,10 +93,16 @@ public static class ApplicationServiceCollectionExtensions
         services.AddHostedService<ExpiryScannerWorker>();
         services.AddHostedService<KafkaPaymentEventsConsumerWorker>();
         services.AddHostedService<InboxProcessingWorker>();
+        services.AddHostedService<OverdueProtectionWorker>();
 
         // Observability & TimeProvider
         services.AddSingleton<RentalMetrics>();
         services.AddSingleton(TimeProvider.System);
+
+        // Overdue protection
+        services.AddOptions<OverdueProtectionOptions>()
+            .BindConfiguration(OverdueProtectionOptions.SectionName);
+        services.AddScoped<IOverdueProtectionService, OverdueProtectionService>();
 
         return services;
     }
