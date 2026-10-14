@@ -8,6 +8,8 @@ public sealed record GetEquipmentTypesRequest
     public string? Keyword { get; init; }
     public Guid? CategoryId { get; init; }
     public string? Sort { get; init; }
+    public string? Scope { get; init; }
+    public string? ListingStatus { get; init; }
     public int Page { get; init; } = PageRequest.DefaultPage;
     public int PageSize { get; init; } = PageRequest.DefaultPageSize;
 }

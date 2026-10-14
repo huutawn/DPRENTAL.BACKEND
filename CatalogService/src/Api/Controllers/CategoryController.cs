@@ -18,6 +18,11 @@ namespace Dprental.CatalogService.Api.Controllers;
 [Authorize(Policy = CatalogPolicies.CategoryManage)]
 public class CategoryController : ControllerBase
 {
+    private static readonly HashSet<string> PublicAllowedQueryKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "keyword", "sort", "scope", "listingStatus"
+    };
+
     private static readonly HashSet<string> AdminAllowedQueryKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "keyword",
@@ -26,6 +31,7 @@ public class CategoryController : ControllerBase
         "sort",
         "isActive"
     };
+
 
     private readonly ICategoryService _categoryService;
     private readonly ICatalogCallerContext _caller;
@@ -134,14 +140,25 @@ public class CategoryController : ControllerBase
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
-    /// <summary>Lấy danh sách tất cả Category đang hoạt động (Public).</summary>
+    /// <summary>Lấy danh sách tất cả Category đang hoạt động (Public / Mine).</summary>
     [AllowAnonymous]
     [HttpGet]
     [ProducesResponseType<IEnumerable<CategoryDetailResponse>>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetCategories(CancellationToken cancellationToken)
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetCategories(
+        [FromQuery] GetCategoriesRequest request,
+        CancellationToken cancellationToken)
     {
-        var result = await _categoryService.GetActiveCategoriesAsync(cancellationToken);
-        return Ok(result);
+
+        if (Request.Query.Any(q => !PublicAllowedQueryKeys.Contains(q.Key) || q.Value.Count != 1))
+        {
+            return this.ToProblem(CatalogErrors.Category.InvalidQuery);
+        }
+
+        var result = await _categoryService.GetActiveCategoriesAsync(request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
     /// <summary>Lấy chi tiết Category theo ID nếu đang hoạt động (Public).</summary>

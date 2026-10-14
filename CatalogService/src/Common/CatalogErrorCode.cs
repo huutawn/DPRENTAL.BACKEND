@@ -78,12 +78,19 @@ public static class CatalogErrorCode
         public const string ServiceUnavailable = "Media.ServiceUnavailable";
     }
 
+    public static class Inventory
+    {
+        public const string ServiceUnavailable = "Inventory.ServiceUnavailable";
+        public const string Unauthorized = "Inventory.Unauthorized";
+        public const string Forbidden = "Inventory.Forbidden";
+    }
+
 
     public static class Catalog
     {
         public const string Uncategorized = "Catalog.Uncategorized";
         public const string InvalidRequest = "Catalog.InvalidRequest";
-        public const string Unauthorized = "Catalog.Unauthorized";  
+        public const string Unauthorized = "Catalog.Unauthorized";
         public const string Forbidden = "Catalog.Forbidden";
     }
 

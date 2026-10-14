@@ -257,6 +257,9 @@ public sealed class CrossCuttingConcernTests
 
     private sealed class FakeCategoryRepository : ICategoryRepository
     {
+        public Task<IReadOnlyList<CategoryWithPublishedTypes>> GetActiveCategoriesWithPublishedTypesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<CategoryWithPublishedTypes>>(_items.Values.Where(c => c.IsActive).Select(c => new CategoryWithPublishedTypes(c, [])).ToList());
+
         private readonly ConcurrentDictionary<Guid, Category> _items = new();
 
         public Task<PagedResult<Category>> SearchAsync(CategorySearchQuery query, CancellationToken cancellationToken = default)
@@ -296,8 +299,6 @@ public sealed class CrossCuttingConcernTests
             return Task.CompletedTask;
         }
 
-        public Task<IEnumerable<Category>> GetAllActiveAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(_items.Values.Where(c => c.IsActive));
     }
 
     private sealed record CapturedLog(LogLevel Level, string Message, IReadOnlyList<KeyValuePair<string, object?>> Scopes);

@@ -10,5 +10,5 @@ public interface ICategoryRepository
     Task<bool> IsSlugExistsAsync(string slug, CancellationToken cancellationToken = default);
     Task AddAsync(Category category, CancellationToken cancellationToken = default);
     Task UpdateAsync(Category category, CancellationToken cancellationToken = default);
-    Task<IEnumerable<Category>> GetAllActiveAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<CategoryWithPublishedTypes>> GetActiveCategoriesWithPublishedTypesAsync(CancellationToken cancellationToken = default);
 }

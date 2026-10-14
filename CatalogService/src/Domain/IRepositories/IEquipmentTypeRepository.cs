@@ -7,9 +7,10 @@ namespace Dprental.CatalogService.Domain.IRepositories;
 
 public interface IEquipmentTypeRepository
 {
-    /// <summary>LuÃ´n Ä‘á»c Status = Published. Filter, sort á»•n Ä‘á»‹nh, phÃ¢n trang vÃ  projection Ä‘á»u á»Ÿ database.</summary>
+    /// <summary>Luôn đọc Status = Published. Filter, sort theo số đếm, phân trang và projection đều ở database.</summary>
     Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(
         GetEquipmentTypesRequest request,
+        IReadOnlyDictionary<Guid, int> listingCounts,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -52,7 +53,7 @@ public interface IEquipmentTypeRepository
     /// <summary>ThÃªm má»›i EquipmentType á»Ÿ tráº¡ng thÃ¡i Draft cÃ¹ng media references trong cÃ¹ng transaction.</summary>
     Task<EquipmentType?> GetWithSchemaAsync(Guid id, CancellationToken cancellationToken = default) =>
         Task.FromResult<EquipmentType?>(null);
-/// <summary>ThÃªm má»›i EquipmentType á»Ÿ tráº¡ng thÃ¡i Draft cÃ¹ng media vÃ  optional schema v1 trong cÃ¹ng transaction.</summary>
+    /// <summary>ThÃªm má»›i EquipmentType á»Ÿ tráº¡ng thÃ¡i Draft cÃ¹ng media vÃ  optional schema v1 trong cÃ¹ng transaction.</summary>
     Task<Result<EquipmentTypeDetailDto>> AddAsync(
         EquipmentType equipmentType,
         IReadOnlyList<EquipmentTypeMediaItemDto?>? mediaItems,

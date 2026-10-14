@@ -75,11 +75,23 @@ public class CategoryRepository : ICategoryRepository
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<IEnumerable<Category>> GetAllActiveAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<CategoryWithPublishedTypes>> GetActiveCategoriesWithPublishedTypesAsync(CancellationToken cancellationToken = default)
     {
-        return await _dbContext.Categories
-            .Where(c => c.IsActive) // Chỉ lấy danh mục đang hoạt động
-            .AsNoTracking()         // Tối ưu hiệu suất cho truy vấn đọc (Read-only)
+        var raw = await _dbContext.Categories
+            .Where(c => c.IsActive)
+            .AsNoTracking()
+            .Select(c => new
+            {
+                Category = c,
+                PublishedTypeIds = c.EquipmentTypes
+                    .Where(t => t.Status == Dprental.CatalogService.Common.Enums.EquipmentTypeStatus.Published)
+                    .Select(t => t.Id)
+                    .ToList()
+            })
             .ToListAsync(cancellationToken);
+
+        return raw
+            .Select(x => new CategoryWithPublishedTypes(x.Category, x.PublishedTypeIds))
+            .ToList();
     }
 }

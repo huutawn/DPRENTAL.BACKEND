@@ -134,7 +134,7 @@ public sealed class ErrorBoundaryTests
 
     private sealed class ThrowingEquipmentTypeRepository(Exception exception) : IEquipmentTypeRepository
     {
-        public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(GetEquipmentTypesRequest request, CancellationToken cancellationToken = default)
+        public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(GetEquipmentTypesRequest request, IReadOnlyDictionary<Guid, int> listingCounts, CancellationToken cancellationToken = default)
         {
             throw exception;
         }
@@ -163,8 +163,8 @@ public sealed class ErrorBoundaryTests
             throw exception;
         public Task<EquipmentType?> GetWithSchemaAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult<EquipmentType?>(null);
-public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
-            throw exception;
+        public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+                    throw exception;
 
         public Task<EquipmentTypeSpecSchemaDto?> GetSpecSchemaAsync(Guid equipmentTypeId, int version, CancellationToken cancellationToken = default) =>
             throw exception;

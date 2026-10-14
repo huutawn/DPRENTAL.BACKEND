@@ -1018,8 +1018,9 @@ public sealed class EquipmentTypeCanonicalSpecificationEndpointTests : IAsyncLif
 
         public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(
             GetEquipmentTypesRequest request,
+            IReadOnlyDictionary<Guid, int> listingCounts,
             CancellationToken cancellationToken = default) =>
-            inner.SearchPublishedAsync(request, cancellationToken);
+            inner.SearchPublishedAsync(request, listingCounts, cancellationToken);
 
         public Task<EquipmentTypeDetailDto?> GetPublishedByIdAsync(
             Guid id,

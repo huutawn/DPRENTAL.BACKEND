@@ -160,3 +160,32 @@ Phương thức `Down` của migration `AddBrands` ném `NotSupportedException` 
 ## Git hook
 
 Sau khi khởi tạo Git trong thư mục service, chạy `./scripts/setup-git-hooks.sh` (hoặc bản `.ps1` trên PowerShell). Hook kiểm tra branch nền `origin/catalog/develop`, rồi build và test trước khi push.
+
+
+## Discovery ưu tiên theo số tin đăng
+
+`GET /api/v1/catalog/categories`, `/equipment-types` và `/brands` trả thêm `listingCount`.
+Chỉ Category/Brand active và EquipmentType Published được hiển thị. Mặc định
+`sort=listing_count_desc`; `listing_count_asc` tăng dần trong nhóm có tin, vẫn đặt mục 0
+ở cuối. Giữ `name_asc`, `name_desc`, `newest`; khi bằng số đếm dùng tên rồi ID.
+Category trả mảng; type/brand phân trang tại PostgreSQL trước khi đọc metadata.
+Tìm type theo Code, Name hoặc Description; `%`, `_`, `\` trong keyword là ký tự literal.
+
+- `scope=public` (mặc định): đếm listing Active toàn hệ thống.
+- `scope=mine`: yêu cầu JWT human, đếm listing của JWT sub, kể cả Admin. Nhận cả
+  Bearer và cookie `accessToken`; Bearer được ưu tiên khi gửi cả hai.
+- `listingStatus=Draft|Active|Inactive` chỉ dùng với mine; không truyền thì đếm mọi
+  trạng thái của owner. Không hỗ trợ alias `status` trên discovery.
+- Số đếm không phụ thuộc keyword, ngày thuê hay số physical unit. Category cộng số
+  listing của từng type Published liên kết một lần; type thuộc nhiều category đóng góp vào từng category.
+- Query ngoài whitelist hoặc scalar lặp trả 400. Scope mine thiếu xác thực trả 401,
+  service principal trả 403. Timeout/network/response thống kê sai contract trả 503,
+  không thay số đếm bằng 0 khi downstream lỗi. Detail/admin không trả số đếm giả.
+
+`InventoryService:BaseUrl` mặc định `http://inventory-service:8080`; Development dùng
+`http://localhost:43622`. Deploy đặt `InventoryService__BaseUrl` cho Catalog container;
+`InventoryService:TimeoutSeconds` mặc định 3 và được validate lúc startup.
+
+Kiểm thử HTTP hai chiều với hai process thật: xem `InventoryService/scripts/test-catalog-inventory.py`
+trong workspace DPRENTAL. Chạy sau khi build Catalog, Inventory và Gateway; harness dùng database test riêng,
+không thêm project reference giữa hai service.

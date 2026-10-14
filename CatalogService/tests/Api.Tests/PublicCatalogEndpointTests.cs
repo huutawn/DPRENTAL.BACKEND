@@ -93,6 +93,7 @@ public sealed class PublicCatalogEndpointTests
     {
         public Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(
             GetEquipmentTypesRequest request,
+            IReadOnlyDictionary<Guid, int> listingCounts,
             CancellationToken cancellationToken = default)
         {
             var item = new EquipmentTypeListItemDto(
@@ -153,8 +154,8 @@ public sealed class PublicCatalogEndpointTests
 
         public Task<EquipmentType?> GetWithSchemaAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult<EquipmentType?>(null);
-public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<EquipmentTypeSpecSchemaDto>>([]);
+        public Task<IReadOnlyList<EquipmentTypeSpecSchemaDto>> GetSpecSchemasAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
+                    Task.FromResult<IReadOnlyList<EquipmentTypeSpecSchemaDto>>([]);
 
         public Task<EquipmentTypeSpecSchemaDto?> GetSpecSchemaAsync(Guid equipmentTypeId, int version, CancellationToken cancellationToken = default) =>
             Task.FromResult<EquipmentTypeSpecSchemaDto?>(null);

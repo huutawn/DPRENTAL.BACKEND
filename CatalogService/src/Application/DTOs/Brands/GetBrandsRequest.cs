@@ -11,4 +11,6 @@ public sealed record GetBrandsRequest
     public int Page { get; init; } = PageRequest.DefaultPage;
     public int PageSize { get; init; } = PageRequest.DefaultPageSize;
     public string? Sort { get; init; }
+    public string? Scope { get; init; }
+    public string? ListingStatus { get; init; }
 }
