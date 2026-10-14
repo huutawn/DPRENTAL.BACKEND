@@ -208,3 +208,25 @@ COMMIT;
 ```
 
 Đây là bước cutover một lần; deploy mới trên database trống không cần chạy SQL này.
+
+
+## Inventory Meilisearch
+
+Compose requires `MEILI_IMAGE=getmeili/meilisearch:v1.55.0`, a random private
+`MEILI_MASTER_KEY` and a separate `INVENTORY_MEILISEARCH_API_KEY` in the VPS `.env`
+(mode 0600). The Inventory key must allow search, document add/delete, index
+create/get/update/delete/swap, settings get/update and tasks get, restricted to
+`inventory_public_listings*`, `inventory_owner_listings*`, `inventory_owner_assets*`
+so staging indexes are also authorized. Provision it using the protected Meilisearch
+keys API; do not commit keys or place them in shell arguments. Meilisearch is bound
+to host loopback 7700 and the private services network, with a persistent volume.
+
+Inventory uses a five-second HTTP timeout, 60-second task deadline and 5,000 candidate
+limit. Deploy the matching Inventory application/migrator release and drain old
+projectors before the search recovery migration. Changing compose/.env alone does
+not deploy application code or change a running container's environment.
+
+Gateway routes 16/17 are the public Inventory availability POST routes. They must
+point to `inventory-service`, not `rental-service`; stale numbered overrides caused
+404 responses from Rental. Route numbers depend on the Gateway image: validate
+its embedded route paths whenever upgrading that image.

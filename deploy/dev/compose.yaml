@@ -56,6 +56,10 @@ services:
       Routes__14__DownstreamHostAndPorts__0__Port: 8080
       Routes__15__DownstreamHostAndPorts__0__Host: inventory-service
       Routes__15__DownstreamHostAndPorts__0__Port: 8080
+      Routes__16__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__16__DownstreamHostAndPorts__0__Port: 8080
+      Routes__17__DownstreamHostAndPorts__0__Port: 8080
+      Routes__17__DownstreamHostAndPorts__0__Host: inventory-service
       GlobalConfiguration__BaseUrl: https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
       Gateway__Security__Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:?Set CORS_ALLOWED_ORIGIN_0 in .env}
       Gateway__Security__ForwardedHeaders__KnownNetworks__0: ${EDGE_NETWORK_CIDR:-172.30.0.0/24}
@@ -180,6 +184,26 @@ services:
     networks:
       - services
 
+  meilisearch:
+    image: ${MEILI_IMAGE:?Set MEILI_IMAGE in .env}
+    restart: unless-stopped
+    mem_limit: 2g
+    environment:
+      MEILI_ENV: production
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?Set MEILI_MASTER_KEY in .env}
+      MEILI_NO_ANALYTICS: "true"
+    ports:
+      - "127.0.0.1:7700:7700"
+    volumes:
+      - meilisearch-data:/meili_data
+    healthcheck:
+      test: [CMD-SHELL, "wget -q --spider http://localhost:7700/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - services
+
   inventory-service:
     image: ${INVENTORY_SERVICE_IMAGE:?Set INVENTORY_SERVICE_IMAGE in release.env}
     restart: unless-stopped
@@ -196,7 +220,17 @@ services:
       MediaService__PublicGatewayUrl: https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
       MediaService__ApiKey: ${AUTH_ADMIN_BOOTSTRAP_CREATION_KEY:?Set AUTH_ADMIN_BOOTSTRAP_CREATION_KEY in .env}
       MediaService__TimeoutSeconds: ${INVENTORY_MEDIA_TIMEOUT_SECONDS:-10}
+      Meilisearch__Url: http://meilisearch:7700
+      Meilisearch__ApiKey: ${INVENTORY_MEILISEARCH_API_KEY:?Set INVENTORY_MEILISEARCH_API_KEY in .env}
+      Meilisearch__TimeoutSeconds: 5
+      Meilisearch__TaskDeadlineSeconds: 60
+      Meilisearch__CandidateLimit: 5000
+      Meilisearch__PublicListingsIndex: inventory_public_listings
+      Meilisearch__OwnerListingsIndex: inventory_owner_listings
+      Meilisearch__OwnerAssetsIndex: inventory_owner_assets
     depends_on:
+      meilisearch:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       kafka:
@@ -369,6 +403,7 @@ secrets:
     file: ${SECRETS_DIR:?Set SECRETS_DIR in .env}/auth-jwt-public.pem
 
 volumes:
+  meilisearch-data:
   caddy-data:
   caddy-config:
   postgres-data:

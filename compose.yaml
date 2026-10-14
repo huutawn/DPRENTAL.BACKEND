@@ -36,9 +36,9 @@ services:
       Routes__14__DownstreamHostAndPorts__0__Port: 8080
       Routes__15__DownstreamHostAndPorts__0__Host: inventory-service
       Routes__15__DownstreamHostAndPorts__0__Port: 8080
-      Routes__16__DownstreamHostAndPorts__0__Host: rental-service
+      Routes__16__DownstreamHostAndPorts__0__Host: inventory-service
       Routes__16__DownstreamHostAndPorts__0__Port: 8080
-      Routes__17__DownstreamHostAndPorts__0__Host: rental-service
+      Routes__17__DownstreamHostAndPorts__0__Host: inventory-service
       Routes__17__DownstreamHostAndPorts__0__Port: 8080
       Gateway__Security__Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:-http://localhost:3000}
       Gateway__Security__Cors__AllowedOrigins__1: ${CORS_ALLOWED_ORIGIN_1:-http://localhost:5173}
@@ -355,6 +355,25 @@ services:
     networks:
       - dprental
 
+  meilisearch:
+    image: getmeili/meilisearch:v1.55.0
+    restart: unless-stopped
+    environment:
+      MEILI_ENV: ${MEILI_ENV:-development}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-dprental_meili_master_key_32_chars_min}
+      MEILI_NO_ANALYTICS: "true"
+    ports:
+      - "127.0.0.1:${MEILISEARCH_PORT:-7700}:7700"
+    volumes:
+      - meilisearch-data:/meili_data
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7700/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - dprental
+
   inventory-migrate:
     build:
       context: ./InventoryService
@@ -389,6 +408,8 @@ services:
       MediaService__PublicGatewayUrl: http://localhost:${GATEWAY_PORT:-5050}
       MediaService__ApiKey: ${AUTH_ADMIN_BOOTSTRAP_CREATION_KEY:?Set AUTH_ADMIN_BOOTSTRAP_CREATION_KEY in .env}
       MediaService__TimeoutSeconds: 10
+      Meilisearch__Url: http://meilisearch:7700
+      Meilisearch__ApiKey: ${MEILI_MASTER_KEY:-dprental_meili_master_key_32_chars_min}
     depends_on:
       postgres:
         condition: service_healthy
@@ -397,6 +418,8 @@ services:
       auth-service:
         condition: service_started
       kafka:
+        condition: service_healthy
+      meilisearch:
         condition: service_healthy
     networks:
       - dprental
@@ -465,6 +488,7 @@ volumes:
   kafka-data:
   jwt-keys:
   rental-postgres-data:
+  meilisearch-data:
 
 networks:
   dprental:
