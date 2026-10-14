@@ -1,4 +1,4 @@
-﻿using Dprental.RentalService.Common;
+using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Errors;
 
@@ -66,5 +66,3 @@ public partial class RentalItem
         return Result.Success();
     }
 }
-
-public sealed record ReturnUnitData(Guid AssignmentId, UnitCondition Condition, string? Description, List<Guid> MediaIds);

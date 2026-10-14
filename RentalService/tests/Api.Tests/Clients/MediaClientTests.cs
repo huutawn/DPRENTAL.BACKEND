@@ -5,7 +5,7 @@ using Dprental.RentalService.Common;
 using Microsoft.Extensions.Configuration;
 using Xunit;
 
-namespace Dprental.RentalService.Api.Tests.Returns;
+namespace Dprental.RentalService.Api.Tests.Clients;
 
 public sealed class MediaClientTests
 {

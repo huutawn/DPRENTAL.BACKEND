@@ -7,6 +7,7 @@ using Dprental.RentalService.Application.IServices.Expiry;
 using Dprental.RentalService.Application.IServices.Integration;
 using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.IServices.Payments;
+using Dprental.RentalService.Application.IServices.Returns;
 using Dprental.RentalService.Application.IServices.SupplierDecision;
 using Dprental.RentalService.Application.IServices.SupplierStatistics;
 using Dprental.RentalService.Application.Observability;
@@ -20,6 +21,7 @@ using Dprental.RentalService.Application.Services.Expiry;
 using Dprental.RentalService.Application.Services.Integration;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Services.Payments;
+using Dprental.RentalService.Application.Services.Returns;
 using Dprental.RentalService.Application.Services.SupplierDecision;
 using Dprental.RentalService.Application.Services.SupplierStatistics;
 using Microsoft.Extensions.DependencyInjection;
@@ -60,8 +62,8 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<ICheckoutInvoiceIssuer, CheckoutInvoiceIssuer>();
         services.AddScoped<ICheckoutService, CheckoutService>();
 
-        services.AddScoped<Dprental.RentalService.Application.IServices.Returns.IReturnService,
-            Dprental.RentalService.Application.Services.Returns.ReturnService>();
+        // Returns
+        services.AddScoped<IReturnService, ReturnService>();
 
         // Calendar
         services.AddScoped<IRentalCalendarService, RentalCalendarService>();
