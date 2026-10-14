@@ -59,7 +59,9 @@ public sealed class OrderQueryApiTests
         Assert.Equal(2, body.GetProperty("subOrders").GetArrayLength());
         JsonElement firstItem = body.GetProperty("subOrders")[0].GetProperty("items")[0];
         Assert.Equal("2026-10-14", firstItem.GetProperty("endDate").GetString());
-        Assert.Equal("PENDING_SUPPLIER_CONFIRMATION", firstItem.GetProperty("status").GetString());
+        // Dòng máy chỉ có tên, số lượng và ngày; trạng thái nằm ở đơn con.
+        Assert.Equal(["name", "quantity", "startDate", "endDate"], firstItem.EnumerateObject().Select(p => p.Name));
+        Assert.Equal("PENDING_SUPPLIER_CONFIRMATION", body.GetProperty("subOrders")[0].GetProperty("status").GetString());
 
         Assert.Equal(HttpStatusCode.NotFound, other.StatusCode);
         Assert.Equal("Order.NotFound", (await ReadAsync(other)).GetProperty("title").GetString());

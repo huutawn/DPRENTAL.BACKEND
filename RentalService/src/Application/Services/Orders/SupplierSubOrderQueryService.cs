@@ -69,14 +69,14 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
         }
 
         List<OrderItemResponse> items = OrderQueryMapper.ToItems(subOrder.Items);
-        decimal rental = items.Sum(i => i.RentalAmount);
-        decimal deposit = items.Sum(i => i.DepositAmount);
+        decimal rental = subOrder.Items.Sum(i => i.RentalAmount);
+        decimal deposit = subOrder.Items.Sum(i => i.DepositAmount);
 
         return new SupplierSubOrderDetailResponse(
             subOrder.Id,
             subOrder.SubOrderCode,
             order.OrderCode,
-            SubOrderStatusPolicy.Summarize(items.Select(i => i.Status).ToList()),
+            SubOrderStatusPolicy.Summarize(subOrder.Items.Select(i => i.Status).ToList()),
             order.Currency,
             order.PaymentConfirmedAt,
             subOrder.CreatedAt,

@@ -34,43 +34,18 @@ public sealed record OrderDeliveryResponse(
     string? Note);
 
 /// <summary>
-/// Một dòng thiết bị trong đơn, lấy từ thông tin đã chụp lúc đặt hàng.
+/// Một dòng thiết bị trong đơn, lấy từ thông tin đã chụp lúc đặt hàng. Chỉ gồm những gì cần hiển thị;
+/// loại, hãng, model, giá… vẫn được lưu trong snapshot của RentalItem nhưng không trả ra.
 /// </summary>
-/// <param name="RentalItemId">Mã dòng thuê.</param>
-/// <param name="EquipmentListingId">Mã thiết bị niêm yết.</param>
-/// <param name="ListingTitle">Tên thiết bị lúc đặt hàng.</param>
-/// <param name="EquipmentTypeName">Tên loại thiết bị lúc đặt hàng.</param>
-/// <param name="BrandName">Tên hãng lúc đặt hàng.</param>
-/// <param name="Model">Model lúc đặt hàng.</param>
-/// <param name="ThumbnailMediaId">Mã ảnh đại diện, có thể rỗng.</param>
-/// <param name="PickupLocation">Nơi nhận máy của nhà cung cấp.</param>
+/// <param name="Name">Tên thiết bị lúc đặt hàng.</param>
 /// <param name="Quantity">Số máy thuê.</param>
 /// <param name="StartDate">Ngày đầu tiên dùng máy.</param>
 /// <param name="EndDate">Ngày cuối cùng dùng máy (có tính), giống cách giỏ hàng hiển thị.</param>
-/// <param name="RentalDays">Số ngày thuê.</param>
-/// <param name="DailyRate">Giá thuê một máy một ngày.</param>
-/// <param name="DepositPerUnit">Tiền cọc một máy.</param>
-/// <param name="RentalAmount">Tiền thuê của dòng.</param>
-/// <param name="DepositAmount">Tiền cọc của dòng.</param>
-/// <param name="Status">Trạng thái của dòng.</param>
 public sealed record OrderItemResponse(
-    Guid RentalItemId,
-    Guid EquipmentListingId,
-    string ListingTitle,
-    string EquipmentTypeName,
-    string BrandName,
-    string Model,
-    Guid? ThumbnailMediaId,
-    string PickupLocation,
+    string Name,
     int Quantity,
     DateOnly StartDate,
-    DateOnly EndDate,
-    int RentalDays,
-    decimal DailyRate,
-    decimal DepositPerUnit,
-    decimal RentalAmount,
-    decimal DepositAmount,
-    RentalItemStatus Status);
+    DateOnly EndDate);
 
 /// <summary>
 /// Một đơn trong danh sách đơn của người thuê.

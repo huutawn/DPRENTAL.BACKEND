@@ -54,23 +54,10 @@ internal static class OrderQueryMapper
         DateOnly endDate = dates.IsSuccess ? dates.Value.EndDate : item.ExpectedEndDate;
 
         return new OrderItemResponse(
-            item.Id,
-            item.EquipmentListingId,
             item.ListingTitleSnapshot,
-            item.EquipmentTypeNameSnapshot,
-            item.BrandNameSnapshot,
-            item.ModelSnapshot,
-            item.ThumbnailMediaIdSnapshot,
-            item.PickupLocationSnapshot,
             item.Quantity,
             item.ExpectedStartDate,
-            endDate,
-            item.RentalDays,
-            item.DailyRateSnapshot,
-            item.DepositPerUnitSnapshot,
-            item.RentalAmount,
-            item.DepositAmount,
-            item.Status);
+            endDate);
     }
 
     /// <summary>Các dòng theo thứ tự ngày giao rồi mã dòng, để kết quả ổn định giữa các lần gọi.</summary>

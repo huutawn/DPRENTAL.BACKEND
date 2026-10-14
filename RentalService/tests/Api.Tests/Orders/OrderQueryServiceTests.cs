@@ -16,6 +16,12 @@ namespace Dprental.RentalService.Api.Tests.Orders;
 /// </summary>
 public sealed class OrderQueryServiceTests
 {
+    // Giống API thật: tên ô camelCase; giữ nguyên chữ tiếng Việt để so sánh dễ đọc.
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web)
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
     private readonly string _dbName = $"OrderQueries_{Guid.NewGuid():N}";
     private readonly Guid _an = Guid.NewGuid();
     private readonly Guid _otherRenter = Guid.NewGuid();
@@ -95,13 +101,12 @@ public sealed class OrderQueryServiceTests
         Assert.Equal(_binh, binh.SupplierId);
         Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, binh.Status);
         Assert.Equal(29_000_000m, binh.TotalAmount);
+        // Mỗi dòng máy chỉ có tên, số lượng và ngày dùng đầu/cuối (có tính).
         OrderItemResponse excavator = Assert.Single(binh.Items);
-        Assert.Equal("Máy xúc CAT 320", excavator.ListingTitle);
-        Assert.Equal("Máy xúc", excavator.EquipmentTypeName);
-        Assert.Equal("Caterpillar", excavator.BrandName);
-        Assert.Equal(new DateOnly(2026, 10, 12), excavator.StartDate);
-        Assert.Equal(new DateOnly(2026, 10, 14), excavator.EndDate);
-        Assert.Equal(3, excavator.RentalDays);
+        Assert.Equal(new OrderItemResponse("Máy xúc CAT 320", 1, new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 14)), excavator);
+        Assert.Equal(
+            """{"name":"Máy xúc CAT 320","quantity":1,"startDate":"2026-10-12","endDate":"2026-10-14"}""",
+            JsonSerializer.Serialize(excavator, WebJson));
 
         RenterSubOrderResponse cuong = order.SubOrders[1];
         Assert.Equal(_cuong, cuong.SupplierId);
@@ -157,7 +162,7 @@ public sealed class OrderQueryServiceTests
         Assert.True(result.IsSuccess);
         SupplierSubOrderDetailResponse subOrder = result.Value;
         Assert.Equal(_paidMixedOrder.OrderCode, subOrder.OrderCode);
-        Assert.Equal("Máy xúc CAT 320", Assert.Single(subOrder.Items).ListingTitle);
+        Assert.Equal("Máy xúc CAT 320", Assert.Single(subOrder.Items).Name);
         Assert.Equal(29_000_000m, subOrder.TotalAmount);
         Assert.Equal("Nguyễn Văn An", subOrder.Delivery.RecipientName);
         Assert.Equal("0901234567", subOrder.Delivery.RecipientPhone);
