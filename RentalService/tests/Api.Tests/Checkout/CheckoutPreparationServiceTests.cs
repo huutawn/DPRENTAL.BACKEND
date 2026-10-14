@@ -49,7 +49,7 @@ public sealed class CheckoutPreparationServiceTests
     private Guid AddCartItem(Guid listingId, int quantity, DateOnly start, DateOnly end) =>
         _cart.AddItem(Guid.NewGuid(), listingId, _supplierId, quantity, start, end, Now).Value.Id;
 
-    private InventoryListingDto Listing(Guid id) => new(
+    private ListingRentalSnapshotDto Listing(Guid id) => TestListings.Create(
         id,
         _supplierId,
         true,
@@ -357,8 +357,8 @@ public sealed class CheckoutPreparationServiceTests
         Guid missingListing = Guid.NewGuid();
         Guid ownListing = Guid.NewGuid();
         Guid scarceListing = Guid.NewGuid();
-        _inventory.Listings[inactiveListing] = Listing(inactiveListing) with { IsActive = false };
-        _inventory.Listings[ownListing] = Listing(ownListing) with { OwnerUserId = _renterId };
+        _inventory.Listings[inactiveListing] = Listing(inactiveListing) with { BookingStatus = "Inactive" };
+        _inventory.Listings[ownListing] = Listing(ownListing) with { SupplierId = _renterId };
         _inventory.Listings[scarceListing] = Listing(scarceListing);
         _inventory.AvailableQuantities[scarceListing] = 3;
 
@@ -386,13 +386,10 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Theory]
-    [InlineData(null, 2_000_000, "VND")]
     [InlineData(0, 2_000_000, "VND")]
-    [InlineData(500_000, null, "VND")]
     [InlineData(500_000, -1, "VND")]
     [InlineData(500_000, 2_000_000, "USD")]
-    [InlineData(500_000, 2_000_000, null)]
-    public async Task Prepare_RejectsListingWithoutUsablePricing(int? dailyRate, int? deposit, string? currency)
+    public async Task Prepare_RejectsListingWithoutUsablePricing(int dailyRate, int deposit, string currency)
     {
         _inventory.Listings[_listingId] = Listing(_listingId) with
         {
@@ -405,6 +402,31 @@ public sealed class CheckoutPreparationServiceTests
 
         Assert.Equal(CheckoutErrors.ItemsUnavailable, result.Error);
         Assert.Equal(CheckoutLineIssueCode.ListingUnavailable, Assert.Single(result.LineIssues).Code);
+    }
+
+    public static TheoryData<string> IncompleteSnapshotFields => ["EquipmentTypeId", "BrandId", "Model", "SpecSchemaVersion", "SpecValuesJson", "PickupLocation", "Currency"];
+
+    [Theory]
+    [MemberData(nameof(IncompleteSnapshotFields))]
+    public async Task Prepare_WhenInventorySnapshotMissesContractFields_ReportsDependencyUnavailable(string missingField)
+    {
+        ListingRentalSnapshotDto listing = Listing(_listingId);
+        _inventory.Listings[_listingId] = missingField switch
+        {
+            "EquipmentTypeId" => listing with { EquipmentTypeId = Guid.Empty },
+            "BrandId" => listing with { BrandId = Guid.Empty },
+            "Model" => listing with { Model = null! },
+            "SpecSchemaVersion" => listing with { SpecSchemaVersion = 0 },
+            "SpecValuesJson" => listing with { SpecValuesJson = "" },
+            "PickupLocation" => listing with { PickupLocation = " " },
+            _ => listing with { Currency = null! }
+        };
+
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
+
+        // Inventory gửi thiếu trường bắt buộc là lỗi phụ thuộc (503), không báo khách là thiết bị ngừng cho thuê.
+        Assert.Equal(CheckoutErrors.DependencyUnavailable, result.Error);
+        Assert.Empty(result.LineIssues);
     }
 
     [Fact]

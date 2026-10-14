@@ -98,11 +98,14 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
                 $"receipt-{Releases.Count}", request.OperationKey, allocationGroupId, DateTimeOffset.UnixEpoch, false)));
     }
 
+    /// <summary>Khi chạy qua DI chỉ có một Inventory client: câu hỏi về Listing và lịch trống chuyển sang bản giả này.</summary>
+    public FakeInventoryListingClient? Listings { get; set; }
+
     public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) =>
-        throw new NotSupportedException();
+        Listings?.GetListingRentalSnapshotAsync(listingId, ct) ?? throw new NotSupportedException();
 
     public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) =>
-        throw new NotSupportedException();
+        Listings?.CheckListingAvailabilityAsync(request, ct) ?? throw new NotSupportedException();
 
     public Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) =>
         throw new NotSupportedException();

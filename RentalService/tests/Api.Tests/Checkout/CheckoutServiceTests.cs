@@ -81,7 +81,7 @@ public sealed class CheckoutServiceTests
 
     private void AddListing(Guid listingId, string title, decimal dailyRate, decimal depositPerUnit)
     {
-        _listings.Listings[listingId] = new(
+        _listings.Listings[listingId] = TestListings.Create(
             listingId,
             _supplierId,
             true,

@@ -140,7 +140,11 @@ Dịch vụ triển khai mô hình nghiệp vụ canonical theo AGENTS.md và th
   - Nhả hold thất bại chỉ ghi log; hold đó tự hết hạn theo `HoldExpiresAt`.
 - Mọi lỗi checkout có `retryable`; tùy lỗi có thêm `fieldErrors`, `lines`, `conflicts`, `currentQuote` hoặc `pendingOrderCode`.
 - Cấu hình: `Rental:Terms:CurrentVersion`, `Rental:Terms:DocumentRef`, `Rental:Terms:ContentHash` (bắt buộc; thiếu thì checkout trả 500).
-- Giới hạn hiện tại: `IInventoryListingClient` và `ICatalogReferenceClient` đang dùng bản tạm (`UnavailableCheckoutClients.cs`) nên gọi thật luôn nhận `503 Checkout.DependencyUnavailable`. Hợp đồng Inventory v1 (`ListingRentalSnapshotDto`) chưa có loại thiết bị, hãng, model, thông số và ảnh mà snapshot của RentalItem cần; Rental cũng chưa có hợp đồng với CatalogService.
+- Checkout đọc Listing và lịch trống qua hợp đồng Inventory dùng chung (`IInventoryRentalClient`: `GET /equipment-listings/{id}/rental-snapshot`, `POST /equipment-listings/{id}/availability/check`), giống giỏ hàng. `ListingRentalSnapshotDto` đã được mở rộng theo thỏa thuận với Inventory (14/10/2026) thêm `equipmentTypeId`, `brandId`, `model`, `specSchemaVersion`, `specValuesJson`, `thumbnailMediaId`.
+- Inventory trả thiếu trường bắt buộc (loại, hãng, model, thông số, nơi nhận, phiên bản, tiền tệ…) thì checkout trả `503 Checkout.DependencyUnavailable`, không báo khách là thiết bị ngừng cho thuê. Listing không `Active`, giá thuê ≤ 0, tiền cọc âm hoặc không phải VND thì báo dòng `ListingUnavailable`.
+- Giới hạn hiện tại:
+  - Inventory chưa có endpoint `rental-snapshot`, chưa lưu tiền cọc và nơi nhận máy trên `EquipmentListing`. Trong lúc chờ, nếu Inventory gửi tiền cọc 0 thì checkout vẫn chấp nhận.
+  - Tên loại thiết bị và tên hãng vẫn tra qua `ICatalogReferenceClient`, hiện là bản tạm luôn trả 503 (`UnavailableCheckoutClients.cs`). Đề xuất: Inventory trả luôn hai tên này trong rental-snapshot (Inventory đã có `ICatalogServiceClient` trả `Name`), khi đó Rental bỏ `ICatalogReferenceClient`.
 
 ## Payment và Supplier Confirmation Workflow
 

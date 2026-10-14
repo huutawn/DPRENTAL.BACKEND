@@ -181,11 +181,14 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
         throw new NotSupportedException();
 }
 
-internal sealed class FakeInventoryListingClient : IInventoryListingClient
+/// <summary>
+/// Inventory giả phục vụ bước chuẩn bị checkout: đọc thông tin máy (rental-snapshot) và hỏi lịch trống.
+/// </summary>
+internal sealed class FakeInventoryListingClient : IInventoryRentalClient
 {
     private static readonly Error Down = Error.ServiceUnavailable("Inventory.Unavailable", "Inventory không phản hồi.");
 
-    public Dictionary<Guid, InventoryListingDto> Listings { get; } = [];
+    public Dictionary<Guid, ListingRentalSnapshotDto> Listings { get; } = [];
 
     public Dictionary<Guid, int> AvailableQuantities { get; } = [];
 
@@ -199,35 +202,82 @@ internal sealed class FakeInventoryListingClient : IInventoryListingClient
 
     public List<(DateOnly StartDate, DateOnly EndDate)> AvailabilityPeriods { get; } = [];
 
-    public Task<Result<InventoryListingDto?>> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default)
+    public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default)
     {
         ListingReadCount++;
         if (FailListingRead)
         {
-            return Task.FromResult(Result.Failure<InventoryListingDto?>(Down));
+            return Task.FromResult(Result.Failure<ListingRentalSnapshotDto>(Down));
         }
 
-        return Task.FromResult(Result.Success(Listings.GetValueOrDefault(listingId)));
+        return Task.FromResult(Listings.TryGetValue(listingId, out ListingRentalSnapshotDto? listing)
+            ? Result.Success(listing)
+            : Result.Failure<ListingRentalSnapshotDto>(Error.NotFound(
+                InventoryContractSpec.ErrorCodes.ListingNotFound, "Không tìm thấy Listing.")));
     }
 
-    public Task<Result<InventoryListingAvailabilityDto>> CheckAvailabilityAsync(
-        Guid listingId,
-        DateOnly startDate,
-        DateOnly endDate,
-        int requestedQuantity,
-        CancellationToken cancellationToken = default)
+    public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(
+        ListingAvailabilityCheckRequest request,
+        CancellationToken ct = default)
     {
         AvailabilityCheckCount++;
-        AvailabilityPeriods.Add((startDate, endDate));
+        AvailabilityPeriods.Add((request.From, request.To));
         if (FailAvailabilityCheck)
         {
-            return Task.FromResult(Result.Failure<InventoryListingAvailabilityDto>(Down));
+            return Task.FromResult(Result.Failure<ListingAvailabilityCheckResponse>(Down));
         }
 
-        int available = AvailableQuantities.GetValueOrDefault(listingId);
-        return Task.FromResult(Result.Success(
-            new InventoryListingAvailabilityDto(listingId, available, available >= requestedQuantity)));
+        int available = AvailableQuantities.GetValueOrDefault(request.ListingId);
+        return Task.FromResult(Result.Success(new ListingAvailabilityCheckResponse(
+            available, available >= request.Quantity, DateTimeOffset.UnixEpoch, request.From, request.To)));
     }
+
+    public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(string allocationGroupId, ConfirmAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<Result<ReleaseAllocationResponse>> ReleaseAllocationAsync(string allocationGroupId, ReleaseAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<Result<CancelAllocationResponse>> CancelAllocationAsync(string allocationGroupId, CancelAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<Result<MarkAssetsOverdueResponse>> MarkAssetsOverdueAsync(string allocationGroupId, MarkAssetsOverdueRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<Result<MarkAssetsReturnedResponse>> MarkAssetsReturnedAsync(string allocationGroupId, MarkAssetsReturnedRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<Result<BlockDamagedAssetsResponse>> BlockDamagedAssetsAsync(string allocationGroupId, BlockDamagedAssetsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+}
+
+/// <summary>Thông tin máy theo hợp đồng Inventory cho test checkout.</summary>
+internal static class TestListings
+{
+    public static ListingRentalSnapshotDto Create(
+        Guid listingId,
+        Guid supplierId,
+        bool isActive,
+        string displayName,
+        Guid equipmentTypeId,
+        Guid brandId,
+        string model,
+        int specSchemaVersion,
+        string specValuesJson,
+        Guid? thumbnailMediaId,
+        decimal dailyRate,
+        decimal depositPerUnit,
+        string currency,
+        string pickupLocation,
+        string snapshotVersion) => new(
+        listingId,
+        supplierId,
+        displayName,
+        null,
+        pickupLocation,
+        dailyRate,
+        depositPerUnit,
+        currency,
+        isActive ? "Active" : "Inactive",
+        snapshotVersion,
+        DateTimeOffset.UnixEpoch,
+        equipmentTypeId,
+        brandId,
+        model,
+        specSchemaVersion,
+        specValuesJson,
+        thumbnailMediaId);
 }
 
 internal sealed class FakeCatalogReferenceClient : ICatalogReferenceClient

@@ -107,7 +107,7 @@ public sealed class CheckoutServicePostgreSqlTests
         context.RentalCarts.Add(cart);
         await context.SaveChangesAsync();
 
-        _listings.Listings[_listingId] = new(
+        _listings.Listings[_listingId] = TestListings.Create(
             _listingId,
             _supplierId,
             true,

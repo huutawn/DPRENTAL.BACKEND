@@ -59,7 +59,7 @@ internal sealed class CheckoutTestHarness
     public Guid AddListing(Guid supplierId, decimal dailyRate, decimal depositPerUnit, int? units = null)
     {
         Guid listingId = Guid.NewGuid();
-        Listings.Listings[listingId] = new(
+        Listings.Listings[listingId] = TestListings.Create(
             listingId,
             supplierId,
             true,
@@ -90,7 +90,7 @@ internal sealed class CheckoutTestHarness
         RentalCart cart = RentalCart.Create(Guid.NewGuid(), renterId, Now).Value;
         Guid[] cartItemIds = lines
             .Select(l => cart.AddItem(
-                Guid.NewGuid(), l.ListingId, Listings.Listings[l.ListingId].OwnerUserId, l.Quantity, Start, End, Now).Value.Id)
+                Guid.NewGuid(), l.ListingId, Listings.Listings[l.ListingId].SupplierId, l.Quantity, Start, End, Now).Value.Id)
             .ToArray();
 
         await using RentalServiceDbContext context = NewContext();

@@ -20,15 +20,18 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 {
     private readonly IRentalCartRepository _carts;
     private readonly IRentalOrderRepository _orders;
-    private readonly IInventoryListingClient _inventory;
+    private readonly IInventoryRentalClient _inventory;
     private readonly ICatalogReferenceClient _catalog;
     private readonly RentalTermsOptions _terms;
     private readonly TimeProvider _timeProvider;
 
+    // Giỏ hàng cũng coi Listing có BookingStatus = Active là đang cho thuê (InventoryRentalCartReader).
+    private const string ActiveBookingStatus = "Active";
+
     public CheckoutPreparationService(
         IRentalCartRepository carts,
         IRentalOrderRepository orders,
-        IInventoryListingClient inventory,
+        IInventoryRentalClient inventory,
         ICatalogReferenceClient catalog,
         IOptions<RentalTermsOptions> termsOptions,
         TimeProvider timeProvider)
@@ -157,22 +160,28 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     {
         List<CheckoutPlanLine> lines = [];
         List<CheckoutLineIssue> issues = [];
-        Dictionary<Guid, InventoryListingDto?> listings = [];
+        Dictionary<Guid, ListingRentalSnapshotDto?> listings = [];
         Dictionary<Guid, string?> equipmentTypeNames = [];
         Dictionary<Guid, string?> brandNames = [];
 
         foreach (RentalCartItem item in items)
         {
-            if (!listings.TryGetValue(item.EquipmentListingId, out InventoryListingDto? listing))
+            if (!listings.TryGetValue(item.EquipmentListingId, out ListingRentalSnapshotDto? listing))
             {
-                Result<InventoryListingDto?> listingResult = await _inventory.GetListingAsync(item.EquipmentListingId, cancellationToken);
-                if (listingResult.IsFailure)
+                Result<ListingRentalSnapshotDto> listingResult = await _inventory.GetListingRentalSnapshotAsync(item.EquipmentListingId, cancellationToken);
+                if (listingResult.IsFailure && listingResult.Error.Type != ErrorType.NotFound)
                 {
                     return LineBuildOutcome.Unavailable;
                 }
 
-                listing = listingResult.Value;
+                listing = listingResult.IsSuccess ? listingResult.Value : null;
                 listings[item.EquipmentListingId] = listing;
+            }
+
+            // Thiếu dữ liệu bắt buộc theo hợp đồng là lỗi phía Inventory, không phải thiết bị ngừng cho thuê.
+            if (listing is not null && !IsComplete(listing))
+            {
+                return LineBuildOutcome.Unavailable;
             }
 
             if (listing is null || !IsRentable(listing))
@@ -182,7 +191,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
                 continue;
             }
 
-            if (listing.OwnerUserId == renterId)
+            if (listing.SupplierId == renterId)
             {
                 issues.Add(new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.OwnListing,
                     "Bạn không thể thuê thiết bị của chính mình."));
@@ -192,18 +201,15 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             (DateOnly orderStartDate, DateOnly orderEndDate) = CheckoutRules.ToOrderPeriod(item);
 
             // Mỗi dòng được hỏi lịch độc lập để báo lỗi sớm; chống đặt trùng là việc của Inventory lúc hold.
-            Result<InventoryListingAvailabilityDto> availabilityResult = await _inventory.CheckAvailabilityAsync(
-                item.EquipmentListingId,
-                orderStartDate,
-                orderEndDate,
-                item.Quantity,
+            Result<ListingAvailabilityCheckResponse> availabilityResult = await _inventory.CheckListingAvailabilityAsync(
+                new ListingAvailabilityCheckRequest(item.EquipmentListingId, orderStartDate, orderEndDate, item.Quantity),
                 cancellationToken);
             if (availabilityResult.IsFailure)
             {
                 return LineBuildOutcome.Unavailable;
             }
 
-            InventoryListingAvailabilityDto availability = availabilityResult.Value;
+            ListingAvailabilityCheckResponse availability = availabilityResult.Value;
             if (!availability.IsAvailable || availability.AvailableQuantity < item.Quantity)
             {
                 issues.Add(new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.InsufficientAvailability,
@@ -252,12 +258,12 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         RentalCartItem item,
         DateOnly orderStartDate,
         DateOnly orderEndDate,
-        InventoryListingDto listing,
+        ListingRentalSnapshotDto listing,
         string equipmentTypeName,
         string brandName)
     {
-        decimal dailyRate = listing.DailyRate!.Value;
-        decimal depositPerUnit = listing.DepositPerUnit!.Value;
+        decimal dailyRate = listing.DailyRate;
+        decimal depositPerUnit = listing.DepositPerUnit;
         int rentalDays = RentalPricingPolicy.CalculateRentalDays(orderStartDate, orderEndDate);
 
         RentalItemListingSnapshotDto snapshot = new(
@@ -266,20 +272,20 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             listing.BrandId,
             brandName,
             listing.Model.Trim(),
-            listing.SchemaVersion,
+            listing.SpecSchemaVersion,
             listing.SpecValuesJson.Trim(),
             listing.ThumbnailMediaId);
 
         return new(
             item.Id,
             item.EquipmentListingId,
-            listing.OwnerUserId,
+            listing.SupplierId,
             item.Quantity,
             orderStartDate,
             orderEndDate,
-            listing.Title.Trim(),
-            listing.PickupLocation!.Trim(),
-            listing.SnapshotVersion!.Trim(),
+            listing.DisplayName.Trim(),
+            listing.PickupLocation.Trim(),
+            listing.SnapshotVersion.Trim(),
             snapshot,
             dailyRate,
             depositPerUnit,
@@ -288,19 +294,23 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             RentalPricingPolicy.CalculateDepositAmount(depositPerUnit, item.Quantity));
     }
 
-    private static bool IsRentable(InventoryListingDto listing) =>
-        listing.IsActive &&
-        listing.OwnerUserId != Guid.Empty &&
+    private static bool IsComplete(ListingRentalSnapshotDto listing) =>
+        listing.SupplierId != Guid.Empty &&
         listing.EquipmentTypeId != Guid.Empty &&
         listing.BrandId != Guid.Empty &&
-        listing.SchemaVersion >= 1 &&
-        !string.IsNullOrWhiteSpace(listing.Title) &&
+        listing.SpecSchemaVersion >= 1 &&
+        !string.IsNullOrWhiteSpace(listing.DisplayName) &&
         !string.IsNullOrWhiteSpace(listing.Model) &&
         !string.IsNullOrWhiteSpace(listing.SpecValuesJson) &&
         !string.IsNullOrWhiteSpace(listing.PickupLocation) &&
         !string.IsNullOrWhiteSpace(listing.SnapshotVersion) &&
-        listing.DailyRate is > 0 &&
-        listing.DepositPerUnit is >= 0 &&
+        !string.IsNullOrWhiteSpace(listing.BookingStatus) &&
+        !string.IsNullOrWhiteSpace(listing.Currency);
+
+    private static bool IsRentable(ListingRentalSnapshotDto listing) =>
+        string.Equals(listing.BookingStatus, ActiveBookingStatus, StringComparison.OrdinalIgnoreCase) &&
+        listing.DailyRate > 0 &&
+        listing.DepositPerUnit >= 0 &&
         string.Equals(listing.Currency, CheckoutRules.Currency, StringComparison.OrdinalIgnoreCase);
 
     private static CheckoutDeliveryDto Normalize(CheckoutDeliveryDto delivery) =>

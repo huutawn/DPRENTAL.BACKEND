@@ -80,7 +80,13 @@ public sealed class InventoryRentalConsumerContractTests
             "VND",
             "Active",
             "v1.0",
-            _fixedTime);
+            _fixedTime,
+            Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+            Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+            "FX3",
+            2,
+            """{"sensor":"full-frame"}""",
+            Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"));
 
         _stub.GetSnapshotHandler = id => Task.FromResult(Result.Success(fixture));
 
@@ -96,12 +102,18 @@ public sealed class InventoryRentalConsumerContractTests
         string json = JsonSerializer.Serialize(result.Value, JsonOptions);
         Assert.Contains("\"dailyRate\":500000", json);
         Assert.Contains("\"snapshotVersion\":\"v1.0\"", json);
+        Assert.Contains("\"equipmentTypeId\":\"cccccccc-cccc-cccc-cccc-cccccccccccc\"", json);
+        Assert.Contains("\"brandId\":\"dddddddd-dddd-dddd-dddd-dddddddddddd\"", json);
+        Assert.Contains("\"model\":\"FX3\"", json);
+        Assert.Contains("\"specSchemaVersion\":2", json);
+        Assert.Contains("\"specValuesJson\":", json);
+        Assert.Contains("\"thumbnailMediaId\":\"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee\"", json);
         Assert.DoesNotContain("serialNumber", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("assetCode", json, StringComparison.OrdinalIgnoreCase);
 
         ListingRentalSnapshotDto? deserialized = JsonSerializer.Deserialize<ListingRentalSnapshotDto>(json, JsonOptions);
         Assert.NotNull(deserialized);
-        Assert.Equal(fixture.ListingId, deserialized.ListingId);
+        Assert.Equal(fixture, deserialized);
     }
 
     [Fact]

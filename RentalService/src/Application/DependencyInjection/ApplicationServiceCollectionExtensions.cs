@@ -56,7 +56,6 @@ public static class ApplicationServiceCollectionExtensions
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddHttpClient<IInventoryRentalClient, HttpInventoryRentalClient>()
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
-        services.AddSingleton<IInventoryListingClient, UnavailableInventoryListingClient>();
         services.AddSingleton<ICatalogReferenceClient, UnavailableCatalogReferenceClient>();
 
         // Checkout

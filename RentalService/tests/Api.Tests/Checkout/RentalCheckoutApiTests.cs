@@ -179,9 +179,9 @@ public sealed class RentalCheckoutApiTests
     }
 
     [Fact]
-    public async Task Submit_Returns503_WhileInventoryListingAndCatalogAdaptersAreNotAvailable()
+    public async Task Submit_Returns503_WhileCatalogAdapterIsNotAvailable()
     {
-        using CheckoutApiFactory factory = new() { UseRegisteredListingPorts = true };
+        using CheckoutApiFactory factory = new() { UseRegisteredCatalogPort = true };
         using HttpClient client = factory.CreateRenterClient("key-1");
 
         using HttpResponseMessage response = await client.PostAsJsonAsync(Route, factory.Request());
@@ -212,8 +212,8 @@ public sealed class RentalCheckoutApiTests
 
         public FakePaymentRentalClient Payment { get; } = new();
 
-        /// <summary>Giữ nguyên hai cổng đọc Inventory và Catalog mà Program đăng ký, không thay bằng bản giả.</summary>
-        public bool UseRegisteredListingPorts { get; init; }
+        /// <summary>Giữ nguyên cổng tra tên ở Catalog mà Program đăng ký (bản tạm luôn báo 503), không thay bằng bản giả.</summary>
+        public bool UseRegisteredCatalogPort { get; init; }
 
         public CheckoutRequest Request(decimal expectedTotal = Total)
         {
@@ -261,15 +261,14 @@ public sealed class RentalCheckoutApiTests
                 services.RemoveAll<TimeProvider>();
                 services.AddSingleton<TimeProvider>(new FixedTimeProvider(Now));
 
+                Inventory.Listings = _listings;
                 services.RemoveAll<IInventoryRentalClient>();
                 services.AddSingleton<IInventoryRentalClient>(Inventory);
                 services.RemoveAll<IPaymentRentalClient>();
                 services.AddSingleton<IPaymentRentalClient>(Payment);
 
-                if (!UseRegisteredListingPorts)
+                if (!UseRegisteredCatalogPort)
                 {
-                    services.RemoveAll<IInventoryListingClient>();
-                    services.AddSingleton<IInventoryListingClient>(_listings);
                     services.RemoveAll<ICatalogReferenceClient>();
                     services.AddSingleton<ICatalogReferenceClient>(_catalog);
                 }
@@ -301,7 +300,7 @@ public sealed class RentalCheckoutApiTests
             context.RentalCarts.Add(cart);
             context.SaveChanges();
 
-            _listings.Listings[_listingId] = new(
+            _listings.Listings[_listingId] = TestListings.Create(
                 _listingId,
                 supplierId,
                 true,
