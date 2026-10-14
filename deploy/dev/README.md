@@ -215,9 +215,11 @@ COMMIT;
 Compose requires `MEILI_IMAGE=getmeili/meilisearch:v1.55.0`, a random private
 `MEILI_MASTER_KEY` and a separate `INVENTORY_MEILISEARCH_API_KEY` in the VPS `.env`
 (mode 0600). The Inventory key must allow search, document add/delete, index
-create/get/update/delete/swap, settings get/update and tasks get, restricted to
-`inventory_public_listings*`, `inventory_owner_listings*`, `inventory_owner_assets*`
-so staging indexes are also authorized. Provision it using the protected Meilisearch
+create/get/update/delete/swap, settings get/update and tasks get, with `indexes: ["*"]` on this instance dedicated to Inventory. Meilisearch treats
+`indexSwap` as a global task; index-restricted keys can submit the swap but cannot
+read its task, returning 404 and leaving bootstrap unready. Keep the action list
+limited to those operations; the operational key does not need key-management,
+task deletion/cancellation, dumps or snapshots permissions. Provision it using the protected Meilisearch
 keys API; do not commit keys or place them in shell arguments. Meilisearch is bound
 to host loopback 7700 and the private services network, with a persistent volume.
 
@@ -230,3 +232,5 @@ Gateway routes 16/17 are the public Inventory availability POST routes. They mus
 point to `inventory-service`, not `rental-service`; stale numbered overrides caused
 404 responses from Rental. Route numbers depend on the Gateway image: validate
 its embedded route paths whenever upgrading that image.
+
+The global-task requirement is documented in the [Meilisearch asynchronous operations specification](https://specs.meilisearch.dev/specifications/text/0191-swap-indexes-api.html). Verified on v1.55.0: the restricted key received 404 for a successful swap; recreating its UID with global index visibility preserved the application credential and allowed bootstrap to complete.
