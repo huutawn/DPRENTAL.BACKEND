@@ -8,7 +8,7 @@ using System.Security.Claims;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Dprental.RentalService.Application.Security.Jwt;
-using Dprental.RentalService.Domain.DependencyInjection;
+using Dprental.RentalService.Domain.Repositories;
 using Dprental.RentalService.Domain.Entities;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;

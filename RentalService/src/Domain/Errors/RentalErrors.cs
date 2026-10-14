@@ -22,6 +22,8 @@ public static class RentalErrors
         Error.Validation("Cart.OwnerIdRequired", "Bắt buộc phải cung cấp OwnerId của thiết bị.");
     public static readonly Error QuantityOverflow =
         Error.Validation("Cart.QuantityOverflow", "Tổng số lượng vượt quá giới hạn cho phép.");
+    public static readonly Error InvalidCartUpdate =
+        Error.Validation("Cart.InvalidUpdate", "Cung cấp Quantity hoặc cả ExpectedStartDate và ExpectedEndDate; mỗi PATCH chỉ cập nhật một loại thông tin.");
 
     public static readonly Error InvalidQuantity =
         Error.Validation("Rental.InvalidQuantity", "Số lượng thuê phải lớn hơn 0.");
@@ -245,4 +247,14 @@ public static class RentalErrors
 
     public static readonly Error SnapshotContainsInternalData =
         Error.Validation("Snapshot.ContainsInternalData", "Snapshot thương mại không được chứa mã tài sản nội bộ hoặc số serial.");
+
+    public static readonly Error UnauthorizedSupplier = Error.Forbidden("Return.Unauthorized", "Sai nhà cung cấp.");
+    public static readonly Error InvalidItemStatusForReturn = Error.Validation("Return.InvalidStatus", "Chỉ được trả thiết bị khi đơn đang trong trạng thái IN_RENTAL.");
+    public static readonly Error FutureReturnTimeNotAllowed = Error.Validation("Return.FutureTime", "Thời gian trả không được nằm trong tương lai.");
+    public static readonly Error InvalidMediaEvidence = Error.Validation("Return.InvalidMedia", "Bằng chứng hình ảnh không hợp lệ.");
+
+    // Các lỗi cần truyền ID
+    public static Error AssetAlreadyReturned(Guid id) => Error.Conflict("Return.AlreadyReturned", $"Thiết bị {id} đã được trả trước đó.");
+    public static Error AssetNotHandedOver(Guid id) => Error.Validation("Return.NotHandedOver", $"Thiết bị {id} chưa được bàn giao.");
+    public static Error InvalidReturnTimeBeforeHandover(Guid id) => Error.Validation("Return.InvalidTime", $"Thời gian trả của thiết bị {id} trước lúc bàn giao.");
 }

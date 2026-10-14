@@ -63,13 +63,11 @@ Application trả `Result` cho lỗi dự kiến; controller dùng `this.ToProbl
 `GlobalExceptionHandler` đã đăng ký tại API, trả 500 ProblemDetails kèm `traceId`,
 không trả exception message hoặc payload; request bị hủy không chuyển thành lỗi nghiệp vụ.
 
-`Domain/IRepositories/IRepo<TEntity, TKey>` là contract CRUD có CancellationToken,
-không phụ thuộc EF/HTTP. Repository theo aggregate chỉ kế thừa khi cần đủ các thao tác;
-nếu không, định nghĩa contract nhỏ theo use case. Implementation persistence ở
-`Domain/Repositories` theo bố cục hiện tại của AuthService; không sinh generic EF
-repository hoặc entity nghiệp vụ giả. `GetAllAsync` chỉ dùng cho tập dữ liệu nhỏ;
-với dữ liệu lớn, contract chuyên biệt phải hỗ trợ phân trang.
-
+Các repository contract định nghĩa theo từng aggregate/use case trong `Domain/IRepositories`,
+có `CancellationToken` và không phụ thuộc EF/HTTP hay generic CRUD abstraction thừa.
+Implementation persistence đặt tại `Domain/Repositories` theo bố cục kiến trúc của service;
+không sinh generic EF repository hoặc entity nghiệp vụ giả. Các query dữ liệu lớn
+phải hỗ trợ phân trang.
 Template test kiểm tra Result invariant, ánh xạ error và exception qua HTTP ở
 Production, gồm fallback khi client không nhận JSON. Không sao chép mã lỗi,
 constraint database hay dependency đặc thù nghiệp vụ AuthService.
@@ -79,7 +77,7 @@ constraint database hay dependency đặc thù nghiệp vụ AuthService.
 Dịch vụ triển khai mô hình nghiệp vụ canonical theo AGENTS.md và thiết kế mới:
 - Toàn bộ ValueObjects đã được inline vào các entities sở hữu kèm DataAnnotations và Fluent API trong `RentalServiceDbContext`.
 - Các enums nghiệp vụ (`RentalCartStatus`, `RentalOrderStatus`, `RentalItemStatus`, `RentalUnitAssignmentStatus`, `UnitCondition`, `DeductionProposalStatus`, `DisputeStatus`, `ActorRole`) và `ErrorType` được đặt tập trung tại `Common/Enums`.
-- Ngoại lệ kiến trúc: `RentalServiceDbContext`, design-time factory và DI registration đặt tại `Domain/DependencyInjection`, repository contracts tại `Domain/IRepositories`, repository implementations tại `Domain/Repositories`, migrations tại `Domain/Migrations`. Không tạo folder `Persistence` hoặc project `Infrastructure`.
+- Ngoại lệ kiến trúc: `RentalServiceDbContext` và design-time factory đặt tại `Domain/Repositories`, DI registration đặt tại `Domain/DependencyInjection`, repository contracts tại `Domain/IRepositories`, repository implementations tại `Domain/Repositories`, migrations tại `Domain/Migrations`. Không tạo folder `Persistence` hoặc project `Infrastructure`.
 - Hai Aggregate Roots:
   1. `RentalCart`: Quản lý các dòng `RentalCartItem`, checkout all-or-nothing, abandon và optimistic concurrency qua `Version`.
   2. `RentalOrder`: Quản lý `RentalItem`, `RentalUnitAssignment`, `RentalStateTransition`, `RentalTermsAcceptance`, `HandoverRecord`, `ReturnRecord`, `DeductionProposal`, `Dispute`, `RentalOperationReceipt`. Trạng thái `RentalOrderStatus.Paid = 9` (loại bỏ `PendingSupplierConfirmation` khỏi Order enum; Item vẫn giữ trạng thái này).

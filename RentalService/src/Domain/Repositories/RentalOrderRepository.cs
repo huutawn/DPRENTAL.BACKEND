@@ -105,22 +105,39 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
     public Task<bool> UpdateAsync(RentalOrder order, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(order);
-        var entry = _dbContext.Entry(order);
-        if (entry.State == EntityState.Detached)
+        bool autoDetectChanges = _dbContext.ChangeTracker.AutoDetectChangesEnabled;
+        _dbContext.ChangeTracker.AutoDetectChangesEnabled = false;
+        try
         {
-            _dbContext.RentalOrders.Update(order);
-        }
-
-        foreach (var t in order.StateTransitions)
-        {
-            var tEntry = _dbContext.Entry(t);
-            if (tEntry.State == EntityState.Detached)
+            var entry = _dbContext.Entry(order);
+            if (entry.State == EntityState.Detached)
             {
-                tEntry.State = EntityState.Added;
+                // Preserve the existing detached-aggregate update behavior.
+                _dbContext.RentalOrders.Update(order);
+                return Task.FromResult(true);
             }
+            // Register new children before DetectChanges discovers their non-empty GUIDs.
+            foreach (var record in order.Items.SelectMany(i => i.ReturnRecords))
+            {
+                if (_dbContext.Entry(record).State == EntityState.Detached)
+                    _dbContext.Entry(record).State = EntityState.Added;
+            }
+            foreach (var receipt in order.OperationReceipts)
+            {
+                if (_dbContext.Entry(receipt).State == EntityState.Detached)
+                    _dbContext.Entry(receipt).State = EntityState.Added;
+            }
+            foreach (var transition in order.StateTransitions)
+            {
+                if (_dbContext.Entry(transition).State == EntityState.Detached)
+                    _dbContext.Entry(transition).State = EntityState.Added;
+            }
+            return Task.FromResult(true);
         }
-
-        return Task.FromResult(true);
+        finally
+        {
+            _dbContext.ChangeTracker.AutoDetectChangesEnabled = autoDetectChanges;
+        }
     }
 
     public Task<RentalOrder?> GetByIdWithDetailsAsync(Guid id, CancellationToken cancellationToken = default)

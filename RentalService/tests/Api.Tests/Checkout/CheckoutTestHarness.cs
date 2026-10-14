@@ -1,14 +1,14 @@
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.DTOs.Checkout;
-using Dprental.RentalService.Application.Expiry;
-using Dprental.RentalService.Application.Operations;
+using Dprental.RentalService.Application.IServices.Expiry;
+using Dprental.RentalService.Application.Services.Expiry;
+using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Options;
 using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Domain.Repositories;
-using Dprental.RentalService.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;

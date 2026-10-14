@@ -1,5 +1,6 @@
 using Dprental.RentalService.Api.Tests.Domain;
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;

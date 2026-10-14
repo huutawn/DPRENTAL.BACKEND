@@ -38,9 +38,13 @@ public sealed class SwaggerDocumentationTests
                 Assert.True(operation.Value.GetProperty("responses").TryGetProperty("500", out _));
             }
         }
-        Assert.Equal(15, operationCount);
+        Assert.Equal(14, operationCount);
+        Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/returns", out _));
+        Assert.False(paths.TryGetProperty("/api/v1/rental/items/{itemId}/accept", out _));
         Assert.False(paths.TryGetProperty("/rental/cart", out _));
         Assert.False(paths.TryGetProperty("/rental/checkout", out _));
+        Assert.False(paths.TryGetProperty("/api/v1/rental/admin/suppliers/{supplierId}/confirmation-statistics", out _));
+        Assert.False(paths.TryGetProperty("/api/v1/rental/internal/orders/{orderId}/operations/{operationId}/replay", out _));
         var checkoutResponses = paths.GetProperty("/api/v1/rental/checkout").GetProperty("post").GetProperty("responses");
         Assert.True(checkoutResponses.TryGetProperty("201", out _));
         Assert.True(checkoutResponses.TryGetProperty("200", out _));

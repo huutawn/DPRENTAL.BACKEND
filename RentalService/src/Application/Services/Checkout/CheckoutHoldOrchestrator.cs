@@ -2,8 +2,8 @@
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.IServices.Checkout;
-using Dprental.RentalService.Application.Operations;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Microsoft.Extensions.Logging;

@@ -5,6 +5,7 @@ using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
+using Dprental.RentalService.Domain.Repositories;
 using Xunit;
 
 namespace Dprental.RentalService.Api.Tests.Checkout;

@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Common;
 
 namespace Dprental.RentalService.Application.Clients;
@@ -19,28 +20,3 @@ public interface IInventoryListingClient
         int requestedQuantity,
         CancellationToken cancellationToken = default);
 }
-
-/// <summary>
-/// Thông tin Listing mà Rental cần để validate và chụp snapshot lúc checkout.
-/// </summary>
-public sealed record InventoryListingDto(
-    Guid Id,
-    Guid OwnerUserId,
-    bool IsActive,
-    string Title,
-    Guid EquipmentTypeId,
-    Guid BrandId,
-    string Model,
-    int SchemaVersion,
-    string SpecValuesJson,
-    Guid? ThumbnailMediaId,
-    decimal? DailyRate,
-    decimal? DepositPerUnit,
-    string? Currency,
-    string? PickupLocation,
-    string? SnapshotVersion);
-
-public sealed record InventoryListingAvailabilityDto(
-    Guid ListingId,
-    int AvailableQuantity,
-    bool IsAvailable);

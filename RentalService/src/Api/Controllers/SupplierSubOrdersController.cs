@@ -3,7 +3,7 @@ using Dprental.RentalService.Application.DTOs.Orders;
 using Dprental.RentalService.Application.DTOs.Supplier;
 using Dprental.RentalService.Application.IServices.Orders;
 using Dprental.RentalService.Application.Security;
-using Dprental.RentalService.Application.SupplierDecision;
+using Dprental.RentalService.Application.IServices.SupplierDecision;
 using Dprental.RentalService.Common;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

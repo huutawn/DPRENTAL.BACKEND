@@ -1,13 +1,16 @@
 using System.Text.Json;
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Clients;
-using Dprental.RentalService.Application.Operations;
+using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Domain.Repositories;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
-using Dprental.RentalService.Application.Expiry;
-using Dprental.RentalService.Application.Integration;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
+using Dprental.RentalService.Application.IServices.Expiry;
+using Dprental.RentalService.Application.Services.Expiry;
+using Dprental.RentalService.Application.Services.Integration;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;
@@ -353,7 +356,7 @@ public sealed class ExpiryWorkflowIntegrationTests
             [new RefundCompletedItemPayload(item.Id, 500_000m, 1_000_000m)],
             FixedNow);
 
-        var envelope = new PaymentEventEnvelope<RefundCompletedPayload>(
+        var envelope = new KafkaMessageEnvelope<RefundCompletedPayload>(
             Guid.NewGuid(),
             "RefundCompleted",
             1,

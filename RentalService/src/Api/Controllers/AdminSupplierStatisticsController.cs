@@ -1,6 +1,7 @@
 using Dprental.RentalService.Api.Filters;
 using Dprental.RentalService.Application.Security;
-using Dprental.RentalService.Application.SupplierStatistics;
+using Dprental.RentalService.Application.DTOs.SupplierStatistics;
+using Dprental.RentalService.Application.IServices.SupplierStatistics;
 using Dprental.RentalService.Common;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -19,6 +20,7 @@ namespace Dprental.RentalService.Api.Controllers;
 [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
 [Authorize]
 [Route("admin/suppliers")]
+[ApiExplorerSettings(IgnoreApi = true)]
 public sealed class AdminSupplierStatisticsController : ControllerBase
 {
     private readonly ISupplierStatisticsService _statisticsService;

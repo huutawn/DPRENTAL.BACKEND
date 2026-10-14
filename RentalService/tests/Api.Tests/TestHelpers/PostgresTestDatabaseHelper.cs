@@ -1,4 +1,5 @@
 using Dprental.RentalService.Domain.DependencyInjection;
+using Dprental.RentalService.Domain.Repositories;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Api.Tests.Domain;
 using Microsoft.EntityFrameworkCore;
