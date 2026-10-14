@@ -36,10 +36,12 @@ services:
       Routes__14__DownstreamHostAndPorts__0__Port: 8080
       Routes__15__DownstreamHostAndPorts__0__Host: inventory-service
       Routes__15__DownstreamHostAndPorts__0__Port: 8080
-      Routes__16__DownstreamHostAndPorts__0__Host: rental-service
+      Routes__16__DownstreamHostAndPorts__0__Host: inventory-service
       Routes__16__DownstreamHostAndPorts__0__Port: 8080
-      Routes__17__DownstreamHostAndPorts__0__Host: rental-service
+      Routes__17__DownstreamHostAndPorts__0__Host: inventory-service
       Routes__17__DownstreamHostAndPorts__0__Port: 8080
+      Routes__26__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__26__DownstreamHostAndPorts__0__Port: 8080
       Gateway__Security__Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:-http://localhost:3000}
       Gateway__Security__Cors__AllowedOrigins__1: ${CORS_ALLOWED_ORIGIN_1:-http://localhost:5173}
       Gateway__Security__Cors__AllowedOrigins__2: http://localhost:${GATEWAY_PORT:-5050}

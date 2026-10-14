@@ -56,6 +56,8 @@ services:
       Routes__14__DownstreamHostAndPorts__0__Port: 8080
       Routes__15__DownstreamHostAndPorts__0__Host: inventory-service
       Routes__15__DownstreamHostAndPorts__0__Port: 8080
+      Routes__26__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__26__DownstreamHostAndPorts__0__Port: 8080
       GlobalConfiguration__BaseUrl: https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
       Gateway__Security__Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:?Set CORS_ALLOWED_ORIGIN_0 in .env}
       Gateway__Security__ForwardedHeaders__KnownNetworks__0: ${EDGE_NETWORK_CIDR:-172.30.0.0/24}
@@ -160,6 +162,8 @@ services:
       Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:?Set CORS_ALLOWED_ORIGIN_0 in .env}
       Telemetry__Tracing__SamplingRatio: ${TRACING_SAMPLING_RATIO:-0.1}
       Telemetry__Otlp__TracesEndpoint: ${OTLP_TRACES_ENDPOINT:-}
+      InventoryService__BaseUrl: http://inventory-service:8080
+      InventoryService__TimeoutSeconds: 3
     depends_on:
       postgres:
         condition: service_healthy
