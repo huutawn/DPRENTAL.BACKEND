@@ -38,7 +38,7 @@ public sealed class SwaggerDocumentationTests
                 Assert.True(operation.Value.GetProperty("responses").TryGetProperty("500", out _));
             }
         }
-        Assert.Equal(11, operationCount);
+        Assert.Equal(15, operationCount);
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/returns", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/deductions", out _));
         Assert.False(paths.TryGetProperty("/rental/cart", out _));

@@ -37,6 +37,15 @@ public interface IRentalOrderRepository
     Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(
     DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<Guid>> GetRenterResponseTimeoutItemIdsAsync(
+    DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<Guid>> GetDisputedItemIdsAsync(
+        int skip, int take, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<Guid>> GetSettlementReadyItemIdsAsync(
+        int batchSize, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<RenterCalendarItemRecord>> GetRenterCalendarItemsAsync(
         Guid renterId,
         DateOnly monthStart,

@@ -182,6 +182,13 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
             case "PaymentExpiry":
                 return await PaymentExpiryCoreAsync(order, receipt, cancellationToken);
 
+            case RentalItem.SettleRentalAction:
+                {
+                    var item = order.Items.FirstOrDefault(i => i.Id == receipt.TargetItemId);
+                    if (item is null) return Error.NotFound("ITEM_NOT_FOUND", "Rental item was not found.");
+                    return await SettleRentalCoreAsync(order, item, receipt, cancellationToken);
+                }
+
             default:
                 return Error.Validation("UNSUPPORTED_ACTION", $"Hành động {receipt.Action} không hỗ trợ scheduled execution.");
         }

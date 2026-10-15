@@ -105,4 +105,11 @@ public class DeductionProposal
     {
         Status = DeductionProposalStatus.Resolved;
     }
+
+    private void EnsureStatus(DeductionProposalStatus expected)
+    {
+        if (Status != expected)
+            throw new InvalidOperationException(
+                $"Deduction proposal {Id} is {Status}, expected {expected}.");
+    }
 }

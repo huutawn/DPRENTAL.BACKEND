@@ -32,6 +32,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
     private readonly IOrderLockManager _lockManager;
     private readonly IPaymentWorkflowService _paymentWorkflowService;
     private readonly IRefundCompletedConsumer _refundCompletedConsumer;
+    private readonly IRentalSettledConsumer _rentalSettledConsumer;
     private readonly IKafkaOutboxWriter _outboxWriter;
     private readonly IUnitOfWork _unitOfWork;
     private readonly TimeProvider _timeProvider;
@@ -49,7 +50,8 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         IUnitOfWork unitOfWork,
         IOptions<KafkaOptions> kafkaOptions,
         ILogger<PaymentEventsDispatcher>? logger = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IRentalSettledConsumer? rentalSettledConsumer = null)
     {
         _inboxRepository = inboxRepository ?? throw new ArgumentNullException(nameof(inboxRepository));
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
@@ -61,6 +63,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         _kafkaOptions = kafkaOptions?.Value ?? new KafkaOptions();
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PaymentEventsDispatcher>.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _rentalSettledConsumer = rentalSettledConsumer ?? new Dprental.RentalService.Application.Services.Integration.RentalSettledConsumer(_timeProvider);
     }
 
     internal PaymentEventsDispatcher(
@@ -202,7 +205,8 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             Guid? causationId = root.TryGetProperty("causationId", out var causProp) && causProp.ValueKind == JsonValueKind.String && causProp.TryGetGuid(out var causGuid) ? causGuid : null;
 
             if (!string.Equals(messageType, KafkaContractSpec.EventTypes.InvoicePaid, StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(messageType, KafkaContractSpec.EventTypes.RefundCompleted, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(messageType, KafkaContractSpec.EventTypes.RefundCompleted, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(messageType, KafkaContractSpec.EventTypes.RentalSettled, StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogInformation("Ignored unhandled payment event type: {Type}", messageType);
                 return Result.Success(KafkaIntakeDisposition.Ignored);
@@ -511,6 +515,15 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
 
             result = await _refundCompletedConsumer.ApplyRefundCompletedStagedAsync(order, envelope, msg, cancellationToken);
         }
+        else if (string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.RentalSettled, StringComparison.OrdinalIgnoreCase))
+        {
+            KafkaMessageEnvelope<RentalSettledPayload>? envelope = null;
+            try { envelope = JsonSerializer.Deserialize<KafkaMessageEnvelope<RentalSettledPayload>>(msg.Payload, JsonOptions); }
+            catch (JsonException) { /* The shared failure path writes a DLQ record. */ }
+            result = envelope?.Payload is null
+                ? Error.Validation("DESERIALIZATION_FAILED", "Invalid RentalSettled event payload.")
+                : await _rentalSettledConsumer.ApplyRentalSettledStagedAsync(order, envelope, msg, cancellationToken);
+        }
         else
         {
             msg.MarkProcessed(utcNow);
@@ -546,7 +559,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         }
         else
         {
-            bool isRetryable = result.Error.Code is "INVOICE_NOT_ATTACHED" or "ORDER_NOT_FOUND";
+            bool isRetryable = result.Error.Code is "INVOICE_NOT_ATTACHED" or "ORDER_NOT_FOUND" or "INVENTORY_CLOSURE_PENDING";
             if (isRetryable && msg.RetryCount < 9)
             {
                 double baseDelay = Math.Min(60, Math.Pow(2, msg.RetryCount));

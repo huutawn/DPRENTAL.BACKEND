@@ -127,6 +127,11 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 if (_dbContext.Entry(proposal!).State == EntityState.Detached)
                     _dbContext.Entry(proposal!).State = EntityState.Added;
             }
+            foreach (var dispute in order.Items.Select(i => i.DeductionProposal?.Dispute).Where(d => d is not null))
+            {
+                if (_dbContext.Entry(dispute!).State == EntityState.Detached)
+                    _dbContext.Entry(dispute!).State = EntityState.Added;
+            }
             foreach (var receipt in order.OperationReceipts)
             {
                 if (_dbContext.Entry(receipt).State == EntityState.Detached)
@@ -341,6 +346,52 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                      && i.FinalDeductionAmount == null
                      && i.DeductionProposal == null)
             .OrderBy(i => i.DeductionDeadline)
+            .Select(i => i.Id)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+    }
+    public async Task<IReadOnlyList<Guid>> GetRenterResponseTimeoutItemIdsAsync(
+    DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.PendingSettlement
+                     && i.FinalDeductionAmount == null
+                     && i.DeductionProposal != null
+                     && i.DeductionProposal.Status == DeductionProposalStatus.Submitted
+                     && i.DeductionProposal.RenterResponseDeadline < utcNow)
+            .OrderBy(i => i.DeductionProposal!.RenterResponseDeadline)
+            .Select(i => i.Id)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetDisputedItemIdsAsync(
+        int skip, int take, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.PendingSettlement
+                     && i.FinalDeductionAmount == null
+                     && i.DeductionProposal != null
+                     && i.DeductionProposal.Status == DeductionProposalStatus.Disputed)
+            .OrderBy(i => i.DeductionProposal!.RespondedAt)     // khiếu nại cũ nhất lên đầu
+            .Select(i => i.Id)
+            .Skip(skip).Take(take)
+            .ToListAsync(cancellationToken);
+    }
+    public async Task<IReadOnlyList<Guid>> GetSettlementReadyItemIdsAsync(
+    int batchSize, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.PendingSettlement
+                     && i.FinalDeductionAmount != null
+                     && i.InventoryClosureConfirmedAt != null
+                     && i.SettlementRef == null
+                     && !i.RentalOrder!.OperationReceipts.Any(r =>
+                            r.Action == RentalItem.SettleRentalAction && r.TargetItemId == i.Id))
+            .OrderBy(i => i.FinalDeductionAmount)   // thứ tự ổn định; thay bằng mốc chốt nếu có
             .Select(i => i.Id)
             .Take(batchSize)
             .ToListAsync(cancellationToken);
