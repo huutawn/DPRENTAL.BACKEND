@@ -10,6 +10,9 @@ namespace Dprental.RentalService.Application.Kafka.Producers;
 /// </summary>
 public interface IInventoryCommandProducer
 {
+    Task<Result<ProducerEnqueueResult>> EnqueueApplyReturnedUnitsAsync(
+        ApplyReturnedUnitsCommandPayload command,
+        CancellationToken cancellationToken = default);
     Task<Result<ProducerEnqueueResult>> EnqueueCreateHoldAsync(
         CreateHoldCommandPayload command,
         string? correlationId = null,

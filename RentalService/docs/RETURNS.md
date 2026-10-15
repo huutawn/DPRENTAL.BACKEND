@@ -69,6 +69,9 @@ Inventory's provider endpoints remain unimplemented/unconfirmed on the current
 Inventory branch. Rental-only tests use a fake client. Payment settlement and
 `RentalSettled` event handling belong to the settlement workflow and are still
 required before normal returns can become `COMPLETED` end-to-end.
+The proposed Kafka alternative for new returns is documented in
+`INVENTORY_RETURN_KAFKA_CONTRACT.md`. It is opt-in through
+`Rental:InventoryReturn:Transport=Kafka` after Inventory signs off the wire contract.
 The Development configuration sets `Rental:InventoryReturn:Enabled=false`, so the
 recovery worker leaves return and damage receipts pending while Inventory is absent.
 Set `Rental__InventoryReturn__Enabled=true` when a compatible Inventory provider

@@ -27,6 +27,8 @@ public sealed class OperationRecoveryWorker : BackgroundService
         int pollSeconds = configuration.GetValue("Workers:OperationRecovery:PollingIntervalSeconds", 15);
         _pollingInterval = TimeSpan.FromSeconds(Math.Max(1, pollSeconds));
         var excluded = new List<string>();
+        // Kafka return receipts are completed only by a validated Inventory result event.
+        excluded.Add(RentalItem.ApplyReturnedUnitsAction);
         if (!configuration.GetValue("Rental:OverdueProtection:Enabled", true))
             excluded.Add(RentalItem.OverdueProtectionAction);
         if (!configuration.GetValue("Rental:InventoryReturn:Enabled", true))

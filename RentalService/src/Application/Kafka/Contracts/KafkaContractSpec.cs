@@ -16,6 +16,9 @@ public static class KafkaContractSpec
         public const string RentalEvents = "rental.events.v1";
         public const string PaymentEvents = "payment.events.v1";
         public const string PaymentDlq = "payment.events.v1.dlq";
+        // Proposed return workflow topics; Inventory must confirm before enablement.
+        public const string InventoryAllocationCommands = "inventory.allocation.commands.v1";
+        public const string InventoryAllocationEvents = "inventory.allocation.events.v1";
 
         // PROPOSED topics (Unconfirmed by provider)
         public const string InventoryCommands = "inventory.commands.v1";
@@ -34,6 +37,7 @@ public static class KafkaContractSpec
         public const string LatePaymentRefundRequested = "LatePaymentRefundRequested";
         public const string InvoicePaid = "InvoicePaid";
         public const string RefundCompleted = "RefundCompleted";
+        public const string ReturnedUnitsApplied = "ReturnedUnitsApplied";
         public const string DeadLetter = "DeadLetter";
     }
 
@@ -43,5 +47,6 @@ public static class KafkaContractSpec
         public const string CreateHold = "CreateHold";
         public const string ReleaseAllocation = "ReleaseAllocation";
         public const string CreateInvoice = "CreateInvoice";
+        public const string ApplyReturnedUnits = "ApplyReturnedUnits";
     }
 }

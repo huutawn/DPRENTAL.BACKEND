@@ -6,6 +6,7 @@ public partial class RentalItem
 {
     public const string MarkReturnedAction = "MarkAssetsReturned";
     public const string BlockDamagedAction = "BlockDamagedAssets";
+    public const string ApplyReturnedUnitsAction = "ApplyReturnedUnits";
 
     public Result ConfirmReturnedUnitClosure(Guid assignmentId, DateTimeOffset closedAt,
         string? dispositionRef, string receiptRef, DateTimeOffset confirmedAt)

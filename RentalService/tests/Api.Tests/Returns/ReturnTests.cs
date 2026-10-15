@@ -74,7 +74,8 @@ public sealed class ReturnTests : IAsyncLifetime
 
     private ReturnService Service(RentalServiceDbContext db, IRentalMediaClient? media = null, IConfiguration? configuration = null) => new(
         new RentalOrderRepository(db), new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
-        db, media ?? Mock.Of<IRentalMediaClient>(), _clock, new OutboxRepository(db), configuration ?? Configuration());
+        db, media ?? Mock.Of<IRentalMediaClient>(), _clock, new OutboxRepository(db), configuration ?? Configuration(),
+        Mock.Of<Dprental.RentalService.Application.Kafka.Producers.IInventoryCommandProducer>());
 
     private async Task<RentalItem> SeedAsync(int quantity = 2)
     {

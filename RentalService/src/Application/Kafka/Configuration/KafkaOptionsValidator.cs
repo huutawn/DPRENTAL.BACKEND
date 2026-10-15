@@ -46,6 +46,13 @@ public sealed class KafkaOptionsValidator : IValidateOptions<KafkaOptions>
         {
             failures.Add("InventoryCommandsTopic cannot be empty.");
         }
+        if (string.IsNullOrWhiteSpace(options.InventoryReturnCommandsTopic) ||
+            string.IsNullOrWhiteSpace(options.InventoryReturnEventsTopic) ||
+            string.IsNullOrWhiteSpace(options.InventoryReturnDlqTopic) ||
+            string.IsNullOrWhiteSpace(options.InventoryReturnConsumerGroupId))
+        {
+            failures.Add("Inventory return Kafka topics and consumer group cannot be empty.");
+        }
 
         if (string.IsNullOrWhiteSpace(options.PaymentCommandsTopic))
         {
