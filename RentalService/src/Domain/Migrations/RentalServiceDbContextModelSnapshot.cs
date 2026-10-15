@@ -31,6 +31,15 @@ namespace RentalService.Domain.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("DamageDescription")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.PrimitiveCollection<Guid[]>("EvidenceMediaIds")
+                        .IsRequired()
+                        .HasColumnType("uuid[]");
+
                     b.Property<Guid>("RentalItemId")
                         .HasColumnType("uuid");
 
@@ -51,6 +60,10 @@ namespace RentalService.Domain.Migrations
 
                     b.Property<Guid>("SubmittedById")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal>("TotalProposedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
 
                     b.HasKey("Id");
 

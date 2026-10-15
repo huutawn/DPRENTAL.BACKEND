@@ -201,6 +201,8 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
         // DeductionProposal & Dispute
         modelBuilder.Entity<DeductionProposal>(b =>
         {
+            b.Property(p => p.TotalProposedAmount).HasPrecision(18, 2);
+            b.Property(p => p.EvidenceMediaIds).HasField("_evidenceMediaIds");
             b.HasOne(p => p.Dispute)
                 .WithOne(d => d.DeductionProposal)
                 .HasForeignKey<Dispute>(d => d.DeductionProposalId)

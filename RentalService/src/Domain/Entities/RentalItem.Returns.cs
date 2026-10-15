@@ -24,7 +24,7 @@ public partial class RentalItem
         if (AreAllUnitsReturned)
         {
             ReturnsCompletedAt = submittedAt.ToUniversalTime();
-            if (HasDamagedUnits)
+            if (HasDamagedUnits && DepositAmount > 0m)
             {
                 Status = RentalItemStatus.PendingSettlement;
                 DeductionDeadline = ReturnsCompletedAt.Value.AddHours(48);
