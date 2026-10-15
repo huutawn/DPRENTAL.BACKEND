@@ -23,8 +23,6 @@ public sealed class CheckoutPreparationServiceTests
     private readonly Guid _renterId = Guid.NewGuid();
     private readonly Guid _supplierId = Guid.NewGuid();
     private readonly Guid _listingId = Guid.NewGuid();
-    private readonly Guid _equipmentTypeId = Guid.NewGuid();
-    private readonly Guid _brandId = Guid.NewGuid();
     private readonly Guid _thumbnailMediaId = Guid.NewGuid();
 
     private readonly FakeCartRepository _carts = new();
@@ -46,26 +44,11 @@ public sealed class CheckoutPreparationServiceTests
     private Guid AddCartItem(Guid listingId, int quantity, DateOnly start, DateOnly end) =>
         _cart.AddItem(Guid.NewGuid(), listingId, _supplierId, quantity, start, end, Now).Value.Id;
 
-    private ListingRentalSnapshotDto Listing(Guid id) => TestListings.Create(
-        id,
-        _supplierId,
-        true,
-        " Sony A7 IV ",
-        _equipmentTypeId,
-        _brandId,
-        "A7 IV",
-        3,
-        """{"sensor":"full-frame"}""",
-        _thumbnailMediaId,
-        500_000m,
-        2_000_000m,
-        "VND",
-        "Quận 1, TP.HCM",
-        "listing-v7",
-        equipmentTypeName: " Máy ảnh ",
-        brandName: " Sony ");
+    private ListingRentalSnapshotDto Listing(Guid id) =>
+        TestListings.Create(id, _supplierId, " Sony A7 IV ", 500_000m, thumbnailMediaId: _thumbnailMediaId);
 
-    private CheckoutRequest Request(decimal expectedTotal = 7_000_000m, params Guid[] cartItemIds) => new(
+    // 2 máy x 500.000 x 3 ngày; Inventory chưa có tiền cọc nên cọc = 0.
+    private CheckoutRequest Request(decimal expectedTotal = 3_000_000m, params Guid[] cartItemIds) => new(
         cartItemIds.Length == 0 ? [_cartItemId] : cartItemIds,
         new(" Hồ Chí Minh ", "123 Nguyễn Huệ, Quận 1", "Nguyễn Văn A", "0901234567", "  "),
         new("VCB", "0123456789", "NGUYEN VAN A"),
@@ -143,8 +126,6 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(_listingId, line.EquipmentListingId);
         Assert.Equal(_supplierId, line.SupplierId);
         Assert.Equal("Sony A7 IV", line.ListingName);
-        Assert.Equal("Quận 1, TP.HCM", line.PickupLocation);
-        Assert.Equal("listing-v7", line.SnapshotVersion);
         Assert.Equal(2, line.Quantity);
         Assert.Equal(3, line.RentalDays);
         // Đơn hàng lưu [từ, đến): ngày kết thúc lùi một ngày so với ngày trả trong giỏ.
@@ -152,18 +133,15 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(new DateOnly(2026, 10, 15), line.ExpectedEndDate);
         Assert.Equal((new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 15)), Assert.Single(_inventory.AvailabilityPeriods));
         Assert.Equal(500_000m, line.DailyRate);
-        Assert.Equal(2_000_000m, line.DepositPerUnit);
+        Assert.Equal(0m, line.DepositPerUnit);
         Assert.Equal(3_000_000m, line.RentalAmount);
-        Assert.Equal(4_000_000m, line.DepositAmount);
-        // Tên loại thiết bị và tên hãng lấy từ Inventory (đã cắt khoảng trắng), không gọi Catalog.
-        Assert.Equal(
-            new RentalItemListingSnapshotDto(
-                _equipmentTypeId, "Máy ảnh", _brandId, "Sony", "A7 IV", 3, """{"sensor":"full-frame"}""", _thumbnailMediaId),
-            line.ListingSnapshot);
+        Assert.Equal(0m, line.DepositAmount);
+        // Inventory chỉ trả tên, giá và ảnh: snapshot chỉ còn ảnh, các thông tin khác để trống.
+        Assert.Equal(RentalItemListingSnapshotDto.ThumbnailOnly(_thumbnailMediaId), line.ListingSnapshot);
 
         Assert.Equal(3_000_000m, plan.TotalRentalAmount);
-        Assert.Equal(4_000_000m, plan.TotalDepositAmount);
-        Assert.Equal(7_000_000m, plan.TotalAmount);
+        Assert.Equal(0m, plan.TotalDepositAmount);
+        Assert.Equal(3_000_000m, plan.TotalAmount);
     }
 
     [Fact]
@@ -197,7 +175,7 @@ public sealed class CheckoutPreparationServiceTests
                     line.ExpectedEndDate,
                     line.ListingName,
                     null,
-                    line.PickupLocation,
+                    null,
                     line.DailyRate,
                     line.DepositPerUnit,
                     "rental-item:1",
@@ -219,7 +197,7 @@ public sealed class CheckoutPreparationServiceTests
     {
         Guid oneDayItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 20));
 
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(2_500_000m, oneDayItem));
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(500_000m, oneDayItem));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Plan.Lines.Single().RentalDays);
@@ -301,7 +279,7 @@ public sealed class CheckoutPreparationServiceTests
     [Fact]
     public async Task Prepare_RejectsCartItemThatIsNotInRentersCart()
     {
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(7_000_000m, Guid.NewGuid()));
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(3_000_000m, Guid.NewGuid()));
 
         Assert.Equal(RentalErrors.CartItemNotFound, result.Error);
         Assert.Equal(0, _inventory.ListingReadCount);
@@ -371,8 +349,8 @@ public sealed class CheckoutPreparationServiceTests
         Guid missingListing = Guid.NewGuid();
         Guid ownListing = Guid.NewGuid();
         Guid scarceListing = Guid.NewGuid();
-        _inventory.Listings[inactiveListing] = Listing(inactiveListing) with { BookingStatus = "Inactive" };
-        _inventory.Listings[ownListing] = Listing(ownListing) with { SupplierId = _renterId };
+        _inventory.Listings[inactiveListing] = Listing(inactiveListing) with { Status = "Inactive" };
+        _inventory.Listings[ownListing] = Listing(ownListing) with { OwnerUserId = _renterId };
         _inventory.Listings[scarceListing] = Listing(scarceListing);
         _inventory.AvailableQuantities[scarceListing] = 3;
 
@@ -400,15 +378,13 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Theory]
-    [InlineData(0, 2_000_000, "VND")]
-    [InlineData(500_000, -1, "VND")]
-    [InlineData(500_000, 2_000_000, "USD")]
-    public async Task Prepare_RejectsListingWithoutUsablePricing(int dailyRate, int deposit, string currency)
+    [InlineData(0, "VND")]
+    [InlineData(500_000, "USD")]
+    public async Task Prepare_RejectsListingWithoutUsablePricing(int dailyRate, string currency)
     {
         _inventory.Listings[_listingId] = Listing(_listingId) with
         {
             DailyRate = dailyRate,
-            DepositPerUnit = deposit,
             Currency = currency
         };
 
@@ -418,7 +394,7 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(CheckoutLineIssueCode.ListingUnavailable, Assert.Single(result.LineIssues).Code);
     }
 
-    public static TheoryData<string> IncompleteSnapshotFields => ["EquipmentTypeId", "EquipmentTypeName", "BrandId", "BrandName", "Model","SpecSchemaVersion", "SpecValuesJson", "PickupLocation", "Currency"];
+    public static TheoryData<string> IncompleteSnapshotFields => ["OwnerUserId", "Name", "Status", "Currency"];
 
     [Theory]
     [MemberData(nameof(IncompleteSnapshotFields))]
@@ -427,14 +403,9 @@ public sealed class CheckoutPreparationServiceTests
         ListingRentalSnapshotDto listing = Listing(_listingId);
         _inventory.Listings[_listingId] = missingField switch
         {
-            "EquipmentTypeId" => listing with { EquipmentTypeId = Guid.Empty },
-            "EquipmentTypeName" => listing with { EquipmentTypeName = " " },
-            "BrandId" => listing with { BrandId = Guid.Empty },
-            "BrandName" => listing with { BrandName = null! },
-            "Model" => listing with { Model = null! },
-            "SpecSchemaVersion" => listing with { SpecSchemaVersion = 0 },
-            "SpecValuesJson" => listing with { SpecValuesJson = "" },
-            "PickupLocation" => listing with { PickupLocation = " " },
+            "OwnerUserId" => listing with { OwnerUserId = Guid.Empty },
+            "Name" => listing with { Name = " " },
+            "Status" => listing with { Status = null! },
             _ => listing with { Currency = null! }
         };
 
@@ -446,27 +417,16 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Fact]
-    public async Task Prepare_AcceptsZeroDeposit()
-    {
-        _inventory.Listings[_listingId] = Listing(_listingId) with { DepositPerUnit = 0m };
-
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(3_000_000m));
-
-        Assert.True(result.IsSuccess);
-        Assert.Equal(0m, result.Plan.TotalDepositAmount);
-    }
-
-    [Fact]
     public async Task Prepare_ReturnsCurrentQuote_WhenPriceDiffersFromWhatRenterSaw()
     {
         _inventory.Listings[_listingId] = Listing(_listingId) with { DailyRate = 600_000m };
 
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(7_000_000m));
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(3_000_000m));
 
         Assert.Equal(CheckoutErrors.PriceChanged, result.Error);
         Assert.NotNull(result.CurrentQuote);
         Assert.Equal(600_000m, result.CurrentQuote.Lines.Single().DailyRate);
-        Assert.Equal(3_600_000m + 4_000_000m, result.CurrentQuote.TotalAmount);
+        Assert.Equal(3_600_000m, result.CurrentQuote.TotalAmount);
     }
 
     [Fact]
@@ -496,7 +456,7 @@ public sealed class CheckoutPreparationServiceTests
         Guid secondItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 21));
 
         CheckoutPreparationResult result = await CreateService()
-            .PrepareAsync(Renter(), Request(7_000_000m + 3_000_000m, _cartItemId, secondItem));
+            .PrepareAsync(Renter(), Request(3_000_000m + 1_000_000m, _cartItemId, secondItem));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(2, result.Plan.Lines.Count);

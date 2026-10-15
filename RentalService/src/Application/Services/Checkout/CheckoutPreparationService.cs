@@ -24,8 +24,8 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     private readonly RentalTermsOptions _terms;
     private readonly TimeProvider _timeProvider;
 
-    // Giỏ hàng cũng coi Listing có BookingStatus = Active là đang cho thuê (InventoryRentalCartReader).
-    private const string ActiveBookingStatus = "Active";
+    // Giỏ hàng cũng coi Listing có Status = Active là đang cho thuê (InventoryRentalCartReader).
+    private const string ActiveStatus = "Active";
 
     public CheckoutPreparationService(
         IRentalCartRepository carts,
@@ -148,7 +148,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     }
 
     /// <summary>
-    /// Đọc lại Listing (kèm tên loại thiết bị và tên hãng) và lịch trống của mọi dòng, mỗi việc một lần gọi Inventory theo danh sách.
+    /// Đọc lại Listing và lịch trống của mọi dòng, mỗi việc một lần gọi Inventory theo danh sách.
     /// Lỗi của mọi dòng được gom lại để trả một lần, theo thứ tự dòng trong giỏ.
     /// </summary>
     private async Task<LineBuildOutcome> BuildLinesAsync(
@@ -177,7 +177,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
                 continue;
             }
 
-            if (listing.SupplierId == renterId)
+            if (listing.OwnerUserId == renterId)
             {
                 issues.Add(new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.OwnListing,
                     "Bạn không thể thuê thiết bị của chính mình."));
@@ -242,7 +242,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     {
         Dictionary<Guid, ListingRentalSnapshotDto> indexed = [];
         listings = indexed;
-        if (response.Items is null || response.NotFoundListingIds is null)
+        if (response.Items is null || response.MissingIds is null)
         {
             return false;
         }
@@ -250,13 +250,13 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         HashSet<Guid> requested = [.. requestedIds];
         foreach (ListingRentalSnapshotDto listing in response.Items)
         {
-            if (listing is null || !requested.Contains(listing.ListingId) || !IsComplete(listing) || !indexed.TryAdd(listing.ListingId, listing))
+            if (listing is null || !requested.Contains(listing.Id) || !IsComplete(listing) || !indexed.TryAdd(listing.Id, listing))
             {
                 return false;
             }
         }
 
-        HashSet<Guid> notFound = [.. response.NotFoundListingIds];
+        HashSet<Guid> notFound = [.. response.MissingIds];
         return requestedIds.All(id => indexed.ContainsKey(id) || notFound.Contains(id));
     }
 
@@ -267,56 +267,33 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         ListingRentalSnapshotDto listing)
     {
         decimal dailyRate = listing.DailyRate;
-        decimal depositPerUnit = listing.DepositPerUnit;
         int rentalDays = RentalPricingPolicy.CalculateRentalDays(orderStartDate, orderEndDate);
-
-        RentalItemListingSnapshotDto snapshot = new(
-            listing.EquipmentTypeId,
-            listing.EquipmentTypeName.Trim(),
-            listing.BrandId,
-            listing.BrandName.Trim(),
-            listing.Model.Trim(),
-            listing.SpecSchemaVersion,
-            listing.SpecValuesJson.Trim(),
-            listing.ThumbnailMediaId);
 
         return new(
             item.Id,
             item.EquipmentListingId,
-            listing.SupplierId,
+            listing.OwnerUserId,
             item.Quantity,
             orderStartDate,
             orderEndDate,
-            listing.DisplayName.Trim(),
-            listing.PickupLocation.Trim(),
-            listing.SnapshotVersion.Trim(),
-            snapshot,
+            listing.Name.Trim(),
+            RentalItemListingSnapshotDto.ThumbnailOnly(listing.ThumbnailMediaId),
             dailyRate,
-            depositPerUnit,
+            CheckoutRules.DepositPerUnit,
             rentalDays,
             RentalPricingPolicy.CalculateRentalAmount(dailyRate, item.Quantity, rentalDays),
-            RentalPricingPolicy.CalculateDepositAmount(depositPerUnit, item.Quantity));
+            RentalPricingPolicy.CalculateDepositAmount(CheckoutRules.DepositPerUnit, item.Quantity));
     }
 
     private static bool IsComplete(ListingRentalSnapshotDto listing) =>
-        listing.SupplierId != Guid.Empty &&
-        listing.EquipmentTypeId != Guid.Empty &&
-        listing.BrandId != Guid.Empty &&
-        listing.SpecSchemaVersion >= 1 &&
-        !string.IsNullOrWhiteSpace(listing.EquipmentTypeName) &&
-        !string.IsNullOrWhiteSpace(listing.BrandName) &&
-        !string.IsNullOrWhiteSpace(listing.DisplayName) &&
-        !string.IsNullOrWhiteSpace(listing.Model) &&
-        !string.IsNullOrWhiteSpace(listing.SpecValuesJson) &&
-        !string.IsNullOrWhiteSpace(listing.PickupLocation) &&
-        !string.IsNullOrWhiteSpace(listing.SnapshotVersion) &&
-        !string.IsNullOrWhiteSpace(listing.BookingStatus) &&
+        listing.OwnerUserId != Guid.Empty &&
+        !string.IsNullOrWhiteSpace(listing.Name) &&
+        !string.IsNullOrWhiteSpace(listing.Status) &&
         !string.IsNullOrWhiteSpace(listing.Currency);
 
     private static bool IsRentable(ListingRentalSnapshotDto listing) =>
-        string.Equals(listing.BookingStatus, ActiveBookingStatus, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(listing.Status, ActiveStatus, StringComparison.OrdinalIgnoreCase) &&
         listing.DailyRate > 0 &&
-        listing.DepositPerUnit >= 0 &&
         string.Equals(listing.Currency, CheckoutRules.Currency, StringComparison.OrdinalIgnoreCase);
 
     private static CheckoutDeliveryDto Normalize(CheckoutDeliveryDto delivery) =>

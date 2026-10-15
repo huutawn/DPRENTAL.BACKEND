@@ -1,6 +1,8 @@
+using System.Globalization;
 using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 
@@ -23,7 +25,7 @@ public sealed class InventoryRentalCartReader(IInventoryRentalClient inventory) 
             throw DependencyFailure(result.Error);
         }
 
-        return result.Value.SupplierId == Guid.Empty ? null : result.Value.SupplierId;
+        return result.Value.OwnerUserId == Guid.Empty ? null : result.Value.OwnerUserId;
     }
 
     public async Task<RentalListingSnapshot?> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default)
@@ -38,16 +40,17 @@ public sealed class InventoryRentalCartReader(IInventoryRentalClient inventory) 
         }
 
         ListingRentalSnapshotDto snapshot = result.Value;
-        bool active = string.Equals(snapshot.BookingStatus, "Active", StringComparison.OrdinalIgnoreCase);
+        bool active = string.Equals(snapshot.Status, "Active", StringComparison.OrdinalIgnoreCase);
 
+        // Inventory không có phiên bản giá: lấy chính giá thuê làm phiên bản, giá đổi thì phiên bản đổi.
         return new RentalListingSnapshot(
-            snapshot.ListingId,
-            snapshot.SupplierId,
+            snapshot.Id,
+            snapshot.OwnerUserId,
             IsPublished: active,
             AcceptsBookings: active,
             snapshot.DailyRate,
-            snapshot.DepositPerUnit,
-            snapshot.SnapshotVersion);
+            CheckoutRules.DepositPerUnit,
+            snapshot.DailyRate.ToString(CultureInfo.InvariantCulture));
     }
 
     public async Task<int?> GetAvailableQuantityAsync(

@@ -55,8 +55,7 @@ public sealed class CheckoutHoldOrchestrator : ICheckoutHoldOrchestrator
                 line.ExpectedStartDate,
                 line.ExpectedEndDate,
                 $"rental-item:{rentalItemId}",
-                holdExpiresAt,
-                line.SnapshotVersion);
+                holdExpiresAt);
 
             Result<CreateHoldResponse> result = await _inventory.CreateHoldAsync(request, cancellationToken);
 

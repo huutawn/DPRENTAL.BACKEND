@@ -29,8 +29,6 @@ internal sealed class CheckoutTestHarness
     public const int RentalDays = 3;
 
     private readonly string _dbName = $"CheckoutHarness_{Guid.NewGuid():N}";
-    private readonly Guid _equipmentTypeId = Guid.NewGuid();
-    private readonly Guid _brandId = Guid.NewGuid();
 
     public FakeInventoryListingClient Listings { get; } = new();
 
@@ -48,25 +46,10 @@ internal sealed class CheckoutTestHarness
         new DbContextOptionsBuilder<RentalServiceDbContext>().UseInMemoryDatabase(_dbName).Options);
 
     /// <param name="units">Số máy của Listing; null thì Inventory giả giữ được không giới hạn.</param>
-    public Guid AddListing(Guid supplierId, decimal dailyRate, decimal depositPerUnit, int? units = null)
+    public Guid AddListing(Guid supplierId, decimal dailyRate, int? units = null)
     {
         Guid listingId = Guid.NewGuid();
-        Listings.Listings[listingId] = TestListings.Create(
-            listingId,
-            supplierId,
-            true,
-            "Thiết bị",
-            _equipmentTypeId,
-            _brandId,
-            "Model",
-            1,
-            """{"sensor":"full-frame"}""",
-            Guid.NewGuid(),
-            dailyRate,
-            depositPerUnit,
-            "VND",
-            "Quận 1, TP.HCM",
-            "listing-v1");
+        Listings.Listings[listingId] = TestListings.Create(listingId, supplierId, "Thiết bị", dailyRate, thumbnailMediaId: Guid.NewGuid());
         Listings.AvailableQuantities[listingId] = units ?? 10;
         if (units is int capacity)
         {
@@ -82,7 +65,7 @@ internal sealed class CheckoutTestHarness
         RentalCart cart = RentalCart.Create(Guid.NewGuid(), renterId, Now).Value;
         Guid[] cartItemIds = lines
             .Select(l => cart.AddItem(
-                Guid.NewGuid(), l.ListingId, Listings.Listings[l.ListingId].SupplierId, l.Quantity, Start, End, Now).Value.Id)
+                Guid.NewGuid(), l.ListingId, Listings.Listings[l.ListingId].OwnerUserId, l.Quantity, Start, End, Now).Value.Id)
             .ToArray();
 
         await using RentalServiceDbContext context = NewContext();

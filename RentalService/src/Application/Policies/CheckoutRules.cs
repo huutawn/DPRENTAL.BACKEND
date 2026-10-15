@@ -16,6 +16,9 @@ public static class CheckoutRules
     public const int BookingHorizonMonths = 6;
     public const string Currency = "VND";
 
+    /// <summary>Inventory chưa có tiền cọc trên Listing; tạm tính 0 cho đến khi có (giỏ hàng dùng cùng giá trị).</summary>
+    public const decimal DepositPerUnit = 0m;
+
     /// <summary>Phase 1 chỉ có một cách giao: nhà cung cấp giao tới địa chỉ của người thuê.</summary>
     public const string DeliveryMethod = "Delivery";
 

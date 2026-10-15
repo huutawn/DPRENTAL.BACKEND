@@ -37,7 +37,8 @@ public sealed class RentalCheckoutApiTests
     private const string ProfileCompletedHeader = "X-Test-Pc";
 
     // 2 máy x 500.000 x 3 ngày (12, 13, 14/10) + cọc 2 x 2.000.000.
-    private const decimal Total = 7_000_000m;
+    // 2 máy x 500.000 x 3 ngày; Inventory chưa có tiền cọc nên cọc = 0.
+    private const decimal Total = 3_000_000m;
 
     [Fact]
     public async Task Submit_WithoutToken_Returns401()
@@ -105,7 +106,7 @@ public sealed class RentalCheckoutApiTests
         Assert.Equal("INV-1", order.GetProperty("invoiceRef").GetString());
         Assert.Equal("VND", order.GetProperty("currency").GetString());
         Assert.Equal(3_000_000m, order.GetProperty("totalRentalAmount").GetDecimal());
-        Assert.Equal(4_000_000m, order.GetProperty("totalDepositAmount").GetDecimal());
+        Assert.Equal(0m, order.GetProperty("totalDepositAmount").GetDecimal());
         Assert.Equal(Total, order.GetProperty("totalAmount").GetDecimal());
         Assert.False(order.GetProperty("isReplay").GetBoolean());
 
@@ -180,12 +181,12 @@ public sealed class RentalCheckoutApiTests
     }
 
     [Fact]
-    public async Task Submit_Returns503_WhenInventoryOmitsEquipmentTypeOrBrandName()
+    public async Task Submit_Returns503_WhenInventoryOmitsTheListingName()
     {
         using CheckoutApiFactory factory = new();
         using HttpClient client = factory.CreateRenterClient("key-1");
         CheckoutRequest request = factory.Request();
-        factory.ChangeListing(listing => listing with { BrandName = "" });
+        factory.ChangeListing(listing => listing with { Name = "" });
 
         using HttpResponseMessage response = await client.PostAsJsonAsync(Route, request);
 
@@ -285,8 +286,6 @@ public sealed class RentalCheckoutApiTests
             _seeded = true;
 
             Guid supplierId = Guid.NewGuid();
-            Guid equipmentTypeId = Guid.NewGuid();
-            Guid brandId = Guid.NewGuid();
 
             RentalCart cart = RentalCart.Create(Guid.NewGuid(), RenterId, Now).Value;
             CartItemId = cart.AddItem(
@@ -298,21 +297,7 @@ public sealed class RentalCheckoutApiTests
             context.SaveChanges();
 
             _listings.Listings[_listingId] = TestListings.Create(
-                _listingId,
-                supplierId,
-                true,
-                "Sony A7 IV",
-                equipmentTypeId,
-                brandId,
-                "A7 IV",
-                1,
-                """{"sensor":"full-frame"}""",
-                Guid.NewGuid(),
-                500_000m,
-                2_000_000m,
-                "VND",
-                "Quận 1, TP.HCM",
-                "listing-v1");
+                _listingId, supplierId, "Sony A7 IV", 500_000m, thumbnailMediaId: Guid.NewGuid());
             _listings.AvailableQuantities[_listingId] = 10;
         }
     }

@@ -34,17 +34,15 @@ public sealed class CheckoutServiceTests
     private const string Key = "checkout-key-1";
     private const string OtherKey = "checkout-key-2";
 
-    // Máy ảnh: 2 máy x 500.000 x 3 ngày + cọc 2 x 2.000.000 = 7.000.000.
-    // Ống kính: 1 cái x 200.000 x 3 ngày + cọc 1.000.000 = 1.600.000.
-    private const decimal CameraAndLensTotal = 8_600_000m;
-    // Chân máy: 1 cái x 100.000 x 3 ngày + cọc 500.000 = 800.000.
-    private const decimal TripodTotal = 800_000m;
+    // Inventory chưa có tiền cọc nên cọc = 0.
+    // Máy ảnh: 2 máy x 500.000 x 3 ngày = 3.000.000. Ống kính: 1 cái x 200.000 x 3 ngày = 600.000.
+    private const decimal CameraAndLensTotal = 3_600_000m;
+    // Chân máy: 1 cái x 100.000 x 3 ngày = 300.000.
+    private const decimal TripodTotal = 300_000m;
 
     private readonly string _dbName = $"CheckoutService_{Guid.NewGuid():N}";
     private readonly Guid _renterId = Guid.NewGuid();
     private readonly Guid _supplierId = Guid.NewGuid();
-    private readonly Guid _equipmentTypeId = Guid.NewGuid();
-    private readonly Guid _brandId = Guid.NewGuid();
     private readonly Guid _cameraListingId = Guid.NewGuid();
     private readonly Guid _lensListingId = Guid.NewGuid();
     private readonly Guid _tripodListingId = Guid.NewGuid();
@@ -71,29 +69,14 @@ public sealed class CheckoutServiceTests
         context.RentalCarts.Add(cart);
         context.SaveChanges();
 
-        AddListing(_cameraListingId, "Sony A7 IV", 500_000m, 2_000_000m);
-        AddListing(_lensListingId, "Ống kính 24-70", 200_000m, 1_000_000m);
-        AddListing(_tripodListingId, "Chân máy", 100_000m, 500_000m);
+        AddListing(_cameraListingId, "Sony A7 IV", 500_000m);
+        AddListing(_lensListingId, "Ống kính 24-70", 200_000m);
+        AddListing(_tripodListingId, "Chân máy", 100_000m);
     }
 
-    private void AddListing(Guid listingId, string title, decimal dailyRate, decimal depositPerUnit)
+    private void AddListing(Guid listingId, string title, decimal dailyRate)
     {
-        _listings.Listings[listingId] = TestListings.Create(
-            listingId,
-            _supplierId,
-            true,
-            title,
-            _equipmentTypeId,
-            _brandId,
-            "Model",
-            1,
-            """{"sensor":"full-frame"}""",
-            Guid.NewGuid(),
-            dailyRate,
-            depositPerUnit,
-            "VND",
-            "Quận 1, TP.HCM",
-            "listing-v1");
+        _listings.Listings[listingId] = TestListings.Create(listingId, _supplierId, title, dailyRate, thumbnailMediaId: Guid.NewGuid());
         _listings.AvailableQuantities[listingId] = 10;
     }
 
@@ -174,7 +157,7 @@ public sealed class CheckoutServiceTests
         Assert.Equal(_renterId, invoice.RenterId);
         Assert.Equal(order.PaymentDeadline, invoice.PaymentDeadline);
         Assert.Equal(3_600_000m, invoice.Items.Sum(i => i.RentalAmount));
-        Assert.Equal(5_000_000m, invoice.Items.Sum(i => i.DepositAmount));
+        Assert.Equal(0m, invoice.Items.Sum(i => i.DepositAmount));
         Assert.Equal(CameraAndLensTotal, invoice.TotalAmount);
 
         Assert.Equal(2, _inventory.HoldRequests.Count);

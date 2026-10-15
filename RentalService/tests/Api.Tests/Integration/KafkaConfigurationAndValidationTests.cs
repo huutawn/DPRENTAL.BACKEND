@@ -132,8 +132,7 @@ public sealed class KafkaConfigurationAndValidationTests
             From: new DateOnly(2026, 10, 20),
             To: new DateOnly(2026, 10, 25),
             ExternalReference: "op-hold-1",
-            RequestedHoldExpiresAt: now.AddMinutes(30),
-            ExpectedSnapshotVersion: "v1");
+            RequestedHoldExpiresAt: now.AddMinutes(30));
 
         var command = new CreateHoldCommandPayload(orderId, itemId, "op-hold-1", holdRequest);
 

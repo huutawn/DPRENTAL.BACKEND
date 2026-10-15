@@ -27,16 +27,22 @@ public sealed record InitialRentalUnitAssignmentDto(
 
 /// <summary>
 /// Bản sao thông tin Listing tại thời điểm checkout. Không chứa AssetCode hoặc SerialNumber.
+/// Mọi trường đều có thể trống: Inventory hiện chỉ trả tên, giá và ảnh; đơn cũ vẫn giữ dữ liệu đã chụp.
 /// </summary>
 public sealed record RentalItemListingSnapshotDto(
-    Guid EquipmentTypeId,
-    string EquipmentTypeName,
-    Guid BrandId,
-    string BrandName,
-    string Model,
-    int SpecSchemaVersion,
-    string SpecValuesJson,
-    Guid? ThumbnailMediaId);
+    Guid? EquipmentTypeId,
+    string? EquipmentTypeName,
+    Guid? BrandId,
+    string? BrandName,
+    string? Model,
+    int? SpecSchemaVersion,
+    string? SpecValuesJson,
+    Guid? ThumbnailMediaId)
+{
+    /// <summary>Snapshot chỉ có ảnh, đúng với những gì Inventory trả hiện nay.</summary>
+    public static RentalItemListingSnapshotDto ThumbnailOnly(Guid? thumbnailMediaId) =>
+        new(null, null, null, null, null, null, null, thumbnailMediaId);
+}
 
 public sealed record InitialRentalItemDto(
     Guid Id,
@@ -47,7 +53,7 @@ public sealed record InitialRentalItemDto(
     DateOnly ExpectedEndDate,
     string ListingTitleSnapshot,
     string? ListingDescriptionSnapshot,
-    string PickupLocationSnapshot,
+    string? PickupLocationSnapshot,
     decimal DailyRateSnapshot,
     decimal DepositPerUnitSnapshot,
     string AllocationGroupId,

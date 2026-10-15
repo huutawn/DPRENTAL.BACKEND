@@ -313,11 +313,10 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
-                    b.Property<Guid>("BrandId")
+                    b.Property<Guid?>("BrandId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("BrandNameSnapshot")
-                        .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
@@ -339,11 +338,10 @@ namespace RentalService.Domain.Migrations
                     b.Property<Guid>("EquipmentListingId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("EquipmentTypeId")
+                    b.Property<Guid?>("EquipmentTypeId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("EquipmentTypeNameSnapshot")
-                        .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
@@ -381,12 +379,10 @@ namespace RentalService.Domain.Migrations
                         .HasColumnType("character varying(200)");
 
                     b.Property<string>("ModelSnapshot")
-                        .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
                     b.Property<string>("PickupLocationSnapshot")
-                        .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
@@ -414,11 +410,10 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
-                    b.Property<int>("SpecSchemaVersionSnapshot")
+                    b.Property<int?>("SpecSchemaVersionSnapshot")
                         .HasColumnType("integer");
 
                     b.Property<string>("SpecValuesSnapshot")
-                        .IsRequired()
                         .HasColumnType("jsonb");
 
                     b.Property<int>("Status")

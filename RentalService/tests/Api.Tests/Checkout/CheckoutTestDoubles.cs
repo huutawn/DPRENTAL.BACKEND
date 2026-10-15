@@ -210,14 +210,14 @@ internal sealed class FakeInventoryListingClient : IInventoryRentalClient
         CancellationToken ct = default)
     {
         ListingReadCount++;
-        RequestedListingIds.AddRange(request.ListingIds);
+        RequestedListingIds.AddRange(request.Ids);
         if (FailListingRead)
         {
             return Task.FromResult(Result.Failure<ListingRentalSnapshotsResponse>(Down));
         }
 
-        List<ListingRentalSnapshotDto> found = request.ListingIds.Where(Listings.ContainsKey).Select(id => Listings[id]).ToList();
-        List<Guid> notFound = request.ListingIds.Where(id => !Listings.ContainsKey(id)).ToList();
+        List<ListingRentalSnapshotDto> found = request.Ids.Where(Listings.ContainsKey).Select(id => Listings[id]).ToList();
+        List<Guid> notFound = request.Ids.Where(id => !Listings.ContainsKey(id)).ToList();
         return Task.FromResult(Result.Success(new ListingRentalSnapshotsResponse(found, notFound)));
     }
 
@@ -287,38 +287,16 @@ internal static class TestListings
     public static ListingRentalSnapshotDto Create(
         Guid listingId,
         Guid supplierId,
-        bool isActive,
-        string displayName,
-        Guid equipmentTypeId,
-        Guid brandId,
-        string model,
-        int specSchemaVersion,
-        string specValuesJson,
-        Guid? thumbnailMediaId,
+        string name,
         decimal dailyRate,
-        decimal depositPerUnit,
-        string currency,
-        string pickupLocation,
-        string snapshotVersion,
-        string equipmentTypeName = "Máy ảnh",
-        string brandName = "Sony") => new(
+        bool isActive = true,
+        Guid? thumbnailMediaId = null,
+        string currency = "VND") => new(
         listingId,
         supplierId,
-        displayName,
-        null,
-        pickupLocation,
+        name,
+        thumbnailMediaId,
         dailyRate,
-        depositPerUnit,
         currency,
-        isActive ? "Active" : "Inactive",
-        snapshotVersion,
-        DateTimeOffset.UnixEpoch,
-        equipmentTypeId,
-        equipmentTypeName,
-        brandId,
-        brandName,
-        model,
-        specSchemaVersion,
-        specValuesJson,
-        thumbnailMediaId);
+        isActive ? "Active" : "Inactive");
 }

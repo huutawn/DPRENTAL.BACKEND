@@ -120,6 +120,7 @@ public class RentalOrder
     {
     }
 
+    /// <summary>Các trường đều không bắt buộc; trường nào có thì phải hợp lệ (không rỗng, không quá dài).</summary>
     private static bool IsValidListingSnapshot(RentalItemListingSnapshotDto? snapshot)
     {
         if (snapshot is null ||
@@ -131,12 +132,16 @@ public class RentalOrder
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(snapshot.EquipmentTypeName) || snapshot.EquipmentTypeName.Trim().Length > 200 ||
-            string.IsNullOrWhiteSpace(snapshot.BrandName) || snapshot.BrandName.Trim().Length > 200 ||
-            string.IsNullOrWhiteSpace(snapshot.Model) || snapshot.Model.Trim().Length > 200 ||
-            string.IsNullOrWhiteSpace(snapshot.SpecValuesJson))
+        if (!IsValidOptionalText(snapshot.EquipmentTypeName, 200) ||
+            !IsValidOptionalText(snapshot.BrandName, 200) ||
+            !IsValidOptionalText(snapshot.Model, 200))
         {
             return false;
+        }
+
+        if (snapshot.SpecValuesJson is null)
+        {
+            return true;
         }
 
         try
@@ -149,6 +154,9 @@ public class RentalOrder
             return false;
         }
     }
+
+    private static bool IsValidOptionalText(string? value, int maxLength) =>
+        value is null || (!string.IsNullOrWhiteSpace(value) && value.Trim().Length <= maxLength);
 
     public static Result<RentalOrder> Create(
         Guid id,
@@ -292,7 +300,7 @@ public class RentalOrder
             if (depositAmountCheck.IsFailure) return depositAmountCheck.Error;
 
             if (string.IsNullOrWhiteSpace(itemDto.ListingTitleSnapshot) || itemDto.ListingTitleSnapshot.Trim().Length > 200 ||
-                string.IsNullOrWhiteSpace(itemDto.PickupLocationSnapshot) || itemDto.PickupLocationSnapshot.Trim().Length > 500 ||
+                !IsValidOptionalText(itemDto.PickupLocationSnapshot, 500) ||
                 string.IsNullOrWhiteSpace(itemDto.AllocationGroupId) || itemDto.AllocationGroupId.Trim().Length > 64)
             {
                 return RentalErrors.InvalidSnapshot;
@@ -393,7 +401,7 @@ public class RentalOrder
                 itemDto.ExpectedEndDate,
                 itemDto.ListingTitleSnapshot.Trim(),
                 itemDto.ListingDescriptionSnapshot?.Trim(),
-                itemDto.PickupLocationSnapshot.Trim(),
+                itemDto.PickupLocationSnapshot?.Trim(),
                 itemDto.DailyRateSnapshot,
                 itemDto.DepositPerUnitSnapshot,
                 itemDto.AllocationGroupId.Trim(),

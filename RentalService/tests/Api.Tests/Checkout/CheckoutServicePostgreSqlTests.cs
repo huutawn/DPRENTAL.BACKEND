@@ -26,8 +26,6 @@ public sealed class CheckoutServicePostgreSqlTests
     private readonly Guid _renterId = Guid.NewGuid();
     private readonly Guid _supplierId = Guid.NewGuid();
     private readonly Guid _listingId = Guid.NewGuid();
-    private readonly Guid _equipmentTypeId = Guid.NewGuid();
-    private readonly Guid _brandId = Guid.NewGuid();
     private readonly FakeInventoryListingClient _listings = new();
     private readonly FakeInventoryRentalClient _inventory = new();
     private readonly FakePaymentRentalClient _payment = new();
@@ -58,7 +56,7 @@ public sealed class CheckoutServicePostgreSqlTests
                 new("VCB", "0123456789", "NGUYEN VAN A"),
                 "v1.0",
                 true,
-                7_000_000m);
+                3_000_000m);
 
             CheckoutResult[] concurrent = await Task.WhenAll(
                 Task.Run(() => SubmitAsync(options, locks, request)),
@@ -81,7 +79,7 @@ public sealed class CheckoutServicePostgreSqlTests
             Assert.Equal(RentalOrderStatus.PendingPayment, order.Status);
             Assert.Equal(Now.AddMinutes(30), order.PaymentDeadline);
             Assert.Equal("INV-1", order.InvoiceRef);
-            Assert.Equal(7_000_000m, order.TotalPayableAmount);
+            Assert.Equal(3_000_000m, order.TotalPayableAmount);
             Assert.Equal(2, Assert.Single(order.Items).UnitAssignments.Count);
             Assert.Equal(0, await context.RentalCartItems.CountAsync());
 
@@ -106,22 +104,7 @@ public sealed class CheckoutServicePostgreSqlTests
         context.RentalCarts.Add(cart);
         await context.SaveChangesAsync();
 
-        _listings.Listings[_listingId] = TestListings.Create(
-            _listingId,
-            _supplierId,
-            true,
-            "Sony A7 IV",
-            _equipmentTypeId,
-            _brandId,
-            "A7 IV",
-            1,
-            """{"sensor":"full-frame"}""",
-            Guid.NewGuid(),
-            500_000m,
-            2_000_000m,
-            "VND",
-            "Quận 1, TP.HCM",
-            "listing-v1");
+        _listings.Listings[_listingId] = TestListings.Create(_listingId, _supplierId, "Sony A7 IV", 500_000m, thumbnailMediaId: Guid.NewGuid());
         _listings.AvailableQuantities[_listingId] = 10;
 
         return cartItemId;

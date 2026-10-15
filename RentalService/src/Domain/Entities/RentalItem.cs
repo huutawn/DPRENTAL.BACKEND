@@ -38,31 +38,28 @@ public partial class RentalItem
     [MaxLength(2000)]
     public string? ListingDescriptionSnapshot { get; private set; }
 
-    [Required]
+    // Nơi nhận, loại, hãng, model và thông số được để trống từ 15/10/2026: Inventory không còn trả các thông tin này.
+    // Đơn đặt trước đó vẫn giữ dữ liệu đã chụp.
     [MaxLength(500)]
-    public string PickupLocationSnapshot { get; private set; } = string.Empty;
+    public string? PickupLocationSnapshot { get; private set; }
 
-    public Guid EquipmentTypeId { get; private set; }
+    public Guid? EquipmentTypeId { get; private set; }
 
-    [Required]
     [MaxLength(200)]
-    public string EquipmentTypeNameSnapshot { get; private set; } = string.Empty;
+    public string? EquipmentTypeNameSnapshot { get; private set; }
 
-    public Guid BrandId { get; private set; }
+    public Guid? BrandId { get; private set; }
 
-    [Required]
     [MaxLength(200)]
-    public string BrandNameSnapshot { get; private set; } = string.Empty;
+    public string? BrandNameSnapshot { get; private set; }
 
-    [Required]
     [MaxLength(200)]
-    public string ModelSnapshot { get; private set; } = string.Empty;
+    public string? ModelSnapshot { get; private set; }
 
-    public int SpecSchemaVersionSnapshot { get; private set; }
+    public int? SpecSchemaVersionSnapshot { get; private set; }
 
-    [Required]
     [Column(TypeName = "jsonb")]
-    public string SpecValuesSnapshot { get; private set; } = "{}";
+    public string? SpecValuesSnapshot { get; private set; }
 
     public Guid? ThumbnailMediaIdSnapshot { get; private set; }
 
@@ -164,7 +161,7 @@ public partial class RentalItem
         DateOnly expectedEndDate,
         string listingTitleSnapshot,
         string? listingDescriptionSnapshot,
-        string pickupLocationSnapshot,
+        string? pickupLocationSnapshot,
         decimal dailyRateSnapshot,
         decimal depositPerUnitSnapshot,
         string allocationGroupId,
@@ -188,12 +185,12 @@ public partial class RentalItem
         Status = RentalItemStatus.PendingPayment;
 
         EquipmentTypeId = listingSnapshot.EquipmentTypeId;
-        EquipmentTypeNameSnapshot = listingSnapshot.EquipmentTypeName.Trim();
+        EquipmentTypeNameSnapshot = listingSnapshot.EquipmentTypeName?.Trim();
         BrandId = listingSnapshot.BrandId;
-        BrandNameSnapshot = listingSnapshot.BrandName.Trim();
-        ModelSnapshot = listingSnapshot.Model.Trim();
+        BrandNameSnapshot = listingSnapshot.BrandName?.Trim();
+        ModelSnapshot = listingSnapshot.Model?.Trim();
         SpecSchemaVersionSnapshot = listingSnapshot.SpecSchemaVersion;
-        SpecValuesSnapshot = listingSnapshot.SpecValuesJson.Trim();
+        SpecValuesSnapshot = listingSnapshot.SpecValuesJson?.Trim();
         ThumbnailMediaIdSnapshot = listingSnapshot.ThumbnailMediaId;
 
         RentalAmount = RentalPricingPolicy.CalculateRentalAmount(dailyRateSnapshot, quantity, RentalDays);

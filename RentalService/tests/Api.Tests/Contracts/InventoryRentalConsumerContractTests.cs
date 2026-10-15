@@ -74,18 +74,18 @@ public sealed class InventoryRentalConsumerContractTests
         string availabilityRequest = JsonSerializer.Serialize(new ListingAvailabilityBatchRequest(
             [new ListingAvailabilityBatchLine(listingId, new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 15), 2)]), JsonOptions);
 
-        Assert.Equal("""{"listingIds":["11111111-1111-1111-1111-111111111111"]}""", snapshotsRequest);
+        Assert.Equal("""{"ids":["11111111-1111-1111-1111-111111111111"]}""", snapshotsRequest);
         Assert.Equal(
             """{"lines":[{"listingId":"11111111-1111-1111-1111-111111111111","from":"2026-10-12","to":"2026-10-15","quantity":2}]}""",
             availabilityRequest);
 
         ListingRentalSnapshotsResponse? snapshots = JsonSerializer.Deserialize<ListingRentalSnapshotsResponse>(
-            """{"items":[],"notFoundListingIds":["11111111-1111-1111-1111-111111111111"]}""", JsonOptions);
+            """{"items":[],"missingIds":["11111111-1111-1111-1111-111111111111"]}""", JsonOptions);
         ListingAvailabilityBatchResponse? availability = JsonSerializer.Deserialize<ListingAvailabilityBatchResponse>(
             """{"results":[{"listingId":"11111111-1111-1111-1111-111111111111","from":"2026-10-12","to":"2026-10-15","availableQuantity":3,"isAvailable":true}]}""",
             JsonOptions);
 
-        Assert.Equal([listingId], snapshots!.NotFoundListingIds);
+        Assert.Equal([listingId], snapshots!.MissingIds);
         ListingAvailabilityBatchResult result = Assert.Single(availability!.Results);
         Assert.Equal(3, result.AvailableQuantity);
         Assert.True(result.IsAvailable);
@@ -101,23 +101,11 @@ public sealed class InventoryRentalConsumerContractTests
         ListingRentalSnapshotDto fixture = new(
             listingId,
             supplierId,
-            "Sony FX3 Cinema Camera Kit",
-            "Professional cinema body with 24-70mm lens",
-            "District 1, Ho Chi Minh City",
+            "Sony FX3",
+            Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
             500_000m,
-            1_000_000m,
             "VND",
-            "Active",
-            "v1.0",
-            _fixedTime,
-            Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"),
-            "Máy quay phim",
-            Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"),
-            "Sony",
-            "FX3",
-            2,
-            """{"sensor":"full-frame"}""",
-            Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"));
+            "Active");
 
         _stub.GetSnapshotHandler = id => Task.FromResult(Result.Success(fixture));
 
@@ -125,22 +113,13 @@ public sealed class InventoryRentalConsumerContractTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(500_000m, result.Value.DailyRate);
-        Assert.Equal(1_000_000m, result.Value.DepositPerUnit);
         Assert.Equal("VND", result.Value.Currency);
-        Assert.Equal("v1.0", result.Value.SnapshotVersion);
 
-        // Verify JSON round-trip
+        // Đúng dạng Inventory đưa ngày 15/10/2026, không thêm ô nào khác.
         string json = JsonSerializer.Serialize(result.Value, JsonOptions);
-        Assert.Contains("\"dailyRate\":500000", json);
-        Assert.Contains("\"snapshotVersion\":\"v1.0\"", json);
-        Assert.Contains("\"equipmentTypeId\":\"cccccccc-cccc-cccc-cccc-cccccccccccc\"", json);
-        Assert.Contains("\"equipmentTypeName\":", json);
-        Assert.Contains("\"brandId\":\"dddddddd-dddd-dddd-dddd-dddddddddddd\"", json);
-        Assert.Contains("\"brandName\":\"Sony\"", json);
-        Assert.Contains("\"model\":\"FX3\"", json);
-        Assert.Contains("\"specSchemaVersion\":2", json);
-        Assert.Contains("\"specValuesJson\":", json);
-        Assert.Contains("\"thumbnailMediaId\":\"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee\"", json);
+        Assert.Equal(
+            """{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","ownerUserId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","name":"Sony FX3","thumbnailMediaId":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","dailyRate":500000,"currency":"VND","status":"Active"}""",
+            json);
         Assert.DoesNotContain("serialNumber", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("assetCode", json, StringComparison.OrdinalIgnoreCase);
 
@@ -209,8 +188,7 @@ public sealed class InventoryRentalConsumerContractTests
             new(2026, 10, 10),
             new(2026, 10, 15),
             "rental-item:001",
-            _fixedTime.AddMinutes(30),
-            "v1.0");
+            _fixedTime.AddMinutes(30));
 
         CreateHoldResponse responseFixture = new(
             AllocationGroupId: "group-hold-001",

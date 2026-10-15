@@ -3,29 +3,16 @@ using Dprental.RentalService.Common.Enums;
 namespace Dprental.RentalService.Application.DTOs.Inventory;
 
 // 1. GetListingRentalSnapshot
-// Các trường từ EquipmentTypeId trở đi (loại, hãng, model, thông số, ảnh) được thêm theo thỏa thuận với Inventory
-// ngày 14/10/2026 để checkout chụp đủ snapshot của RentalItem. Inventory trả luôn tên loại thiết bị và tên hãng,
-// Rental không gọi CatalogService.
+// Theo dạng Inventory đưa ngày 15/10/2026: chỉ những gì Rental cần để tính tiền, chia đơn con và hiển thị.
+// Inventory chưa có tiền cọc, Rental tạm tính cọc = 0.
 public sealed record ListingRentalSnapshotDto(
-    Guid ListingId,
-    Guid SupplierId,
-    string DisplayName,
-    string? Description,
-    string PickupLocation,
+    Guid Id,
+    Guid OwnerUserId,
+    string Name,
+    Guid? ThumbnailMediaId,
     decimal DailyRate,
-    decimal DepositPerUnit,
     string Currency,
-    string BookingStatus,
-    string SnapshotVersion,
-    DateTimeOffset CapturedAt,
-    Guid EquipmentTypeId,
-    string EquipmentTypeName,
-    Guid BrandId,
-    string BrandName,
-    string Model,
-    int SpecSchemaVersion,
-    string SpecValuesJson,
-    Guid? ThumbnailMediaId);
+    string Status);
 
 // 2. CheckListingAvailability
 public sealed record ListingAvailabilityCheckRequest(
@@ -42,12 +29,13 @@ public sealed record ListingAvailabilityCheckResponse(
     DateOnly To);
 
 // 1b. GetListingRentalSnapshots (theo danh sách): checkout đọc mọi Listing của giỏ trong một lần gọi.
+// Dạng request ({ "ids": [...] }) và đường dẫn chưa chốt với Inventory.
 public sealed record ListingRentalSnapshotsRequest(
-    IReadOnlyList<Guid> ListingIds);
+    IReadOnlyList<Guid> Ids);
 
 public sealed record ListingRentalSnapshotsResponse(
     IReadOnlyList<ListingRentalSnapshotDto> Items,
-    IReadOnlyList<Guid> NotFoundListingIds);
+    IReadOnlyList<Guid> MissingIds);
 
 // 2b. CheckListingAvailabilityBatch (theo danh sách): mỗi dòng có Listing, khoảng ngày [From, To) và số lượng riêng.
 public sealed record ListingAvailabilityBatchLine(
@@ -70,14 +58,15 @@ public sealed record ListingAvailabilityBatchResponse(
     IReadOnlyList<ListingAvailabilityBatchResult> Results);
 
 // 3. CreateHold
+// Inventory không kiểm tra phiên bản Listing khi giữ máy nên Rental không gửi ExpectedSnapshotVersion nữa.
+// Các ô còn lại vẫn lệch với Inventory (startDate/endDate, groupReference…), sẽ sửa riêng.
 public sealed record CreateHoldRequest(
     Guid ListingId,
     int Quantity,
     DateOnly From,
     DateOnly To,
     string ExternalReference,
-    DateTimeOffset RequestedHoldExpiresAt,
-    string ExpectedSnapshotVersion);
+    DateTimeOffset RequestedHoldExpiresAt);
 
 public sealed record AssignedAssetDto(
     Guid AllocationId,

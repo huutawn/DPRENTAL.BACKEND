@@ -38,8 +38,6 @@ public sealed class CheckoutHoldOrchestratorTests
         start ?? Start,
         End,
         "Listing",
-        "Quận 1, TP.HCM",
-        "listing-v7",
         TestListingSnapshots.Default,
         500_000m,
         2_000_000m,
@@ -89,7 +87,6 @@ public sealed class CheckoutHoldOrchestratorTests
             Assert.Equal(End, request.To);
             Assert.Equal($"rental-item:{held.RentalItemId}", request.ExternalReference);
             Assert.Equal(Now.AddMinutes(30), request.RequestedHoldExpiresAt);
-            Assert.Equal("listing-v7", request.ExpectedSnapshotVersion);
         }
 
         Assert.Equal(3, result.HeldLines.Select(h => h.RentalItemId).Distinct().Count());
