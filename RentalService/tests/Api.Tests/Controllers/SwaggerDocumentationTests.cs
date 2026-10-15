@@ -49,8 +49,9 @@ public sealed class SwaggerDocumentationTests
         Assert.False(paths.TryGetProperty("/api/v1/rental/admin/suppliers/{supplierId}/confirmation-statistics", out _));
         Assert.False(paths.TryGetProperty("/api/v1/rental/internal/orders/{orderId}/operations/{operationId}/replay", out _));
         var checkoutResponses = paths.GetProperty("/api/v1/rental/checkout").GetProperty("post").GetProperty("responses");
-        Assert.True(checkoutResponses.TryGetProperty("201", out _));
-        Assert.True(checkoutResponses.TryGetProperty("200", out _));
+        // Checkout bất đồng bộ: chỉ trả 202 kèm statusUrl, đơn được tạo sau khi Inventory giữ lịch.
+        Assert.True(checkoutResponses.TryGetProperty("202", out _));
+        Assert.False(checkoutResponses.TryGetProperty("201", out _));
         Assert.True(checkoutResponses.TryGetProperty("503", out _));
         var cart = paths.GetProperty("/api/v1/rental/cart");
         Assert.True(cart.GetProperty("delete").GetProperty("responses").TryGetProperty("404", out _));

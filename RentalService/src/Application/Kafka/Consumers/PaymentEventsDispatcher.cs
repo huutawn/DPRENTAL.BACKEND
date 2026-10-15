@@ -927,25 +927,73 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
 
         if (order == null)
         {
+            // Lệnh nhả máy bù trừ của checkout thất bại/hết hạn: đơn chưa từng được tạo nên không còn gì để cập nhật.
+            // Ghi nhận đã xử lý thay vì trả lỗi, để message không bị thử lại mãi.
+            if (string.Equals(commandType, KafkaContractSpec.CommandTypes.ReleaseAllocation, StringComparison.OrdinalIgnoreCase) &&
+                await _checkoutOperationRepo.GetByExpectedOrderIdAsync(orderId, cancellationToken) is
+                    { Status: CheckoutOperationStatus.Failed or CheckoutOperationStatus.TimedOut })
+            {
+                _logger.LogInformation("Release reply {OperationKey} for unfinished checkout order {OrderId} acknowledged", operationKey, orderId);
+                return Result.Success();
+            }
+
             return Error.NotFound("ORDER_NOT_FOUND", $"Không tìm thấy đơn hàng '{orderId}'.");
         }
 
         var receipt = order.OperationReceipts.FirstOrDefault(r => string.Equals(r.OperationId, operationKey, StringComparison.OrdinalIgnoreCase));
         if (receipt != null)
         {
+            if (receipt.Status == RentalOperationReceipt.StatusSucceeded)
+            {
+                // Inventory phát lại câu trả lời của lệnh đã chốt: không áp lại chuyển trạng thái
+                // (item có thể đã bàn giao, không được kéo ngược về AwaitingHandover).
+                _logger.LogInformation("Duplicate {CommandType} reply for operation {OperationKey} ignored", commandType, operationKey);
+                return Result.Success();
+            }
+
             if (isSuccess)
             {
-                receipt.MarkSucceeded(utcNow, null, payloadElement.GetRawText());
+                // Payload của Inventory là phản hồi của provider; response API (nếu có) để supplier gửi lại cùng khóa.
+                string? apiResponseJson = null;
 
                 if (string.Equals(commandType, KafkaContractSpec.CommandTypes.ConfirmAllocation, StringComparison.OrdinalIgnoreCase))
                 {
                     var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
-                    if (item != null)
+                    if (item is { Status: RentalItemStatus.PendingSupplierConfirmation })
                     {
                         item.ApplySupplierAccept(item.SupplierId, utcNow, operationKey, operationKey);
                         order.EvaluateOrderStatusRollup(utcNow, operationKey);
+
+                        // Báo cho Notification/Reporting rằng supplier đã nhận, cùng lần lưu với chuyển trạng thái.
+                        var confirmedEnvelope = new KafkaMessageEnvelope<RentalItemConfirmedPayload>(
+                            OutboxMessageIdGenerator.ComputeDeterministicId(
+                                KafkaContractSpec.Producers.RentalService,
+                                KafkaContractSpec.EventTypes.RentalItemConfirmed,
+                                operationKey),
+                            KafkaContractSpec.EventTypes.RentalItemConfirmed,
+                            KafkaContractSpec.CurrentEnvelopeVersion,
+                            "rental-service",
+                            order.Id.ToString("D"),
+                            utcNow,
+                            operationKey,
+                            null,
+                            new RentalItemConfirmedPayload(order.Id, item.Id, item.SupplierId, utcNow, operationKey));
+                        var confirmedEvent = await _outboxWriter.EnqueueAsync(
+                            _kafkaOptions.RentalEventsTopic, order.Id.ToString("D"), confirmedEnvelope, cancellationToken);
+                        if (confirmedEvent.IsFailure)
+                        {
+                            _unitOfWork.DiscardChanges();
+                            return confirmedEvent.Error;
+                        }
+                    }
+
+                    if (item != null)
+                    {
+                        apiResponseJson = RentalOperationExecutor.SerializeSupplierResponse(order, item);
                     }
                 }
+
+                receipt.MarkSucceeded(utcNow, payloadElement.GetRawText(), apiResponseJson);
             }
             else
             {

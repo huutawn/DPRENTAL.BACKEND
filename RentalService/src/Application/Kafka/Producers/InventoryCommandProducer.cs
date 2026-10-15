@@ -146,8 +146,12 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
         if (command.RentalItemId == Guid.Empty) return Error.Validation("INVALID_RENTAL_ITEM_ID", "RentalItemId cannot be empty.");
         if (string.IsNullOrWhiteSpace(command.OperationKey)) return Error.Validation("INVALID_OPERATION_KEY", "OperationKey cannot be empty.");
 
+        // MessageId cố định theo OperationKey: gửi lại cùng khóa hoặc expiry worker chốt nốt không ghi thêm lệnh trùng vào Outbox.
         var envelope = new KafkaMessageEnvelope<ConfirmAllocationCommandPayload>(
-            MessageId: OutboxMessageIdGenerator.Generate(),
+            MessageId: OutboxMessageIdGenerator.ComputeDeterministicId(
+                KafkaContractSpec.Producers.RentalService,
+                KafkaContractSpec.CommandTypes.ConfirmAllocation,
+                command.OperationKey),
             MessageType: KafkaContractSpec.CommandTypes.ConfirmAllocation,
             Version: KafkaContractSpec.CurrentEnvelopeVersion,
             Producer: KafkaContractSpec.Producers.RentalService,

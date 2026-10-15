@@ -18,6 +18,7 @@ using Dprental.RentalService.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 using Dprental.RentalService.Api.Tests.Domain;
 
@@ -287,28 +288,27 @@ public sealed class ExpiryWorkflowIntegrationTests
         db.RentalOrders.Add(order);
         await db.SaveChangesAsync();
 
-        var inventoryClient = new StubInventoryClient
-        {
-            ConfirmHandler = (g, req) =>
-            {
-                Assert.Equal(inFlightKey, req.OperationKey);
-                var units = item.UnitAssignments.Select(u => new ConfirmedAllocationUnitDto(u.AllocationId, u.AssetId, "Confirmed")).ToList();
-                return Task.FromResult(Result.Success(new ConfirmAllocationResponse("REC-RECONCILED", g, FixedNow, false, units)));
-            }
-        };
-
-        var service = CreateExpiryService(db, inventoryClient, new StubPaymentClient());
+        var service = CreateExpiryService(db, new StubInventoryClient(), new StubPaymentClient());
 
         var result = await service.ExpireSingleItemSupplierTimeoutAsync(item.Id);
 
         Assert.True(result.IsSuccess);
 
-        // Reconciled as Accepted!
-        var reloaded = await db.RentalItems.FirstAsync(i => i.Id == item.Id);
-        Assert.Equal(RentalItemStatus.AwaitingHandover, reloaded.Status);
-        Assert.Equal("REC-RECONCILED", reloaded.InventoryConfirmationRef);
+        // Phiếu nhận ghi trước hạn: không hết hạn, gửi lại ConfirmAllocation cùng khóa để Inventory chốt nốt.
+        Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, (await db.RentalItems.FirstAsync(i => i.Id == item.Id)).Status);
+        var replies = new InventoryReplySimulator(() => CreateDbContext(dbName), new FakeTimeProvider(FixedNow));
+        var confirm = Assert.Single(await replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation));
+        Assert.Equal(inFlightKey, confirm.OperationKey);
 
-        var reloadedOrder = await db.RentalOrders.FirstAsync(o => o.Id == orderId);
+        Assert.True((await replies.SucceedAsync(confirm)).IsSuccess);
+
+        // Reconciled as Accepted!
+        await using var verify = CreateDbContext(dbName);
+        var reloaded = await verify.RentalItems.FirstAsync(i => i.Id == item.Id);
+        Assert.Equal(RentalItemStatus.AwaitingHandover, reloaded.Status);
+        Assert.Equal(inFlightKey, reloaded.InventoryConfirmationRef);
+
+        var reloadedOrder = await verify.RentalOrders.FirstAsync(o => o.Id == orderId);
         Assert.Equal(RentalOrderStatus.AwaitingHandover, reloadedOrder.Status);
     }
 

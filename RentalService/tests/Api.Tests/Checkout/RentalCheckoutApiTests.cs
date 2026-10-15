@@ -8,6 +8,7 @@ using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Security.Jwt;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Repositories;
@@ -90,56 +91,59 @@ public sealed class RentalCheckoutApiTests
     }
 
     [Fact]
-    public async Task Submit_Returns201WithPayableOrder_Then200WithTheSameOrderOnReplay()
+    public async Task Submit_Returns202WithOperation_ThenTheSameOperationOnReplay()
     {
         using CheckoutApiFactory factory = new();
         using HttpClient client = factory.CreateRenterClient("key-1");
 
-        using HttpResponseMessage created = await client.PostAsJsonAsync(Route, factory.Request());
+        using HttpResponseMessage accepted = await client.PostAsJsonAsync(Route, factory.Request());
 
-        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-        string createdJson = await created.Content.ReadAsStringAsync();
-        JsonElement order = JsonDocument.Parse(createdJson).RootElement;
-        Assert.Equal("DH-2026-000001", order.GetProperty("orderCode").GetString());
-        Assert.Equal("PENDING_PAYMENT", order.GetProperty("status").GetString());
-        Assert.Equal(Now.AddMinutes(30), order.GetProperty("paymentDeadline").GetDateTimeOffset());
-        Assert.Equal("INV-1", order.GetProperty("invoiceRef").GetString());
-        Assert.Equal("VND", order.GetProperty("currency").GetString());
-        Assert.Equal(3_000_000m, order.GetProperty("totalRentalAmount").GetDecimal());
-        Assert.Equal(0m, order.GetProperty("totalDepositAmount").GetDecimal());
-        Assert.Equal(Total, order.GetProperty("totalAmount").GetDecimal());
-        Assert.False(order.GetProperty("isReplay").GetBoolean());
+        Assert.Equal(HttpStatusCode.Accepted, accepted.StatusCode);
+        string acceptedJson = await accepted.Content.ReadAsStringAsync();
+        JsonElement operation = JsonDocument.Parse(acceptedJson).RootElement;
+        string operationId = operation.GetProperty("operationId").GetString()!;
+        string statusUrl = $"/api/v1/rental/checkout/operations/{operationId}";
+        Assert.Equal(statusUrl, operation.GetProperty("statusUrl").GetString());
+        Assert.Equal(statusUrl, accepted.Headers.Location?.OriginalString);
 
         // Mã máy và mã giữ lịch là dữ liệu nội bộ, không trả cho renter.
-        Assert.DoesNotContain("asset", createdJson, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("allocation", createdJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("asset", acceptedJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("allocation", acceptedJson, StringComparison.OrdinalIgnoreCase);
 
         using HttpResponseMessage replayed = await client.PostAsJsonAsync(Route, factory.Request());
 
-        Assert.Equal(HttpStatusCode.OK, replayed.StatusCode);
-        JsonElement replay = await ReadAsync(replayed);
-        Assert.Equal(order.GetProperty("orderId").GetGuid(), replay.GetProperty("orderId").GetGuid());
-        Assert.True(replay.GetProperty("isReplay").GetBoolean());
-        Assert.Single(factory.Inventory.HoldRequests);
-        Assert.Single(factory.Payment.InvoiceRequests);
+        Assert.Equal(HttpStatusCode.Accepted, replayed.StatusCode);
+        Assert.Equal(operationId, (await ReadAsync(replayed)).GetProperty("operationId").GetString());
+
+        // Lệnh giữ lịch chỉ đi qua Outbox một lần; đơn và hóa đơn chỉ được tạo khi Inventory trả lời.
+        Assert.Single(factory.LoadCreateHoldCommands());
+        Assert.Empty(factory.Inventory.HoldRequests);
+        Assert.Empty(factory.Payment.InvoiceRequests);
     }
 
     [Fact]
-    public async Task Submit_Returns503WithOrderCodeAndDeadline_WhenPaymentIsDown()
+    public async Task OperationStatus_IsProcessingUntilInventoryReplies_AndHiddenFromOtherRenters()
     {
         using CheckoutApiFactory factory = new();
-        factory.Payment.AlwaysFailWith = FakePaymentRentalClient.Down;
         using HttpClient client = factory.CreateRenterClient("key-1");
+        using HttpResponseMessage accepted = await client.PostAsJsonAsync(Route, factory.Request());
+        string statusUrl = (await ReadAsync(accepted)).GetProperty("statusUrl").GetString()!;
 
-        using HttpResponseMessage response = await client.PostAsJsonAsync(Route, factory.Request());
+        using HttpResponseMessage status = await client.GetAsync(statusUrl);
 
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        JsonElement problem = await ReadAsync(response);
-        Assert.Equal("Checkout.InvoiceTemporarilyUnavailable", problem.GetProperty("title").GetString());
-        Assert.Equal("DH-2026-000001", problem.GetProperty("orderCode").GetString());
-        Assert.Equal(Now.AddMinutes(30), problem.GetProperty("paymentDeadline").GetDateTimeOffset());
-        Assert.True(problem.GetProperty("retryable").GetBoolean());
-        Assert.DoesNotContain("Payment.Unavailable", problem.GetRawText(), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.OK, status.StatusCode);
+        JsonElement body = await ReadAsync(status);
+        Assert.Equal("Processing", body.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("orderId").ValueKind);
+
+        using HttpClient otherRenter = factory.CreateClient();
+        otherRenter.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
+        otherRenter.DefaultRequestHeaders.Add(SubjectHeader, Guid.NewGuid().ToString("D"));
+        otherRenter.DefaultRequestHeaders.Add(ProfileCompletedHeader, "true");
+
+        using HttpResponseMessage hidden = await otherRenter.GetAsync(statusUrl);
+
+        Assert.Equal(HttpStatusCode.NotFound, hidden.StatusCode);
     }
 
     [Fact]
@@ -229,6 +233,15 @@ public sealed class RentalCheckoutApiTests
                 "v1.0",
                 true,
                 expectedTotal);
+        }
+
+        public List<RentalOutboxMessage> LoadCreateHoldCommands()
+        {
+            using IServiceScope scope = Services.CreateScope();
+            RentalServiceDbContext context = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            return context.RentalOutboxMessages
+                .Where(m => m.MessageType == KafkaContractSpec.CommandTypes.CreateHold)
+                .ToList();
         }
 
         public HttpClient CreateRenterClient(string? idempotencyKey = null, bool profileCompleted = true)

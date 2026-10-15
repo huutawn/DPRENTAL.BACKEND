@@ -1,6 +1,8 @@
+using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.Errors;
+using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Entities;
@@ -86,11 +88,8 @@ public sealed class CheckoutScenarioTests
         CheckoutResult winner = Assert.Single(results, r => r.IsSuccess);
         CheckoutResult loser = Assert.Single(results, r => r.IsFailure);
 
-        Assert.Equal(CheckoutErrors.HoldFailed, loser.Error);
-        CheckoutHoldConflict conflict = Assert.Single(loser.HoldConflicts);
-        Assert.Equal(CheckoutHoldConflictCode.InsufficientAvailability, conflict.Code);
-        Assert.Equal(camera, conflict.EquipmentListingId);
-        Assert.Equal(3, conflict.RequestedQuantity);
+        // Thao tác gửi đơn của người thua thất bại với mã lỗi Inventory trả về.
+        Assert.Equal(InventoryContractSpec.ErrorCodes.InsufficientAvailability, loser.Error.Code);
 
         RentalOrder order = Assert.Single(await _harness.LoadOrdersAsync());
         Assert.Equal(winner.Order!.Id, order.Id);
@@ -105,27 +104,32 @@ public sealed class CheckoutScenarioTests
     }
 
     [Fact]
-    public async Task DatabaseFailureWhileSavingTheOrder_ReleasesHolds_AndTheRenterCanCheckoutAgain()
+    public async Task DatabaseFailureWhileSavingTheOrder_KeepsTheHold_AndTheInboxRetryCreatesTheOrder()
     {
         Guid supplier = Guid.NewGuid();
         Guid camera = _harness.AddListing(supplier, 500_000m, units: 2);
         Guid[] cart = await _harness.SeedCartAsync(_an, (camera, 2));
         CheckoutRequest request = CheckoutTestHarness.Request(3_000_000m, cart);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _harness.SubmitAsync(
-            _an, "key-1", request, writerUnitOfWork: context => new FailingUnitOfWork(context)));
+        // Database sập đúng lúc consumer lưu đơn từ câu trả lời giữ lịch của Inventory.
+        _harness.OrderCodes.FailNext = 1;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _harness.SubmitAsync(_an, "key-1", request));
 
-        Assert.Equal(0, _harness.Inventory.HeldUnits(camera));
+        // Không lưu dở gì: chưa có đơn, chưa có hóa đơn, giỏ còn nguyên; máy vẫn được giữ cho lần gửi này.
         Assert.Empty(await _harness.LoadOrdersAsync());
         Assert.Empty(_harness.Payment.InvoiceRequests);
         Assert.Equal(1, await _harness.CountCartItemsAsync(_an));
-
-        // Khóa của renter đã được trả và máy đã được nhả: lần đặt lại thành công.
-        CheckoutResult retried = await _harness.SubmitAsync(_an, "key-2", request);
-
-        Assert.True(retried.IsSuccess, retried.Error.Code);
         Assert.Equal(2, _harness.Inventory.HeldUnits(camera));
+
+        // Consumer xử lý lại message trong Inbox: đơn được tạo từ đúng lần giữ máy cũ, không giữ thêm.
+        Assert.True((await _harness.Completion.Replies.ReprocessPendingInboxAsync()).IsSuccess);
+        CheckoutResult completed = await _harness.Completion.CompleteAsync(_an, "key-1");
+
+        Assert.True(completed.IsSuccess, completed.Error.Code);
         Assert.Single(await _harness.LoadOrdersAsync());
+        Assert.Equal(2, _harness.Inventory.HeldUnits(camera));
+        Assert.Single(_harness.Payment.InvoiceRequests);
+        Assert.Equal(0, await _harness.CountCartItemsAsync(_an));
     }
 
     [Fact]
@@ -188,8 +192,17 @@ public sealed class CheckoutScenarioTests
         Assert.Null(expired.InvoiceRef);
         Assert.Equal(0, _harness.Inventory.HeldUnits(camera));
 
-        // Không có hóa đơn thì không gọi Payment hủy và không để lại việc treo cho OperationRecoveryWorker.
+        // Không có hóa đơn thì không gọi Payment hủy.
         Assert.Empty(_harness.Payment.CancelRequests);
+
+        // Phiếu tạo hóa đơn còn chờ thử lại: lượt sau của OperationRecoveryWorker thấy đơn đã hết hạn thì dừng,
+        // không gọi Payment nữa và không còn việc treo.
+        OperationReceiptDescriptor invoiceRetry = Assert.Single(await _harness.LoadPendingOperationsAsync());
+        Assert.Equal("CreateInvoice", invoiceRetry.Action);
+        int invoiceCalls = _harness.Payment.InvoiceRequests.Count;
+        Result stopped = await _harness.Completion.RunPendingInvoiceAsync(expired.Id);
+        Assert.Equal("ORDER_EXPIRED", stopped.Error.Code);
+        Assert.Equal(invoiceCalls, _harness.Payment.InvoiceRequests.Count);
         Assert.Empty(await _harness.LoadPendingOperationsAsync());
 
         // Renter không còn bị chặn bởi đơn cũ: đặt được dòng còn lại trong giỏ.
@@ -197,16 +210,5 @@ public sealed class CheckoutScenarioTests
         CheckoutResult next = await _harness.SubmitAsync(_an, "key-2", CheckoutTestHarness.Request(300_000m, cart[1]));
         Assert.True(next.IsSuccess, next.Error.Code);
         Assert.Equal(2, (await _harness.LoadOrdersAsync()).Count);
-    }
-
-    /// <summary>Giả lập database sập đúng lúc lưu đơn.</summary>
-    private sealed class FailingUnitOfWork(RentalServiceDbContext inner) : IUnitOfWork
-    {
-        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Simulated database outage.");
-
-        public void DiscardChanges() => inner.DiscardChanges();
-        public Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
-            inner.BeginTransactionAsync(cancellationToken);
     }
 }

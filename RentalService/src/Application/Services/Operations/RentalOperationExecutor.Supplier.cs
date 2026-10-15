@@ -472,6 +472,10 @@ public sealed partial class RentalOperationExecutor
         return Result.Success();
     }
 
+    /// <summary>Response API của supplier accept, lưu vào phiếu để gửi lại cùng khóa trả đúng kết quả đã chốt.</summary>
+    internal static string SerializeSupplierResponse(RentalOrder order, RentalItem item) =>
+        JsonSerializer.Serialize(BuildSupplierResponse(order, item), JsonOptions);
+
     private static SupplierDecisionResponse BuildSupplierResponse(RentalOrder order, RentalItem item)
     {
         return new SupplierDecisionResponse(

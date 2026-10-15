@@ -49,7 +49,7 @@ public sealed class CheckoutService : ICheckoutService
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    public async Task<Result<CheckoutOperationAcceptedResponse>> SubmitAsync(
+    public async Task<CheckoutSubmitResult> SubmitAsync(
         CheckoutRenterContext renter,
         CheckoutRequest request,
         string idempotencyKey,
@@ -103,14 +103,15 @@ public sealed class CheckoutService : ICheckoutService
             var pendingOrder = await _orders.GetPendingPaymentByRenterIdAsync(renter.RenterId, cancellationToken);
             if (pendingOrder is not null)
             {
-                return CheckoutErrors.PendingOrderExists;
+                return CheckoutPreparationResult.PendingOrder(pendingOrder.OrderCode);
             }
 
             // 3. Chuẩn bị checkout (snapshot, bảng giá, giỏ hàng)
             var prepared = await _preparation.PrepareAsync(renter, request, cancellationToken);
             if (prepared.IsFailure)
             {
-                return prepared.Error;
+                // Giữ nguyên chi tiết lỗi (fieldErrors, currentQuote, lines) để client hiển thị đúng chỗ.
+                return prepared;
             }
 
             var plan = prepared.Plan;

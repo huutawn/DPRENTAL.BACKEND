@@ -234,14 +234,7 @@ public sealed class RentalItemsControllerIntegrationTests
                     services.AddDbContext<RentalServiceDbContext>(options => options.UseInMemoryDatabase(dbName));
                     services.RemoveAll<Dprental.RentalService.Domain.IRepositories.IOrderLockManager>();
                     services.AddSingleton<Dprental.RentalService.Domain.IRepositories.IOrderLockManager, FakeOrderLockManager>();
-                    services.AddSingleton<IInventoryRentalClient>(new StubInventoryClient
-                    {
-                        ConfirmHandler = (g, req) =>
-                        {
-                            var units = item.UnitAssignments.Select(u => new ConfirmedAllocationUnitDto(u.AllocationId, u.AssetId, "Confirmed")).ToList();
-                            return Task.FromResult(Result.Success(new ConfirmAllocationResponse("REC-CONF", g, FixedNow, false, units)));
-                        }
-                    });
+                    services.AddSingleton<IInventoryRentalClient>(new StubInventoryClient());
 
                     services.RemoveAll<IPaymentRentalClient>();
                     services.AddSingleton<IPaymentRentalClient>(new StubPaymentClient());
@@ -272,10 +265,17 @@ public sealed class RentalItemsControllerIntegrationTests
 
         var response = await client.PostAsync($"/api/v1/rental/supplier/sub-orders/{item.RentalSubOrderId}/accept", null);
 
+        // Nhận yêu cầu và gửi lệnh ConfirmAllocation cho Inventory; mục thuê chờ Inventory trả lời.
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<SubOrderDecisionResponse>();
         Assert.NotNull(body);
-        Assert.Equal("AwaitingHandover", body.Status);
+        Assert.Equal("PendingSupplierConfirmation", body.Status);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            Assert.Equal(1, await db.RentalOutboxMessages.CountAsync(m => m.MessageType == "ConfirmAllocation"));
+        }
     }
 
     [Fact]

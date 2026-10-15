@@ -4,6 +4,7 @@ using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Supplier;
+using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Services.Expiry;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Services.SupplierDecision;
@@ -27,21 +28,31 @@ public sealed class SubOrderDecisionTests
     private readonly string _dbName = $"SubOrderDecision_{Guid.NewGuid():N}";
     private readonly Guid _binh = Guid.NewGuid();
     private readonly Guid _cuong = Guid.NewGuid();
-    private readonly ConfirmingInventoryClient _inventory = new();
+    private readonly FakeInventoryRentalClient _inventory = new();
     private readonly AdjustableTimeProvider _clock = new(OrderTestData.Now.AddMinutes(10));
+    private readonly InventoryReplySimulator _replies;
     private RentalOrder _order = null!;
 
+    public SubOrderDecisionTests()
+    {
+        _replies = new InventoryReplySimulator(NewContext, _clock);
+    }
+
     [Fact]
-    public async Task Accept_ConfirmsEveryLineOfTheSubOrder_AndLeavesTheOtherSupplierPending()
+    public async Task Accept_SendsAConfirmForEveryLine_AndInventoryRepliesMoveOnlyThatSubOrderToAwaitingHandover()
     {
         await SeedAsync();
 
         Result<SubOrderDecisionResponse> result = await Service().AcceptSubOrderAsync(BinhsSubOrderId, "accept-1", OrderTestData.User(_binh));
 
+        // Inventory xác nhận bất đồng bộ: lúc trả lời API, các dòng vẫn chờ xác nhận.
         Assert.True(result.IsSuccess, result.Error.Code);
-        Assert.Equal("AwaitingHandover", result.Value.Status);
+        Assert.Equal("PendingSupplierConfirmation", result.Value.Status);
         Assert.Equal(2, result.Value.Items.Count);
-        Assert.Equal(2, _inventory.ConfirmCalls.Count);
+        IReadOnlyList<InventoryCommand> confirms = await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation);
+        Assert.Equal(BinhsItemIds, confirms.Select(c => c.RentalItemId).Order());
+
+        await _replies.SucceedAllAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation);
 
         List<RentalItem> items = await LoadItemsAsync();
         Assert.All(items.Where(i => i.SupplierId == _binh), i => Assert.Equal(RentalItemStatus.AwaitingHandover, i.Status));
@@ -56,48 +67,46 @@ public sealed class SubOrderDecisionTests
         Result<SubOrderDecisionResponse> result = await Service().AcceptSubOrderAsync(BinhsSubOrderId, "accept-1", OrderTestData.User(_binh));
 
         Assert.Equal("HOLD_NOT_EXTENDED", result.Error.Code);
-        Assert.Empty(_inventory.ConfirmCalls);
+        Assert.Empty(await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation));
         Assert.All(await LoadItemsAsync(), i => Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, i.Status));
     }
 
     [Fact]
-    public async Task Accept_WhenInventoryFailsMidway_RetryWithTheSameKeyConfirmsOnlyTheRemainingLine()
+    public async Task Accept_ReplayWithTheSameKey_DoesNotResendConfirms_AndARejectedLineStaysPending()
     {
         await SeedAsync();
-        _inventory.FailNextConfirms = 1;
-        _inventory.FailAfterSuccesses = 1;
 
         Result<SubOrderDecisionResponse> first = await Service().AcceptSubOrderAsync(BinhsSubOrderId, "accept-1", OrderTestData.User(_binh));
+        Result<SubOrderDecisionResponse> replay = await Service().AcceptSubOrderAsync(BinhsSubOrderId, "accept-1", OrderTestData.User(_binh));
 
-        Assert.Equal(ErrorType.ServiceUnavailable, first.Error.Type);
-        List<RentalItem> afterFailure = await LoadItemsAsync();
-        Assert.Equal(1, afterFailure.Count(i => i.SupplierId == _binh && i.Status == RentalItemStatus.AwaitingHandover));
+        Assert.True(first.IsSuccess, first.Error.Code);
+        Assert.True(replay.IsSuccess, replay.Error.Code);
+        IReadOnlyList<InventoryCommand> confirms = await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation);
+        Assert.Equal(2, confirms.Count);
 
-        // Qua thời điểm thử lại rồi gửi lại cùng khóa.
-        _clock.UtcNow += TimeSpan.FromMinutes(5);
-        Result<SubOrderDecisionResponse> retry = await Service().AcceptSubOrderAsync(BinhsSubOrderId, "accept-1", OrderTestData.User(_binh));
+        // Inventory chốt máy đầu, từ chối máy sau: chỉ máy đầu sang chờ bàn giao, phiếu của máy sau thất bại.
+        Assert.True((await _replies.SucceedAsync(confirms[0])).IsSuccess);
+        Assert.True((await _replies.RejectAsync(confirms[1], "ALLOCATION_NOT_HELD", "Hold đã bị nhả.")).IsSuccess);
 
-        Assert.True(retry.IsSuccess, retry.Error.Code);
-        Assert.Equal("AwaitingHandover", retry.Value.Status);
-        // Dòng đã xác nhận không gọi lại Inventory: 2 lần ở lượt đầu, 1 lần cho dòng còn thiếu.
-        Assert.Equal(3, _inventory.ConfirmCalls.Count);
-        Assert.All((await LoadItemsAsync()).Where(i => i.SupplierId == _binh), i => Assert.Equal(RentalItemStatus.AwaitingHandover, i.Status));
+        List<RentalItem> items = await LoadItemsAsync();
+        Assert.Equal(RentalItemStatus.AwaitingHandover, items.Single(i => i.Id == confirms[0].RentalItemId).Status);
+        Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, items.Single(i => i.Id == confirms[1].RentalItemId).Status);
+        await using RentalServiceDbContext context = NewContext();
+        RentalOperationReceipt rejected = await context.RentalOperationReceipts.SingleAsync(r => r.OperationId == confirms[1].OperationKey);
+        Assert.Equal(RentalOperationReceipt.StatusFailed, rejected.Status);
+        Assert.Equal("ALLOCATION_NOT_HELD", rejected.ErrorCode);
     }
 
     [Fact]
-    public async Task Accept_OneSecondBeforeDeadline_ExpiryWorkerFinishesTheLineStillBeingConfirmed()
+    public async Task Accept_OneSecondBeforeDeadline_IsNotExpiredWhileInventoryIsStillConfirming()
     {
         await SeedAsync();
         DateTimeOffset deadline = _order.Items.First().SupplierConfirmationDeadline!.Value;
 
-        // Bình bấm nhận lúc 23:59:59: máy đầu chốt được, máy sau gặp Inventory chập chờn và đồng hồ đã qua hạn.
+        // Bình bấm nhận lúc 23:59:59; Inventory chưa kịp trả lời trước hạn.
         _clock.UtcNow = deadline.AddSeconds(-1);
-        _inventory.FailAfterSuccesses = 1;
-        _inventory.FailNextConfirms = 1;
-        _inventory.OnFailure = () => _clock.UtcNow = deadline.AddSeconds(1);
-
         Result<SubOrderDecisionResponse> accept = await Service().AcceptSubOrderAsync(BinhsSubOrderId, "accept-1", OrderTestData.User(_binh));
-        Assert.Equal(ErrorType.ServiceUnavailable, accept.Error.Type);
+        Assert.True(accept.IsSuccess, accept.Error.Code);
 
         // Phiếu "đang nhận" của cả hai máy đã được ghi trước hạn.
         await using (RentalServiceDbContext context = NewContext())
@@ -109,13 +118,43 @@ public sealed class SubOrderDecisionTests
             Assert.All(intents, r => Assert.True(r.CreatedAt < deadline));
         }
 
-        // Hai phút sau hạn, worker hết hạn chạy: máy của Bình được chốt nốt, máy của Cường (chưa ai nhận) hết hạn.
+        // Hai phút sau hạn, worker hết hạn chạy: máy của Bình đang được xác nhận nên không bị hủy,
+        // máy của Cường (chưa ai nhận) hết hạn.
         _clock.UtcNow = deadline.AddMinutes(2);
         await ExpiryService().ProcessSupplierTimeoutsAsync();
 
         List<RentalItem> items = await LoadItemsAsync();
-        Assert.All(items.Where(i => i.SupplierId == _binh), i => Assert.Equal(RentalItemStatus.AwaitingHandover, i.Status));
+        Assert.All(items.Where(i => i.SupplierId == _binh), i => Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, i.Status));
         Assert.Equal(RentalItemStatus.Expired, items.Single(i => i.SupplierId == _cuong).Status);
+
+        // Inventory trả lời muộn: các máy đã được nhận trước hạn được chốt.
+        await _replies.SucceedAllAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation);
+
+        Assert.All((await LoadItemsAsync()).Where(i => i.SupplierId == _binh),
+            i => Assert.Equal(RentalItemStatus.AwaitingHandover, i.Status));
+    }
+
+    [Fact]
+    public async Task RedeliveredConfirmReply_AfterHandover_DoesNotMoveTheItemBack()
+    {
+        await SeedAsync();
+        Assert.True((await Service().AcceptSubOrderAsync(BinhsSubOrderId, "accept-1", OrderTestData.User(_binh))).IsSuccess);
+        IReadOnlyList<InventoryCommand> confirms = await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation);
+        await _replies.SucceedAllAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation);
+
+        // Máy đã được bàn giao cho renter.
+        await using (RentalServiceDbContext context = NewContext())
+        {
+            RentalItem handedOver = await context.RentalItems.SingleAsync(i => i.Id == confirms[0].RentalItemId);
+            typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(handedOver, RentalItemStatus.InRental);
+            await context.SaveChangesAsync();
+        }
+
+        // Inventory phát lại câu trả lời cũ với messageId mới.
+        Result redelivered = await _replies.RedeliverSuccessAsync(confirms[0]);
+
+        Assert.True(redelivered.IsSuccess, redelivered.Error.Code);
+        Assert.Equal(RentalItemStatus.InRental, (await LoadItemsAsync()).Single(i => i.Id == confirms[0].RentalItemId).Status);
     }
 
     [Fact]
@@ -159,11 +198,13 @@ public sealed class SubOrderDecisionTests
 
         Assert.Equal("SUB_ORDER_NOT_FOUND", accept.Error.Code);
         Assert.Equal("SUB_ORDER_NOT_FOUND", reject.Error.Code);
-        Assert.Empty(_inventory.ConfirmCalls);
+        Assert.Empty(await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation));
         Assert.All(await LoadItemsAsync(), i => Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, i.Status));
     }
 
     private Guid BinhsSubOrderId => _order.SubOrders.Single(s => s.SupplierId == _binh).Id;
+
+    private Guid[] BinhsItemIds => _order.Items.Where(i => i.SupplierId == _binh).Select(i => i.Id).Order().ToArray();
 
     private RentalServiceDbContext NewContext() => new(
         new DbContextOptionsBuilder<RentalServiceDbContext>().UseInMemoryDatabase(_dbName).Options);
@@ -243,61 +284,8 @@ public sealed class SubOrderDecisionTests
                 targetItemId: item.Id));
         }
 
-        foreach (RentalItem item in _order.Items)
-        {
-            _inventory.UnitsByGroup[item.AllocationGroupId] = item.UnitAssignments
-                .Select(u => new ConfirmedAllocationUnitDto(u.AllocationId, u.AssetId, "Confirmed"))
-                .ToList();
-        }
-
         await using RentalServiceDbContext context = NewContext();
         context.RentalOrders.Add(_order);
         await context.SaveChangesAsync();
-    }
-
-    /// <summary>Inventory giả: xác nhận đúng các unit đã giữ; có thể lỗi tạm thời sau một số lần thành công.</summary>
-    private sealed class ConfirmingInventoryClient : IInventoryRentalClient
-    {
-        private int _successes;
-
-        public Dictionary<string, List<ConfirmedAllocationUnitDto>> UnitsByGroup { get; } = [];
-
-        public List<string> ConfirmCalls { get; } = [];
-
-        public int FailAfterSuccesses { get; set; }
-
-        public int FailNextConfirms { get; set; }
-
-        /// <summary>Chạy ngay trước khi trả lỗi, ví dụ để cho đồng hồ trôi qua hạn xác nhận.</summary>
-        public Action? OnFailure { get; set; }
-
-        public Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(
-            string allocationGroupId, ConfirmAllocationRequest request, CancellationToken ct = default)
-        {
-            ConfirmCalls.Add(allocationGroupId);
-            if (FailNextConfirms > 0 && _successes >= FailAfterSuccesses)
-            {
-                FailNextConfirms--;
-                OnFailure?.Invoke();
-                return Task.FromResult(Result.Failure<ConfirmAllocationResponse>(
-                    Error.ServiceUnavailable("INVENTORY_UNAVAILABLE", "Inventory tạm thời không phản hồi.")));
-            }
-
-            _successes++;
-            return Task.FromResult(Result.Success(new ConfirmAllocationResponse(
-                $"REC-{allocationGroupId}", allocationGroupId, OrderTestData.Now, false, UnitsByGroup[allocationGroupId])));
-        }
-
-        public Task<Result<ReleaseAllocationResponse>> ReleaseAllocationAsync(string allocationGroupId, ReleaseAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
-
-        public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Result<CancelAllocationResponse>> CancelAllocationAsync(string allocationGroupId, CancelAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Result<MarkAssetsOverdueResponse>> MarkAssetsOverdueAsync(string allocationGroupId, MarkAssetsOverdueRequest request, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Result<MarkAssetsReturnedResponse>> MarkAssetsReturnedAsync(string allocationGroupId, MarkAssetsReturnedRequest request, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Result<BlockDamagedAssetsResponse>> BlockDamagedAssetsAsync(string allocationGroupId, BlockDamagedAssetsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

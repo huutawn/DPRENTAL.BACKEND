@@ -24,8 +24,19 @@ internal sealed class FakeOrderCodeGenerator : IOrderCodeGenerator
 {
     private int _issued;
 
-    public Task<string> NextAsync(DateTimeOffset utcNow, CancellationToken cancellationToken = default) =>
-        Task.FromResult($"DH-{utcNow.Year}-{Interlocked.Increment(ref _issued):D6}");
+    /// <summary>Số lần lấy mã tiếp theo bị lỗi như sequence PostgreSQL không phản hồi.</summary>
+    public int FailNext { get; set; }
+
+    public Task<string> NextAsync(DateTimeOffset utcNow, CancellationToken cancellationToken = default)
+    {
+        if (FailNext > 0)
+        {
+            FailNext--;
+            throw new InvalidOperationException("Simulated database outage.");
+        }
+
+        return Task.FromResult($"DH-{utcNow.Year}-{Interlocked.Increment(ref _issued):D6}");
+    }
 }
 
 /// <summary>Đơn chờ thanh toán dựng sẵn cho test hóa đơn: tiền thuê 3.600.000, tiền cọc 5.000.000.</summary>

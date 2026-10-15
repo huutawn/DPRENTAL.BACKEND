@@ -90,12 +90,35 @@ internal sealed class CheckoutTestHarness
         true,
         expectedTotal);
 
-    /// <param name="writerUnitOfWork">Thay unit of work của bước lưu đơn để giả lập lỗi database.</param>
+    /// <summary>
+    /// Gửi đơn rồi chạy nốt phần bất đồng bộ (Inventory giữ máy, tạo đơn, tạo hóa đơn) như hệ thống thật.
+    /// </summary>
     public async Task<CheckoutResult> SubmitAsync(
         Guid renterId,
         string key,
         CheckoutRequest request,
-        Func<RentalServiceDbContext, IUnitOfWork>? writerUnitOfWork = null,
+        CancellationToken cancellationToken = default)
+    {
+        CheckoutSubmitResult accepted = await AcceptAsync(renterId, key, request, cancellationToken);
+        if (accepted.IsFailure)
+        {
+            return accepted.Failure!;
+        }
+
+        return await Completion.CompleteAsync(renterId, key, cancellationToken);
+    }
+
+    /// <summary>Chạy phần bất đồng bộ của checkout: Inventory giả, dispatcher và worker tạo hóa đơn dùng chung cho mọi renter.</summary>
+    public CheckoutCompletion Completion => _completion ??= new CheckoutCompletion(
+        NewContext, Clock, Inventory, Payment, Locks, _ => OrderCodes);
+
+    private CheckoutCompletion? _completion;
+
+    /// <summary>Chỉ bước API nhận đơn: kiểm tra, ghi lệnh giữ lịch vào Outbox, trả 202.</summary>
+    public async Task<CheckoutSubmitResult> AcceptAsync(
+        Guid renterId,
+        string key,
+        CheckoutRequest request,
         CancellationToken cancellationToken = default)
     {
         await using RentalServiceDbContext context = NewContext();
@@ -104,7 +127,6 @@ internal sealed class CheckoutTestHarness
         RentalCheckoutOperationRepository operations = new(context);
         OutboxRepository outbox = new(context);
         InventoryCommandProducer inventoryCommands = new(outbox, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), Clock);
-        CheckoutOrderWriter writer = new(orders, carts, OrderCodes, NullLogger<CheckoutOrderWriter>.Instance);
 
         CheckoutService service = new(
             new CheckoutPreparationService(
@@ -125,54 +147,7 @@ internal sealed class CheckoutTestHarness
             context,
             Clock);
 
-        var accepted = await service.SubmitAsync(new(renterId, true), request, key, cancellationToken);
-        if (accepted.IsFailure)
-        {
-            return CheckoutResult.Failure(accepted.Error);
-        }
-
-        string operationId = CheckoutRules.DeriveOperationId(renterId, key);
-        var op = await operations.GetByOperationIdAsync(operationId, cancellationToken);
-        if (op is null) return CheckoutResult.Failure(CheckoutErrors.OrderNotSaved);
-
-        if (op.Status == CheckoutOperationStatus.Succeeded)
-        {
-            var existingOrder = await orders.GetByIdAsync(op.ExpectedRentalOrderId, cancellationToken);
-            return CheckoutResult.Success(existingOrder!, isReplay: true);
-        }
-
-        var plan = JsonSerializer.Deserialize<CheckoutPlan>(op.PreparationSnapshotJson, JsonOptions)!;
-        var heldLines = plan.Lines.Select(l =>
-        {
-            var rentalItemId = Guid.NewGuid();
-            var assignedAssets = Enumerable.Range(0, l.Quantity)
-                .Select(_ => new AssignedAssetDto(Guid.NewGuid(), Guid.NewGuid(), "Held"))
-                .ToList();
-            return new CheckoutHeldLine(l, rentalItemId, $"rental-item:{rentalItemId}", assignedAssets);
-        }).ToList();
-
-        var orderResult = await writer.CreateOrderAsync(plan, heldLines, op.OperationId, op.ExpectedRentalOrderId, op.HoldExpiresAt, Clock.GetUtcNow(), cancellationToken);
-        if (orderResult.IsFailure)
-        {
-            op.MarkFailed(orderResult.Error.Code, orderResult.Error.Message, Clock.GetUtcNow());
-            await context.SaveChangesAsync(cancellationToken);
-            return CheckoutResult.Failure(orderResult.Error);
-        }
-
-        var order = orderResult.Value;
-        var issuer = new CheckoutInvoiceIssuer(Payment, orders, context, Clock, NullLogger<CheckoutInvoiceIssuer>.Instance);
-        var invoiceResult = await issuer.EnsureInvoiceAsync(order, cancellationToken);
-        if (invoiceResult.IsFailure)
-        {
-            op.MarkSucceeded(Clock.GetUtcNow(), invoiceStatus: "Failed");
-            await context.SaveChangesAsync(cancellationToken);
-            return CheckoutResult.OrderFailure(invoiceResult.Error, order);
-        }
-
-        op.MarkSucceeded(Clock.GetUtcNow(), invoiceStatus: "Ready");
-        await context.SaveChangesAsync(cancellationToken);
-
-        return CheckoutResult.Success(order, isReplay: false);
+        return await service.SubmitAsync(new(renterId, true), request, key, cancellationToken);
     }
 
     /// <summary>Chạy một lượt quét hết hạn thanh toán như ExpiryScannerWorker, dùng chung Inventory và Payment giả.</summary>
