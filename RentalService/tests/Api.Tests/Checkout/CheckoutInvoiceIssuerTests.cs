@@ -222,5 +222,7 @@ public sealed class CheckoutInvoiceIssuerTests
             throw new DbUpdateConcurrencyException("Simulated concurrent update.");
 
         public void DiscardChanges() => inner.DiscardChanges();
+        public Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
+            inner.BeginTransactionAsync(cancellationToken);
     }
 }

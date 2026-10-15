@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Payment;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Common;
 using Xunit;
 
@@ -190,7 +192,7 @@ public sealed class PaymentRentalContractAndEventsTests
             PaidAt: _fixedTime);
 
         Guid messageId = Guid.NewGuid();
-        PaymentEventEnvelope<InvoicePaidPayload> envelope = new(
+        KafkaMessageEnvelope<InvoicePaidPayload> envelope = new(
             messageId,
             PaymentContractSpec.EventTypes.InvoicePaid,
             1,
@@ -206,8 +208,8 @@ public sealed class PaymentRentalContractAndEventsTests
         Assert.Contains("\"paidAmount\":1500000", json);
         Assert.Contains($"\"aggregateId\":\"{orderId}\"", json);
 
-        PaymentEventEnvelope<InvoicePaidPayload>? des =
-            JsonSerializer.Deserialize<PaymentEventEnvelope<InvoicePaidPayload>>(json, JsonOptions);
+        KafkaMessageEnvelope<InvoicePaidPayload>? des =
+            JsonSerializer.Deserialize<KafkaMessageEnvelope<InvoicePaidPayload>>(json, JsonOptions);
         Assert.NotNull(des);
         Assert.Equal("InvoicePaid", des.MessageType);
         Assert.Equal(1_500_000m, des.Payload.PaidAmount);
@@ -235,7 +237,7 @@ public sealed class PaymentRentalContractAndEventsTests
 
         Guid messageId = Guid.NewGuid();
         Guid causationId = Guid.NewGuid();
-        PaymentEventEnvelope<RefundCompletedPayload> envelope = new(
+        KafkaMessageEnvelope<RefundCompletedPayload> envelope = new(
             messageId,
             PaymentContractSpec.EventTypes.RefundCompleted,
             1,
@@ -250,8 +252,8 @@ public sealed class PaymentRentalContractAndEventsTests
         Assert.Contains("\"refundedRentalAmount\":500000", json);
         Assert.Contains("\"totalRefundedAmount\":1500000", json);
 
-        PaymentEventEnvelope<RefundCompletedPayload>? des =
-            JsonSerializer.Deserialize<PaymentEventEnvelope<RefundCompletedPayload>>(json, JsonOptions);
+        KafkaMessageEnvelope<RefundCompletedPayload>? des =
+            JsonSerializer.Deserialize<KafkaMessageEnvelope<RefundCompletedPayload>>(json, JsonOptions);
         Assert.NotNull(des);
         Assert.Single(des.Payload.Items);
         Assert.Equal(1_500_000m, des.Payload.Items[0].TotalRefundedAmount);
@@ -277,7 +279,7 @@ public sealed class PaymentRentalContractAndEventsTests
             CompletedAt: _fixedTime);
 
         Guid messageId = Guid.NewGuid();
-        PaymentEventEnvelope<RentalSettledPayload> envelope = new(
+        KafkaMessageEnvelope<RentalSettledPayload> envelope = new(
             messageId,
             PaymentContractSpec.EventTypes.RentalSettled,
             1,
@@ -292,8 +294,8 @@ public sealed class PaymentRentalContractAndEventsTests
         Assert.Contains("\"refundedDepositAmount\":0", json);
         Assert.Contains("\"finalDeductionAmount\":1000000", json);
 
-        PaymentEventEnvelope<RentalSettledPayload>? des =
-            JsonSerializer.Deserialize<PaymentEventEnvelope<RentalSettledPayload>>(json, JsonOptions);
+        KafkaMessageEnvelope<RentalSettledPayload>? des =
+            JsonSerializer.Deserialize<KafkaMessageEnvelope<RentalSettledPayload>>(json, JsonOptions);
         Assert.NotNull(des);
         Assert.Equal(0m, des.Payload.RefundedDepositAmount);
         Assert.Equal(1_000_000m, des.Payload.FinalDeductionAmount);

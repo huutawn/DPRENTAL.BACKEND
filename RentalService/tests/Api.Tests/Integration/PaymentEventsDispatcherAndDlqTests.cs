@@ -1,8 +1,8 @@
-using Dprental.RentalService.Application.DTOs.Payment;
+using Dprental.RentalService.Application.Kafka.Consumers;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.IServices.Integration;
 using Dprental.RentalService.Application.IServices.Payments;
-using Dprental.RentalService.Application.Services.Integration;
-using Dprental.RentalService.Application.Services.Payments;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Entities;
@@ -15,6 +15,9 @@ using Dprental.RentalService.Api.Tests.Domain;
 
 namespace Dprental.RentalService.Api.Tests.Integration;
 
+using Microsoft.Extensions.Options;
+using Dprental.RentalService.Application.Kafka.Configuration;
+using Dprental.RentalService.Application.Kafka.Producers;
 public sealed class PaymentEventsDispatcherAndDlqTests
 {
     private static RentalServiceDbContext CreateDbContext(string dbName)
@@ -30,24 +33,29 @@ public sealed class PaymentEventsDispatcherAndDlqTests
         IPaymentWorkflowService paymentWorkflow,
         IRefundCompletedConsumer refundConsumer)
     {
+        var outboxRepo = new OutboxRepository(db);
+        var options = Options.Create(new KafkaOptions
+        {
+            PaymentEventsTopic = "payment.events.v1",
+            PaymentDlqTopic = "payment.events.v1.dlq"
+        });
         return new PaymentEventsDispatcher(
             new InboxRepository(db),
             new RentalOrderRepository(db),
             new Dprental.RentalService.Api.Tests.TestHelpers.FakeOrderLockManager(),
             paymentWorkflow,
             refundConsumer,
-            new OutboxRepository(db),
+            new KafkaOutboxWriter(outboxRepo),
             db,
-            new ConfigurationBuilder().Build(),
+            options,
             NullLogger<PaymentEventsDispatcher>.Instance);
     }
-
     private sealed class StubPaymentWorkflowService : IPaymentWorkflowService
     {
         public bool ProcessCalled { get; set; }
         public Task<Result> ApplyInvoicePaidStagedAsync(
             RentalOrder order,
-            PaymentEventEnvelope<InvoicePaidPayload> envelope,
+            KafkaMessageEnvelope<InvoicePaidPayload> envelope,
             RentalInboxMessage inboxMessage,
             CancellationToken cancellationToken = default)
         {
@@ -55,7 +63,7 @@ public sealed class PaymentEventsDispatcherAndDlqTests
             return Task.FromResult(Result.Success());
         }
 
-        public Task<Result> ProcessInvoicePaidAsync(PaymentEventEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default)
+        public Task<Result> ProcessInvoicePaidAsync(KafkaMessageEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default)
         {
             ProcessCalled = true;
             return Task.FromResult(Result.Success());
@@ -67,7 +75,7 @@ public sealed class PaymentEventsDispatcherAndDlqTests
         public bool ProcessCalled { get; set; }
         public Task<Result> ApplyRefundCompletedStagedAsync(
             RentalOrder order,
-            PaymentEventEnvelope<RefundCompletedPayload> envelope,
+            KafkaMessageEnvelope<RefundCompletedPayload> envelope,
             RentalInboxMessage inboxMessage,
             CancellationToken cancellationToken = default)
         {
@@ -75,7 +83,7 @@ public sealed class PaymentEventsDispatcherAndDlqTests
             return Task.FromResult(Result.Success());
         }
 
-        public Task<Result> ProcessRefundCompletedAsync(PaymentEventEnvelope<RefundCompletedPayload> envelope, CancellationToken cancellationToken = default)
+        public Task<Result> ProcessRefundCompletedAsync(KafkaMessageEnvelope<RefundCompletedPayload> envelope, CancellationToken cancellationToken = default)
         {
             ProcessCalled = true;
             return Task.FromResult(Result.Success());
@@ -90,10 +98,10 @@ public sealed class PaymentEventsDispatcherAndDlqTests
         var refundConsumer = new StubRefundConsumer();
         var dispatcher = CreateDispatcher(db, paymentWorkflow, refundConsumer);
         string malformed = "{ this is not json }";
-        var result = await dispatcher.DispatchRawMessageAsync(malformed);
+        var result = await dispatcher.ReceiveMessageAsync(malformed);
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("MALFORMED_JSON", result.Error.Code);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(KafkaIntakeDisposition.DlqStored, result.Value);
 
         var dlqOutbox = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "DeadLetter");
         Assert.NotNull(dlqOutbox);
@@ -109,10 +117,10 @@ public sealed class PaymentEventsDispatcherAndDlqTests
         var refundConsumer = new StubRefundConsumer();
         var dispatcher = CreateDispatcher(db, paymentWorkflow, refundConsumer);
         string noType = """{"producer":"payment-service","payload":{}}""";
-        var result = await dispatcher.DispatchRawMessageAsync(noType);
+        var result = await dispatcher.ReceiveMessageAsync(noType);
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("MISSING_MESSAGE_TYPE", result.Error.Code);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(KafkaIntakeDisposition.DlqStored, result.Value);
 
         var dlqOutbox = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "DeadLetter");
         Assert.NotNull(dlqOutbox);
@@ -155,9 +163,12 @@ public sealed class PaymentEventsDispatcherAndDlqTests
             }
         }
         """;
+        var intakeResult = await dispatcher.ReceiveMessageAsync(validJson);
+        Assert.True(intakeResult.IsSuccess);
+        Assert.Equal(KafkaIntakeDisposition.InboxStored, intakeResult.Value);
 
-        var result = await dispatcher.DispatchRawMessageAsync(validJson);
-
+        var inboxMsg = await db.RentalInboxMessages.FirstAsync(m => m.AggregateId == orderId.ToString("D"));
+        var result = await dispatcher.ProcessInboxMessageAsync(inboxMsg.Id);
         Assert.True(result.IsSuccess);
         Assert.True(paymentWorkflow.ProcessCalled);
     }
@@ -208,10 +219,71 @@ public sealed class PaymentEventsDispatcherAndDlqTests
             }
         }
         """;
+        var intakeResult = await dispatcher.ReceiveMessageAsync(validJson);
+        Assert.True(intakeResult.IsSuccess);
+        Assert.Equal(KafkaIntakeDisposition.InboxStored, intakeResult.Value);
 
-        var result = await dispatcher.DispatchRawMessageAsync(validJson);
-
+        var inboxMsg = await db.RentalInboxMessages.FirstAsync(m => m.AggregateId == orderId.ToString("D"));
+        var result = await dispatcher.ProcessInboxMessageAsync(inboxMsg.Id);
         Assert.True(result.IsSuccess);
         Assert.True(refundConsumer.ProcessCalled);
+    }
+
+    [Fact]
+    public async Task ProcessInboxMessage_WhenDlqRouteFails_DoesNotMarkInboxAsDeadLettered()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+
+        Guid orderId = Guid.NewGuid();
+        Guid msgId = Guid.NewGuid();
+        Guid itemId = Guid.NewGuid();
+
+        var order = RentalOrder.Create(
+            orderId, "ORD-DLQ-FAIL", Guid.NewGuid(), "VND", "Standard", "Renter", "0123456789", "Address", null,
+            "ORIGINAL_PAYMENT_SOURCE", "v1.0", "DOC-001", "HASH-001", "OP-DLQ-FAIL", DateTimeOffset.UtcNow,
+            new[] { new InitialRentalItemDto(itemId, Guid.NewGuid(), Guid.NewGuid(), 1, DateOnly.FromDateTime(DateTime.UtcNow), DateOnly.FromDateTime(DateTime.UtcNow.AddDays(3)), "Listing", null, "Pickup", 500_000m, 1_000_000m, "GRP-DLQ", new[] { new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()) }, TestListingSnapshots.Default) }).Value;
+        db.RentalOrders.Add(order);
+        var inboxMsg = new RentalInboxMessage(
+            Guid.NewGuid(),
+            msgId,
+            "InvoicePaid",
+            "payment-service",
+            orderId.ToString("D"),
+            null,
+            null,
+            "{ invalid json payload }",
+            DateTimeOffset.UtcNow);
+
+        db.RentalInboxMessages.Add(inboxMsg);
+        await db.SaveChangesAsync();
+
+        var failingWriter = new FailingKafkaOutboxWriter();
+
+        var dispatcher = new PaymentEventsDispatcher(
+            new InboxRepository(db),
+            new RentalOrderRepository(db),
+            new Dprental.RentalService.Api.Tests.TestHelpers.FakeOrderLockManager(),
+            new StubPaymentWorkflowService(),
+            new StubRefundConsumer(),
+            failingWriter,
+            db,
+            Options.Create(new KafkaOptions { PaymentEventsTopic = "payment.events.v1", PaymentDlqTopic = "payment.events.v1.dlq" }),
+            NullLogger<PaymentEventsDispatcher>.Instance);
+
+        var result = await dispatcher.ProcessInboxMessageAsync(inboxMsg.Id);
+        Assert.True(result.IsFailure);
+
+        await using var verifyDb = CreateDbContext(dbName);
+        var reloaded = await verifyDb.RentalInboxMessages.FirstAsync(m => m.Id == inboxMsg.Id);
+        Assert.Equal(RentalInboxMessage.StatusReceived, reloaded.Status);
+    }
+
+    private sealed class FailingKafkaOutboxWriter : IKafkaOutboxWriter
+    {
+        public Task<Result<ProducerEnqueueResult>> EnqueueAsync<TPayload>(string topic, string partitionKey, KafkaMessageEnvelope<TPayload> candidateEnvelope, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result.Failure<ProducerEnqueueResult>(Error.Failure("OUTBOX_PERSISTENCE_FAILED", "Simulated DLQ persistence failure.")));
+        }
     }
 }

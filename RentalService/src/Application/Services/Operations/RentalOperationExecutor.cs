@@ -3,7 +3,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
-using Dprental.RentalService.Application.DTOs.Integration;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.DTOs.Supplier;
@@ -127,6 +128,12 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
 
         switch (receipt.Action)
         {
+            case RentalItem.OverdueProtectionAction:
+                {
+                    var item = order.Items.FirstOrDefault(i => i.Id == receipt.TargetItemId);
+                    if (item is null) return Error.NotFound("ITEM_NOT_FOUND", "Không tìm thấy mục thuê.");
+                    return await MarkAssetsOverdueCoreAsync(order, item, receipt, cancellationToken);
+                }
             case "ExtendHold":
                 {
                     var item = order.Items.FirstOrDefault(i => i.Id == receipt.TargetItemId);

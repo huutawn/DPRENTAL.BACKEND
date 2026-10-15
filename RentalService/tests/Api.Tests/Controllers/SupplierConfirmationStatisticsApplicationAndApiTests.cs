@@ -66,6 +66,9 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
         public Task<IReadOnlyList<Guid>> GetPendingPaymentExpiredOrderIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Guid>> GetPendingSupplierTimeoutItemIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<RenterCalendarItemRecord>> GetRenterCalendarItemsAsync(Guid renterId, DateOnly monthStart, DateOnly monthEnd, IReadOnlyCollection<RentalItemStatus> targetStatuses, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<Guid>> GetOverdueUnprotectedOrderIdsAsync(
+    DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
+    Task.FromResult<IReadOnlyList<Guid>>([]);
     }
 
     private sealed class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
