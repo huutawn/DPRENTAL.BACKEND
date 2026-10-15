@@ -8,7 +8,8 @@ internal static class PaymentOutboxFactory
 {
     public static OutboxMessage CreateInvoicePaidOutboxMessage(
         Invoice invoice,
-        DateTimeOffset eventTime)
+        DateTimeOffset occurredAt,
+        DateTimeOffset? paidAt = null)
     {
         ArgumentNullException.ThrowIfNull(invoice);
 
@@ -20,7 +21,7 @@ internal static class PaymentOutboxFactory
             invoice.PaymentRef!,
             (decimal)decimal.ToInt64(invoice.TotalAmount),
             invoice.Currency,
-            invoice.PaidAt ?? eventTime);
+            paidAt ?? invoice.PaidAt ?? occurredAt);
 
         var envelope = new PaymentEventEnvelope<InvoicePaidPayload>(
             messageId,
@@ -28,7 +29,7 @@ internal static class PaymentOutboxFactory
             1,
             "payment-service",
             invoice.RentalOrderId.ToString("D"),
-            eventTime,
+            occurredAt,
             messageId.ToString("D"),
             null,
             eventPayload);
@@ -39,6 +40,6 @@ internal static class PaymentOutboxFactory
             "RentalOrder",
             envelope.AggregateId,
             JsonSerializer.Serialize(envelope),
-            eventTime);
+            occurredAt);
     }
 }

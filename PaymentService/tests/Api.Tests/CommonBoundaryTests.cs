@@ -57,6 +57,7 @@ public sealed class CommonBoundaryTests
                 builder.UseSetting("environment", "Production");
                 builder.UseSetting("ConnectionStrings:Postgres",
                     "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("Security:ForwardedHeaders:KnownProxies:0", "127.0.0.1");
                 builder.ConfigureTestServices(services => services.AddControllers()
                     .AddApplicationPart(typeof(BoundaryTestController).Assembly));
             });

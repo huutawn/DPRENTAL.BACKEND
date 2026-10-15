@@ -18,15 +18,6 @@ public interface IInvoiceService
         string invoiceRef,
         Guid callerRenterId,
         CancellationToken ct = default);
-
-    Task<Result> RecordPaymentReceivedAsync(
-        string invoiceRef,
-        string paymentRef,
-        decimal amount,
-        string currency,
-        DateTimeOffset paidAt,
-        CancellationToken ct = default);
-
     Task<int> ExpirePendingInvoicesBatchAsync(
         int batchSize = 100,
         CancellationToken ct = default);

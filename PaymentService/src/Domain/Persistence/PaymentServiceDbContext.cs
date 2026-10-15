@@ -13,6 +13,7 @@ public sealed class PaymentServiceDbContext : DbContext
     public DbSet<InvoiceItem> InvoiceItems => Set<InvoiceItem>();
     public DbSet<OperationReceipt> OperationReceipts => Set<OperationReceipt>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -39,5 +40,12 @@ public sealed class PaymentServiceDbContext : DbContext
 
         modelBuilder.Entity<OutboxMessage>()
             .HasIndex(o => o.PublishedAt);
+
+        modelBuilder.Entity<PaymentTransaction>(b =>
+        {
+            b.HasIndex(t => new { t.Provider, t.ProviderTransactionId }).IsUnique();
+            b.HasIndex(t => t.PaymentRef);
+            b.HasIndex(t => t.InvoiceRef);
+        });
     }
 }

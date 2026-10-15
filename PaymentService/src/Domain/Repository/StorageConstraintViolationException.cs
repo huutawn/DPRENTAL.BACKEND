@@ -6,6 +6,7 @@ public enum StorageConstraintViolationType
     RentalOrderId,
     PaymentCode,
     PaymentRef,
+    PaymentTransaction,
     Other
 }
 
@@ -34,4 +35,5 @@ public static class StorageConstraints
     public const string PaymentRef = "IX_invoices_PaymentRef";
     public const string InvoiceRef = "IX_invoices_InvoiceRef";
     public const string InvoiceItemUnique = "IX_invoice_items_InvoiceId_RentalItemId";
+    public const string PaymentTransaction = "IX_payment_transactions_Provider_ProviderTransactionId";
 }

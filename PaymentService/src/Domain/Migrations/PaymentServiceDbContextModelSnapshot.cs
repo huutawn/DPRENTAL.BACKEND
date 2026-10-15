@@ -115,7 +115,7 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.HasIndex("RentalOrderId")
                         .IsUnique();
 
-                    b.ToTable("invoices", (string)null);
+                    b.ToTable("invoices");
                 });
 
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.InvoiceItem", b =>
@@ -147,7 +147,7 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.HasIndex("InvoiceId", "RentalItemId")
                         .IsUnique();
 
-                    b.ToTable("invoice_items", (string)null);
+                    b.ToTable("invoice_items");
                 });
 
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.OperationReceipt", b =>
@@ -193,7 +193,7 @@ namespace Dprental.PaymentService.Domain.Migrations
 
                     b.HasIndex("RentalOrderId");
 
-                    b.ToTable("operation_receipts", (string)null);
+                    b.ToTable("operation_receipts");
                 });
 
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.OutboxMessage", b =>
@@ -234,7 +234,107 @@ namespace Dprental.PaymentService.Domain.Migrations
 
                     b.HasIndex("PublishedAt");
 
-                    b.ToTable("outbox_messages", (string)null);
+                    b.ToTable("outbox_messages");
+                });
+
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.PaymentTransaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<decimal?>("Accumulated")
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<string>("Content")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Gateway")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid?>("InvoiceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("InvoiceRef")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PaymentCode")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("PaymentRef")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ProviderCode")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProviderTransactionId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ReasonCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ReferenceCode")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("SubAccount")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("TransactionDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("TransferAmount")
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<string>("TransferType")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InvoiceRef");
+
+                    b.HasIndex("PaymentRef");
+
+                    b.HasIndex("Provider", "ProviderTransactionId")
+                        .IsUnique();
+
+                    b.ToTable("payment_transactions");
                 });
 
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.InvoiceItem", b =>

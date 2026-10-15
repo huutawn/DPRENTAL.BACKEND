@@ -17,6 +17,7 @@ internal static class DbExceptionTranslator
                     StorageConstraints.RentalOrderId => StorageConstraintViolationType.RentalOrderId,
                     StorageConstraints.PaymentCode => StorageConstraintViolationType.PaymentCode,
                     StorageConstraints.PaymentRef => StorageConstraintViolationType.PaymentRef,
+                    StorageConstraints.PaymentTransaction => StorageConstraintViolationType.PaymentTransaction,
                     _ => StorageConstraintViolationType.Other
                 };
 
@@ -59,6 +60,12 @@ internal static class DbExceptionTranslator
             {
                 type = StorageConstraintViolationType.PaymentRef;
                 constraintName = StorageConstraints.PaymentRef;
+            }
+            else if (msg.Contains(StorageConstraints.PaymentTransaction, StringComparison.OrdinalIgnoreCase) ||
+                     msg.Contains("payment_transactions_Provider_ProviderTransactionId", StringComparison.OrdinalIgnoreCase))
+            {
+                type = StorageConstraintViolationType.PaymentTransaction;
+                constraintName = StorageConstraints.PaymentTransaction;
             }
 
             if (type != StorageConstraintViolationType.Other)

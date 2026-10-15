@@ -1,5 +1,6 @@
 using Dprental.PaymentService.Application.Security.Jwt;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -39,13 +40,26 @@ public static class PaymentJwtAuthenticationExtensions
         });
 
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-            .AddJwtBearer();
+            .AddJwtBearer()
+            .AddScheme<AuthenticationSchemeOptions, SePayAuthenticationHandler>(
+                SePayAuthenticationDefaults.AuthenticationScheme, _ => { });
 
         services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
             .Configure<PaymentJwksConfigurationManager, IOptions<PaymentJwtOptions>>((bearerOptions, configManager, jwtOptionsAccessor) =>
             {
                 var options = jwtOptionsAccessor.Value;
 
+                bearerOptions.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = context =>
+                    {
+                        if (context.Request.Path.StartsWithSegments("/api/v1/payment/webhooks", StringComparison.OrdinalIgnoreCase))
+                        {
+                            context.NoResult();
+                        }
+                        return Task.CompletedTask;
+                    }
+                };
                 bearerOptions.MapInboundClaims = false;
                 bearerOptions.ConfigurationManager = configManager;
                 bearerOptions.RefreshOnIssuerKeyNotFound = true;

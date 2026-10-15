@@ -23,11 +23,17 @@ public static class ApplicationServiceCollectionExtensions
                 "Merchant Bank and Account must be non-empty.")
             .ValidateOnStart();
 
+        services.AddOptions<SePayOptions>()
+            .Bind(configuration.GetSection(SePayOptions.SectionName))
+            .ValidateDataAnnotations()
+            .Validate(o => !string.IsNullOrWhiteSpace(o.ApiKey), "SePay ApiKey must be non-empty.")
+            .ValidateOnStart();
+
         services.AddSingleton(TimeProvider.System);
 
         services.AddScoped<IInvoiceCreationService, InvoiceCreationService>();
         services.AddScoped<IInvoiceLifecycleService, InvoiceLifecycleService>();
-        services.AddScoped<IPaymentRecordingService, PaymentRecordingService>();
+        services.AddScoped<IInvoicePaymentProcessor, InvoicePaymentProcessor>();
         services.AddScoped<IInvoiceService, InvoiceService>();
 
         services.AddHostedService<InvoiceExpiryWorker>();

@@ -248,6 +248,34 @@ public sealed class Invoice
         return Result.Success();
     }
 
+    public Result RecordLatePayment(string paymentRef, DateTimeOffset paidAt, DateTimeOffset processedAt)
+    {
+        if (string.IsNullOrWhiteSpace(paymentRef))
+        {
+            return Error.Validation("Payment.InvalidPaymentRef", "PaymentRef không được rỗng.");
+        }
+
+        string normalizedPaymentRef = paymentRef.Trim();
+        DateTimeOffset utcPaidAt = paidAt.ToUniversalTime();
+        DateTimeOffset utcProcessedAt = processedAt.ToUniversalTime();
+
+        if (Status == InvoiceStatus.Paid)
+        {
+            return Error.Conflict("INVOICE_ALREADY_PAID", "Hóa đơn đã được thanh toán, không thể ghi nhận thanh toán trễ.");
+        }
+
+        if (Status == InvoiceStatus.Pending)
+        {
+            Status = InvoiceStatus.Expired;
+            ExpiredAt = utcProcessedAt;
+        }
+
+        PaymentRef = normalizedPaymentRef;
+        PaidAt = utcPaidAt;
+
+        return Result.Success();
+    }
+
     public Result Cancel(string reason, DateTimeOffset cancelledAt)
     {
         if (Status == InvoiceStatus.Paid)
