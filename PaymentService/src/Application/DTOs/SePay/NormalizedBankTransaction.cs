@@ -1,6 +1,6 @@
-namespace Dprental.PaymentService.Application.DTOs.Bank;
+namespace Dprental.PaymentService.Application.DTOs.SePay;
 
-public sealed record VerifiedBankTransaction(
+internal sealed record NormalizedBankTransaction(
     long Id,
     string Gateway,
     DateTimeOffset TransactionDate,
@@ -12,5 +12,4 @@ public sealed record VerifiedBankTransaction(
     string? Description,
     decimal TransferAmount,
     decimal? Accumulated,
-    string? ReferenceCode,
-    DateTimeOffset ProcessedAt);
+    string? ReferenceCode);

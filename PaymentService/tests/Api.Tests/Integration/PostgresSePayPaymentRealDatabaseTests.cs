@@ -1,5 +1,6 @@
 using Dprental.PaymentService.Api.Tests.TestHelpers;
-using Dprental.PaymentService.Application.DTOs.Bank;
+using System.Globalization;
+using Dprental.PaymentService.Application.DTOs.SePay;
 using Dprental.PaymentService.Application.DTOs.Invoice;
 using Dprental.PaymentService.Application.IServices;
 using Dprental.PaymentService.Application.Options;
@@ -58,7 +59,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
         return new InvoicePaymentProcessor(repo, mo, so, tp);
     }
 
-    private static VerifiedBankTransaction CreateBankTx(
+    private static SePayWebhookPayload CreateBankTx(
         long id,
         string paymentCode,
         decimal amount = 500_000m,
@@ -67,20 +68,19 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
         string? content = null)
     {
         var date = txDate ?? DateTimeOffset.UtcNow;
-        return new VerifiedBankTransaction(
+        return new SePayWebhookPayload(
             Id: id,
             Gateway: "MBBank",
-            TransactionDate: date,
+            TransactionDate: date.ToOffset(TimeSpan.FromHours(7)).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
             AccountNumber: "0383799632",
             SubAccount: null,
             Code: paymentCode,
-            Content: content ?? $"Thanh toan {paymentCode}",
+            Content: content ?? (string.IsNullOrEmpty(paymentCode) ? "Chuyen khoan khong ma" : $"Thanh toan {paymentCode}"),
             TransferType: "in",
             Description: "Payment",
             TransferAmount: amount,
             Accumulated: 10_000_000m,
-            ReferenceCode: $"FT-{id}",
-            ProcessedAt: procDate ?? date);
+            ReferenceCode: $"FT-{id}");
     }
 
     [Fact]
@@ -555,6 +555,80 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             await PostgresTestDatabaseHelper.DropTestDatabaseAsync(dbName);
         }
     }
+    [Fact]
+    public async Task ConcurrentPayments_TwoDifferentIds_SameInvoice_ExactlyOneInvoicePaid_SecondReviewRequired()
+    {
+        var (connString, dbName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connString);
+            await using (var initCtx = new PaymentServiceDbContext(options))
+            {
+                await initCtx.Database.MigrateAsync();
+            }
+
+            string invoiceRef;
+            string paymentCode;
+            await using (var setupCtx = new PaymentServiceDbContext(options))
+            {
+                var invoiceService = CreateInvoiceService(new EfInvoiceRepository(setupCtx));
+                var createRes = await invoiceService.CreateInvoiceAsync(new CreateInvoiceRequest(
+                    Guid.NewGuid(), "ORD-CONC-TX", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
+                    [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
+                    "op-conc-tx"));
+                invoiceRef = createRes.Value.InvoiceRef;
+                paymentCode = (await setupCtx.Invoices.SingleAsync(i => i.InvoiceRef == invoiceRef)).PaymentCode;
+            }
+
+            var tx1 = CreateBankTx(1003, paymentCode, 500_000m);
+            var tx2 = CreateBankTx(1004, paymentCode, 500_000m);
+
+            var barrier = new Barrier(2);
+
+            var task1 = Task.Run(async () =>
+            {
+                await using var ctx = new PaymentServiceDbContext(options);
+                var repo = new BarrierInvoiceRepositoryDecorator(
+                    new EfInvoiceRepository(ctx),
+                    () => { barrier.SignalAndWait(); return Task.CompletedTask; });
+                var proc = CreateProcessor(repo);
+                return await proc.ProcessAsync(tx1);
+            });
+
+            var task2 = Task.Run(async () =>
+            {
+                await using var ctx = new PaymentServiceDbContext(options);
+                var repo = new BarrierInvoiceRepositoryDecorator(
+                    new EfInvoiceRepository(ctx),
+                    () => { barrier.SignalAndWait(); return Task.CompletedTask; });
+                var proc = CreateProcessor(repo);
+                return await proc.ProcessAsync(tx2);
+            });
+
+            var results = await Task.WhenAll(task1, task2);
+            Assert.All(results, r => Assert.True(r.IsSuccess));
+
+            await using (var verifyCtx = new PaymentServiceDbContext(options))
+            {
+                var txs = await verifyCtx.PaymentTransactions.OrderBy(t => t.ProviderTransactionId).ToListAsync();
+                Assert.Equal(2, txs.Count);
+                Assert.Contains(txs, t => t.Status == PaymentTransactionStatus.Matched);
+                Assert.Contains(txs, t => t.Status == PaymentTransactionStatus.ReviewRequired && t.ReasonCode == PaymentTransactionReason.InvoiceAlreadyPaid);
+
+                var outbox = await verifyCtx.OutboxMessages.ToListAsync();
+                Assert.Single(outbox);
+
+                var inv = await verifyCtx.Invoices.SingleAsync(i => i.InvoiceRef == invoiceRef);
+                Assert.Equal(InvoiceStatus.Paid, inv.Status);
+                Assert.True(inv.PaymentRef is "SEPAY:1003" or "SEPAY:1004");
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(dbName);
+        }
+    }
+
 
     [Fact]
     public async Task Rollback_ErrorBeforeCommit_LeavesNoPartialData_AndRetrySucceeds()

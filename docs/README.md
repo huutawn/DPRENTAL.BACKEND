@@ -48,8 +48,11 @@ Cấu hình merchant tài khoản nhận tiền đặt tại `Payment:Merchant` 
 - **Invariants về thời gian, khóa hàng và sự kiện:**
   - Mọi `DateTimeOffset` lưu trữ trong domain (`PaymentDeadline`, `CreatedAt`, `PaidAt`, `CancelledAt`, `ExpiredAt`, `TransactionDate`) được chuẩn hóa về UTC (`Offset = 0`).
   - Bước kiểm tra ownership trong `GET` dùng `AsNoTracking()`; mọi cập nhật trạng thái (`Cancel`, `Expiry`, xác nhận webhook) đều lấy khóa hàng PostgreSQL `SELECT ... FOR UPDATE` kèm `ReloadAsync()` từ database trước khi quyết định chuyển trạng thái.
-  - `IInvoicePaymentProcessor` thay thế hoàn toàn `PaymentRecordingService`, thực hiện khóa claim Provider ID (`Provider = "SEPAY"`, `ProviderTransactionId`), trích xuất mã thanh toán ordinal chính xác từ `code` và `content`, so khớp tài khoản/gateway/số tiền/loại tiền tệ.
-  - Các giao dịch tiền vào khớp hoàn toàn còn hạn chuyển hóa đơn sang `PAID` và phát 1 sự kiện `InvoicePaid`.
+  - **Phân tách trách nhiệm sau refactor:**
+    - *API Controller (`PaymentWebhooksController`):* Controller mỏng, chỉ đảm nhận model binding DTO `SePayWebhookPayload`, gọi `IInvoicePaymentProcessor.ProcessAsync`, và chuyển `Result` sang HTTP ProblemDetails (`this.ToProblem(result.Error)`). Không chứa validation, parse ngày, normalization hay matching.
+    - *Application (`InvoicePaymentProcessor`, `SePayTransactionNormalizer`):* Sở hữu toàn bộ use case webhook bao gồm validate input (fail-fast trước DB tx), chuẩn hóa thời gian/chuỗi (`SePayDateTimeParser`), claim provider ID, trích xuất mã thanh toán (`PaymentCodeExtractor`), khóa hàng và reload Invoice, kiểm tra replay/duplicate, matching và điều phối transaction.
+    - *Domain (`Invoice`):* Bảo vệ invariants và thực hiện chuyển trạng thái (`MarkPaid`, `RecordLatePayment`).
+    - *Repository (`EfInvoiceRepository`):* Quản lý câu truy vấn, khóa hàng PostgreSQL (`FOR UPDATE`), và lưu trữ nguyên tử PaymentTransaction, Invoice, Outbox.
   - Các giao dịch late payment (thời điểm chuyển khoản hoặc thời điểm xử lý sau khi lấy khóa đạt/vượt `PaymentDeadline`, hoặc hóa đơn đã đóng `EXPIRED`/`CANCELLED`) chuyển hóa đơn PENDING sang `EXPIRED`, giữ nguyên trạng thái hóa đơn đã đóng, lưu `PaymentRef` định dạng ổn định `SEPAY:<id>`, lưu transaction trạng thái `MANUAL_REFUND_REQUIRED` và phát 1 sự kiện Outbox `InvoicePaid` (với `paidAt` là giờ ngân hàng, `occurredAt` là giờ xử lý) để Rental Service điều phối hoàn tiền thủ công.
   - `PaymentRef` có unique index để chặn hai hóa đơn dùng chung một mã giao dịch thanh toán.
   - Sự kiện `InvoicePaid` trong `outbox_messages` luôn có `correlationId` kiểu chuỗi bắt buộc (mặc định bằng `MessageId` dạng UUID).

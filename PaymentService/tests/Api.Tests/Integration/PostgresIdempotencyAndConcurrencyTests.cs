@@ -1,5 +1,6 @@
 using System.Text.Json;
-using Dprental.PaymentService.Application.DTOs.Bank;
+using System.Globalization;
+using Dprental.PaymentService.Application.DTOs.SePay;
 using System.Text.Json.Nodes;
 using Dprental.PaymentService.Api.Tests.TestHelpers;
 using Dprental.PaymentService.Application.DTOs.Events;
@@ -66,6 +67,32 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
         });
         return new InvoicePaymentProcessor(repo, mo, so, tp);
     }
+    private static SePayWebhookPayload CreatePayload(
+        long id,
+        string code,
+        decimal amount,
+        DateTimeOffset? txDate = null,
+        string gateway = "MBBank",
+        string account = "0383799632",
+        string transferType = "in",
+        string? content = null)
+    {
+        var date = txDate ?? DateTimeOffset.UtcNow;
+        return new SePayWebhookPayload(
+            Id: id,
+            Gateway: gateway,
+            TransactionDate: date.ToOffset(TimeSpan.FromHours(7)).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+            AccountNumber: account,
+            SubAccount: null,
+            Code: code,
+            Content: content ?? code,
+            TransferType: transferType,
+            Description: "Payment",
+            TransferAmount: amount,
+            Accumulated: 10_000_000m,
+            ReferenceCode: $"REF-{id}");
+    }
+
 
     private sealed class TestOptionsMonitor<T>(T currentValue) : IOptionsMonitor<T>
     {
@@ -223,20 +250,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             var paidAtPlus7 = new DateTimeOffset(2026, 10, 12, 17, 15, 0, offsetPlus7);
             var dbInvoiceBefore = await ctx.Invoices.AsNoTracking().SingleAsync(i => i.InvoiceRef == createRes.Value.InvoiceRef);
             var processor = CreatePaymentProcessor(new EfInvoiceRepository(ctx), fakeTime);
-            var vt = new VerifiedBankTransaction(
-                Id: 1001,
-                Gateway: "MBBank",
-                TransactionDate: paidAtPlus7.ToUniversalTime(),
-                AccountNumber: "0383799632",
-                SubAccount: null,
-                Code: dbInvoiceBefore.PaymentCode,
-                Content: dbInvoiceBefore.PaymentCode,
-                TransferType: "in",
-                Description: "Payment",
-                TransferAmount: 1_500_000m,
-                Accumulated: 10_000_000m,
-                ReferenceCode: "REF-TZ-001",
-                ProcessedAt: paidAtPlus7.ToUniversalTime());
+            var vt = CreatePayload(1001, dbInvoiceBefore.PaymentCode, 1_500_000m, txDate: paidAtPlus7);
             var payRes = await processor.ProcessAsync(vt);
             Assert.True(payRes.IsSuccess);
 
@@ -321,20 +335,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
                 "op-dl-1"))).Value;
             var dbInv1 = await ctx.Invoices.AsNoTracking().SingleAsync(i => i.InvoiceRef == inv1.InvoiceRef);
             var processor1 = CreatePaymentProcessor(new EfInvoiceRepository(ctx), fakeTime);
-            var vt1 = new VerifiedBankTransaction(
-                Id: 2001,
-                Gateway: "MBBank",
-                TransactionDate: deadline.AddSeconds(-1),
-                AccountNumber: "0383799632",
-                SubAccount: null,
-                Code: dbInv1.PaymentCode,
-                Content: dbInv1.PaymentCode,
-                TransferType: "in",
-                Description: "Case 1",
-                TransferAmount: 300_000m,
-                Accumulated: 10_000_000m,
-                ReferenceCode: "REF-DL-1",
-                ProcessedAt: startTime);
+            var vt1 = CreatePayload(2001, dbInv1.PaymentCode, 300_000m, txDate: deadline.AddSeconds(-1));
             var payBefore = await processor1.ProcessAsync(vt1);
             Assert.True(payBefore.IsSuccess);
             var tx1 = await ctx.PaymentTransactions.AsNoTracking().SingleAsync(t => t.ProviderTransactionId == "2001");
@@ -349,20 +350,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
 
             var dbInv2 = await ctx.Invoices.AsNoTracking().SingleAsync(i => i.InvoiceRef == inv2.InvoiceRef);
             var processor2 = CreatePaymentProcessor(new EfInvoiceRepository(ctx), fakeTime);
-            var vt2 = new VerifiedBankTransaction(
-                Id: 2002,
-                Gateway: "MBBank",
-                TransactionDate: deadline,
-                AccountNumber: "0383799632",
-                SubAccount: null,
-                Code: dbInv2.PaymentCode,
-                Content: dbInv2.PaymentCode,
-                TransferType: "in",
-                Description: "Case 2",
-                TransferAmount: 300_000m,
-                Accumulated: 10_000_000m,
-                ReferenceCode: "REF-DL-2",
-                ProcessedAt: startTime);
+            var vt2 = CreatePayload(2002, dbInv2.PaymentCode, 300_000m, txDate: deadline);
             var payAtDeadline = await processor2.ProcessAsync(vt2);
             Assert.True(payAtDeadline.IsSuccess);
             var tx2 = await ctx.PaymentTransactions.AsNoTracking().SingleAsync(t => t.ProviderTransactionId == "2002");
@@ -382,20 +370,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
 
             var dbInv3 = await ctx.Invoices.AsNoTracking().SingleAsync(i => i.InvoiceRef == inv3.InvoiceRef);
             var processor3 = CreatePaymentProcessor(new EfInvoiceRepository(ctx), fakeTime);
-            var vt3 = new VerifiedBankTransaction(
-                Id: 2003,
-                Gateway: "MBBank",
-                TransactionDate: fakeTime.GetUtcNow(),
-                AccountNumber: "0383799632",
-                SubAccount: null,
-                Code: dbInv3.PaymentCode,
-                Content: dbInv3.PaymentCode,
-                TransferType: "in",
-                Description: "Case 3",
-                TransferAmount: 300_000m,
-                Accumulated: 10_000_000m,
-                ReferenceCode: "REF-DL-3",
-                ProcessedAt: fakeTime.GetUtcNow());
+            var vt3 = CreatePayload(2003, dbInv3.PaymentCode, 300_000m, txDate: fakeTime.GetUtcNow());
             var payAfterDeadline = await processor3.ProcessAsync(vt3);
             Assert.True(payAfterDeadline.IsSuccess);
             var tx3 = await ctx.PaymentTransactions.AsNoTracking().SingleAsync(t => t.ProviderTransactionId == "2003");
@@ -678,20 +653,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
                     await using var payCtx = new PaymentServiceDbContext(options);
                     var payTime = new FakeTimeProvider(deadline.AddSeconds(-10));
                     var proc = CreatePaymentProcessor(new EfInvoiceRepository(payCtx), payTime);
-                    var vt = new VerifiedBankTransaction(
-                        Id: 4001,
-                        Gateway: "MBBank",
-                        TransactionDate: deadline.AddSeconds(-10),
-                        AccountNumber: "0383799632",
-                        SubAccount: null,
-                        Code: paymentCode,
-                        Content: paymentCode,
-                        TransferType: "in",
-                        Description: "Pay during get",
-                        TransferAmount: 500_000m,
-                        Accumulated: 10_000_000m,
-                        ReferenceCode: "REF-4001",
-                        ProcessedAt: deadline.AddSeconds(-10));
+                    var vt = CreatePayload(4001, paymentCode, 500_000m, txDate: deadline.AddSeconds(-10));
                     var payRes = await proc.ProcessAsync(vt, ct);
                     Assert.True(payRes.IsSuccess);
                 };
@@ -758,20 +720,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             {
                 await using var ctx1 = new PaymentServiceDbContext(options);
                 var proc1 = CreatePaymentProcessor(new EfInvoiceRepository(ctx1));
-                var vt1 = new VerifiedBankTransaction(
-                    Id: 5001,
-                    Gateway: "MBBank",
-                    TransactionDate: paidAt,
-                    AccountNumber: "0383799632",
-                    SubAccount: null,
-                    Code: code1,
-                    Content: code1,
-                    TransferType: "in",
-                    Description: "Payment 1",
-                    TransferAmount: 500_000m,
-                    Accumulated: 10_000_000m,
-                    ReferenceCode: "REF-5001",
-                    ProcessedAt: paidAt);
+                var vt1 = CreatePayload(5001, code1, 500_000m, txDate: paidAt);
                 return await proc1.ProcessAsync(vt1);
             });
 
@@ -779,20 +728,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             {
                 await using var ctx2 = new PaymentServiceDbContext(options);
                 var proc2 = CreatePaymentProcessor(new EfInvoiceRepository(ctx2));
-                var vt2 = new VerifiedBankTransaction(
-                    Id: 5001,
-                    Gateway: "MBBank",
-                    TransactionDate: paidAt,
-                    AccountNumber: "0383799632",
-                    SubAccount: null,
-                    Code: code2,
-                    Content: code2,
-                    TransferType: "in",
-                    Description: "Payment 2",
-                    TransferAmount: 500_000m,
-                    Accumulated: 10_000_000m,
-                    ReferenceCode: "REF-5001",
-                    ProcessedAt: paidAt);
+                var vt2 = CreatePayload(5001, code2, 500_000m, txDate: paidAt);
                 return await proc2.ProcessAsync(vt2);
             });
 
@@ -859,20 +795,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             {
                 await using var ctxB = new PaymentServiceDbContext(options);
                 var procB = CreatePaymentProcessor(new EfInvoiceRepository(ctxB));
-                var vt = new VerifiedBankTransaction(
-                    Id: 6001,
-                    Gateway: "MBBank",
-                    TransactionDate: DateTimeOffset.UtcNow,
-                    AccountNumber: "0383799632",
-                    SubAccount: null,
-                    Code: paymentCode,
-                    Content: paymentCode,
-                    TransferType: "in",
-                    Description: "Payment race",
-                    TransferAmount: 400_000m,
-                    Accumulated: 10_000_000m,
-                    ReferenceCode: "REF-6001",
-                    ProcessedAt: DateTimeOffset.UtcNow);
+                var vt = CreatePayload(6001, paymentCode, 400_000m, txDate: DateTimeOffset.UtcNow);
                 return await procB.ProcessAsync(vt);
             });
 
@@ -960,20 +883,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             {
                 await using var payCtx = new PaymentServiceDbContext(options);
                 var proc = CreatePaymentProcessor(new EfInvoiceRepository(payCtx), fakeTime);
-                var vt = new VerifiedBankTransaction(
-                    Id: 7001,
-                    Gateway: "MBBank",
-                    TransactionDate: validPaidAt,
-                    AccountNumber: "0383799632",
-                    SubAccount: null,
-                    Code: paymentCode,
-                    Content: paymentCode,
-                    TransferType: "in",
-                    Description: "Wait exp",
-                    TransferAmount: 500_000m,
-                    Accumulated: 10_000_000m,
-                    ReferenceCode: "REF-7001",
-                    ProcessedAt: fakeTime.GetUtcNow());
+                var vt = CreatePayload(7001, paymentCode, 500_000m, txDate: validPaidAt);
                 return await proc.ProcessAsync(vt);
             });
 
@@ -1054,20 +964,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
                 await lockCmd.ExecuteScalarAsync();
             }
 
-            var vt8 = new VerifiedBankTransaction(
-                Id: 8001,
-                Gateway: "MBBank",
-                TransactionDate: validPaidAt,
-                AccountNumber: "0383799632",
-                SubAccount: null,
-                Code: paymentCode,
-                Content: paymentCode,
-                TransferType: "in",
-                Description: "Wait ok",
-                TransferAmount: 500_000m,
-                Accumulated: 10_000_000m,
-                ReferenceCode: "REF-8001",
-                ProcessedAt: fakeTime.GetUtcNow());
+            var vt8 = CreatePayload(8001, paymentCode, 500_000m, txDate: validPaidAt);
 
             // 2. Connection 2 starts payment processing BEFORE deadline
             var recordTask = Task.Run(async () =>

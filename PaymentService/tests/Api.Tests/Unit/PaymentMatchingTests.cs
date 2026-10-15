@@ -1,4 +1,6 @@
-using Dprental.PaymentService.Application.DTOs.Bank;
+using Dprental.PaymentService.Application.DTOs.SePay;
+using System.Globalization;
+using Dprental.PaymentService.Common;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Application.Services;
 using Dprental.PaymentService.Domain.Entities;
@@ -78,7 +80,7 @@ public sealed class PaymentMatchingTests
         return inv;
     }
 
-    private static VerifiedBankTransaction CreateTx(
+    private static SePayWebhookPayload CreateTx(
         long id = 100,
         string? code = ValidCode,
         string? content = $"Thanh toan {ValidCode} chuyen khoan",
@@ -86,12 +88,15 @@ public sealed class PaymentMatchingTests
         string account = ValidAccount,
         string transferType = "in",
         decimal amount = TotalAmount,
-        DateTimeOffset? txDate = null)
+        DateTimeOffset? txDate = null,
+        string? txDateString = null)
     {
-        return new VerifiedBankTransaction(
+        var date = txDate ?? FixedNow.AddMinutes(5);
+        string dateString = txDateString ?? date.ToOffset(TimeSpan.FromHours(7)).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+        return new SePayWebhookPayload(
             Id: id,
             Gateway: gateway,
-            TransactionDate: txDate ?? FixedNow.AddMinutes(5),
+            TransactionDate: dateString,
             AccountNumber: account,
             SubAccount: null,
             Code: code,
@@ -100,8 +105,165 @@ public sealed class PaymentMatchingTests
             Description: "Chuyen khoan",
             TransferAmount: amount,
             Accumulated: 10_000_000m,
-            ReferenceCode: $"REF-{id}",
-            ProcessedAt: FixedNow);
+            ReferenceCode: $"REF-{id}");
+    }
+
+    [Fact]
+    public async Task ProcessAsync_NullPayload_ReturnsValidationError_DoesNotCallRepository()
+    {
+        var (processor, repo) = CreateProcessor();
+        var result = await processor.ProcessAsync(null);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal("INVALID_PAYLOAD", result.Error.Code);
+        Assert.False(repo.TransactionStarted);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_NullId_ReturnsValidationError_DoesNotCallRepository()
+    {
+        var (processor, repo) = CreateProcessor();
+        var payload = CreateTx() with { Id = null };
+        var result = await processor.ProcessAsync(payload);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal("INVALID_ID", result.Error.Code);
+        Assert.False(repo.TransactionStarted);
+    }
+
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(-1L)]
+    [InlineData(-100L)]
+    public async Task ProcessAsync_InvalidId_ReturnsValidationError_DoesNotCallRepository(long invalidId)
+    {
+        var (processor, repo) = CreateProcessor();
+        var payload = CreateTx() with { Id = invalidId };
+        var result = await processor.ProcessAsync(payload);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal("INVALID_ID", result.Error.Code);
+        Assert.False(repo.TransactionStarted);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_NullAmount_ReturnsValidationError_DoesNotCallRepository()
+    {
+        var (processor, repo) = CreateProcessor();
+        var payload = CreateTx() with { TransferAmount = null };
+        var result = await processor.ProcessAsync(payload);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal("INVALID_TRANSFER_AMOUNT", result.Error.Code);
+        Assert.False(repo.TransactionStarted);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-500")]
+    [InlineData("100.5")]
+    [InlineData("1000.99")]
+    public async Task ProcessAsync_InvalidAmount_ReturnsValidationError_DoesNotCallRepository(string amountStr)
+    {
+        decimal invalidAmount = decimal.Parse(amountStr, CultureInfo.InvariantCulture);
+        var (processor, repo) = CreateProcessor();
+        var payload = CreateTx() with { TransferAmount = invalidAmount };
+        var result = await processor.ProcessAsync(payload);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal("INVALID_TRANSFER_AMOUNT", result.Error.Code);
+        Assert.False(repo.TransactionStarted);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ProcessAsync_EmptyGateway_ReturnsValidationError_DoesNotCallRepository(string? gateway)
+    {
+        var (processor, repo) = CreateProcessor();
+        var payload = CreateTx() with { Gateway = gateway };
+        var result = await processor.ProcessAsync(payload);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal("INVALID_GATEWAY", result.Error.Code);
+        Assert.False(repo.TransactionStarted);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ProcessAsync_EmptyAccountNumber_ReturnsValidationError_DoesNotCallRepository(string? account)
+    {
+        var (processor, repo) = CreateProcessor();
+        var payload = CreateTx() with { AccountNumber = account };
+        var result = await processor.ProcessAsync(payload);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal("INVALID_ACCOUNT_NUMBER", result.Error.Code);
+        Assert.False(repo.TransactionStarted);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ProcessAsync_EmptyTransferType_ReturnsValidationError_DoesNotCallRepository(string? transferType)
+    {
+        var (processor, repo) = CreateProcessor();
+        var payload = CreateTx() with { TransferType = transferType };
+        var result = await processor.ProcessAsync(payload);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal("INVALID_TRANSFER_TYPE", result.Error.Code);
+        Assert.False(repo.TransactionStarted);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not-a-datetime")]
+    [InlineData("2024-99-99 99:99:99")]
+    public async Task ProcessAsync_InvalidTransactionDate_ReturnsValidationError_DoesNotCallRepository(string? invalidDate)
+    {
+        var (processor, repo) = CreateProcessor();
+        var payload = CreateTx() with { TransactionDate = invalidDate };
+        var result = await processor.ProcessAsync(payload);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal("INVALID_TRANSACTION_DATE", result.Error.Code);
+        Assert.False(repo.TransactionStarted);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ValidPayload_ConvertsVietnamTimeToUtc_AndPreservesRawCodeAndContent()
+    {
+        var invoice = CreatePendingInvoice();
+        var (processor, repo) = CreateProcessor(invoice);
+
+        var payload = CreateTx(
+            code: "DPR 23456789AB",
+            content: "  DPR 23456789AB   chuyen khoan  ",
+            txDateString: "2026-10-15 17:15:00");
+
+        var result = await processor.ProcessAsync(payload);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(repo.SavedTransaction);
+        var expectedUtc = new DateTimeOffset(2026, 10, 15, 10, 15, 0, TimeSpan.Zero);
+        Assert.Equal(expectedUtc, repo.SavedTransaction.TransactionDate);
+        Assert.Equal("DPR 23456789AB", repo.SavedTransaction.ProviderCode);
+        Assert.Equal("  DPR 23456789AB   chuyen khoan  ", repo.SavedTransaction.Content);
     }
 
     [Fact]
@@ -423,14 +585,18 @@ public sealed class PaymentMatchingTests
         private readonly Invoice? _invoice;
         public PaymentTransaction? SavedTransaction { get; private set; }
         public OutboxMessage? SavedOutbox { get; private set; }
+        public bool TransactionStarted { get; private set; }
 
         public FakeInvoiceRepo(Invoice? invoice)
         {
             _invoice = invoice;
         }
 
-        public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IExecutionTransaction>(new FakeTx());
+        public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+        {
+            TransactionStarted = true;
+            return Task.FromResult<IExecutionTransaction>(new FakeTx());
+        }
 
         public Task<OperationReceipt?> GetOperationReceiptAsync(string operationKey, CancellationToken cancellationToken = default) =>
             Task.FromResult<OperationReceipt?>(null);

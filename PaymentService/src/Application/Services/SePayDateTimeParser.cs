@@ -1,8 +1,8 @@
 using System.Globalization;
 
-namespace Dprental.PaymentService.Common.Utils;
+namespace Dprental.PaymentService.Application.Services;
 
-public static class SePayDateTimeParser
+internal static class SePayDateTimeParser
 {
     private static readonly TimeSpan VietnamOffset = TimeSpan.FromHours(7);
 

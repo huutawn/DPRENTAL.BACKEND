@@ -5,7 +5,7 @@ using System.Security.Cryptography;
 using Dprental.PaymentService.Api.Controllers;
 using Dprental.PaymentService.Api.Security;
 using Dprental.PaymentService.Api.Tests.TestHelpers;
-using Dprental.PaymentService.Application.DTOs.Bank;
+using Dprental.PaymentService.Application.DTOs.SePay;
 using Dprental.PaymentService.Application.IServices;
 using Dprental.PaymentService.Common;
 using Dprental.PaymentService.Domain.Persistence;
@@ -423,10 +423,10 @@ public sealed class PaymentWebhooksProxyHttpTests : IAsyncLifetime
         Accumulated: 10_000_000m,
         ReferenceCode: "FT99001");
 
-    private sealed class CallbackProcessor(Func<VerifiedBankTransaction, Task<Result>> callback) : IInvoicePaymentProcessor
+    private sealed class CallbackProcessor(Func<SePayWebhookPayload?, Task<Result>> callback) : IInvoicePaymentProcessor
     {
-        public Task<Result> ProcessAsync(VerifiedBankTransaction transaction, CancellationToken ct = default) =>
-            callback(transaction);
+        public Task<Result> ProcessAsync(SePayWebhookPayload? payload, CancellationToken ct = default) =>
+            callback(payload);
     }
 
     private sealed class InjectRemoteIpFilter(IPAddress remoteIp) : IStartupFilter
