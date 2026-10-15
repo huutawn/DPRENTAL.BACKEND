@@ -14,6 +14,8 @@ using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Dprental.RentalService.Application.Services.Operations;
+using Microsoft.Extensions.Configuration;
 using Moq;
 
 namespace Dprental.RentalService.Api.Tests.TestHelpers;
@@ -171,6 +173,34 @@ internal sealed class InventoryReplySimulator(
         OutboxRepository outbox = new(context);
         var options = Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true });
 
+        var executor = new RentalOperationExecutor(
+            orders,
+            new OperationReceiptRepository(context),
+            outbox,
+            _locks,
+            new FakeInventoryRentalClient(),
+            payment ?? new FakePaymentRentalClient(),
+            context,
+            new ConfigurationBuilder().Build(),
+            NullLogger<RentalOperationExecutor>.Instance,
+            clock);
+
+        var allocationHandler = new InventoryAllocationResultHandler(
+            orders,
+            outbox,
+            context,
+            _locks,
+            clock,
+            new RentalCheckoutOperationRepository(context),
+            new InventoryCommandProducer(outbox, options, clock),
+            new CheckoutOrderWriter(
+                orders,
+                new RentalCartRepository(context),
+                orderCodes?.Invoke(context) ?? _defaultOrderCodes,
+                NullLogger<CheckoutOrderWriter>.Instance),
+            executor,
+            NullLogger<InventoryAllocationResultHandler>.Instance);
+
         return new PaymentEventsDispatcher(
             new InboxRepository(context),
             orders,
@@ -179,20 +209,9 @@ internal sealed class InventoryReplySimulator(
             Mock.Of<IRefundCompletedConsumer>(),
             new KafkaOutboxWriter(outbox),
             context,
-            new RentalCheckoutOperationRepository(context),
-            new InventoryCommandProducer(outbox, options, clock),
-            new CheckoutOrderWriter(
-                orders,
-                new RentalCartRepository(context),
-                orderCodes?.Invoke(context) ?? _defaultOrderCodes,
-                NullLogger<CheckoutOrderWriter>.Instance),
-            new CheckoutInvoiceIssuer(
-                payment ?? new FakePaymentRentalClient(),
-                orders,
-                context,
-                clock,
-                NullLogger<CheckoutInvoiceIssuer>.Instance),
+            allocationHandler,
             options,
+            new RentalCheckoutOperationRepository(context),
             NullLogger<PaymentEventsDispatcher>.Instance,
             clock);
     }

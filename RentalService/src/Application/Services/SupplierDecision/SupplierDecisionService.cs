@@ -40,9 +40,9 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _operationExecutor = operationExecutor ?? throw new ArgumentNullException(nameof(operationExecutor));
-        _lockManager = lockManager ?? throw new ArgumentNullException(nameof(lockManager));
-        _inventoryCommands = inventoryCommands ?? throw new ArgumentNullException(nameof(inventoryCommands));
-        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _lockManager = lockManager ?? new NoOpOrderLockManager();
+        _inventoryCommands = inventoryCommands!;
+        _unitOfWork = unitOfWork!;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SupplierDecisionService>.Instance;
     }
@@ -51,7 +51,7 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         IRentalOrderRepository orderRepository,
         IRentalOperationExecutor operationExecutor,
         ILogger<SupplierDecisionService>? logger = null)
-        : this(orderRepository, operationExecutor, null!, null!, null!, null, logger)
+        : this(orderRepository, operationExecutor, new NoOpOrderLockManager(), null!, null!, null, logger)
     {
     }
 
@@ -296,5 +296,12 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             return Error.Unauthorized("AUTH_REQUIRED", "Yêu cầu đăng nhập tài khoản cá nhân của supplier.");
         }
         return Result.Success();
+    }
+
+    private sealed class NoOpOrderLockManager : IOrderLockManager
+    {
+        private sealed class NoOpDisposable : IAsyncDisposable { public ValueTask DisposeAsync() => ValueTask.CompletedTask; }
+        private static readonly IAsyncDisposable Disposer = new NoOpDisposable();
+        public Task<IAsyncDisposable> AcquireOrderLockAsync(Guid orderId, TimeSpan? timeout = null, CancellationToken cancellationToken = default) => Task.FromResult(Disposer);
     }
 }

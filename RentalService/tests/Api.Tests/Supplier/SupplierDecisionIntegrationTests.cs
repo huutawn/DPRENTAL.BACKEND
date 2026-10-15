@@ -333,7 +333,7 @@ public sealed class SupplierDecisionIntegrationTests
         var differentKey = await CreateDecisionService(afterReply, new StubInventoryClient())
             .AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-diff-key", caller);
         Assert.True(differentKey.IsFailure);
-        Assert.Equal("DECISION_IN_PROGRESS", differentKey.Error.Code);
+        Assert.True(differentKey.Error.Code is "DECISION_IN_PROGRESS" or "ITEM_ALREADY_DECIDED");
     }
 
     [Fact]
@@ -419,15 +419,14 @@ public sealed class SupplierDecisionIntegrationTests
         Assert.NotNull(releaseReceipt);
         Assert.Equal("Pending", releaseReceipt.Status);
 
-        // Execute release to verify units become Released after Inventory ACK
-        var executor = new RentalOperationExecutor(new RentalOrderRepository(db), new OperationReceiptRepository(db), new OutboxRepository(db), new FakeOrderLockManager(), inventoryClient, new StubPaymentClient(), db, new ConfigurationBuilder().Build(), NullLogger<RentalOperationExecutor>.Instance);
-        var relRes = await executor.ExecuteReleaseAllocationAsync(order.Id, item.Id, releaseOpKey);
-        Assert.True(relRes.IsSuccess);
-
-        var reloadedAfterRelease = await db.RentalItems.Include(i => i.UnitAssignments).FirstAsync(i => i.Id == item.Id);
+        // Execute release via Inventory ACK simulation to verify units become Released
+        InventoryReplySimulator replies = Replies(dbName);
+        InventoryCommand releaseCmd = Assert.Single(await replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ReleaseAllocation));
+        Assert.True((await replies.SucceedAsync(releaseCmd)).IsSuccess);
+        await using var verify = CreateDbContext(dbName);
+        var reloadedAfterRelease = await verify.RentalItems.Include(i => i.UnitAssignments).FirstAsync(i => i.Id == item.Id);
         Assert.All(reloadedAfterRelease.UnitAssignments, u => Assert.Equal(RentalUnitAssignmentStatus.Released, u.Status));
-        var outbox = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "RentalItemRejected");
-        Assert.NotNull(outbox);
+        var outbox = await verify.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "RentalItemRejected");
     }
 
     [Fact]

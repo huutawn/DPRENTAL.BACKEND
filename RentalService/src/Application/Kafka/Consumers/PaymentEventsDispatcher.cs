@@ -77,7 +77,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         _rentalSettledConsumer = rentalSettledConsumer ?? new Dprental.RentalService.Application.Services.Integration.RentalSettledConsumer(_timeProvider);
     }
 
-    public PaymentEventsDispatcher(
+    internal PaymentEventsDispatcher(
         IInboxRepository inboxRepository,
         IRentalOrderRepository orderRepository,
         IOrderLockManager lockManager,
@@ -99,6 +99,45 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             new InventoryAllocationResultHandler(orderRepository, new Domain.Repositories.OutboxRepository((Domain.Repositories.RentalServiceDbContext)unitOfWork), unitOfWork, lockManager, timeProvider),
             kafkaOptions,
             null,
+            logger,
+            timeProvider)
+    {
+    }
+
+    internal PaymentEventsDispatcher(
+        IInboxRepository inboxRepository,
+        IRentalOrderRepository orderRepository,
+        IOrderLockManager lockManager,
+        IPaymentWorkflowService paymentWorkflowService,
+        IRefundCompletedConsumer refundCompletedConsumer,
+        IKafkaOutboxWriter outboxWriter,
+        IUnitOfWork unitOfWork,
+        IRentalCheckoutOperationRepository checkoutOperationRepo,
+        IInventoryCommandProducer inventoryCommands,
+        ICheckoutOrderWriter orderWriter,
+        ICheckoutInvoiceIssuer invoiceIssuer,
+        IOptions<KafkaOptions> kafkaOptions,
+        ILogger<PaymentEventsDispatcher>? logger = null,
+        TimeProvider? timeProvider = null)
+        : this(
+            inboxRepository,
+            orderRepository,
+            lockManager,
+            paymentWorkflowService,
+            refundCompletedConsumer,
+            outboxWriter,
+            unitOfWork,
+            new InventoryAllocationResultHandler(
+                orderRepository,
+                new Domain.Repositories.OutboxRepository((Domain.Repositories.RentalServiceDbContext)unitOfWork),
+                unitOfWork,
+                lockManager,
+                timeProvider,
+                checkoutOperationRepo,
+                inventoryCommands,
+                orderWriter),
+            kafkaOptions,
+            checkoutOperationRepo,
             logger,
             timeProvider)
     {

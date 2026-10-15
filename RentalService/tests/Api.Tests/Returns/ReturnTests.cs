@@ -1,13 +1,12 @@
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Producers;
+using Dprental.RentalService.Application.Kafka.Configuration;
 using System.Security.Claims;
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Media;
 using Dprental.RentalService.Application.DTOs.Returns;
-using Dprental.RentalService.Application.Kafka.Configuration;
-using Dprental.RentalService.Application.Kafka.Contracts;
-using Dprental.RentalService.Application.Kafka.Producers;
+
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Returns;
 using Dprental.RentalService.Common;
@@ -28,8 +27,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Dprental.RentalService.Domain.IRepositories;
-using Dprental.RentalService.Application.Kafka.Configuration;
-using Dprental.RentalService.Application.Kafka.Producers;
+
 using Dprental.RentalService.Api.Tests.Cart;
 using Microsoft.Extensions.Options;
 

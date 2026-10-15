@@ -24,6 +24,7 @@ namespace Dprental.RentalService.Api.Tests.Payments;
 public sealed class PaymentWorkflowIntegrationTests
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 10, 8, 8, 15, 30, TimeSpan.Zero);
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true };
 
     private static RentalServiceDbContext CreateDbContext(string dbName)
     {
@@ -193,7 +194,7 @@ public sealed class PaymentWorkflowIntegrationTests
 
         // Verify Outbox message emitted
         var outboxMessages = await db.RentalOutboxMessages.ToListAsync();
-        Assert.Contains(outboxMessages, m => m.MessageType == "RentalSupplierConfirmationRequested");
+        Assert.Contains(outboxMessages, m => m.MessageType == "ExtendHold");
 
         // Verify Inbox message recorded
         var inboxMessage = await db.RentalInboxMessages.FirstOrDefaultAsync(m => m.MessageId == envelope.MessageId);
@@ -240,7 +241,10 @@ public sealed class PaymentWorkflowIntegrationTests
         var item = (await db.RentalOrders.Include(o => o.Items).FirstAsync(o => o.Id == orderId)).Items.First();
         // Supplier vẫn phải quyết định trước hạn; hold còn thêm 5 phút để worker chốt nốt đơn con đã bấm nhận trước hạn.
         Assert.Equal(FixedNow.AddHours(24), item.SupplierConfirmationDeadline);
-        Assert.Equal(FixedNow.AddHours(24).AddMinutes(5), requestedHoldExpiry);
+        var extendOutbox = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "ExtendHold");
+        Assert.NotNull(extendOutbox);
+        var extendEnvelope = JsonSerializer.Deserialize<KafkaMessageEnvelope<ExtendHoldCommandPayload>>(extendOutbox.Payload, JsonOptions);
+        Assert.Equal(FixedNow.AddHours(24).AddMinutes(5), extendEnvelope!.Payload.NewHoldExpiresAt);
     }
 
     [Fact]
@@ -522,9 +526,15 @@ public sealed class PaymentWorkflowIntegrationTests
         var result = await service.ProcessInvoicePaidAsync(envelope);
 
         Assert.True(result.IsSuccess);
+
+        var replies = new InventoryReplySimulator(() => CreateDbContext(dbName), new TestTimeProvider(FixedNow), payment: paymentClient);
+        var extendCmd = Assert.Single(await replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ExtendHold));
+        Assert.True((await replies.RejectAsync(extendCmd, "HOLD_EXPIRED", "Hold on Inventory has expired.")).IsSuccess);
+
         Assert.True(refundRequested);
 
-        var reloaded = await db.RentalOrders.Include(o => o.Items).FirstAsync(o => o.Id == orderId);
+        await using var verify = CreateDbContext(dbName);
+        var reloaded = await verify.RentalOrders.Include(o => o.Items).FirstAsync(o => o.Id == orderId);
         Assert.Equal(RentalItemStatus.Expired, reloaded.Items.First().Status);
         Assert.Equal(RentalOrderStatus.Expired, reloaded.Status);
     }

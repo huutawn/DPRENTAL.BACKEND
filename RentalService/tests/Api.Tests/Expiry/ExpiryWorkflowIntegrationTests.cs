@@ -172,15 +172,7 @@ public sealed class ExpiryWorkflowIntegrationTests
             }
         };
 
-        bool releaseCalled = false;
-        var inventoryClient = new StubInventoryClient
-        {
-            ReleaseHandler = (g, req) =>
-            {
-                releaseCalled = true;
-                return Task.FromResult(Result.Success(new ReleaseAllocationResponse("REC-REL", req.OperationKey, g, FixedNow, false)));
-            }
-        };
+        var inventoryClient = new StubInventoryClient();
 
         var service = CreateExpiryService(db, inventoryClient, paymentClient);
 
@@ -188,7 +180,8 @@ public sealed class ExpiryWorkflowIntegrationTests
 
         Assert.True(result.IsSuccess, result.Error?.Code + ": " + result.Error?.Message);
         Assert.True(cancelCalled);
-        Assert.True(releaseCalled);
+        var releaseOutbox = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "ReleaseAllocation");
+        Assert.NotNull(releaseOutbox);
         var reloaded = await db.RentalOrders.Include(o => o.Items).FirstAsync(o => o.Id == orderId);
         Assert.Equal(RentalOrderStatus.Expired, reloaded.Status);
         Assert.Equal(RentalItemStatus.Expired, reloaded.Items.First().Status);

@@ -316,6 +316,12 @@ public sealed partial class RentalOperationExecutor
             order.AddOperationReceipt(releaseReceipt);
         }
 
+        if (_inventoryCommands != null)
+        {
+            var releaseCmdPayload = new ReleaseAllocationCommandPayload(order.Id, item.Id, releaseOpKey, reason);
+            await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmdPayload, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
+        }
+
         string refundOpKey = ComputeOperationKey("RequestRefund", $"{order.Id}:{item.Id}");
         var refundReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundOpKey);
         if (refundReceipt == null)

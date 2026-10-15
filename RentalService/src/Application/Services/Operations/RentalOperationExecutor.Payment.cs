@@ -131,6 +131,16 @@ public sealed partial class RentalOperationExecutor
         return await RequestRefundInternalAsync(order, item, receipt, operationKey, cancellationToken);
     }
 
+    public Task<Result> RequestRefundDirectAsync(
+        RentalOrder order,
+        RentalItem item,
+        RentalOperationReceipt receipt,
+        string operationKey,
+        CancellationToken cancellationToken = default)
+    {
+        return RequestRefundInternalAsync(order, item, receipt, operationKey, cancellationToken);
+    }
+
     internal async Task<Result> RequestRefundCoreAsync(
         RentalOrder order,
         RentalItem item,
@@ -273,12 +283,7 @@ public sealed partial class RentalOperationExecutor
                 return cancelRes;
             }
         }
-        else
-        {
-            string invoiceOpKey = ComputeOperationKey("CreateInvoice", order.Id.ToString());
-            var invReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == invoiceOpKey && (r.Status == RentalOperationReceipt.StatusPending || r.Status == RentalOperationReceipt.StatusProcessing));
-            invReceipt?.MarkFailed("ORDER_EXPIRED", "Order payment window expired", utcNow);
-        }
+
 
         // 2. Release all allocation groups
         var releaseKeys = new List<(RentalItem item, string releaseKey)>();

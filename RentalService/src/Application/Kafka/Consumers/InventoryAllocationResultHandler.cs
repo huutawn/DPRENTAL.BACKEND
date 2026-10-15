@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.Kafka.Contracts;
@@ -103,9 +104,18 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             return await HandleCreateHoldResultAsync(orderId, rentalItemId, operationKey, isSuccess, payloadElement, utcNow, cancellationToken);
         }
 
-        // For non-CreateHold commands, an existing order is required
+        // For non-CreateHold commands, an existing order is required (except compensation release on failed/timed-out checkout)
         if (order == null)
         {
+            if (string.Equals(commandType, KafkaContractSpec.CommandTypes.ReleaseAllocation, StringComparison.OrdinalIgnoreCase) &&
+                _checkoutOperationRepo != null &&
+                await _checkoutOperationRepo.GetByExpectedOrderIdAsync(orderId, cancellationToken) is
+                    { Status: CheckoutOperationStatus.Failed or CheckoutOperationStatus.TimedOut })
+            {
+                _logger.LogInformation("Release reply {OperationKey} for unfinished checkout order {OrderId} acknowledged", operationKey, orderId);
+                return Result.Success();
+            }
+
             return Error.NotFound("ORDER_NOT_FOUND", $"Không tìm thấy đơn hàng '{orderId}'.");
         }
 
@@ -375,8 +385,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
     {
         if (isSuccess)
         {
-            receipt.MarkSucceeded(utcNow, null, payloadElement.GetRawText());
-
+            string? apiResponseJson = null;
             var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
             if (item != null)
             {
@@ -385,7 +394,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 {
                     item.ApplySupplierAccept(item.SupplierId, utcNow, operationKey, operationKey);
                     order.EvaluateOrderStatusRollup(utcNow, operationKey);
-
+                    apiResponseJson = RentalOperationExecutor.SerializeSupplierResponse(order, item);
                     var outboxPayload = new RentalItemConfirmedPayload(
                         order.Id,
                         item.Id,
@@ -418,6 +427,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 {
                     _logger.LogWarning("ConfirmAllocation succeeded late for item {ItemId} in status {Status}; not restoring", item.Id, item.Status);
                 }
+
+                receipt.MarkSucceeded(utcNow, payloadElement.GetRawText(), apiResponseJson);
             }
         }
         else
@@ -482,6 +493,43 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             string errCode = payloadElement.TryGetProperty("errorCode", out var ec) ? ec.GetString() ?? "HOLD_EXTENSION_REJECTED" : "HOLD_EXTENSION_REJECTED";
             string errMsg = payloadElement.TryGetProperty("errorMessage", out var em) ? em.GetString() ?? "Hold extension rejected" : "Rejected";
             receipt.MarkFailed(errCode, errMsg, utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+
+            var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
+            if (item != null)
+            {
+                item.ApplySupplierTimeout(utcNow, operationKey);
+                order.EvaluateOrderStatusRollup(utcNow, operationKey);
+
+                string refundKey = RentalOperationExecutor.ComputeOperationKey("RequestRefund", $"{order.Id}:{rentalItemId}");
+                var refundReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundKey);
+                if (refundReceipt == null && !string.IsNullOrWhiteSpace(order.InvoiceRef))
+                {
+                    var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
+                    refundReceipt = new RentalOperationReceipt(
+                        Guid.NewGuid(),
+                        order.Id,
+                        refundKey,
+                        "RequestRefund",
+                        RentalOperationExecutor.ComputeFingerprint($"RequestRefund:{order.Id}:{item.RentalAmount + item.DepositAmount}"),
+                        isSuccess: false,
+                        errorCode: null,
+                        errorMessage: null,
+                        createdAt: utcNow,
+                        status: RentalOperationReceipt.StatusPending,
+                        targetItemId: item.Id,
+                        payloadJson: JsonSerializer.Serialize(new RequestRefundRequest(order.Id, order.InvoiceRef, order.PaymentRef!, refundItems, errMsg, refundKey), JsonOptions));
+                    order.AddOperationReceipt(refundReceipt);
+                }
+
+                await _orderRepository.UpdateAsync(order, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                if (_operationExecutor != null && refundReceipt != null)
+                {
+                    await _operationExecutor.RequestRefundDirectAsync(order, item, refundReceipt, refundKey, cancellationToken);
+                }
+                return Result.Success();
+            }
         }
 
         await _orderRepository.UpdateAsync(order, cancellationToken);
@@ -508,7 +556,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             var pendingRefund = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundOpKey && r.Status == RentalOperationReceipt.StatusPending);
             if (pendingRefund != null && _operationExecutor != null && item != null)
             {
-                await _operationExecutor.ExecuteRequestRefundAsync(order.Id, rentalItemId, refundOpKey, cancellationToken);
+                await _operationExecutor.RequestRefundDirectAsync(order, item, pendingRefund, refundOpKey, cancellationToken);
             }
         }
         else

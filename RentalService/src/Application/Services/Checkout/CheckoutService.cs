@@ -61,7 +61,7 @@ public sealed class CheckoutService : ICheckoutService
 
         if (renter.RenterId == Guid.Empty)
         {
-            return CheckoutSubmissionResult.Failure(CheckoutErrors.Unauthenticated);
+            return CheckoutErrors.Unauthenticated;
         }
 
         string operationId = CheckoutRules.DeriveOperationId(renter.RenterId, idempotencyKey);
@@ -74,7 +74,7 @@ public sealed class CheckoutService : ICheckoutService
         }
         catch (TimeoutException)
         {
-            return CheckoutSubmissionResult.Failure(CheckoutErrors.InProgress);
+            return CheckoutErrors.InProgress;
         }
 
         await using (renterLock)
@@ -85,19 +85,19 @@ public sealed class CheckoutService : ICheckoutService
             {
                 if (existingOp.RenterUserId != renter.RenterId || existingOp.RequestFingerprint != fingerprint)
                 {
-                    return CheckoutSubmissionResult.Failure(CheckoutErrors.IdempotencyKeyReused);
+                    return CheckoutErrors.IdempotencyKeyReused;
                 }
 
-                return CheckoutSubmissionResult.Success(new CheckoutOperationAcceptedResponse(
+                return new CheckoutOperationAcceptedResponse(
                     existingOp.OperationId,
-                    $"/api/v1/rental/checkout/operations/{existingOp.OperationId}"));
+                    $"/api/v1/rental/checkout/operations/{existingOp.OperationId}");
             }
 
             // 2. Kiểm tra giới hạn: Mỗi renter chỉ có 1 checkout đang chạy hoặc 1 đơn chờ thanh toán
             var activeOp = await _operationRepository.GetActiveOperationByRenterAsync(renter.RenterId, cancellationToken);
             if (activeOp is not null)
             {
-                return CheckoutSubmissionResult.Failure(Error.Conflict("ACTIVE_CHECKOUT_IN_PROGRESS", "Bạn đang có một thao tác gửi đơn đang được xử lý."));
+                return Error.Conflict("ACTIVE_CHECKOUT_IN_PROGRESS", "Bạn đang có một thao tác gửi đơn đang được xử lý.");
             }
 
             var pendingOrder = await _orders.GetPendingPaymentByRenterIdAsync(renter.RenterId, cancellationToken);
@@ -154,8 +154,7 @@ public sealed class CheckoutService : ICheckoutService
                     if (enqueueResult.IsFailure)
                     {
                         await tx.RollbackAsync(cancellationToken);
-                        _unitOfWork.DiscardChanges();
-                        return CheckoutSubmissionResult.Failure(enqueueResult.Error);
+                        return enqueueResult.Error;
                     }
 
                     lineStatuses.Add(new CheckoutItemHoldDescriptor(
@@ -180,10 +179,9 @@ public sealed class CheckoutService : ICheckoutService
                 await _operationRepository.AddAsync(checkoutOp, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await tx.CommitAsync(cancellationToken);
-
-                return CheckoutSubmissionResult.Success(new CheckoutOperationAcceptedResponse(
+                return new CheckoutOperationAcceptedResponse(
                     operationId,
-                    $"/api/v1/rental/checkout/operations/{operationId}"));
+                    $"/api/v1/rental/checkout/operations/{operationId}");
             }
             catch (Exception)
             {

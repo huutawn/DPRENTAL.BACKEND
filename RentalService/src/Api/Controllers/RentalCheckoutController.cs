@@ -97,7 +97,7 @@ public sealed class RentalCheckoutController(
             return ToProblem(result.Failure!);
         }
 
-        var accepted = result.Accepted!;
+        var accepted = result.Value;
         Response.Headers.Location = accepted.StatusUrl;
         return Accepted(accepted.StatusUrl, accepted);
     }
@@ -135,7 +135,7 @@ public sealed class RentalCheckoutController(
     }
 
     /// <summary>Gắn chi tiết của bước bị lỗi vào problem details để client hiển thị đúng chỗ.</summary>
-    private ObjectResult ToProblem(CheckoutSubmissionResult result)
+    private ObjectResult ToProblem(CheckoutResult result)
     {
         ObjectResult problem = this.ToProblem(result.Error);
         if (problem.Value is not ProblemDetails details)
