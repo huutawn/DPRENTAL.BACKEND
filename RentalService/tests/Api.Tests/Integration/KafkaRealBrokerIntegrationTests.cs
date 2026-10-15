@@ -123,6 +123,7 @@ public sealed class KafkaRealBrokerIntegrationTests
                 Enabled = true,
                 BootstrapServers = bootstrapServers,
                 PaymentEventsTopic = testTopic,
+                InventoryAllocationEventsTopic = testTopic,
                 ConsumerGroupId = testGroup,
                 DeliveryTimeoutSeconds = 10,
                 ConsumeTimeoutMilliseconds = 500
@@ -155,6 +156,7 @@ public sealed class KafkaRealBrokerIntegrationTests
             services.AddSingleton<IPaymentWorkflowService, StubPaymentWorkflow>();
             services.AddSingleton<IRefundCompletedConsumer, StubRefundConsumer>();
             services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
+            services.AddScoped<IInventoryAllocationResultHandler, InventoryAllocationResultHandler>();
             services.AddSingleton(Options.Create(kafkaOptions));
 
             var sp = services.BuildServiceProvider();
@@ -168,6 +170,7 @@ public sealed class KafkaRealBrokerIntegrationTests
 
             // Poll by consuming from real broker
             RentalInboxMessage? inboxMessage = null;
+
             for (int i = 0; i < 40; i++)
             {
                 await consumerWorker.ConsumeNextMessageAsync(CancellationToken.None);
@@ -196,6 +199,113 @@ public sealed class KafkaRealBrokerIntegrationTests
             await using var verifyDb = new RentalServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(connectionString));
             int totalInboxCount = await verifyDb.RentalInboxMessages.CountAsync(m => m.MessageId == messageId);
             Assert.Equal(1, totalInboxCount);
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task HostedWorker_InitialSubscription_ReceivesInventoryAllocationEventImmediately()
+    {
+        string? bootstrapServers = GetConfiguredBroker();
+        if (string.IsNullOrWhiteSpace(bootstrapServers)) return;
+        if (!await CanConnectToBrokerAsync(bootstrapServers)) return;
+        if (!await PostgresTestDatabaseHelper.IsPostgreSqlAvailableAsync()) return;
+
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            await using var db = new RentalServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(connectionString));
+            await db.Database.MigrateAsync();
+
+            string paymentTopic = $"test-payment-{Guid.NewGuid():N}";
+            string inventoryTopic = $"test-inventory-{Guid.NewGuid():N}";
+            string consumerGroup = $"test-group-{Guid.NewGuid():N}";
+
+            var kafkaOptions = new KafkaOptions
+            {
+                Enabled = true,
+                BootstrapServers = bootstrapServers,
+                PaymentEventsTopic = paymentTopic,
+                InventoryAllocationEventsTopic = inventoryTopic,
+                ConsumerGroupId = consumerGroup,
+                DeliveryTimeoutSeconds = 10,
+                ConsumeTimeoutMilliseconds = 500
+            };
+
+            // Publish Inventory event to the inventory topic
+            using var transport = new KafkaProducerTransport(
+                Options.Create(kafkaOptions),
+                NullLogger<KafkaProducerTransport>.Instance);
+
+            Guid orderId = Guid.NewGuid();
+            Guid messageId = Guid.NewGuid();
+            var payload = new
+            {
+                commandType = KafkaContractSpec.CommandTypes.CreateHold,
+                operationKey = $"op-test-{Guid.NewGuid():N}",
+                rentalItemId = Guid.NewGuid(),
+                allocations = new[] { new { allocationId = Guid.NewGuid(), assetId = Guid.NewGuid(), assetCode = "A1" } }
+            };
+
+            var envelope = new KafkaMessageEnvelope<object>(
+                messageId,
+                KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded,
+                1,
+                KafkaContractSpec.Producers.InventoryService,
+                orderId.ToString("D"),
+                DateTimeOffset.UtcNow,
+                "corr-init-sub",
+                null,
+                payload);
+
+            var sendRes = await transport.ProduceAsync(
+                inventoryTopic,
+                orderId.ToString("D"),
+                JsonSerializer.Serialize(envelope, JsonOptions),
+                CancellationToken.None);
+            Assert.Equal(PersistenceStatus.Persisted, sendRes.Status);
+
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSingleton(TimeProvider.System);
+            services.AddDbContext<RentalServiceDbContext>(options => options.UseNpgsql(connectionString));
+            services.AddScoped<IInboxRepository, InboxRepository>();
+            services.AddScoped<IRentalOrderRepository, RentalOrderRepository>();
+            services.AddScoped<IOrderLockManager, FakeOrderLockManager>();
+            services.AddScoped<IOutboxRepository, OutboxRepository>();
+            services.AddScoped<IKafkaOutboxWriter, KafkaOutboxWriter>();
+            services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<RentalServiceDbContext>());
+            services.AddSingleton<IPaymentWorkflowService, StubPaymentWorkflow>();
+            services.AddSingleton<IRefundCompletedConsumer, StubRefundConsumer>();
+            services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
+            services.AddScoped<IInventoryAllocationResultHandler, InventoryAllocationResultHandler>();
+            services.AddSingleton(Options.Create(kafkaOptions));
+
+            var sp = services.BuildServiceProvider();
+            var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+
+            // Regression test: worker starts and immediately subscribes to BOTH payment and inventory topics on the first run
+            using var consumerWorker = new KafkaPaymentEventsConsumerWorker(
+                scopeFactory,
+                Options.Create(kafkaOptions),
+                NullLogger<KafkaPaymentEventsConsumerWorker>.Instance);
+
+            RentalInboxMessage? inboxMessage = null;
+            for (int i = 0; i < 40; i++)
+            {
+                await consumerWorker.ConsumeNextMessageAsync(CancellationToken.None);
+                await using var checkDb = new RentalServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(connectionString));
+                inboxMessage = await checkDb.RentalInboxMessages.FirstOrDefaultAsync(m => m.MessageId == messageId);
+                if (inboxMessage != null) break;
+                await Task.Delay(100);
+            }
+
+            Assert.NotNull(inboxMessage);
+            Assert.Equal(inventoryTopic, inboxMessage.KafkaTopic);
+            Assert.Equal(KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded, inboxMessage.MessageType);
         }
         finally
         {

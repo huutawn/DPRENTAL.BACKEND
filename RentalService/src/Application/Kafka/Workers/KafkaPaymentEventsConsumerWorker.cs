@@ -144,6 +144,12 @@ public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
             .Build();
     }
 
+    private List<string> GetSubscribedTopics() =>
+        new[] { _options.PaymentEventsTopic, _options.InventoryAllocationEventsTopic }
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
     private void RecreateConsumer()
     {
         if (_consumerConfig == null)
@@ -170,7 +176,7 @@ public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
         {
             _consumer = BuildConsumer(_consumerConfig);
             _isSubscribed = false;
-            _consumer.Subscribe(new[] { _options.PaymentEventsTopic, _options.InventoryAllocationEventsTopic });
+            _consumer.Subscribe(GetSubscribedTopics());
             _isSubscribed = true;
             _logger.LogInformation("Recreated Kafka consumer successfully; resuming from committed offset");
         }
@@ -209,7 +215,7 @@ public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
             return;
         }
 
-        var topics = new[] { _options.PaymentEventsTopic, _options.InventoryAllocationEventsTopic };
+        var topics = GetSubscribedTopics();
         _logger.LogInformation("KafkaPaymentEventsConsumerWorker subscribing to [{Topics}] with GroupId {GroupId}",
             string.Join(", ", topics), _options.ConsumerGroupId);
 
@@ -279,7 +285,7 @@ public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
 
         if (!_isSubscribed)
         {
-            _consumer.Subscribe(new[] { _options.PaymentEventsTopic, _options.InventoryAllocationEventsTopic });
+            _consumer.Subscribe(GetSubscribedTopics());
             _isSubscribed = true;
         }
 
