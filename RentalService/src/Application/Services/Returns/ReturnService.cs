@@ -14,12 +14,16 @@ using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.DTOs.Integration;
 using Microsoft.Extensions.Configuration;
 using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.Services.Operations;
+using Dprental.RentalService.Application.Kafka.Producers;
 
 namespace Dprental.RentalService.Application.Services.Returns;
 
 public sealed class ReturnService(IRentalOrderRepository repository, IOrderLockManager locks,
     IUnitOfWork unitOfWork, IRentalMediaClient mediaClient, TimeProvider timeProvider,
-    IOutboxRepository outbox, IConfiguration configuration) : IReturnService
+    IOutboxRepository outbox, IConfiguration configuration,
+    IInventoryCommandProducer inventoryCommands) : IReturnService
 {
     private static readonly JsonSerializerOptions EventJsonOptions = new(JsonSerializerDefaults.Web);
     public async Task<Result<RecordReturnResponse>> RecordReturnAsync(Guid itemId, IRentalCallerContext caller,
@@ -32,6 +36,12 @@ public sealed class ReturnService(IRentalOrderRepository repository, IOrderLockM
             return Error.Validation("INVALID_IDEMPOTENCY_KEY", "Idempotency-Key is required (maximum 64 characters).");
         if (request?.Units is null || request.Units.Count == 0 || request.Units.Any(u => u is null || u.MediaIds is null))
             return Error.Validation("Return.InvalidUnits", "Return units and media collections are required.");
+        bool useKafka = string.Equals(configuration["Rental:InventoryReturn:Transport"],
+            "Kafka", StringComparison.OrdinalIgnoreCase);
+        if (useKafka && (!configuration.GetValue<bool>("Kafka:Enabled") ||
+            !configuration.GetValue("Rental:InventoryReturn:Enabled", true)))
+            return Error.ServiceUnavailable("INVENTORY_RETURN_KAFKA_DISABLED",
+                "Kafka and Inventory return processing must be enabled to record a Kafka-backed return.");
         Guid supplierId = caller.UserId.Value;
         var orderId = await repository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
         if (!orderId.HasValue) return RentalErrors.ItemNotFound;
@@ -92,9 +102,27 @@ public sealed class ReturnService(IRentalOrderRepository repository, IOrderLockM
         order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id, key, "RecordReturn",
             fingerprint, true, null, null, now, targetItemId: item.Id, payloadJson: payload,
             apiResponseJson: JsonSerializer.Serialize(response)));
+        ApplyReturnedUnitsCommandPayload? returnCommand = useKafka
+            ? ScheduleKafkaInventoryReturn(order, item, recorded.Value, now)
+            : null;
+        if (!useKafka) ScheduleInventoryReturn(order, item, recorded.Value, now);
         order.IncrementVersion();
+        await using var transaction = useKafka
+            ? await unitOfWork.BeginTransactionAsync(cancellationToken)
+            : null;
         try
         {
+            if (returnCommand is not null)
+            {
+                var queued = await inventoryCommands.EnqueueApplyReturnedUnitsAsync(
+                    returnCommand, cancellationToken);
+                if (queued.IsFailure)
+                {
+                    await transaction!.RollbackAsync(cancellationToken);
+                    unitOfWork.DiscardChanges();
+                    return queued.Error;
+                }
+            }
             var envelope = new KafkaMessageEnvelope<RentalUnitsReturnedPayload>(Guid.NewGuid(), "RentalUnitsReturned",
                 1, "rental-service", order.Id.ToString("D"), now, key, null,
                 new RentalUnitsReturnedPayload(order.Id, item.Id, recorded.Value.Id,
@@ -105,12 +133,78 @@ public sealed class ReturnService(IRentalOrderRepository repository, IOrderLockM
                 envelope.MessageType, JsonSerializer.Serialize(envelope, EventJsonOptions), now), cancellationToken);
             await repository.UpdateAsync(order, cancellationToken);
             await unitOfWork.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         }
         catch
         {
+            if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
             unitOfWork.DiscardChanges();
             throw;
         }
         return response;
+    }
+
+    internal static ApplyReturnedUnitsCommandPayload ScheduleKafkaInventoryReturn(
+        RentalOrder order, RentalItem item, ReturnRecord record, DateTimeOffset now)
+    {
+        var units = item.UnitAssignments
+            .Where(a => a.ReturnRecordId == record.Id)
+            .OrderBy(a => a.AllocationId)
+            .Select(a => new ApplyReturnedUnitPayload(a.AllocationId,
+                a.ReturnCondition == UnitCondition.Damaged ? "DAMAGED" : "NORMAL"))
+            .ToArray();
+        string operationId = $"return:{record.Id:N}:apply";
+        string operationKey = RentalOperationExecutor.ComputeOperationKey(
+            RentalItem.ApplyReturnedUnitsAction, operationId);
+        var command = new ApplyReturnedUnitsCommandPayload(order.Id, item.Id,
+            item.AllocationGroupId, record.Id, record.ActualReturnAt, operationKey, units);
+        var json = JsonSerializer.Serialize(command);
+        order.AddOperationReceipt(RentalOperationReceipt.CreatePending(Guid.NewGuid(),
+            order.Id, operationId, RentalItem.ApplyReturnedUnitsAction,
+            RentalOperationExecutor.ComputeFingerprint(json), now, item.Id, json));
+        return command;
+    }
+
+    internal static void ScheduleInventoryReturn(RentalOrder order, RentalItem item,
+        ReturnRecord record, DateTimeOffset now)
+    {
+        var returned = item.UnitAssignments
+            .Where(a => a.ReturnRecordId == record.Id)
+            .OrderBy(a => a.AllocationId)
+            .ToArray();
+        var normal = returned.Where(a => a.ReturnCondition == UnitCondition.Normal).ToArray();
+        var damaged = returned.Where(a => a.ReturnCondition == UnitCondition.Damaged).ToArray();
+
+        void AddReceipt(string operationId, string action, object request, string? prerequisite = null)
+        {
+            string requestJson = JsonSerializer.Serialize(request);
+            order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id,
+                operationId, action, RentalOperationExecutor.ComputeFingerprint(requestJson),
+                isSuccess: false, errorCode: null, errorMessage: null, createdAt: now,
+                status: RentalOperationReceipt.StatusPending, targetItemId: item.Id,
+                payloadJson: requestJson, prerequisiteOperationId: prerequisite));
+        }
+
+        if (normal.Length > 0)
+        {
+            string id = $"return:{record.Id:N}:normal";
+            AddReceipt(id, RentalItem.MarkReturnedAction,
+                new MarkAssetsReturnedRequest(record.Id, record.ActualReturnAt,
+                    normal.Select(a => new ReturnedUnitItemRequest(a.AllocationId, UnitCondition.Normal)).ToArray(),
+                    RentalOperationExecutor.ComputeOperationKey(RentalItem.MarkReturnedAction, id)));
+        }
+
+        if (damaged.Length > 0)
+        {
+            string blockId = $"return:{record.Id:N}:block";
+            AddReceipt(blockId, RentalItem.BlockDamagedAction,
+                new BlockDamagedAssetsRequest(damaged.Select(a => a.AllocationId).ToArray(),
+                    record.Id, "Returned damaged", RentalOperationExecutor.ComputeOperationKey(RentalItem.BlockDamagedAction, blockId)));
+            string closeId = $"return:{record.Id:N}:damaged";
+            AddReceipt(closeId, RentalItem.MarkReturnedAction,
+                new MarkAssetsReturnedRequest(record.Id, record.ActualReturnAt,
+                    damaged.Select(a => new ReturnedUnitItemRequest(a.AllocationId, UnitCondition.Damaged)).ToArray(),
+                    RentalOperationExecutor.ComputeOperationKey(RentalItem.MarkReturnedAction, closeId)), blockId);
+        }
     }
 }

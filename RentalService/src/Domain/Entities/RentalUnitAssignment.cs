@@ -157,4 +157,9 @@ public class RentalUnitAssignment
         }
     }
 
+    internal void RecordInventoryDisposition(string dispositionRef)
+    {
+        InventoryDispositionRef = dispositionRef;
+    }
+
 }

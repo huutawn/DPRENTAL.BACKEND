@@ -21,6 +21,10 @@ public interface IOperationReceiptRepository
 
     Task<IReadOnlyList<OperationReceiptDescriptor>> GetPendingOperationDescriptorsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<OperationReceiptDescriptor>> GetPendingOperationDescriptorsExcludingActionsAsync(
+        DateTimeOffset utcNow, int batchSize, IReadOnlyCollection<string> excludedActions,
+        CancellationToken cancellationToken = default);
+
     Task AddAsync(RentalOperationReceipt receipt, CancellationToken cancellationToken = default);
 
     Task UpdateAsync(RentalOperationReceipt receipt, CancellationToken cancellationToken = default);

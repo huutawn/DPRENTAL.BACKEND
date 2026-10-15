@@ -29,7 +29,11 @@ public partial class RentalItem
                 Status = RentalItemStatus.PendingSettlement;
                 DeductionDeadline = ReturnsCompletedAt.Value.AddHours(48);
             }
-            else FinalDeductionAmount = 0m;
+            else
+            {
+                FinalDeductionAmount = 0m;
+                Status = RentalItemStatus.PendingSettlement;
+            }
         }
         return record;
     }

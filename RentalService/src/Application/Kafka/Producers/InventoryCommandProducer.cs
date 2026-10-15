@@ -46,6 +46,36 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
     {
     }
 
+    public async Task<Result<ProducerEnqueueResult>> EnqueueApplyReturnedUnitsAsync(
+        ApplyReturnedUnitsCommandPayload command,
+        CancellationToken cancellationToken = default)
+    {
+        if (command is null || command.RentalOrderId == Guid.Empty ||
+            command.RentalItemId == Guid.Empty || command.ReturnRecordId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(command.AllocationGroupId) ||
+            string.IsNullOrWhiteSpace(command.OperationKey) ||
+            command.Units is null || command.Units.Count == 0 ||
+            command.Units.Any(u => u.AllocationId == Guid.Empty ||
+                u.Condition is not ("NORMAL" or "DAMAGED")) ||
+            command.Units.Select(u => u.AllocationId).Distinct().Count() != command.Units.Count)
+        {
+            return Error.Validation("INVALID_RETURN_COMMAND", "Return command is incomplete or has duplicate allocations.");
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        var messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.CommandTypes.ApplyReturnedUnits,
+            command.OperationKey);
+        var key = command.RentalOrderId.ToString("D");
+        var envelope = new KafkaMessageEnvelope<ApplyReturnedUnitsCommandPayload>(
+            messageId, KafkaContractSpec.CommandTypes.ApplyReturnedUnits,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            key, now, command.ReturnRecordId.ToString("D"), null, command);
+        return await _outboxWriter.EnqueueAsync(
+            _kafkaOptions.InventoryReturnCommandsTopic, key, envelope, cancellationToken);
+    }
+
     public async Task<Result<ProducerEnqueueResult>> EnqueueCreateHoldAsync(
         CreateHoldCommandPayload command,
         string? correlationId = null,

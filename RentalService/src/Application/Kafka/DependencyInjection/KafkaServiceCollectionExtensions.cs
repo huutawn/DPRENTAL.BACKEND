@@ -42,10 +42,12 @@ public static class KafkaServiceCollectionExtensions
 
         // Register consumers / dispatchers
         services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
+        services.AddScoped<InventoryReturnResultHandler>();
 
         // Register hosted workers
         services.AddHostedService<OutboxPublisherWorker>();
         services.AddHostedService<KafkaPaymentEventsConsumerWorker>();
+        services.AddHostedService<KafkaInventoryReturnConsumerWorker>();
         services.AddHostedService<InboxProcessingWorker>();
 
         return services;

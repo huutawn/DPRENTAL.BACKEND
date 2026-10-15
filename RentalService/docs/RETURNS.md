@@ -37,6 +37,8 @@ Same key + different content returns 409. A previously returned unit cannot be o
 - The final return sets `ReturnsCompletedAt` to server time, not supplier-entered `ActualReturnAt`.
 - If any unit is damaged, the final return changes the item to `PENDING_SETTLEMENT` and starts 48 hours for the supplier proposal.
 - All-normal returns set final deduction to zero, but do not mark the item completed.
+- When the final unit is returned normally, the item moves to `PENDING_SETTLEMENT`;
+  financial completion still requires Payment confirmation.
 - Rental fees are unchanged; early return does not refund unused days.
 - Return record, assignment evidence, state history, operation receipt and outbox are committed atomically.
 - Requests serialize using the existing PostgreSQL order advisory lock.
@@ -56,8 +58,25 @@ Payload: `orderId`, `rentalItemId`, `returnRecordId`, `actualReturnAt`, `submitt
 The payload carries no serial numbers or internal asset codes. Consumers must deduplicate by `messageId`.
 Outbox delivery confirms a recorded return, **not** successful Inventory release or Payment settlement.
 
-Subtasks 1/3/4 add overdue protection and Inventory return processing; subtasks 5/6 add proposal/dispute/settlement.
-The record is the durable input for those workflows. Inventory closure fields stay unset until Inventory confirms.
+Each return record now schedules durable Inventory operations. Normal units are closed
+separately. Damaged units must receive a successful `BlockDamagedAssets` receipt
+before their `MarkAssetsReturned` receipt can execute. A temporary Inventory failure
+keeps the operation pending for recovery; it does not undo the recorded return.
+The response is checked against every assigned allocation and asset before closure
+fields are saved. Partial returns do not close other assignments.
+
+Inventory's provider endpoints remain unimplemented/unconfirmed on the current
+Inventory branch. Rental-only tests use a fake client. Payment settlement and
+`RentalSettled` event handling belong to the settlement workflow and are still
+required before normal returns can become `COMPLETED` end-to-end.
+The proposed Kafka alternative for new returns is documented in
+`INVENTORY_RETURN_KAFKA_CONTRACT.md`. It is opt-in through
+`Rental:InventoryReturn:Transport=Kafka` after Inventory signs off the wire contract.
+The Development configuration sets `Rental:InventoryReturn:Enabled=false`, so the
+recovery worker leaves return and damage receipts pending while Inventory is absent.
+Set `Rental__InventoryReturn__Enabled=true` when a compatible Inventory provider
+is available; pending receipts are then eligible for replay. Production defaults
+to enabled.
 No migration is needed: existing return/evidence, receipt and outbox mappings are reused.
 
 ## Verification
