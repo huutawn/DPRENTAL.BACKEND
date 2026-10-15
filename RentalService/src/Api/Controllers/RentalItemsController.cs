@@ -62,7 +62,7 @@ public sealed class RentalItemsController : ControllerBase
     /// <response code="503">Dịch vụ Inventory tạm thời không khả dụng khi xác nhận phân bổ.</response>
     /// <returns>Dữ liệu phản hồi quyết định chấp nhận mục thuê của Supplier.</returns>
     [HttpPost("{itemId:guid}/accept")]
-    [ProducesResponseType(typeof(SupplierDecisionResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(SupplierDecisionResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
@@ -87,7 +87,37 @@ public sealed class RentalItemsController : ControllerBase
             return this.ToProblem(result.Error);
         }
 
-        return Ok(result.Value);
+        return Accepted(result.Value);
+    }
+
+    /// <summary>
+    /// Supplier bàn giao thiết bị cho mục thuê (RentalItem).
+    /// </summary>
+    [HttpPost("{itemId:guid}/handover")]
+    [Consumes("application/json")]
+    [ProducesResponseType(typeof(HandoverItemResponse), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> HandoverItem(
+        [FromRoute] Guid itemId,
+        [FromBody] HandoverItemRequest request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            return this.ToProblem(Error.Validation("MISSING_IDEMPOTENCY_KEY", "Header Idempotency-Key là bắt buộc."));
+        }
+
+        var result = await _decisionService.HandoverItemAsync(itemId, request, idempotencyKey, _callerContext, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Accepted(result.Value);
     }
 
     /// <summary>

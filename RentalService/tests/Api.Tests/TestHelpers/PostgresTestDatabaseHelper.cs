@@ -2,6 +2,7 @@ using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Repositories;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Api.Tests.Domain;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -112,6 +113,7 @@ public static class PostgresTestDatabaseHelper
     {
         return new DbContextOptionsBuilder<RentalServiceDbContext>()
             .UseNpgsql(connString)
+            .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
             .Options;
     }
 

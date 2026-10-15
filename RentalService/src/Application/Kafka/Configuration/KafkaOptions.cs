@@ -22,8 +22,14 @@ public sealed class KafkaOptions
     public string PaymentEventsTopic { get; set; } = "payment.events.v1";
     public string PaymentDlqTopic { get; set; } = "payment.events.v1.dlq";
 
-    // PROPOSED topics for checkout preparation
-    public string InventoryCommandsTopic { get; set; } = "inventory.commands.v1";
+    // Allocation and Inventory command topics
+    public string InventoryCommandsTopic { get; set; } = "inventory.allocation.commands.v1";
+    public string InventoryReturnCommandsTopic { get; set; } = "inventory.allocation.commands.v1";
+    public string InventoryReturnEventsTopic { get; set; } = "inventory.allocation.events.v1";
+    public string InventoryReturnDlqTopic { get; set; } = "inventory.allocation.events.v1.rental.dlq";
+    public string InventoryReturnConsumerGroupId { get; set; } = "rental-inventory-return-consumer";
+    public string InventoryAllocationEventsTopic { get; set; } = "inventory.allocation.events.v1";
+    public string InventoryAllocationEventsDlqTopic { get; set; } = "inventory.allocation.events.v1.dlq";
     public string PaymentCommandsTopic { get; set; } = "payment.commands.v1";
 
     // Security options

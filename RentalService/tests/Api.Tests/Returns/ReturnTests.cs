@@ -74,7 +74,8 @@ public sealed class ReturnTests : IAsyncLifetime
 
     private ReturnService Service(RentalServiceDbContext db, IRentalMediaClient? media = null, IConfiguration? configuration = null) => new(
         new RentalOrderRepository(db), new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
-        db, media ?? Mock.Of<IRentalMediaClient>(), _clock, new OutboxRepository(db), configuration ?? Configuration());
+        db, media ?? Mock.Of<IRentalMediaClient>(), _clock, new OutboxRepository(db), configuration ?? Configuration(),
+        Mock.Of<Dprental.RentalService.Application.Kafka.Producers.IInventoryCommandProducer>());
 
     private async Task<RentalItem> SeedAsync(int quantity = 2)
     {
@@ -158,6 +159,12 @@ public sealed class ReturnTests : IAsyncLifetime
             Assert.Equal(saved, replay.Value);
             Assert.Equal(2, await db.ReturnRecords.CountAsync());
             Assert.Equal(2, await db.RentalOutboxMessages.CountAsync());
+            Assert.Equal(2, await db.RentalOperationReceipts.CountAsync(r => r.Action == RentalItem.MarkReturnedAction));
+            Assert.Equal(1, await db.RentalOperationReceipts.CountAsync(r => r.Action == RentalItem.BlockDamagedAction));
+            var pending = await new OperationReceiptRepository(db)
+                .GetPendingOperationDescriptorsExcludingActionsAsync(_clock.GetUtcNow(), 50,
+                    [RentalItem.MarkReturnedAction, RentalItem.BlockDamagedAction]);
+            Assert.DoesNotContain(pending, r => r.Action is RentalItem.MarkReturnedAction or RentalItem.BlockDamagedAction);
             Assert.All(await db.RentalUnitAssignments.ToListAsync(), u => Assert.Null(u.AllocationClosedAt));
         }
     }
@@ -224,6 +231,8 @@ public sealed class ReturnTests : IAsyncLifetime
             Assert.Empty(await db.ReturnRecords.ToListAsync());
             Assert.Empty(await db.RentalOutboxMessages.ToListAsync());
             Assert.False(await db.RentalOperationReceipts.AnyAsync(r => r.OperationId == "rollback"));
+            Assert.False(await db.RentalOperationReceipts.AnyAsync(r =>
+                r.Action == RentalItem.MarkReturnedAction || r.Action == RentalItem.BlockDamagedAction));
             Assert.All(await db.RentalUnitAssignments.ToListAsync(), u => Assert.Null(u.ReturnRecordId));
             Assert.True((await Service(db).RecordReturnAsync(item.Id, Caller(item.SupplierId), request, "rollback")).IsSuccess);
         }
@@ -252,7 +261,7 @@ public sealed class ReturnTests : IAsyncLifetime
         {
             var result = await Service(db, media.Object).RecordReturnAsync(item.Id, Caller(item.SupplierId), request, "key");
             Assert.True(result.IsSuccess, result.Error.Message);
-            Assert.Equal(RentalItemStatus.InRental, result.Value.Status);
+            Assert.Equal(RentalItemStatus.PendingSettlement, result.Value.Status);
             Assert.Null(result.Value.DeductionDeadline);
         }
         await using var check = NewDb();

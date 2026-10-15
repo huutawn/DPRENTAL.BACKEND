@@ -8,10 +8,14 @@ namespace Dprental.RentalService.Domain.Entities;
 [Index(nameof(Status), nameof(ScheduledAt), nameof(CreatedAt))]
 [Index(nameof(Status), nameof(ScheduledAt), nameof(LockedUntilUtc))]
 [Index(nameof(Status))]
+[Index(nameof(Topic), nameof(PartitionKey), nameof(Sequence), nameof(Status))]
 public class RentalOutboxMessage
 {
     [Key]
     public Guid Id { get; private set; }
+
+    [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+    public long Sequence { get; private set; }
 
     [Required]
     [MaxLength(256)]

@@ -14,13 +14,22 @@ using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.DTOs.Integration;
 using Microsoft.Extensions.Configuration;
 using Dprental.RentalService.Application.Kafka.Contracts;
-
+using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.Services.Operations;
+using Dprental.RentalService.Application.Kafka.Producers;
 namespace Dprental.RentalService.Application.Services.Returns;
 
-public sealed class ReturnService(IRentalOrderRepository repository, IOrderLockManager locks,
-    IUnitOfWork unitOfWork, IRentalMediaClient mediaClient, TimeProvider timeProvider,
-    IOutboxRepository outbox, IConfiguration configuration) : IReturnService
+public sealed class ReturnService(
+    IRentalOrderRepository repository,
+    IOrderLockManager locks,
+    IUnitOfWork unitOfWork,
+    IRentalMediaClient mediaClient,
+    TimeProvider timeProvider,
+    IOutboxRepository outbox,
+    IConfiguration configuration,
+    IInventoryCommandProducer inventoryCommands) : IReturnService
 {
+
     private static readonly JsonSerializerOptions EventJsonOptions = new(JsonSerializerDefaults.Web);
     public async Task<Result<RecordReturnResponse>> RecordReturnAsync(Guid itemId, IRentalCallerContext caller,
         RecordReturnRequest request, string idempotencyKey, CancellationToken cancellationToken = default)
@@ -32,6 +41,12 @@ public sealed class ReturnService(IRentalOrderRepository repository, IOrderLockM
             return Error.Validation("INVALID_IDEMPOTENCY_KEY", "Idempotency-Key is required (maximum 64 characters).");
         if (request?.Units is null || request.Units.Count == 0 || request.Units.Any(u => u is null || u.MediaIds is null))
             return Error.Validation("Return.InvalidUnits", "Return units and media collections are required.");
+        bool useKafka = string.Equals(configuration["Rental:InventoryReturn:Transport"],
+            "Kafka", StringComparison.OrdinalIgnoreCase);
+        if (useKafka && (!configuration.GetValue<bool>("Kafka:Enabled") ||
+            !configuration.GetValue("Rental:InventoryReturn:Enabled", true)))
+            return Error.ServiceUnavailable("INVENTORY_RETURN_KAFKA_DISABLED",
+                "Kafka and Inventory return processing must be enabled to record a Kafka-backed return.");
         Guid supplierId = caller.UserId.Value;
         var orderId = await repository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
         if (!orderId.HasValue) return RentalErrors.ItemNotFound;
@@ -92,9 +107,19 @@ public sealed class ReturnService(IRentalOrderRepository repository, IOrderLockM
         order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id, key, "RecordReturn",
             fingerprint, true, null, null, now, targetItemId: item.Id, payloadJson: payload,
             apiResponseJson: JsonSerializer.Serialize(response)));
-        order.IncrementVersion();
+        await using var tx = await unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
+            var returnCmd = ScheduleKafkaInventoryReturn(order, item, recorded.Value, now);
+            var enqueueResult = await inventoryCommands.EnqueueApplyReturnedUnitsAsync(returnCmd, cancellationToken);
+            if (enqueueResult.IsFailure)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                unitOfWork.DiscardChanges();
+                return enqueueResult.Error;
+            }
+            order.IncrementVersion();
+
             var envelope = new KafkaMessageEnvelope<RentalUnitsReturnedPayload>(Guid.NewGuid(), "RentalUnitsReturned",
                 1, "rental-service", order.Id.ToString("D"), now, key, null,
                 new RentalUnitsReturnedPayload(order.Id, item.Id, recorded.Value.Id,
@@ -105,12 +130,37 @@ public sealed class ReturnService(IRentalOrderRepository repository, IOrderLockM
                 envelope.MessageType, JsonSerializer.Serialize(envelope, EventJsonOptions), now), cancellationToken);
             await repository.UpdateAsync(order, cancellationToken);
             await unitOfWork.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
         }
         catch
         {
+            await tx.RollbackAsync(cancellationToken);
             unitOfWork.DiscardChanges();
             throw;
         }
         return response;
     }
+
+    internal static ApplyReturnedUnitsCommandPayload ScheduleKafkaInventoryReturn(
+        RentalOrder order, RentalItem item, ReturnRecord record, DateTimeOffset now)
+    {
+        var units = item.UnitAssignments
+            .Where(a => a.ReturnRecordId == record.Id)
+            .OrderBy(a => a.AllocationId)
+            .Select(a => new ApplyReturnedUnitPayload(a.AllocationId,
+                a.ReturnCondition == UnitCondition.Damaged ? "DAMAGED" : "NORMAL"))
+            .ToArray();
+        string operationId = $"return:{record.Id:N}:apply";
+        string operationKey = RentalOperationExecutor.ComputeOperationKey(
+            RentalItem.ApplyReturnedUnitsAction, operationId);
+        var command = new ApplyReturnedUnitsCommandPayload(order.Id, item.Id,
+            item.AllocationGroupId, record.Id, record.ActualReturnAt, operationKey, units);
+        var json = JsonSerializer.Serialize(command);
+        order.AddOperationReceipt(RentalOperationReceipt.CreatePending(Guid.NewGuid(),
+            order.Id, operationId, RentalItem.ApplyReturnedUnitsAction,
+            RentalOperationExecutor.ComputeFingerprint(json), now, item.Id, json));
+        return command;
+    }
+
+
 }

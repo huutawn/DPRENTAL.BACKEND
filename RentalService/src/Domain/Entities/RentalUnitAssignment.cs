@@ -128,12 +128,11 @@ public class RentalUnitAssignment
 
     internal void RecordDeduction(
         Guid deductionProposalId,
-        decimal amount,
         string reason,
         IEnumerable<Guid>? mediaIds)
     {
         DeductionProposalId = deductionProposalId;
-        ProposedDeductionAmount = amount;
+        ProposedDeductionAmount = null;
         DeductionReason = reason;
         _deductionMediaIds.Clear();
         if (mediaIds is not null)
@@ -154,6 +153,24 @@ public class RentalUnitAssignment
         if (!string.IsNullOrWhiteSpace(dispositionRef))
         {
             InventoryDispositionRef = dispositionRef;
+        }
+    }
+
+    internal void RecordInventoryDisposition(string dispositionRef)
+    {
+        InventoryDispositionRef = dispositionRef;
+    }
+
+    /// Liên kết máy hỏng với đề nghị khấu trừ. Số tiền nằm ở proposal, không chia theo máy.
+    internal void LinkToDeductionProposal(Guid deductionProposalId, string reason, IEnumerable<Guid>? mediaIds)
+    {
+        DeductionProposalId = deductionProposalId;
+        ProposedDeductionAmount = null;
+        DeductionReason = reason;
+        _deductionMediaIds.Clear();
+        if (mediaIds is not null)
+        {
+            _deductionMediaIds.AddRange(mediaIds);
         }
     }
 

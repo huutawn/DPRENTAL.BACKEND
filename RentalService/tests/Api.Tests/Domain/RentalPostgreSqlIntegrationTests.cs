@@ -111,7 +111,8 @@ public sealed class RentalPostgreSqlIntegrationTests
             Assert.Contains("rental_terms_acceptances", tables);
             Assert.Contains("rental_inbox_messages", tables);
             Assert.Contains("rental_outbox_messages", tables);
-            Assert.Equal(14, tables.Count);
+            Assert.Contains("rental_checkout_operations", tables);
+            Assert.Equal(15, tables.Count);
         }
         finally
         {
@@ -212,8 +213,8 @@ public sealed class RentalPostgreSqlIntegrationTests
                 itemId,
                 supplierId,
                 now.AddDays(5),
-                now.AddDays(7));
-            unit.RecordDeduction(propId, 150_000m, "Lens polishing fee", [deductionMediaId]);
+                now.AddDays(7), 150_000m, "Lens polishing fee", [deductionMediaId]);
+            unit.RecordDeduction(propId, "Lens polishing fee", [deductionMediaId]);
             proposal.AddAssignment(unit);
 
             Guid disputeMediaId = Guid.NewGuid();
@@ -276,6 +277,8 @@ public sealed class RentalPostgreSqlIntegrationTests
 
                 RentalItem reloadedItem = reloaded.Items.First();
                 Assert.NotNull(reloadedItem.DeductionProposal?.Dispute);
+                Assert.Equal(150_000m, reloadedItem.DeductionProposal.TotalProposedAmount);
+                Assert.Contains(deductionMediaId, reloadedItem.DeductionProposal.EvidenceMediaIds);
                 Assert.Equal(100_000m, reloadedItem.DeductionProposal.Dispute.FinalDeductionAmount);
 
                 RentalUnitAssignment reloadedUnit = reloadedItem.UnitAssignments.First();

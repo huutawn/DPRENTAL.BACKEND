@@ -107,8 +107,8 @@ public sealed class RentalPersistenceAndMappingTests
             item.Id,
             supplierId,
             now.AddDays(5),
-            now.AddDays(7));
-        assignment.RecordDeduction(propId, 250_000m, "Deduction reason", [deductionMediaId]);
+            now.AddDays(7), 250_000m, "Deduction reason", [deductionMediaId]);
+        assignment.RecordDeduction(propId, "Deduction reason", [deductionMediaId]);
         proposal.AddAssignment(assignment);
 
         Guid disputeId = Guid.NewGuid();
@@ -169,6 +169,8 @@ public sealed class RentalPersistenceAndMappingTests
 
             RentalItem reloadedItem = reloaded.Items.First();
             Assert.NotNull(reloadedItem.DeductionProposal?.Dispute);
+            Assert.Equal(250_000m, reloadedItem.DeductionProposal.TotalProposedAmount);
+            Assert.Contains(deductionMediaId, reloadedItem.DeductionProposal.EvidenceMediaIds);
             Assert.Equal(200_000m, reloadedItem.DeductionProposal.Dispute.FinalDeductionAmount);
             // Verify encapsulated media collections on assignment
             RentalUnitAssignment reloadedAssignment = reloadedItem.UnitAssignments.First();

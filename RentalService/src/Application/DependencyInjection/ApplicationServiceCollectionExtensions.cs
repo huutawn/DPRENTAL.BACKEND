@@ -29,6 +29,8 @@ using Dprental.RentalService.Application.Services.SupplierStatistics;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net.Http;
 using Dprental.RentalService.Application.Services.Overdue;
+using Dprental.RentalService.Application.IServices.Settlement;
+using Dprental.RentalService.Application.Services.Settlement;
 
 namespace Dprental.RentalService.Application.DependencyInjection;
 
@@ -61,7 +63,6 @@ public static class ApplicationServiceCollectionExtensions
 
         // Checkout
         services.AddScoped<ICheckoutPreparationService, CheckoutPreparationService>();
-        services.AddScoped<ICheckoutHoldOrchestrator, CheckoutHoldOrchestrator>();
         services.AddScoped<ICheckoutOrderWriter, CheckoutOrderWriter>();
         services.AddScoped<ICheckoutInvoiceIssuer, CheckoutInvoiceIssuer>();
         services.AddScoped<ICheckoutService, CheckoutService>();
@@ -95,6 +96,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddHostedService<OperationRecoveryWorker>();
         services.AddHostedService<ExpiryScannerWorker>();
         services.AddHostedService<OverdueProtectionWorker>();
+        services.AddHostedService<CheckoutTimeoutScannerWorker>();
 
         // Observability & TimeProvider
         services.AddSingleton<RentalMetrics>();
@@ -104,6 +106,11 @@ public static class ApplicationServiceCollectionExtensions
         services.AddOptions<OverdueProtectionOptions>()
             .BindConfiguration(OverdueProtectionOptions.SectionName);
         services.AddScoped<IOverdueProtectionService, OverdueProtectionService>();
+
+        // Settlement
+        services.AddScoped<IDeductionService, DeductionService>();
+        // trong khối Background Workers:
+        services.AddHostedService<DeductionDeadlineWorker>();
 
         return services;
     }

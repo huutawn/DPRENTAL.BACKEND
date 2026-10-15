@@ -225,6 +225,9 @@ public sealed class KafkaRealBrokerIntegrationTests
         public Task<IAsyncDisposable> AcquireOrderLockAsync(Guid orderId, TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
             Task.FromResult<IAsyncDisposable>(new NoOpDisposable());
 
+        public Task<IAsyncDisposable> AcquireRenterLockAsync(Guid renterUserId, TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IAsyncDisposable>(new NoOpDisposable());
+
         private sealed class NoOpDisposable : IAsyncDisposable
         {
             public ValueTask DisposeAsync() => ValueTask.CompletedTask;
