@@ -82,8 +82,9 @@ public sealed class SupplierConfirmationStatisticsQueryAndMigrationPostgreSqlTes
             var options = PostgresTestDatabaseHelper.CreateOptions(connString);
             await using var ctx = new RentalServiceDbContext(options);
 
-            // 1. Run all migrations up to latest (includes SupplierConfirmationStatisticsIndex)
-            await ctx.Database.MigrateAsync();
+            // 1. Run all migrations up to SupplierConfirmationStatisticsIndex
+            var migrator = ctx.GetService<IMigrator>();
+            await migrator.MigrateAsync("20261012022317_SupplierConfirmationStatisticsIndex");
 
             // 2. Verify new composite index exists
             await using var conn = new NpgsqlConnection(connString);
@@ -94,7 +95,6 @@ public sealed class SupplierConfirmationStatisticsQueryAndMigrationPostgreSqlTes
             Assert.Equal(1, indexCount);
 
             // 3. Roll back to prior migration (PaymentAndSupplierConfirmationMigration)
-            var migrator = ctx.GetService<IMigrator>();
             await migrator.MigrateAsync("PaymentAndSupplierConfirmationMigration");
 
             // 4. Verify new composite index is dropped

@@ -1,6 +1,11 @@
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.DTOs.Checkout;
+using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.Errors;
+using Dprental.RentalService.Application.Kafka.Configuration;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Options;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;
@@ -19,6 +24,7 @@ namespace Dprental.RentalService.Api.Tests.Checkout;
 /// </summary>
 public sealed class CheckoutServicePostgreSqlTests
 {
+    private static readonly System.Text.Json.JsonSerializerOptions CamelCaseJsonOptions = new() { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase };
     // 10:00 ngày 09/10/2026 giờ Việt Nam.
     private static readonly DateTimeOffset Now = new(2026, 10, 9, 3, 0, 0, TimeSpan.Zero);
     private const string Key = "checkout-key-1";
@@ -118,8 +124,11 @@ public sealed class CheckoutServicePostgreSqlTests
         await using RentalServiceDbContext context = new(options);
         RentalOrderRepository orders = new(context);
         RentalCartRepository carts = new(context);
+        RentalCheckoutOperationRepository operations = new(context);
+        OutboxRepository outbox = new(context);
         FixedTimeProvider clock = new(Now);
-        CheckoutHoldOrchestrator holds = new(_inventory, NullLogger<CheckoutHoldOrchestrator>.Instance);
+        InventoryCommandProducer inventoryCommands = new(outbox, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), clock);
+        CheckoutOrderWriter writer = new(orders, carts, new PostgresOrderCodeGenerator(context), NullLogger<CheckoutOrderWriter>.Instance);
 
         CheckoutService service = new(
             new CheckoutPreparationService(
@@ -133,14 +142,55 @@ public sealed class CheckoutServicePostgreSqlTests
                     ContentHash = "hash123456"
                 }),
                 clock),
-            holds,
-            new CheckoutOrderWriter(
-                orders, carts, new PostgresOrderCodeGenerator(context), holds, context, NullLogger<CheckoutOrderWriter>.Instance),
-            new CheckoutInvoiceIssuer(_payment, orders, context, clock, NullLogger<CheckoutInvoiceIssuer>.Instance),
+            operations,
             orders,
             locks,
+            inventoryCommands,
+            context,
             clock);
 
-        return await service.SubmitAsync(new(_renterId, true), request, Key);
+        var accepted = await service.SubmitAsync(new(_renterId, true), request, Key);
+        if (accepted.IsFailure)
+        {
+            return CheckoutResult.Failure(accepted.Error);
+        }
+
+        string operationId = CheckoutRules.DeriveOperationId(_renterId, Key);
+        var op = await operations.GetByOperationIdAsync(operationId);
+        if (op is null) return CheckoutResult.Failure(CheckoutErrors.OrderNotSaved);
+
+        if (op.Status == CheckoutOperationStatus.Succeeded)
+        {
+            var existingOrder = await orders.GetByIdAsync(op.ExpectedRentalOrderId);
+            return CheckoutResult.Success(existingOrder!, isReplay: true);
+        }
+
+        var plan = System.Text.Json.JsonSerializer.Deserialize<CheckoutPlan>(op.PreparationSnapshotJson, CamelCaseJsonOptions)!;
+        var heldLines = plan.Lines.Select(l =>
+        {
+            var rentalItemId = Guid.NewGuid();
+            var assignedAssets = Enumerable.Range(0, l.Quantity)
+                .Select(_ => new AssignedAssetDto(Guid.NewGuid(), Guid.NewGuid(), "Held"))
+                .ToList();
+            return new CheckoutHeldLine(l, rentalItemId, $"rental-item:{rentalItemId}", assignedAssets);
+        }).ToList();
+
+        var orderResult = await writer.CreateOrderAsync(plan, heldLines, op.OperationId, op.ExpectedRentalOrderId, op.HoldExpiresAt, clock.GetUtcNow());
+        if (orderResult.IsFailure)
+        {
+            op.MarkFailed(orderResult.Error.Code, orderResult.Error.Message, clock.GetUtcNow());
+            await operations.UpdateAsync(op);
+            await context.SaveChangesAsync();
+            return CheckoutResult.Failure(orderResult.Error);
+        }
+
+        var order = orderResult.Value;
+        order.AttachInvoice("INV-1", clock.GetUtcNow());
+        op.MarkSucceeded(clock.GetUtcNow(), invoiceStatus: "Ready");
+        await orders.UpdateAsync(order);
+        await operations.UpdateAsync(op);
+        await context.SaveChangesAsync();
+
+        return CheckoutResult.Success(order, isReplay: false);
     }
 }

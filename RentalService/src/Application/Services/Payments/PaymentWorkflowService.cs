@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.Services.Operations;
@@ -36,6 +37,33 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<PaymentWorkflowService> _logger;
     private readonly string _rentalEventsTopic;
+    private readonly IInventoryCommandProducer _inventoryCommands;
+
+    public PaymentWorkflowService(
+        IRentalOrderRepository orderRepository,
+        IInboxRepository inboxRepository,
+        IOutboxRepository outboxRepository,
+        IOperationReceiptRepository receiptRepository,
+        IOrderLockManager lockManager,
+        IRentalOperationExecutor operationExecutor,
+        IUnitOfWork unitOfWork,
+        IInventoryCommandProducer inventoryCommands,
+        IConfiguration configuration,
+        ILogger<PaymentWorkflowService> logger,
+        TimeProvider? timeProvider = null)
+    {
+        _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
+        _inboxRepository = inboxRepository ?? throw new ArgumentNullException(nameof(inboxRepository));
+        _outboxRepository = outboxRepository ?? throw new ArgumentNullException(nameof(outboxRepository));
+        _receiptRepository = receiptRepository ?? throw new ArgumentNullException(nameof(receiptRepository));
+        _lockManager = lockManager ?? throw new ArgumentNullException(nameof(lockManager));
+        _operationExecutor = operationExecutor ?? throw new ArgumentNullException(nameof(operationExecutor));
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _inventoryCommands = inventoryCommands!;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _rentalEventsTopic = configuration["Kafka:RentalEventsTopic"] ?? "rental.events.v1";
+    }
 
     public PaymentWorkflowService(
         IRentalOrderRepository orderRepository,
@@ -48,17 +76,19 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         IConfiguration configuration,
         ILogger<PaymentWorkflowService> logger,
         TimeProvider? timeProvider = null)
+        : this(
+            orderRepository,
+            inboxRepository,
+            outboxRepository,
+            receiptRepository,
+            lockManager,
+            operationExecutor,
+            unitOfWork,
+            null!,
+            configuration,
+            logger,
+            timeProvider)
     {
-        _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
-        _inboxRepository = inboxRepository ?? throw new ArgumentNullException(nameof(inboxRepository));
-        _outboxRepository = outboxRepository ?? throw new ArgumentNullException(nameof(outboxRepository));
-        _receiptRepository = receiptRepository ?? throw new ArgumentNullException(nameof(receiptRepository));
-        _lockManager = lockManager ?? throw new ArgumentNullException(nameof(lockManager));
-        _operationExecutor = operationExecutor ?? throw new ArgumentNullException(nameof(operationExecutor));
-        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _timeProvider = timeProvider ?? TimeProvider.System;
-        _rentalEventsTopic = configuration["Kafka:RentalEventsTopic"] ?? "rental.events.v1";
     }
 
     public async Task<Result> ApplyInvoicePaidStagedAsync(
@@ -111,8 +141,10 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         }
 
         // Lifecycle branching
+        // Lifecycle branching: late if terminal, bank transfer paidAt >= deadline, or payment processing occurredAt >= deadline
         bool isLatePayment = order.Status is RentalOrderStatus.Expired or RentalOrderStatus.Cancelled ||
-                             payload.PaidAt >= order.PaymentDeadline;
+                             payload.PaidAt >= order.PaymentDeadline ||
+                             envelope.OccurredAt >= order.PaymentDeadline;
 
         if (isLatePayment)
         {
@@ -149,6 +181,16 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                         JsonSerializer.Serialize(releaseCmd, JsonOptions));
 
                     order.AddOperationReceipt(releaseReceipt);
+
+                    var releaseCmdPayload = new ReleaseAllocationCommandPayload(
+                        order.Id,
+                        item.Id,
+                        releaseOpKey,
+                        "Late payment arrived after deadline; releasing allocation");
+                    if (_inventoryCommands != null)
+                    {
+                        await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmdPayload, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
+                    }
                 }
 
                 string refundKey = RentalOperationExecutor.ComputeOperationKey("RequestRefund", $"{order.Id}:{item.Id}");
@@ -177,7 +219,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                         errorCode: null,
                         errorMessage: null,
                         createdAt: utcNow,
-                        status: RentalOperationReceipt.StatusPending,
+                        status: RentalOperationReceipt.StatusManualRefundRequired,
                         targetItemId: item.Id,
                         prerequisiteOperationId: releaseOpKey,
                         payloadJson: JsonSerializer.Serialize(refundCmd, JsonOptions));
@@ -250,6 +292,16 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                         JsonSerializer.Serialize(extHoldCmd, JsonOptions));
 
                     order.AddOperationReceipt(receipt);
+
+                    var extendCmdPayload = new ExtendHoldCommandPayload(
+                        order.Id,
+                        item.Id,
+                        opKey,
+                        newHoldExpiresAt);
+                    if (_inventoryCommands != null)
+                    {
+                        await _inventoryCommands.EnqueueExtendHoldAsync(extendCmdPayload, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
+                    }
                 }
             }
         }

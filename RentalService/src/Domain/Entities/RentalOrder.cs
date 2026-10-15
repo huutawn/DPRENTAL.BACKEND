@@ -208,7 +208,8 @@ public class RentalOrder
         string termsContentHash,
         string checkoutOperationId,
         DateTimeOffset utcNow,
-        IEnumerable<InitialRentalItemDto> initialItems)
+        IEnumerable<InitialRentalItemDto> initialItems,
+        DateTimeOffset? paymentDeadline = null)
     {
         if (id == Guid.Empty || renterId == Guid.Empty)
         {
@@ -359,7 +360,7 @@ public class RentalOrder
             TermsVersion = termsVersion.Trim(),
             TermsDocumentRef = termsDocumentRef.Trim(),
             TermsContentHash = termsContentHash.Trim(),
-            PaymentDeadline = utcNow.AddMinutes(30),
+            PaymentDeadline = paymentDeadline ?? utcNow.AddMinutes(30),
             CheckoutOperationId = checkoutOperationId.Trim(),
             CreatedAt = utcNow,
             UpdatedAt = utcNow,
@@ -559,6 +560,29 @@ public class RentalOrder
         PaymentRef = paymentRef;
         PaymentConfirmedAt = paidAt;
         UpdatedAt = utcNow;
+
+        if (Status == RentalOrderStatus.PendingPayment)
+        {
+            string from = Status.ToString();
+            Status = RentalOrderStatus.Expired;
+            foreach (var item in _items)
+            {
+                item.ApplyHoldExpired(utcNow, paymentRef, "Payment deadline expired");
+            }
+            AddStateTransition(new RentalStateTransition(
+                Guid.NewGuid(),
+                Id,
+                null,
+                from,
+                RentalOrderStatus.Expired.ToString(),
+                "ExpirePayment",
+                null,
+                ActorRole.System,
+                "Order expired due to late payment",
+                utcNow,
+                paymentRef));
+        }
+
         AddStateTransition(new RentalStateTransition(
             Guid.NewGuid(),
             Id,
@@ -681,6 +705,30 @@ public class RentalOrder
             null,
             ActorRole.System,
             "Payment window expired without payment",
+            utcNow,
+            operationId));
+    }
+
+    internal void MarkCancelled(DateTimeOffset utcNow, string operationId, string reason = "Order cancelled")
+    {
+        string from = Status.ToString();
+        Status = RentalOrderStatus.Cancelled;
+        UpdatedAt = utcNow;
+        foreach (var item in _items)
+        {
+            item.ApplyHoldExpired(utcNow, operationId, reason);
+        }
+
+        AddStateTransition(new RentalStateTransition(
+            Guid.NewGuid(),
+            Id,
+            null,
+            from,
+            RentalOrderStatus.Cancelled.ToString(),
+            "CancelOrder",
+            null,
+            ActorRole.System,
+            reason,
             utcNow,
             operationId));
     }

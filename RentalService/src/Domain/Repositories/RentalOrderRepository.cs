@@ -122,6 +122,11 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 if (_dbContext.Entry(record).State == EntityState.Detached)
                     _dbContext.Entry(record).State = EntityState.Added;
             }
+            foreach (var proposal in order.Items.Select(i => i.DeductionProposal).Where(p => p is not null))
+            {
+                if (_dbContext.Entry(proposal!).State == EntityState.Detached)
+                    _dbContext.Entry(proposal!).State = EntityState.Added;
+            }
             foreach (var receipt in order.OperationReceipts)
             {
                 if (_dbContext.Entry(receipt).State == EntityState.Detached)
@@ -400,4 +405,44 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             .Where(s => s.SupplierId == supplierId &&
                         s.RentalOrder!.PaymentConfirmedAt != null &&
                         !s.RentalOrder.LatePaymentRefundRequired);
+
+    public async Task<IReadOnlyList<Guid>> GetOverdueUnprotectedOrderIdsAsync(
+    DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
+    {
+        DateOnly todayVn = RentalItem.TodayInVietnam(utcNow);
+
+        return await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.InRental
+                     && i.ExpectedEndDate < todayVn
+                     && i.UnitAssignments.Any(u =>
+                            u.Status == RentalUnitAssignmentStatus.HandedOver
+                            // Chỉ receipt "exhausted" mới không chặn; Succeeded/đang chạy/Business đều chặn.
+                            && !i.RentalOrder!.OperationReceipts.Any(r =>
+                                   r.Action == RentalItem.OverdueProtectionAction
+                                && EF.Functions.Like(r.OperationId, "overdue:" + u.Id.ToString() + ":%")
+                                && !(r.Status == RentalOperationReceipt.StatusFailed
+                                     && (r.ErrorClassification == RentalOperationReceipt.ClassificationTransientExhausted
+                                      || r.ErrorClassification == RentalOperationReceipt.ClassificationUncertainExhausted)))))
+            .GroupBy(i => i.RentalOrderId)
+            .OrderBy(g => g.Min(i => i.ExpectedEndDate))
+            .Select(g => g.Key)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+    }
+    public async Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(
+    DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.PendingSettlement
+                     && i.DeductionDeadline != null
+                     && i.DeductionDeadline < utcNow
+                     && i.FinalDeductionAmount == null
+                     && i.DeductionProposal == null)
+            .OrderBy(i => i.DeductionDeadline)
+            .Select(i => i.Id)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+    }
 }

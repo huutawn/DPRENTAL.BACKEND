@@ -1,6 +1,7 @@
 #pragma warning disable CA1848, CA1873
 using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Domain.IRepositories;
+using Dprental.RentalService.Domain.Entities;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -13,6 +14,7 @@ public sealed class OperationRecoveryWorker : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<OperationRecoveryWorker> _logger;
     private readonly TimeSpan _pollingInterval;
+    private readonly string[] _excludedActions;
 
     public OperationRecoveryWorker(
         IServiceScopeFactory scopeFactory,
@@ -24,6 +26,17 @@ public sealed class OperationRecoveryWorker : BackgroundService
 
         int pollSeconds = configuration.GetValue("Workers:OperationRecovery:PollingIntervalSeconds", 15);
         _pollingInterval = TimeSpan.FromSeconds(Math.Max(1, pollSeconds));
+        var excluded = new List<string>();
+        // Kafka return receipts are completed only by a validated Inventory result event.
+        excluded.Add(RentalItem.ApplyReturnedUnitsAction);
+        if (!configuration.GetValue("Rental:OverdueProtection:Enabled", true))
+            excluded.Add(RentalItem.OverdueProtectionAction);
+        if (!configuration.GetValue("Rental:InventoryReturn:Enabled", true))
+        {
+            excluded.Add(RentalItem.MarkReturnedAction);
+            excluded.Add(RentalItem.BlockDamagedAction);
+        }
+        _excludedActions = excluded.ToArray();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -75,7 +88,10 @@ public sealed class OperationRecoveryWorker : BackgroundService
         using (var scope = _scopeFactory.CreateScope())
         {
             var receiptRepository = scope.ServiceProvider.GetRequiredService<IOperationReceiptRepository>();
-            descriptors = await receiptRepository.GetPendingOperationDescriptorsAsync(utcNow, 50, cancellationToken);
+            descriptors = _excludedActions.Length == 0
+                ? await receiptRepository.GetPendingOperationDescriptorsAsync(utcNow, 50, cancellationToken)
+                : await receiptRepository.GetPendingOperationDescriptorsExcludingActionsAsync(
+                    utcNow, 50, _excludedActions, cancellationToken);
         }
 
         if (descriptors.Count == 0)

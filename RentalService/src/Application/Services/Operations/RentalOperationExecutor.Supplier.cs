@@ -398,8 +398,7 @@ public sealed partial class RentalOperationExecutor
             return Error.Conflict("ITEM_IN_TERMINAL_STATE", $"Mục thuê đã ở trạng thái {item.Status}; không thể khôi phục thành AwaitingHandover.");
         }
 
-        var result = await ConfirmAllocationCoreAsync(order, item, acceptReceipt, acceptOperationKey, item.SupplierId, isReconciliation: true, cancellationToken);
-        return result.IsSuccess ? Result.Success() : result.Error;
+        return await ConfirmAllocationCoreAsync(order, item, acceptReceipt, acceptOperationKey, item.SupplierId, isReconciliation: true, cancellationToken);
     }
 
     private async Task<Result<SupplierDecisionResponse>> ConfirmAllocationCoreAsync(
@@ -412,72 +411,24 @@ public sealed partial class RentalOperationExecutor
         CancellationToken cancellationToken)
     {
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-
-        // Begin provider attempt before HTTP call
         receipt.BeginProviderAttempt(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
 
-        // Call Inventory ConfirmAllocation without holding DB transaction
-        var confirmReq = new ConfirmAllocationRequest(operationKey);
-        var confirmResult = await _inventoryClient.ConfirmAllocationAsync(item.AllocationGroupId, confirmReq, cancellationToken);
-
-        utcNow = _timeProvider.GetUtcNow();
-        if (confirmResult.IsFailure)
+        if (_inventoryCommands != null)
         {
-            _logger.LogWarning("ConfirmAllocation for item {ItemId} failed: {Code} - {Msg}", item.Id, confirmResult.Error.Code, confirmResult.Error.Message);
-            RecordExecutionFailure(receipt, confirmResult.Error, utcNow);
-            await CommitLocalChangesAsync(order, cancellationToken);
-            return confirmResult.Error;
+            var confirmCmd = new ConfirmAllocationCommandPayload(order.Id, item.Id, operationKey);
+            var enqueueResult = await _inventoryCommands.EnqueueConfirmAllocationAsync(confirmCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
+            if (enqueueResult.IsFailure)
+            {
+                RecordExecutionFailure(receipt, enqueueResult.Error, utcNow, forceUncertain: false);
+                await CommitLocalChangesAsync(order, cancellationToken);
+                return enqueueResult.Error;
+            }
         }
 
-        var confirmData = confirmResult.Value;
-        var validation = ValidateAllocationResponse(item, confirmData);
-        if (validation.IsFailure)
-        {
-            // 2xx response with invalid payload is UNCERTAIN! Not safe business failure!
-            RecordExecutionFailure(receipt, validation.Error, utcNow, forceUncertain: true);
-            await CommitLocalChangesAsync(order, cancellationToken);
-            return validation.Error;
-        }
-
-        // Invariant: Item must still be in PendingSupplierConfirmation to transition
-        if (item.Status != RentalItemStatus.PendingSupplierConfirmation)
-        {
-            return Error.Conflict("ITEM_IN_TERMINAL_STATE", $"Mục thuê đã ở trạng thái {item.Status}; không thể áp dụng kết quả.");
-        }
-
-        // Apply accept atomically
-        item.ApplySupplierAccept(supplierId, utcNow, confirmData.ReceiptRef, operationKey);
-        order.EvaluateOrderStatusRollup(utcNow, operationKey);
-
-        var response = BuildSupplierResponse(order, item);
-        string responseJson = JsonSerializer.Serialize(confirmData, JsonOptions);
-        string apiResponseJson = JsonSerializer.Serialize(response, JsonOptions);
-        receipt.MarkSucceeded(utcNow, responseJson, apiResponseJson);
-
-        var notifyEnvelope = new KafkaMessageEnvelope<RentalItemConfirmedPayload>(
-            Guid.NewGuid(),
-            KafkaContractSpec.EventTypes.RentalItemConfirmed,
-            1,
-            "rental-service",
-            order.Id.ToString("D"),
-            utcNow,
-            operationKey,
-            null,
-            new RentalItemConfirmedPayload(order.Id, item.Id, supplierId, utcNow, confirmData.ReceiptRef));
-
-        var outbox = new RentalOutboxMessage(
-            notifyEnvelope.MessageId,
-            _rentalEventsTopic,
-            order.Id.ToString("D"),
-            KafkaContractSpec.EventTypes.RentalItemConfirmed,
-            JsonSerializer.Serialize(notifyEnvelope, JsonOptions),
-            utcNow);
-
-        await _outboxRepository.AddAsync(outbox, cancellationToken);
+        receipt.MarkProcessing(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
-
-        return response;
+        return BuildSupplierResponse(order, item);
     }
 
     private static Result ValidateAllocationResponse(RentalItem item, ConfirmAllocationResponse confirmData)

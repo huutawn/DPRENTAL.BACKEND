@@ -26,8 +26,15 @@ public class DeductionProposal
 
     public DateTimeOffset? RespondedAt { get; private set; }
 
-    [NotMapped]
-    public decimal TotalProposedAmount => _assignments.Sum(a => a.ProposedDeductionAmount ?? 0m);
+    [Precision(18, 2)]
+    public decimal TotalProposedAmount { get; private set; }
+
+    [Required]
+    [MaxLength(2000)]
+    public string DamageDescription { get; private set; } = string.Empty;
+
+    private readonly List<Guid> _evidenceMediaIds = [];
+    public IReadOnlyList<Guid> EvidenceMediaIds => _evidenceMediaIds.AsReadOnly();
 
     [ForeignKey(nameof(RentalItemId))]
     public RentalItem? RentalItem { get; private set; }
@@ -46,7 +53,10 @@ public class DeductionProposal
         Guid rentalItemId,
         Guid submittedById,
         DateTimeOffset submittedAt,
-        DateTimeOffset renterResponseDeadline)
+        DateTimeOffset renterResponseDeadline,
+        decimal totalProposedAmount,
+        string damageDescription,
+        IEnumerable<Guid> evidenceMediaIds)
     {
         Id = id;
         RentalItemId = rentalItemId;
@@ -54,6 +64,9 @@ public class DeductionProposal
         SubmittedById = submittedById;
         SubmittedAt = submittedAt;
         RenterResponseDeadline = renterResponseDeadline;
+        TotalProposedAmount = totalProposedAmount;
+        DamageDescription = damageDescription.Trim();
+        _evidenceMediaIds.AddRange(evidenceMediaIds);
     }
 
     internal void AddAssignment(RentalUnitAssignment assignment)

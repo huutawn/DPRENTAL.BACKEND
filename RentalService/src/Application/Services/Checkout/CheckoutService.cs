@@ -1,8 +1,14 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.IServices.Checkout;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
+using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 
@@ -11,34 +17,39 @@ namespace Dprental.RentalService.Application.Services.Checkout;
 public sealed class CheckoutService : ICheckoutService
 {
     private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(10);
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
 
     private readonly ICheckoutPreparationService _preparation;
-    private readonly ICheckoutHoldOrchestrator _holds;
-    private readonly ICheckoutOrderWriter _writer;
-    private readonly ICheckoutInvoiceIssuer _invoices;
+    private readonly IRentalCheckoutOperationRepository _operationRepository;
     private readonly IRentalOrderRepository _orders;
     private readonly IOrderLockManager _locks;
+    private readonly IInventoryCommandProducer _inventoryCommands;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly TimeProvider _timeProvider;
 
     public CheckoutService(
         ICheckoutPreparationService preparation,
-        ICheckoutHoldOrchestrator holds,
-        ICheckoutOrderWriter writer,
-        ICheckoutInvoiceIssuer invoices,
+        IRentalCheckoutOperationRepository operationRepository,
         IRentalOrderRepository orders,
         IOrderLockManager locks,
-        TimeProvider timeProvider)
+        IInventoryCommandProducer inventoryCommands,
+        IUnitOfWork unitOfWork,
+        TimeProvider? timeProvider = null)
     {
         _preparation = preparation ?? throw new ArgumentNullException(nameof(preparation));
-        _holds = holds ?? throw new ArgumentNullException(nameof(holds));
-        _writer = writer ?? throw new ArgumentNullException(nameof(writer));
-        _invoices = invoices ?? throw new ArgumentNullException(nameof(invoices));
+        _operationRepository = operationRepository ?? throw new ArgumentNullException(nameof(operationRepository));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _locks = locks ?? throw new ArgumentNullException(nameof(locks));
-        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _inventoryCommands = inventoryCommands ?? throw new ArgumentNullException(nameof(inventoryCommands));
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    public async Task<CheckoutResult> SubmitAsync(
+    public async Task<Result<CheckoutOperationAcceptedResponse>> SubmitAsync(
         CheckoutRenterContext renter,
         CheckoutRequest request,
         string idempotencyKey,
@@ -50,116 +61,199 @@ public sealed class CheckoutService : ICheckoutService
 
         if (renter.RenterId == Guid.Empty)
         {
-            return CheckoutResult.Failure(CheckoutErrors.Unauthenticated);
+            return CheckoutErrors.Unauthenticated;
         }
 
         string operationId = CheckoutRules.DeriveOperationId(renter.RenterId, idempotencyKey);
+        string fingerprint = ComputeRequestFingerprint(renter.RenterId, request);
 
-        // Khóa theo renter (không phải theo đơn): mỗi renter chỉ có một checkout chạy tại một thời điểm,
-        // nên bấm đúp hay mở nhiều tab không thể cùng giữ lịch rồi nhả nhầm hold của nhau.
         IAsyncDisposable renterLock;
         try
         {
-            renterLock = await _locks.AcquireOrderLockAsync(renter.RenterId, LockTimeout, cancellationToken);
+            renterLock = await _locks.AcquireRenterLockAsync(renter.RenterId, LockTimeout, cancellationToken);
         }
         catch (TimeoutException)
         {
-            return CheckoutResult.Failure(CheckoutErrors.InProgress);
+            return CheckoutErrors.InProgress;
         }
 
         await using (renterLock)
         {
-            RentalOrder? existing = await _orders.GetByCheckoutOperationIdAsync(operationId, cancellationToken);
-            if (existing is not null)
+            // 1. Idempotency replay check trước khi kiểm tra giỏ hàng
+            var existingOp = await _operationRepository.GetByOperationIdAsync(operationId, cancellationToken);
+            if (existingOp is not null)
             {
-                return await ReplayAsync(existing, renter.RenterId, request, operationId, cancellationToken);
+                if (existingOp.RenterUserId != renter.RenterId || existingOp.RequestFingerprint != fingerprint)
+                {
+                    return CheckoutErrors.IdempotencyKeyReused;
+                }
+
+                return new CheckoutOperationAcceptedResponse(
+                    existingOp.OperationId,
+                    $"/api/v1/rental/checkout/operations/{existingOp.OperationId}");
             }
 
-            await EnsurePendingOrderHasInvoiceAsync(renter.RenterId, cancellationToken);
+            // 2. Kiểm tra giới hạn: Mỗi renter chỉ có 1 checkout đang chạy hoặc 1 đơn chờ thanh toán
+            var activeOp = await _operationRepository.GetActiveOperationByRenterAsync(renter.RenterId, cancellationToken);
+            if (activeOp is not null)
+            {
+                return Error.Conflict("ACTIVE_CHECKOUT_IN_PROGRESS", "Bạn đang có một thao tác gửi đơn đang được xử lý.");
+            }
 
-            CheckoutPreparationResult prepared = await _preparation.PrepareAsync(renter, request, cancellationToken);
+            var pendingOrder = await _orders.GetPendingPaymentByRenterIdAsync(renter.RenterId, cancellationToken);
+            if (pendingOrder is not null)
+            {
+                return CheckoutErrors.PendingOrderExists;
+            }
+
+            // 3. Chuẩn bị checkout (snapshot, bảng giá, giỏ hàng)
+            var prepared = await _preparation.PrepareAsync(renter, request, cancellationToken);
             if (prepared.IsFailure)
             {
-                return CheckoutResult.From(prepared);
+                return prepared.Error;
             }
 
-            DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-            CheckoutHoldResult held = await _holds.HoldAllLinesAsync(prepared.Plan, operationId, utcNow, cancellationToken);
-            if (!held.IsSuccess)
+            var plan = prepared.Plan;
+            var expectedOrderId = Guid.NewGuid();
+            var utcNow = _timeProvider.GetUtcNow();
+            var holdExpiresAt = utcNow.AddMinutes(30);
+
+            // 4. Mở transaction trước khi enqueue Outbox đầu tiên để đảm bảo nguyên tử toàn bộ
+            await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+            try
             {
-                return CheckoutResult.From(held);
-            }
+                var lineStatuses = new List<CheckoutItemHoldDescriptor>(plan.Lines.Count);
 
-            Result<RentalOrder> order = await _writer.CreateOrderAsync(
-                prepared.Plan, held.HeldLines, operationId, utcNow, cancellationToken);
-            if (order.IsFailure)
+                foreach (var line in plan.Lines)
+                {
+                    var rentalItemId = Guid.NewGuid();
+                    var opKey = $"checkout:{expectedOrderId:N}:{rentalItemId:N}:hold";
+
+                    // Đơn lưu [từ, đến) không tính ngày cuối; Inventory nhận ngày dùng máy cuối có tính.
+                    // Thuê 18, 19, 20: đơn lưu [18, 21), gửi Inventory startDate 18, endDate 20.
+                    var (holdStartDate, holdEndDate) = RentalInventoryDateAdapter
+                        .ToInventoryDates(line.ExpectedStartDate, line.ExpectedEndDate).Value;
+
+                    var holdCmd = new CreateHoldCommandPayload(
+                        RentalOrderId: expectedOrderId,
+                        RentalItemId: rentalItemId,
+                        OperationKey: opKey,
+                        EquipmentListingId: line.EquipmentListingId,
+                        Quantity: line.Quantity,
+                        StartDate: holdStartDate,
+                        EndDate: holdEndDate,
+                        HoldExpiresAt: holdExpiresAt,
+                        Notes: $"Order checkout: item {rentalItemId}");
+
+                    var enqueueResult = await _inventoryCommands.EnqueueCreateHoldAsync(
+                        holdCmd,
+                        correlationId: expectedOrderId.ToString("D"),
+                        cancellationToken: cancellationToken);
+
+                    if (enqueueResult.IsFailure)
+                    {
+                        await tx.RollbackAsync(cancellationToken);
+                        _unitOfWork.DiscardChanges();
+                        return enqueueResult.Error;
+                    }
+
+                    lineStatuses.Add(new CheckoutItemHoldDescriptor(
+                        CartItemId: line.CartItemId,
+                        RentalItemId: rentalItemId,
+                        EquipmentListingId: line.EquipmentListingId,
+                        OperationKey: opKey,
+                        Status: "Pending"));
+                }
+
+                // 5. Lưu bền vững RentalCheckoutOperation trong cùng transaction với Outbox
+                var checkoutOp = new RentalCheckoutOperation(
+                    operationId: operationId,
+                    renterUserId: renter.RenterId,
+                    requestFingerprint: fingerprint,
+                    expectedRentalOrderId: expectedOrderId,
+                    holdExpiresAt: holdExpiresAt,
+                    preparationSnapshotJson: JsonSerializer.Serialize(plan, JsonOptions),
+                    itemHoldStatusesJson: JsonSerializer.Serialize(lineStatuses, JsonOptions),
+                    createdAt: utcNow);
+
+                await _operationRepository.AddAsync(checkoutOp, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+
+                return new CheckoutOperationAcceptedResponse(
+                    operationId,
+                    $"/api/v1/rental/checkout/operations/{operationId}");
+            }
+            catch (Exception)
             {
-                return CheckoutResult.Failure(order.Error);
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                throw;
             }
-
-            return await IssueInvoiceAsync(order.Value, isReplay: false, cancellationToken);
         }
     }
 
-    /// <summary>
-    /// Key đã có đơn: trả lại đơn đó, không chuẩn bị và không giữ lịch lần nữa. Đơn chưa có hóa đơn thì tạo nốt.
-    /// </summary>
-    private async Task<CheckoutResult> ReplayAsync(
-        RentalOrder existing,
-        Guid renterId,
-        CheckoutRequest request,
+    public async Task<Result<CheckoutOperationStatusResponse>> GetOperationStatusAsync(
         string operationId,
-        CancellationToken cancellationToken)
+        Guid renterUserId,
+        CancellationToken cancellationToken = default)
     {
-        if (existing.RenterId != renterId || !IsSameSelection(existing, renterId, request, operationId))
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+
+        var op = await _operationRepository.GetByOperationIdAsync(operationId, cancellationToken);
+        if (op is null || op.RenterUserId != renterUserId)
         {
-            return CheckoutResult.Failure(CheckoutErrors.IdempotencyKeyReused);
+            return Error.NotFound("CHECKOUT_OPERATION_NOT_FOUND", "Không tìm thấy thao tác gửi đơn.");
         }
 
-        return await IssueInvoiceAsync(existing, isReplay: true, cancellationToken);
+        if (op.Status == CheckoutOperationStatus.Succeeded)
+        {
+            var order = await _orders.GetByIdWithDetailsAsync(op.ExpectedRentalOrderId, cancellationToken);
+            var orderDto = order != null ? CheckoutResponse.From(order, false) : null;
+            return new CheckoutOperationStatusResponse(
+                OperationId: op.OperationId,
+                Status: op.Status.ToString(),
+                OrderId: order?.Id,
+                OrderCode: order?.OrderCode,
+                Order: orderDto,
+                InvoiceStatus: op.InvoiceStatus);
+        }
+
+        if (op.Status == CheckoutOperationStatus.Failed)
+        {
+            return new CheckoutOperationStatusResponse(
+                OperationId: op.OperationId,
+                Status: op.Status.ToString(),
+                ErrorCode: op.ErrorCode ?? "FAILED",
+                ErrorMessage: op.ErrorMessage ?? "Thao tác gửi đơn thất bại.");
+        }
+
+        if (op.Status == CheckoutOperationStatus.TimedOut)
+        {
+            return new CheckoutOperationStatusResponse(
+                OperationId: op.OperationId,
+                Status: op.Status.ToString(),
+                ErrorCode: "TIMEOUT",
+                ErrorMessage: "Hết hạn giữ lịch cho đơn hàng.");
+        }
+
+        return new CheckoutOperationStatusResponse(
+            OperationId: op.OperationId,
+            Status: op.Status.ToString());
     }
 
-    /// <summary>RentalItemId sinh từ dòng giỏ, nên so được yêu cầu gửi lại với đơn mà không cần lưu lại request.</summary>
-    private static bool IsSameSelection(RentalOrder order, Guid renterId, CheckoutRequest request, string operationId)
+    private static string ComputeRequestFingerprint(Guid renterId, CheckoutRequest request)
     {
-        if (request.CartItemIds is null)
-        {
-            return false;
-        }
-
-        HashSet<Guid> requestedItemIds = request.CartItemIds
-            .Select(cartItemId => CheckoutRules.DeriveRentalItemId(renterId, operationId, cartItemId))
-            .ToHashSet();
-
-        return requestedItemIds.SetEquals(order.Items.Select(i => i.Id));
-    }
-
-    /// <summary>
-    /// Renter quay lại bằng Idempotency-Key mới trong lúc đơn chờ thanh toán chưa có hóa đơn: tạo nốt hóa đơn
-    /// để đơn đó thanh toán được. Bước chuẩn bị ngay sau vẫn báo đang có đơn chưa thanh toán.
-    /// </summary>
-    private async Task EnsurePendingOrderHasInvoiceAsync(Guid renterId, CancellationToken cancellationToken)
-    {
-        RentalOrder? pending = await _orders.GetPendingPaymentByRenterIdAsync(renterId, cancellationToken);
-        if (pending is null ||
-            !string.IsNullOrWhiteSpace(pending.InvoiceRef) ||
-            pending.PaymentDeadline <= _timeProvider.GetUtcNow())
-        {
-            return;
-        }
-
-        RentalOrder? detailed = await _orders.GetByIdWithDetailsAsync(pending.Id, cancellationToken);
-        if (detailed is not null)
-        {
-            await _invoices.EnsureInvoiceAsync(detailed, cancellationToken);
-        }
-    }
-
-    private async Task<CheckoutResult> IssueInvoiceAsync(RentalOrder order, bool isReplay, CancellationToken cancellationToken)
-    {
-        Result invoice = await _invoices.EnsureInvoiceAsync(order, cancellationToken);
-        return invoice.IsSuccess
-            ? CheckoutResult.Success(order, isReplay)
-            : CheckoutResult.OrderFailure(invoice.Error, order);
+        var wrapper = new { RenterId = renterId, Request = request };
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(wrapper, JsonOptions);
+        return Convert.ToHexString(SHA256.HashData(bytes));
     }
 }
+
+public sealed record CheckoutItemHoldDescriptor(
+    Guid CartItemId,
+    Guid RentalItemId,
+    Guid EquipmentListingId,
+    string OperationKey,
+    string Status,
+    IReadOnlyList<AllocationAssetMappingPayload>? Allocations = null);

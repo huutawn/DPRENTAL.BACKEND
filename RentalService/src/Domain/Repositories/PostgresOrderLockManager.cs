@@ -27,8 +27,30 @@ public sealed class PostgresOrderLockManager : IOrderLockManager
         return p1 ^ p2;
     }
 
-    public async Task<IAsyncDisposable> AcquireOrderLockAsync(
+    public static long ComputeRenterLockKey(Guid renterUserId)
+    {
+        return ComputeLockKey(renterUserId) ^ 0x52454E5445524C4BL; // "RENTERLK"
+    }
+
+    public Task<IAsyncDisposable> AcquireRenterLockAsync(
+        Guid renterUserId,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        return AcquireLockCoreAsync(ComputeRenterLockKey(renterUserId), $"RenterUser '{renterUserId}'", timeout, cancellationToken);
+    }
+
+    public Task<IAsyncDisposable> AcquireOrderLockAsync(
         Guid orderId,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        return AcquireLockCoreAsync(ComputeLockKey(orderId), $"RentalOrder '{orderId}'", timeout, cancellationToken);
+    }
+
+    private async Task<IAsyncDisposable> AcquireLockCoreAsync(
+        long lockKey,
+        string targetDescription,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
@@ -38,7 +60,6 @@ public sealed class PostgresOrderLockManager : IOrderLockManager
         }
 
         TimeSpan effectiveTimeout = timeout ?? TimeSpan.FromSeconds(5);
-        long lockKey = ComputeLockKey(orderId);
 
         NpgsqlConnection conn = new(_connectionString);
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -70,7 +91,7 @@ public sealed class PostgresOrderLockManager : IOrderLockManager
             if (!acquired)
             {
                 await conn.DisposeAsync();
-                throw new TimeoutException($"Không thể thu thập PostgreSQL advisory lock cho RentalOrder '{orderId}' sau {effectiveTimeout.TotalSeconds}s.");
+                throw new TimeoutException($"Không thể thu thập PostgreSQL advisory lock cho {targetDescription} sau {effectiveTimeout.TotalSeconds}s.");
             }
 
             return new PostgresLockReleaser(conn, lockKey, _logger);
@@ -78,14 +99,14 @@ public sealed class PostgresOrderLockManager : IOrderLockManager
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             await conn.DisposeAsync();
-            throw new TimeoutException($"Không thể thu thập PostgreSQL advisory lock cho RentalOrder '{orderId}' sau {effectiveTimeout.TotalSeconds}s.");
+            throw new TimeoutException($"Không thể thu thập PostgreSQL advisory lock cho {targetDescription} sau {effectiveTimeout.TotalSeconds}s.");
         }
         catch (Exception ex)
         {
             await conn.DisposeAsync();
             if (ex is not TimeoutException)
             {
-                _logger.LogError(ex, "Lỗi kết nối PostgreSQL advisory lock cho Order {OrderId}", orderId);
+                _logger.LogError(ex, "Lỗi kết nối PostgreSQL advisory lock cho {Target}", targetDescription);
             }
             throw;
         }

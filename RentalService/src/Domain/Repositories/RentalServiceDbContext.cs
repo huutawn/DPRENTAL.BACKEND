@@ -26,6 +26,7 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
     public DbSet<RentalOperationReceipt> RentalOperationReceipts => Set<RentalOperationReceipt>();
     public DbSet<RentalInboxMessage> RentalInboxMessages => Set<RentalInboxMessage>();
     public DbSet<RentalOutboxMessage> RentalOutboxMessages => Set<RentalOutboxMessage>();
+    public DbSet<RentalCheckoutOperation> RentalCheckoutOperations => Set<RentalCheckoutOperation>();
 
     public void DiscardChanges() => ChangeTracker.Clear();
 
@@ -69,6 +70,7 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
 
         // Bộ đếm cho mã đơn hàng DH-YYYY-NNNNNN.
         modelBuilder.HasSequence<long>("order_code_seq", "rental");
+        modelBuilder.HasSequence<long>("rental_outbox_sequence", "rental");
 
         // RentalCart & RentalCartItem
         modelBuilder.Entity<RentalCart>(b =>
@@ -216,6 +218,8 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
         // DeductionProposal & Dispute
         modelBuilder.Entity<DeductionProposal>(b =>
         {
+            b.Property(p => p.TotalProposedAmount).HasPrecision(18, 2);
+            b.Property(p => p.EvidenceMediaIds).HasField("_evidenceMediaIds");
             b.HasOne(p => p.Dispute)
                 .WithOne(d => d.DeductionProposal)
                 .HasForeignKey<Dispute>(d => d.DeductionProposalId)
@@ -261,9 +265,20 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
         modelBuilder.Entity<RentalOutboxMessage>(b =>
         {
             b.Property(m => m.Id).ValueGeneratedNever();
+            b.Property(m => m.Sequence).HasDefaultValueSql("nextval('rental.rental_outbox_sequence')");
             b.HasIndex(m => new { m.Status, m.ScheduledAt, m.CreatedAt });
             b.HasIndex(m => new { m.Status, m.ScheduledAt, m.LockedUntilUtc });
             b.HasIndex(m => m.Status);
+            b.HasIndex(m => new { m.Topic, m.PartitionKey, m.Sequence, m.Status });
+        });
+
+        modelBuilder.Entity<RentalCheckoutOperation>(b =>
+        {
+            b.HasKey(o => o.OperationId);
+            b.Property(o => o.OperationId).HasMaxLength(128);
+            b.Property(o => o.RequestFingerprint).HasMaxLength(64);
+            b.HasIndex(o => o.RenterUserId);
+            b.HasIndex(o => new { o.RenterUserId, o.Status });
         });
     }
 }

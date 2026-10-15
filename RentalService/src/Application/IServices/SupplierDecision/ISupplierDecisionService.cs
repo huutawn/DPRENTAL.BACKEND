@@ -21,4 +21,11 @@ public interface ISupplierDecisionService
         string idempotencyKey,
         IRentalCallerContext caller,
         CancellationToken cancellationToken = default);
+
+    Task<Result<HandoverItemResponse>> HandoverItemAsync(
+        Guid itemId,
+        HandoverItemRequest request,
+        string idempotencyKey,
+        IRentalCallerContext caller,
+        CancellationToken cancellationToken = default);
 }

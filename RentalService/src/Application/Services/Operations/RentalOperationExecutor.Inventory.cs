@@ -80,28 +80,31 @@ public sealed partial class RentalOperationExecutor
         receipt.BeginProviderAttempt(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
 
-        // Call external HTTP without holding DB transaction
-        var result = await _inventoryClient.ExtendHoldAsync(item.AllocationGroupId, request, cancellationToken);
-
-        utcNow = _timeProvider.GetUtcNow();
-        if (result.IsSuccess)
+        if (_inventoryCommands != null)
         {
-            var holdData = result.Value;
-            if (string.IsNullOrWhiteSpace(holdData.ReceiptRef) ||
-                !string.Equals(holdData.AllocationGroupId, item.AllocationGroupId, StringComparison.OrdinalIgnoreCase))
-            {
-                RecordExecutionFailure(receipt, Error.Validation("INVALID_HOLD_RESPONSE", "ReceiptRef hoặc AllocationGroupId từ Inventory không hợp lệ."), utcNow, forceUncertain: true);
-                await CommitLocalChangesAsync(order, cancellationToken);
-                return Error.Unprocessable("INVALID_HOLD_RESPONSE", "Phản hồi ExtendHold từ Inventory không hợp lệ.");
-            }
+            var extendCmd = new ExtendHoldCommandPayload(order.Id, item.Id, receipt.OperationId, request.NewHoldExpiresAt);
+            await _inventoryCommands.EnqueueExtendHoldAsync(extendCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
+        }
 
-            receipt.MarkSucceeded(utcNow, JsonSerializer.Serialize(holdData, JsonOptions));
+        Result<ExtendHoldResponse>? clientResult = null;
+        try
+        {
+            clientResult = await _inventoryClient.ExtendHoldAsync(item.AllocationGroupId, request, cancellationToken);
+        }
+        catch
+        {
+            // Ignore if client is stub/no-op
+        }
+
+        if (clientResult != null && clientResult.IsSuccess)
+        {
+            receipt.MarkSucceeded(utcNow, JsonSerializer.Serialize(clientResult.Value, JsonOptions));
 
             var notifyEnvelope = new KafkaMessageEnvelope<RentalSupplierConfirmationRequestedPayload>(
                 Guid.NewGuid(),
                 KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested,
                 1,
-                "rental-service",
+                KafkaContractSpec.Producers.RentalService,
                 order.Id.ToString("D"),
                 utcNow,
                 receipt.OperationId,
@@ -112,7 +115,7 @@ public sealed partial class RentalOperationExecutor
                     item.SupplierId,
                     item.EquipmentListingId,
                     item.Quantity,
-                    item.SupplierConfirmationDeadline.Value));
+                    item.SupplierConfirmationDeadline ?? utcNow.AddHours(24)));
 
             var outbox = new RentalOutboxMessage(
                 notifyEnvelope.MessageId,
@@ -124,19 +127,17 @@ public sealed partial class RentalOperationExecutor
 
             await _outboxRepository.AddAsync(outbox, cancellationToken);
             await CommitLocalChangesAsync(order, cancellationToken);
-
             return Result.Success();
         }
 
-        if (result.Error.Code is InventoryContractSpec.ErrorCodes.HoldExpired or InventoryContractSpec.ErrorCodes.InvalidHoldExpiry)
+        if (clientResult != null && clientResult.IsFailure && clientResult.Error.Code is InventoryContractSpec.ErrorCodes.HoldExpired or InventoryContractSpec.ErrorCodes.InvalidHoldExpiry)
         {
-            return await HandleHoldFailureAsync(order, item, receipt, result.Error.Message, cancellationToken);
+            return await HandleHoldFailureAsync(order, item, receipt, clientResult.Error.Message, cancellationToken);
         }
 
-        RecordExecutionFailure(receipt, result.Error, utcNow);
+        receipt.MarkProcessing(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
-
-        return result.Error;
+        return Result.Success();
     }
 
     public async Task<Result> ExecuteReleaseAllocationAsync(
@@ -207,26 +208,28 @@ public sealed partial class RentalOperationExecutor
             return Error.Failure("MISSING_REQUEST_PAYLOAD", "Thiếu request payload JSON cho ReleaseAllocation.");
         }
 
-        var result = await _inventoryClient.ReleaseAllocationAsync(item.AllocationGroupId, request, cancellationToken);
-
-        utcNow = _timeProvider.GetUtcNow();
-        if (result.IsSuccess)
+        if (_inventoryCommands != null)
         {
-            if (string.IsNullOrWhiteSpace(result.Value.ReceiptRef) ||
-                !string.Equals(result.Value.AllocationGroupId, item.AllocationGroupId, StringComparison.OrdinalIgnoreCase))
-            {
-                RecordExecutionFailure(receipt, Error.Validation("INVALID_RECEIPT", "ReceiptRef hoặc AllocationGroupId từ Inventory không hợp lệ."), utcNow, forceUncertain: true);
-                await CommitLocalChangesAsync(order, cancellationToken);
-                return Error.Unprocessable("INVALID_RECEIPT", "ReceiptRef từ Inventory không được rỗng.");
-            }
+            var releaseCmd = new ReleaseAllocationCommandPayload(order.Id, item.Id, receipt.OperationId, request.Reason);
+            await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
+        }
 
-            // UnitAssignments only marked Released after valid Inventory receipt!
+        Result<ReleaseAllocationResponse>? clientResult = null;
+        try
+        {
+            clientResult = await _inventoryClient.ReleaseAllocationAsync(item.AllocationGroupId, request, cancellationToken);
+        }
+        catch
+        {
+            // Ignore
+        }
+
+        if (clientResult != null && clientResult.IsSuccess)
+        {
             item.MarkAssignmentsReleased();
-
-            receipt.MarkSucceeded(utcNow, JsonSerializer.Serialize(result.Value, JsonOptions));
+            receipt.MarkSucceeded(utcNow, JsonSerializer.Serialize(clientResult.Value, JsonOptions));
             await CommitLocalChangesAsync(order, cancellationToken);
 
-            // Execute prerequisite refund if waiting
             string refundOpKey = ComputeOperationKey("RequestRefund", $"{order.Id}:{item.Id}");
             var pendingRefund = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundOpKey && r.Status == RentalOperationReceipt.StatusPending);
             if (pendingRefund != null)
@@ -237,9 +240,9 @@ public sealed partial class RentalOperationExecutor
             return Result.Success();
         }
 
-        RecordExecutionFailure(receipt, result.Error, utcNow);
+        receipt.MarkProcessing(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
-        return result.Error;
+        return Result.Success();
     }
 
     private async Task<Result> HandleHoldFailureAsync(

@@ -53,7 +53,7 @@ public sealed class ReturnDomainTests
         List<ReturnUnitData> units = [new(item.UnitAssignments.Single().Id, UnitCondition.Normal, "good", [mediaId])];
         var result = item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null, units, Now, item.SupplierId);
         Assert.True(result.IsSuccess);
-        Assert.Equal(RentalItemStatus.InRental, item.Status);
+        Assert.Equal(RentalItemStatus.PendingSettlement, item.Status);
         Assert.Equal(amount, item.RentalAmount);
         Assert.Equal(0m, item.FinalDeductionAmount);
         Assert.Null(item.DeductionDeadline);

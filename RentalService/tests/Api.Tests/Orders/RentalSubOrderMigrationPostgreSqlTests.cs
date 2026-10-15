@@ -15,6 +15,7 @@ namespace Dprental.RentalService.Api.Tests.Orders;
 public sealed class RentalSubOrderMigrationPostgreSqlTests
 {
     private const string MigrationBeforeSubOrders = "AddOrderCodeSequence";
+    private const string SubOrdersMigration = "AddRentalSubOrders";
 
     // Chỉ khác byte cuối để PostgreSQL và .NET sắp xếp giống nhau: Bình đứng trước Cường.
     private static readonly Guid SupplierBinh = Guid.Parse("00000000-0000-0000-0000-0000000000b1");
@@ -42,7 +43,8 @@ public sealed class RentalSubOrderMigrationPostgreSqlTests
 
             await using (RentalServiceDbContext context = new(options))
             {
-                await context.Database.MigrateAsync();
+                // Chỉ lên tới migration đơn con rồi lùi lại: migration hoàn tiền trễ đứng sau cố ý chặn lùi.
+                await context.GetService<IMigrator>().MigrateAsync(SubOrdersMigration);
                 context.RentalOrders.Add(order);
                 await context.SaveChangesAsync();
 
