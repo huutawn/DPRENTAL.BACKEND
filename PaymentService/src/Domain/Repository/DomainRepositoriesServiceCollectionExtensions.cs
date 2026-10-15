@@ -23,6 +23,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
             options.UseNpgsql(connectionString));
 
         services.AddScoped<IInvoiceRepository, EfInvoiceRepository>();
+        services.AddScoped<IOutboxRepository, EfOutboxRepository>();
 
         return services;
     }
