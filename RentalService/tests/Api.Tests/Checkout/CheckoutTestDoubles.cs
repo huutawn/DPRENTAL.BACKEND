@@ -159,6 +159,18 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
         DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Guid>>([]);
 
+    public Task<IReadOnlyList<Guid>> GetRenterResponseTimeoutItemIdsAsync(
+    DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
+    Task.FromResult<IReadOnlyList<Guid>>([]);
+
+    public Task<IReadOnlyList<Guid>> GetDisputedItemIdsAsync(
+        int skip, int take, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Guid>>([]);
+
+    public Task<IReadOnlyList<Guid>> GetSettlementReadyItemIdsAsync(
+        int batchSize, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Guid>>([]);
+
     public Task<IReadOnlyList<RenterCalendarItemRecord>> GetRenterCalendarItemsAsync(
         Guid renterId,
         DateOnly monthStart,

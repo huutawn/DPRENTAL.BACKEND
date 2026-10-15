@@ -35,6 +35,7 @@ public static class KafkaContractSpec
         public const string LatePaymentRefundRequested = "LatePaymentRefundRequested";
         public const string InvoicePaid = "InvoicePaid";
         public const string RefundCompleted = "RefundCompleted";
+        public const string RentalSettled = "RentalSettled";
         public const string ReturnedUnitsApplied = "ReturnedUnitsApplied";
         public const string ReturnedUnitsRejected = "ReturnedUnitsRejected";
         public const string DeadLetter = "DeadLetter";

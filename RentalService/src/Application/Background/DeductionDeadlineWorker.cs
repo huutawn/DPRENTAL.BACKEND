@@ -43,7 +43,10 @@ public sealed class DeductionDeadlineWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var service = scope.ServiceProvider.GetRequiredService<IDeductionService>();
         int count = await service.ProcessDeductionTimeoutsAsync(cancellationToken);
-        if (count > 0) _logger.LogInformation("DeductionDeadlineWorker finalized {Count} items", count);
+        var responses = scope.ServiceProvider.GetRequiredService<IDeductionResponseService>();
+        count += await responses.ProcessRenterResponseTimeoutsAsync(cancellationToken);
+        count += await service.ScheduleReadySettlementsAsync(cancellationToken);
+        if (count > 0) _logger.LogInformation("DeductionDeadlineWorker processed {Count} deadlines and settlement schedules", count);
         return count;
     }
 }

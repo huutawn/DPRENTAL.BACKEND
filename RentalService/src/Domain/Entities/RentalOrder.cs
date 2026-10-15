@@ -383,6 +383,7 @@ public class RentalOrder
                 itemDto.Assignments,
                 itemDto.ListingSnapshot);
 
+            item.RentalOrder = order;
             order._items.Add(item);
         }
 
@@ -420,6 +421,7 @@ public class RentalOrder
         {
             throw new InvalidOperationException($"RentalItem '{item.Id}' already exists in order.");
         }
+        item.RentalOrder = this;
         _items.Add(item);
     }
 

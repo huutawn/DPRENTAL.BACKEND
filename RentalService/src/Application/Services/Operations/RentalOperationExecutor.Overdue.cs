@@ -56,6 +56,7 @@ public sealed partial class RentalOperationExecutor
                 response.Units is not { Count: 1 } ||
                 response.Units[0].AllocationId != unit.AllocationId ||
                 response.Units[0].AssetId != unit.AssetId ||
+                !string.Equals(response.Units[0].Status, "PROTECTED", StringComparison.OrdinalIgnoreCase) ||
                 string.IsNullOrWhiteSpace(response.Units[0].OverdueProtectionRef))
             {
                 var invalid = Error.ServiceUnavailable("INVALID_OVERDUE_RESPONSE", "Inventory trả thông tin bảo vệ quá hạn không hợp lệ.");

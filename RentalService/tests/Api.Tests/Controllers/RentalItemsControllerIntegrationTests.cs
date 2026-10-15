@@ -216,7 +216,7 @@ public sealed class RentalItemsControllerIntegrationTests
     }
 
     [Fact]
-    public async Task Accept_WithValidTokenAndKey_Returns200OK()
+    public async Task Accept_WithValidTokenAndKey_Returns202Accepted()
     {
         Guid supplierId = Guid.NewGuid();
         string dbName = Guid.NewGuid().ToString("N");

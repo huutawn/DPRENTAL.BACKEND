@@ -10,10 +10,11 @@ namespace Dprental.RentalService.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("items/{itemId:guid}/deductions")]
-public sealed class RentalDeductionsController(IDeductionService deductions, IRentalCallerContext caller) : ControllerBase
+public sealed class RentalDeductionsController(IDeductionService deductions,
+    IDeductionResponseService responses, IRentalCallerContext caller) : ControllerBase
 {
-    /// <summary>Supplier submits one deposit deduction proposal after all assigned assets are returned.</summary>
-    /// <remarks>Requires Idempotency-Key. The total deduction is for the RentalItem; affected asset IDs identify damaged units and do not receive invented per-unit amounts.</remarks>
+    /// <summary>Nhà cung cấp gửi đề nghị khấu trừ tiền cọc sau khi đã thu hồi đủ các máy.</summary>
+    /// <remarks>Cần header Idempotency-Key. Số tiền khấu trừ áp dụng cho toàn bộ mục thuê; danh sách AssetId chỉ xác định những máy bị hỏng, không chia tiền khấu trừ cho từng máy.</remarks>
     [HttpPost]
     [ProducesResponseType(typeof(SubmitDeductionResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
@@ -26,6 +27,43 @@ public sealed class RentalDeductionsController(IDeductionService deductions, IRe
         [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey, CancellationToken cancellationToken)
     {
         var result = await deductions.SubmitAsync(itemId, caller, request, idempotencyKey ?? string.Empty, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Người thuê chấp nhận hoặc khiếu nại đề nghị khấu trừ tiền cọc.</summary>
+    /// <remarks>Cần header Idempotency-Key. Nếu khiếu nại, phải nhập lý do và có thể gửi thêm MediaId làm bằng chứng.</remarks>
+    [HttpPost("response")]
+    [ProducesResponseType(typeof(RespondDeductionResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> Respond(Guid itemId, [FromBody] RespondDeductionRequest request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey, CancellationToken cancellationToken)
+    {
+        var result = await responses.RespondAsync(itemId, caller, request,
+            idempotencyKey ?? string.Empty, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Quản trị viên xem đề nghị khấu trừ, khiếu nại và bằng chứng thu hồi của từng máy.</summary>
+    /// <remarks>Chỉ quản trị viên hệ thống được xem bằng chứng khiếu nại riêng tư.</remarks>
+    [HttpGet("dispute")]
+    [ProducesResponseType(typeof(DisputeDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GetDispute(Guid itemId, CancellationToken cancellationToken)
+    {
+        var result = await responses.GetDisputeDetailAsync(itemId, caller, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Quản trị viên chốt số tiền khấu trừ sau khi người thuê khiếu nại.</summary>
+    /// <remarks>Cần header Idempotency-Key. Số tiền chốt không được vượt đề nghị của nhà cung cấp hoặc tổng tiền cọc của mục thuê.</remarks>
+    [HttpPost("dispute/resolution")]
+    [ProducesResponseType(typeof(ResolveDisputeResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> Resolve(Guid itemId, [FromBody] ResolveDisputeRequest request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey, CancellationToken cancellationToken)
+    {
+        var result = await responses.ResolveDisputeAsync(itemId, caller, request,
+            idempotencyKey ?? string.Empty, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 }

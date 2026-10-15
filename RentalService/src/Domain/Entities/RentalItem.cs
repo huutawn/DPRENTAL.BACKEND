@@ -132,7 +132,7 @@ public partial class RentalItem
         _unitAssignments.Any(u => u.Status == RentalUnitAssignmentStatus.ReturnedDamaged);
 
     [ForeignKey(nameof(RentalOrderId))]
-    public RentalOrder? RentalOrder { get; private set; }
+    public RentalOrder? RentalOrder { get; internal set; }
 
     private readonly List<RentalUnitAssignment> _unitAssignments = [];
     public IReadOnlyCollection<RentalUnitAssignment> UnitAssignments => _unitAssignments.AsReadOnly();

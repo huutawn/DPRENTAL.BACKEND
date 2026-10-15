@@ -25,7 +25,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Dprental.RentalService.Domain.IRepositories;
+using Dprental.RentalService.Application.Kafka.Configuration;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Api.Tests.Cart;
+using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Api.Tests.Returns;
 
@@ -74,16 +77,11 @@ public sealed class ReturnTests : IAsyncLifetime
     private static RentalCallerContext Caller(Guid id) => RentalCallerContext.FromClaimsPrincipal(
         new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", id.ToString())], "test")));
 
-    private ReturnService Service(RentalServiceDbContext db, IRentalMediaClient? media = null, IConfiguration? configuration = null)
-    {
-        var mockProducer = new Mock<IInventoryCommandProducer>();
-        mockProducer.Setup(x => x.EnqueueApplyReturnedUnitsAsync(It.IsAny<ApplyReturnedUnitsCommandPayload>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "ApplyReturnedUnits", "inventory.allocation.commands.v1", "key")));
-        return new(
-            new RentalOrderRepository(db), new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
-            db, media ?? Mock.Of<IRentalMediaClient>(), _clock, new OutboxRepository(db), configuration ?? Configuration(),
-            mockProducer.Object);
-    }
+    private ReturnService Service(RentalServiceDbContext db, IRentalMediaClient? media = null, IConfiguration? configuration = null) => new(
+        new RentalOrderRepository(db), new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
+        db, media ?? Mock.Of<IRentalMediaClient>(), _clock, new OutboxRepository(db), configuration ?? Configuration(),
+        new InventoryCommandProducer(new KafkaOutboxWriter(new OutboxRepository(db)),
+            Options.Create(new KafkaOptions { Enabled = true }), _clock));
     private async Task<RentalItem> SeedAsync(int quantity = 2)
     {
         var order = NewOrder(quantity);
@@ -165,7 +163,8 @@ public sealed class ReturnTests : IAsyncLifetime
             var replay = await Service(db).RecordReturnAsync(item.Id, Caller(item.SupplierId), Request(units[1].Id), "last");
             Assert.Equal(saved, replay.Value);
             Assert.Equal(2, await db.ReturnRecords.CountAsync());
-            Assert.Equal(2, await db.RentalOutboxMessages.CountAsync());
+            Assert.Equal(4, await db.RentalOutboxMessages.CountAsync());
+            Assert.Equal(2, await db.RentalOperationReceipts.CountAsync(r => r.Action == "RecordReturn"));
             Assert.Equal(2, await db.RentalOperationReceipts.CountAsync(r => r.Action == RentalItem.ApplyReturnedUnitsAction));
             var pending = await new OperationReceiptRepository(db)
                 .GetPendingOperationDescriptorsExcludingActionsAsync(_clock.GetUtcNow(), 50,
@@ -189,7 +188,7 @@ public sealed class ReturnTests : IAsyncLifetime
         Assert.Single(results, r => r.IsSuccess);
         await using var check = NewDb();
         Assert.Equal(1, await check.ReturnRecords.CountAsync());
-        Assert.Equal(1, await check.RentalOutboxMessages.CountAsync());
+        Assert.Equal(2, await check.RentalOutboxMessages.CountAsync());
     }
 
     [Fact]

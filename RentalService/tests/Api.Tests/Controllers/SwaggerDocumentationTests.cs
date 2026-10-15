@@ -34,11 +34,12 @@ public sealed class SwaggerDocumentationTests
             {
                 operationCount++;
                 Assert.False(string.IsNullOrWhiteSpace(operation.Value.GetProperty("summary").GetString()));
-                Assert.False(string.IsNullOrWhiteSpace(operation.Value.GetProperty("description").GetString()));
+                Assert.True(operation.Value.TryGetProperty("description", out var description) &&
+                    !string.IsNullOrWhiteSpace(description.GetString()), $"Missing description: {operation.Name} {path.Name}");
                 Assert.True(operation.Value.GetProperty("responses").TryGetProperty("500", out _));
             }
         }
-        Assert.Equal(13, operationCount);
+        Assert.Equal(17, operationCount);
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/returns", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/deductions", out _));
         Assert.False(paths.TryGetProperty("/rental/cart", out _));
@@ -47,6 +48,8 @@ public sealed class SwaggerDocumentationTests
         Assert.False(paths.TryGetProperty("/api/v1/rental/internal/orders/{orderId}/operations/{operationId}/replay", out _));
         var checkoutResponses = paths.GetProperty("/api/v1/rental/checkout").GetProperty("post").GetProperty("responses");
         Assert.True(checkoutResponses.TryGetProperty("202", out _));
+        Assert.True(checkoutResponses.TryGetProperty("400", out _));
+        Assert.True(checkoutResponses.TryGetProperty("409", out _));
         Assert.True(checkoutResponses.TryGetProperty("503", out _));
         var cart = paths.GetProperty("/api/v1/rental/cart");
         Assert.True(cart.GetProperty("delete").GetProperty("responses").TryGetProperty("404", out _));

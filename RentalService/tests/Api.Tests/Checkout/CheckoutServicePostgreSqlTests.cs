@@ -1,11 +1,8 @@
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.DTOs.Checkout;
-using Dprental.RentalService.Application.DTOs.Inventory;
-using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.Kafka.Configuration;
 using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Options;
-using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;
@@ -24,7 +21,6 @@ namespace Dprental.RentalService.Api.Tests.Checkout;
 /// </summary>
 public sealed class CheckoutServicePostgreSqlTests
 {
-    private static readonly System.Text.Json.JsonSerializerOptions CamelCaseJsonOptions = new() { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase };
     // 10:00 ngày 09/10/2026 giờ Việt Nam.
     private static readonly DateTimeOffset Now = new(2026, 10, 9, 3, 0, 0, TimeSpan.Zero);
     private const string Key = "checkout-key-1";
@@ -36,11 +32,9 @@ public sealed class CheckoutServicePostgreSqlTests
     private readonly Guid _brandId = Guid.NewGuid();
     private readonly FakeInventoryListingClient _listings = new();
     private readonly FakeCatalogReferenceClient _catalog = new();
-    private readonly FakeInventoryRentalClient _inventory = new();
-    private readonly FakePaymentRentalClient _payment = new();
 
     [Fact]
-    public async Task Submit_ConcurrentAndRepeatedSameKey_CreatesOnePayableOrder()
+    public async Task Submit_ConcurrentAndRepeatedSameKey_CreatesOnePendingOperation()
     {
         if (!await PostgresTestDatabaseHelper.IsPostgreSqlAvailableAsync())
         {
@@ -67,34 +61,23 @@ public sealed class CheckoutServicePostgreSqlTests
                 true,
                 7_000_000m);
 
-            CheckoutResult[] concurrent = await Task.WhenAll(
+            var concurrent = await Task.WhenAll(
                 Task.Run(() => SubmitAsync(options, locks, request)),
                 Task.Run(() => SubmitAsync(options, locks, request)));
-            CheckoutResult repeated = await SubmitAsync(options, locks, request);
+            var repeated = await SubmitAsync(options, locks, request);
 
             Assert.All(concurrent, r => Assert.True(r.IsSuccess, r.Error.Code));
-            Assert.Single(concurrent, r => r.IsReplay);
             Assert.True(repeated.IsSuccess, repeated.Error.Code);
-            Assert.True(repeated.IsReplay);
+            Assert.All(concurrent, r => Assert.Equal(repeated.Value.OperationId, r.Value.OperationId));
 
             await using RentalServiceDbContext context = new(options);
-            RentalOrder order = await context.RentalOrders
-                .Include(o => o.Items).ThenInclude(i => i.UnitAssignments)
-                .SingleAsync();
-
-            Assert.All(concurrent, r => Assert.Equal(order.Id, r.Order!.Id));
-            Assert.Equal(order.Id, repeated.Order!.Id);
-            Assert.Equal("DH-2026-000001", order.OrderCode);
-            Assert.Equal(RentalOrderStatus.PendingPayment, order.Status);
-            Assert.Equal(Now.AddMinutes(30), order.PaymentDeadline);
-            Assert.Equal("INV-1", order.InvoiceRef);
-            Assert.Equal(7_000_000m, order.TotalPayableAmount);
-            Assert.Equal(2, Assert.Single(order.Items).UnitAssignments.Count);
-            Assert.Equal(0, await context.RentalCartItems.CountAsync());
-
-            Assert.Single(_inventory.HoldRequests);
-            Assert.Empty(_inventory.Releases);
-            Assert.Single(_payment.InvoiceRequests);
+            var operation = await context.RentalCheckoutOperations.SingleAsync();
+            Assert.Equal(repeated.Value.OperationId, operation.OperationId);
+            Assert.Equal(CheckoutOperationStatus.Processing, operation.Status);
+            Assert.Equal(Now.AddMinutes(30), operation.HoldExpiresAt);
+            Assert.Single(await context.RentalOutboxMessages.Where(m => m.MessageType == "CreateHold").ToListAsync());
+            Assert.Empty(await context.RentalOrders.ToListAsync());
+            Assert.Single(await context.RentalCartItems.ToListAsync());
         }
         finally
         {
@@ -136,7 +119,7 @@ public sealed class CheckoutServicePostgreSqlTests
         return cartItemId;
     }
 
-    private async Task<CheckoutResult> SubmitAsync(
+    private async Task<Dprental.RentalService.Common.Result<CheckoutOperationAcceptedResponse>> SubmitAsync(
         DbContextOptions<RentalServiceDbContext> options,
         PostgresOrderLockManager locks,
         CheckoutRequest request)
@@ -148,7 +131,7 @@ public sealed class CheckoutServicePostgreSqlTests
         OutboxRepository outbox = new(context);
         FixedTimeProvider clock = new(Now);
         InventoryCommandProducer inventoryCommands = new(outbox, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), clock);
-        CheckoutOrderWriter writer = new(orders, carts, new PostgresOrderCodeGenerator(context), context, NullLogger<CheckoutOrderWriter>.Instance);
+
 
         CheckoutService service = new(
             new CheckoutPreparationService(
@@ -170,54 +153,6 @@ public sealed class CheckoutServicePostgreSqlTests
             context,
             clock);
 
-        var accepted = await service.SubmitAsync(new(_renterId, true), request, Key);
-        if (accepted.IsFailure)
-        {
-            return CheckoutResult.Failure(accepted.Error);
-        }
-
-        string operationId = CheckoutRules.DeriveOperationId(_renterId, Key);
-        var op = await operations.GetByOperationIdAsync(operationId);
-        if (op is null) return CheckoutResult.Failure(CheckoutErrors.OrderNotSaved);
-        Console.WriteLine($"SUBMIT: OpId={op.OperationId}, ExpectedOrderId={op.ExpectedRentalOrderId}, Status={op.Status}");
-        await using (await locks.AcquireOrderLockAsync(op.ExpectedRentalOrderId, TimeSpan.FromSeconds(10)))
-        {
-            var existingOrder = await orders.GetByIdAsync(op.ExpectedRentalOrderId);
-            if (existingOrder is not null)
-            {
-                return CheckoutResult.Success(existingOrder, isReplay: true);
-            }
-            var plan = System.Text.Json.JsonSerializer.Deserialize<CheckoutPlan>(op.PreparationSnapshotJson, CamelCaseJsonOptions)!;
-            var heldLines = plan.Lines.Select(l =>
-            {
-                var rentalItemId = Guid.NewGuid();
-                var assignedAssets = Enumerable.Range(0, l.Quantity)
-                    .Select(_ => new AssignedAssetDto(Guid.NewGuid(), Guid.NewGuid(), "Held"))
-                    .ToList();
-                return new CheckoutHeldLine(l, rentalItemId, $"rental-item:{rentalItemId}", assignedAssets);
-            }).ToList();
-
-            var orderResult = await writer.CreateOrderAsync(plan, heldLines, op.OperationId, op.ExpectedRentalOrderId, op.HoldExpiresAt, clock.GetUtcNow());
-            if (orderResult.IsFailure)
-            {
-                op.MarkFailed(orderResult.Error.Code, orderResult.Error.Message, clock.GetUtcNow());
-                await operations.UpdateAsync(op);
-                await context.SaveChangesAsync();
-                return CheckoutResult.Failure(orderResult.Error);
-            }
-
-            var order = orderResult.Value;
-            bool isReplay = order.InvoiceRef != null;
-            if (!isReplay)
-            {
-                order.AttachInvoice("INV-1", clock.GetUtcNow());
-                op.MarkSucceeded(clock.GetUtcNow(), invoiceStatus: "Ready");
-                await orders.UpdateAsync(order);
-                await operations.UpdateAsync(op);
-                await context.SaveChangesAsync();
-            }
-
-            return CheckoutResult.Success(order, isReplay: isReplay);
-        }
+        return await service.SubmitAsync(new(_renterId, true), request, Key);
     }
 }
