@@ -209,6 +209,8 @@ public sealed partial class EquipmentListingRepository
 
         if (hasInterval)
         {
+            var today = BusinessDateTime.ToVietnamDate(criteria.AvailabilityEvaluationUtc);
+            commonParams.Add(new NpgsqlParameter("pToday", today));
             commonParams.Add(new NpgsqlParameter("pAvailFrom", criteria.AvailabilityFrom!.Value));
             commonParams.Add(new NpgsqlParameter("pAvailTo", criteria.AvailabilityTo!.Value));
             commonParams.Add(new NpgsqlParameter("pAllocatedStatus", (int)AllocationStatus.Allocated));
@@ -229,11 +231,15 @@ public sealed partial class EquipmentListingRepository
                       AND NOT EXISTS (
                           SELECT 1 FROM "inventory"."asset_allocations" al
                           WHERE al.asset_id = a.id
-                            AND al.start_date <= @pAvailTo
-                            AND al.end_date >= @pAvailFrom
                             AND (
-                                al.status = @pAllocatedStatus
-                                OR (al.status = @pHeldStatus AND al.hold_expires_at > @pEvaluationUtc)
+                                (al.start_date <= @pAvailTo AND al.end_date >= @pAvailFrom
+                                 AND (al.status = @pAllocatedStatus OR (al.status = @pHeldStatus AND al.hold_expires_at > @pEvaluationUtc)))
+                                OR
+                                (al.status = @pAllocatedStatus
+                                 AND al.handed_over_at IS NOT NULL
+                                 AND al.returned_at IS NULL
+                                 AND al.end_date < @pToday
+                                 AND @pAvailTo >= al.start_date)
                             )
                       )
                 ), 0)
@@ -261,11 +267,15 @@ public sealed partial class EquipmentListingRepository
                       AND NOT EXISTS (
                           SELECT 1 FROM "inventory"."asset_allocations" al
                           WHERE al.asset_id = a.id
-                            AND al.start_date <= @pToday
-                            AND al.end_date >= @pToday
                             AND (
-                                al.status = @pAllocatedStatus
-                                OR (al.status = @pHeldStatus AND al.hold_expires_at > @pEvaluationUtc)
+                                (al.start_date <= @pToday AND al.end_date >= @pToday
+                                 AND (al.status = @pAllocatedStatus OR (al.status = @pHeldStatus AND al.hold_expires_at > @pEvaluationUtc)))
+                                OR
+                                (al.status = @pAllocatedStatus
+                                 AND al.handed_over_at IS NOT NULL
+                                 AND al.returned_at IS NULL
+                                 AND al.end_date < @pToday
+                                 AND al.start_date <= @pToday)
                             )
                       )
                 ), 0)

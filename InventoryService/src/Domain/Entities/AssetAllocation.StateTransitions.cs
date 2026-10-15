@@ -284,6 +284,11 @@ public sealed partial class AssetAllocation
             return Error.Validation("INVALID_STATUS_TRANSITION", $"Chỉ có thể giải phóng khi đang ở trạng thái Allocated. Trạng thái hiện tại: {Status}.");
         }
 
+        if (HandedOverAt.HasValue && !ReturnedAt.HasValue)
+        {
+            return Error.Conflict("ALLOCATION_ALREADY_HANDED_OVER", "Máy đã bàn giao nhưng chưa trả không được giải phóng bằng release thông thường; phải đi qua quy trình return.");
+        }
+
         if (string.IsNullOrWhiteSpace(reason))
         {
             return Error.Validation("REASON_REQUIRED", "Cần cung cấp lý do khi giải phóng lượt phân bổ.");
@@ -305,6 +310,130 @@ public sealed partial class AssetAllocation
             now: now,
             actor: actor,
             reason: trimmedReason,
+            previousHoldExpiresAt: null,
+            newHoldExpiresAt: null,
+            operationKey: operationKey,
+            requestFingerprint: fingerprint);
+
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Ghi nhận bàn giao tài sản cho người thuê (Allocated -> Allocated).
+    /// </summary>
+    public Result Handover(DateTimeOffset handedOverAt, DateTimeOffset now, string actor = "system", string? operationKey = null)
+    {
+        if (string.IsNullOrWhiteSpace(actor) || actor.Trim().Length > 200)
+        {
+            return Error.Validation("ACTOR_REQUIRED", "Actor không hợp lệ.");
+        }
+
+        var normalizedHandedOverAt = BusinessDateTime.NormalizeUtc(handedOverAt);
+        var replay = CheckReplay(operationKey, AllocationOperationType.Handover, [actor.Trim(), normalizedHandedOverAt], out var fingerprint);
+        if (replay is not null) return replay;
+
+        if (IsTerminalState())
+        {
+            return Error.Conflict("ALLOCATION_IN_TERMINAL_STATE", $"Không thể bàn giao lượt phân bổ đã ở trạng thái kết thúc ({Status}).");
+        }
+
+        if (Status != AllocationStatus.Allocated)
+        {
+            return Error.Validation("INVALID_STATUS_TRANSITION", $"Chỉ có thể bàn giao khi ở trạng thái Allocated. Trạng thái hiện tại: {Status}.");
+        }
+
+        if (HandedOverAt.HasValue)
+        {
+            if (HandedOverAt.Value == normalizedHandedOverAt)
+            {
+                return Result.Success();
+            }
+            return Error.Conflict("ALREADY_HANDED_OVER", "Tài sản đã được ghi nhận bàn giao trước đó với thời điểm khác.");
+        }
+
+        if (handedOverAt > now.AddMinutes(5))
+        {
+            return Error.Validation("INVALID_HANDOVER_TIME", "Thời điểm bàn giao không thể ở tương lai.");
+        }
+
+        HandedOverAt = normalizedHandedOverAt;
+        UpdatedAt = BusinessDateTime.NormalizeUtc(now);
+
+        AddTransition(
+            operationType: AllocationOperationType.Handover,
+            fromStatus: AllocationStatus.Allocated,
+            toStatus: AllocationStatus.Allocated,
+            now: now,
+            actor: actor,
+            reason: "Handed over to renter",
+            previousHoldExpiresAt: null,
+            newHoldExpiresAt: null,
+            operationKey: operationKey,
+            requestFingerprint: fingerprint);
+
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Ghi nhận hoàn trả tài sản (Allocated -> Released).
+    /// </summary>
+    public Result Return(DateTimeOffset returnedAt, string condition, DateTimeOffset now, string actor = "system", string? operationKey = null)
+    {
+        if (string.IsNullOrWhiteSpace(actor) || actor.Trim().Length > 200)
+        {
+            return Error.Validation("ACTOR_REQUIRED", "Actor không hợp lệ.");
+        }
+
+        if (string.IsNullOrWhiteSpace(condition))
+        {
+            return Error.Validation("CONDITION_REQUIRED", "Tình trạng hoàn trả không được để trống.");
+        }
+
+        var normalizedReturnedAt = BusinessDateTime.NormalizeUtc(returnedAt);
+        var replay = CheckReplay(operationKey, AllocationOperationType.Return, [actor.Trim(), condition.Trim(), normalizedReturnedAt], out var fingerprint);
+        if (replay is not null) return replay;
+
+        if (IsTerminalState())
+        {
+            return Error.Conflict("ALLOCATION_IN_TERMINAL_STATE", $"Không thể hoàn trả lượt phân bổ đã ở trạng thái kết thúc ({Status}).");
+        }
+
+        if (Status != AllocationStatus.Allocated)
+        {
+            return Error.Validation("INVALID_STATUS_TRANSITION", $"Chỉ có thể hoàn trả khi đang ở trạng thái Allocated. Trạng thái hiện tại: {Status}.");
+        }
+
+        if (!HandedOverAt.HasValue)
+        {
+            return Error.Conflict("NOT_HANDED_OVER", "Không thể hoàn trả tài sản chưa được bàn giao.");
+        }
+
+        if (ReturnedAt.HasValue)
+        {
+            return Error.Conflict("ALREADY_RETURNED", "Tài sản đã được ghi nhận hoàn trả trước đó.");
+        }
+
+        if (normalizedReturnedAt < HandedOverAt.Value)
+        {
+            return Error.Validation("INVALID_RETURN_TIME", "Thời điểm hoàn trả không thể trước thời điểm bàn giao.");
+        }
+
+        if (returnedAt > now.AddMinutes(5))
+        {
+            return Error.Validation("INVALID_RETURN_TIME", "Thời điểm hoàn trả không thể ở tương lai.");
+        }
+
+        ReturnedAt = normalizedReturnedAt;
+        Status = AllocationStatus.Released;
+        UpdatedAt = BusinessDateTime.NormalizeUtc(now);
+
+        AddTransition(
+            operationType: AllocationOperationType.Return,
+            fromStatus: AllocationStatus.Allocated,
+            toStatus: AllocationStatus.Released,
+            now: now,
+            actor: actor,
+            reason: $"Returned ({condition.Trim()})",
             previousHoldExpiresAt: null,
             newHoldExpiresAt: null,
             operationKey: operationKey,

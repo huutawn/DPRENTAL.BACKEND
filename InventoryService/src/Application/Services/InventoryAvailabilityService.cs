@@ -446,24 +446,32 @@ public sealed class InventoryAvailabilityService : IInventoryAvailabilityService
 
         foreach (var alloc in asset.Allocations)
         {
-            if (!AssetAvailabilityPolicy.OccupiesCalendar(alloc, nowUtc))
+            var display = AssetAvailabilityPolicy.GetDisplayOccupiedInterval(alloc, monthStart, monthEnd, nowUtc);
+            if (display.HasValue)
             {
-                continue;
+                rawRanges.Add((display.Value.StartDate, display.Value.EndDate));
             }
 
-            if (alloc.RentalPeriod.StartDate <= monthEnd && alloc.RentalPeriod.EndDate >= monthStart)
+            if (alloc.Status == AllocationStatus.Held &&
+                alloc.HoldExpiresAt.HasValue &&
+                alloc.HoldExpiresAt.Value > nowUtc)
             {
-                var s = alloc.RentalPeriod.StartDate < monthStart ? monthStart : alloc.RentalPeriod.StartDate;
-                var e = alloc.RentalPeriod.EndDate > monthEnd ? monthEnd : alloc.RentalPeriod.EndDate;
-                rawRanges.Add((s, e));
-
-                if (alloc.Status == AllocationStatus.Held &&
-                    alloc.HoldExpiresAt.HasValue &&
-                    alloc.HoldExpiresAt.Value > nowUtc)
+                if (nearestHoldExpiry is null || alloc.HoldExpiresAt.Value < nearestHoldExpiry.Value)
                 {
-                    if (nearestHoldExpiry is null || alloc.HoldExpiresAt.Value < nearestHoldExpiry.Value)
+                    nearestHoldExpiry = alloc.HoldExpiresAt.Value;
+                }
+            }
+            else if (alloc.Status == AllocationStatus.Allocated &&
+                     alloc.HandedOverAt.HasValue &&
+                     !alloc.ReturnedAt.HasValue &&
+                     alloc.RentalPeriod.EndDate < DateOnly.MaxValue)
+            {
+                var overdueTransitionUtc = BusinessDateTime.StartOfDayUtc(alloc.RentalPeriod.EndDate.AddDays(1));
+                if (overdueTransitionUtc > nowUtc)
+                {
+                    if (nearestHoldExpiry is null || overdueTransitionUtc < nearestHoldExpiry.Value)
                     {
-                        nearestHoldExpiry = alloc.HoldExpiresAt.Value;
+                        nearestHoldExpiry = overdueTransitionUtc;
                     }
                 }
             }
@@ -498,16 +506,10 @@ public sealed class InventoryAvailabilityService : IInventoryAvailabilityService
 
         foreach (var alloc in asset.Allocations)
         {
-            if (!AssetAvailabilityPolicy.OccupiesCalendar(alloc, nowUtc))
+            var display = AssetAvailabilityPolicy.GetDisplayOccupiedInterval(alloc, windowStart, windowEnd, nowUtc);
+            if (display.HasValue)
             {
-                continue;
-            }
-
-            if (alloc.RentalPeriod.StartDate <= windowEnd && alloc.RentalPeriod.EndDate >= windowStart)
-            {
-                var s = alloc.RentalPeriod.StartDate < windowStart ? windowStart : alloc.RentalPeriod.StartDate;
-                var e = alloc.RentalPeriod.EndDate > windowEnd ? windowEnd : alloc.RentalPeriod.EndDate;
-                rawRanges.Add((s, e));
+                rawRanges.Add((display.Value.StartDate, display.Value.EndDate));
             }
         }
 

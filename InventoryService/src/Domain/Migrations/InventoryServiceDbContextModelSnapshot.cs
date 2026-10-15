@@ -129,9 +129,17 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("group_reference");
 
+                    b.Property<DateTimeOffset?>("HandedOverAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("handed_over_at");
+
                     b.Property<DateTimeOffset?>("HoldExpiresAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("hold_expires_at");
+
+                    b.Property<DateTimeOffset?>("ReturnedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("returned_at");
 
                     b.Property<string>("Notes")
                         .HasMaxLength(500)
@@ -204,7 +212,91 @@ namespace InventoryService.Domain.Migrations
                             t.HasCheckConstraint("ck_asset_allocations_source_reference", "length(btrim(\"source_system\")) > 0 AND length(btrim(\"external_reference\")) > 0");
 
                             t.HasCheckConstraint("ck_asset_allocations_status", "\"status\" IN (1, 2, 5, 6)");
+
+                            t.HasCheckConstraint("ck_asset_allocations_handover_return", "(\"returned_at\" IS NULL OR \"handed_over_at\" IS NOT NULL) AND (\"returned_at\" IS NULL OR \"returned_at\" >= \"handed_over_at\")");
                         });
+                });
+
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AllocationOperationReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("ClosesGroup")
+                        .HasColumnType("boolean")
+                        .HasColumnName("closes_group");
+
+                    b.Property<string>("CommandType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("command_type");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("error_code");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("error_message");
+
+                    b.Property<string>("GroupReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("group_reference");
+
+                    b.Property<string>("OperationKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("operation_key");
+
+                    b.Property<string>("PayloadFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("payload_fingerprint");
+
+                    b.Property<Guid>("RentalOrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("rental_order_id");
+
+                    b.Property<string>("ResultPayloadJson")
+                        .HasColumnType("text")
+                        .HasColumnName("result_payload_json");
+
+                    b.Property<string>("SourceSystem")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("source_system");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RentalOrderId")
+                        .HasDatabaseName("ix_allocation_operation_receipts_order");
+
+                    b.HasIndex("SourceSystem", "GroupReference")
+                        .HasDatabaseName("ix_allocation_operation_receipts_group")
+                        .HasFilter("\"group_reference\" IS NOT NULL");
+
+                    b.HasIndex("SourceSystem", "OperationKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_allocation_operation_receipts_source_opkey");
+
+                    b.ToTable("allocation_operation_receipts", "inventory");
                 });
 
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.CalendarBlock", b =>

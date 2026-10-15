@@ -160,6 +160,14 @@ public sealed class PostgresCalendarConcurrencyTests : IClassFixture<PostgresFix
             Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation,
             CancellationToken cancellationToken = default) =>
             inner.ExecuteGroupHoldAsync(sourceSystem, groupReference, listingId, operation, cancellationToken);
+
+        public Task<Result<T>> ExecuteAllocationCommandAsync<T>(
+            string sourceSystem,
+            string operationKey,
+            string groupReference,
+            Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation,
+            CancellationToken cancellationToken = default) =>
+            inner.ExecuteAllocationCommandAsync(sourceSystem, operationKey, groupReference, operation, cancellationToken);
     }
 
     [Fact]

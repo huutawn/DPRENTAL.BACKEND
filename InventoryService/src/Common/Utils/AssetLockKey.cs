@@ -41,4 +41,17 @@ public static class AssetLockKey
         byte[] hash = SHA256.HashData(input);
         return BinaryPrimitives.ReadInt64LittleEndian(hash);
     }
+
+    /// <summary>
+    /// Chuyển đổi bộ khóa (sourceSystem, operationKey) thành số nguyên 64-bit trong namespace "operation:".
+    /// </summary>
+    public static long FromOperationKey(string sourceSystem, string operationKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceSystem);
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationKey);
+
+        byte[] input = System.Text.Encoding.UTF8.GetBytes($"operation:{sourceSystem.Trim()}:{operationKey.Trim()}");
+        byte[] hash = SHA256.HashData(input);
+        return BinaryPrimitives.ReadInt64LittleEndian(hash);
+    }
 }

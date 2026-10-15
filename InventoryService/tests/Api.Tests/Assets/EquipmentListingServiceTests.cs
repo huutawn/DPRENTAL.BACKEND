@@ -182,6 +182,9 @@ public sealed class EquipmentListingServiceTests
 
         public Task<Result<T>> ExecuteGroupHoldAsync<T>(string sourceSystem, string groupReference, Guid listingId, Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation, CancellationToken cancellationToken = default) =>
             operation(new FakeWriteContext(listingId, _listings, _assets), cancellationToken);
+
+        public Task<Result<T>> ExecuteAllocationCommandAsync<T>(string sourceSystem, string operationKey, string groupReference, Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation, CancellationToken cancellationToken = default) =>
+            operation(new FakeWriteContext(null, _listings, _assets), cancellationToken);
     }
 
     private sealed class FakeCatalogClient : ICatalogServiceClient
