@@ -47,6 +47,12 @@ public static class CheckoutRules
             "N");
 
     /// <summary>
+    /// Mã nhóm máy của một dòng thuê bên Inventory (groupReference, cùng SourceSystem "rental").
+    /// Rental lưu mã này vào RentalItem.AllocationGroupId; các lệnh Kafka của Inventory cũng tìm nhóm theo mã này.
+    /// </summary>
+    public static string HoldGroupReference(Guid rentalItemId) => $"rental-item:{rentalItemId}";
+
+    /// <summary>
     /// Đổi khoảng ngày của dòng giỏ (ngày trả có tính) sang khoảng [từ, đến) của đơn hàng:
     /// giao 10, trả 12 thành [10, 13), tức 3 ngày thuê và Inventory giữ lịch các ngày 10, 11, 12.
     /// </summary>

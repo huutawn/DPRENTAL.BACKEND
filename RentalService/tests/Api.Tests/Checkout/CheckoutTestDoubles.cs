@@ -183,7 +183,7 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
 
 /// <summary>
 /// Inventory giả phục vụ bước chuẩn bị checkout: đọc thông tin máy (rental-snapshot) và hỏi lịch trống.
-/// ListingReadCount và AvailabilityCheckCount đếm số lần gọi Inventory, không phải số Listing hay số dòng.
+/// ListingReadCount đếm số lần gọi đọc Listing; AvailabilityCheckCount đếm số lần hỏi lịch (mỗi dòng một lần).
 /// </summary>
 internal sealed class FakeInventoryListingClient : IInventoryRentalClient
 {
@@ -210,35 +210,15 @@ internal sealed class FakeInventoryListingClient : IInventoryRentalClient
         CancellationToken ct = default)
     {
         ListingReadCount++;
-        RequestedListingIds.AddRange(request.Ids);
+        RequestedListingIds.AddRange(request.EquipmentListingIds);
         if (FailListingRead)
         {
             return Task.FromResult(Result.Failure<ListingRentalSnapshotsResponse>(Down));
         }
 
-        List<ListingRentalSnapshotDto> found = request.Ids.Where(Listings.ContainsKey).Select(id => Listings[id]).ToList();
-        List<Guid> notFound = request.Ids.Where(id => !Listings.ContainsKey(id)).ToList();
+        List<ListingRentalSnapshotDto> found = request.EquipmentListingIds.Where(Listings.ContainsKey).Select(id => Listings[id]).ToList();
+        List<Guid> notFound = request.EquipmentListingIds.Where(id => !Listings.ContainsKey(id)).ToList();
         return Task.FromResult(Result.Success(new ListingRentalSnapshotsResponse(found, notFound)));
-    }
-
-    public Task<Result<ListingAvailabilityBatchResponse>> CheckListingAvailabilityBatchAsync(
-        ListingAvailabilityBatchRequest request,
-        CancellationToken ct = default)
-    {
-        AvailabilityCheckCount++;
-        AvailabilityPeriods.AddRange(request.Lines.Select(l => (l.From, l.To)));
-        if (FailAvailabilityCheck)
-        {
-            return Task.FromResult(Result.Failure<ListingAvailabilityBatchResponse>(Down));
-        }
-
-        return Task.FromResult(Result.Success(new ListingAvailabilityBatchResponse(request.Lines
-            .Select(l =>
-            {
-                int available = AvailableQuantities.GetValueOrDefault(l.ListingId);
-                return new ListingAvailabilityBatchResult(l.ListingId, l.From, l.To, available, available >= l.Quantity);
-            })
-            .ToList())));
     }
 
     public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default)
@@ -260,7 +240,7 @@ internal sealed class FakeInventoryListingClient : IInventoryRentalClient
         CancellationToken ct = default)
     {
         AvailabilityCheckCount++;
-        AvailabilityPeriods.Add((request.From, request.To));
+        AvailabilityPeriods.Add((request.StartDate, request.EndDate));
         if (FailAvailabilityCheck)
         {
             return Task.FromResult(Result.Failure<ListingAvailabilityCheckResponse>(Down));
@@ -268,7 +248,8 @@ internal sealed class FakeInventoryListingClient : IInventoryRentalClient
 
         int available = AvailableQuantities.GetValueOrDefault(request.ListingId);
         return Task.FromResult(Result.Success(new ListingAvailabilityCheckResponse(
-            available, available >= request.Quantity, DateTimeOffset.UnixEpoch, request.From, request.To)));
+            request.ListingId, request.StartDate, request.EndDate, request.RequestedQuantity,
+            available, available >= request.RequestedQuantity)));
     }
 
     public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();

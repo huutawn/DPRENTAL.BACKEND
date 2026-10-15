@@ -59,15 +59,11 @@ public sealed class InventoryRentalCartReader(IInventoryRentalClient inventory) 
         DateOnly endDate,
         CancellationToken cancellationToken = default)
     {
-        Result<(DateOnly From, DateOnly To)> rentalDates = RentalInventoryDateAdapter.ToRentalDates(startDate, endDate);
-        if (rentalDates.IsFailure) return null;
+        if (startDate > endDate) return null;
 
+        // Giỏ và Inventory cùng tính ngày cuối có tính, nên gửi thẳng ngày của giỏ.
         Result<ListingAvailabilityCheckResponse> result = await inventory.CheckListingAvailabilityAsync(
-            new ListingAvailabilityCheckRequest(
-                listingId,
-                rentalDates.Value.From,
-                rentalDates.Value.To,
-                Quantity: 1),
+            new ListingAvailabilityCheckRequest(listingId, startDate, endDate, RequestedQuantity: 1),
             cancellationToken);
 
         if (result.IsFailure) throw DependencyFailure(result.Error);

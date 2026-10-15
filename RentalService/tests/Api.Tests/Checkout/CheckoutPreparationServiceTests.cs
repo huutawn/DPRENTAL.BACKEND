@@ -131,7 +131,8 @@ public sealed class CheckoutPreparationServiceTests
         // Đơn hàng lưu [từ, đến): ngày kết thúc lùi một ngày so với ngày trả trong giỏ.
         Assert.Equal(new DateOnly(2026, 10, 12), line.ExpectedStartDate);
         Assert.Equal(new DateOnly(2026, 10, 15), line.ExpectedEndDate);
-        Assert.Equal((new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 15)), Assert.Single(_inventory.AvailabilityPeriods));
+        // Inventory nhận ngày dùng máy cuối có tính, giống giỏ: 12, 13, 14.
+        Assert.Equal((new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 14)), Assert.Single(_inventory.AvailabilityPeriods));
         Assert.Equal(500_000m, line.DailyRate);
         Assert.Equal(0m, line.DepositPerUnit);
         Assert.Equal(3_000_000m, line.RentalAmount);
@@ -460,11 +461,13 @@ public sealed class CheckoutPreparationServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(2, result.Plan.Lines.Count);
-        // Một lần gọi cho Listing (hai dòng cùng Listing nên chỉ hỏi một mã), một lần gọi cho lịch của cả hai dòng.
+        // Một lần gọi cho Listing (hai dòng cùng Listing nên chỉ hỏi một mã); lịch thì mỗi dòng một lần.
         Assert.Equal(1, _inventory.ListingReadCount);
         Assert.Equal([_listingId], _inventory.RequestedListingIds);
-        Assert.Equal(1, _inventory.AvailabilityCheckCount);
-        Assert.Equal(2, _inventory.AvailabilityPeriods.Count);
+        Assert.Equal(2, _inventory.AvailabilityCheckCount);
+        Assert.Equal(
+            [(new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 14)), (new DateOnly(2026, 10, 20), new DateOnly(2026, 10, 21))],
+            _inventory.AvailabilityPeriods);
     }
 
     [Fact]
@@ -488,13 +491,24 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Fact]
-    public async Task Prepare_WhenInventoryOmitsTheAvailabilityOfALine_ReportsDependencyUnavailable()
+    public async Task Prepare_WhenInventoryAnswersAvailabilityForOtherDates_ReportsDependencyUnavailable()
     {
-        BrokenInventory inventory = new(_inventory) { DropAvailability = true };
+        BrokenInventory inventory = new(_inventory) { ShiftAvailabilityEndDate = true };
 
         CheckoutPreparationResult result = await CreateService(inventory: inventory).PrepareAsync(Renter(), Request());
 
         Assert.Equal(CheckoutErrors.DependencyUnavailable, result.Error);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenListingDisappearsBeforeAvailabilityCheck_ReportsListingUnavailable()
+    {
+        BrokenInventory inventory = new(_inventory) { AvailabilityListingNotFound = true };
+
+        CheckoutPreparationResult result = await CreateService(inventory: inventory).PrepareAsync(Renter(), Request());
+
+        Assert.Equal(CheckoutErrors.ItemsUnavailable, result.Error);
+        Assert.Equal(CheckoutLineIssueCode.ListingUnavailable, Assert.Single(result.LineIssues).Code);
     }
 
     /// <summary>Bọc Inventory giả để trả kết quả sai hợp đồng.</summary>
@@ -504,7 +518,9 @@ public sealed class CheckoutPreparationServiceTests
 
         public ListingRentalSnapshotDto? ExtraSnapshot { get; init; }
 
-        public bool DropAvailability { get; init; }
+        public bool ShiftAvailabilityEndDate { get; init; }
+
+        public bool AvailabilityListingNotFound { get; init; }
 
         public async Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default)
         {
@@ -519,14 +535,21 @@ public sealed class CheckoutPreparationServiceTests
                 : Result.Success(result.Value with { Items = [.. result.Value.Items, ExtraSnapshot] });
         }
 
-        public async Task<Result<ListingAvailabilityBatchResponse>> CheckListingAvailabilityBatchAsync(ListingAvailabilityBatchRequest request, CancellationToken ct = default)
+        public async Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default)
         {
-            Result<ListingAvailabilityBatchResponse> result = await inner.CheckListingAvailabilityBatchAsync(request, ct);
-            return DropAvailability ? Result.Success(new ListingAvailabilityBatchResponse([])) : result;
+            if (AvailabilityListingNotFound)
+            {
+                return Result.Failure<ListingAvailabilityCheckResponse>(
+                    Error.NotFound(InventoryContractSpec.ErrorCodes.ListingNotFound, "Listing không tồn tại."));
+            }
+
+            Result<ListingAvailabilityCheckResponse> result = await inner.CheckListingAvailabilityAsync(request, ct);
+            return ShiftAvailabilityEndDate
+                ? Result.Success(result.Value with { EndDate = result.Value.EndDate.AddDays(1) })
+                : result;
         }
 
         public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(string allocationGroupId, ConfirmAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();

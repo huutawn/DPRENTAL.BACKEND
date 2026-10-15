@@ -79,14 +79,17 @@ public sealed class CheckoutHoldOrchestratorTests
             Assert.Same(line, held.Line);
             Assert.NotEqual(Guid.Empty, held.RentalItemId);
             Assert.Equal(line.Quantity, held.AssignedAssets.Count);
-            Assert.False(string.IsNullOrWhiteSpace(held.AllocationGroupId));
+            // Mã nhóm Rental lưu chính là groupReference gửi Inventory.
+            Assert.Equal($"rental-item:{held.RentalItemId}", held.AllocationGroupId);
 
             Assert.Equal(line.EquipmentListingId, request.ListingId);
             Assert.Equal(line.Quantity, request.Quantity);
-            Assert.Equal(Start, request.From);
-            Assert.Equal(End, request.To);
-            Assert.Equal($"rental-item:{held.RentalItemId}", request.ExternalReference);
-            Assert.Equal(Now.AddMinutes(30), request.RequestedHoldExpiresAt);
+            // Đơn lưu [12, 15); Inventory nhận ngày dùng máy cuối có tính: 12 đến 14.
+            Assert.Equal(Start, request.StartDate);
+            Assert.Equal(End.AddDays(-1), request.EndDate);
+            Assert.Equal("rental", request.SourceSystem);
+            Assert.Equal($"rental-item:{held.RentalItemId}", request.GroupReference);
+            Assert.Equal(Now.AddMinutes(30), request.HoldExpiresAt);
         }
 
         Assert.Equal(3, result.HeldLines.Select(h => h.RentalItemId).Distinct().Count());

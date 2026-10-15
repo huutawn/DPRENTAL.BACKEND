@@ -87,7 +87,7 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
             return Error.Validation("INVALID_QUANTITY", "Quantity must be greater than zero.");
         }
 
-        if (command.Request.From > command.Request.To)
+        if (command.Request.StartDate > command.Request.EndDate)
         {
             return Error.Validation("INVALID_DATE_RANGE", "ExpectedStartDate cannot be after ExpectedEndDate.");
         }

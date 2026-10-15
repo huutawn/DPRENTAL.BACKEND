@@ -129,10 +129,11 @@ public sealed class KafkaConfigurationAndValidationTests
         var holdRequest = new CreateHoldRequest(
             ListingId: Guid.NewGuid(),
             Quantity: 2,
-            From: new DateOnly(2026, 10, 20),
-            To: new DateOnly(2026, 10, 25),
-            ExternalReference: "op-hold-1",
-            RequestedHoldExpiresAt: now.AddMinutes(30));
+            StartDate: new DateOnly(2026, 10, 20),
+            EndDate: new DateOnly(2026, 10, 24),
+            HoldExpiresAt: now.AddMinutes(30),
+            SourceSystem: "rental",
+            GroupReference: $"rental-item:{itemId}");
 
         var command = new CreateHoldCommandPayload(orderId, itemId, "op-hold-1", holdRequest);
 

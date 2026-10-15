@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Dprental.RentalService.Common.Enums;
 
 namespace Dprental.RentalService.Application.DTOs.Inventory;
@@ -14,75 +15,65 @@ public sealed record ListingRentalSnapshotDto(
     string Currency,
     string Status);
 
-// 2. CheckListingAvailability
+// 2. CheckListingAvailability: POST /equipment-listings/{listingId}/availability/check, đúng dạng Inventory.
+// EndDate là ngày dùng máy cuối cùng (có tính): thuê 18, 19, 20 thì gửi startDate 18, endDate 20.
+// ListingId nằm trên đường dẫn, không gửi trong body.
 public sealed record ListingAvailabilityCheckRequest(
-    Guid ListingId,
-    DateOnly From,
-    DateOnly To,
-    int Quantity);
+    [property: JsonIgnore] Guid ListingId,
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int RequestedQuantity);
 
 public sealed record ListingAvailabilityCheckResponse(
+    Guid ListingId,
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int RequestedQuantity,
     int AvailableQuantity,
-    bool IsAvailable,
-    DateTimeOffset EvaluatedAt,
-    DateOnly From,
-    DateOnly To);
+    bool IsAvailable);
 
-// 1b. GetListingRentalSnapshots (theo danh sách): checkout đọc mọi Listing của giỏ trong một lần gọi.
-// Dạng request ({ "ids": [...] }) và đường dẫn chưa chốt với Inventory.
+// 1b. GetListingRentalSnapshots (theo danh sách): POST /equipment-listings/batch, checkout đọc mọi Listing của giỏ trong một lần gọi.
+// Inventory nhận 1–100 mã, bỏ mã trùng và từ chối ô lạ.
 public sealed record ListingRentalSnapshotsRequest(
-    IReadOnlyList<Guid> Ids);
+    IReadOnlyList<Guid> EquipmentListingIds);
 
 public sealed record ListingRentalSnapshotsResponse(
     IReadOnlyList<ListingRentalSnapshotDto> Items,
     IReadOnlyList<Guid> MissingIds);
 
-// 2b. CheckListingAvailabilityBatch (theo danh sách): mỗi dòng có Listing, khoảng ngày [From, To) và số lượng riêng.
-public sealed record ListingAvailabilityBatchLine(
-    Guid ListingId,
-    DateOnly From,
-    DateOnly To,
-    int Quantity);
-
-public sealed record ListingAvailabilityBatchRequest(
-    IReadOnlyList<ListingAvailabilityBatchLine> Lines);
-
-public sealed record ListingAvailabilityBatchResult(
-    Guid ListingId,
-    DateOnly From,
-    DateOnly To,
-    int AvailableQuantity,
-    bool IsAvailable);
-
-public sealed record ListingAvailabilityBatchResponse(
-    IReadOnlyList<ListingAvailabilityBatchResult> Results);
-
-// 3. CreateHold
-// Inventory không kiểm tra phiên bản Listing khi giữ máy nên Rental không gửi ExpectedSnapshotVersion nữa.
-// Các ô còn lại vẫn lệch với Inventory (startDate/endDate, groupReference…), sẽ sửa riêng.
+// 3. CreateHold: POST /equipment-listings/{listingId}/holds, đúng dạng CreateListingHoldRequest của Inventory
+// (Inventory từ chối mọi ô lạ). EndDate là ngày dùng máy cuối (có tính); ListingId nằm trên đường dẫn.
+// Gửi lại cùng SourceSystem + GroupReference thì Inventory trả đúng nhóm máy cũ với IsReplay = true.
+// Các lệnh Kafka sau này của Inventory cũng tìm nhóm máy theo "rental" + "rental-item:{RentalItemId}".
 public sealed record CreateHoldRequest(
-    Guid ListingId,
+    [property: JsonIgnore] Guid ListingId,
     int Quantity,
-    DateOnly From,
-    DateOnly To,
-    string ExternalReference,
-    DateTimeOffset RequestedHoldExpiresAt);
+    DateOnly StartDate,
+    DateOnly EndDate,
+    DateTimeOffset HoldExpiresAt,
+    string SourceSystem,
+    string GroupReference,
+    string? Notes = null);
 
-public sealed record AssignedAssetDto(
-    Guid AllocationId,
+/// <summary>Một máy Inventory đã giữ (AllocationResponse bên Inventory, Rental chỉ đọc các ô cần).</summary>
+public sealed record HeldAllocationDto(
+    Guid Id,
     Guid AssetId,
     string Status);
 
 public sealed record CreateHoldResponse(
-    string AllocationGroupId,
-    IReadOnlyList<AssignedAssetDto> AssignedAssets,
-    DateTimeOffset HoldExpiresAt,
     Guid ListingId,
+    string SourceSystem,
+    string GroupReference,
     int Quantity,
-    DateOnly From,
-    DateOnly To,
-    bool IsReplay,
-    string AllocationStatus);
+    IReadOnlyList<HeldAllocationDto> Allocations,
+    bool IsReplay);
+
+/// <summary>Máy đã giữ cho một dòng checkout, dạng Rental dùng để lưu RentalUnitAssignment.</summary>
+public sealed record AssignedAssetDto(
+    Guid AllocationId,
+    Guid AssetId,
+    string Status);
 
 // 4. ExtendHold
 public sealed record ExtendHoldRequest(

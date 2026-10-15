@@ -21,10 +21,6 @@ public interface IInventoryRentalClient
         ListingRentalSnapshotsRequest request,
         CancellationToken ct = default);
 
-    Task<Result<ListingAvailabilityBatchResponse>> CheckListingAvailabilityBatchAsync(
-        ListingAvailabilityBatchRequest request,
-        CancellationToken ct = default);
-
     Task<Result<CreateHoldResponse>> CreateHoldAsync(
         CreateHoldRequest request,
         CancellationToken ct = default);

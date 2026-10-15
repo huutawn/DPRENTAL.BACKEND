@@ -148,7 +148,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     }
 
     /// <summary>
-    /// Đọc lại Listing và lịch trống của mọi dòng, mỗi việc một lần gọi Inventory theo danh sách.
+    /// Đọc lại mọi Listing trong một lần gọi Inventory, rồi hỏi lịch trống từng dòng (gọi song song).
     /// Lỗi của mọi dòng được gom lại để trả một lần, theo thứ tự dòng trong giỏ.
     /// </summary>
     private async Task<LineBuildOutcome> BuildLinesAsync(
@@ -188,35 +188,34 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             candidates.Add((item, listing, orderStartDate, orderEndDate));
         }
 
-        // 2. Một lần gọi hỏi lịch trống của mọi dòng còn lại; chống đặt trùng là việc của Inventory lúc hold.
-        Dictionary<(Guid ListingId, DateOnly From, DateOnly To), ListingAvailabilityBatchResult> availability = [];
-        if (candidates.Count > 0)
-        {
-            Result<ListingAvailabilityBatchResponse> availabilityResult = await _inventory.CheckListingAvailabilityBatchAsync(
-                new ListingAvailabilityBatchRequest(candidates
-                    .Select(c => new ListingAvailabilityBatchLine(c.Item.EquipmentListingId, c.From, c.To, c.Item.Quantity))
-                    .ToList()),
-                cancellationToken);
-            if (availabilityResult.IsFailure || availabilityResult.Value.Results is null)
-            {
-                return LineBuildOutcome.Unavailable;
-            }
-
-            foreach (ListingAvailabilityBatchResult result in availabilityResult.Value.Results)
-            {
-                availability[(result.ListingId, result.From, result.To)] = result;
-            }
-        }
+        // 2. Hỏi lịch trống từng dòng bằng API của Inventory, các dòng gọi song song.
+        // Giỏ và Inventory cùng tính ngày cuối có tính nên gửi thẳng ngày của giỏ. Chống đặt trùng là việc của Inventory lúc hold.
+        Result<ListingAvailabilityCheckResponse>[] availability = await Task.WhenAll(candidates.Select(c =>
+            _inventory.CheckListingAvailabilityAsync(
+                new ListingAvailabilityCheckRequest(
+                    c.Item.EquipmentListingId, c.Item.ExpectedStartDate, c.Item.ExpectedEndDate, c.Item.Quantity),
+                cancellationToken)));
 
         List<CheckoutPlanLine> lines = [];
-        foreach (var (item, listing, orderStartDate, orderEndDate) in candidates)
+        for (int i = 0; i < candidates.Count; i++)
         {
-            if (!availability.TryGetValue((item.EquipmentListingId, orderStartDate, orderEndDate), out ListingAvailabilityBatchResult? lineAvailability))
+            var (item, listing, orderStartDate, orderEndDate) = candidates[i];
+            Result<ListingAvailabilityCheckResponse> result = availability[i];
+            if (result.IsFailure && result.Error.Type == ErrorType.NotFound)
             {
-                // Inventory trả thiếu kết quả của một dòng đã hỏi.
+                // Listing vừa bị xóa giữa hai lần gọi.
+                issues.Add(new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.ListingUnavailable,
+                    "Thiết bị không còn cho thuê."));
+                continue;
+            }
+
+            if (result.IsFailure || !MatchesLine(result.Value, item))
+            {
+                // Inventory không phản hồi, hoặc trả kết quả của Listing/khoảng ngày khác với dòng đã hỏi.
                 return LineBuildOutcome.Unavailable;
             }
 
+            ListingAvailabilityCheckResponse lineAvailability = result.Value;
             if (!lineAvailability.IsAvailable || lineAvailability.AvailableQuantity < item.Quantity)
             {
                 issues.Add(new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.InsufficientAvailability,
@@ -284,6 +283,12 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             RentalPricingPolicy.CalculateRentalAmount(dailyRate, item.Quantity, rentalDays),
             RentalPricingPolicy.CalculateDepositAmount(CheckoutRules.DepositPerUnit, item.Quantity));
     }
+
+    private static bool MatchesLine(ListingAvailabilityCheckResponse response, RentalCartItem item) =>
+        response is not null &&
+        response.ListingId == item.EquipmentListingId &&
+        response.StartDate == item.ExpectedStartDate &&
+        response.EndDate == item.ExpectedEndDate;
 
     private static bool IsComplete(ListingRentalSnapshotDto listing) =>
         listing.OwnerUserId != Guid.Empty &&

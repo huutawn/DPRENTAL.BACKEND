@@ -49,25 +49,37 @@ public sealed class CheckoutHoldOrchestrator : ICheckoutHoldOrchestrator
         foreach (CheckoutPlanLine line in plan.Lines)
         {
             Guid rentalItemId = CheckoutRules.DeriveRentalItemId(plan.RenterId, checkoutOperationId.Trim(), line.CartItemId);
+            string groupReference = CheckoutRules.HoldGroupReference(rentalItemId);
+
+            // Đơn lưu [từ, đến); Inventory nhận ngày dùng máy cuối có tính.
+            (DateOnly startDate, DateOnly endDate) = RentalInventoryDateAdapter
+                .ToInventoryDates(line.ExpectedStartDate, line.ExpectedEndDate).Value;
             CreateHoldRequest request = new(
                 line.EquipmentListingId,
                 line.Quantity,
-                line.ExpectedStartDate,
-                line.ExpectedEndDate,
-                $"rental-item:{rentalItemId}",
-                holdExpiresAt);
+                startDate,
+                endDate,
+                holdExpiresAt,
+                InventoryContractSpec.SourceSystem,
+                groupReference);
 
             Result<CreateHoldResponse> result = await _inventory.CreateHoldAsync(request, cancellationToken);
 
             if (result.IsSuccess)
             {
-                held.Add(new(line, rentalItemId, result.Value.AllocationGroupId, result.Value.AssignedAssets));
-                if (result.Value.AssignedAssets.Count == line.Quantity)
+                CreateHoldResponse hold = result.Value;
+                List<AssignedAssetDto> assets = (hold.Allocations ?? [])
+                    .Select(a => new AssignedAssetDto(a.Id, a.AssetId, a.Status))
+                    .ToList();
+                // Mã nhóm máy Rental lưu chính là groupReference: Inventory tìm nhóm bằng mã này.
+                held.Add(new(line, rentalItemId, groupReference, assets));
+                if (assets.Count == line.Quantity &&
+                    string.Equals(hold.GroupReference, groupReference, StringComparison.Ordinal))
                 {
                     continue;
                 }
 
-                // Inventory trả sai số lượng máy: lỗi phía phụ thuộc, nhả luôn cả nhóm vừa giữ.
+                // Inventory trả sai số lượng máy hoặc sai nhóm: lỗi phía phụ thuộc, nhả luôn các nhóm vừa giữ.
                 await ReleaseAllLinesAsync(held);
                 return CheckoutHoldResult.DependencyFailed();
             }
@@ -83,6 +95,8 @@ public sealed class CheckoutHoldOrchestrator : ICheckoutHoldOrchestrator
 
     /// <summary>
     /// Nhả theo thứ tự ngược với lúc giữ. Không ném lỗi: nhóm nhả hỏng sẽ tự hết hạn theo HoldExpiresAt.
+    /// Hiện Inventory chưa có API nhả qua HTTP (chỉ có lệnh Kafka ReleaseAllocation), nên lời gọi này thất bại
+    /// và lượt giữ tự hết hạn sau 30 phút. Sẽ chuyển sang lệnh Kafka khi làm phần Kafka với Inventory.
     /// </summary>
     public async Task ReleaseAllLinesAsync(IReadOnlyList<CheckoutHeldLine> heldLines)
     {
@@ -115,9 +129,9 @@ public sealed class CheckoutHoldOrchestrator : ICheckoutHoldOrchestrator
             Conflict(line, CheckoutHoldConflictCode.InsufficientAvailability, "Thiết bị không còn đủ số lượng trống."),
         InventoryContractSpec.ErrorCodes.SnapshotVersionMismatch =>
             Conflict(line, CheckoutHoldConflictCode.ListingChanged, "Thông tin thiết bị vừa thay đổi. Vui lòng xem lại."),
-        InventoryContractSpec.ErrorCodes.ListingNotFound =>
+        InventoryContractSpec.ErrorCodes.ListingNotFound or InventoryContractSpec.ErrorCodes.ListingNotActive =>
             Conflict(line, CheckoutHoldConflictCode.ListingUnavailable, "Thiết bị không còn cho thuê."),
-        InventoryContractSpec.ErrorCodes.InvalidHoldExpiry =>
+        InventoryContractSpec.ErrorCodes.InvalidHoldExpiry or InventoryContractSpec.ErrorCodes.HoldExpiresAfterStart =>
             Conflict(line, CheckoutHoldConflictCode.StartDateTooSoon, "Ngày giao quá gần, không còn đủ thời gian chờ thanh toán."),
         InventoryContractSpec.ErrorCodes.HoldExpired or InventoryContractSpec.ErrorCodes.ExternalReferenceReused =>
             Conflict(line, CheckoutHoldConflictCode.OperationNotReusable, "Lần gửi này đã hết hiệu lực. Vui lòng gửi lại."),
