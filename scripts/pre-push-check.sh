@@ -47,6 +47,9 @@ fi
 printf 'Đang build %s (Release)...\n' "$SOLUTION_FILE"
 dotnet build "$SOLUTION_FILE" --configuration Release --nologo || fail "build thất bại; push đã bị chặn."
 
+printf 'Đang kiểm tra pending EF model changes...\n'
+dotnet dotnet-ef migrations has-pending-model-changes --project PaymentService/src/Domain/PaymentService.Domain.csproj --startup-project PaymentService/src/Api/PaymentService.Api.csproj --configuration Release --no-build || fail "phát hiện model changes chưa được tạo migration; push đã bị chặn."
+
 printf 'Đang chạy test %s (Release)...\n' "$SOLUTION_FILE"
 DOTNET_USE_POLLING_FILE_WATCHER=1 dotnet test "$SOLUTION_FILE" --configuration Release --no-build --nologo || fail "test thất bại; push đã bị chặn."
 

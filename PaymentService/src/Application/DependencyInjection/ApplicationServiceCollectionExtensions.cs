@@ -1,3 +1,4 @@
+using Dprental.PaymentService.Application.Kafka;
 using Dprental.PaymentService.Application.Background;
 using Dprental.PaymentService.Application.IServices;
 using Dprental.PaymentService.Application.Options;
@@ -29,14 +30,23 @@ public static class ApplicationServiceCollectionExtensions
             .Validate(o => !string.IsNullOrWhiteSpace(o.ApiKey), "SePay ApiKey must be non-empty.")
             .ValidateOnStart();
 
+        services.AddOptions<PaymentKafkaOptions>()
+            .Bind(configuration.GetSection(PaymentKafkaOptions.SectionName))
+            .ValidateDataAnnotations()
+            .Validate(o => !o.Enabled || !string.IsNullOrWhiteSpace(o.BootstrapServers),
+                "Kafka BootstrapServers must be provided when Kafka is enabled.")
+            .ValidateOnStart();
+
         services.AddSingleton(TimeProvider.System);
 
         services.AddScoped<IInvoiceCreationService, InvoiceCreationService>();
         services.AddScoped<IInvoiceLifecycleService, InvoiceLifecycleService>();
         services.AddScoped<IInvoicePaymentProcessor, InvoicePaymentProcessor>();
         services.AddScoped<IInvoiceService, InvoiceService>();
+        services.AddSingleton<IInvoicePaidKafkaProducer, InvoicePaidKafkaProducer>();
 
         services.AddHostedService<InvoiceExpiryWorker>();
+        services.AddHostedService<InvoicePaidOutboxPublisherWorker>();
 
         return services;
     }

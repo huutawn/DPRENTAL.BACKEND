@@ -31,6 +31,18 @@ public sealed class OutboxMessage
     public DateTimeOffset CreatedAt { get; private set; }
 
     public DateTimeOffset? PublishedAt { get; private set; }
+
+    [MaxLength(128)]
+    public string? LockedBy { get; private set; }
+
+    public DateTimeOffset? LockedUntilUtc { get; private set; }
+
+    public int RetryCount { get; private set; }
+
+    public DateTimeOffset? NextRetryAt { get; private set; }
+
+    [MaxLength(2000)]
+    public string? LastErrorMessage { get; private set; }
     private OutboxMessage()
     {
     }
@@ -54,5 +66,37 @@ public sealed class OutboxMessage
             CreatedAt = createdAt.ToUniversalTime(),
             PublishedAt = null
         };
+    }
+
+    public void Claim(string workerId, DateTimeOffset lockedUntilUtc)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workerId);
+        LockedBy = workerId;
+        LockedUntilUtc = lockedUntilUtc.ToUniversalTime();
+        RetryCount++;
+    }
+
+    public void MarkPublished(DateTimeOffset publishedAt)
+    {
+        PublishedAt = publishedAt.ToUniversalTime();
+        LockedBy = null;
+        LockedUntilUtc = null;
+        LastErrorMessage = null;
+    }
+
+    public void RecordAttemptFailure(string errorMessage, DateTimeOffset attemptedAt, DateTimeOffset nextRetryAt)
+    {
+        LastErrorMessage = errorMessage;
+        NextRetryAt = nextRetryAt.ToUniversalTime();
+        LockedBy = null;
+        LockedUntilUtc = null;
+    }
+
+    public void RecordExhausted(string errorMessage, DateTimeOffset attemptedAt)
+    {
+        LastErrorMessage = errorMessage;
+        NextRetryAt = null;
+        LockedBy = null;
+        LockedUntilUtc = null;
     }
 }
