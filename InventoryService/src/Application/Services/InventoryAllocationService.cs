@@ -17,20 +17,30 @@ namespace Dprental.InventoryService.Application.Services;
 /// Dịch vụ ứng dụng quản lý vòng đời giữ chỗ và phân bổ tài sản (Hold &amp; Allocation Core).
 /// Thực thi nguyên tử dưới sự bảo vệ của pg_advisory_xact_lock mức tài sản.
 /// </summary>
-public sealed class InventoryAllocationService : IInventoryAllocationService
+public sealed partial class InventoryAllocationService : IInventoryAllocationService
 {
     private readonly IAssetAllocationRepository _allocationRepository;
     private readonly IInventoryWriteTransaction _writeTransaction;
     private readonly TimeProvider _timeProvider;
+    private readonly AllocationCommandCoordinator _coordinator;
+    public InventoryAllocationService(
+        IAssetAllocationRepository allocationRepository,
+        IInventoryWriteTransaction writeTransaction,
+        TimeProvider? timeProvider = null)
+        : this(allocationRepository, writeTransaction, null, timeProvider)
+    {
+    }
 
     public InventoryAllocationService(
         IAssetAllocationRepository allocationRepository,
         IInventoryWriteTransaction writeTransaction,
+        AllocationCommandCoordinator? coordinator,
         TimeProvider? timeProvider = null)
     {
         _allocationRepository = allocationRepository ?? throw new ArgumentNullException(nameof(allocationRepository));
         _writeTransaction = writeTransaction ?? throw new ArgumentNullException(nameof(writeTransaction));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _coordinator = coordinator ?? new AllocationCommandCoordinator(writeTransaction, _timeProvider);
     }
 
     /// <inheritdoc />
@@ -302,76 +312,25 @@ public sealed class InventoryAllocationService : IInventoryAllocationService
                 return Error.Validation("HOLD_EXPIRES_AFTER_START", "Thời hạn giữ chỗ phải trước 00:00 ngày bắt đầu theo giờ Việt Nam.");
             }
 
-            // 3. Đọc lại Listing và kiểm tra Active
-            var listing = await ctx.Listings.GetByIdAsync(listingId, ct);
-            if (listing is null)
+            var holdCoreResult = await ExecuteCreateGroupHoldCoreAsync(
+                ctx,
+                listingId,
+                request.Quantity,
+                period,
+                canonicalHoldExpiresAt,
+                sourceSystem,
+                groupReference,
+                operationKey: null,
+                notes: notes,
+                nowUtc: nowUtc,
+                ct: ct);
+
+            if (holdCoreResult.IsFailure)
             {
-                return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+                return holdCoreResult.Error;
             }
 
-            if (listing.Status != EquipmentListingStatus.Active)
-            {
-                return Error.Conflict("LISTING_NOT_ACTIVE", "Listing không ở trạng thái Active để nhận giữ chỗ mới.");
-            }
-
-            // 4. Tìm N candidate units accepting bookings theo thứ tự Asset ID tăng dần
-            var listingSnapshot = await ctx.Listings.GetCalendarSnapshotAsync(listingId, period.StartDate, period.EndDate, ct);
-            if (listingSnapshot is null)
-            {
-                return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
-            }
-
-            var freeUnits = listingSnapshot.Assets
-                .Where(a => a.AcceptingBookings &&
-                    !a.CalendarBlocks.Any(cb => cb.StartDate <= period.EndDate && cb.EndDate >= period.StartDate) &&
-                    !a.Allocations.Any(al =>
-                        (al.Status == AllocationStatus.Allocated ||
-                         (al.Status == AllocationStatus.Held && al.HoldExpiresAt > nowUtc)) &&
-                        al.RentalPeriod.StartDate <= period.EndDate &&
-                        al.RentalPeriod.EndDate >= period.StartDate))
-                .OrderBy(a => a.Id)
-                .ToList();
-
-            if (freeUnits.Count < request.Quantity)
-            {
-                return Error.Conflict("INSUFFICIENT_AVAILABILITY", "Không đủ số lượng thiết bị khả dụng trong khoảng thời gian yêu cầu.");
-            }
-
-            var chosenUnits = freeUnits.Take(request.Quantity).ToList();
-
-            // 5. Khóa các unit đã chọn theo thứ tự ID tăng dần
-            await ctx.AcquireAssetLocksAsync(chosenUnits.Select(u => u.Id), ct);
-
-            // 6. Tạo N allocations + transitions + outbox
-            var createdAllocations = new List<AssetAllocation>(request.Quantity);
-            foreach (var unit in chosenUnits)
-            {
-                var unitExtRef = $"listing-hold:{groupReference}:{unit.AssetCode}";
-                var holdResult = AssetAllocation.CreateHold(
-                    id: Guid.NewGuid(),
-                    assetId: unit.Id,
-                    period: period,
-                    holdExpiresAt: canonicalHoldExpiresAt,
-                    now: nowUtc,
-                    sourceSystem: sourceSystem,
-                    externalReference: unitExtRef,
-                    notes: notes,
-                    actor: "system",
-                    groupReference: groupReference);
-
-                if (holdResult.IsFailure)
-                {
-                    return holdResult.Error;
-                }
-
-                var hold = holdResult.Value;
-                ctx.Allocations.Add(hold);
-                createdAllocations.Add(hold);
-
-                var outboxMsg = InventoryAssetAvailabilityEvents.CreateAvailabilityChangedOutboxMessage(unit.Id, nowUtc);
-                ctx.StageOutbox(outboxMsg);
-            }
-
+            var (createdAllocations, _) = holdCoreResult.Value;
             var responses = createdAllocations.Select(InventoryAllocationMapper.ToResponse).ToList();
             return Result.Success(new ListingHoldResponse(
                 listingId,

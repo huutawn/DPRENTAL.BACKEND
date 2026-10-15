@@ -341,6 +341,22 @@ internal sealed class FakeWriteTransaction : IInventoryWriteTransaction
         }
         return result;
     }
+
+    public async Task<Result<T>> ExecuteAllocationCommandAsync<T>(
+        string sourceSystem,
+        string operationKey,
+        string groupReference,
+        Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation,
+        CancellationToken cancellationToken = default)
+    {
+        var ctx = new FakeWriteContext(Guid.Empty, _assets, _allocations, _calendarBlocks, listings: Listings);
+        var result = await operation(ctx, cancellationToken);
+        if (result.IsSuccess)
+        {
+            StagedOutbox.AddRange(ctx.StagedOutbox);
+        }
+        return result;
+    }
 }
 
 internal static class AllocationTestHelper

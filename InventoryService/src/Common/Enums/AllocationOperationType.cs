@@ -43,5 +43,15 @@ public enum AllocationOperationType
     /// <summary>
     /// Gia hạn thời gian giữ chỗ khi hold còn hiệu lực (Held -> Held).
     /// </summary>
-    ExtendHold = 9
+    ExtendHold = 9,
+
+    /// <summary>
+    /// Bàn giao tài sản (Allocated -> Allocated).
+    /// </summary>
+    Handover = 10,
+
+    /// <summary>
+    /// Hoàn trả tài sản (Allocated -> Released).
+    /// </summary>
+    Return = 11
 }

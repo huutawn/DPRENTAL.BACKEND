@@ -304,7 +304,7 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
                 .ThenInclude(a => a.Allocations.Where(al =>
                     (al.Status == AllocationStatus.Held || al.Status == AllocationStatus.Allocated) &&
                     al.RentalPeriod.StartDate <= endDate &&
-                    al.RentalPeriod.EndDate >= startDate));
+                    (al.RentalPeriod.EndDate >= startDate || (al.Status == AllocationStatus.Allocated && al.HandedOverAt != null && al.ReturnedAt == null))));
 
         if (_context.Database.IsRelational() && _context.Database.CurrentTransaction is null)
         {

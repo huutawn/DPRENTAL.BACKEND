@@ -1,5 +1,6 @@
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Enums;
+using Dprental.InventoryService.Common.Utils;
 using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Domain.ValueObjects;
 
@@ -94,19 +95,89 @@ public static class AssetAvailabilityPolicy
                 continue;
             }
 
-            if (!OccupiesCalendar(alloc, now))
+            var interval = GetOccupiedInterval(alloc, now);
+            if (!interval.HasValue)
             {
                 continue;
             }
 
-            if (alloc.RentalPeriod.Overlaps(startDate, endDate))
+            var (occupiedStart, occupiedEnd) = interval.Value;
+            if (occupiedStart <= endDate && occupiedEnd >= startDate)
             {
-                return Error.Conflict("ASSET_UNAVAILABLE", $"Tài sản đã có lượt phân bổ ({alloc.ExternalReference}, trạng thái: {alloc.Status}) trùng với khoảng thời gian từ {alloc.RentalPeriod.StartDate:yyyy-MM-dd} đến {alloc.RentalPeriod.EndDate:yyyy-MM-dd}.");
+                string desc = occupiedEnd == DateOnly.MaxValue
+                    ? $"từ ngày {occupiedStart:yyyy-MM-dd} (đã bàn giao, quá hạn chưa trả)"
+                    : $"từ {occupiedStart:yyyy-MM-dd} đến {occupiedEnd:yyyy-MM-dd}";
+
+                return Error.Conflict("ASSET_UNAVAILABLE", $"Tài sản đã có lượt phân bổ ({alloc.ExternalReference}, trạng thái: {alloc.Status}) trùng với khoảng thời gian {desc}.");
             }
         }
 
         return Result.Success();
     }
+
+    /// <summary>
+    /// Xác định khoảng chiếm dụng thực tế của một lượt phân bổ.
+    /// Trả về null nếu phân bổ không chiếm lịch tại thời điểm kiểm tra.
+    /// Nếu máy đã bàn giao nhưng chưa trả và ngày hiện tại tại VN đã vượt EndDate, chiếm dụng kéo dài đến DateOnly.MaxValue.
+    /// </summary>
+    public static (DateOnly StartDate, DateOnly EndDate)? GetOccupiedInterval(AssetAllocation allocation, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(allocation);
+
+        switch (allocation.Status)
+        {
+            case AllocationStatus.Released:
+            case AllocationStatus.Cancelled:
+                return null;
+
+            case AllocationStatus.Held:
+                if (!allocation.HoldExpiresAt.HasValue || allocation.HoldExpiresAt.Value <= now)
+                {
+                    return null;
+                }
+                return (allocation.RentalPeriod.StartDate, allocation.RentalPeriod.EndDate);
+
+            case AllocationStatus.Allocated:
+                var todayVN = BusinessDateTime.ToVietnamDate(now);
+                if (allocation.HandedOverAt.HasValue && !allocation.ReturnedAt.HasValue && todayVN > allocation.RentalPeriod.EndDate)
+                {
+                    return (allocation.RentalPeriod.StartDate, DateOnly.MaxValue);
+                }
+                return (allocation.RentalPeriod.StartDate, allocation.RentalPeriod.EndDate);
+
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// Lấy giao của khoảng chiếm dụng với một cửa sổ hiển thị [windowStart, windowEnd].
+    /// Trả về null nếu không có giao điểm.
+    /// </summary>
+    public static (DateOnly StartDate, DateOnly EndDate)? GetDisplayOccupiedInterval(
+        AssetAllocation allocation,
+        DateOnly windowStart,
+        DateOnly windowEnd,
+        DateTimeOffset now)
+    {
+        var interval = GetOccupiedInterval(allocation, now);
+        if (!interval.HasValue)
+        {
+            return null;
+        }
+
+        var (start, end) = interval.Value;
+        if (start > windowEnd || end < windowStart)
+        {
+            return null;
+        }
+
+        var displayStart = start < windowStart ? windowStart : start;
+        var displayEnd = end > windowEnd ? windowEnd : end;
+
+        return (displayStart, displayEnd);
+    }
+
     /// <summary>
     /// Predicate dùng chung xác định một lượt phân bổ có đang chiếm lịch tại thời điểm kiểm tra hay không.
     /// Dùng cho cả việc kiểm tra overlap và đọc lịch tổng hợp (Calendar Read).
@@ -114,17 +185,6 @@ public static class AssetAvailabilityPolicy
     /// <param name="allocation">Lượt phân bổ cần kiểm tra.</param>
     /// <param name="now">Thời điểm hiện tại (UTC).</param>
     /// <returns>True nếu phân bổ đang chiếm lịch; ngược lại False.</returns>
-    public static bool OccupiesCalendar(AssetAllocation allocation, DateTimeOffset now)
-    {
-        ArgumentNullException.ThrowIfNull(allocation);
-
-        return allocation.Status switch
-        {
-            AllocationStatus.Held => allocation.HoldExpiresAt.HasValue && allocation.HoldExpiresAt.Value > now,
-            AllocationStatus.Allocated => true,
-            AllocationStatus.Released => false,
-            AllocationStatus.Cancelled => false,
-            _ => false
-        };
-    }
+    public static bool OccupiesCalendar(AssetAllocation allocation, DateTimeOffset now) =>
+        GetOccupiedInterval(allocation, now).HasValue;
 }

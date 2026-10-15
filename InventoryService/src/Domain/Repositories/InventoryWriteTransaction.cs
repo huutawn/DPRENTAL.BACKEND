@@ -191,6 +191,85 @@ public sealed class InventoryWriteTransaction : IInventoryWriteTransaction
             cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task<Result<T>> ExecuteAllocationCommandAsync<T>(
+        string sourceSystem,
+        string operationKey,
+        string groupReference,
+        Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sourceSystem))
+        {
+            return Error.Validation("INVALID_SOURCE_SYSTEM", "SourceSystem không được để trống.");
+        }
+
+        if (string.IsNullOrWhiteSpace(operationKey))
+        {
+            return Error.Validation("INVALID_OPERATION_KEY", "OperationKey không được để trống.");
+        }
+
+        if (string.IsNullOrWhiteSpace(groupReference))
+        {
+            return Error.Validation("INVALID_GROUP_REFERENCE", "GroupReference không được để trống.");
+        }
+
+        ArgumentNullException.ThrowIfNull(operation);
+
+        return await ExecuteWithinBoundaryAsync(
+            $"AllocationCommand:{sourceSystem}:{operationKey}",
+            async (db, services, ct) =>
+            {
+                // Thứ tự khóa nghiêm ngặt:
+                // 1. Khóa serialize OperationKey
+                await AcquireOpKeyLockAsync(db, sourceSystem, operationKey, ct);
+
+                // 2. Khóa Group
+                await AcquireGroupLockAsync(db, sourceSystem, groupReference, ct);
+                // 3. Tạo savepoint trước khi thực thi domain mutation
+                bool hasSavepoint = false;
+                if (db.Database.IsRelational() && db.Database.CurrentTransaction is not null)
+                {
+                    await db.Database.ExecuteSqlRawAsync("SAVEPOINT sp_domain_mutation;", ct);
+                    hasSavepoint = true;
+                }
+
+                var context = CreateWriteContext(db, Guid.Empty, null, services);
+                Result<T> result;
+                try
+                {
+                    result = await operation(context, ct);
+                }
+                catch
+                {
+                    if (hasSavepoint)
+                    {
+                        try { await db.Database.ExecuteSqlRawAsync("ROLLBACK TO SAVEPOINT sp_domain_mutation;", CancellationToken.None); } catch { }
+                    }
+                    throw;
+                }
+
+                if (result.IsFailure)
+                {
+                    if (hasSavepoint)
+                    {
+                        await db.Database.ExecuteSqlRawAsync("ROLLBACK TO SAVEPOINT sp_domain_mutation;", ct);
+                    }
+                    db.ChangeTracker.Clear();
+                    return result;
+                }
+
+                var validationResult = await ValidateWriteScopeAsync(db, null, context.LockedAssetIds, ct);
+                if (validationResult.IsFailure)
+                {
+                    return validationResult.Error;
+                }
+
+                return result;
+            },
+            cancellationToken);
+    }
+
     private async Task<Result<T>> ExecuteWithinBoundaryAsync<T>(
         string operationName,
         Func<InventoryServiceDbContext, IServiceProvider, CancellationToken, Task<Result<T>>> coreOperation,
@@ -308,6 +387,14 @@ public sealed class InventoryWriteTransaction : IInventoryWriteTransaction
         await db.Database.ExecuteSqlRawAsync(
             "SELECT pg_advisory_xact_lock({0});",
             [AssetLockKey.FromGroup(sourceSystem, groupReference)],
+            cancellationToken);
+    }
+
+    private static async Task AcquireOpKeyLockAsync(InventoryServiceDbContext db, string sourceSystem, string operationKey, CancellationToken cancellationToken)
+    {
+        await db.Database.ExecuteSqlRawAsync(
+            "SELECT pg_advisory_xact_lock({0});",
+            [AssetLockKey.FromOperationKey(sourceSystem, operationKey)],
             cancellationToken);
     }
 

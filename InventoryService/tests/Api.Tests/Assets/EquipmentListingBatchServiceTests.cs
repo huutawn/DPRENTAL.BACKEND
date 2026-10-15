@@ -57,6 +57,8 @@ public sealed class EquipmentListingBatchServiceTests
             throw new NotImplementedException();
         public Task<Result<T>> ExecuteGroupHoldAsync<T>(string sourceSystem, string groupReference, Guid listingId, Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
+        public Task<Result<T>> ExecuteAllocationCommandAsync<T>(string sourceSystem, string operationKey, string groupReference, Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
     }
 
 
