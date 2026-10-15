@@ -377,6 +377,8 @@ public sealed class SingleHoldAndCalendarConsistencyTests : IClassFixture<Postgr
 
         public Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             _inner.GetPublicByIdAsync(id, cancellationToken);
+        public Task<IReadOnlyList<EquipmentListingBatchItem>> GetBatchByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken = default) =>
+            _inner.GetBatchByIdsAsync(ids, cancellationToken);
         public Task<EquipmentListingStatisticsResult> GetListingStatisticsAsync(EquipmentListingStatisticsCriteria criteria, CancellationToken cancellationToken = default) =>
             _inner.GetListingStatisticsAsync(criteria, cancellationToken);
 

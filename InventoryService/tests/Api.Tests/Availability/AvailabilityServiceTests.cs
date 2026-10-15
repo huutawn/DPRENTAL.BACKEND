@@ -545,6 +545,14 @@ public sealed class AvailabilityServiceTests
 
         public Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(id, out var l) && l.Status == EquipmentListingStatus.Active ? l : null);
+        public Task<IReadOnlyList<EquipmentListingBatchItem>> GetBatchByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken = default)
+        {
+            var list = Store.Values
+                .Where(l => ids.Contains(l.Id))
+                .Select(l => new EquipmentListingBatchItem(l.Id, l.OwnerUserId, l.Name, l.ThumbnailMediaId, l.DailyRate, l.Currency, l.Status))
+                .ToList();
+            return Task.FromResult<IReadOnlyList<EquipmentListingBatchItem>>(list);
+        }
         public Task<EquipmentListingStatisticsResult> GetListingStatisticsAsync(EquipmentListingStatisticsCriteria criteria, CancellationToken cancellationToken = default)
         {
             var q = Store.Values.AsEnumerable();

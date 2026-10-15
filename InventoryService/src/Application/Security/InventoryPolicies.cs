@@ -29,4 +29,9 @@ public static class InventoryPolicies
     /// Quyền tạo phân bổ thủ công (Manual allocation): Human p=inventory.asset.manage + own asset, hoặc Admin r=adm. Service bị từ chối.
     /// </summary>
     public const string ManualAllocation = "InventoryManualAllocation";
+
+    /// <summary>
+    /// Quyền đọc batch EquipmentListing: Chỉ Service u=svc có scope s=inventory.availability.read. Human, kể cả Admin, bị từ chối.
+    /// </summary>
+    public const string EquipmentListingBatchRead = "InventoryEquipmentListingBatchRead";
 }

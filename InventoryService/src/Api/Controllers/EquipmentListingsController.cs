@@ -59,6 +59,29 @@ public sealed class EquipmentListingsController : ControllerBase
     }
 
     /// <summary>
+    /// Đọc thông tin tóm tắt danh sách EquipmentListing theo lô (batch) phục vụ Rental Service.
+    /// Yêu cầu Service principal có audience inventory-api và scope inventory.availability.read.
+    /// </summary>
+    [HttpPost("batch")]
+    [Authorize(Policy = InventoryPolicies.EquipmentListingBatchRead)]
+    [ProducesResponseType(typeof(EquipmentListingBatchResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GetBatch(
+        [FromBody] EquipmentListingBatchRequest? request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _listingService.GetListingBatchAsync(request!, _callerContext, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
+    }
+
+    /// <summary>
     /// Lấy danh sách EquipmentListing phân trang của người dùng hiện tại (My Listings).
     /// </summary>
     [HttpGet]

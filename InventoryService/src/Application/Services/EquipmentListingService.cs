@@ -292,4 +292,80 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         var result = await _listingRepository.GetListingStatisticsAsync(criteria, cancellationToken);
         return Result.Success(new EquipmentListingStatisticsResponse(result.ByEquipmentType, result.ByBrand));
     }
+
+    /// <inheritdoc />
+    public async Task<Result<EquipmentListingBatchResponse>> GetListingBatchAsync(
+        EquipmentListingBatchRequest request,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (request is null)
+        {
+            return Error.Validation("INVALID_REQUEST", "Yêu cầu không được để trống.");
+        }
+
+        if (request.EquipmentListingIds is null || request.EquipmentListingIds.Count == 0)
+        {
+            return Error.Validation("EMPTY_EQUIPMENT_LISTING_IDS", "Danh sách equipmentListingIds bắt buộc và không được rỗng.");
+        }
+
+        if (request.EquipmentListingIds.Count > 100)
+        {
+            return Error.Validation("EXCEEDED_EQUIPMENT_LISTING_IDS_LIMIT", "Danh sách equipmentListingIds không được vượt quá 100 phần tử.");
+        }
+
+        if (request.EquipmentListingIds.Any(id => id == Guid.Empty))
+        {
+            return Error.Validation("INVALID_EQUIPMENT_LISTING_ID", "Danh sách equipmentListingIds chứa GUID rỗng không hợp lệ.");
+        }
+
+        if (!caller.IsAuthenticated)
+        {
+            return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
+        }
+
+        if (!InventoryAccessEvaluator.CanReadEquipmentListingBatch(caller))
+        {
+            return Error.Forbidden("FORBIDDEN", "Chỉ Service với scope inventory.availability.read mới có quyền đọc batch listing.");
+        }
+
+        var deduplicatedIds = new List<Guid>();
+        var seenIds = new HashSet<Guid>();
+        foreach (var id in request.EquipmentListingIds)
+        {
+            if (seenIds.Add(id))
+            {
+                deduplicatedIds.Add(id);
+            }
+        }
+
+        var listings = await _listingRepository.GetBatchByIdsAsync(deduplicatedIds, cancellationToken);
+        var listingsById = listings.ToDictionary(l => l.Id);
+
+        var items = new List<EquipmentListingBatchItemResponse>();
+        var missingIds = new List<Guid>();
+
+        foreach (var id in deduplicatedIds)
+        {
+            if (listingsById.TryGetValue(id, out var listing))
+            {
+                items.Add(new EquipmentListingBatchItemResponse(
+                    listing.Id,
+                    listing.OwnerUserId,
+                    listing.Name,
+                    listing.ThumbnailMediaId,
+                    listing.DailyRate,
+                    listing.Currency,
+                    listing.Status.ToString()));
+            }
+            else
+            {
+                missingIds.Add(id);
+            }
+        }
+
+        return Result.Success(new EquipmentListingBatchResponse(items, missingIds));
+    }
 }
