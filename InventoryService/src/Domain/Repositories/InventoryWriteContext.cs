@@ -107,4 +107,51 @@ public sealed class InventoryWriteContext : IInventoryWriteContext
         return await _context.Database.SqlQueryRaw<long>(
             "SELECT nextval('inventory.search_projection_revision_seq') AS \"Value\"").SingleAsync(cancellationToken);
     }
+
+    public async Task<AllocationOperationReceipt?> GetReceiptAsync(string sourceSystem, string operationKey, CancellationToken cancellationToken = default)
+    {
+        return await _context.AllocationOperationReceipts
+            .FirstOrDefaultAsync(r => r.SourceSystem == sourceSystem && r.OperationKey == operationKey, cancellationToken);
+    }
+
+    public async Task<AllocationOperationReceipt?> GetGroupTombstoneAsync(string sourceSystem, string groupReference, CancellationToken cancellationToken = default)
+    {
+        return await _context.AllocationOperationReceipts
+            .FirstOrDefaultAsync(r => r.SourceSystem == sourceSystem && r.GroupReference == groupReference && r.ClosesGroup, cancellationToken);
+    }
+
+    public void AddReceipt(AllocationOperationReceipt receipt)
+    {
+        ArgumentNullException.ThrowIfNull(receipt);
+        _context.AllocationOperationReceipts.Add(receipt);
+    }
+
+    public async Task AcquireListingLockAsync(Guid listingId, CancellationToken cancellationToken = default)
+    {
+        if (listingId == Guid.Empty) return;
+        await _context.Database.ExecuteSqlRawAsync(
+            "SELECT pg_advisory_xact_lock({0});",
+            [AssetLockKey.FromListingId(listingId)],
+            cancellationToken);
+    }
+
+    public async Task RollbackToSavepointAsync(string name, CancellationToken cancellationToken = default)
+    {
+        if (_context.Database.IsRelational() && _context.Database.CurrentTransaction is not null)
+        {
+            await _context.Database.ExecuteSqlRawAsync("ROLLBACK TO SAVEPOINT sp_domain_mutation;", cancellationToken);
+        }
+    }
+
+    public void ClearChangeTracker()
+    {
+        _context.ChangeTracker.Clear();
+    }
+
+    public async Task MarkInboxProcessedAsync(string handler, string messageId, DateTimeOffset nowUtc, CancellationToken cancellationToken = default)
+    {
+        var msg = await _context.InboxMessages
+            .FirstOrDefaultAsync(m => m.Handler == handler && m.MessageId == messageId, cancellationToken);
+        msg?.MarkAsProcessed(nowUtc);
+    }
 }

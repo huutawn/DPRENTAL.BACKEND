@@ -54,4 +54,23 @@ public interface IInventoryWriteContext
     Guid? SearchBackfillRunId { get; }
 
     Task<long> GetNextSearchRevisionAsync(CancellationToken cancellationToken = default);
+
+    Task<AllocationOperationReceipt?> GetReceiptAsync(string sourceSystem, string operationKey, CancellationToken cancellationToken = default) =>
+        Task.FromResult<AllocationOperationReceipt?>(null);
+
+    Task<AllocationOperationReceipt?> GetGroupTombstoneAsync(string sourceSystem, string groupReference, CancellationToken cancellationToken = default) =>
+        Task.FromResult<AllocationOperationReceipt?>(null);
+
+    void AddReceipt(AllocationOperationReceipt receipt) { }
+
+    Task AcquireListingLockAsync(Guid listingId, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    Task RollbackToSavepointAsync(string name, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    void ClearChangeTracker() { }
+
+    Task MarkInboxProcessedAsync(string handler, string messageId, DateTimeOffset nowUtc, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
 }

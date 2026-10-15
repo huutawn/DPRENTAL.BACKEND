@@ -40,9 +40,53 @@ public static class KafkaServiceCollectionExtensions
             version: 1,
             handlerName: nameof(SearchProjectionMessageHandler) + "_Asset",
             groupId: SearchProjectionMessageHandler.ConsumerGroupId);
+
+        // Đăng ký Allocation Commands handlers
+        registry.Register<AllocationCommandHandler, CreateHoldPayload>(
+            topic: KafkaTopics.InventoryAllocationCommandsV1,
+            messageType: AllocationMessageTypes.CreateHold,
+            version: 1,
+            handlerName: $"{nameof(AllocationCommandHandler)}_{AllocationMessageTypes.CreateHold}",
+            groupId: AllocationCommandHandler.ConsumerGroupId);
+
+        registry.Register<AllocationCommandHandler, ExtendHoldPayload>(
+            topic: KafkaTopics.InventoryAllocationCommandsV1,
+            messageType: AllocationMessageTypes.ExtendHold,
+            version: 1,
+            handlerName: $"{nameof(AllocationCommandHandler)}_{AllocationMessageTypes.ExtendHold}",
+            groupId: AllocationCommandHandler.ConsumerGroupId);
+
+        registry.Register<AllocationCommandHandler, ConfirmAllocationPayload>(
+            topic: KafkaTopics.InventoryAllocationCommandsV1,
+            messageType: AllocationMessageTypes.ConfirmAllocation,
+            version: 1,
+            handlerName: $"{nameof(AllocationCommandHandler)}_{AllocationMessageTypes.ConfirmAllocation}",
+            groupId: AllocationCommandHandler.ConsumerGroupId);
+
+        registry.Register<AllocationCommandHandler, ReleaseAllocationPayload>(
+            topic: KafkaTopics.InventoryAllocationCommandsV1,
+            messageType: AllocationMessageTypes.ReleaseAllocation,
+            version: 1,
+            handlerName: $"{nameof(AllocationCommandHandler)}_{AllocationMessageTypes.ReleaseAllocation}",
+            groupId: AllocationCommandHandler.ConsumerGroupId);
+
+        registry.Register<AllocationCommandHandler, MarkAssetsHandedOverPayload>(
+            topic: KafkaTopics.InventoryAllocationCommandsV1,
+            messageType: AllocationMessageTypes.MarkAssetsHandedOver,
+            version: 1,
+            handlerName: $"{nameof(AllocationCommandHandler)}_{AllocationMessageTypes.MarkAssetsHandedOver}",
+            groupId: AllocationCommandHandler.ConsumerGroupId);
+
+        registry.Register<AllocationCommandHandler, ApplyReturnedUnitsCommandPayload>(
+            topic: KafkaTopics.InventoryAllocationCommandsV1,
+            messageType: AllocationMessageTypes.ApplyReturnedUnits,
+            version: 1,
+            handlerName: $"{nameof(AllocationCommandHandler)}_{AllocationMessageTypes.ApplyReturnedUnits}",
+            groupId: AllocationCommandHandler.ConsumerGroupId);
         configureHandlers?.Invoke(registry);
         services.AddSingleton(registry);
         services.AddScoped<SearchProjectionMessageHandler>();
+        services.AddScoped<AllocationCommandHandler>();
 
         // Đăng ký Kafka Transport
         services.AddSingleton<KafkaProducer>();

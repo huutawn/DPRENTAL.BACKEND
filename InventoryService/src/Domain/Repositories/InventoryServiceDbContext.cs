@@ -38,6 +38,11 @@ public sealed class InventoryServiceDbContext : DbContext
     public DbSet<AllocationTransition> AllocationTransitions => Set<AllocationTransition>();
 
     /// <summary>
+    /// Bảng lưu trữ biên nhận tác vụ phân bổ phục vụ idempotent replay và serialization.
+    /// </summary>
+    public DbSet<AllocationOperationReceipt> AllocationOperationReceipts => Set<AllocationOperationReceipt>();
+
+    /// <summary>
     /// Bảng quản lý các khoảng thời gian chặn lịch sử dụng tài sản.
     /// </summary>
     public DbSet<CalendarBlock> CalendarBlocks => Set<CalendarBlock>();
@@ -253,6 +258,7 @@ public sealed class InventoryServiceDbContext : DbContext
                 t.HasCheckConstraint("ck_asset_allocations_status", "\"status\" IN (1, 2, 5, 6)");
                 t.HasCheckConstraint("ck_asset_allocations_source_reference", "length(btrim(\"source_system\")) > 0 AND length(btrim(\"external_reference\")) > 0");
                 t.HasCheckConstraint("ck_asset_allocations_group_reference", "\"group_reference\" IS NULL OR (length(btrim(\"group_reference\")) > 0 AND length(\"group_reference\") <= 100)");
+                t.HasCheckConstraint("ck_asset_allocations_handover_return", "(\"returned_at\" IS NULL OR \"handed_over_at\" IS NOT NULL) AND (\"returned_at\" IS NULL OR \"returned_at\" >= \"handed_over_at\")");
             });
         });
 
@@ -270,6 +276,21 @@ public sealed class InventoryServiceDbContext : DbContext
 
             b.HasIndex(t => new { t.AllocationId, t.CreatedAt })
                 .HasDatabaseName("ix_allocation_transitions_timeline");
+        });
+
+        // Cấu hình thực thể AllocationOperationReceipt
+        modelBuilder.Entity<AllocationOperationReceipt>(b =>
+        {
+            b.HasIndex(r => new { r.SourceSystem, r.OperationKey })
+                .IsUnique()
+                .HasDatabaseName("ix_allocation_operation_receipts_source_opkey");
+
+            b.HasIndex(r => new { r.SourceSystem, r.GroupReference })
+                .HasFilter("\"group_reference\" IS NOT NULL")
+                .HasDatabaseName("ix_allocation_operation_receipts_group");
+
+            b.HasIndex(r => r.RentalOrderId)
+                .HasDatabaseName("ix_allocation_operation_receipts_order");
         });
 
         // 4. Cấu hình thực thể CalendarBlock

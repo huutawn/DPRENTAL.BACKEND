@@ -48,6 +48,12 @@ public sealed partial class AssetAllocation
     [Column("hold_expires_at")]
     public DateTimeOffset? HoldExpiresAt { get; private set; }
 
+    [Column("handed_over_at")]
+    public DateTimeOffset? HandedOverAt { get; private set; }
+
+    [Column("returned_at")]
+    public DateTimeOffset? ReturnedAt { get; private set; }
+
     [Column("created_at")]
     public DateTimeOffset CreatedAt { get; private set; }
 

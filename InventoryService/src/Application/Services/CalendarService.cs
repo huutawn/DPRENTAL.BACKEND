@@ -86,7 +86,8 @@ public sealed class CalendarService : ICalendarService
 
         foreach (var alloc in asset.Allocations)
         {
-            if (!AssetAvailabilityPolicy.OccupiesCalendar(alloc, nowUtc))
+            var displayInterval = AssetAvailabilityPolicy.GetDisplayOccupiedInterval(alloc, today, horizon, nowUtc);
+            if (!displayInterval.HasValue)
             {
                 continue;
             }
@@ -95,8 +96,8 @@ public sealed class CalendarService : ICalendarService
             {
                 Id = alloc.Id,
                 Type = alloc.Status == AllocationStatus.Held ? "Held" : "Allocated",
-                StartDate = alloc.RentalPeriod.StartDate,
-                EndDate = alloc.RentalPeriod.EndDate,
+                StartDate = displayInterval.Value.StartDate,
+                EndDate = displayInterval.Value.EndDate,
                 Reason = null,
                 Note = null,
                 HoldExpiresAt = alloc.Status == AllocationStatus.Held ? alloc.HoldExpiresAt : null
@@ -186,9 +187,10 @@ public sealed class CalendarService : ICalendarService
             foreach (var unit in snapshot.Assets)
             {
                 bool isOccupied = unit.Allocations.Any(al =>
-                    al.RentalPeriod.StartDate <= d &&
-                    al.RentalPeriod.EndDate >= d &&
-                    AssetAvailabilityPolicy.OccupiesCalendar(al, evaluationNowUtc));
+                {
+                    var interval = AssetAvailabilityPolicy.GetOccupiedInterval(al, evaluationNowUtc);
+                    return interval.HasValue && interval.Value.StartDate <= d && interval.Value.EndDate >= d;
+                });
 
                 bool isBlocked = unit.CalendarBlocks.Any(cb =>
                     cb.StartDate <= d &&

@@ -245,6 +245,18 @@ public sealed partial class InventoryAssetServiceTests
             var ctx = new FakeWriteContext(Guid.Empty, _repo);
             return action(ctx, cancellationToken);
         }
+
+        public Task<Result<T>> ExecuteAllocationCommandAsync<T>(
+            string sourceSystem,
+            string operationKey,
+            string groupReference,
+            Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> action,
+            CancellationToken cancellationToken = default)
+        {
+            BeforeExecute?.Invoke();
+            var ctx = new FakeWriteContext(Guid.Empty, _repo);
+            return action(ctx, cancellationToken);
+        }
     }
 
     private sealed class FakeCatalogClient : ICatalogServiceClient

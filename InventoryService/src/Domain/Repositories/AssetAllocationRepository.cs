@@ -81,7 +81,7 @@ public sealed class AssetAllocationRepository : IAssetAllocationRepository
             .Where(a => a.AssetId == assetId &&
                         (a.Status == AllocationStatus.Held || a.Status == AllocationStatus.Allocated) &&
                         a.RentalPeriod.StartDate <= endDate &&
-                        a.RentalPeriod.EndDate >= startDate)
+                        (a.RentalPeriod.EndDate >= startDate || (a.Status == AllocationStatus.Allocated && a.HandedOverAt != null && a.ReturnedAt == null)))
             .ToListAsync(cancellationToken);
     }
 
