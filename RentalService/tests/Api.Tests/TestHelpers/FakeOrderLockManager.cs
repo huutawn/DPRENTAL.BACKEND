@@ -21,6 +21,12 @@ public sealed class FakeOrderLockManager : IOrderLockManager
         return new Releaser(sem);
     }
 
+    public Task<IAsyncDisposable> AcquireRenterLockAsync(
+        Guid renterUserId,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default) =>
+        AcquireOrderLockAsync(renterUserId, timeout, cancellationToken);
+
     private sealed class Releaser : IAsyncDisposable
     {
         private readonly SemaphoreSlim _sem;

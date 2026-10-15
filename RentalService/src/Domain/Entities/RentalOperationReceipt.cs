@@ -16,6 +16,7 @@ public class RentalOperationReceipt
     public const string StatusProcessing = "Processing";
     public const string StatusSucceeded = "Succeeded";
     public const string StatusFailed = "Failed";
+    public const string StatusManualRefundRequired = "MANUAL_REFUND_REQUIRED";
 
     public const string ClassificationTransient = "Transient";
     public const string ClassificationBusiness = "Business";

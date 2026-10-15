@@ -170,7 +170,7 @@ public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
         {
             _consumer = BuildConsumer(_consumerConfig);
             _isSubscribed = false;
-            _consumer.Subscribe(_options.PaymentEventsTopic);
+            _consumer.Subscribe(new[] { _options.PaymentEventsTopic, _options.InventoryAllocationEventsTopic });
             _isSubscribed = true;
             _logger.LogInformation("Recreated Kafka consumer successfully; resuming from committed offset");
         }
@@ -278,7 +278,7 @@ public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
 
         if (!_isSubscribed)
         {
-            _consumer.Subscribe(_options.PaymentEventsTopic);
+            _consumer.Subscribe(new[] { _options.PaymentEventsTopic, _options.InventoryAllocationEventsTopic });
             _isSubscribed = true;
         }
 

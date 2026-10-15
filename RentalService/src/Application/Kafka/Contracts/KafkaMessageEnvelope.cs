@@ -15,4 +15,5 @@ public sealed record KafkaMessageEnvelope<TPayload>(
     [property: JsonPropertyName("occurredAt")] DateTimeOffset OccurredAt,
     [property: JsonPropertyName("correlationId")] string? CorrelationId,
     [property: JsonPropertyName("causationId")] Guid? CausationId,
-    [property: JsonPropertyName("payload")] TPayload Payload);
+    [property: JsonPropertyName("payload")] TPayload Payload,
+    [property: JsonPropertyName("organizationId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? OrganizationId = null);

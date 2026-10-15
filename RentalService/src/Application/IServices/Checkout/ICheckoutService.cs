@@ -1,16 +1,18 @@
 using Dprental.RentalService.Application.DTOs.Checkout;
+using Dprental.RentalService.Common;
 
 namespace Dprental.RentalService.Application.IServices.Checkout;
 
-/// <summary>
-/// Gửi đơn hàng từ giỏ: chuẩn bị, giữ lịch, lưu đơn rồi tạo hóa đơn. Gửi lại với cùng Idempotency-Key
-/// trả về đúng đơn đã tạo, không tạo thêm đơn và không giữ thêm lịch.
-/// </summary>
 public interface ICheckoutService
 {
-    Task<CheckoutResult> SubmitAsync(
+    Task<Result<CheckoutOperationAcceptedResponse>> SubmitAsync(
         CheckoutRenterContext renter,
         CheckoutRequest request,
         string idempotencyKey,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<CheckoutOperationStatusResponse>> GetOperationStatusAsync(
+        string operationId,
+        Guid renterUserId,
         CancellationToken cancellationToken = default);
 }

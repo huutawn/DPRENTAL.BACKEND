@@ -6,9 +6,9 @@ public static class KafkaContractSpec
 
     public static class Producers
     {
-        public const string RentalService = "rental-service";
-        public const string PaymentService = "payment-service";
-        public const string InventoryService = "inventory-service";
+        public const string RentalService = "RentalService";
+        public const string PaymentService = "PaymentService";
+        public const string InventoryService = "InventoryService";
     }
 
     public static class Topics
@@ -16,12 +16,10 @@ public static class KafkaContractSpec
         public const string RentalEvents = "rental.events.v1";
         public const string PaymentEvents = "payment.events.v1";
         public const string PaymentDlq = "payment.events.v1.dlq";
-        // Proposed return workflow topics; Inventory must confirm before enablement.
+        public const string InventoryCommands = "inventory.allocation.commands.v1";
         public const string InventoryAllocationCommands = "inventory.allocation.commands.v1";
         public const string InventoryAllocationEvents = "inventory.allocation.events.v1";
-
-        // PROPOSED topics (Unconfirmed by provider)
-        public const string InventoryCommands = "inventory.commands.v1";
+        public const string InventoryAllocationEventsDlq = "inventory.allocation.events.v1.dlq";
         public const string PaymentCommands = "payment.commands.v1";
     }
 
@@ -38,15 +36,21 @@ public static class KafkaContractSpec
         public const string InvoicePaid = "InvoicePaid";
         public const string RefundCompleted = "RefundCompleted";
         public const string ReturnedUnitsApplied = "ReturnedUnitsApplied";
+        public const string ReturnedUnitsRejected = "ReturnedUnitsRejected";
         public const string DeadLetter = "DeadLetter";
+        public const string InventoryAllocationCommandSucceeded = "InventoryAllocationCommandSucceeded";
+        public const string InventoryAllocationCommandRejected = "InventoryAllocationCommandRejected";
     }
 
     public static class CommandTypes
     {
-        // PROPOSED commands (Unconfirmed by provider)
         public const string CreateHold = "CreateHold";
+        public const string ExtendHold = "ExtendHold";
+        public const string ConfirmAllocation = "ConfirmAllocation";
         public const string ReleaseAllocation = "ReleaseAllocation";
         public const string CreateInvoice = "CreateInvoice";
         public const string ApplyReturnedUnits = "ApplyReturnedUnits";
+        public const string MarkAssetsHandedOver = "MarkAssetsHandedOver";
+        public const string MarkAssetsReturned = "MarkAssetsReturned";
     }
 }

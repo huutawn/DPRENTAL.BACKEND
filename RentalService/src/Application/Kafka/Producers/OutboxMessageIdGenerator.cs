@@ -21,4 +21,6 @@ public static class OutboxMessageIdGenerator
         hash.AsSpan(0, 16).CopyTo(guidBytes);
         return new Guid(guidBytes);
     }
+
+    public static Guid Generate() => Guid.NewGuid();
 }

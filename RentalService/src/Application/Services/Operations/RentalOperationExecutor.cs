@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
@@ -14,6 +15,7 @@ using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.DTOs.Operations;
 using Dprental.RentalService.Application.IServices.Operations;
+using Dprental.RentalService.Application.IServices.Checkout;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -33,6 +35,9 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
     private readonly IOrderLockManager _lockManager;
     private readonly IInventoryRentalClient _inventoryClient;
     private readonly IPaymentRentalClient _paymentClient;
+    private readonly IInventoryCommandProducer _inventoryCommands;
+    private readonly ICheckoutInvoiceIssuer? _invoiceIssuer;
+    private readonly IRentalCheckoutOperationRepository? _checkoutOperationRepo;
     private readonly IUnitOfWork _unitOfWork;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RentalOperationExecutor> _logger;
@@ -45,9 +50,12 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         IOrderLockManager lockManager,
         IInventoryRentalClient inventoryClient,
         IPaymentRentalClient paymentClient,
+        IInventoryCommandProducer inventoryCommands,
         IUnitOfWork unitOfWork,
         IConfiguration configuration,
         ILogger<RentalOperationExecutor> logger,
+        ICheckoutInvoiceIssuer? invoiceIssuer = null,
+        IRentalCheckoutOperationRepository? checkoutOperationRepo = null,
         TimeProvider? timeProvider = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
@@ -56,10 +64,41 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         _lockManager = lockManager ?? throw new ArgumentNullException(nameof(lockManager));
         _inventoryClient = inventoryClient ?? throw new ArgumentNullException(nameof(inventoryClient));
         _paymentClient = paymentClient ?? throw new ArgumentNullException(nameof(paymentClient));
+        _inventoryCommands = inventoryCommands!;
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _rentalEventsTopic = configuration["Kafka:RentalEventsTopic"] ?? "rental.events.v1";
+        _invoiceIssuer = invoiceIssuer;
+        _checkoutOperationRepo = checkoutOperationRepo;
+    }
+
+    public RentalOperationExecutor(
+        IRentalOrderRepository orderRepository,
+        IOperationReceiptRepository receiptRepository,
+        IOutboxRepository outboxRepository,
+        IOrderLockManager lockManager,
+        IInventoryRentalClient inventoryClient,
+        IPaymentRentalClient paymentClient,
+        IUnitOfWork unitOfWork,
+        IConfiguration configuration,
+        ILogger<RentalOperationExecutor> logger,
+        TimeProvider? timeProvider = null)
+        : this(
+            orderRepository,
+            receiptRepository,
+            outboxRepository,
+            lockManager,
+            inventoryClient,
+            paymentClient,
+            new InventoryCommandProducer(outboxRepository, Microsoft.Extensions.Options.Options.Create(new Dprental.RentalService.Application.Kafka.Configuration.KafkaOptions { Enabled = true })),
+            unitOfWork,
+            configuration,
+            logger,
+            null,
+            null,
+            timeProvider)
+    {
     }
 
     public static string ComputeOperationKey(string action, string logicalIdentity)
@@ -182,6 +221,8 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
             case "PaymentExpiry":
                 return await PaymentExpiryCoreAsync(order, receipt, cancellationToken);
 
+            case "CreateInvoice":
+                return await ExecuteCreateInvoiceAsync(order, receipt, cancellationToken);
             default:
                 return Error.Validation("UNSUPPORTED_ACTION", $"Hành động {receipt.Action} không hỗ trợ scheduled execution.");
         }
@@ -225,6 +266,12 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         if (receipt.IsSuccess && receipt.Status == RentalOperationReceipt.StatusSucceeded)
         {
             return Error.Conflict("OPERATION_ALREADY_SUCCEEDED", "Operation đã hoàn thành thành công (Succeeded); không thể replay.");
+        }
+
+        if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired ||
+            (receipt.Action == "RequestRefund" && order.LatePaymentRefundRequired))
+        {
+            return Error.Conflict("MANUAL_REFUND_REQUIRED", "Tác vụ hoàn tiền late payment yêu cầu xử lý thủ công, không hỗ trợ Admin replay tự động.");
         }
 
         // Validate journal command payload
@@ -297,6 +344,12 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
 
             var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == operationId);
             if (receipt == null) return Error.NotFound("RECEIPT_NOT_FOUND", "Không tìm thấy operation receipt.");
+
+            if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired ||
+                (receipt.Action == "RequestRefund" && order.LatePaymentRefundRequired))
+            {
+                return Error.Conflict("MANUAL_REFUND_REQUIRED", "Tác vụ hoàn tiền late payment yêu cầu xử lý thủ công, không hỗ trợ replay tự động.");
+            }
 
             receipt.ReopenForManualReplay(utcNow);
             await CommitLocalChangesAsync(order, cancellationToken);
