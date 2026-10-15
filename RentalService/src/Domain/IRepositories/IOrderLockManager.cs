@@ -10,4 +10,10 @@ public interface IOrderLockManager
     /// Trả về IAsyncDisposable để giải phóng khóa khi hoàn tất.
     /// </summary>
     Task<IAsyncDisposable> AcquireOrderLockAsync(Guid orderId, TimeSpan? timeout = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Thu thập distributed advisory lock cho RenterUserId với thời gian chờ hữu hạn.
+    /// </summary>
+    Task<IAsyncDisposable> AcquireRenterLockAsync(Guid renterUserId, TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
+        AcquireOrderLockAsync(renterUserId, timeout, cancellationToken);
 }

@@ -36,3 +36,19 @@ public sealed record SupplierDecisionResponse(
     string? DecisionReason,
     string? DecisionNote);
 
+public sealed record HandoverUnitObservationRequest(
+    [Required] Guid AssignmentId,
+    [Required] Dprental.RentalService.Common.Enums.UnitCondition Condition,
+    [MaxLength(2000)] string? Note = null,
+    IReadOnlyList<Guid>? MediaIds = null);
+
+public sealed record HandoverItemRequest(
+    [Required] DateTimeOffset ActualHandoverAt,
+    [MaxLength(2000)] string? Note = null,
+    [Required] IReadOnlyList<HandoverUnitObservationRequest> Units = null!);
+
+public sealed record HandoverItemResponse(
+    Guid HandoverRecordId,
+    DateTimeOffset HandoverAt,
+    string Status);
+

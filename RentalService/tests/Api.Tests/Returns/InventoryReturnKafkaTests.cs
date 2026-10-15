@@ -55,7 +55,8 @@ public sealed class InventoryReturnKafkaTests
                 KafkaContractSpec.Topics.InventoryAllocationCommands, order.Id.ToString("D")));
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["Kafka:Enabled"] = "true", ["Rental:InventoryReturn:Enabled"] = "true",
+            ["Kafka:Enabled"] = "true",
+            ["Rental:InventoryReturn:Enabled"] = "true",
             ["Rental:InventoryReturn:Transport"] = "Kafka"
         }).Build();
         var service = new ReturnService(repository.Object, locks.Object, uow.Object,

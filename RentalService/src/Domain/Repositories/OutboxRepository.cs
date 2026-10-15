@@ -30,13 +30,29 @@ public sealed class OutboxRepository : IOutboxRepository
 
             var messages = await _dbContext.RentalOutboxMessages
                 .FromSqlInterpolated($@"
-                    SELECT * FROM rental.rental_outbox_messages
-                    WHERE ""Status"" = 'Pending'
-                      AND (""ScheduledAt"" IS NULL OR ""ScheduledAt"" <= NOW())
-                      AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" <= NOW())
-                    ORDER BY ""CreatedAt""
-                    LIMIT 1
-                    FOR UPDATE SKIP LOCKED")
+                    WITH candidate AS (
+                        SELECT m.*
+                        FROM rental.rental_outbox_messages m
+                        WHERE m.""Status"" = 'Pending'
+                          AND (m.""ScheduledAt"" IS NULL OR m.""ScheduledAt"" <= NOW())
+                          AND (m.""LockedUntilUtc"" IS NULL OR m.""LockedUntilUtc"" <= NOW())
+                          AND NOT EXISTS (
+                              SELECT 1 FROM rental.rental_outbox_messages prev
+                              WHERE prev.""Topic"" = m.""Topic""
+                                AND prev.""PartitionKey"" = m.""PartitionKey""
+                                AND prev.""Sequence"" < m.""Sequence""
+                                AND prev.""Status"" <> 'Published'
+                          )
+                        ORDER BY m.""Sequence""
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    UPDATE rental.rental_outbox_messages u
+                    SET ""LockedBy"" = {claimToken},
+                        ""LockedUntilUtc"" = NOW() + ({leaseDuration.TotalSeconds} * interval '1 second')
+                    FROM candidate
+                    WHERE u.""Id"" = candidate.""Id""
+                    RETURNING u.*;")
                 .ToListAsync(cancellationToken);
 
             if (messages.Count == 0)
@@ -46,12 +62,6 @@ public sealed class OutboxRepository : IOutboxRepository
             }
 
             var message = messages[0];
-            await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
-                UPDATE rental.rental_outbox_messages
-                SET ""LockedBy"" = {claimToken},
-                    ""LockedUntilUtc"" = NOW() + ({leaseDuration.TotalSeconds} * interval '1 second')
-                WHERE ""Id"" = {message.Id}", cancellationToken);
-
             message.Claim(claimToken, leaseUntil);
             await tx.CommitAsync(cancellationToken);
             return message;
@@ -61,10 +71,14 @@ public sealed class OutboxRepository : IOutboxRepository
             var message = await _dbContext.RentalOutboxMessages
                 .Where(m => m.Status == "Pending" &&
                             (m.ScheduledAt == null || m.ScheduledAt <= utcNow) &&
-                            (m.LockedUntilUtc == null || m.LockedUntilUtc <= utcNow))
-                .OrderBy(m => m.CreatedAt)
+                            (m.LockedUntilUtc == null || m.LockedUntilUtc <= utcNow) &&
+                            !_dbContext.RentalOutboxMessages.Any(prev =>
+                                prev.Topic == m.Topic &&
+                                prev.PartitionKey == m.PartitionKey &&
+                                prev.Sequence < m.Sequence &&
+                                prev.Status != "Published"))
+                .OrderBy(m => m.Sequence)
                 .FirstOrDefaultAsync(cancellationToken);
-
             if (message != null)
             {
                 message.Claim(claimToken, leaseUntil);

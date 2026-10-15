@@ -66,22 +66,29 @@ public sealed class KafkaInventoryReturnConsumerWorker : BackgroundService
                 var message = consumer.Consume(TimeSpan.FromMilliseconds(_options.ConsumeTimeoutMilliseconds));
                 if (message?.Message?.Value is not { } json) continue;
                 currentOffset = message.TopicPartitionOffset;
+                string? msgType = null;
                 try
                 {
                     using var document = JsonDocument.Parse(json);
                     if (document.RootElement.ValueKind == JsonValueKind.Object &&
                         document.RootElement.TryGetProperty("messageType", out var type) &&
-                        type.ValueKind == JsonValueKind.String &&
-                        type.GetString() != KafkaContractSpec.EventTypes.ReturnedUnitsApplied)
+                        type.ValueKind == JsonValueKind.String)
                     {
-                        consumer.Commit(message);
-                        continue;
+                        msgType = type.GetString();
+                        if (msgType != KafkaContractSpec.EventTypes.ReturnedUnitsApplied &&
+                            msgType != KafkaContractSpec.EventTypes.ReturnedUnitsRejected)
+                        {
+                            consumer.Commit(message);
+                            continue;
+                        }
                     }
                 }
                 catch (JsonException) { /* Handler routes malformed input to the durable DLQ. */ }
                 using var scope = _scopes.CreateScope();
                 var handler = scope.ServiceProvider.GetRequiredService<InventoryReturnResultHandler>();
-                var applied = await handler.ApplyAsync(json, stoppingToken);
+                var applied = string.Equals(msgType, KafkaContractSpec.EventTypes.ReturnedUnitsRejected, StringComparison.OrdinalIgnoreCase)
+                    ? await handler.RejectAsync(json, stoppingToken)
+                    : await handler.ApplyAsync(json, stoppingToken);
                 if (applied.IsFailure)
                 {
                     _logger.LogWarning("Inventory return result at {Offset} is not applied: {Code}",

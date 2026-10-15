@@ -52,14 +52,12 @@ RentalService/src/Application/Kafka/
 - Việc chuyển Checkout flow sang cơ chế hoàn toàn bất đồng bộ và thiết kế response contracts thuộc về các task tương lai.
 - **Không sửa Checkout, Checkout Controller, HTTP Clients, và không nối producer vào luồng Checkout hiện tại.**
 
-### 2.2. Trạng thái PROPOSED của các Commands
-Ba command chuẩn bị cho Checkout flow:
-1. `CreateHold` (topic `inventory.commands.v1`): Giữ quantity theo listing và interval; Inventory tự chọn physical assets.
-2. `ReleaseAllocation` (topic `inventory.commands.v1`): Bù trừ các hold đã thành công khi checkout thất bại hoặc hủy.
-3. `CreateInvoice` (topic `payment.commands.v1`): Yêu cầu tạo hóa đơn thanh toán cho toàn bộ order.
-
-> **Cảnh báo:** Ba command trên và các topic commands tương ứng hiện mang trạng thái **PROPOSED**, chưa được xác nhận chính thức từ nhà cung cấp `InventoryService` và `PaymentService`. Hệ sinh thái không có consumer kết quả giả và không giả định phía downstream đã hỗ trợ.
-
+### 2.2. Trạng thái Commands
+Các commands đồng bộ với InventoryService và PaymentService:
+1. `CreateHold` (topic `inventory.allocation.commands.v1`): Giữ quantity theo listing và interval; Inventory tự chọn physical assets.
+2. `ReleaseAllocation` (topic `inventory.allocation.commands.v1`): Bù trừ các hold đã thành công khi checkout thất bại hoặc hủy.
+3. `ExtendHold` / `ConfirmAllocation` / `MarkAssetsHandedOver` / `MarkAssetsReturned` (topic `inventory.allocation.commands.v1`).
+4. `CreateInvoice` (topic `payment.commands.v1`): Yêu cầu tạo hóa đơn thanh toán cho toàn bộ order.
 ---
 
 ## 3. Envelope dùng chung (Version 1)
@@ -130,7 +128,9 @@ Khi bật (`Enabled = true`), nếu thiếu `BootstrapServers` hoặc các thôn
     "RentalEventsTopic": "rental.events.v1",
     "PaymentEventsTopic": "payment.events.v1",
     "PaymentDlqTopic": "payment.events.v1.dlq",
-    "InventoryCommandsTopic": "inventory.commands.v1",
+    "InventoryCommandsTopic": "inventory.allocation.commands.v1",
+    "InventoryAllocationEventsTopic": "inventory.allocation.events.v1",
+    "InventoryAllocationEventsDlqTopic": "inventory.allocation.events.v1.dlq",
     "PaymentCommandsTopic": "payment.commands.v1",
     "DeliveryTimeoutSeconds": 10,
     "LeaseDurationSeconds": 30,

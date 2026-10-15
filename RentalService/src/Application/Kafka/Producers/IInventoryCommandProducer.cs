@@ -5,6 +5,7 @@ namespace Dprental.RentalService.Application.Kafka.Producers;
 
 /// <summary>
 /// Business producer for staging Inventory commands into the durable Outbox.
+/// Topic: inventory.allocation.commands.v1
 /// NOTE: Successful enqueue indicates only that the command was durably staged for Kafka transmission;
 /// it DOES NOT indicate that InventoryService has processed or accepted the command.
 /// </summary>
@@ -19,9 +20,28 @@ public interface IInventoryCommandProducer
         Guid? causationId = null,
         CancellationToken cancellationToken = default);
 
+    Task<Result<ProducerEnqueueResult>> EnqueueExtendHoldAsync(
+        ExtendHoldCommandPayload command,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueConfirmAllocationAsync(
+        ConfirmAllocationCommandPayload command,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
     Task<Result<ProducerEnqueueResult>> EnqueueReleaseAllocationAsync(
         ReleaseAllocationCommandPayload command,
         string? correlationId = null,
         Guid? causationId = null,
         CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueMarkAssetsHandedOverAsync(
+        MarkAssetsHandedOverCommandPayload command,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
 }
