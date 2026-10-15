@@ -32,8 +32,7 @@ public sealed class KafkaInventoryReturnConsumerWorker : BackgroundService
         _options = options.Value;
         _logger = logger;
         _clock = clock;
-        _active = _options.Enabled && configuration.GetValue("Rental:InventoryReturn:Enabled", true) && string.Equals(
-            configuration["Rental:InventoryReturn:Transport"], "Kafka", StringComparison.OrdinalIgnoreCase);
+        _active = _options.Enabled;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

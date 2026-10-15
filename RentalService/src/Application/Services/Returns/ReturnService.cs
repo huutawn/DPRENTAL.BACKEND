@@ -4,6 +4,7 @@ using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Returns;
 using Dprental.RentalService.Application.IServices.Returns;
+using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Validation;
 using Dprental.RentalService.Common;
@@ -13,10 +14,10 @@ using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.DTOs.Integration;
 using Microsoft.Extensions.Configuration;
-using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Kafka.Producers;
+
 namespace Dprental.RentalService.Application.Services.Returns;
 
 public sealed class ReturnService(
@@ -41,12 +42,11 @@ public sealed class ReturnService(
             return Error.Validation("INVALID_IDEMPOTENCY_KEY", "Idempotency-Key is required (maximum 64 characters).");
         if (request?.Units is null || request.Units.Count == 0 || request.Units.Any(u => u is null || u.MediaIds is null))
             return Error.Validation("Return.InvalidUnits", "Return units and media collections are required.");
-        bool useKafka = string.Equals(configuration["Rental:InventoryReturn:Transport"],
-            "Kafka", StringComparison.OrdinalIgnoreCase);
-        if (useKafka && (!configuration.GetValue<bool>("Kafka:Enabled") ||
-            !configuration.GetValue("Rental:InventoryReturn:Enabled", true)))
-            return Error.ServiceUnavailable("INVENTORY_RETURN_KAFKA_DISABLED",
-                "Kafka and Inventory return processing must be enabled to record a Kafka-backed return.");
+        bool kafkaEnabled = configuration.GetValue("Kafka:Enabled", true);
+        if (!kafkaEnabled)
+        {
+            return Error.ServiceUnavailable("KAFKA_UNAVAILABLE", "Kafka service is disabled or unavailable.");
+        }
         Guid supplierId = caller.UserId.Value;
         var orderId = await repository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
         if (!orderId.HasValue) return RentalErrors.ItemNotFound;

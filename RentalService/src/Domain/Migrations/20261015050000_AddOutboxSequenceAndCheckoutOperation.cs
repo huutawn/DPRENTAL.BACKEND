@@ -1,16 +1,12 @@
-using System;
-using Microsoft.EntityFrameworkCore.Migrations;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Dprental.RentalService.Domain.Repositories;
-
 #nullable disable
 #pragma warning disable CA1861
+
+using System;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace Dprental.RentalService.Domain.Migrations
 {
     /// <inheritdoc />
-    [DbContext(typeof(RentalServiceDbContext))]
-    [Migration("20261015050000_AddOutboxSequenceAndCheckoutOperation")]
     public partial class AddOutboxSequenceAndCheckoutOperation : Migration
     {
         /// <inheritdoc />

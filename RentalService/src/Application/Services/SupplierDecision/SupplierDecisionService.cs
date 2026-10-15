@@ -2,8 +2,11 @@
 using Dprental.RentalService.Application.DTOs.Supplier;
 using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.IServices.SupplierDecision;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
+using Dprental.RentalService.Common.Enums;
+using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Logging;
 
@@ -37,7 +40,7 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _operationExecutor = operationExecutor ?? throw new ArgumentNullException(nameof(operationExecutor));
-        _lockManager = lockManager!;
+        _lockManager = lockManager ?? new NoOpOrderLockManager();
         _inventoryCommands = inventoryCommands!;
         _unitOfWork = unitOfWork!;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -48,12 +51,12 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         IRentalOrderRepository orderRepository,
         IRentalOperationExecutor operationExecutor,
         ILogger<SupplierDecisionService>? logger = null)
-        : this(orderRepository, operationExecutor, null!, null!, null!, null, logger)
+        : this(orderRepository, operationExecutor, new NoOpOrderLockManager(), null!, null!, null, logger)
     {
     }
 
-    public async Task<Result<SupplierDecisionResponse>> AcceptItemAsync(
-        Guid itemId,
+    public async Task<Result<SubOrderDecisionResponse>> AcceptSubOrderAsync(
+        Guid subOrderId,
         string idempotencyKey,
         IRentalCallerContext caller,
         CancellationToken cancellationToken = default)
@@ -66,23 +69,25 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
 
         Guid supplierId = caller.UserId!.Value;
 
-        // Lookup only OrderId before lock using AsNoTracking
-        var orderId = await _orderRepository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
-        if (!orderId.HasValue)
+        // Lookup only the sub-order before lock using AsNoTracking
+        RentalSubOrder? subOrder = await _orderRepository.GetSubOrderByIdAsync(subOrderId, cancellationToken);
+        if (subOrder is null || subOrder.SupplierId != supplierId)
         {
-            return Error.NotFound("ITEM_NOT_FOUND", $"Không tìm thấy mục thuê '{itemId}'.");
+            return SubOrderNotFound(subOrderId);
         }
 
-        return await _operationExecutor.ExecuteSupplierAcceptAsync(
-            orderId.Value,
-            itemId,
+        var result = await _operationExecutor.ExecuteSubOrderAcceptAsync(
+            subOrder.RentalOrderId,
+            subOrder.Id,
             supplierId,
             idempotencyKey.Trim(),
             cancellationToken);
+
+        return result.IsSuccess ? ToResponse(subOrder, result.Value) : result.Error;
     }
 
-    public async Task<Result<SupplierDecisionResponse>> RejectItemAsync(
-        Guid itemId,
+    public async Task<Result<SubOrderDecisionResponse>> RejectSubOrderAsync(
+        Guid subOrderId,
         SupplierRejectRequest request,
         string idempotencyKey,
         IRentalCallerContext caller,
@@ -106,21 +111,34 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
 
         Guid supplierId = caller.UserId!.Value;
 
-        // Lookup only OrderId before lock using AsNoTracking
-        var orderId = await _orderRepository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
-        if (!orderId.HasValue)
+        // Lookup only the sub-order before lock using AsNoTracking
+        RentalSubOrder? subOrder = await _orderRepository.GetSubOrderByIdAsync(subOrderId, cancellationToken);
+        if (subOrder is null || subOrder.SupplierId != supplierId)
         {
-            return Error.NotFound("ITEM_NOT_FOUND", $"Không tìm thấy mục thuê '{itemId}'.");
+            return SubOrderNotFound(subOrderId);
         }
 
-        return await _operationExecutor.ExecuteSupplierRejectAsync(
-            orderId.Value,
-            itemId,
+        var result = await _operationExecutor.ExecuteSubOrderRejectAsync(
+            subOrder.RentalOrderId,
+            subOrder.Id,
             supplierId,
             request.RejectReason.Trim(),
             string.IsNullOrWhiteSpace(request.OptionalNote) ? null : request.OptionalNote.Trim(),
             idempotencyKey.Trim(),
             cancellationToken);
+
+        return result.IsSuccess ? ToResponse(subOrder, result.Value) : result.Error;
+    }
+
+    // Đơn con của supplier khác trả như không tồn tại để không lộ dữ liệu.
+    private static Error SubOrderNotFound(Guid subOrderId) =>
+        Error.NotFound("SUB_ORDER_NOT_FOUND", $"Không tìm thấy đơn con '{subOrderId}'.");
+
+    private static SubOrderDecisionResponse ToResponse(RentalSubOrder subOrder, IReadOnlyList<SupplierDecisionResponse> items)
+    {
+        RentalItemStatus status = SubOrderStatusPolicy.Summarize(
+            items.Select(i => Enum.Parse<RentalItemStatus>(i.Status)).ToList());
+        return new SubOrderDecisionResponse(subOrder.Id, subOrder.SubOrderCode, subOrder.RentalOrderId, status.ToString(), items);
     }
 
     public async Task<Result<HandoverItemResponse>> HandoverItemAsync(
@@ -141,6 +159,11 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             return Error.Validation("INVALID_REQUEST", "Thông tin bàn giao không hợp lệ.");
         }
 
+        if (request.ActualHandoverAt == default)
+        {
+            return Error.Validation("INVALID_HANDOVER_TIME", "Thời gian bàn giao thực tế không hợp lệ.");
+        }
+
         Guid supplierId = caller.UserId!.Value;
         var orderId = await _orderRepository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
         if (!orderId.HasValue) return Error.NotFound("ITEM_NOT_FOUND", $"Không tìm thấy mục thuê '{itemId}'.");
@@ -158,12 +181,58 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             return Error.Forbidden("SUPPLIER_MISMATCH", "Chỉ chủ thiết bị mới có quyền bàn giao.");
         }
 
+        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
+        if (request.ActualHandoverAt > utcNow.AddMinutes(5))
+        {
+            return Error.Validation("INVALID_HANDOVER_TIME", "Thời gian bàn giao thực tế không thể ở tương lai.");
+        }
+
+        if (request.Units.Count != item.UnitAssignments.Count ||
+            request.Units.Select(u => u.AssignmentId).Distinct().Count() != request.Units.Count ||
+            request.Units.Any(u => !item.UnitAssignments.Any(a => a.Id == u.AssignmentId)))
+        {
+            return Error.Validation("INVALID_UNITS", "Danh sách thiết bị bàn giao phải bao gồm đầy đủ và duy nhất các máy thuộc mục thuê.");
+        }
+
+        if (request.Units.Any(u => u.MediaIds == null || u.MediaIds.Count == 0))
+        {
+            return Error.Validation("MISSING_MEDIA", "Mỗi thiết bị bàn giao phải kèm bằng chứng hình ảnh.");
+        }
+
+        string opKey = idempotencyKey.Trim();
+        string fingerprint = RentalOperationExecutor.ComputeFingerprint(new
+        {
+            Action = "MarkAssetsHandedOver",
+            ItemId = item.Id,
+            ActualHandoverAt = request.ActualHandoverAt,
+            Units = request.Units.OrderBy(u => u.AssignmentId).Select(u => new
+            {
+                u.AssignmentId,
+                u.Condition,
+                u.Note,
+                MediaIds = (u.MediaIds ?? []).OrderBy(m => m).ToList()
+            }).ToList()
+        });
+
+        var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
+        if (existingReceipt != null)
+        {
+            if (existingReceipt.Action != "MarkAssetsHandedOver" ||
+                existingReceipt.TargetItemId != item.Id ||
+                !string.Equals(existingReceipt.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase))
+            {
+                return Error.Conflict("IDEMPOTENCY_CONFLICT", "Khóa idempotency đã được dùng với payload khác.");
+            }
+
+            var existingRecord = item.HandoverRecord;
+            return new HandoverItemResponse(existingRecord?.Id ?? Guid.Empty, request.ActualHandoverAt, existingReceipt.Status);
+        }
+
         if (item.Status != RentalItemStatus.AwaitingHandover)
         {
             return Error.Conflict("INVALID_STATUS", $"Mục thuê không ở trạng thái AwaitingHandover. Trạng thái hiện tại: {item.Status}.");
         }
 
-        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         var handoverRecord = new HandoverRecord(
             Guid.NewGuid(),
             item.Id,
@@ -177,14 +246,9 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
 
         foreach (var u in request.Units)
         {
-            var assignment = item.UnitAssignments.FirstOrDefault(a => a.Id == u.AssignmentId);
-            if (assignment != null)
-            {
-                assignment.RecordHandover(handoverRecord.Id, u.Condition, u.Note, u.MediaIds);
-            }
+            var assignment = item.UnitAssignments.First(a => a.Id == u.AssignmentId);
+            assignment.RecordHandoverEvidence(handoverRecord.Id, u.Condition, u.Note, u.MediaIds);
         }
-
-        string opKey = idempotencyKey.Trim();
 
         var handoverCmd = new MarkAssetsHandedOverCommandPayload(
             order.Id,
@@ -192,14 +256,19 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             opKey,
             request.ActualHandoverAt);
 
-        await _inventoryCommands.EnqueueMarkAssetsHandedOverAsync(handoverCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
+        var enqueueResult = await _inventoryCommands.EnqueueMarkAssetsHandedOverAsync(
+            handoverCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
+        if (enqueueResult.IsFailure)
+        {
+            return enqueueResult.Error;
+        }
 
         var receipt = RentalOperationReceipt.CreatePending(
             Guid.NewGuid(),
             order.Id,
             opKey,
             "MarkAssetsHandedOver",
-            RentalOperationExecutor.ComputeFingerprint($"Handover:{item.Id}:{handoverRecord.Id}"),
+            fingerprint,
             utcNow,
             item.Id,
             JsonSerializer.Serialize(handoverCmd));
@@ -227,5 +296,12 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             return Error.Unauthorized("AUTH_REQUIRED", "Yêu cầu đăng nhập tài khoản cá nhân của supplier.");
         }
         return Result.Success();
+    }
+
+    private sealed class NoOpOrderLockManager : IOrderLockManager
+    {
+        private sealed class NoOpDisposable : IAsyncDisposable { public ValueTask DisposeAsync() => ValueTask.CompletedTask; }
+        private static readonly IAsyncDisposable Disposer = new NoOpDisposable();
+        public Task<IAsyncDisposable> AcquireOrderLockAsync(Guid orderId, TimeSpan? timeout = null, CancellationToken cancellationToken = default) => Task.FromResult(Disposer);
     }
 }

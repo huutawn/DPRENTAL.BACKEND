@@ -1,8 +1,12 @@
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.DTOs.Checkout;
+using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.Kafka.Configuration;
+using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Options;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;
@@ -21,6 +25,7 @@ namespace Dprental.RentalService.Api.Tests.Checkout;
 /// </summary>
 public sealed class CheckoutServicePostgreSqlTests
 {
+    private static readonly System.Text.Json.JsonSerializerOptions CamelCaseJsonOptions = new() { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase };
     // 10:00 ngày 09/10/2026 giờ Việt Nam.
     private static readonly DateTimeOffset Now = new(2026, 10, 9, 3, 0, 0, TimeSpan.Zero);
     private const string Key = "checkout-key-1";
@@ -28,13 +33,12 @@ public sealed class CheckoutServicePostgreSqlTests
     private readonly Guid _renterId = Guid.NewGuid();
     private readonly Guid _supplierId = Guid.NewGuid();
     private readonly Guid _listingId = Guid.NewGuid();
-    private readonly Guid _equipmentTypeId = Guid.NewGuid();
-    private readonly Guid _brandId = Guid.NewGuid();
     private readonly FakeInventoryListingClient _listings = new();
-    private readonly FakeCatalogReferenceClient _catalog = new();
+    private readonly FakeInventoryRentalClient _inventory = new();
+    private readonly FakePaymentRentalClient _payment = new();
 
     [Fact]
-    public async Task Submit_ConcurrentAndRepeatedSameKey_CreatesOnePendingOperation()
+    public async Task Submit_ConcurrentAndRepeatedSameKey_CreatesOnePayableOrder()
     {
         if (!await PostgresTestDatabaseHelper.IsPostgreSqlAvailableAsync())
         {
@@ -59,25 +63,43 @@ public sealed class CheckoutServicePostgreSqlTests
                 new("VCB", "0123456789", "NGUYEN VAN A"),
                 "v1.0",
                 true,
-                7_000_000m);
+                3_000_000m);
 
-            var concurrent = await Task.WhenAll(
-                Task.Run(() => SubmitAsync(options, locks, request)),
-                Task.Run(() => SubmitAsync(options, locks, request)));
-            var repeated = await SubmitAsync(options, locks, request);
+            // Consumer và worker dùng chung cho mọi lần gửi, như một instance Rental đang chạy.
+            FixedTimeProvider clock = new(Now);
+            CheckoutCompletion completion = new(
+                () => new RentalServiceDbContext(options), clock, _inventory, _payment, locks,
+                context => new PostgresOrderCodeGenerator(context));
+
+            CheckoutResult[] concurrent = await Task.WhenAll(
+                Task.Run(() => SubmitAsync(options, locks, request, completion)),
+                Task.Run(() => SubmitAsync(options, locks, request, completion)));
+            CheckoutResult repeated = await SubmitAsync(options, locks, request, completion);
 
             Assert.All(concurrent, r => Assert.True(r.IsSuccess, r.Error.Code));
             Assert.True(repeated.IsSuccess, repeated.Error.Code);
-            Assert.All(concurrent, r => Assert.Equal(repeated.Value.OperationId, r.Value.OperationId));
+            Assert.True(repeated.IsReplay);
 
             await using RentalServiceDbContext context = new(options);
-            var operation = await context.RentalCheckoutOperations.SingleAsync();
-            Assert.Equal(repeated.Value.OperationId, operation.OperationId);
-            Assert.Equal(CheckoutOperationStatus.Processing, operation.Status);
-            Assert.Equal(Now.AddMinutes(30), operation.HoldExpiresAt);
-            Assert.Single(await context.RentalOutboxMessages.Where(m => m.MessageType == "CreateHold").ToListAsync());
-            Assert.Empty(await context.RentalOrders.ToListAsync());
-            Assert.Single(await context.RentalCartItems.ToListAsync());
+            RentalOrder order = await context.RentalOrders
+                .Include(o => o.Items).ThenInclude(i => i.UnitAssignments)
+                .SingleAsync();
+
+            Assert.All(concurrent, r => Assert.Equal(order.Id, r.Order!.Id));
+            Assert.Equal(order.Id, repeated.Order!.Id);
+            Assert.Equal("DH-2026-000001", order.OrderCode);
+            Assert.Equal(RentalOrderStatus.PendingPayment, order.Status);
+            Assert.Equal(Now.AddMinutes(30), order.PaymentDeadline);
+            Assert.Equal("INV-1", order.InvoiceRef);
+            Assert.Equal(3_000_000m, order.TotalPayableAmount);
+            Assert.Equal(2, Assert.Single(order.Items).UnitAssignments.Count);
+            Assert.Equal(0, await context.RentalCartItems.CountAsync());
+
+            // Cùng Idempotency-Key chỉ ghi một lệnh giữ lịch và Inventory chỉ giữ máy một lần.
+            Assert.Equal(1, await context.RentalOutboxMessages.CountAsync(m => m.MessageType == KafkaContractSpec.CommandTypes.CreateHold));
+            Assert.Single(_inventory.HoldRequests);
+            Assert.Empty(_inventory.Releases);
+            Assert.Single(_payment.InvoiceRequests);
         }
         finally
         {
@@ -96,48 +118,42 @@ public sealed class CheckoutServicePostgreSqlTests
         context.RentalCarts.Add(cart);
         await context.SaveChangesAsync();
 
-        _listings.Listings[_listingId] = new(
-            _listingId,
-            _supplierId,
-            true,
-            "Sony A7 IV",
-            _equipmentTypeId,
-            _brandId,
-            "A7 IV",
-            1,
-            """{"sensor":"full-frame"}""",
-            Guid.NewGuid(),
-            500_000m,
-            2_000_000m,
-            "VND",
-            "Quận 1, TP.HCM",
-            "listing-v1");
+        _listings.Listings[_listingId] = TestListings.Create(_listingId, _supplierId, "Sony A7 IV", 500_000m, thumbnailMediaId: Guid.NewGuid());
         _listings.AvailableQuantities[_listingId] = 10;
-        _catalog.EquipmentTypeNames[_equipmentTypeId] = "Máy ảnh";
-        _catalog.BrandNames[_brandId] = "Sony";
 
         return cartItemId;
     }
 
-    private async Task<Dprental.RentalService.Common.Result<CheckoutOperationAcceptedResponse>> SubmitAsync(
+    private async Task<CheckoutResult> SubmitAsync(
         DbContextOptions<RentalServiceDbContext> options,
         PostgresOrderLockManager locks,
-        CheckoutRequest request)
+        CheckoutRequest request,
+        CheckoutCompletion completion)
     {
-        await using RentalServiceDbContext context = new(options);
+        CheckoutSubmitResult accepted;
+        await using (RentalServiceDbContext context = new(options))
+        {
+            accepted = await NewService(context, locks).SubmitAsync(new(_renterId, true), request, Key);
+        }
+
+        return accepted.IsFailure
+            ? accepted.Failure!
+            : await completion.CompleteAsync(_renterId, Key);
+    }
+
+    private CheckoutService NewService(RentalServiceDbContext context, PostgresOrderLockManager locks)
+    {
         RentalOrderRepository orders = new(context);
         RentalCartRepository carts = new(context);
-        RentalCheckoutOperationRepository operations = new(context);
         OutboxRepository outbox = new(context);
         FixedTimeProvider clock = new(Now);
         InventoryCommandProducer inventoryCommands = new(outbox, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), clock);
 
-        CheckoutService service = new(
+        return new CheckoutService(
             new CheckoutPreparationService(
                 carts,
                 orders,
                 _listings,
-                _catalog,
                 Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
                 {
                     CurrentVersion = "v1.0",
@@ -145,13 +161,11 @@ public sealed class CheckoutServicePostgreSqlTests
                     ContentHash = "hash123456"
                 }),
                 clock),
-            operations,
+            new RentalCheckoutOperationRepository(context),
             orders,
             locks,
             inventoryCommands,
             context,
             clock);
-
-        return await service.SubmitAsync(new(_renterId, true), request, Key);
     }
 }

@@ -89,7 +89,7 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
         if (command.Quantity <= 0) return Error.Validation("INVALID_QUANTITY", "Quantity must be greater than zero.");
 
         var envelope = new KafkaMessageEnvelope<CreateHoldCommandPayload>(
-            MessageId: OutboxMessageIdGenerator.Generate(),
+            MessageId: OutboxMessageIdGenerator.ComputeDeterministicId(KafkaContractSpec.Producers.RentalService, KafkaContractSpec.CommandTypes.CreateHold, command.OperationKey),
             MessageType: KafkaContractSpec.CommandTypes.CreateHold,
             Version: KafkaContractSpec.CurrentEnvelopeVersion,
             Producer: KafkaContractSpec.Producers.RentalService,
@@ -118,7 +118,7 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
         if (string.IsNullOrWhiteSpace(command.OperationKey)) return Error.Validation("INVALID_OPERATION_KEY", "OperationKey cannot be empty.");
 
         var envelope = new KafkaMessageEnvelope<ExtendHoldCommandPayload>(
-            MessageId: OutboxMessageIdGenerator.Generate(),
+            MessageId: OutboxMessageIdGenerator.ComputeDeterministicId(KafkaContractSpec.Producers.RentalService, KafkaContractSpec.CommandTypes.ExtendHold, command.OperationKey),
             MessageType: KafkaContractSpec.CommandTypes.ExtendHold,
             Version: KafkaContractSpec.CurrentEnvelopeVersion,
             Producer: KafkaContractSpec.Producers.RentalService,
@@ -146,8 +146,12 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
         if (command.RentalItemId == Guid.Empty) return Error.Validation("INVALID_RENTAL_ITEM_ID", "RentalItemId cannot be empty.");
         if (string.IsNullOrWhiteSpace(command.OperationKey)) return Error.Validation("INVALID_OPERATION_KEY", "OperationKey cannot be empty.");
 
+        // MessageId cố định theo OperationKey: gửi lại cùng khóa hoặc expiry worker chốt nốt không ghi thêm lệnh trùng vào Outbox.
         var envelope = new KafkaMessageEnvelope<ConfirmAllocationCommandPayload>(
-            MessageId: OutboxMessageIdGenerator.Generate(),
+            MessageId: OutboxMessageIdGenerator.ComputeDeterministicId(
+                KafkaContractSpec.Producers.RentalService,
+                KafkaContractSpec.CommandTypes.ConfirmAllocation,
+                command.OperationKey),
             MessageType: KafkaContractSpec.CommandTypes.ConfirmAllocation,
             Version: KafkaContractSpec.CurrentEnvelopeVersion,
             Producer: KafkaContractSpec.Producers.RentalService,
@@ -177,7 +181,7 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
         if (string.IsNullOrWhiteSpace(command.Reason)) return Error.Validation("INVALID_REASON", "Reason cannot be empty.");
 
         var envelope = new KafkaMessageEnvelope<ReleaseAllocationCommandPayload>(
-            MessageId: OutboxMessageIdGenerator.Generate(),
+            MessageId: OutboxMessageIdGenerator.ComputeDeterministicId(KafkaContractSpec.Producers.RentalService, KafkaContractSpec.CommandTypes.ReleaseAllocation, command.OperationKey),
             MessageType: KafkaContractSpec.CommandTypes.ReleaseAllocation,
             Version: KafkaContractSpec.CurrentEnvelopeVersion,
             Producer: KafkaContractSpec.Producers.RentalService,
@@ -206,7 +210,7 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
         if (string.IsNullOrWhiteSpace(command.OperationKey)) return Error.Validation("INVALID_OPERATION_KEY", "OperationKey cannot be empty.");
 
         var envelope = new KafkaMessageEnvelope<MarkAssetsHandedOverCommandPayload>(
-            MessageId: OutboxMessageIdGenerator.Generate(),
+            MessageId: OutboxMessageIdGenerator.ComputeDeterministicId(KafkaContractSpec.Producers.RentalService, KafkaContractSpec.CommandTypes.MarkAssetsHandedOver, command.OperationKey),
             MessageType: KafkaContractSpec.CommandTypes.MarkAssetsHandedOver,
             Version: KafkaContractSpec.CurrentEnvelopeVersion,
             Producer: KafkaContractSpec.Producers.RentalService,

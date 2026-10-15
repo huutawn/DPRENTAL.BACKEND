@@ -24,8 +24,19 @@ internal sealed class FakeOrderCodeGenerator : IOrderCodeGenerator
 {
     private int _issued;
 
-    public Task<string> NextAsync(DateTimeOffset utcNow, CancellationToken cancellationToken = default) =>
-        Task.FromResult($"DH-{utcNow.Year}-{Interlocked.Increment(ref _issued):D6}");
+    /// <summary>Số lần lấy mã tiếp theo bị lỗi như sequence PostgreSQL không phản hồi.</summary>
+    public int FailNext { get; set; }
+
+    public Task<string> NextAsync(DateTimeOffset utcNow, CancellationToken cancellationToken = default)
+    {
+        if (FailNext > 0)
+        {
+            FailNext--;
+            throw new InvalidOperationException("Simulated database outage.");
+        }
+
+        return Task.FromResult($"DH-{utcNow.Year}-{Interlocked.Increment(ref _issued):D6}");
+    }
 }
 
 /// <summary>Đơn chờ thanh toán dựng sẵn cho test hóa đơn: tiền thuê 3.600.000, tiền cọc 5.000.000.</summary>
@@ -178,13 +189,36 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
         IReadOnlyCollection<RentalItemStatus> targetStatuses,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+
+    public Task<RentalSubOrder?> GetSubOrderByIdAsync(Guid subOrderId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(
+        Guid renterId, int skip, int take, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<RentalOrder?> GetRenterOrderWithSubOrdersAsync(
+        Guid orderId, Guid renterId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(
+        Guid supplierId, int skip, int take, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<RentalSubOrder?> GetPaidSubOrderForSupplierAsync(
+        Guid subOrderId, Guid supplierId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
 }
 
-internal sealed class FakeInventoryListingClient : IInventoryListingClient
+/// <summary>
+/// Inventory giả phục vụ bước chuẩn bị checkout: đọc thông tin máy (rental-snapshot) và hỏi lịch trống.
+/// ListingReadCount đếm số lần gọi đọc Listing; AvailabilityCheckCount đếm số lần hỏi lịch (mỗi dòng một lần).
+/// </summary>
+internal sealed class FakeInventoryListingClient : IInventoryRentalClient
 {
     private static readonly Error Down = Error.ServiceUnavailable("Inventory.Unavailable", "Inventory không phản hồi.");
 
-    public Dictionary<Guid, InventoryListingDto> Listings { get; } = [];
+    public Dictionary<Guid, ListingRentalSnapshotDto> Listings { get; } = [];
 
     public Dictionary<Guid, int> AvailableQuantities { get; } = [];
 
@@ -198,62 +232,81 @@ internal sealed class FakeInventoryListingClient : IInventoryListingClient
 
     public List<(DateOnly StartDate, DateOnly EndDate)> AvailabilityPeriods { get; } = [];
 
-    public Task<Result<InventoryListingDto?>> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default)
+    public List<Guid> RequestedListingIds { get; } = [];
+
+    public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(
+        ListingRentalSnapshotsRequest request,
+        CancellationToken ct = default)
+    {
+        ListingReadCount++;
+        RequestedListingIds.AddRange(request.EquipmentListingIds);
+        if (FailListingRead)
+        {
+            return Task.FromResult(Result.Failure<ListingRentalSnapshotsResponse>(Down));
+        }
+
+        List<ListingRentalSnapshotDto> found = request.EquipmentListingIds.Where(Listings.ContainsKey).Select(id => Listings[id]).ToList();
+        List<Guid> notFound = request.EquipmentListingIds.Where(id => !Listings.ContainsKey(id)).ToList();
+        return Task.FromResult(Result.Success(new ListingRentalSnapshotsResponse(found, notFound)));
+    }
+
+    public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default)
     {
         ListingReadCount++;
         if (FailListingRead)
         {
-            return Task.FromResult(Result.Failure<InventoryListingDto?>(Down));
+            return Task.FromResult(Result.Failure<ListingRentalSnapshotDto>(Down));
         }
 
-        return Task.FromResult(Result.Success(Listings.GetValueOrDefault(listingId)));
+        return Task.FromResult(Listings.TryGetValue(listingId, out ListingRentalSnapshotDto? listing)
+            ? Result.Success(listing)
+            : Result.Failure<ListingRentalSnapshotDto>(Error.NotFound(
+                InventoryContractSpec.ErrorCodes.ListingNotFound, "Không tìm thấy Listing.")));
     }
 
-    public Task<Result<InventoryListingAvailabilityDto>> CheckAvailabilityAsync(
-        Guid listingId,
-        DateOnly startDate,
-        DateOnly endDate,
-        int requestedQuantity,
-        CancellationToken cancellationToken = default)
+    public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(
+        ListingAvailabilityCheckRequest request,
+        CancellationToken ct = default)
     {
         AvailabilityCheckCount++;
-        AvailabilityPeriods.Add((startDate, endDate));
+        AvailabilityPeriods.Add((request.StartDate, request.EndDate));
         if (FailAvailabilityCheck)
         {
-            return Task.FromResult(Result.Failure<InventoryListingAvailabilityDto>(Down));
+            return Task.FromResult(Result.Failure<ListingAvailabilityCheckResponse>(Down));
         }
 
-        int available = AvailableQuantities.GetValueOrDefault(listingId);
-        return Task.FromResult(Result.Success(
-            new InventoryListingAvailabilityDto(listingId, available, available >= requestedQuantity)));
+        int available = AvailableQuantities.GetValueOrDefault(request.ListingId);
+        return Task.FromResult(Result.Success(new ListingAvailabilityCheckResponse(
+            request.ListingId, request.StartDate, request.EndDate, request.RequestedQuantity,
+            available, available >= request.RequestedQuantity)));
     }
+
+    public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(string allocationGroupId, ConfirmAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<Result<ReleaseAllocationResponse>> ReleaseAllocationAsync(string allocationGroupId, ReleaseAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<Result<CancelAllocationResponse>> CancelAllocationAsync(string allocationGroupId, CancelAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<Result<MarkAssetsOverdueResponse>> MarkAssetsOverdueAsync(string allocationGroupId, MarkAssetsOverdueRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<Result<MarkAssetsReturnedResponse>> MarkAssetsReturnedAsync(string allocationGroupId, MarkAssetsReturnedRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<Result<BlockDamagedAssetsResponse>> BlockDamagedAssetsAsync(string allocationGroupId, BlockDamagedAssetsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
 }
 
-internal sealed class FakeCatalogReferenceClient : ICatalogReferenceClient
+/// <summary>Thông tin máy theo hợp đồng Inventory cho test checkout.</summary>
+internal static class TestListings
 {
-    private static readonly Error Down = Error.ServiceUnavailable("Catalog.Unavailable", "Catalog không phản hồi.");
-
-    public Dictionary<Guid, string> EquipmentTypeNames { get; } = [];
-
-    public Dictionary<Guid, string> BrandNames { get; } = [];
-
-    public bool Fail { get; set; }
-
-    public int CallCount { get; private set; }
-
-    public Task<Result<string?>> GetEquipmentTypeNameAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default)
-    {
-        CallCount++;
-        return Task.FromResult(Fail
-            ? Result.Failure<string?>(Down)
-            : Result.Success(EquipmentTypeNames.GetValueOrDefault(equipmentTypeId)));
-    }
-
-    public Task<Result<string?>> GetBrandNameAsync(Guid brandId, CancellationToken cancellationToken = default)
-    {
-        CallCount++;
-        return Task.FromResult(Fail
-            ? Result.Failure<string?>(Down)
-            : Result.Success(BrandNames.GetValueOrDefault(brandId)));
-    }
+    public static ListingRentalSnapshotDto Create(
+        Guid listingId,
+        Guid supplierId,
+        string name,
+        decimal dailyRate,
+        bool isActive = true,
+        Guid? thumbnailMediaId = null,
+        string currency = "VND") => new(
+        listingId,
+        supplierId,
+        name,
+        thumbnailMediaId,
+        dailyRate,
+        currency,
+        isActive ? "Active" : "Inactive");
 }

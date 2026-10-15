@@ -33,6 +33,9 @@ case "${1:-}" in
   build)
     [ "${DOTNET_FAIL:-}" != build ] || exit 31
     ;;
+  dotnet-ef)
+    [ "${DOTNET_FAIL:-}" != ef ] || exit 33
+    ;;
   test)
     [ "${DOTNET_FAIL:-}" != test ] || exit 32
     ;;
@@ -95,6 +98,7 @@ git -C "$first_push_work" remote add origin "$first_push_remote"
   cd "$first_push_work"
   PATH="$fake_bin:$PATH" DOTNET_LOG="$first_push_log" "$validator"
 ) >/dev/null
+assert_contains 'dotnet-ef migrations has-pending-model-changes' "$first_push_log"
 
 assert_contains 'build RentalService.sln --configuration Release --nologo' "$first_push_log"
 assert_contains 'test RentalService.sln --configuration Release --no-build --nologo' "$first_push_log"
@@ -122,6 +126,7 @@ git -C "$work_repo" merge --no-edit origin/rental/develop >/dev/null
 
 assert_contains 'build RentalService.sln --configuration Release --nologo' "$dotnet_log"
 assert_contains 'test RentalService.sln --configuration Release --no-build --nologo' "$dotnet_log"
+assert_contains 'dotnet-ef migrations has-pending-model-changes' "$dotnet_log"
 
 # -------------------------------------------------------------
 # Test 4: Build thất bại
@@ -141,6 +146,16 @@ if (
   PATH="$fake_bin:$PATH" DOTNET_LOG="$dotnet_log" DOTNET_FAIL=test "$validator"
 ) >/dev/null 2>&1; then
   fail 'test thất bại lại được cho qua.'
+fi
+
+# -------------------------------------------------------------
+# Test 6: Pending model changes thất bại
+# -------------------------------------------------------------
+if (
+  cd "$work_repo"
+  PATH="$fake_bin:$PATH" DOTNET_LOG="$dotnet_log" DOTNET_FAIL=ef "$validator"
+) >/dev/null 2>&1; then
+  fail 'pending model changes lại được cho qua.'
 fi
 
 printf 'Đã đạt toàn bộ kiểm thử cho script pre-push-check.sh.\n'

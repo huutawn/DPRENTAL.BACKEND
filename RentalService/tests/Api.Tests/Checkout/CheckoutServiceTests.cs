@@ -23,8 +23,11 @@ public sealed class CheckoutServiceTests
     private static readonly DateTimeOffset Now = CheckoutTestHarness.Now;
     private const string Key = "checkout-key-1";
     private const string OtherKey = "checkout-key-2";
-    private const decimal CameraAndLensTotal = 8_600_000m;
-    private const decimal TripodTotal = 800_000m;
+    // Inventory chưa có tiền cọc nên cọc = 0.
+    // Máy ảnh: 2 máy x 500.000 x 3 ngày = 3.000.000. Ống kính: 1 cái x 200.000 x 3 ngày = 600.000.
+    private const decimal CameraAndLensTotal = 3_600_000m;
+    // Chân máy: 1 cái x 100.000 x 3 ngày = 300.000.
+    private const decimal TripodTotal = 300_000m;
 
     private readonly CheckoutTestHarness _harness = new();
     private readonly Guid _renterId = Guid.NewGuid();
@@ -36,9 +39,9 @@ public sealed class CheckoutServiceTests
 
     public CheckoutServiceTests()
     {
-        _cameraListingId = _harness.AddListing(_supplierId, dailyRate: 500_000m, depositPerUnit: 2_000_000m);
-        _lensListingId = _harness.AddListing(_supplierId, dailyRate: 200_000m, depositPerUnit: 1_000_000m);
-        _tripodListingId = _harness.AddListing(_supplierId, dailyRate: 100_000m, depositPerUnit: 500_000m);
+        _cameraListingId = _harness.AddListing(_supplierId, dailyRate: 500_000m);
+        _lensListingId = _harness.AddListing(_supplierId, dailyRate: 200_000m);
+        _tripodListingId = _harness.AddListing(_supplierId, dailyRate: 100_000m);
 
         _cartItemIds = _harness.SeedCartAsync(_renterId,
             (_cameraListingId, 2),
@@ -62,7 +65,6 @@ public sealed class CheckoutServiceTests
                 carts,
                 orders,
                 _harness.Listings,
-                _harness.Catalog,
                 Options.Create(new RentalTermsOptions
                 {
                     CurrentVersion = "v1.0",
@@ -104,6 +106,25 @@ public sealed class CheckoutServiceTests
             Assert.Equal(KafkaContractSpec.Topics.InventoryAllocationCommands, m.Topic);
             Assert.Equal(KafkaContractSpec.CommandTypes.CreateHold, m.MessageType);
             Assert.Equal(op.ExpectedRentalOrderId.ToString("D"), m.PartitionKey);
+        });
+    }
+
+    [Fact]
+    public async Task SubmitAsync_SendsInventoryTheLastRentalDayInclusive()
+    {
+        await using var context = _harness.NewContext();
+        var service = CreateService(context);
+
+        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
+
+        Assert.True(result.IsSuccess);
+        // Giỏ thuê 12, 13, 14; đơn lưu [12, 15). Inventory nhận ngày cuối có tính: endDate = 14, không phải 15.
+        Assert.All(await context.RentalOutboxMessages.ToListAsync(), m =>
+        {
+            using var envelope = System.Text.Json.JsonDocument.Parse(m.Payload);
+            var payload = envelope.RootElement.GetProperty("payload");
+            Assert.Equal("2026-10-12", payload.GetProperty("startDate").GetString());
+            Assert.Equal("2026-10-14", payload.GetProperty("endDate").GetString());
         });
     }
 

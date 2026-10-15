@@ -1,3 +1,4 @@
+using System.Text.Json;
 #pragma warning disable CA1848, CA1873
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Payment;
@@ -106,6 +107,10 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
             _logger.LogError("Không gắn được hóa đơn vào đơn {OrderCode}: {ErrorCode}.", order.OrderCode, attached.Error.Code);
             return CheckoutErrors.InvoiceRejected;
         }
+
+        string invoiceOpKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
+        var invReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == invoiceOpKey);
+        invReceipt?.MarkSucceeded(_timeProvider.GetUtcNow(), JsonSerializer.Serialize(invoice));
 
         await _orders.UpdateAsync(order, cancellationToken);
         try

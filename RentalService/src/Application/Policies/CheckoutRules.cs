@@ -6,7 +6,8 @@ using Dprental.RentalService.Domain.Policies;
 namespace Dprental.RentalService.Application.Policies;
 
 /// <summary>
-/// Quy tắc ngày thuê lúc checkout theo SRS Rental: giao từ ngày mai, trong 6 tháng, tối đa 30 ngày.
+/// Quy tắc ngày thuê lúc checkout: đặt trước ít nhất <see cref="RentalBookingPolicy.MinimumLeadDays"/> ngày
+/// (SRS cũ ghi "từ ngày mai"), trong 6 tháng, tối đa 30 ngày.
 /// Giỏ lưu ngày trả có tính (giao 10, trả 12 là 3 ngày); đơn hàng lưu khoảng [từ, đến) không tính ngày cuối.
 /// </summary>
 public static class CheckoutRules
@@ -14,6 +15,9 @@ public static class CheckoutRules
     public const int MaxRentalDays = 30;
     public const int BookingHorizonMonths = 6;
     public const string Currency = "VND";
+
+    /// <summary>Inventory chưa có tiền cọc trên Listing; tạm tính 0 cho đến khi có (giỏ hàng dùng cùng giá trị).</summary>
+    public const decimal DepositPerUnit = 0m;
 
     /// <summary>Phase 1 chỉ có một cách giao: nhà cung cấp giao tới địa chỉ của người thuê.</summary>
     public const string DeliveryMethod = "Delivery";
@@ -43,6 +47,12 @@ public static class CheckoutRules
             "N");
 
     /// <summary>
+    /// Mã nhóm máy của một dòng thuê bên Inventory (groupReference, cùng SourceSystem "rental").
+    /// Rental lưu mã này vào RentalItem.AllocationGroupId; các lệnh Kafka của Inventory cũng tìm nhóm theo mã này.
+    /// </summary>
+    public static string HoldGroupReference(Guid rentalItemId) => $"rental-item:{rentalItemId}";
+
+    /// <summary>
     /// Đổi khoảng ngày của dòng giỏ (ngày trả có tính) sang khoảng [từ, đến) của đơn hàng:
     /// giao 10, trả 12 thành [10, 13), tức 3 ngày thuê và Inventory giữ lịch các ngày 10, 11, 12.
     /// </summary>
@@ -56,10 +66,10 @@ public static class CheckoutRules
     {
         ArgumentNullException.ThrowIfNull(item);
 
-        if (item.ExpectedStartDate <= today)
+        if (RentalBookingPolicy.IsStartDateTooSoon(item.ExpectedStartDate, today))
         {
             return new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.StartDateNotInFuture,
-                "Ngày giao dự kiến phải từ ngày mai trở đi.");
+                RentalBookingPolicy.TooSoonMessage(today));
         }
 
         if (item.ExpectedStartDate > today.AddMonths(BookingHorizonMonths))

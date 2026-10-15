@@ -20,16 +20,17 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 {
     private readonly IRentalCartRepository _carts;
     private readonly IRentalOrderRepository _orders;
-    private readonly IInventoryListingClient _inventory;
-    private readonly ICatalogReferenceClient _catalog;
+    private readonly IInventoryRentalClient _inventory;
     private readonly RentalTermsOptions _terms;
     private readonly TimeProvider _timeProvider;
+
+    // Giỏ hàng cũng coi Listing có Status = Active là đang cho thuê (InventoryRentalCartReader).
+    private const string ActiveStatus = "Active";
 
     public CheckoutPreparationService(
         IRentalCartRepository carts,
         IRentalOrderRepository orders,
-        IInventoryListingClient inventory,
-        ICatalogReferenceClient catalog,
+        IInventoryRentalClient inventory,
         IOptions<RentalTermsOptions> termsOptions,
         TimeProvider timeProvider)
     {
@@ -38,7 +39,6 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         _carts = carts ?? throw new ArgumentNullException(nameof(carts));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
-        _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _terms = termsOptions.Value;
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
@@ -148,34 +148,29 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     }
 
     /// <summary>
-    /// Đọc lại Listing, lịch và tên loại/hãng cho từng dòng. Lỗi của mọi dòng được gom lại để trả một lần.
+    /// Đọc lại mọi Listing trong một lần gọi Inventory, rồi hỏi lịch trống từng dòng (gọi song song).
+    /// Lỗi của mọi dòng được gom lại để trả một lần, theo thứ tự dòng trong giỏ.
     /// </summary>
     private async Task<LineBuildOutcome> BuildLinesAsync(
         Guid renterId,
         List<RentalCartItem> items,
         CancellationToken cancellationToken)
     {
-        List<CheckoutPlanLine> lines = [];
-        List<CheckoutLineIssue> issues = [];
-        Dictionary<Guid, InventoryListingDto?> listings = [];
-        Dictionary<Guid, string?> equipmentTypeNames = [];
-        Dictionary<Guid, string?> brandNames = [];
+        // 1. Một lần gọi cho mọi Listing của các dòng đã chọn.
+        List<Guid> listingIds = items.Select(i => i.EquipmentListingId).Distinct().ToList();
+        Result<ListingRentalSnapshotsResponse> snapshotsResult = await _inventory.GetListingRentalSnapshotsAsync(
+            new ListingRentalSnapshotsRequest(listingIds), cancellationToken);
+        if (snapshotsResult.IsFailure ||
+            !TryIndexSnapshots(listingIds, snapshotsResult.Value, out Dictionary<Guid, ListingRentalSnapshotDto> listings))
+        {
+            return LineBuildOutcome.Unavailable;
+        }
 
+        List<CheckoutLineIssue> issues = [];
+        List<(RentalCartItem Item, ListingRentalSnapshotDto Listing, DateOnly From, DateOnly To)> candidates = [];
         foreach (RentalCartItem item in items)
         {
-            if (!listings.TryGetValue(item.EquipmentListingId, out InventoryListingDto? listing))
-            {
-                Result<InventoryListingDto?> listingResult = await _inventory.GetListingAsync(item.EquipmentListingId, cancellationToken);
-                if (listingResult.IsFailure)
-                {
-                    return LineBuildOutcome.Unavailable;
-                }
-
-                listing = listingResult.Value;
-                listings[item.EquipmentListingId] = listing;
-            }
-
-            if (listing is null || !IsRentable(listing))
+            if (!listings.TryGetValue(item.EquipmentListingId, out ListingRentalSnapshotDto? listing) || !IsRentable(listing))
             {
                 issues.Add(new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.ListingUnavailable,
                     "Thiết bị không còn cho thuê."));
@@ -190,85 +185,88 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             }
 
             (DateOnly orderStartDate, DateOnly orderEndDate) = CheckoutRules.ToOrderPeriod(item);
+            candidates.Add((item, listing, orderStartDate, orderEndDate));
+        }
 
-            // Mỗi dòng được hỏi lịch độc lập để báo lỗi sớm; chống đặt trùng là việc của Inventory lúc hold.
-            Result<InventoryListingAvailabilityDto> availabilityResult = await _inventory.CheckAvailabilityAsync(
-                item.EquipmentListingId,
-                orderStartDate,
-                orderEndDate,
-                item.Quantity,
-                cancellationToken);
-            if (availabilityResult.IsFailure)
+        // 2. Hỏi lịch trống từng dòng bằng API của Inventory, các dòng gọi song song.
+        // Giỏ và Inventory cùng tính ngày cuối có tính nên gửi thẳng ngày của giỏ. Chống đặt trùng là việc của Inventory lúc hold.
+        Result<ListingAvailabilityCheckResponse>[] availability = await Task.WhenAll(candidates.Select(c =>
+            _inventory.CheckListingAvailabilityAsync(
+                new ListingAvailabilityCheckRequest(
+                    c.Item.EquipmentListingId, c.Item.ExpectedStartDate, c.Item.ExpectedEndDate, c.Item.Quantity),
+                cancellationToken)));
+
+        List<CheckoutPlanLine> lines = [];
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            var (item, listing, orderStartDate, orderEndDate) = candidates[i];
+            Result<ListingAvailabilityCheckResponse> result = availability[i];
+            if (result.IsFailure && result.Error.Type == ErrorType.NotFound)
             {
-                return LineBuildOutcome.Unavailable;
-            }
-
-            InventoryListingAvailabilityDto availability = availabilityResult.Value;
-            if (!availability.IsAvailable || availability.AvailableQuantity < item.Quantity)
-            {
-                issues.Add(new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.InsufficientAvailability,
-                    "Thiết bị không đủ số lượng trống trong ngày đã chọn.", item.Quantity, availability.AvailableQuantity));
-                continue;
-            }
-
-            if (!equipmentTypeNames.TryGetValue(listing.EquipmentTypeId, out string? equipmentTypeName))
-            {
-                Result<string?> typeResult = await _catalog.GetEquipmentTypeNameAsync(listing.EquipmentTypeId, cancellationToken);
-                if (typeResult.IsFailure)
-                {
-                    return LineBuildOutcome.Unavailable;
-                }
-
-                equipmentTypeName = typeResult.Value;
-                equipmentTypeNames[listing.EquipmentTypeId] = equipmentTypeName;
-            }
-
-            if (!brandNames.TryGetValue(listing.BrandId, out string? brandName))
-            {
-                Result<string?> brandResult = await _catalog.GetBrandNameAsync(listing.BrandId, cancellationToken);
-                if (brandResult.IsFailure)
-                {
-                    return LineBuildOutcome.Unavailable;
-                }
-
-                brandName = brandResult.Value;
-                brandNames[listing.BrandId] = brandName;
-            }
-
-            if (string.IsNullOrWhiteSpace(equipmentTypeName) || string.IsNullOrWhiteSpace(brandName))
-            {
+                // Listing vừa bị xóa giữa hai lần gọi.
                 issues.Add(new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.ListingUnavailable,
                     "Thiết bị không còn cho thuê."));
                 continue;
             }
 
-            lines.Add(BuildLine(item, orderStartDate, orderEndDate, listing, equipmentTypeName.Trim(), brandName.Trim()));
+            if (result.IsFailure || !MatchesLine(result.Value, item))
+            {
+                // Inventory không phản hồi, hoặc trả kết quả của Listing/khoảng ngày khác với dòng đã hỏi.
+                return LineBuildOutcome.Unavailable;
+            }
+
+            ListingAvailabilityCheckResponse lineAvailability = result.Value;
+            if (!lineAvailability.IsAvailable || lineAvailability.AvailableQuantity < item.Quantity)
+            {
+                issues.Add(new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.InsufficientAvailability,
+                    "Thiết bị không đủ số lượng trống trong ngày đã chọn.", item.Quantity, lineAvailability.AvailableQuantity));
+                continue;
+            }
+
+            lines.Add(BuildLine(item, orderStartDate, orderEndDate, listing));
         }
 
-        return new(false, lines, issues);
+        Dictionary<Guid, int> cartOrder = items.Select((item, index) => (item.Id, index)).ToDictionary(x => x.Id, x => x.index);
+        return new(false, lines, issues.OrderBy(i => cartOrder[i.CartItemId]).ToList());
+    }
+
+    /// <summary>
+    /// Đánh chỉ mục snapshot theo ListingId. Sai hợp đồng (Listing lạ, trùng, thiếu trường bắt buộc, hoặc Listing đã hỏi
+    /// nhưng không có trong cả kết quả lẫn danh sách không tìm thấy) là lỗi phía Inventory, không phải thiết bị ngừng cho thuê.
+    /// </summary>
+    private static bool TryIndexSnapshots(
+        List<Guid> requestedIds,
+        ListingRentalSnapshotsResponse response,
+        out Dictionary<Guid, ListingRentalSnapshotDto> listings)
+    {
+        Dictionary<Guid, ListingRentalSnapshotDto> indexed = [];
+        listings = indexed;
+        if (response.Items is null || response.MissingIds is null)
+        {
+            return false;
+        }
+
+        HashSet<Guid> requested = [.. requestedIds];
+        foreach (ListingRentalSnapshotDto listing in response.Items)
+        {
+            if (listing is null || !requested.Contains(listing.Id) || !IsComplete(listing) || !indexed.TryAdd(listing.Id, listing))
+            {
+                return false;
+            }
+        }
+
+        HashSet<Guid> notFound = [.. response.MissingIds];
+        return requestedIds.All(id => indexed.ContainsKey(id) || notFound.Contains(id));
     }
 
     private static CheckoutPlanLine BuildLine(
         RentalCartItem item,
         DateOnly orderStartDate,
         DateOnly orderEndDate,
-        InventoryListingDto listing,
-        string equipmentTypeName,
-        string brandName)
+        ListingRentalSnapshotDto listing)
     {
-        decimal dailyRate = listing.DailyRate!.Value;
-        decimal depositPerUnit = listing.DepositPerUnit!.Value;
+        decimal dailyRate = listing.DailyRate;
         int rentalDays = RentalPricingPolicy.CalculateRentalDays(orderStartDate, orderEndDate);
-
-        RentalItemListingSnapshotDto snapshot = new(
-            listing.EquipmentTypeId,
-            equipmentTypeName,
-            listing.BrandId,
-            brandName,
-            listing.Model.Trim(),
-            listing.SchemaVersion,
-            listing.SpecValuesJson.Trim(),
-            listing.ThumbnailMediaId);
 
         return new(
             item.Id,
@@ -277,30 +275,30 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             item.Quantity,
             orderStartDate,
             orderEndDate,
-            listing.Title.Trim(),
-            listing.PickupLocation!.Trim(),
-            listing.SnapshotVersion!.Trim(),
-            snapshot,
+            listing.Name.Trim(),
+            RentalItemListingSnapshotDto.ThumbnailOnly(listing.ThumbnailMediaId),
             dailyRate,
-            depositPerUnit,
+            CheckoutRules.DepositPerUnit,
             rentalDays,
             RentalPricingPolicy.CalculateRentalAmount(dailyRate, item.Quantity, rentalDays),
-            RentalPricingPolicy.CalculateDepositAmount(depositPerUnit, item.Quantity));
+            RentalPricingPolicy.CalculateDepositAmount(CheckoutRules.DepositPerUnit, item.Quantity));
     }
 
-    private static bool IsRentable(InventoryListingDto listing) =>
-        listing.IsActive &&
+    private static bool MatchesLine(ListingAvailabilityCheckResponse response, RentalCartItem item) =>
+        response is not null &&
+        response.ListingId == item.EquipmentListingId &&
+        response.StartDate == item.ExpectedStartDate &&
+        response.EndDate == item.ExpectedEndDate;
+
+    private static bool IsComplete(ListingRentalSnapshotDto listing) =>
         listing.OwnerUserId != Guid.Empty &&
-        listing.EquipmentTypeId != Guid.Empty &&
-        listing.BrandId != Guid.Empty &&
-        listing.SchemaVersion >= 1 &&
-        !string.IsNullOrWhiteSpace(listing.Title) &&
-        !string.IsNullOrWhiteSpace(listing.Model) &&
-        !string.IsNullOrWhiteSpace(listing.SpecValuesJson) &&
-        !string.IsNullOrWhiteSpace(listing.PickupLocation) &&
-        !string.IsNullOrWhiteSpace(listing.SnapshotVersion) &&
-        listing.DailyRate is > 0 &&
-        listing.DepositPerUnit is >= 0 &&
+        !string.IsNullOrWhiteSpace(listing.Name) &&
+        !string.IsNullOrWhiteSpace(listing.Status) &&
+        !string.IsNullOrWhiteSpace(listing.Currency);
+
+    private static bool IsRentable(ListingRentalSnapshotDto listing) =>
+        string.Equals(listing.Status, ActiveStatus, StringComparison.OrdinalIgnoreCase) &&
+        listing.DailyRate > 0 &&
         string.Equals(listing.Currency, CheckoutRules.Currency, StringComparison.OrdinalIgnoreCase);
 
     private static CheckoutDeliveryDto Normalize(CheckoutDeliveryDto delivery) =>

@@ -4,6 +4,7 @@ using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
+using Dprental.RentalService.Domain.Policies;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Xunit;
@@ -64,9 +65,23 @@ public sealed class GetRentalCartTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_StartDateLessThanThreeDaysAhead_ReturnsDatePassedStatus()
+    {
+        // Hôm nay 15/10: ngày 17/10 chỉ còn 2 ngày, sớm nhất phải là 18/10.
+        SetupCartWithOneItem(_todayVn.AddDays(2), _todayVn.AddDays(4));
+
+        var result = await _sut.ExecuteAsync(_renterId, null);
+
+        var item = result.Value.Items.Single();
+        Assert.Equal(RentalCartLineStatus.DatePassed, item.Status);
+        Assert.Contains("18/10/2026", item.Message);
+        _listingReaderMock.Verify(x => x.GetListingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_OneDayRental_CalculatesCorrectAmount()
     {
-        var start = _todayVn.AddDays(1);
+        var start = RentalBookingPolicy.EarliestStartDate(_todayVn);
         var cart = SetupCartWithOneItem(start, start, qty: 2); // Cùng 1 ngày, số lượng 2
         var listing = new RentalListingSnapshot(_listingId, Guid.NewGuid(), true, true, 100m, 50m, "v1");
 
@@ -92,7 +107,7 @@ public sealed class GetRentalCartTests
     [Fact]
     public async Task ExecuteAsync_PriceVersionMismatched_ReturnsPriceChanged()
     {
-        var start = _todayVn.AddDays(1);
+        var start = RentalBookingPolicy.EarliestStartDate(_todayVn);
         var cart = SetupCartWithOneItem(start, start.AddDays(2));
         var cartItemId = cart.Items.Single().Id;
 
@@ -111,7 +126,7 @@ public sealed class GetRentalCartTests
     [Fact]
     public async Task ExecuteAsync_ListingOwnerIsRenter_ReturnsValidationFailed()
     {
-        var start = _todayVn.AddDays(1);
+        var start = RentalBookingPolicy.EarliestStartDate(_todayVn);
         SetupCartWithOneItem(start, start.AddDays(2));
 
         // Owner của Listing lại chính là người đang thuê (_renterId)
@@ -125,7 +140,7 @@ public sealed class GetRentalCartTests
     [Fact]
     public async Task ExecuteAsync_InsufficientQuantity_ReturnsInsufficientQuantityStatus()
     {
-        var start = _todayVn.AddDays(1);
+        var start = RentalBookingPolicy.EarliestStartDate(_todayVn);
         SetupCartWithOneItem(start, start.AddDays(2), qty: 5); // Khách muốn thuê 5
 
         var listing = new RentalListingSnapshot(_listingId, Guid.NewGuid(), true, true, 100m, 50m, "v1");

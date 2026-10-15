@@ -113,7 +113,6 @@ public static class PostgresTestDatabaseHelper
     {
         return new DbContextOptionsBuilder<RentalServiceDbContext>()
             .UseNpgsql(connString)
-            .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
             .Options;
     }
 

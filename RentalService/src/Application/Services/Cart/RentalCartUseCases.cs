@@ -5,6 +5,7 @@ using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
+using Dprental.RentalService.Domain.Policies;
 using System.Security.AccessControl;
 
 namespace Dprental.RentalService.Application.Services.Cart;
@@ -219,8 +220,8 @@ public sealed class RentalCartUseCases(
         int durationDays = endDate.DayNumber - startDate.DayNumber + 1;
         if (durationDays > 365) return RentalErrors.DurationExceedsOneYear; // Đảm bảo khai báo Error này trong RentalErrors
 
-        if (startDate <= todayVn)
-            return Error.Validation("Cart.StartDateInvalid", "Ngày bắt đầu thuê phải từ ngày mai.");
+        if (RentalBookingPolicy.IsStartDateTooSoon(startDate, todayVn))
+            return Error.Validation("Cart.StartDateInvalid", RentalBookingPolicy.TooSoonMessage(todayVn));
 
         if (startDate > todayVn.AddMonths(6))
             return Error.Validation("Cart.AdvanceBookingTooFar", "Chỉ được phép đặt trước tối đa 6 tháng.");

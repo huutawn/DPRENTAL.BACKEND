@@ -7,6 +7,7 @@ using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.IServices.Expiry;
 using Dprental.RentalService.Application.IServices.Integration;
 using Dprental.RentalService.Application.IServices.Operations;
+using Dprental.RentalService.Application.IServices.Orders;
 using Dprental.RentalService.Application.IServices.Overdue;
 using Dprental.RentalService.Application.IServices.Payments;
 using Dprental.RentalService.Application.IServices.Returns;
@@ -22,6 +23,7 @@ using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Application.Services.Expiry;
 using Dprental.RentalService.Application.Services.Integration;
 using Dprental.RentalService.Application.Services.Operations;
+using Dprental.RentalService.Application.Services.Orders;
 using Dprental.RentalService.Application.Services.Payments;
 using Dprental.RentalService.Application.Services.Returns;
 using Dprental.RentalService.Application.Services.SupplierDecision;
@@ -58,14 +60,16 @@ public static class ApplicationServiceCollectionExtensions
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddHttpClient<IInventoryRentalClient, HttpInventoryRentalClient>()
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
-        services.AddSingleton<IInventoryListingClient, UnavailableInventoryListingClient>();
-        services.AddSingleton<ICatalogReferenceClient, UnavailableCatalogReferenceClient>();
 
         // Checkout
         services.AddScoped<ICheckoutPreparationService, CheckoutPreparationService>();
         services.AddScoped<ICheckoutOrderWriter, CheckoutOrderWriter>();
         services.AddScoped<ICheckoutInvoiceIssuer, CheckoutInvoiceIssuer>();
         services.AddScoped<ICheckoutService, CheckoutService>();
+
+        // Orders
+        services.AddScoped<IRenterOrderQueryService, RenterOrderQueryService>();
+        services.AddScoped<ISupplierSubOrderQueryService, SupplierSubOrderQueryService>();
 
         // Returns
         services.AddScoped<IReturnService, ReturnService>();

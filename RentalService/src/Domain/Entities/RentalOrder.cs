@@ -96,6 +96,9 @@ public class RentalOrder
     private readonly List<RentalItem> _items = [];
     public IReadOnlyCollection<RentalItem> Items => _items.AsReadOnly();
 
+    private readonly List<RentalSubOrder> _subOrders = [];
+    public IReadOnlyCollection<RentalSubOrder> SubOrders => _subOrders.AsReadOnly();
+
     [NotMapped]
     public decimal TotalRentalAmount => _items.Sum(i => i.RentalAmount);
 
@@ -117,6 +120,7 @@ public class RentalOrder
     {
     }
 
+    /// <summary>Các trường đều không bắt buộc; trường nào có thì phải hợp lệ (không rỗng, không quá dài).</summary>
     private static bool IsValidListingSnapshot(RentalItemListingSnapshotDto? snapshot)
     {
         if (snapshot is null ||
@@ -128,12 +132,16 @@ public class RentalOrder
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(snapshot.EquipmentTypeName) || snapshot.EquipmentTypeName.Trim().Length > 200 ||
-            string.IsNullOrWhiteSpace(snapshot.BrandName) || snapshot.BrandName.Trim().Length > 200 ||
-            string.IsNullOrWhiteSpace(snapshot.Model) || snapshot.Model.Trim().Length > 200 ||
-            string.IsNullOrWhiteSpace(snapshot.SpecValuesJson))
+        if (!IsValidOptionalText(snapshot.EquipmentTypeName, 200) ||
+            !IsValidOptionalText(snapshot.BrandName, 200) ||
+            !IsValidOptionalText(snapshot.Model, 200))
         {
             return false;
+        }
+
+        if (snapshot.SpecValuesJson is null)
+        {
+            return true;
         }
 
         try
@@ -146,6 +154,9 @@ public class RentalOrder
             return false;
         }
     }
+
+    private static bool IsValidOptionalText(string? value, int maxLength) =>
+        value is null || (!string.IsNullOrWhiteSpace(value) && value.Trim().Length <= maxLength);
 
     public static Result<RentalOrder> Create(
         Guid id,
@@ -290,7 +301,7 @@ public class RentalOrder
             if (depositAmountCheck.IsFailure) return depositAmountCheck.Error;
 
             if (string.IsNullOrWhiteSpace(itemDto.ListingTitleSnapshot) || itemDto.ListingTitleSnapshot.Trim().Length > 200 ||
-                string.IsNullOrWhiteSpace(itemDto.PickupLocationSnapshot) || itemDto.PickupLocationSnapshot.Trim().Length > 500 ||
+                !IsValidOptionalText(itemDto.PickupLocationSnapshot, 500) ||
                 string.IsNullOrWhiteSpace(itemDto.AllocationGroupId) || itemDto.AllocationGroupId.Trim().Length > 64)
             {
                 return RentalErrors.InvalidSnapshot;
@@ -364,11 +375,26 @@ public class RentalOrder
             termsContentHash.Trim(),
             utcNow);
 
+        // Mỗi nhà cung cấp một đơn con, đánh số theo thứ tự xuất hiện đầu tiên trong đơn.
+        Dictionary<Guid, RentalSubOrder> subOrdersBySupplier = [];
         foreach (var itemDto in itemsList)
         {
+            if (!subOrdersBySupplier.TryGetValue(itemDto.SupplierId, out RentalSubOrder? subOrder))
+            {
+                subOrder = new RentalSubOrder(
+                    Guid.NewGuid(),
+                    id,
+                    itemDto.SupplierId,
+                    RentalSubOrder.BuildCode(order.OrderCode, subOrdersBySupplier.Count + 1),
+                    utcNow);
+                subOrdersBySupplier.Add(itemDto.SupplierId, subOrder);
+                order._subOrders.Add(subOrder);
+            }
+
             RentalItem item = new(
                 itemDto.Id,
                 id,
+                subOrder.Id,
                 itemDto.EquipmentListingId,
                 itemDto.SupplierId,
                 itemDto.Quantity,
@@ -376,7 +402,7 @@ public class RentalOrder
                 itemDto.ExpectedEndDate,
                 itemDto.ListingTitleSnapshot.Trim(),
                 itemDto.ListingDescriptionSnapshot?.Trim(),
-                itemDto.PickupLocationSnapshot.Trim(),
+                itemDto.PickupLocationSnapshot?.Trim(),
                 itemDto.DailyRateSnapshot,
                 itemDto.DepositPerUnitSnapshot,
                 itemDto.AllocationGroupId.Trim(),
@@ -385,6 +411,7 @@ public class RentalOrder
 
             item.RentalOrder = order;
             order._items.Add(item);
+            subOrder.AddItem(item);
         }
 
         order.AddOperationReceipt(new RentalOperationReceipt(
@@ -501,9 +528,15 @@ public class RentalOrder
         PaymentRef = paymentRef;
         PaymentConfirmedAt = paidAt;
         UpdatedAt = utcNow;
-        foreach (var item in _items)
+        // Supplier nhận hoặc từ chối cả đơn con, nên mọi dòng của đơn con dùng chung hạn sớm nhất.
+        foreach (var subOrderItems in _items.GroupBy(i => i.RentalSubOrderId))
         {
-            item.RecordPaid(paidAt);
+            DateTimeOffset deadline = subOrderItems.Min(i =>
+                RentalItem.CalculateSupplierConfirmationDeadline(paidAt, i.ExpectedStartDate));
+            foreach (var item in subOrderItems)
+            {
+                item.RecordPaid(deadline);
+            }
         }
 
         AddStateTransition(new RentalStateTransition(
@@ -580,6 +613,30 @@ public class RentalOrder
         }
 
         // If all items finished supplier decision:
+        var activeItems = _items.Where(i => i.Status is not (RentalItemStatus.Rejected or RentalItemStatus.Expired or RentalItemStatus.Cancelled)).ToList();
+        if (activeItems.Count > 0 && activeItems.All(i => i.Status is RentalItemStatus.InRental or RentalItemStatus.PendingSettlement or RentalItemStatus.Completed))
+        {
+            if (Status != RentalOrderStatus.InRental)
+            {
+                string from = Status.ToString();
+                Status = RentalOrderStatus.InRental;
+                UpdatedAt = utcNow;
+                AddStateTransition(new RentalStateTransition(
+                    Guid.NewGuid(),
+                    Id,
+                    null,
+                    from,
+                    RentalOrderStatus.InRental.ToString(),
+                    "OrderRollup",
+                    null,
+                    ActorRole.System,
+                    "All items handed over; rental in progress",
+                    utcNow,
+                    operationId));
+            }
+            return;
+        }
+
         // 1. Any item is accepted/awaiting handover (or beyond) -> Order moves to AwaitingHandover
         if (_items.Any(i => i.Status is RentalItemStatus.AwaitingHandover or RentalItemStatus.InRental or RentalItemStatus.PendingSettlement or RentalItemStatus.Completed))
         {

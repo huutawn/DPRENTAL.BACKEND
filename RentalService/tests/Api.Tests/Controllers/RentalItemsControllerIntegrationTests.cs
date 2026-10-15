@@ -74,6 +74,7 @@ public sealed class RentalItemsControllerIntegrationTests
         public Task<Result<ReleaseAllocationResponse>> ReleaseAllocationAsync(string allocationGroupId, ReleaseAllocationRequest request, CancellationToken ct = default) =>
             Task.FromResult(Result.Success(new ReleaseAllocationResponse("REC-REL", request.OperationKey, allocationGroupId, FixedNow, false)));
 
+        public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotImplementedException();
@@ -173,7 +174,7 @@ public sealed class RentalItemsControllerIntegrationTests
             });
 
         using var client = factory.CreateClient();
-        var response = await client.PostAsync($"/api/v1/rental/items/{Guid.NewGuid()}/accept", null);
+        var response = await client.PostAsync($"/api/v1/rental/supplier/sub-orders/{Guid.NewGuid()}/accept", null);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -210,7 +211,7 @@ public sealed class RentalItemsControllerIntegrationTests
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
         // No Idempotency-Key header
-        var response = await client.PostAsync($"/api/v1/rental/items/{Guid.NewGuid()}/accept", null);
+        var response = await client.PostAsync($"/api/v1/rental/supplier/sub-orders/{Guid.NewGuid()}/accept", null);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -233,14 +234,7 @@ public sealed class RentalItemsControllerIntegrationTests
                     services.AddDbContext<RentalServiceDbContext>(options => options.UseInMemoryDatabase(dbName));
                     services.RemoveAll<Dprental.RentalService.Domain.IRepositories.IOrderLockManager>();
                     services.AddSingleton<Dprental.RentalService.Domain.IRepositories.IOrderLockManager, FakeOrderLockManager>();
-                    services.AddSingleton<IInventoryRentalClient>(new StubInventoryClient
-                    {
-                        ConfirmHandler = (g, req) =>
-                        {
-                            var units = item.UnitAssignments.Select(u => new ConfirmedAllocationUnitDto(u.AllocationId, u.AssetId, "Confirmed")).ToList();
-                            return Task.FromResult(Result.Success(new ConfirmAllocationResponse("REC-CONF", g, FixedNow, false, units)));
-                        }
-                    });
+                    services.AddSingleton<IInventoryRentalClient>(new StubInventoryClient());
 
                     services.RemoveAll<IPaymentRentalClient>();
                     services.AddSingleton<IPaymentRentalClient>(new StubPaymentClient());
@@ -269,12 +263,19 @@ public sealed class RentalItemsControllerIntegrationTests
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
         client.DefaultRequestHeaders.Add("Idempotency-Key", "idemp-ctrl-accept-1");
 
-        var response = await client.PostAsync($"/api/v1/rental/items/{item.Id}/accept", null);
+        var response = await client.PostAsync($"/api/v1/rental/supplier/sub-orders/{item.RentalSubOrderId}/accept", null);
 
-        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<SupplierDecisionResponse>();
+        // Nhận yêu cầu và gửi lệnh ConfirmAllocation cho Inventory; mục thuê chờ Inventory trả lời.
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<SubOrderDecisionResponse>();
         Assert.NotNull(body);
         Assert.Equal("PendingSupplierConfirmation", body.Status);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            Assert.Equal(1, await db.RentalOutboxMessages.CountAsync(m => m.MessageType == "ConfirmAllocation"));
+        }
     }
 
     [Fact]
@@ -325,12 +326,12 @@ public sealed class RentalItemsControllerIntegrationTests
         client.DefaultRequestHeaders.Add("Idempotency-Key", "idemp-ctrl-rej-1");
 
         var req = new SupplierRejectRequest("Equipment is broken", "Will be repaired next week");
-        var response = await client.PostAsJsonAsync($"/api/v1/rental/items/{item.Id}/reject", req);
+        var response = await client.PostAsJsonAsync($"/api/v1/rental/supplier/sub-orders/{item.RentalSubOrderId}/reject", req);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<SupplierDecisionResponse>();
+        var body = await response.Content.ReadFromJsonAsync<SubOrderDecisionResponse>();
         Assert.NotNull(body);
         Assert.Equal("Rejected", body.Status);
-        Assert.Equal("Equipment is broken", body.DecisionReason);
+        Assert.Equal("Equipment is broken", Assert.Single(body.Items).DecisionReason);
     }
 }

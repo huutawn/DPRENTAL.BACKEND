@@ -5,6 +5,7 @@ using System.Text.Json;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Producers;
+using Dprental.RentalService.Application.Kafka.Configuration;
 using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.Services.Operations;
@@ -84,7 +85,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             lockManager,
             operationExecutor,
             unitOfWork,
-            null!,
+            new InventoryCommandProducer(outboxRepository, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), timeProvider),
             configuration,
             logger,
             timeProvider)
@@ -266,7 +267,10 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                 var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
                 if (existingReceipt == null)
                 {
-                    DateTimeOffset newHoldExpiresAt = item.SupplierConfirmationDeadline ?? payload.PaidAt.AddHours(24);
+                    // Hold sống thêm một khoảng sau hạn xác nhận để worker chốt nốt đơn con supplier đã bấm nhận trước hạn.
+                    DateTimeOffset newHoldExpiresAt = item.SupplierConfirmationDeadline is DateTimeOffset deadline
+                        ? RentalItem.CalculateConfirmationHoldExpiry(deadline, item.ExpectedStartDate)
+                        : payload.PaidAt.AddHours(24);
                     var extHoldReq = new ExtendHoldRequest(newHoldExpiresAt, opKey);
                     var extHoldCmd = new RentalOperationCommand(
                         1,
@@ -369,22 +373,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         }
 
         // Direct invocation/tests outside lock executes hold/cleanup
-        if (order.Status == RentalOrderStatus.Paid)
-        {
-            foreach (var item in order.Items)
-            {
-                string opKey = RentalOperationExecutor.ComputeOperationKey("ExtendHold", $"{order.Id}:{item.Id}");
-                await _operationExecutor.ExecuteExtendHoldAsync(order.Id, item.Id, opKey, cancellationToken);
-            }
-        }
-        else if (order.LatePaymentRefundRequired)
-        {
-            foreach (var item in order.Items)
-            {
-                string relKey = RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
-                await _operationExecutor.ExecuteReleaseAllocationAsync(order.Id, item.Id, relKey, cancellationToken);
-            }
-        }
+
 
         return Result.Success();
     }

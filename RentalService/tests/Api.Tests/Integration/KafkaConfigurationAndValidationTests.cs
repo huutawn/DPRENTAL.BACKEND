@@ -129,11 +129,11 @@ public sealed class KafkaConfigurationAndValidationTests
         var holdRequest = new CreateHoldRequest(
             ListingId: Guid.NewGuid(),
             Quantity: 2,
-            From: new DateOnly(2026, 10, 20),
-            To: new DateOnly(2026, 10, 25),
-            ExternalReference: "op-hold-1",
-            RequestedHoldExpiresAt: now.AddMinutes(30),
-            ExpectedSnapshotVersion: "v1");
+            StartDate: new DateOnly(2026, 10, 20),
+            EndDate: new DateOnly(2026, 10, 24),
+            HoldExpiresAt: now.AddMinutes(30),
+            SourceSystem: "rental",
+            GroupReference: $"rental-item:{itemId}");
 
         var command = new CreateHoldCommandPayload(
             orderId,
@@ -141,9 +141,9 @@ public sealed class KafkaConfigurationAndValidationTests
             "op-hold-1",
             holdRequest.ListingId,
             holdRequest.Quantity,
-            holdRequest.From,
-            holdRequest.To,
-            holdRequest.RequestedHoldExpiresAt,
+            holdRequest.StartDate,
+            holdRequest.EndDate,
+            holdRequest.HoldExpiresAt,
             "Notes");
 
         var envelope = new KafkaMessageEnvelope<CreateHoldCommandPayload>(

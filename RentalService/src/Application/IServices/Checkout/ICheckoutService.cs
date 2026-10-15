@@ -5,7 +5,7 @@ namespace Dprental.RentalService.Application.IServices.Checkout;
 
 public interface ICheckoutService
 {
-    Task<Result<CheckoutOperationAcceptedResponse>> SubmitAsync(
+    Task<CheckoutSubmitResult> SubmitAsync(
         CheckoutRenterContext renter,
         CheckoutRequest request,
         string idempotencyKey,

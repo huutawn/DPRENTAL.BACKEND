@@ -17,6 +17,6 @@ public enum RentalCartLineStatus
     ListingDisabled,
     /// <summary>Dữ liệu mục giỏ hàng vi phạm quy tắc xác thực (ví dụ: ngày thuê không hợp lệ).</summary>
     ValidationFailed,
-    /// <summary>Ngày bắt đầu thuê đã trôi qua ở thời điểm hiện tại.</summary>
+    /// <summary>Ngày bắt đầu thuê đã qua hoặc không còn đủ thời gian đặt trước tối thiểu (3 ngày).</summary>
     DatePassed,
 }

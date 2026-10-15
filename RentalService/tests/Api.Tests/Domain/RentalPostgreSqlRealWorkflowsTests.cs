@@ -86,6 +86,7 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
         public Task<Result<ReleaseAllocationResponse>> ReleaseAllocationAsync(string allocationGroupId, ReleaseAllocationRequest request, CancellationToken ct = default) =>
             Task.FromResult(Result.Success(new ReleaseAllocationResponse("REC-REL", request.OperationKey, allocationGroupId, FixedNow, false)));
 
+        public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotImplementedException();
@@ -115,7 +116,6 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
         {
             var options = new DbContextOptionsBuilder<RentalServiceDbContext>()
                 .UseNpgsql(connString)
-                .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning))
                 .Options;
 
             await using (var context = new RentalServiceDbContext(options))
@@ -141,8 +141,9 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
                 Assert.Contains("rental_operation_receipts", tables);
                 Assert.Contains("rental_inbox_messages", tables);
                 Assert.Contains("rental_outbox_messages", tables);
+                Assert.Contains("rental_sub_orders", tables);
                 Assert.Contains("rental_checkout_operations", tables);
-                Assert.Equal(15, tables.Count);
+                Assert.Equal(16, tables.Count);
             }
         }
         finally
@@ -161,7 +162,6 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
         {
             var options = new DbContextOptionsBuilder<RentalServiceDbContext>()
                 .UseNpgsql(connString)
-                .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning))
                 .Options;
 
             // 1. Migrate to InitialRentalModel

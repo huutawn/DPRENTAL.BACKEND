@@ -225,6 +225,29 @@ public sealed class SupplierConfirmationStatisticsQueryAndMigrationPostgreSqlTes
             await orderCmd.ExecuteNonQueryAsync();
         }
 
+        // 1b. Mỗi supplier một đơn con trong đơn chung
+        Dictionary<Guid, Guid> subOrderIds = new()
+        {
+            [targetSupplierId] = Guid.NewGuid(),
+            [otherSupplier1] = Guid.NewGuid(),
+            [otherSupplier2] = Guid.NewGuid()
+        };
+        int subOrderSequence = 0;
+        foreach (var (supplierId, subOrderId) in subOrderIds)
+        {
+            await using var subOrderCmd = conn.CreateCommand();
+            subOrderCmd.CommandText = """
+                INSERT INTO rental.rental_sub_orders ("Id", "RentalOrderId", "SupplierId", "SubOrderCode", "CreatedAt")
+                VALUES (@id, @orderId, @supplierId, @code, @now);
+            """;
+            subOrderCmd.Parameters.AddWithValue("id", subOrderId);
+            subOrderCmd.Parameters.AddWithValue("orderId", sharedOrderId);
+            subOrderCmd.Parameters.AddWithValue("supplierId", supplierId);
+            subOrderCmd.Parameters.AddWithValue("code", RentalSubOrder.BuildCode("ORD-BULK-001", ++subOrderSequence));
+            subOrderCmd.Parameters.AddWithValue("now", fromUtc.AddDays(-5));
+            await subOrderCmd.ExecuteNonQueryAsync();
+        }
+
         // 2. Prepare items and transitions:
         // Total: 10,000 items (1,000 target supplier + 9,000 other suppliers)
         var items = new List<(Guid ItemId, Guid SupplierId)>(10_000);
@@ -339,7 +362,7 @@ public sealed class SupplierConfirmationStatisticsQueryAndMigrationPostgreSqlTes
                 "EquipmentTypeNameSnapshot", "BrandId", "BrandNameSnapshot", "ModelSnapshot",
                 "SpecSchemaVersionSnapshot", "SpecValuesSnapshot", "ThumbnailMediaIdSnapshot",
                 "DailyRateSnapshot", "DepositPerUnitSnapshot",
-                "RentalAmount", "DepositAmount", "Status", "AllocationGroupId"
+                "RentalAmount", "DepositAmount", "Status", "AllocationGroupId", "RentalSubOrderId"
             ) FROM STDIN (FORMAT BINARY)
         """))
         {
@@ -370,6 +393,7 @@ public sealed class SupplierConfirmationStatisticsQueryAndMigrationPostgreSqlTes
                 await writer.WriteAsync(200_000m, NpgsqlDbType.Numeric);
                 await writer.WriteAsync((int)RentalItemStatus.PendingSupplierConfirmation, NpgsqlDbType.Integer);
                 await writer.WriteAsync($"grp-{itemId:N}", NpgsqlDbType.Varchar);
+                await writer.WriteAsync(subOrderIds[supplierId], NpgsqlDbType.Uuid);
             }
             await writer.CompleteAsync();
         }

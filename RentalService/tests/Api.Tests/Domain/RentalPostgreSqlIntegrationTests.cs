@@ -111,8 +111,9 @@ public sealed class RentalPostgreSqlIntegrationTests
             Assert.Contains("rental_terms_acceptances", tables);
             Assert.Contains("rental_inbox_messages", tables);
             Assert.Contains("rental_outbox_messages", tables);
+            Assert.Contains("rental_sub_orders", tables);
             Assert.Contains("rental_checkout_operations", tables);
-            Assert.Equal(15, tables.Count);
+            Assert.Equal(16, tables.Count);
         }
         finally
         {

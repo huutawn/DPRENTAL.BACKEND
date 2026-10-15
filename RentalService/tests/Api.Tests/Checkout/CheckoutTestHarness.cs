@@ -37,18 +37,8 @@ internal sealed class CheckoutTestHarness
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private readonly string _dbName = $"CheckoutHarness_{Guid.NewGuid():N}";
-    private readonly Guid _equipmentTypeId = Guid.NewGuid();
-    private readonly Guid _brandId = Guid.NewGuid();
-
-    public CheckoutTestHarness()
-    {
-        Catalog.EquipmentTypeNames[_equipmentTypeId] = "Máy ảnh";
-        Catalog.BrandNames[_brandId] = "Sony";
-    }
 
     public FakeInventoryListingClient Listings { get; } = new();
-
-    public FakeCatalogReferenceClient Catalog { get; } = new();
 
     public FakeInventoryRentalClient Inventory { get; } = new();
 
@@ -64,25 +54,10 @@ internal sealed class CheckoutTestHarness
         new DbContextOptionsBuilder<RentalServiceDbContext>().UseInMemoryDatabase(_dbName).Options);
 
     /// <param name="units">Số máy của Listing; null thì Inventory giả giữ được không giới hạn.</param>
-    public Guid AddListing(Guid supplierId, decimal dailyRate, decimal depositPerUnit, int? units = null)
+    public Guid AddListing(Guid supplierId, decimal dailyRate, int? units = null)
     {
         Guid listingId = Guid.NewGuid();
-        Listings.Listings[listingId] = new(
-            listingId,
-            supplierId,
-            true,
-            "Thiết bị",
-            _equipmentTypeId,
-            _brandId,
-            "Model",
-            1,
-            """{"sensor":"full-frame"}""",
-            Guid.NewGuid(),
-            dailyRate,
-            depositPerUnit,
-            "VND",
-            "Quận 1, TP.HCM",
-            "listing-v1");
+        Listings.Listings[listingId] = TestListings.Create(listingId, supplierId, "Thiết bị", dailyRate, thumbnailMediaId: Guid.NewGuid());
         Listings.AvailableQuantities[listingId] = units ?? 10;
         if (units is int capacity)
         {
@@ -115,12 +90,35 @@ internal sealed class CheckoutTestHarness
         true,
         expectedTotal);
 
-    /// <param name="writerUnitOfWork">Thay unit of work của bước lưu đơn để giả lập lỗi database.</param>
+    /// <summary>
+    /// Gửi đơn rồi chạy nốt phần bất đồng bộ (Inventory giữ máy, tạo đơn, tạo hóa đơn) như hệ thống thật.
+    /// </summary>
     public async Task<CheckoutResult> SubmitAsync(
         Guid renterId,
         string key,
         CheckoutRequest request,
-        Func<RentalServiceDbContext, IUnitOfWork>? writerUnitOfWork = null,
+        CancellationToken cancellationToken = default)
+    {
+        CheckoutSubmitResult accepted = await AcceptAsync(renterId, key, request, cancellationToken);
+        if (accepted.IsFailure)
+        {
+            return accepted.Failure!;
+        }
+
+        return await Completion.CompleteAsync(renterId, key, cancellationToken);
+    }
+
+    /// <summary>Chạy phần bất đồng bộ của checkout: Inventory giả, dispatcher và worker tạo hóa đơn dùng chung cho mọi renter.</summary>
+    public CheckoutCompletion Completion => _completion ??= new CheckoutCompletion(
+        NewContext, Clock, Inventory, Payment, Locks, _ => OrderCodes);
+
+    private CheckoutCompletion? _completion;
+
+    /// <summary>Chỉ bước API nhận đơn: kiểm tra, ghi lệnh giữ lịch vào Outbox, trả 202.</summary>
+    public async Task<CheckoutSubmitResult> AcceptAsync(
+        Guid renterId,
+        string key,
+        CheckoutRequest request,
         CancellationToken cancellationToken = default)
     {
         await using RentalServiceDbContext context = NewContext();
@@ -129,16 +127,12 @@ internal sealed class CheckoutTestHarness
         RentalCheckoutOperationRepository operations = new(context);
         OutboxRepository outbox = new(context);
         InventoryCommandProducer inventoryCommands = new(outbox, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), Clock);
-        CheckoutHoldOrchestrator holds = new(Inventory, NullLogger<CheckoutHoldOrchestrator>.Instance);
-        CheckoutOrderWriter writer = new(orders, carts, OrderCodes, holds,
-            writerUnitOfWork?.Invoke(context) ?? context, NullLogger<CheckoutOrderWriter>.Instance);
 
         CheckoutService service = new(
             new CheckoutPreparationService(
                 carts,
                 orders,
                 Listings,
-                Catalog,
                 Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
                 {
                     CurrentVersion = "v1.0",
@@ -153,71 +147,7 @@ internal sealed class CheckoutTestHarness
             context,
             Clock);
 
-        var accepted = await service.SubmitAsync(new(renterId, true), request, key, cancellationToken);
-        if (accepted.IsFailure)
-        {
-            return CheckoutResult.Failure(accepted.Error);
-        }
-
-        string operationId = CheckoutRules.DeriveOperationId(renterId, key);
-        var op = await operations.GetByOperationIdAsync(operationId, cancellationToken);
-        if (op is null) return CheckoutResult.Failure(CheckoutErrors.OrderNotSaved);
-
-        if (op.Status == CheckoutOperationStatus.Succeeded)
-        {
-            var existingOrder = await orders.GetByIdAsync(op.ExpectedRentalOrderId, cancellationToken);
-            return CheckoutResult.Success(existingOrder!, isReplay: true);
-        }
-
-        var plan = JsonSerializer.Deserialize<CheckoutPlan>(op.PreparationSnapshotJson, JsonOptions)!;
-        var held = await holds.HoldAllLinesAsync(plan, op.OperationId, Clock.GetUtcNow(), cancellationToken);
-        if (!held.IsSuccess)
-        {
-            op.MarkFailed(held.Error.Code, held.Error.Message, Clock.GetUtcNow());
-            await context.SaveChangesAsync(cancellationToken);
-            return CheckoutResult.From(held);
-        }
-
-        Dprental.RentalService.Common.Result<RentalOrder> orderResult;
-        try
-        {
-            orderResult = await writer.CreateOrderAsync(plan, held.HeldLines, op.OperationId,
-                op.ExpectedRentalOrderId, op.HoldExpiresAt, Clock.GetUtcNow(), cancellationToken);
-        }
-        catch
-        {
-            await using var recoveryContext = NewContext();
-            var recoveryOp = await new RentalCheckoutOperationRepository(recoveryContext)
-                .GetByOperationIdAsync(op.OperationId, cancellationToken);
-            if (recoveryOp is not null)
-            {
-                recoveryOp.MarkFailed(CheckoutErrors.OrderNotSaved.Code,
-                    CheckoutErrors.OrderNotSaved.Message, Clock.GetUtcNow());
-                await recoveryContext.SaveChangesAsync(cancellationToken);
-            }
-            throw;
-        }
-        if (orderResult.IsFailure)
-        {
-            op.MarkFailed(orderResult.Error.Code, orderResult.Error.Message, Clock.GetUtcNow());
-            await context.SaveChangesAsync(cancellationToken);
-            return CheckoutResult.Failure(orderResult.Error);
-        }
-
-        var order = orderResult.Value;
-        var issuer = new CheckoutInvoiceIssuer(Payment, orders, context, Clock, NullLogger<CheckoutInvoiceIssuer>.Instance);
-        var invoiceResult = await issuer.EnsureInvoiceAsync(order, cancellationToken);
-        if (invoiceResult.IsFailure)
-        {
-            op.MarkSucceeded(Clock.GetUtcNow(), invoiceStatus: "Failed");
-            await context.SaveChangesAsync(cancellationToken);
-            return CheckoutResult.OrderFailure(invoiceResult.Error, order);
-        }
-
-        op.MarkSucceeded(Clock.GetUtcNow(), invoiceStatus: "Ready");
-        await context.SaveChangesAsync(cancellationToken);
-
-        return CheckoutResult.Success(order, isReplay: false);
+        return await service.SubmitAsync(new(renterId, true), request, key, cancellationToken);
     }
 
     /// <summary>Chạy một lượt quét hết hạn thanh toán như ExpiryScannerWorker, dùng chung Inventory và Payment giả.</summary>
@@ -242,7 +172,9 @@ internal sealed class CheckoutTestHarness
         ExpiryWorkflowService expiry = new(
             orders, outbox, Locks, executor, context, configuration, NullLogger<ExpiryWorkflowService>.Instance, Clock);
 
-        return await expiry.ProcessPaymentTimeoutsAsync();
+        int expired = await expiry.ProcessPaymentTimeoutsAsync();
+        await Completion.RunInventoryAsync(Guid.Empty);
+        return expired;
     }
 
     /// <summary>Các việc OperationRecoveryWorker sẽ nhặt lên ở lượt quét kế tiếp.</summary>
@@ -258,6 +190,7 @@ internal sealed class CheckoutTestHarness
         await using RentalServiceDbContext context = NewContext();
         return await context.RentalOrders
             .Include(o => o.Items).ThenInclude(i => i.UnitAssignments)
+            .Include(o => o.SubOrders)
             .OrderBy(o => o.OrderCode)
             .ToListAsync();
     }

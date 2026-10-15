@@ -44,20 +44,30 @@ RentalService/src/Application/Kafka/
 
 ---
 
-## 2. Nguyên tắc và Trạng thái PROPOSED
+## 2. Kiến trúc Pipeline và Luồng Kafka
 
-### 2.1. Phân biệt Enqueue Outbox và Xử lý Downstream
-- Khi gọi producer (`IInventoryCommandProducer`, `IPaymentCommandProducer`, `IRentalEventProducer`), phương thức **chỉ kiểm tra hợp lệ (validation) và lưu bền vững vào bảng Outbox (`rental_outbox_messages`)**.
-- **Enqueue thành công KHÔNG đồng nghĩa với việc service đích (InventoryService/PaymentService) đã nhận hoặc thực hiện thành công command.**
-- Việc chuyển Checkout flow sang cơ chế hoàn toàn bất đồng bộ và thiết kế response contracts thuộc về các task tương lai.
-- **Không sửa Checkout, Checkout Controller, HTTP Clients, và không nối producer vào luồng Checkout hiện tại.**
+### 2.1. Checkout bất đồng bộ (202 Accepted + Polling)
+- API `POST /api/v1/rental/checkout` trả về HTTP `202 Accepted` kèm `statusUrl` (`/api/v1/rental/checkout/operations/{operationId}`).
+- Các lệnh `CreateHold` được enqueue bền vững vào Outbox (`rental_outbox_messages`) tới topic `inventory.allocation.commands.v1`.
+- Worker xuất bản Outbox gửi lệnh tới broker; `InventoryAllocationResultHandler` xử lý kết quả:
+  - **All-or-nothing**: Nếu tất cả các dòng giữ lịch thành công, hệ thống tạo đơn hàng nguyên tử, tạo hóa đơn qua HTTP với PaymentService, và đánh dấu thao tác thành công.
+  - Nếu có bất kỳ dòng nào thất bại hoặc quá hạn 30 phút: thao tác thất bại và tự động enqueue lệnh bù trừ `ReleaseAllocation` qua Kafka cho toàn bộ các dòng đã giữ.
 
-### 2.2. Trạng thái Commands
-Các commands đồng bộ với InventoryService và PaymentService:
-1. `CreateHold` (topic `inventory.allocation.commands.v1`): Giữ quantity theo listing và interval; Inventory tự chọn physical assets.
-2. `ReleaseAllocation` (topic `inventory.allocation.commands.v1`): Bù trừ các hold đã thành công khi checkout thất bại hoặc hủy.
-3. `ExtendHold` / `ConfirmAllocation` / `MarkAssetsHandedOver` / `MarkAssetsReturned` (topic `inventory.allocation.commands.v1`).
-4. `CreateInvoice` (topic `payment.commands.v1`): Yêu cầu tạo hóa đơn thanh toán cho toàn bộ order.
+### 2.2. Payment Confirmation & Supplier Confirmation
+- `PaymentService` phát sự kiện `InvoicePaid` tới topic `payment.events.v1` với partition key bằng `RentalOrderId`.
+- Rental consumer ghi nhận Inbox, chuyển đơn hàng sang trạng thái `Paid`, và phát lệnh `ExtendHold` qua Kafka tới Inventory.
+- Khi nhận được xác nhận `InventoryAllocationCommandSucceeded` cho `ExtendHold`, hệ thống hoàn tất receipt và phát sự kiện `RentalSupplierConfirmationRequested` để supplier tiến hành xác nhận đơn con.
+
+### 2.3. Supplier Decision & Handover
+- Supplier accept phát lệnh `ConfirmAllocation` qua Kafka. Khi Inventory xác nhận thành công, mục thuê chuyển sang `AwaitingHandover` và phát sự kiện `RentalItemConfirmed`.
+- Bàn giao thiết bị (`HandoverItem`): Lưu evidence immutable của supplier, ghi nhận biên nhận tác vụ `MarkAssetsHandedOver` và enqueue lệnh qua Kafka.
+- Trạng thái thiết bị chỉ chuyển sang `HandedOver` và mục thuê chuyển sang `InRental` khi nhận được sự kiện xác nhận thành công từ Inventory.
+
+### 2.4. Return, Overdue & Runbook Đối soát
+- Trả thiết bị: Phát lệnh `ApplyReturnedUnits` qua Kafka, xử lý kết quả qua consumer chuyên trách `InventoryReturnResultHandler` (`ReturnedUnitsApplied` / `ReturnedUnitsRejected`), đảm bảo thiết bị hỏng phải được bảo vệ/khóa trước khi đóng allocation.
+- Các receipt return cũ còn pending qua HTTP được chuyển sang trạng thái `MANUAL_RECONCILIATION_REQUIRED` bằng migration dữ liệu riêng.
+- Lệnh bảo vệ quá hạn (Overdue) duy trì qua HTTP với InventoryService do Inventory chưa hỗ trợ command Kafka tương ứng.
+- Mọi tác vụ bàn giao hoặc trả thiết bị quá 30 phút chưa nhận được kết quả acknowledgement sẽ được chuyển sang `MANUAL_RECONCILIATION_REQUIRED` để đối soát thủ công qua runbook của Rental, không tự suy diễn thành công.
 ---
 
 ## 3. Envelope dùng chung (Version 1)
