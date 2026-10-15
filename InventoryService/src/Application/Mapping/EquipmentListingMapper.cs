@@ -40,6 +40,7 @@ public static class EquipmentListingMapper
             listing.ThumbnailMediaId,
             thumbnailUrl,
             rentalRateDto,
+            listing.DepositAmount,
             listing.Status.ToString(),
             totalQuantity,
             listing.CreatedAt,

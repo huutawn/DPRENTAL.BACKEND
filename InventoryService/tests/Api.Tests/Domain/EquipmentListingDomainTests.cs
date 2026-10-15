@@ -420,4 +420,78 @@ public sealed class EquipmentListingDomainTests
         Assert.True(thumbOutside.IsFailure);
         Assert.Equal("INVALID_THUMBNAIL_MEDIA_ID", thumbOutside.Error.Code);
     }
+
+    [Fact]
+    public void Create_DepositAmount_DefaultZero_Succeeds()
+    {
+        var listing = EquipmentListing.Create(
+            TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Sony FX3", null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow, 2024).Value;
+
+        Assert.Equal(0m, listing.DepositAmount);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(500000)]
+    [InlineData(999999999999999999)]
+    public void Create_DepositAmount_ValidValues_Succeeds(decimal depositAmount)
+    {
+        var result = EquipmentListing.Create(
+            TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Sony FX3", null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow, 2024,
+            depositAmount: depositAmount);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(depositAmount, result.Value.DepositAmount);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(-500000)]
+    [InlineData(0.5)]
+    [InlineData(500000.99)]
+    [InlineData(1000000000000000000)]
+    public void Create_DepositAmount_InvalidValues_ReturnsInvalidDepositAmount(decimal depositAmount)
+    {
+        var result = EquipmentListing.Create(
+            TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Sony FX3", null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow, 2024,
+            depositAmount: depositAmount);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_DEPOSIT_AMOUNT", result.Error.Code);
+    }
+
+    [Fact]
+    public void UpdateDepositAmount_Valid_UpdatesValueAndTimestamp()
+    {
+        var listing = EquipmentListing.Create(
+            TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Sony FX3", null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow, 2024,
+            depositAmount: 500_000m).Value;
+
+        var later = FixedNow.AddHours(2);
+        var result = listing.UpdateDepositAmount(0m, later);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(0m, listing.DepositAmount);
+        Assert.Equal(later, listing.UpdatedAt);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(500000.5)]
+    [InlineData(1000000000000000000)]
+    public void UpdateDepositAmount_Invalid_ReturnsInvalidDepositAmount(decimal depositAmount)
+    {
+        var listing = EquipmentListing.Create(
+            TestListingId, TestOwnerId, TestEquipmentTypeId, TestBrandId,
+            "Sony FX3", null, "Sony FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow, 2024).Value;
+
+        var result = listing.UpdateDepositAmount(depositAmount, FixedNow);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_DEPOSIT_AMOUNT", result.Error.Code);
+    }
 }

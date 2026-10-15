@@ -24,6 +24,7 @@ public sealed record EquipmentListingResponse(
     [property: JsonPropertyName("thumbnailMediaId")] Guid? ThumbnailMediaId,
     [property: JsonPropertyName("thumbnailUrl")] string? ThumbnailUrl,
     [property: JsonPropertyName("rentalRate")] RentalRateDto RentalRate,
+    [property: JsonPropertyName("depositAmount")] decimal DepositAmount,
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("totalQuantity")] int TotalQuantity,
     [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt,

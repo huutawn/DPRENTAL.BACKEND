@@ -100,7 +100,8 @@ public sealed class EquipmentListingBatchServiceTests
         decimal dailyRate = 500_000m,
         string currency = "VND",
         EquipmentListingStatus status = EquipmentListingStatus.Active,
-        Guid? thumbnailMediaId = null)
+        Guid? thumbnailMediaId = null,
+        decimal depositAmount = 500_000m)
     {
         var mediaIds = thumbnailMediaId.HasValue ? new[] { thumbnailMediaId.Value } : null;
         var listing = EquipmentListing.Create(
@@ -120,7 +121,8 @@ public sealed class EquipmentListingBatchServiceTests
             FixedNow,
             2024,
             mediaIds: mediaIds,
-            thumbnailMediaId: thumbnailMediaId).Value;
+            thumbnailMediaId: thumbnailMediaId,
+            depositAmount: depositAmount).Value;
 
         listing.UpdateStatus(status, true, FixedNow);
         _listingRepo.Store[listing.Id] = listing;
@@ -372,5 +374,6 @@ public sealed class EquipmentListingBatchServiceTests
         Assert.Equal(500_000m, item.DailyRate);
         Assert.Equal("VND", item.Currency);
         Assert.Equal("Active", item.Status);
+        Assert.Equal(500_000m, item.DepositAmount);
     }
 }

@@ -358,7 +358,8 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
                     listing.ThumbnailMediaId,
                     listing.DailyRate,
                     listing.Currency,
-                    listing.Status.ToString()));
+                    listing.Status.ToString(),
+                    listing.DepositAmount));
             }
             else
             {

@@ -334,4 +334,163 @@ public sealed class PostgresEquipmentListingMigrationTests
             await fixture.DisposeAsync();
         }
     }
+
+    [Fact]
+    public async Task ForwardMigration_AddDepositAmount_ExistingListingsGetZero_ConstraintEnforcesNonNegativeInteger()
+    {
+        var fixture = new PostgresFixture { TargetMigration = "20261015040000_AddAllocationHandoverReturnAndReceipts" };
+        await fixture.InitializeAsync();
+
+        try
+        {
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
+                .UseNpgsql(fixture.ConnectionString, o => o.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
+                .Options;
+
+            await using var db = new InventoryServiceDbContext(options);
+            var listingId = Guid.NewGuid();
+            var ownerId = Guid.NewGuid();
+            var eqTypeId = Guid.NewGuid();
+            var brandId = Guid.NewGuid();
+            var emptyJson = "{}";
+
+            // Insert existing listing prior to deposit_amount migration
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO inventory.equipment_listings (id, owner_user_id, equipment_type_id, brand_id, name, model, schema_version, spec_values, daily_rate, currency, status, created_at, updated_at)
+                VALUES ({listingId}, {ownerId}, {eqTypeId}, {brandId}, 'Legacy Listing', 'Model X', 1, {emptyJson}::jsonb, 100000, 'VND', 1, NOW(), NOW());
+            """);
+
+            // Migrate forward to AddEquipmentListingDepositAmount
+            await db.GetService<IMigrator>().MigrateAsync("20261015120000_AddEquipmentListingDepositAmount");
+
+            // 1. Column exists with numeric(18,0), NOT NULL, default 0
+            var columnInfo = await db.Database.SqlQueryRaw<string>("""
+                SELECT data_type || '(' || numeric_precision || ',' || numeric_scale || ')' AS "Value"
+                FROM information_schema.columns
+                WHERE table_schema = 'inventory' AND table_name = 'equipment_listings' AND column_name = 'deposit_amount'
+            """).SingleAsync();
+            Assert.Equal("numeric(18,0)", columnInfo);
+
+            var isNullable = await db.Database.SqlQueryRaw<string>("""
+                SELECT is_nullable AS "Value"
+                FROM information_schema.columns
+                WHERE table_schema = 'inventory' AND table_name = 'equipment_listings' AND column_name = 'deposit_amount'
+            """).SingleAsync();
+            Assert.Equal("NO", isNullable);
+
+            // 2. Existing listing received 0
+            var depositVal = await db.Database.SqlQuery<decimal>($"""
+                SELECT deposit_amount AS "Value" FROM inventory.equipment_listings WHERE id = {listingId}
+            """).SingleAsync();
+            Assert.Equal(0m, depositVal);
+
+            // 3. Inserting without specifying deposit_amount gets default 0
+            var newListingId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO inventory.equipment_listings (id, owner_user_id, equipment_type_id, brand_id, name, model, schema_version, spec_values, daily_rate, currency, status, created_at, updated_at)
+                VALUES ({newListingId}, {ownerId}, {eqTypeId}, {brandId}, 'Default Listing', 'Model Y', 1, {emptyJson}::jsonb, 100000, 'VND', 1, NOW(), NOW());
+            """);
+            var defaultDeposit = await db.Database.SqlQuery<decimal>($"""
+                SELECT deposit_amount AS "Value" FROM inventory.equipment_listings WHERE id = {newListingId}
+            """).SingleAsync();
+            Assert.Equal(0m, defaultDeposit);
+
+            // 4. Constraint ck_equipment_listings_deposit_amount rejects negative
+            await Assert.ThrowsAnyAsync<PostgresException>(async () =>
+            {
+                var badId = Guid.NewGuid();
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO inventory.equipment_listings (id, owner_user_id, equipment_type_id, brand_id, name, model, schema_version, spec_values, daily_rate, deposit_amount, currency, status, created_at, updated_at)
+                    VALUES ({badId}, {ownerId}, {eqTypeId}, {brandId}, 'Negative', 'Model', 1, {emptyJson}::jsonb, 100000, -100, 'VND', 1, NOW(), NOW());
+                """);
+            });
+
+            // 5. Constraint exists with exact definition
+            var constraintDef = await db.Database.SqlQueryRaw<string>("""
+                SELECT pg_get_constraintdef(c.oid) AS "Value"
+                FROM pg_constraint c
+                JOIN pg_namespace n ON n.oid = c.connamespace
+                WHERE n.nspname = 'inventory' AND c.conname = 'ck_equipment_listings_deposit_amount'
+            """).SingleAsync();
+            Assert.Contains("deposit_amount >=", constraintDef);
+            Assert.Contains("deposit_amount <=", constraintDef);
+            Assert.Contains("trunc(deposit_amount) = deposit_amount", constraintDef);
+
+            // 6. Max value succeeds
+            var maxId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO inventory.equipment_listings (id, owner_user_id, equipment_type_id, brand_id, name, model, schema_version, spec_values, daily_rate, deposit_amount, currency, status, created_at, updated_at)
+                VALUES ({maxId}, {ownerId}, {eqTypeId}, {brandId}, 'Max', 'Model', 1, {emptyJson}::jsonb, 100000, 999999999999999999, 'VND', 1, NOW(), NOW());
+            """);
+            var maxDeposit = await db.Database.SqlQuery<decimal>($"""
+                SELECT deposit_amount AS "Value" FROM inventory.equipment_listings WHERE id = {maxId}
+            """).SingleAsync();
+            Assert.Equal(999999999999999999m, maxDeposit);
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RollbackMigration_AddDepositAmount_BlockedWhenDepositNonZero_AndSucceedsWhenAllZero()
+    {
+        var fixture = new PostgresFixture { TargetMigration = "20261015120000_AddEquipmentListingDepositAmount" };
+        await fixture.InitializeAsync();
+
+        try
+        {
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
+                .UseNpgsql(fixture.ConnectionString, o => o.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
+                .Options;
+
+            await using var db = new InventoryServiceDbContext(options);
+            var listingId = Guid.NewGuid();
+            var ownerId = Guid.NewGuid();
+            var eqTypeId = Guid.NewGuid();
+            var brandId = Guid.NewGuid();
+
+            // Insert listing with non-zero deposit
+            var emptyJson = "{}";
+            // Insert listing with non-zero deposit
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO inventory.equipment_listings (id, owner_user_id, equipment_type_id, brand_id, name, model, schema_version, spec_values, daily_rate, deposit_amount, currency, status, created_at, updated_at)
+                VALUES ({listingId}, {ownerId}, {eqTypeId}, {brandId}, 'Listing With Deposit', 'Model Z', 1, {emptyJson}::jsonb, 100000, 500000, 'VND', 1, NOW(), NOW());
+            """);
+
+            // 1. Attempt rollback while listing has deposit_amount <> 0: MUST BE BLOCKED
+            var rollbackEx = await Assert.ThrowsAnyAsync<Exception>(async () =>
+            {
+                await db.GetService<IMigrator>().MigrateAsync("20261015040000_AddAllocationHandoverReturnAndReceipts");
+            });
+            Assert.Contains("Cannot rollback migration", rollbackEx.Message);
+
+            // Verify deposit_amount column still exists and data preserved
+            var stillDeposit = await db.Database.SqlQuery<decimal>($"""
+                SELECT deposit_amount AS "Value" FROM inventory.equipment_listings WHERE id = {listingId}
+            """).SingleAsync();
+            Assert.Equal(500000m, stillDeposit);
+
+            // 2. Set deposit_amount to 0, then rollback should succeed
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE inventory.equipment_listings SET deposit_amount = 0 WHERE id = {listingId};
+            """);
+
+            await db.GetService<IMigrator>().MigrateAsync("20261015040000_AddAllocationHandoverReturnAndReceipts");
+
+            // Verify deposit_amount column is dropped
+            var colExists = await db.Database.SqlQueryRaw<bool>("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'inventory' AND table_name = 'equipment_listings' AND column_name = 'deposit_amount'
+                ) AS "Value"
+            """).SingleAsync();
+            Assert.False(colExists);
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
+    }
 }

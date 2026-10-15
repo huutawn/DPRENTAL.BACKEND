@@ -103,6 +103,7 @@ public sealed class InventoryServiceDbContext : DbContext
                 t.HasCheckConstraint("ck_equipment_listings_daily_rate", "daily_rate >= 1 AND daily_rate <= 999999999999999999 AND trunc(daily_rate) = daily_rate");
                 t.HasCheckConstraint("ck_equipment_listings_weekly_rate", "weekly_rate IS NULL OR (weekly_rate >= 1 AND weekly_rate <= 999999999999999999 AND trunc(weekly_rate) = weekly_rate)");
                 t.HasCheckConstraint("ck_equipment_listings_monthly_rate", "monthly_rate IS NULL OR (monthly_rate >= 1 AND monthly_rate <= 999999999999999999 AND trunc(monthly_rate) = monthly_rate)");
+                t.HasCheckConstraint("ck_equipment_listings_deposit_amount", "deposit_amount >= 0 AND deposit_amount <= 999999999999999999 AND trunc(deposit_amount) = deposit_amount");
                 t.HasCheckConstraint("ck_equipment_listings_currency", "currency = 'VND'");
                 t.HasCheckConstraint("ck_equipment_listings_status", "\"status\" IN (1, 2, 3)");
             });
@@ -157,6 +158,12 @@ public sealed class InventoryServiceDbContext : DbContext
             b.Property(l => l.MonthlyRate)
                 .HasColumnName("monthly_rate")
                 .HasColumnType("numeric(18,0)");
+
+            b.Property(l => l.DepositAmount)
+                .HasColumnName("deposit_amount")
+                .HasColumnType("numeric(18,0)")
+                .HasDefaultValue(0m)
+                .IsRequired();
 
             b.Property(l => l.Currency)
                 .HasColumnName("currency")

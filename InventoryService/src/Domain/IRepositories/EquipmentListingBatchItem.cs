@@ -12,5 +12,6 @@ public sealed record EquipmentListingBatchItem(
     Guid? ThumbnailMediaId,
     decimal DailyRate,
     string Currency,
-    EquipmentListingStatus Status
+    EquipmentListingStatus Status,
+    decimal DepositAmount
 );
