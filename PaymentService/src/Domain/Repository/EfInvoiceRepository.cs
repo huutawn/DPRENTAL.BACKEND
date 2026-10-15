@@ -95,6 +95,105 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
         return locked;
     }
 
+    public async Task<PaymentTransaction?> FindPaymentTransactionWithRowLockAsync(
+        string provider,
+        string providerTransactionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(provider) || string.IsNullOrWhiteSpace(providerTransactionId))
+        {
+            return null;
+        }
+
+        PaymentTransaction? locked;
+        if (_dbContext.Database.IsNpgsql())
+        {
+            locked = await _dbContext.PaymentTransactions
+                .FromSqlInterpolated($"SELECT * FROM payment_transactions WHERE \"Provider\" = {provider} AND \"ProviderTransactionId\" = {providerTransactionId} FOR UPDATE")
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+        else
+        {
+            locked = await _dbContext.PaymentTransactions
+                .FirstOrDefaultAsync(t => t.Provider == provider && t.ProviderTransactionId == providerTransactionId, cancellationToken);
+        }
+
+        if (locked is not null)
+        {
+            await _dbContext.Entry(locked).ReloadAsync(cancellationToken);
+        }
+
+        return locked;
+    }
+
+    public async Task<Invoice?> FindInvoiceByPaymentCodeWithRowLockAsync(
+        string paymentCode,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(paymentCode))
+        {
+            return null;
+        }
+
+        Invoice? locked;
+        if (_dbContext.Database.IsNpgsql())
+        {
+            locked = await _dbContext.Invoices
+                .FromSqlInterpolated($"SELECT * FROM invoices WHERE \"PaymentCode\" = {paymentCode} FOR UPDATE")
+                .Include(i => i.Items)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+        else
+        {
+            locked = await _dbContext.Invoices
+                .Include(i => i.Items)
+                .FirstOrDefaultAsync(i => i.PaymentCode == paymentCode, cancellationToken);
+        }
+
+        if (locked is not null)
+        {
+            await _dbContext.Entry(locked).ReloadAsync(cancellationToken);
+        }
+
+        return locked;
+    }
+
+    public async Task SavePaymentTransactionAsync(
+        PaymentTransaction transaction,
+        Invoice? invoice = null,
+        OutboxMessage? outboxMessage = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(transaction);
+
+        if (_dbContext.Entry(transaction).State == EntityState.Detached)
+        {
+            await _dbContext.PaymentTransactions.AddAsync(transaction, cancellationToken);
+        }
+
+        if (invoice is not null)
+        {
+            if (_dbContext.Entry(invoice).State == EntityState.Detached)
+            {
+                _dbContext.Invoices.Update(invoice);
+            }
+        }
+
+        if (outboxMessage is not null)
+        {
+            await _dbContext.OutboxMessages.AddAsync(outboxMessage, cancellationToken);
+        }
+
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (DbExceptionTranslator.TryTranslate(ex, out var constraintEx))
+        {
+            throw constraintEx;
+        }
+    }
+
     public async Task<IReadOnlyList<Guid>> GetPendingExpiredCandidateIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
     {
         return await _dbContext.Invoices

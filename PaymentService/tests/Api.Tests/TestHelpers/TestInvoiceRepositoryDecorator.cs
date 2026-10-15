@@ -38,6 +38,15 @@ public sealed class TestInvoiceRepositoryDecorator : IInvoiceRepository
         return await _inner.FindInvoiceWithRowLockAsync(invoiceRef, cancellationToken);
     }
 
+    public Task<PaymentTransaction?> FindPaymentTransactionWithRowLockAsync(string provider, string providerTransactionId, CancellationToken cancellationToken = default) =>
+        _inner.FindPaymentTransactionWithRowLockAsync(provider, providerTransactionId, cancellationToken);
+
+    public Task<Invoice?> FindInvoiceByPaymentCodeWithRowLockAsync(string paymentCode, CancellationToken cancellationToken = default) =>
+        _inner.FindInvoiceByPaymentCodeWithRowLockAsync(paymentCode, cancellationToken);
+
+    public Task SavePaymentTransactionAsync(PaymentTransaction transaction, Invoice? invoice = null, OutboxMessage? outboxMessage = null, CancellationToken cancellationToken = default) =>
+        _inner.SavePaymentTransactionAsync(transaction, invoice, outboxMessage, cancellationToken);
+
     public Task<IReadOnlyList<Guid>> GetPendingExpiredCandidateIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
         _inner.GetPendingExpiredCandidateIdsAsync(utcNow, batchSize, cancellationToken);
 

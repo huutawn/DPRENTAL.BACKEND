@@ -1,4 +1,6 @@
 using System.IO;
+using System.Net;
+using Microsoft.AspNetCore.HttpOverrides;
 using Dprental.PaymentService.Api.Exceptions;
 using Dprental.PaymentService.Api.Security;
 using Dprental.PaymentService.Application.DependencyInjection;
@@ -33,6 +35,80 @@ builder.Services.AddAuthorization(options =>
     });
 });
 
+var forwardedSection = builder.Configuration.GetSection(ForwardedHeadersSecurityOptions.SectionName);
+var rawProxies = forwardedSection.GetSection("KnownProxies").Get<List<string>>() ?? [];
+var rawNetworks = forwardedSection.GetSection("KnownNetworks").Get<List<string>>() ?? [];
+
+bool hasProxyConfig = rawProxies.Count > 0 || rawNetworks.Count > 0;
+
+if (builder.Environment.IsProduction())
+{
+    if (!hasProxyConfig)
+    {
+        throw new InvalidOperationException(
+            "Production environment requires reverse proxy trust configuration in Security:ForwardedHeaders (KnownProxies or KnownNetworks).");
+    }
+}
+
+List<IPAddress> validProxies = [];
+List<System.Net.IPNetwork> validNetworks = [];
+
+if (hasProxyConfig)
+{
+    foreach (var proxyStr in rawProxies)
+    {
+        if (string.IsNullOrWhiteSpace(proxyStr) || !IPAddress.TryParse(proxyStr.Trim(), out var ip))
+        {
+            throw new InvalidOperationException($"Invalid IP address in Security:ForwardedHeaders:KnownProxies: '{proxyStr}'.");
+        }
+
+        if (IPAddress.Any.Equals(ip) || IPAddress.IPv6Any.Equals(ip))
+        {
+            throw new InvalidOperationException($"Security:ForwardedHeaders:KnownProxies cannot be a wildcard address ('{proxyStr}').");
+        }
+
+        validProxies.Add(ip);
+    }
+
+    foreach (var networkStr in rawNetworks)
+    {
+        if (string.IsNullOrWhiteSpace(networkStr) || !System.Net.IPNetwork.TryParse(networkStr.Trim(), out var network))
+        {
+            throw new InvalidOperationException($"Invalid CIDR network in Security:ForwardedHeaders:KnownNetworks: '{networkStr}'.");
+        }
+
+        if (network.PrefixLength == 0)
+        {
+            throw new InvalidOperationException($"Security:ForwardedHeaders:KnownNetworks cannot trust the entire internet ('{networkStr}').");
+        }
+
+        validNetworks.Add(network);
+    }
+
+    if (validProxies.Count == 0 && validNetworks.Count == 0)
+    {
+        throw new InvalidOperationException("Security:ForwardedHeaders must contain at least one valid trusted proxy IP or CIDR network.");
+    }
+
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        options.ForwardLimit = 1;
+        options.KnownProxies.Clear();
+        options.KnownIPNetworks.Clear();
+
+        foreach (var p in validProxies)
+        {
+            options.KnownProxies.Add(p);
+        }
+
+        foreach (var n in validNetworks)
+        {
+            options.KnownIPNetworks.Add(n);
+        }
+    });
+}
+
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<PaymentServiceDbContext>(
         "postgres",
@@ -62,6 +138,11 @@ if (app.Environment.IsDevelopment())
 
 app.UseExceptionHandler();
 app.UseStatusCodePages();
+
+if (hasProxyConfig)
+{
+    app.UseForwardedHeaders();
+}
 
 app.UseAuthentication();
 app.UseAuthorization();

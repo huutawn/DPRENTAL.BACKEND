@@ -138,7 +138,5 @@ public sealed class InvoiceExpiryWorkerTests
             throw new NotImplementedException();
         public Task<Result<GetInvoiceResponse>> GetInvoiceAsync(string invoiceRef, Guid callerRenterId, CancellationToken ct = default) =>
             throw new NotImplementedException();
-        public Task<Result> RecordPaymentReceivedAsync(string invoiceRef, string paymentRef, decimal amount, string currency, DateTimeOffset paidAt, CancellationToken ct = default) =>
-            throw new NotImplementedException();
     }
 }

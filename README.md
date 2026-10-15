@@ -9,7 +9,7 @@ PaymentService/
   src/
     Common/          # Kiểu dùng chung, Result/Error, Utils (VndAmountValidator, VietQrUrlGenerator, PaymentCodeGenerator, PayloadFingerprinter)
     Domain/          # Entities, IRepository, Repository (EfInvoiceRepository), Persistence (DbContext, Factory), Migrations
-    Application/     # DTOs, IServices, Services (InvoiceService, Creation, Lifecycle, Recording), Background (InvoiceExpiryWorker), Options
+    Application/     # DTOs, IServices, Services (InvoiceService, Creation, Lifecycle, InvoicePaymentProcessor), Background (InvoiceExpiryWorker), Options
     Api/             # Controllers, Filters, JWT Auth, HTTP composition root
   tests/             # Kiểm thử đơn vị và tích hợp (PostgreSQL 17)
 Directory.Build.props
@@ -63,17 +63,46 @@ Application trả `Result` cho lỗi dự kiến; controller dùng `this.ToProbl
 `GlobalExceptionHandler` đã đăng ký tại API, trả 500 ProblemDetails kèm `traceId`,
 không trả exception message hoặc payload; request bị hủy không chuyển thành lỗi nghiệp vụ.
 
-## API Hóa đơn & QR (Payment Contract v1)
+## API Hóa đơn, QR & Webhook SePay (Payment Contract v1)
 
 - `POST /api/v1/invoices`: Tạo hóa đơn từ items `RentalOrder` (tính tiền độc lập, không truy cập Rental DB). Tự động replay an toàn bằng `OperationKey` và snapshot fingerprint. Hóa đơn tổng 0 khởi tạo `PAID` kèm outbox message `InvoicePaid`.
 - `POST /api/v1/invoices/{invoiceRef}/cancel`: Hủy hóa đơn chưa thanh toán. Trả về 409 `INVOICE_ALREADY_PAID` nếu đã thanh toán. Hóa đơn `EXPIRED` được xác nhận đóng và giữ nguyên trạng thái.
 - `GET /api/v1/invoices/{invoiceRef}`: Trả về thông tin hóa đơn và ảnh VietQR SePay (`https://vietqr.app/img?acc=...&bank=...&amount=...&des=...&template=compact`). Chỉ renter sở hữu mới được xem (404 nếu không khớp hoặc không tìm thấy). `qrUrl` là null khi không ở trạng thái PENDING hoặc tổng 0.
-- **Thiết kế Entity & Invariants Runtime:**
-  - Các entity trong `Domain` (`Invoice`, `InvoiceItem`, `OperationReceipt`, `OutboxMessage`) được thiết kế theo hướng `DataAnnotations` / `DataAnnotations.Schema` attributes (`[Table]`, `[Key]`, `[Required]`, `[MaxLength]`, `[Column(TypeName = "numeric(18,0)")]`, `[ForeignKey]`, `[InverseProperty]`) thay vì các lớp `IEntityTypeConfiguration`.
-  - Mọi `DateTimeOffset` lưu trữ đều chuẩn hóa về UTC (`Offset = 0`).
-  - `GET` kiểm tra quyền sở hữu bằng `AsNoTracking()`; mọi cập nhật trạng thái (`Cancel`, `RecordPayment`, `Expiry`) đều lấy khóa hàng PostgreSQL `FOR UPDATE` và `ReloadAsync()` từ database trước khi chuyển trạng thái.
-  - `PaymentRef` có unique index nullable (`IX_invoices_PaymentRef`) chống thanh toán trùng giữa hai hóa đơn.
-  - Sự kiện `InvoicePaid` trong `outbox_messages` luôn có `correlationId` kiểu chuỗi bắt buộc (mặc định bằng `MessageId`).
+- `POST /api/v1/payment/webhooks`: Tiếp nhận webhook chuyển khoản từ cổng thanh toán SePay. Yêu cầu xác thực `Authorization: Apikey <key>` với so sánh thời gian hằng số (constant-time). Xác thực, chuẩn hóa dữ liệu ngân hàng và điều phối qua `IInvoicePaymentProcessor`.
 
-*Ghi chú:*
-Outbox message được lưu bền vững vào bảng `outbox_messages` trong cùng database transaction, chưa được publish ra Kafka trong vertical slice này. Webhook và xử lý chuyển tiền đến thuộc phạm vi tích hợp tiếp theo. Không triển khai refund, card, wallet, recurring, installment hoặc multi-currency.
+### Cấu hình SePay Webhook (`Payment:SePay`)
+
+```json
+"Payment": {
+  "Merchant": {
+    "Bank": "MBBank",
+    "Account": "0383799632"
+  },
+  "SePay": {
+    "ApiKey": "YOUR_SEPAY_API_KEY",
+    "Gateway": "MBBank",
+    "AccountNumber": "0383799632",
+    "GatewayMapping": {
+      "MBBank": "MBBank",
+      "MB": "MBBank"
+    }
+  }
+}
+```
+
+- **ApiKey:** Cấu hình từ secret/biến môi trường (`Payment__SePay__ApiKey`), bắt buộc kiểm tra khi khởi động ứng dụng (`ValidateOnStart`). Tuyệt đối không ghi API key, header Authorization hoặc raw payload vào log.
+- **Gateway & GatewayMapping:** Ánh xạ tường minh giữa gateway từ SePay và ngân hàng merchant đã đăng ký. Không suy đoán hoặc match chuỗi mờ từ tên ngân hàng.
+- **AccountNumber:** Tài khoản nhận tiền được so khớp chính xác với snapshot hóa đơn và merchant cấu hình.
+
+### Định dạng Webhook JSON và Xử lý Giao dịch
+
+SePay gửi webhook JSON với các trường: `id`, `gateway`, `transactionDate`, `accountNumber`, `subAccount`, `code`, `content`, `transferType`, `description`, `transferAmount`, `accumulated`, `referenceCode`.
+
+- **Chuẩn hóa thời gian:** `transactionDate` theo giờ Việt Nam (UTC+7) được chuẩn hóa sang UTC. Giữ riêng thời điểm giao dịch ngân hàng (`TransactionDate`) và thời điểm hệ thống xử lý sau khi lấy khóa (`ProcessedAt`).
+- **Phân loại giao dịch:**
+  - `MATCHED`: Tiền vào (`transferType = "in"`), mã thanh toán khớp duy nhất, số tiền khớp đúng `TotalAmount`, tài khoản khớp cấu hình/snapshot, còn hạn -> Hóa đơn chuyển `PAID` và phát 1 sự kiện Outbox `InvoicePaid`.
+  - `UNMATCHED`: Thiếu mã thanh toán hoặc mã hợp lệ nhưng không tìm thấy hóa đơn -> Lưu transaction `UNMATCHED`, không xác nhận hóa đơn.
+  - `REVIEW_REQUIRED`: Mã mơ hồ/mâu thuẫn, sai số tiền, sai tài khoản nhận, giao dịch tiền ra (`transferType != "in"`), hoặc hóa đơn đã ghi nhận thanh toán trước đó -> Lưu transaction `REVIEW_REQUIRED`, không xác nhận hóa đơn.
+  - `MANUAL_REFUND_REQUIRED`: Khớp đầy đủ nhưng giao dịch trễ hạn thanh toán (thời điểm chuyển khoản hoặc thời điểm xử lý sau khi lấy khóa đạt/vượt `PaymentDeadline`, hoặc hóa đơn đã `EXPIRED`/`CANCELLED`) -> Hóa đơn `PENDING` chuyển `EXPIRED`, hóa đơn đã đóng giữ nguyên; lưu `PaymentRef`/`PaidAt` và phát 1 Outbox `InvoicePaid` (với `paidAt` là giờ ngân hàng, `occurredAt` là giờ xử lý) để Rental Service điều phối hoàn tiền thủ công.
+- **Idempotency & Khóa hàng:** Claim ID nhà cung cấp (`Provider = "SEPAY"`, `ProviderTransactionId = id`) và khóa hàng hóa đơn `FOR UPDATE` trong cùng một database transaction. Giao dịch duplicate cùng ID trả 200 `{"success": true}` đã lưu; trùng ID nhưng dữ liệu nghiệp vụ khác trả 409 Conflict.
+- **Phạm vi tích hợp:** Kết quả tích hợp dừng ở commit Outbox atomic trong database. Kafka publisher, đối soát admin UI và thực hiện disburse refund nằm ngoài phạm vi này.
