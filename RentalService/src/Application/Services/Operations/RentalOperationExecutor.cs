@@ -128,6 +128,12 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
 
         switch (receipt.Action)
         {
+            case RentalItem.OverdueProtectionAction:
+                {
+                    var item = order.Items.FirstOrDefault(i => i.Id == receipt.TargetItemId);
+                    if (item is null) return Error.NotFound("ITEM_NOT_FOUND", "Không tìm thấy mục thuê.");
+                    return await MarkAssetsOverdueCoreAsync(order, item, receipt, cancellationToken);
+                }
             case "ExtendHold":
                 {
                     var item = order.Items.FirstOrDefault(i => i.Id == receipt.TargetItemId);

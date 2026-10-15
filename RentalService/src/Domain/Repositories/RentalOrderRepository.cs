@@ -301,4 +301,28 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
 
         return result ?? new SupplierConfirmationStatisticsRecord(0, 0, 0, 0);
     }
+    public async Task<IReadOnlyList<Guid>> GetOverdueUnprotectedOrderIdsAsync(
+    DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
+    {
+        DateOnly todayVn = RentalItem.TodayInVietnam(utcNow);
+
+        return await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.InRental
+                     && i.ExpectedEndDate < todayVn
+                     && i.UnitAssignments.Any(u =>
+                            u.Status == RentalUnitAssignmentStatus.HandedOver
+                            // Chỉ receipt "exhausted" mới không chặn; Succeeded/đang chạy/Business đều chặn.
+                            && !i.RentalOrder!.OperationReceipts.Any(r =>
+                                   r.Action == RentalItem.OverdueProtectionAction
+                                && EF.Functions.Like(r.OperationId, "overdue:" + u.Id.ToString() + ":%")
+                                && !(r.Status == RentalOperationReceipt.StatusFailed
+                                     && (r.ErrorClassification == RentalOperationReceipt.ClassificationTransientExhausted
+                                      || r.ErrorClassification == RentalOperationReceipt.ClassificationUncertainExhausted)))))
+            .GroupBy(i => i.RentalOrderId)
+            .OrderBy(g => g.Min(i => i.ExpectedEndDate))
+            .Select(g => g.Key)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+    }
 }
