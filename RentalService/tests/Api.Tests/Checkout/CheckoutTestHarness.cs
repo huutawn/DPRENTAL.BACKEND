@@ -39,18 +39,8 @@ internal sealed class CheckoutTestHarness
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private readonly string _dbName = $"CheckoutHarness_{Guid.NewGuid():N}";
-    private readonly Guid _equipmentTypeId = Guid.NewGuid();
-    private readonly Guid _brandId = Guid.NewGuid();
-
-    public CheckoutTestHarness()
-    {
-        Catalog.EquipmentTypeNames[_equipmentTypeId] = "Máy ảnh";
-        Catalog.BrandNames[_brandId] = "Sony";
-    }
 
     public FakeInventoryListingClient Listings { get; } = new();
-
-    public FakeCatalogReferenceClient Catalog { get; } = new();
 
     public FakeInventoryRentalClient Inventory { get; } = new();
 
@@ -66,25 +56,10 @@ internal sealed class CheckoutTestHarness
         new DbContextOptionsBuilder<RentalServiceDbContext>().UseInMemoryDatabase(_dbName).Options);
 
     /// <param name="units">Số máy của Listing; null thì Inventory giả giữ được không giới hạn.</param>
-    public Guid AddListing(Guid supplierId, decimal dailyRate, decimal depositPerUnit, int? units = null)
+    public Guid AddListing(Guid supplierId, decimal dailyRate, int? units = null)
     {
         Guid listingId = Guid.NewGuid();
-        Listings.Listings[listingId] = new(
-            listingId,
-            supplierId,
-            true,
-            "Thiết bị",
-            _equipmentTypeId,
-            _brandId,
-            "Model",
-            1,
-            """{"sensor":"full-frame"}""",
-            Guid.NewGuid(),
-            dailyRate,
-            depositPerUnit,
-            "VND",
-            "Quận 1, TP.HCM",
-            "listing-v1");
+        Listings.Listings[listingId] = TestListings.Create(listingId, supplierId, "Thiết bị", dailyRate, thumbnailMediaId: Guid.NewGuid());
         Listings.AvailableQuantities[listingId] = units ?? 10;
         if (units is int capacity)
         {
@@ -117,12 +92,35 @@ internal sealed class CheckoutTestHarness
         true,
         expectedTotal);
 
-    /// <param name="writerUnitOfWork">Thay unit of work của bước lưu đơn để giả lập lỗi database.</param>
+    /// <summary>
+    /// Gửi đơn rồi chạy nốt phần bất đồng bộ (Inventory giữ máy, tạo đơn, tạo hóa đơn) như hệ thống thật.
+    /// </summary>
     public async Task<CheckoutResult> SubmitAsync(
         Guid renterId,
         string key,
         CheckoutRequest request,
-        Func<RentalServiceDbContext, IUnitOfWork>? writerUnitOfWork = null,
+        CancellationToken cancellationToken = default)
+    {
+        CheckoutSubmitResult accepted = await AcceptAsync(renterId, key, request, cancellationToken);
+        if (accepted.IsFailure)
+        {
+            return accepted.Failure!;
+        }
+
+        return await Completion.CompleteAsync(renterId, key, cancellationToken);
+    }
+
+    /// <summary>Chạy phần bất đồng bộ của checkout: Inventory giả, dispatcher và worker tạo hóa đơn dùng chung cho mọi renter.</summary>
+    public CheckoutCompletion Completion => _completion ??= new CheckoutCompletion(
+        NewContext, Clock, Inventory, Payment, Locks, _ => OrderCodes);
+
+    private CheckoutCompletion? _completion;
+
+    /// <summary>Chỉ bước API nhận đơn: kiểm tra, ghi lệnh giữ lịch vào Outbox, trả 202.</summary>
+    public async Task<CheckoutSubmitResult> AcceptAsync(
+        Guid renterId,
+        string key,
+        CheckoutRequest request,
         CancellationToken cancellationToken = default)
     {
         await using RentalServiceDbContext context = NewContext();
@@ -131,16 +129,18 @@ internal sealed class CheckoutTestHarness
         RentalCheckoutOperationRepository operations = new(context);
         OutboxRepository outbox = new(context);
         InventoryCommandProducer inventoryCommands = new(outbox, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), Clock);
+<<<<<<< HEAD
         CheckoutHoldOrchestrator holds = new(Inventory, NullLogger<CheckoutHoldOrchestrator>.Instance);
         CheckoutOrderWriter writer = new(orders, carts, OrderCodes, holds,
             writerUnitOfWork?.Invoke(context) ?? context, NullLogger<CheckoutOrderWriter>.Instance);
+=======
+>>>>>>> origin/rental/fix/sub-order-and-order-queries
 
         CheckoutService service = new(
             new CheckoutPreparationService(
                 carts,
                 orders,
                 Listings,
-                Catalog,
                 Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
                 {
                     CurrentVersion = "v1.0",
@@ -155,6 +155,7 @@ internal sealed class CheckoutTestHarness
             context,
             Clock);
 
+<<<<<<< HEAD
         var accepted = await service.SubmitAsync(new(renterId, true), request, key, cancellationToken);
         if (accepted.IsFailure)
         {
@@ -230,6 +231,9 @@ internal sealed class CheckoutTestHarness
         await context.SaveChangesAsync(cancellationToken);
 
         return CheckoutResult.Success(order, isReplay: false);
+=======
+        return await service.SubmitAsync(new(renterId, true), request, key, cancellationToken);
+>>>>>>> origin/rental/fix/sub-order-and-order-queries
     }
 
     /// <summary>Chạy một lượt quét hết hạn thanh toán như ExpiryScannerWorker, dùng chung Inventory và Payment giả.</summary>
@@ -298,6 +302,7 @@ internal sealed class CheckoutTestHarness
         await using RentalServiceDbContext context = NewContext();
         return await context.RentalOrders
             .Include(o => o.Items).ThenInclude(i => i.UnitAssignments)
+            .Include(o => o.SubOrders)
             .OrderBy(o => o.OrderCode)
             .ToListAsync();
     }

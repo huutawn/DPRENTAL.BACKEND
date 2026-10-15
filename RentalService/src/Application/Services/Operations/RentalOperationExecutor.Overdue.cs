@@ -44,6 +44,7 @@ public sealed partial class RentalOperationExecutor
         receipt.BeginProviderAttempt(now);
         await CommitLocalChangesAsync(order, cancellationToken);
 
+
         var result = await _inventoryClient.MarkAssetsOverdueAsync(
             item.AllocationGroupId, command.ProviderRequest, cancellationToken);
         now = _timeProvider.GetUtcNow();

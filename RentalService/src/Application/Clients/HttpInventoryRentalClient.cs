@@ -72,6 +72,18 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
             ct);
     }
 
+    public async Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(
+        ListingRentalSnapshotsRequest request,
+        CancellationToken ct = default)
+    {
+        return await SendAsync<ListingRentalSnapshotsRequest, ListingRentalSnapshotsResponse>(
+            HttpMethod.Post,
+            InventoryContractSpec.Routes.ListingRentalSnapshots,
+            request,
+            InventoryContractSpec.Scopes.ReadAvailability,
+            ct);
+    }
+
     public async Task<Result<CreateHoldResponse>> CreateHoldAsync(
         CreateHoldRequest request,
         CancellationToken ct = default)

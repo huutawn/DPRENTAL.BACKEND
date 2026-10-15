@@ -2,8 +2,11 @@
 using Dprental.RentalService.Application.DTOs.Supplier;
 using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.IServices.SupplierDecision;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
+using Dprental.RentalService.Common.Enums;
+using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Logging;
 
@@ -44,8 +47,16 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SupplierDecisionService>.Instance;
     }
 
-    public async Task<Result<SupplierDecisionResponse>> AcceptItemAsync(
-        Guid itemId,
+    public SupplierDecisionService(
+        IRentalOrderRepository orderRepository,
+        IRentalOperationExecutor operationExecutor,
+        ILogger<SupplierDecisionService>? logger = null)
+        : this(orderRepository, operationExecutor, null!, null!, null!, null, logger)
+    {
+    }
+
+    public async Task<Result<SubOrderDecisionResponse>> AcceptSubOrderAsync(
+        Guid subOrderId,
         string idempotencyKey,
         IRentalCallerContext caller,
         CancellationToken cancellationToken = default)
@@ -58,23 +69,25 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
 
         Guid supplierId = caller.UserId!.Value;
 
-        // Lookup only OrderId before lock using AsNoTracking
-        var orderId = await _orderRepository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
-        if (!orderId.HasValue)
+        // Lookup only the sub-order before lock using AsNoTracking
+        RentalSubOrder? subOrder = await _orderRepository.GetSubOrderByIdAsync(subOrderId, cancellationToken);
+        if (subOrder is null || subOrder.SupplierId != supplierId)
         {
-            return Error.NotFound("ITEM_NOT_FOUND", $"Không tìm thấy mục thuê '{itemId}'.");
+            return SubOrderNotFound(subOrderId);
         }
 
-        return await _operationExecutor.ExecuteSupplierAcceptAsync(
-            orderId.Value,
-            itemId,
+        var result = await _operationExecutor.ExecuteSubOrderAcceptAsync(
+            subOrder.RentalOrderId,
+            subOrder.Id,
             supplierId,
             idempotencyKey.Trim(),
             cancellationToken);
+
+        return result.IsSuccess ? ToResponse(subOrder, result.Value) : result.Error;
     }
 
-    public async Task<Result<SupplierDecisionResponse>> RejectItemAsync(
-        Guid itemId,
+    public async Task<Result<SubOrderDecisionResponse>> RejectSubOrderAsync(
+        Guid subOrderId,
         SupplierRejectRequest request,
         string idempotencyKey,
         IRentalCallerContext caller,
@@ -98,21 +111,34 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
 
         Guid supplierId = caller.UserId!.Value;
 
-        // Lookup only OrderId before lock using AsNoTracking
-        var orderId = await _orderRepository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
-        if (!orderId.HasValue)
+        // Lookup only the sub-order before lock using AsNoTracking
+        RentalSubOrder? subOrder = await _orderRepository.GetSubOrderByIdAsync(subOrderId, cancellationToken);
+        if (subOrder is null || subOrder.SupplierId != supplierId)
         {
-            return Error.NotFound("ITEM_NOT_FOUND", $"Không tìm thấy mục thuê '{itemId}'.");
+            return SubOrderNotFound(subOrderId);
         }
 
-        return await _operationExecutor.ExecuteSupplierRejectAsync(
-            orderId.Value,
-            itemId,
+        var result = await _operationExecutor.ExecuteSubOrderRejectAsync(
+            subOrder.RentalOrderId,
+            subOrder.Id,
             supplierId,
             request.RejectReason.Trim(),
             string.IsNullOrWhiteSpace(request.OptionalNote) ? null : request.OptionalNote.Trim(),
             idempotencyKey.Trim(),
             cancellationToken);
+
+        return result.IsSuccess ? ToResponse(subOrder, result.Value) : result.Error;
+    }
+
+    // Đơn con của supplier khác trả như không tồn tại để không lộ dữ liệu.
+    private static Error SubOrderNotFound(Guid subOrderId) =>
+        Error.NotFound("SUB_ORDER_NOT_FOUND", $"Không tìm thấy đơn con '{subOrderId}'.");
+
+    private static SubOrderDecisionResponse ToResponse(RentalSubOrder subOrder, IReadOnlyList<SupplierDecisionResponse> items)
+    {
+        RentalItemStatus status = SubOrderStatusPolicy.Summarize(
+            items.Select(i => Enum.Parse<RentalItemStatus>(i.Status)).ToList());
+        return new SubOrderDecisionResponse(subOrder.Id, subOrder.SubOrderCode, subOrder.RentalOrderId, status.ToString(), items);
     }
 
     public async Task<Result<HandoverItemResponse>> HandoverItemAsync(

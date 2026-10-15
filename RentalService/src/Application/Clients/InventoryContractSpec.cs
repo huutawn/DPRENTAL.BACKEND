@@ -17,6 +17,9 @@ public static class InventoryContractSpec
         public static string CheckAvailability(Guid listingId) =>
             $"/equipment-listings/{listingId}/availability/check";
 
+        // Inventory 654acf4: tối đa 100 Listing mỗi lần.
+        public const string ListingRentalSnapshots = "/equipment-listings/batch";
+
         public static string CreateHold(Guid listingId) =>
             $"/equipment-listings/{listingId}/holds";
 
@@ -53,6 +56,8 @@ public static class InventoryContractSpec
         public const string InvalidReceipt = "INVALID_RECEIPT";
         public const string InvalidHoldExpiry = "INVALID_HOLD_EXPIRY";
         public const string ListingNotFound = "LISTING_NOT_FOUND";
+        public const string ListingNotActive = "LISTING_NOT_ACTIVE";
+        public const string HoldExpiresAfterStart = "HOLD_EXPIRES_AFTER_START";
         public const string AllocationGroupNotFound = "ALLOCATION_GROUP_NOT_FOUND";
     }
 

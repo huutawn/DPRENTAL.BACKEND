@@ -105,6 +105,7 @@ public sealed class PaymentWorkflowIntegrationTests
                 ? ReleaseHandler(allocationGroupId, request)
                 : Task.FromResult(Result.Success(new ReleaseAllocationResponse("REC-REL", request.OperationKey, allocationGroupId, FixedNow, false)));
 
+        public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotImplementedException();
@@ -198,6 +199,48 @@ public sealed class PaymentWorkflowIntegrationTests
         var inboxMessage = await db.RentalInboxMessages.FirstOrDefaultAsync(m => m.MessageId == envelope.MessageId);
         Assert.NotNull(inboxMessage);
         Assert.Equal("Processed", inboxMessage.Status);
+    }
+
+    [Fact]
+    public async Task ProcessInvoicePaid_ExtendsHoldFiveMinutesPastTheSupplierDeadline()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
+        var order = CreateOrder(orderId, renterId, dailyRate: 200_000m, depositPerUnit: 500_000m, quantity: 2);
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        DateTimeOffset? requestedHoldExpiry = null;
+        var inventoryClient = new StubInventoryClient
+        {
+            ExtendHoldHandler = (groupId, req) =>
+            {
+                requestedHoldExpiry = req.NewHoldExpiresAt;
+                return Task.FromResult(Result.Success(new ExtendHoldResponse("REC-001", groupId, req.NewHoldExpiresAt, FixedNow, false)));
+            }
+        };
+        var service = CreateWorkflowService(db, inventoryClient, new StubPaymentClient());
+
+        var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
+            Guid.NewGuid(),
+            "InvoicePaid",
+            1,
+            "payment-service",
+            orderId.ToString("D"),
+            FixedNow,
+            "corr-hold",
+            null,
+            new InvoicePaidPayload(orderId, renterId, "INV-001", "PAY-001", order.TotalPayableAmount, "VND", FixedNow));
+
+        var result = await service.ProcessInvoicePaidAsync(envelope);
+
+        Assert.True(result.IsSuccess);
+        var item = (await db.RentalOrders.Include(o => o.Items).FirstAsync(o => o.Id == orderId)).Items.First();
+        // Supplier vẫn phải quyết định trước hạn; hold còn thêm 5 phút để worker chốt nốt đơn con đã bấm nhận trước hạn.
+        Assert.Equal(FixedNow.AddHours(24), item.SupplierConfirmationDeadline);
+        Assert.Equal(FixedNow.AddHours(24).AddMinutes(5), requestedHoldExpiry);
     }
 
     [Fact]

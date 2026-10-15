@@ -72,8 +72,8 @@ public sealed class RentalCartController(
     /// <remarks>
     /// Thêm thiết bị vào giỏ hàng của người thuê hiện tại:
     /// - Số lượng thuê (<c>Quantity</c>) phải lớn hơn 0.
-    /// - Ngày bắt đầu (<c>ExpectedStartDate</c>) phải trong tương lai (sau ngày hiện tại).
-    /// - Ngày gửi theo YYYY-MM-DD, tính theo Asia/Ho_Chi_Minh. Ngày bắt đầu từ ngày mai và tối đa 6 tháng từ hôm nay.
+    /// - Ngày bắt đầu (<c>ExpectedStartDate</c>) phải đặt trước ít nhất 3 ngày: hôm nay 14/10 thì sớm nhất là 17/10.
+    /// - Ngày gửi theo YYYY-MM-DD, tính theo Asia/Ho_Chi_Minh. Ngày bắt đầu tối đa 6 tháng từ hôm nay.
     /// - Ngày kết thúc không trước ngày bắt đầu; tối đa 365 ngày, tính cả hai đầu.
     /// - Không được thuê listing của chính mình. Cùng listing và cùng cặp ngày sẽ cộng số lượng vào dòng hiện có, trả lại cùng cartItemId.
     /// - Chỉ lưu nhu cầu thuê; không giữ thiết bị hay giá và không đảm bảo khả dụng khi checkout.
@@ -82,7 +82,7 @@ public sealed class RentalCartController(
     /// <param name="request">Thông tin thiết bị, số lượng và khoảng thời gian dự kiến thuê.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <response code="200">Thêm mục vào giỏ hàng thành công, trả về mã định danh của mục giỏ hàng (<c>CartItemId</c>).</response>
-    /// <response code="400">Dữ liệu yêu cầu không hợp lệ (số lượng &lt;= 0, ngày thuê ở quá khứ hoặc khoảng ngày sai lệch).</response>
+    /// <response code="400">Dữ liệu yêu cầu không hợp lệ (số lượng &lt;= 0, ngày bắt đầu chưa đủ 3 ngày đặt trước hoặc khoảng ngày sai lệch).</response>
     /// <response code="401">Người dùng chưa được xác thực.</response>
     /// <response code="403">Người dùng không có quyền Renter.</response>
     /// <response code="404">Không tìm thấy giỏ hàng hoặc mã listing rỗng; listing không có thông tin chủ sở hữu trả 400 Cart.OwnerIdRequired.</response>
@@ -121,7 +121,7 @@ public sealed class RentalCartController(
     /// Quy tắc cập nhật:
     /// - Mỗi yêu cầu PATCH chỉ được phép cập nhật **hoặc** <c>Quantity</c>, **hoặc** cả hai ngày <c>ExpectedStartDate</c> và <c>ExpectedEndDate</c>.
     /// - Không được gửi đồng thời cả số lượng và ngày, cũng không được chỉ gửi một trong hai ngày.
-    /// - Vi phạm quy tắc trên trả 400 <c>Cart.InvalidUpdate</c>. Quantity phải dương; ngày theo YYYY-MM-DD, bắt đầu từ ngày mai,
+    /// - Vi phạm quy tắc trên trả 400 <c>Cart.InvalidUpdate</c>. Quantity phải dương; ngày theo YYYY-MM-DD, đặt trước ít nhất 3 ngày,
     /// đặt trước tối đa 6 tháng và tối đa 365 ngày thuê tính cả hai đầu.
     /// - Nếu ngày mới trùng một dòng khác của cùng listing, hệ thống cộng số lượng vào dòng đó và xóa dòng đang sửa.
     /// <para>Ví dụ body: {"quantity":3} hoặc {"expectedStartDate":"2026-11-01","expectedEndDate":"2026-11-03"}.</para>

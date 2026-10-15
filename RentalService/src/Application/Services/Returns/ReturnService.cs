@@ -4,6 +4,7 @@ using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Returns;
 using Dprental.RentalService.Application.IServices.Returns;
+using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Validation;
 using Dprental.RentalService.Common;
@@ -13,10 +14,10 @@ using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.DTOs.Integration;
 using Microsoft.Extensions.Configuration;
-using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Kafka.Producers;
+
 namespace Dprental.RentalService.Application.Services.Returns;
 
 public sealed class ReturnService(

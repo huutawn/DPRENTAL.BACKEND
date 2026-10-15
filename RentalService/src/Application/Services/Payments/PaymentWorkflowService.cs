@@ -266,7 +266,10 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                 var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
                 if (existingReceipt == null)
                 {
-                    DateTimeOffset newHoldExpiresAt = item.SupplierConfirmationDeadline ?? payload.PaidAt.AddHours(24);
+                    // Hold sống thêm một khoảng sau hạn xác nhận để worker chốt nốt đơn con supplier đã bấm nhận trước hạn.
+                    DateTimeOffset newHoldExpiresAt = item.SupplierConfirmationDeadline is DateTimeOffset deadline
+                        ? RentalItem.CalculateConfirmationHoldExpiry(deadline, item.ExpectedStartDate)
+                        : payload.PaidAt.AddHours(24);
                     var extHoldReq = new ExtendHoldRequest(newHoldExpiresAt, opKey);
                     var extHoldCmd = new RentalOperationCommand(
                         1,

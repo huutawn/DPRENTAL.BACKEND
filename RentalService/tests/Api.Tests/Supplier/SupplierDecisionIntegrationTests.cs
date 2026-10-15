@@ -7,6 +7,7 @@ using Dprental.RentalService.Domain.Repositories;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.DTOs.Supplier;
+using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Security.Jwt;
 using Dprental.RentalService.Api.Tests.TestHelpers;
@@ -162,6 +163,7 @@ public sealed class SupplierDecisionIntegrationTests
                 ? ReleaseHandler(allocationGroupId, request)
                 : Task.FromResult(Result.Success(new ReleaseAllocationResponse("REC-REL", request.OperationKey, allocationGroupId, FixedNow, false)));
 
+        public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotImplementedException();
@@ -189,52 +191,54 @@ public sealed class SupplierDecisionIntegrationTests
         public override DateTimeOffset GetUtcNow() => _utcNow;
     }
 
+    private static InventoryReplySimulator Replies(string dbName) =>
+        new(() => CreateDbContext(dbName), new TestTimeProvider(FixedNow));
+
     [Fact]
-    public async Task AcceptItem_ValidSupplier_QueuesInventoryConfirmation()
+    public async Task AcceptSubOrder_ValidSupplier_SendsConfirm_ThenInventoryReplyMovesItemToAwaitingHandover()
     {
         string dbName = Guid.NewGuid().ToString("N");
         Guid supplierId = Guid.NewGuid();
-        Guid itemId;
+        Guid subOrderId;
         Guid orderId;
-        IReadOnlyCollection<RentalUnitAssignment> assignments;
 
         await using (var seedDb = CreateDbContext(dbName))
         {
             var (order, item) = CreatePaidOrderWithItem(supplierId);
             orderId = order.Id;
-            itemId = item.Id;
-            assignments = item.UnitAssignments.ToList();
+            subOrderId = item.RentalSubOrderId;
             seedDb.RentalOrders.Add(order);
             await seedDb.SaveChangesAsync();
         }
 
-        await using var db = CreateDbContext(dbName);
-
-        var inventoryClient = new StubInventoryClient
+        await using (var db = CreateDbContext(dbName))
         {
-            ConfirmHandler = (groupId, req) =>
-            {
-                var units = assignments.Select(u => new ConfirmedAllocationUnitDto(u.AllocationId, u.AssetId, "Confirmed")).ToList();
-                return Task.FromResult(Result.Success(new ConfirmAllocationResponse("REC-CONF-001", groupId, FixedNow, false, units)));
-            }
-        };
+            var service = CreateDecisionService(db, new StubInventoryClient());
+            var result = await service.AcceptSubOrderAsync(subOrderId, "idemp-accept-1", CreateUserCaller(supplierId));
 
-        var service = CreateDecisionService(db, inventoryClient);
+            // Inventory xác nhận bất đồng bộ: lúc trả lời API, mục thuê vẫn chờ xác nhận và chưa phát sự kiện.
+            Assert.True(result.IsSuccess, result.Error.Code);
+            Assert.Equal("PendingSupplierConfirmation", result.Value.Status);
+            Assert.Equal(subOrderId, result.Value.SubOrderId);
+            Assert.False(await db.RentalOutboxMessages.AnyAsync(m => m.MessageType == "RentalItemConfirmed"));
+        }
 
-        var caller = CreateUserCaller(supplierId);
-        var result = await service.AcceptItemAsync(itemId, "idemp-accept-1", caller);
-        Assert.True(result.IsSuccess);
-        Assert.Equal("PendingSupplierConfirmation", result.Value.Status);
+        InventoryReplySimulator replies = Replies(dbName);
+        InventoryCommand confirm = Assert.Single(await replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation));
+        Assert.True((await replies.SucceedAsync(confirm)).IsSuccess);
 
-        var reloadedOrder = await db.RentalOrders.Include(o => o.Items).FirstAsync(o => o.Id == orderId);
-        Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, reloadedOrder.Items.First().Status);
+        await using var verify = CreateDbContext(dbName);
+        var reloadedOrder = await verify.RentalOrders.Include(o => o.Items).FirstAsync(o => o.Id == orderId);
+        RentalItem accepted = reloadedOrder.Items.First();
+        Assert.Equal(RentalItemStatus.AwaitingHandover, accepted.Status);
+        Assert.Equal(supplierId, accepted.SupplierDecisionBy);
 
-        var outbox = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "ConfirmAllocation");
-        Assert.NotNull(outbox);
+        var outbox = Assert.Single(await verify.RentalOutboxMessages.Where(m => m.MessageType == "RentalItemConfirmed").ToListAsync());
+        Assert.Equal(orderId.ToString("D"), outbox.PartitionKey);
     }
 
     [Fact]
-    public async Task AcceptItem_WrongSupplier_ReturnsForbidden()
+    public async Task AcceptSubOrder_WrongSupplier_ReturnsNotFound()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -247,14 +251,14 @@ public sealed class SupplierDecisionIntegrationTests
         var service = CreateDecisionService(db, new StubInventoryClient());
 
         var strangerCaller = CreateUserCaller(strangerSupplierId);
-        var result = await service.AcceptItemAsync(item.Id, "idemp-1", strangerCaller);
+        var result = await service.AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-1", strangerCaller);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("SUPPLIER_MISMATCH", result.Error.Code);
+        Assert.Equal("SUB_ORDER_NOT_FOUND", result.Error.Code);
     }
 
     [Fact]
-    public async Task AcceptItem_ServiceCaller_ReturnsUnauthorized()
+    public async Task AcceptSubOrder_ServiceCaller_ReturnsUnauthorized()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -266,14 +270,14 @@ public sealed class SupplierDecisionIntegrationTests
         var service = CreateDecisionService(db, new StubInventoryClient());
 
         var serviceCaller = CreateServiceCaller();
-        var result = await service.AcceptItemAsync(item.Id, "idemp-1", serviceCaller);
+        var result = await service.AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-1", serviceCaller);
 
         Assert.True(result.IsFailure);
         Assert.Equal("AUTH_REQUIRED", result.Error.Code);
     }
 
     [Fact]
-    public async Task AcceptItem_AdminCallerNotOwner_ReturnsForbidden()
+    public async Task AcceptSubOrder_AdminCallerNotOwner_ReturnsNotFound()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -287,14 +291,14 @@ public sealed class SupplierDecisionIntegrationTests
 
         // Admin caller who is NOT the supplier
         var adminCaller = CreateUserCaller(adminId, roles: ["admin", "adm"]);
-        var result = await service.AcceptItemAsync(item.Id, "idemp-1", adminCaller);
+        var result = await service.AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-1", adminCaller);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("SUPPLIER_MISMATCH", result.Error.Code);
+        Assert.Equal("SUB_ORDER_NOT_FOUND", result.Error.Code);
     }
 
     [Fact]
-    public async Task AcceptItem_ReplaySameKey_RemainsPending()
+    public async Task AcceptSubOrder_ReplaySameKey_Returns200OK()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -303,34 +307,37 @@ public sealed class SupplierDecisionIntegrationTests
         db.RentalOrders.Add(order);
         await db.SaveChangesAsync();
 
-        var inventoryClient = new StubInventoryClient
-        {
-            ConfirmHandler = (groupId, req) =>
-            {
-                var units = item.UnitAssignments.Select(u => new ConfirmedAllocationUnitDto(u.AllocationId, u.AssetId, "Confirmed")).ToList();
-                return Task.FromResult(Result.Success(new ConfirmAllocationResponse("REC-CONF-001", groupId, FixedNow, false, units)));
-            }
-        };
-
-        var service = CreateDecisionService(db, inventoryClient);
-
         var caller = CreateUserCaller(supplierId);
-        var first = await service.AcceptItemAsync(item.Id, "idemp-replay-1", caller);
-        Assert.True(first.IsSuccess);
+        var first = await CreateDecisionService(db, new StubInventoryClient())
+            .AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-replay-1", caller);
+        Assert.True(first.IsSuccess, first.Error.Code);
 
-        // Replay with exact same key
-        var second = await service.AcceptItemAsync(item.Id, "idemp-replay-1", caller);
-        Assert.True(second.IsSuccess);
-        Assert.Equal("PendingSupplierConfirmation", second.Value.Status);
+        // Gửi lại cùng khóa khi Inventory chưa trả lời: vẫn thành công, không ghi thêm lệnh xác nhận.
+        var whilePending = await CreateDecisionService(db, new StubInventoryClient())
+            .AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-replay-1", caller);
+        Assert.True(whilePending.IsSuccess, whilePending.Error.Code);
+        Assert.Equal("PendingSupplierConfirmation", whilePending.Value.Status);
 
-        // Different key after decision -> 409 Conflict
-        var differentKey = await service.AcceptItemAsync(item.Id, "idemp-diff-key", caller);
+        InventoryReplySimulator replies = Replies(dbName);
+        InventoryCommand confirm = Assert.Single(await replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation));
+        Assert.True((await replies.SucceedAsync(confirm)).IsSuccess);
+
+        // Gửi lại cùng khóa sau khi Inventory đã xác nhận: trả lại kết quả đã chốt.
+        await using var afterReply = CreateDbContext(dbName);
+        var second = await CreateDecisionService(afterReply, new StubInventoryClient())
+            .AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-replay-1", caller);
+        Assert.True(second.IsSuccess, second.Error.Code);
+        Assert.Equal("AwaitingHandover", second.Value.Status);
+
+        // Khóa khác sau khi đã quyết định -> 409 Conflict
+        var differentKey = await CreateDecisionService(afterReply, new StubInventoryClient())
+            .AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-diff-key", caller);
         Assert.True(differentKey.IsFailure);
         Assert.Equal("DECISION_IN_PROGRESS", differentKey.Error.Code);
     }
 
     [Fact]
-    public async Task AcceptItem_DeadlineExpired_ReturnsExpired()
+    public async Task AcceptSubOrder_DeadlineExpired_ReturnsExpired()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -343,47 +350,42 @@ public sealed class SupplierDecisionIntegrationTests
         var service = CreateDecisionService(db, new StubInventoryClient());
 
         var caller = CreateUserCaller(supplierId);
-        var result = await service.AcceptItemAsync(item.Id, "idemp-1", caller);
+        var result = await service.AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-1", caller);
 
         Assert.True(result.IsFailure);
         Assert.Equal("SUPPLIER_DEADLINE_EXPIRED", result.Error.Code);
     }
 
     [Fact]
-    public async Task AcceptItem_DoesNotUseSynchronousInventoryResponse()
+    public async Task AcceptSubOrder_InventoryRejectsConfirm_KeepsItemPending_AndPublishesNoConfirmation()
     {
         string dbName = Guid.NewGuid().ToString("N");
-        await using var db = CreateDbContext(dbName);
         Guid supplierId = Guid.NewGuid();
         var (order, item) = CreatePaidOrderWithItem(supplierId);
-        db.RentalOrders.Add(order);
-        await db.SaveChangesAsync();
-
-        var inventoryClient = new StubInventoryClient
+        await using (var db = CreateDbContext(dbName))
         {
-            ConfirmHandler = (groupId, req) =>
-            {
-                // Even an invalid synchronous result must not be read by the async command path.
-                var badUnits = new List<ConfirmedAllocationUnitDto> { new(Guid.NewGuid(), Guid.NewGuid(), "Confirmed") };
-                return Task.FromResult(Result.Success(new ConfirmAllocationResponse("REC-CONF-001", groupId, FixedNow, false, badUnits)));
-            }
-        };
+            db.RentalOrders.Add(order);
+            await db.SaveChangesAsync();
+            var result = await CreateDecisionService(db, new StubInventoryClient())
+                .AcceptSubOrderAsync(item.RentalSubOrderId, "idemp-1", CreateUserCaller(supplierId));
+            Assert.True(result.IsSuccess, result.Error.Code);
+        }
 
-        var service = CreateDecisionService(db, inventoryClient);
+        InventoryReplySimulator replies = Replies(dbName);
+        InventoryCommand confirm = Assert.Single(await replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation));
+        Assert.True((await replies.RejectAsync(confirm, "INVALID_ALLOCATION", "Allocation không còn được giữ.")).IsSuccess);
 
-        var caller = CreateUserCaller(supplierId);
-        var result = await service.AcceptItemAsync(item.Id, "idemp-1", caller);
-
-        Assert.True(result.IsSuccess);
-        Assert.Equal("PendingSupplierConfirmation", result.Value.Status);
-
-        // State must remain PendingSupplierConfirmation!
-        var reloaded = await db.RentalItems.FirstAsync(i => i.Id == item.Id);
-        Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, reloaded.Status);
+        // Trạng thái phải giữ nguyên PendingSupplierConfirmation, phiếu nhận ghi lỗi của Inventory.
+        await using var verify = CreateDbContext(dbName);
+        Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, (await verify.RentalItems.FirstAsync(i => i.Id == item.Id)).Status);
+        RentalOperationReceipt receipt = await verify.RentalOperationReceipts.SingleAsync(r => r.OperationId == confirm.OperationKey);
+        Assert.Equal(RentalOperationReceipt.StatusFailed, receipt.Status);
+        Assert.Equal("INVALID_ALLOCATION", receipt.ErrorCode);
+        Assert.False(await verify.RentalOutboxMessages.AnyAsync(m => m.MessageType == "RentalItemConfirmed"));
     }
 
     [Fact]
-    public async Task RejectItem_ValidReason_TransitionsToRejected_ReleasesUnits_SchedulesRefund()
+    public async Task RejectSubOrder_ValidReason_TransitionsToRejected_ReleasesUnits_SchedulesRefund()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -402,11 +404,11 @@ public sealed class SupplierDecisionIntegrationTests
 
         var caller = CreateUserCaller(supplierId);
         var req = new SupplierRejectRequest("Equipment is undergoing maintenance", "Apologies for the inconvenience");
-        var result = await service.RejectItemAsync(item.Id, req, "idemp-rej-1", caller);
+        var result = await service.RejectSubOrderAsync(item.RentalSubOrderId, req, "idemp-rej-1", caller);
 
         Assert.True(result.IsSuccess);
         Assert.Equal("Rejected", result.Value.Status);
-        Assert.Equal("Equipment is undergoing maintenance", result.Value.DecisionReason);
+        Assert.Equal("Equipment is undergoing maintenance", Assert.Single(result.Value.Items).DecisionReason);
 
         var reloaded = await db.RentalItems.Include(i => i.UnitAssignments).FirstAsync(i => i.Id == item.Id);
         Assert.Equal(RentalItemStatus.Rejected, reloaded.Status);
@@ -429,7 +431,7 @@ public sealed class SupplierDecisionIntegrationTests
     }
 
     [Fact]
-    public async Task RejectItem_InvalidReason_ReturnsValidationError()
+    public async Task RejectSubOrder_InvalidReason_ReturnsValidationError()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -442,7 +444,7 @@ public sealed class SupplierDecisionIntegrationTests
 
         var caller = CreateUserCaller(supplierId);
         var req = new SupplierRejectRequest(""); // Empty reason
-        var result = await service.RejectItemAsync(item.Id, req, "idemp-rej-empty", caller);
+        var result = await service.RejectSubOrderAsync(item.RentalSubOrderId, req, "idemp-rej-empty", caller);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_REJECT_REASON", result.Error.Code);

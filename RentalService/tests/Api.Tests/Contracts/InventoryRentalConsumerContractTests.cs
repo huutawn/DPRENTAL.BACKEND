@@ -60,6 +60,24 @@ public sealed class InventoryRentalConsumerContractTests
 
         Assert.Equal("/allocation-groups/group-test-01/block-damaged",
             InventoryContractSpec.Routes.BlockDamaged(groupId));
+
+        Assert.Equal("/equipment-listings/batch", InventoryContractSpec.Routes.ListingRentalSnapshots);
+        Assert.Equal("/equipment-listings/11111111-1111-1111-1111-111111111111/availability/check",
+            InventoryContractSpec.Routes.CheckAvailability(Guid.Parse("11111111-1111-1111-1111-111111111111")));
+    }
+
+    [Fact]
+    public void ListingSnapshotsBatch_UsesInventoryJsonShape()
+    {
+        Guid listingId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+
+        // Đúng dạng API batch của Inventory (654acf4).
+        string snapshotsRequest = JsonSerializer.Serialize(new ListingRentalSnapshotsRequest([listingId]), JsonOptions);
+        Assert.Equal("""{"equipmentListingIds":["11111111-1111-1111-1111-111111111111"]}""", snapshotsRequest);
+
+        ListingRentalSnapshotsResponse? snapshots = JsonSerializer.Deserialize<ListingRentalSnapshotsResponse>(
+            """{"items":[],"missingIds":["11111111-1111-1111-1111-111111111111"]}""", JsonOptions);
+        Assert.Equal([listingId], snapshots!.MissingIds);
     }
 
     // 2. Listing Snapshot Fixture & Serialization
@@ -72,15 +90,11 @@ public sealed class InventoryRentalConsumerContractTests
         ListingRentalSnapshotDto fixture = new(
             listingId,
             supplierId,
-            "Sony FX3 Cinema Camera Kit",
-            "Professional cinema body with 24-70mm lens",
-            "District 1, Ho Chi Minh City",
+            "Sony FX3",
+            Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
             500_000m,
-            1_000_000m,
             "VND",
-            "Active",
-            "v1.0",
-            _fixedTime);
+            "Active");
 
         _stub.GetSnapshotHandler = id => Task.FromResult(Result.Success(fixture));
 
@@ -88,20 +102,19 @@ public sealed class InventoryRentalConsumerContractTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(500_000m, result.Value.DailyRate);
-        Assert.Equal(1_000_000m, result.Value.DepositPerUnit);
         Assert.Equal("VND", result.Value.Currency);
-        Assert.Equal("v1.0", result.Value.SnapshotVersion);
 
-        // Verify JSON round-trip
+        // Đúng dạng Inventory đưa ngày 15/10/2026, không thêm ô nào khác.
         string json = JsonSerializer.Serialize(result.Value, JsonOptions);
-        Assert.Contains("\"dailyRate\":500000", json);
-        Assert.Contains("\"snapshotVersion\":\"v1.0\"", json);
+        Assert.Equal(
+            """{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","ownerUserId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","name":"Sony FX3","thumbnailMediaId":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","dailyRate":500000,"currency":"VND","status":"Active"}""",
+            json);
         Assert.DoesNotContain("serialNumber", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("assetCode", json, StringComparison.OrdinalIgnoreCase);
 
         ListingRentalSnapshotDto? deserialized = JsonSerializer.Deserialize<ListingRentalSnapshotDto>(json, JsonOptions);
         Assert.NotNull(deserialized);
-        Assert.Equal(fixture.ListingId, deserialized.ListingId);
+        Assert.Equal(fixture, deserialized);
     }
 
     [Fact]
@@ -120,21 +133,20 @@ public sealed class InventoryRentalConsumerContractTests
     [Fact]
     public async Task CheckListingAvailability_SerializesDatesAndEvaluatesResponse()
     {
-        Guid listingId = Guid.NewGuid();
+        Guid listingId = Guid.Parse("11111111-1111-1111-1111-111111111111");
         ListingAvailabilityCheckRequest request = new(
             listingId,
             new(2026, 10, 10),
             new(2026, 10, 15),
             2);
 
-        ListingAvailabilityCheckResponse responseFixture = new(
-            AvailableQuantity: 2,
-            IsAvailable: true,
-            EvaluatedAt: _fixedTime,
-            From: request.From,
-            To: request.To);
+        // Đúng dạng response của Inventory (CheckListingAvailabilityResponse).
+        ListingAvailabilityCheckResponse? responseFixture = JsonSerializer.Deserialize<ListingAvailabilityCheckResponse>(
+            """{"listingId":"11111111-1111-1111-1111-111111111111","startDate":"2026-10-10","endDate":"2026-10-15","requestedQuantity":2,"availableQuantity":2,"isAvailable":true}""",
+            JsonOptions);
+        Assert.Equal(new ListingAvailabilityCheckResponse(listingId, new(2026, 10, 10), new(2026, 10, 15), 2, 2, true), responseFixture);
 
-        _stub.CheckAvailabilityHandler = req => Task.FromResult(Result.Success(responseFixture));
+        _stub.CheckAvailabilityHandler = req => Task.FromResult(Result.Success(responseFixture!));
 
         Result<ListingAvailabilityCheckResponse> result = await _stub.CheckListingAvailabilityAsync(request);
 
@@ -142,63 +154,55 @@ public sealed class InventoryRentalConsumerContractTests
         Assert.True(result.Value.IsAvailable);
         Assert.Equal(2, result.Value.AvailableQuantity);
 
+        // Body đúng dạng Inventory nhận; listingId nằm trên đường dẫn, endDate là ngày dùng máy cuối (có tính).
         string json = JsonSerializer.Serialize(request, JsonOptions);
-        Assert.Contains("\"from\":\"2026-10-10\"", json);
-        Assert.Contains("\"to\":\"2026-10-15\"", json);
-        Assert.Contains("\"quantity\":2", json);
+        Assert.Equal("""{"startDate":"2026-10-10","endDate":"2026-10-15","requestedQuantity":2}""", json);
     }
 
-    // 4. Create Hold Fixture & Mapping
+    // 4. Create Hold: đúng dạng CreateListingHoldRequest / ListingHoldResponse của Inventory
     [Fact]
-    public async Task CreateHold_MapsAssignedAssets_AndReplayFlag()
+    public void CreateHold_UsesInventoryJsonShape()
     {
-        Guid listingId = Guid.NewGuid();
-        Guid alloc1 = Guid.NewGuid();
-        Guid asset1 = Guid.NewGuid();
-        Guid alloc2 = Guid.NewGuid();
-        Guid asset2 = Guid.NewGuid();
-
+        Guid listingId = Guid.Parse("11111111-1111-1111-1111-111111111111");
         CreateHoldRequest request = new(
             listingId,
             2,
-            new(2026, 10, 10),
-            new(2026, 10, 15),
-            "rental-item:001",
-            _fixedTime.AddMinutes(30),
-            "v1.0");
+            new(2026, 10, 18),
+            new(2026, 10, 20),
+            new DateTimeOffset(2026, 10, 15, 3, 30, 0, TimeSpan.Zero),
+            "rental",
+            "rental-item:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
 
-        CreateHoldResponse responseFixture = new(
-            AllocationGroupId: "group-hold-001",
-            AssignedAssets:
+        // Inventory từ chối ô lạ: body chỉ có đúng các ô này, listingId nằm trên đường dẫn.
+        Assert.Equal(
+            """{"quantity":2,"startDate":"2026-10-18","endDate":"2026-10-20","holdExpiresAt":"2026-10-15T03:30:00+00:00","sourceSystem":"rental","groupReference":"rental-item:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","notes":null}""",
+            JsonSerializer.Serialize(request, JsonOptions));
+        Assert.Equal("/equipment-listings/11111111-1111-1111-1111-111111111111/holds", InventoryContractSpec.Routes.CreateHold(listingId));
+
+        // Response mẫu theo ListingHoldResponse; Rental bỏ qua các ô của allocation không dùng tới.
+        CreateHoldResponse? response = JsonSerializer.Deserialize<CreateHoldResponse>(
+            """
+            {"listingId":"11111111-1111-1111-1111-111111111111","sourceSystem":"rental",
+             "groupReference":"rental-item:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","quantity":2,
+             "allocations":[
+               {"id":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","assetId":"cccccccc-cccc-cccc-cccc-cccccccccccc","sourceSystem":"rental",
+                "externalReference":"listing-hold:x:A1","startDate":"2026-10-18","endDate":"2026-10-20","status":"Held",
+                "holdExpiresAt":"2026-10-15T03:30:00+00:00","notes":null,"createdAt":"2026-10-15T03:00:00+00:00","updatedAt":"2026-10-15T03:00:00+00:00"},
+               {"id":"dddddddd-dddd-dddd-dddd-dddddddddddd","assetId":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","status":"Held"}
+             ],
+             "isReplay":true}
+            """,
+            JsonOptions);
+
+        Assert.NotNull(response);
+        Assert.Equal("rental-item:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", response.GroupReference);
+        Assert.True(response.IsReplay);
+        Assert.Equal(
             [
-                new(alloc1, asset1, "Held"),
-                new(alloc2, asset2, "Held")
+                new HeldAllocationDto(Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"), "Held"),
+                new HeldAllocationDto(Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"), Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"), "Held")
             ],
-            HoldExpiresAt: request.RequestedHoldExpiresAt,
-            ListingId: listingId,
-            Quantity: 2,
-            From: request.From,
-            To: request.To,
-            IsReplay: false,
-            AllocationStatus: "Held");
-
-        _stub.CreateHoldHandler = _ => Task.FromResult(Result.Success(responseFixture));
-
-        Result<CreateHoldResponse> result = await _stub.CreateHoldAsync(request);
-
-        Assert.True(result.IsSuccess);
-        Assert.Equal("group-hold-001", result.Value.AllocationGroupId);
-        Assert.Equal(2, result.Value.AssignedAssets.Count);
-        Assert.False(result.Value.IsReplay);
-
-        // Verify JSON round-trip
-        string json = JsonSerializer.Serialize(result.Value, JsonOptions);
-        Assert.Contains("\"allocationGroupId\":\"group-hold-001\"", json);
-        Assert.Contains("\"isReplay\":false", json);
-
-        CreateHoldResponse? roundtrip = JsonSerializer.Deserialize<CreateHoldResponse>(json, JsonOptions);
-        Assert.NotNull(roundtrip);
-        Assert.Equal(2, roundtrip.AssignedAssets.Count);
+            response.Allocations);
     }
 
     // 5. Extend Hold Fixture
@@ -325,6 +329,7 @@ public sealed class InventoryRentalConsumerContractTests
         public Func<string, MarkAssetsReturnedRequest, Task<Result<MarkAssetsReturnedResponse>>>? MarkReturnedHandler { get; set; }
         public Func<string, BlockDamagedAssetsRequest, Task<Result<BlockDamagedAssetsResponse>>>? BlockDamagedHandler { get; set; }
 
+        public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) =>
             GetSnapshotHandler?.Invoke(listingId) ?? Task.FromResult(Result.Failure<ListingRentalSnapshotDto>(Error.NotFound("NotConfigured", "Stub not configured.")));
 
