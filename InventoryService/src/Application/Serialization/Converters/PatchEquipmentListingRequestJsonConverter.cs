@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Dprental.InventoryService.Application.DTOs.Listings;
@@ -22,7 +23,8 @@ public sealed class PatchEquipmentListingRequestJsonConverter : JsonConverter<Pa
         "thumbnailMediaId",
         "schemaVersion",
         "specValues",
-        "status"
+        "status",
+        "depositAmount"
     };
     public override PatchEquipmentListingRequest Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
@@ -263,6 +265,31 @@ public sealed class PatchEquipmentListingRequestJsonConverter : JsonConverter<Pa
                         throw new JsonException("Thuộc tính 'status' phải là số nguyên hoặc chuỗi trạng thái hợp lệ.");
                     }
                     break;
+
+                case "depositamount":
+                    request.IsDepositAmountSpecified = true;
+                    if (reader.TokenType == JsonTokenType.Null)
+                    {
+                        request.DepositAmount = null;
+                    }
+                    else if (reader.TokenType == JsonTokenType.Number)
+                    {
+                        ReadOnlySpan<byte> span = reader.HasValueSequence
+                            ? reader.ValueSequence.ToArray()
+                            : reader.ValueSpan;
+
+                        if (!StrictIntegerRateJsonConverter.TryParseExactIntegerDecimal(span, out decimal depositVal))
+                        {
+                            throw new JsonException("INVALID_DEPOSIT_AMOUNT: Giá trị tiền cọc phải là số nguyên, không được chứa phần lẻ hoặc vượt quá giới hạn.");
+                        }
+
+                        request.DepositAmount = depositVal;
+                    }
+                    else
+                    {
+                        throw new JsonException("INVALID_DEPOSIT_AMOUNT: Giá trị tiền cọc phải là số.");
+                    }
+                    break;
             }
         }
 
@@ -389,6 +416,18 @@ public sealed class PatchEquipmentListingRequestJsonConverter : JsonConverter<Pa
             else
             {
                 writer.WriteString("status", value.Status.Value.ToString());
+            }
+        }
+
+        if (value.IsDepositAmountSpecified)
+        {
+            if (value.DepositAmount.HasValue)
+            {
+                writer.WriteNumber("depositAmount", value.DepositAmount.Value);
+            }
+            else
+            {
+                writer.WriteNull("depositAmount");
             }
         }
 

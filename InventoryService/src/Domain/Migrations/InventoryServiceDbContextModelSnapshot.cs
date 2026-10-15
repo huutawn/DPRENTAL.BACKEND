@@ -379,6 +379,12 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("numeric(18,0)")
                         .HasColumnName("daily_rate");
 
+                    b.Property<decimal>("DepositAmount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("numeric(18,0)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("deposit_amount");
+
                     b.Property<string>("Description")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)")
@@ -473,6 +479,8 @@ namespace InventoryService.Domain.Migrations
 
                             t.HasCheckConstraint("ck_equipment_listings_daily_rate", "daily_rate >= 1 AND daily_rate <= 999999999999999999 AND trunc(daily_rate) = daily_rate");
 
+
+                            t.HasCheckConstraint("ck_equipment_listings_deposit_amount", "deposit_amount >= 0 AND deposit_amount <= 999999999999999999 AND trunc(deposit_amount) = deposit_amount");
                             t.HasCheckConstraint("ck_equipment_listings_description", "description IS NULL OR (description ~ '\\S' AND length(description) <= 2000)");
 
                             t.HasCheckConstraint("ck_equipment_listings_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid AND brand_id <> '00000000-0000-0000-0000-000000000000'::uuid");

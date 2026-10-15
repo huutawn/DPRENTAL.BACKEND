@@ -121,7 +121,8 @@ public sealed class EquipmentListingBatchIntegrationTests : IClassFixture<Postgr
         string name = "Sony FX3",
         decimal dailyRate = 500_000m,
         EquipmentListingStatus status = EquipmentListingStatus.Active,
-        Guid? thumbnailMediaId = null)
+        Guid? thumbnailMediaId = null,
+        decimal depositAmount = 500_000m)
     {
         await using var db = CreateDbContext();
         var mediaIds = thumbnailMediaId.HasValue ? new[] { thumbnailMediaId.Value } : null;
@@ -142,7 +143,8 @@ public sealed class EquipmentListingBatchIntegrationTests : IClassFixture<Postgr
             FixedNow,
             2024,
             mediaIds: mediaIds,
-            thumbnailMediaId: thumbnailMediaId).Value;
+            thumbnailMediaId: thumbnailMediaId,
+            depositAmount: depositAmount).Value;
 
         listing.UpdateStatus(status, true, FixedNow);
         db.EquipmentListings.Add(listing);
@@ -316,6 +318,7 @@ public sealed class EquipmentListingBatchIntegrationTests : IClassFixture<Postgr
         Assert.Equal("VND", item0.GetProperty("currency").GetString());
         Assert.Equal("Inactive", item0.GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, item0.GetProperty("thumbnailMediaId").ValueKind);
+        Assert.Equal(500_000m, item0.GetProperty("depositAmount").GetDecimal());
 
         var item1 = itemsElement[1];
         Assert.Equal(listing1.Id, item1.GetProperty("id").GetGuid());
@@ -326,6 +329,7 @@ public sealed class EquipmentListingBatchIntegrationTests : IClassFixture<Postgr
         Assert.Equal("VND", item1.GetProperty("currency").GetString());
         Assert.Equal("Active", item1.GetProperty("status").GetString());
 
+        Assert.Equal(500_000m, item1.GetProperty("depositAmount").GetDecimal());
         var item2 = itemsElement[2];
         Assert.Equal(listing3.Id, item2.GetProperty("id").GetGuid());
         Assert.Equal("Draft", item2.GetProperty("status").GetString());

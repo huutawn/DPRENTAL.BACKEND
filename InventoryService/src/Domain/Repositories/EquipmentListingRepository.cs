@@ -62,7 +62,8 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
                 l.ThumbnailMediaId,
                 l.DailyRate,
                 l.Currency,
-                l.Status))
+                l.Status,
+                l.DepositAmount))
             .ToListAsync(cancellationToken);
     }
 

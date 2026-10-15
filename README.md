@@ -146,7 +146,8 @@ dotnet test InventoryService.sln
     "weeklyRate": 3000000,
     "monthlyRate": 10000000,
     "currency": "VND"
-  }
+  },
+  "depositAmount": 500000
 }
 ```
 *Phản hồi*: `201 Created` kèm `Location: /api/v1/inventory/equipment-listings/{listingId}`.
@@ -173,7 +174,7 @@ dotnet test InventoryService.sln
 | `GET` | `/api/v1/inventory/public/equipment-listings/{id}` | Đọc chi tiết Listing Active công khai đã làm sạch dữ liệu nhạy cảm. Listing Draft/Inactive trả 404. |
 
 ### Bảo vệ dữ liệu nhạy cảm (Privacy & Security)
-- Phản hồi công khai chỉ hiển thị cấp Listing: `id`, `equipmentTypeId`, `brandId`, `name`, `description`, `model`, `manufactureYear`, `schemaVersion`, `specValues`, `rentalRate`, `media` (`[{id, url}]`), `thumbnailUrl`, `totalQuantity`, `availableQuantity`.
+- Phản hồi công khai chỉ hiển thị cấp Listing: `id`, `equipmentTypeId`, `brandId`, `name`, `description`, `model`, `manufactureYear`, `schemaVersion`, `specValues`, `rentalRate`, `depositAmount`, `media` (`[{id, url}]`), `thumbnailUrl`, `totalQuantity`, `availableQuantity`.
 - Tuyệt đối không rò rỉ `serialNumber`, `assetCode`, hay các GUID định danh đơn vị vật lý (`assetId`).
 - Từ chối tham số ngoài whitelist: Việc truyền `manufactureYearFrom` hay `manufactureYearTo` vào endpoint công khai sẽ bị từ chối `400 INVALID_QUERY_PARAMETER` (năm sản xuất thuộc từng unit vật lý, không thuộc Listing).
 

@@ -13,5 +13,6 @@ public sealed record EquipmentListingBatchItemResponse(
     [property: JsonPropertyName("thumbnailMediaId")] Guid? ThumbnailMediaId,
     [property: JsonPropertyName("dailyRate")] decimal DailyRate,
     [property: JsonPropertyName("currency")] string Currency,
-    [property: JsonPropertyName("status")] string Status
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("depositAmount")] decimal DepositAmount
 );

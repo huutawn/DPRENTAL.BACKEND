@@ -20,6 +20,7 @@ public sealed record PublicEquipmentListingResponse(
     [property: JsonPropertyName("schemaVersion")] int SchemaVersion,
     [property: JsonPropertyName("specValues")] JsonElement SpecValues,
     [property: JsonPropertyName("rentalRate")] RentalRateDto RentalRate,
+    [property: JsonPropertyName("depositAmount")] decimal DepositAmount,
     [property: JsonPropertyName("media")] IReadOnlyList<MediaReferenceResponse> Media,
     [property: JsonPropertyName("thumbnailUrl")] string? ThumbnailUrl,
     [property: JsonPropertyName("totalQuantity")] int TotalQuantity,

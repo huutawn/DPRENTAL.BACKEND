@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Dprental.InventoryService.Application.DTOs.Assets;
+using Dprental.InventoryService.Application.Serialization.Converters;
 
 namespace Dprental.InventoryService.Application.DTOs.Listings;
 
@@ -21,5 +22,6 @@ public sealed record CreateEquipmentListingRequest(
     [property: JsonPropertyName("description")] string? Description = null,
     [property: JsonPropertyName("schemaVersion")] int SchemaVersion = 1,
     [property: JsonPropertyName("mediaIds")] IReadOnlyList<Guid>? MediaIds = null,
-    [property: JsonPropertyName("thumbnailMediaId")] Guid? ThumbnailMediaId = null
+    [property: JsonPropertyName("thumbnailMediaId")] Guid? ThumbnailMediaId = null,
+    [property: JsonPropertyName("depositAmount"), JsonConverter(typeof(StrictIntegerDepositJsonConverter))] decimal? DepositAmount = null
 );

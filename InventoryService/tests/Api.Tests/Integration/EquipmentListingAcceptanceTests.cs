@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using System.Net;
 using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.Clients;
@@ -820,5 +821,219 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
         Assert.Equal(HttpStatusCode.Created, addAfterResp.StatusCode);
         var addedAfterAsset = await addAfterResp.Content.ReadFromJsonAsync<InventoryAssetResponse>();
         Assert.Equal(2025, addedAfterAsset!.ManufactureYear);
+    }
+
+    [Fact]
+    public async Task CreateListing_DepositAmount_DefaultZero_AndCustomDeposit_Succeeds()
+    {
+        var (app, secFactory) = CreateFactory();
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        var token = secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        // 1. Omitted depositAmount defaults to 0
+        var payloadDefault = new
+        {
+            equipmentTypeId = Guid.NewGuid(),
+            brandId = Guid.NewGuid(),
+            name = "Sony FX3 Default Deposit",
+            model = "FX3",
+            serialNumber = "FX3-DEF-001",
+            manufactureYear = 2024,
+            schemaVersion = 1,
+            specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 500_000m, currency = "VND" }
+        };
+        var respDefault = await client.PostAsync("api/v1/inventory/equipment-listings",
+            new StringContent(JsonSerializer.Serialize(payloadDefault), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Created, respDefault.StatusCode);
+        var createdDefault = await respDefault.Content.ReadFromJsonAsync<EquipmentListingResponse>();
+        Assert.NotNull(createdDefault);
+        Assert.Equal(0m, createdDefault.DepositAmount);
+        Assert.Equal(1, createdDefault.TotalQuantity);
+
+        // 2. Custom depositAmount 500,000 saves correctly
+        var payloadCustom = new
+        {
+            equipmentTypeId = Guid.NewGuid(),
+            brandId = Guid.NewGuid(),
+            name = "Sony FX3 Custom Deposit",
+            model = "FX3",
+            serialNumber = "FX3-CUST-001",
+            manufactureYear = 2024,
+            schemaVersion = 1,
+            specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 500_000m, currency = "VND" },
+            depositAmount = 500_000m
+        };
+        var respCustom = await client.PostAsync("api/v1/inventory/equipment-listings",
+            new StringContent(JsonSerializer.Serialize(payloadCustom), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Created, respCustom.StatusCode);
+        var createdCustom = await respCustom.Content.ReadFromJsonAsync<EquipmentListingResponse>();
+        Assert.NotNull(createdCustom);
+        Assert.Equal(500_000m, createdCustom.DepositAmount);
+
+        // Verify persistence in PostgreSQL
+        await using var db = CreateDbContext();
+        var listingInDb = await db.EquipmentListings.SingleAsync(l => l.Id == createdCustom.Id);
+        Assert.Equal(500_000m, listingInDb.DepositAmount);
+    }
+
+    [Theory]
+    [InlineData("{\"depositAmount\": -50000}")]
+    [InlineData("{\"depositAmount\": 500000.5}")]
+    [InlineData("{\"depositAmount\": 0.00000000000000000000000000000001}")]
+    [InlineData("{\"depositAmount\": null}")]
+    [InlineData("{\"depositAmount\": \"not-a-number\"}")]
+    [InlineData("{\"depositAmount\": 1000000000000000000}")]
+    public async Task CreateListing_InvalidDepositAmount_Returns400_WithInvalidDepositAmountCode(string depositJsonFragment)
+    {
+        var (app, secFactory) = CreateFactory();
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        var token = secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var jsonBody = $$"""
+            {
+                "equipmentTypeId": "{{Guid.NewGuid():D}}",
+                "brandId": "{{Guid.NewGuid():D}}",
+                "name": "Invalid Deposit Camera",
+                "model": "FX3",
+                "serialNumber": "SN-INV-DEP",
+                "manufactureYear": 2024,
+                "schemaVersion": 1,
+                "specValues": {},
+                "rentalRate": { "dailyRate": 500000, "currency": "VND" },
+                {{depositJsonFragment.Trim('{', '}')}}
+            }
+            """;
+
+        var response = await client.PostAsync("api/v1/inventory/equipment-listings",
+            new StringContent(jsonBody, Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>();
+        Assert.NotNull(problem);
+        Assert.Equal("INVALID_DEPOSIT_AMOUNT", problem.Title);
+    }
+
+    [Fact]
+    public async Task PatchListing_DepositAmount_PresenceTracking_AndReadConsistency()
+    {
+        var (app, secFactory) = CreateFactory();
+        await using var _ = app;
+        await using var __ = secFactory;
+        using var client = app.CreateClient();
+
+        var owner = Guid.NewGuid();
+        var token = secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        // 1. Create with depositAmount = 500,000
+        var createPayload = new
+        {
+            equipmentTypeId = Guid.NewGuid(),
+            brandId = Guid.NewGuid(),
+            name = "Sony FX3 Read Test",
+            model = "FX3",
+            serialNumber = "FX3-PATCH-DEP-1",
+            manufactureYear = 2024,
+            schemaVersion = 1,
+            specValues = new { sensor = "Full-Frame" },
+            rentalRate = new { dailyRate = 500_000m, currency = "VND" },
+            depositAmount = 500_000m
+        };
+        var createResp = await client.PostAsync("api/v1/inventory/equipment-listings",
+            new StringContent(JsonSerializer.Serialize(createPayload), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Created, createResp.StatusCode);
+        var created = await createResp.Content.ReadFromJsonAsync<EquipmentListingResponse>();
+        var listingId = created!.Id;
+
+        // 2. Owner GET by ID -> depositAmount is 500,000
+        var getResp = await client.GetAsync($"api/v1/inventory/equipment-listings/{listingId:D}");
+        Assert.Equal(HttpStatusCode.OK, getResp.StatusCode);
+        var gotOwner = await getResp.Content.ReadFromJsonAsync<EquipmentListingResponse>();
+        Assert.Equal(500_000m, gotOwner!.DepositAmount);
+
+        // 3. PATCH name only (omitted depositAmount) -> depositAmount remains 500,000
+        var patchNameResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
+            new StringContent("{\"name\":\"Sony FX3 Updated\"}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, patchNameResp.StatusCode);
+        var patchedName = await patchNameResp.Content.ReadFromJsonAsync<EquipmentListingResponse>();
+        Assert.Equal(500_000m, patchedName!.DepositAmount);
+
+        // 4. PATCH depositAmount = 0 -> depositAmount becomes 0
+        var patchZeroResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
+            new StringContent("{\"depositAmount\":0}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, patchZeroResp.StatusCode);
+        var patchedZero = await patchZeroResp.Content.ReadFromJsonAsync<EquipmentListingResponse>();
+        Assert.Equal(0m, patchedZero!.DepositAmount);
+
+        // 5. PATCH depositAmount = 1,000,000 -> depositAmount becomes 1,000,000
+        var patchNewResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
+            new StringContent("{\"depositAmount\":1000000}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, patchNewResp.StatusCode);
+        var patchedNew = await patchNewResp.Content.ReadFromJsonAsync<EquipmentListingResponse>();
+        Assert.Equal(1_000_000m, patchedNew!.DepositAmount);
+
+        // 6. PATCH invalid depositAmount (null, negative, fractional) -> 400 INVALID_DEPOSIT_AMOUNT
+        var patchNullResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
+            new StringContent("{\"depositAmount\":null}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, patchNullResp.StatusCode);
+        var probNull = await patchNullResp.Content.ReadFromJsonAsync<ProblemDetails>();
+        Assert.Equal("INVALID_DEPOSIT_AMOUNT", probNull!.Title);
+
+        var patchNegResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
+            new StringContent("{\"depositAmount\":-100}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, patchNegResp.StatusCode);
+        var probNeg = await patchNegResp.Content.ReadFromJsonAsync<ProblemDetails>();
+        Assert.Equal("INVALID_DEPOSIT_AMOUNT", probNeg!.Title);
+
+        var patchFracResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
+            new StringContent("{\"depositAmount\":500000.5}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, patchFracResp.StatusCode);
+        var probFrac = await patchFracResp.Content.ReadFromJsonAsync<ProblemDetails>();
+        Assert.Equal("INVALID_DEPOSIT_AMOUNT", probFrac!.Title);
+
+        // 7. PATCH by another user without ownership -> 403 Forbidden
+        var otherUser = Guid.NewGuid();
+        var otherToken = secFactory.CreateHumanToken(otherUser, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        using var otherClient = app.CreateClient();
+        otherClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", otherToken);
+        var patchOtherResp = await otherClient.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
+            new StringContent("{\"depositAmount\":200000}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Forbidden, patchOtherResp.StatusCode);
+
+        // 8. Activate listing and test Public Detail and Batch Read consistency
+        var patchActiveResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
+            new StringContent("{\"status\":\"Active\"}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, patchActiveResp.StatusCode);
+
+        // Public GET
+        using var anonClient = app.CreateClient();
+        var pubResp = await anonClient.GetAsync($"api/v1/inventory/public/equipment-listings/{listingId:D}");
+        Assert.Equal(HttpStatusCode.OK, pubResp.StatusCode);
+        var pubListing = await pubResp.Content.ReadFromJsonAsync<PublicEquipmentListingResponse>();
+        Assert.Equal(1_000_000m, pubListing!.DepositAmount);
+
+        // Service Batch Read
+        var serviceToken = secFactory.CreateServiceToken(Guid.NewGuid(), scopes: [InventoryAccessEvaluator.ScopeAvailabilityRead]);
+        using var svcClient = app.CreateClient();
+        svcClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
+        var batchPayload = new { equipmentListingIds = new[] { listingId } };
+        var batchResp = await svcClient.PostAsync("api/v1/inventory/equipment-listings/batch",
+            new StringContent(JsonSerializer.Serialize(batchPayload), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, batchResp.StatusCode);
+        var batchData = await batchResp.Content.ReadFromJsonAsync<EquipmentListingBatchResponse>();
+        var batchItem = Assert.Single(batchData!.Items);
+        Assert.Equal(1_000_000m, batchItem.DepositAmount);
     }
 }
