@@ -129,7 +129,9 @@ internal sealed class CheckoutTestHarness
         RentalCheckoutOperationRepository operations = new(context);
         OutboxRepository outbox = new(context);
         InventoryCommandProducer inventoryCommands = new(outbox, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), Clock);
-        CheckoutOrderWriter writer = new(orders, carts, OrderCodes, NullLogger<CheckoutOrderWriter>.Instance);
+        CheckoutHoldOrchestrator holds = new(Inventory, NullLogger<CheckoutHoldOrchestrator>.Instance);
+        CheckoutOrderWriter writer = new(orders, carts, OrderCodes, holds,
+            writerUnitOfWork?.Invoke(context) ?? context, NullLogger<CheckoutOrderWriter>.Instance);
 
         CheckoutService service = new(
             new CheckoutPreparationService(
@@ -168,16 +170,33 @@ internal sealed class CheckoutTestHarness
         }
 
         var plan = JsonSerializer.Deserialize<CheckoutPlan>(op.PreparationSnapshotJson, JsonOptions)!;
-        var heldLines = plan.Lines.Select(l =>
+        var held = await holds.HoldAllLinesAsync(plan, op.OperationId, Clock.GetUtcNow(), cancellationToken);
+        if (!held.IsSuccess)
         {
-            var rentalItemId = Guid.NewGuid();
-            var assignedAssets = Enumerable.Range(0, l.Quantity)
-                .Select(_ => new AssignedAssetDto(Guid.NewGuid(), Guid.NewGuid(), "Held"))
-                .ToList();
-            return new CheckoutHeldLine(l, rentalItemId, $"rental-item:{rentalItemId}", assignedAssets);
-        }).ToList();
+            op.MarkFailed(held.Error.Code, held.Error.Message, Clock.GetUtcNow());
+            await context.SaveChangesAsync(cancellationToken);
+            return CheckoutResult.From(held);
+        }
 
-        var orderResult = await writer.CreateOrderAsync(plan, heldLines, op.OperationId, op.ExpectedRentalOrderId, op.HoldExpiresAt, Clock.GetUtcNow(), cancellationToken);
+        Dprental.RentalService.Common.Result<RentalOrder> orderResult;
+        try
+        {
+            orderResult = await writer.CreateOrderAsync(plan, held.HeldLines, op.OperationId,
+                op.ExpectedRentalOrderId, op.HoldExpiresAt, Clock.GetUtcNow(), cancellationToken);
+        }
+        catch
+        {
+            await using var recoveryContext = NewContext();
+            var recoveryOp = await new RentalCheckoutOperationRepository(recoveryContext)
+                .GetByOperationIdAsync(op.OperationId, cancellationToken);
+            if (recoveryOp is not null)
+            {
+                recoveryOp.MarkFailed(CheckoutErrors.OrderNotSaved.Code,
+                    CheckoutErrors.OrderNotSaved.Message, Clock.GetUtcNow());
+                await recoveryContext.SaveChangesAsync(cancellationToken);
+            }
+            throw;
+        }
         if (orderResult.IsFailure)
         {
             op.MarkFailed(orderResult.Error.Code, orderResult.Error.Message, Clock.GetUtcNow());

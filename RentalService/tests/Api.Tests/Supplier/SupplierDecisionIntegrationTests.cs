@@ -187,7 +187,7 @@ public sealed class SupplierDecisionIntegrationTests
     }
 
     [Fact]
-    public async Task AcceptItem_ValidSupplier_Returns200AndAwaitingHandover()
+    public async Task AcceptItem_ValidSupplier_QueuesInventoryConfirmation()
     {
         string dbName = Guid.NewGuid().ToString("N");
         Guid supplierId = Guid.NewGuid();
@@ -221,13 +221,12 @@ public sealed class SupplierDecisionIntegrationTests
         var caller = CreateUserCaller(supplierId);
         var result = await service.AcceptItemAsync(itemId, "idemp-accept-1", caller);
         Assert.True(result.IsSuccess);
-        Assert.Equal("AwaitingHandover", result.Value.Status);
-        Assert.Equal(supplierId, result.Value.DecisionBy);
+        Assert.Equal("PendingSupplierConfirmation", result.Value.Status);
 
         var reloadedOrder = await db.RentalOrders.Include(o => o.Items).FirstAsync(o => o.Id == orderId);
-        Assert.Equal(RentalItemStatus.AwaitingHandover, reloadedOrder.Items.First().Status);
+        Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, reloadedOrder.Items.First().Status);
 
-        var outbox = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "RentalItemConfirmed");
+        var outbox = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "ConfirmAllocation");
         Assert.NotNull(outbox);
     }
 
@@ -292,7 +291,7 @@ public sealed class SupplierDecisionIntegrationTests
     }
 
     [Fact]
-    public async Task AcceptItem_ReplaySameKey_Returns200OK()
+    public async Task AcceptItem_ReplaySameKey_RemainsPending()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -319,12 +318,12 @@ public sealed class SupplierDecisionIntegrationTests
         // Replay with exact same key
         var second = await service.AcceptItemAsync(item.Id, "idemp-replay-1", caller);
         Assert.True(second.IsSuccess);
-        Assert.Equal("AwaitingHandover", second.Value.Status);
+        Assert.Equal("PendingSupplierConfirmation", second.Value.Status);
 
         // Different key after decision -> 409 Conflict
         var differentKey = await service.AcceptItemAsync(item.Id, "idemp-diff-key", caller);
         Assert.True(differentKey.IsFailure);
-        Assert.Equal("ITEM_ALREADY_DECIDED", differentKey.Error.Code);
+        Assert.Equal("DECISION_IN_PROGRESS", differentKey.Error.Code);
     }
 
     [Fact]
@@ -348,7 +347,7 @@ public sealed class SupplierDecisionIntegrationTests
     }
 
     [Fact]
-    public async Task AcceptItem_InventoryReturnsInvalidUnits_ReturnsUnprocessable_AndDoesNotTransitionState()
+    public async Task AcceptItem_DoesNotUseSynchronousInventoryResponse()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -361,7 +360,7 @@ public sealed class SupplierDecisionIntegrationTests
         {
             ConfirmHandler = (groupId, req) =>
             {
-                // Returns completely different unit IDs!
+                // Even an invalid synchronous result must not be read by the async command path.
                 var badUnits = new List<ConfirmedAllocationUnitDto> { new(Guid.NewGuid(), Guid.NewGuid(), "Confirmed") };
                 return Task.FromResult(Result.Success(new ConfirmAllocationResponse("REC-CONF-001", groupId, FixedNow, false, badUnits)));
             }
@@ -372,8 +371,8 @@ public sealed class SupplierDecisionIntegrationTests
         var caller = CreateUserCaller(supplierId);
         var result = await service.AcceptItemAsync(item.Id, "idemp-1", caller);
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("INVALID_ALLOCATION", result.Error.Code);
+        Assert.True(result.IsSuccess);
+        Assert.Equal("PendingSupplierConfirmation", result.Value.Status);
 
         // State must remain PendingSupplierConfirmation!
         var reloaded = await db.RentalItems.FirstAsync(i => i.Id == item.Id);

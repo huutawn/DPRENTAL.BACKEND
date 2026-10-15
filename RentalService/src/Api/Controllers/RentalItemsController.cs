@@ -93,6 +93,7 @@ public sealed class RentalItemsController : ControllerBase
     /// <summary>
     /// Supplier bàn giao thiết bị cho mục thuê (RentalItem).
     /// </summary>
+    /// <remarks>Ghi nhận bàn giao theo từng thiết bị và gửi lệnh xác nhận sang Inventory.</remarks>
     [HttpPost("{itemId:guid}/handover")]
     [Consumes("application/json")]
     [ProducesResponseType(typeof(HandoverItemResponse), StatusCodes.Status202Accepted)]

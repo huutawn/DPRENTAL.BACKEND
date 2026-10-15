@@ -102,6 +102,8 @@ public sealed class RentalCheckoutController(
         return Accepted(accepted.StatusUrl, accepted);
     }
 
+    /// <summary>Xem trạng thái xử lý checkout.</summary>
+    /// <remarks>Trạng thái được cập nhật sau khi Inventory xác nhận giữ lịch và Payment tạo hóa đơn.</remarks>
     [HttpGet("operations/{operationId}")]
     [HttpGet("~/rental/checkout/operations/{operationId}")]
     [ProducesResponseType(typeof(CheckoutOperationStatusResponse), StatusCodes.Status200OK)]

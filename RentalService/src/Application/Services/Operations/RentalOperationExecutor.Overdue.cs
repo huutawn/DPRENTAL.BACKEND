@@ -42,12 +42,35 @@ public sealed partial class RentalOperationExecutor
             return Result.Success();
         }
 
-        if (_inventoryClient != null)
+        receipt.BeginProviderAttempt(now);
+        await CommitLocalChangesAsync(order, cancellationToken);
+        var result = await _inventoryClient.MarkAssetsOverdueAsync(
+            item.AllocationGroupId, command.ProviderRequest, cancellationToken);
+        now = _timeProvider.GetUtcNow();
+        if (result.IsFailure)
         {
-            await _inventoryClient.MarkAssetsOverdueAsync(item.AllocationGroupId, command.ProviderRequest, cancellationToken);
+            RecordExecutionFailure(receipt, result.Error, now);
+            await CommitLocalChangesAsync(order, cancellationToken);
+            return result.Error;
         }
 
-        receipt.MarkSucceeded(now);
+        var response = result.Value;
+        if (string.IsNullOrWhiteSpace(response.ReceiptRef) ||
+            response.OperationKey != command.ProviderRequest.OperationKey ||
+            response.AllocationGroupId != item.AllocationGroupId ||
+            response.Units is not { Count: 1 } ||
+            response.Units[0].AllocationId != unit.AllocationId ||
+            response.Units[0].AssetId != unit.AssetId ||
+            !string.Equals(response.Units[0].Status, "PROTECTED", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(response.Units[0].OverdueProtectionRef))
+        {
+            var error = Error.ServiceUnavailable("INVALID_OVERDUE_RESPONSE", "Inventory returned an inconsistent overdue protection result.");
+            RecordExecutionFailure(receipt, error, now, forceUncertain: true);
+            await CommitLocalChangesAsync(order, cancellationToken);
+            return error;
+        }
+
+        receipt.MarkSucceeded(now, JsonSerializer.Serialize(response, JsonOptions));
         await CommitLocalChangesAsync(order, cancellationToken);
         return Result.Success();
     }

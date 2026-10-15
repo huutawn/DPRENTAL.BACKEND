@@ -302,13 +302,13 @@ public sealed class ExpiryWorkflowIntegrationTests
 
         Assert.True(result.IsSuccess);
 
-        // Reconciled as Accepted!
+        // The in-flight accept remains pending until Inventory confirms it.
         var reloaded = await db.RentalItems.FirstAsync(i => i.Id == item.Id);
-        Assert.Equal(RentalItemStatus.AwaitingHandover, reloaded.Status);
-        Assert.Equal("REC-RECONCILED", reloaded.InventoryConfirmationRef);
+        Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, reloaded.Status);
+        Assert.Null(reloaded.InventoryConfirmationRef);
 
         var reloadedOrder = await db.RentalOrders.FirstAsync(o => o.Id == orderId);
-        Assert.Equal(RentalOrderStatus.AwaitingHandover, reloadedOrder.Status);
+        Assert.Equal(RentalOrderStatus.Paid, reloadedOrder.Status);
     }
 
     [Fact]

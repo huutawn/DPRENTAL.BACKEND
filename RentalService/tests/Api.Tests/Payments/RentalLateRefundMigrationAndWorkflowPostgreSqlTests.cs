@@ -696,6 +696,9 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
         public Task<SupplierConfirmationStatisticsRecord> GetSupplierConfirmationStatisticsAsync(Guid supplierId, DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Guid>> GetOverdueUnprotectedOrderIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<Guid>> GetRenterResponseTimeoutItemIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<Guid>> GetDisputedItemIdsAsync(int skip, int take, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<Guid>> GetSettlementReadyItemIdsAsync(int batchSize, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 
     private sealed class Mock<T> where T : class

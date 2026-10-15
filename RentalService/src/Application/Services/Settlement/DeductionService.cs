@@ -2,9 +2,11 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.DTOs.Settlement;
 using Dprental.RentalService.Application.IServices.Settlement;
 using Dprental.RentalService.Application.Security;
+using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Validation;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
@@ -111,6 +113,49 @@ public sealed class DeductionService(
         if (!item.TryFinalizeZeroDeduction(now, operationId)) return Result.Success();
         order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id,
             operationId, "DeductionTimeout", operationId, true, null, null, now, targetItemId: itemId));
+        order.IncrementVersion();
+        await orders.UpdateAsync(order, cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return Result.Success();
+    }
+
+    public async Task<int> ScheduleReadySettlementsAsync(CancellationToken cancellationToken = default)
+    {
+        var ids = await orders.GetSettlementReadyItemIdsAsync(50, cancellationToken);
+        int count = 0;
+        foreach (var id in ids)
+        {
+            var result = await ScheduleSettlementAsync(id, cancellationToken);
+            if (result.IsSuccess) count++;
+        }
+        return count;
+    }
+
+    public async Task<Result> ScheduleSettlementAsync(Guid itemId, CancellationToken cancellationToken = default)
+    {
+        Guid? orderId = await orders.GetOrderIdByItemIdAsync(itemId, cancellationToken);
+        if (!orderId.HasValue) return RentalErrors.ItemNotFound;
+        await using var orderLock = await locks.AcquireOrderLockAsync(orderId.Value, TimeSpan.FromSeconds(5), cancellationToken);
+        var order = await orders.GetByIdWithDetailsAsync(orderId.Value, cancellationToken);
+        var item = order?.Items.FirstOrDefault(i => i.Id == itemId);
+        if (order is null || item is null) return RentalErrors.ItemNotFound;
+        if (order.OperationReceipts.Any(r => r.Action == RentalItem.SettleRentalAction && r.TargetItemId == itemId))
+            return Result.Success();
+        if (!item.IsReadyForSettlement) return Result.Success();
+        if (string.IsNullOrWhiteSpace(order.InvoiceRef) || string.IsNullOrWhiteSpace(order.PaymentRef))
+            return Error.Conflict("PAYMENT_REFERENCE_MISSING", "InvoiceRef or PaymentRef is not available for settlement.");
+
+        string operationKey = RentalOperationExecutor.ComputeOperationKey(RentalItem.SettleRentalAction, itemId.ToString("N"));
+        var request = new SettleRentalRequest(order.Id, item.Id, order.InvoiceRef, order.PaymentRef,
+            item.SupplierId, item.DepositAmount, item.FinalDeductionAmount!.Value,
+            item.DepositRefundAmount, order.Currency,
+            item.DeductionProposal?.Id.ToString("D") ?? $"return:{item.Id:D}", operationKey);
+        var valid = request.Validate();
+        if (valid.IsFailure) return valid.Error;
+        var payload = JsonSerializer.Serialize(new { providerRequestJson = JsonSerializer.Serialize(request) });
+        order.AddOperationReceipt(RentalOperationReceipt.CreatePending(Guid.NewGuid(), order.Id,
+            operationKey, RentalItem.SettleRentalAction, RentalOperationExecutor.ComputeFingerprint(request),
+            clock.GetUtcNow(), targetItemId: item.Id, payloadJson: payload));
         order.IncrementVersion();
         await orders.UpdateAsync(order, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
