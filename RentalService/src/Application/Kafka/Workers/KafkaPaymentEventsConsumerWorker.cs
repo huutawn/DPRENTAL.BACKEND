@@ -209,12 +209,13 @@ public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
             return;
         }
 
-        _logger.LogInformation("KafkaPaymentEventsConsumerWorker subscribing to {Topic} with GroupId {GroupId}",
-            _options.PaymentEventsTopic, _options.ConsumerGroupId);
+        var topics = new[] { _options.PaymentEventsTopic, _options.InventoryAllocationEventsTopic };
+        _logger.LogInformation("KafkaPaymentEventsConsumerWorker subscribing to [{Topics}] with GroupId {GroupId}",
+            string.Join(", ", topics), _options.ConsumerGroupId);
 
         if (!_isSubscribed)
         {
-            _consumer.Subscribe(_options.PaymentEventsTopic);
+            _consumer.Subscribe(topics);
             _isSubscribed = true;
         }
 

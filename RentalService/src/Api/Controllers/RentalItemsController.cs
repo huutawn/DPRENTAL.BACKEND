@@ -93,6 +93,9 @@ public sealed class RentalItemsController : ControllerBase
     /// <summary>
     /// Supplier bàn giao thiết bị cho mục thuê (RentalItem).
     /// </summary>
+    /// <remarks>
+    /// Ghi nhận bằng chứng bàn giao thực tế của từng thiết bị và gửi lệnh xác nhận bàn giao tới InventoryService qua Kafka.
+    /// </remarks>
     [HttpPost("{itemId:guid}/handover")]
     [Consumes("application/json")]
     [ProducesResponseType(typeof(HandoverItemResponse), StatusCodes.Status202Accepted)]

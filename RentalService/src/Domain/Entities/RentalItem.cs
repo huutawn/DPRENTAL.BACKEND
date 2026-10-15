@@ -291,6 +291,26 @@ public partial class RentalItem
             operationId));
     }
 
+    internal void ApplyHandover(DateTimeOffset utcNow, string operationKey)
+    {
+        string from = Status.ToString();
+        Status = RentalItemStatus.InRental;
+
+
+        RentalOrder?.AddStateTransition(new RentalStateTransition(
+            Guid.NewGuid(),
+            RentalOrderId,
+            Id,
+            from,
+            RentalItemStatus.InRental.ToString(),
+            "MarkAssetsHandedOver",
+            SupplierId,
+            ActorRole.Supplier,
+            "Supplier completed handover of rental item",
+            utcNow,
+            operationKey));
+    }
+
     internal void ApplySupplierReject(
         Guid supplierId,
         DateTimeOffset decisionAt,

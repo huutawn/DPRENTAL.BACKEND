@@ -25,6 +25,8 @@ namespace RentalService.Domain.Migrations
 
             modelBuilder.HasSequence("order_code_seq", "rental");
 
+            modelBuilder.HasSequence("rental_outbox_sequence", "rental");
+
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.DeductionProposal", b =>
                 {
                     b.Property<Guid>("Id")
@@ -231,6 +233,64 @@ namespace RentalService.Domain.Migrations
                         .IsUnique();
 
                     b.ToTable("rental_cart_items", "rental");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.RentalCheckoutOperation", b =>
+                {
+                    b.Property<string>("OperationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("ExpectedRentalOrderId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("HoldExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("InvoiceStatus")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ItemHoldStatusesJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("PreparationSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("RenterUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RequestFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("OperationId");
+
+                    b.HasIndex("RenterUserId");
+
+                    b.HasIndex("RenterUserId", "Status");
+
+                    b.ToTable("rental_checkout_operations", "rental");
                 });
 
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.RentalInboxMessage", b =>
@@ -735,6 +795,11 @@ namespace RentalService.Domain.Migrations
                     b.Property<DateTimeOffset?>("ScheduledAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<long>("Sequence")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValueSql("nextval('rental.rental_outbox_sequence')");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -752,6 +817,8 @@ namespace RentalService.Domain.Migrations
                     b.HasIndex("Status", "ScheduledAt", "CreatedAt");
 
                     b.HasIndex("Status", "ScheduledAt", "LockedUntilUtc");
+
+                    b.HasIndex("Topic", "PartitionKey", "Sequence", "Status");
 
                     b.ToTable("rental_outbox_messages", "rental");
                 });

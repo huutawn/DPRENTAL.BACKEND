@@ -115,7 +115,6 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
         {
             var options = new DbContextOptionsBuilder<RentalServiceDbContext>()
                 .UseNpgsql(connString)
-                .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning))
                 .Options;
 
             await using (var context = new RentalServiceDbContext(options))
@@ -161,7 +160,6 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
         {
             var options = new DbContextOptionsBuilder<RentalServiceDbContext>()
                 .UseNpgsql(connString)
-                .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning))
                 .Options;
 
             // 1. Migrate to InitialRentalModel

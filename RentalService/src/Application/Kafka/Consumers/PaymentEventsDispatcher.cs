@@ -43,11 +43,8 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<PaymentEventsDispatcher> _logger;
     private readonly KafkaOptions _kafkaOptions;
-    private readonly IRentalCheckoutOperationRepository _checkoutOperationRepo;
-    private readonly IInventoryCommandProducer _inventoryCommands;
-    private readonly ICheckoutOrderWriter _orderWriter;
-    private readonly ICheckoutInvoiceIssuer _invoiceIssuer;
-
+    private readonly IRentalCheckoutOperationRepository? _checkoutOperationRepo;
+    private readonly IInventoryAllocationResultHandler _allocationResultHandler;
     [ActivatorUtilitiesConstructor]
     public PaymentEventsDispatcher(
         IInboxRepository inboxRepository,
@@ -57,11 +54,9 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         IRefundCompletedConsumer refundCompletedConsumer,
         IKafkaOutboxWriter outboxWriter,
         IUnitOfWork unitOfWork,
-        IRentalCheckoutOperationRepository checkoutOperationRepo,
-        IInventoryCommandProducer inventoryCommands,
-        ICheckoutOrderWriter orderWriter,
-        ICheckoutInvoiceIssuer invoiceIssuer,
+        IInventoryAllocationResultHandler allocationResultHandler,
         IOptions<KafkaOptions> kafkaOptions,
+        IRentalCheckoutOperationRepository? checkoutOperationRepo = null,
         ILogger<PaymentEventsDispatcher>? logger = null,
         TimeProvider? timeProvider = null)
     {
@@ -72,42 +67,11 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         _refundCompletedConsumer = refundCompletedConsumer ?? throw new ArgumentNullException(nameof(refundCompletedConsumer));
         _outboxWriter = outboxWriter ?? throw new ArgumentNullException(nameof(outboxWriter));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-        _checkoutOperationRepo = checkoutOperationRepo!;
-        _inventoryCommands = inventoryCommands!;
-        _orderWriter = orderWriter!;
-        _invoiceIssuer = invoiceIssuer!;
+        _allocationResultHandler = allocationResultHandler ?? throw new ArgumentNullException(nameof(allocationResultHandler));
+        _checkoutOperationRepo = checkoutOperationRepo;
         _kafkaOptions = kafkaOptions?.Value ?? new KafkaOptions();
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PaymentEventsDispatcher>.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
-    }
-
-    internal PaymentEventsDispatcher(
-        IInboxRepository inboxRepository,
-        IRentalOrderRepository orderRepository,
-        IOrderLockManager lockManager,
-        IPaymentWorkflowService paymentWorkflowService,
-        IRefundCompletedConsumer refundCompletedConsumer,
-        IOutboxRepository outboxRepository,
-        IUnitOfWork unitOfWork,
-        IOptions<KafkaOptions> kafkaOptions,
-        ILogger<PaymentEventsDispatcher>? logger = null,
-        TimeProvider? timeProvider = null)
-        : this(
-            inboxRepository,
-            orderRepository,
-            lockManager,
-            paymentWorkflowService,
-            refundCompletedConsumer,
-            new KafkaOutboxWriter(outboxRepository),
-            unitOfWork,
-            null!,
-            null!,
-            null!,
-            null!,
-            kafkaOptions,
-            logger,
-            timeProvider)
-    {
     }
 
     public PaymentEventsDispatcher(
@@ -129,15 +93,42 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             refundCompletedConsumer,
             outboxWriter,
             unitOfWork,
-            null!,
-            null!,
-            null!,
-            null!,
+            new InventoryAllocationResultHandler(orderRepository, new Domain.Repositories.OutboxRepository((Domain.Repositories.RentalServiceDbContext)unitOfWork), unitOfWork, lockManager, timeProvider),
             kafkaOptions,
+            null,
             logger,
             timeProvider)
     {
     }
+
+    internal PaymentEventsDispatcher(
+        IInboxRepository inboxRepository,
+        IRentalOrderRepository orderRepository,
+        IOrderLockManager lockManager,
+        IPaymentWorkflowService paymentWorkflowService,
+        IRefundCompletedConsumer refundCompletedConsumer,
+        IOutboxRepository outboxRepository,
+        IUnitOfWork unitOfWork,
+        IOptions<KafkaOptions> kafkaOptions,
+        ILogger<PaymentEventsDispatcher>? logger = null,
+        TimeProvider? timeProvider = null)
+        : this(
+            inboxRepository,
+            orderRepository,
+            lockManager,
+            paymentWorkflowService,
+            refundCompletedConsumer,
+            new KafkaOutboxWriter(outboxRepository),
+            unitOfWork,
+            new InventoryAllocationResultHandler(orderRepository, outboxRepository, unitOfWork, lockManager, timeProvider),
+            kafkaOptions,
+            null,
+            logger,
+            timeProvider)
+    {
+    }
+
+
 
     public async Task<Result<KafkaIntakeDisposition>> ReceiveMessageAsync(
         string messageJson,
@@ -479,7 +470,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
 
         if (isAllocationEvent)
         {
-            var allocResult = await ProcessAllocationEventAsync(orderId, msg, order, cancellationToken);
+            var allocResult = await _allocationResultHandler.HandleAllocationEventAsync(orderId, msg, order, cancellationToken);
             if (allocResult.IsSuccess)
             {
                 msg.MarkProcessed(utcNow);
@@ -725,241 +716,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         return new Guid(guidBytes);
     }
 
-    private async Task<Result> ProcessAllocationEventAsync(
-        Guid orderId,
-        RentalInboxMessage msg,
-        RentalOrder? order,
-        CancellationToken cancellationToken)
-    {
-        using var doc = JsonDocument.Parse(msg.Payload);
-        var root = doc.RootElement;
-        var payloadElement = root.GetProperty("payload");
 
-        string commandType = payloadElement.GetProperty("commandType").GetString()!;
-        string operationKey = payloadElement.GetProperty("operationKey").GetString()!;
-        Guid rentalItemId = payloadElement.GetProperty("rentalItemId").GetGuid();
-        bool isSuccess = string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded, StringComparison.OrdinalIgnoreCase);
-        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-
-        if (_checkoutOperationRepo == null || _inventoryCommands == null || _orderWriter == null)
-        {
-            _logger.LogWarning("Checkout dependencies not configured on dispatcher; skipping allocation event");
-            return Result.Success();
-        }
-
-        if (string.Equals(commandType, KafkaContractSpec.CommandTypes.CreateHold, StringComparison.OrdinalIgnoreCase))
-        {
-            var op = await _checkoutOperationRepo.GetByExpectedOrderIdAsync(orderId, cancellationToken);
-            if (op == null)
-            {
-                _logger.LogWarning("Checkout operation for order {OrderId} not found; marking inbox processed", orderId);
-                return Result.Success();
-            }
-
-            // RenterLock and OrderLock already acquired by outer ProcessInboxMessageAsync
-            if (op.Status == CheckoutOperationStatus.Succeeded)
-            {
-                _logger.LogInformation("Checkout operation {OperationId} already succeeded; duplicate reply ignored without release", op.OperationId);
-                return Result.Success();
-            }
-
-            if (op.Status is CheckoutOperationStatus.Failed or CheckoutOperationStatus.TimedOut)
-            {
-                if (isSuccess)
-                {
-                    var releaseCmd = new ReleaseAllocationCommandPayload(
-                        orderId,
-                        rentalItemId,
-                        $"checkout:late:{orderId:N}:{rentalItemId:N}:release",
-                        "Late hold response after checkout failed/timed out");
-
-                    await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmd, correlationId: orderId.ToString("D"), cancellationToken: cancellationToken);
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
-                }
-                return Result.Success();
-            }
-
-            if (op.HoldExpiresAt <= utcNow)
-            {
-                op.MarkTimedOut(utcNow);
-                var lines = JsonSerializer.Deserialize<List<CheckoutItemHoldDescriptor>>(op.ItemHoldStatusesJson, JsonOptions);
-                if (lines != null)
-                {
-                    foreach (var l in lines)
-                    {
-                        var releaseCmd = new ReleaseAllocationCommandPayload(
-                            orderId,
-                            l.RentalItemId,
-                            $"checkout:timeout:{orderId:N}:{l.RentalItemId:N}:release",
-                            "Checkout timed out before all holds completed");
-                        await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmd, correlationId: orderId.ToString("D"), cancellationToken: cancellationToken);
-                    }
-                }
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-                return Result.Success();
-            }
-
-            if (!isSuccess)
-            {
-                string errCode = payloadElement.TryGetProperty("errorCode", out var ec) ? ec.GetString() ?? "HOLD_REJECTED" : "HOLD_REJECTED";
-                string errMsg = payloadElement.TryGetProperty("errorMessage", out var em) ? em.GetString() ?? "Hold rejected by Inventory" : "Hold rejected";
-
-                op.MarkFailed(errCode, errMsg, utcNow);
-
-                var lines = JsonSerializer.Deserialize<List<CheckoutItemHoldDescriptor>>(op.ItemHoldStatusesJson, JsonOptions);
-                if (lines != null)
-                {
-                    foreach (var l in lines)
-                    {
-                        var releaseCmd = new ReleaseAllocationCommandPayload(
-                            orderId,
-                            l.RentalItemId,
-                            $"checkout:compensation:{orderId:N}:{l.RentalItemId:N}:release",
-                            $"Hold rejected on line {rentalItemId}: {errMsg}");
-                        await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmd, correlationId: orderId.ToString("D"), cancellationToken: cancellationToken);
-                    }
-                }
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-                return Result.Success();
-            }
-
-            var linesMap = JsonSerializer.Deserialize<List<CheckoutItemHoldDescriptor>>(op.ItemHoldStatusesJson, JsonOptions) ?? new();
-            var targetLine = linesMap.FirstOrDefault(l => l.RentalItemId == rentalItemId);
-            if (targetLine != null)
-            {
-                var allocs = payloadElement.TryGetProperty("allocations", out var alProp)
-                    ? JsonSerializer.Deserialize<List<AllocationAssetMappingPayload>>(alProp.GetRawText(), JsonOptions)
-                    : null;
-
-                linesMap.Remove(targetLine);
-                linesMap.Add(targetLine with { Status = "Held", Allocations = allocs });
-            }
-
-            bool allHeld = linesMap.All(l => l.Status == "Held");
-            if (allHeld)
-            {
-                var plan = JsonSerializer.Deserialize<CheckoutPlan>(op.PreparationSnapshotJson, JsonOptions)!;
-                var heldLines = linesMap.Select(l =>
-                {
-                    var planLine = plan.Lines.First(pl => pl.CartItemId == l.CartItemId);
-                    var assignedAssets = (l.Allocations ?? (IReadOnlyList<AllocationAssetMappingPayload>)Array.Empty<AllocationAssetMappingPayload>())
-                        .Select(a => new AssignedAssetDto(a.AllocationId, a.AssetId, "Held"))
-                        .ToList();
-
-                    return new CheckoutHeldLine(
-                        planLine,
-                        l.RentalItemId,
-                        $"rental-item:{l.RentalItemId}",
-                        assignedAssets);
-                }).ToList();
-
-                bool hasSavepoint = false;
-                if (_unitOfWork is DbContext dbCtx && dbCtx.Database.IsRelational() && dbCtx.Database.CurrentTransaction is not null)
-                {
-                    await dbCtx.Database.ExecuteSqlRawAsync("SAVEPOINT sp_finalize_order;", cancellationToken);
-                    hasSavepoint = true;
-                }
-
-                Result<RentalOrder> orderResult;
-                try
-                {
-                    orderResult = await _orderWriter.CreateOrderAsync(plan, heldLines, op.OperationId, op.ExpectedRentalOrderId, op.HoldExpiresAt, utcNow, cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    if (hasSavepoint && _unitOfWork is DbContext db)
-                    {
-                        try { await db.Database.ExecuteSqlRawAsync("ROLLBACK TO SAVEPOINT sp_finalize_order;", CancellationToken.None); } catch { }
-                    }
-                    _logger.LogError(ex, "Lỗi hạ tầng khi lưu đơn hàng cho operation {OperationId}", op.OperationId);
-                    throw;
-                }
-
-                if (orderResult.IsFailure)
-                {
-                    if (hasSavepoint && _unitOfWork is DbContext db)
-                    {
-                        await db.Database.ExecuteSqlRawAsync("ROLLBACK TO SAVEPOINT sp_finalize_order;", cancellationToken);
-                    }
-                    _unitOfWork.DiscardChanges();
-
-                    op.MarkFailed(orderResult.Error.Code, orderResult.Error.Message, utcNow);
-                    foreach (var l in linesMap)
-                    {
-                        var releaseCmd = new ReleaseAllocationCommandPayload(
-                            orderId,
-                            l.RentalItemId,
-                            $"checkout:compensation:{orderId:N}:{l.RentalItemId:N}:release",
-                            $"Failed to create order: {orderResult.Error.Message}");
-                        await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmd, correlationId: orderId.ToString("D"), cancellationToken: cancellationToken);
-                    }
-                    await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
-                    return orderResult.Error;
-                }
-
-                var createdOrder = orderResult.Value;
-                string invoiceOpKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", createdOrder.Id.ToString());
-                var invoiceReceipt = RentalOperationReceipt.CreatePending(
-                    Guid.NewGuid(),
-                    createdOrder.Id,
-                    invoiceOpKey,
-                    "CreateInvoice",
-                    RentalOperationExecutor.ComputeFingerprint($"CreateInvoice:{createdOrder.Id}"),
-                    utcNow,
-                    targetItemId: null,
-                    payloadJson: null);
-
-                createdOrder.AddOperationReceipt(invoiceReceipt);
-                op.MarkSucceeded(utcNow, invoiceStatus: "Pending");
-                await _orderRepository.UpdateAsync(createdOrder, cancellationToken);
-                await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-            }
-            else
-            {
-                op.UpdateItemHoldStatuses(JsonSerializer.Serialize(linesMap, JsonOptions), utcNow);
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-            }
-
-            return Result.Success();
-        }
-
-        if (order == null)
-        {
-            return Error.NotFound("ORDER_NOT_FOUND", $"Không tìm thấy đơn hàng '{orderId}'.");
-        }
-
-        var receipt = order.OperationReceipts.FirstOrDefault(r => string.Equals(r.OperationId, operationKey, StringComparison.OrdinalIgnoreCase));
-        if (receipt != null)
-        {
-            if (isSuccess)
-            {
-                receipt.MarkSucceeded(utcNow, null, payloadElement.GetRawText());
-
-                if (string.Equals(commandType, KafkaContractSpec.CommandTypes.ConfirmAllocation, StringComparison.OrdinalIgnoreCase))
-                {
-                    var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
-                    if (item != null)
-                    {
-                        item.ApplySupplierAccept(item.SupplierId, utcNow, operationKey, operationKey);
-                        order.EvaluateOrderStatusRollup(utcNow, operationKey);
-                    }
-                }
-            }
-            else
-            {
-                string errCode = payloadElement.TryGetProperty("errorCode", out var ec) ? ec.GetString() ?? "COMMAND_REJECTED" : "COMMAND_REJECTED";
-                string errMsg = payloadElement.TryGetProperty("errorMessage", out var em) ? em.GetString() ?? "Rejected by Inventory" : "Rejected";
-                receipt.MarkFailed(errCode, errMsg, utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
-            }
-
-            await _orderRepository.UpdateAsync(order, cancellationToken);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-        }
-
-        return Result.Success();
-    }
 
     private async Task<Result> RouteToDlqAsync(
         string rawMessage,

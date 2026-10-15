@@ -1,3 +1,5 @@
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Common;
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.IServices.Expiry;
@@ -129,7 +131,7 @@ internal sealed class CheckoutTestHarness
         RentalCheckoutOperationRepository operations = new(context);
         OutboxRepository outbox = new(context);
         InventoryCommandProducer inventoryCommands = new(outbox, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), Clock);
-        CheckoutOrderWriter writer = new(orders, carts, OrderCodes, NullLogger<CheckoutOrderWriter>.Instance);
+
 
         CheckoutService service = new(
             new CheckoutPreparationService(
@@ -168,19 +170,85 @@ internal sealed class CheckoutTestHarness
         }
 
         var plan = JsonSerializer.Deserialize<CheckoutPlan>(op.PreparationSnapshotJson, JsonOptions)!;
-        var heldLines = plan.Lines.Select(l =>
-        {
-            var rentalItemId = Guid.NewGuid();
-            var assignedAssets = Enumerable.Range(0, l.Quantity)
-                .Select(_ => new AssignedAssetDto(Guid.NewGuid(), Guid.NewGuid(), "Held"))
-                .ToList();
-            return new CheckoutHeldLine(l, rentalItemId, $"rental-item:{rentalItemId}", assignedAssets);
-        }).ToList();
+        var heldLines = new List<CheckoutHeldLine>();
+        List<CheckoutHoldConflict> conflicts = [];
 
-        var orderResult = await writer.CreateOrderAsync(plan, heldLines, op.OperationId, op.ExpectedRentalOrderId, op.HoldExpiresAt, Clock.GetUtcNow(), cancellationToken);
+        foreach (var l in plan.Lines)
+        {
+            var holdReq = new CreateHoldRequest(
+                l.EquipmentListingId,
+                l.Quantity,
+                l.ExpectedStartDate,
+                l.ExpectedEndDate,
+                $"checkout:{op.OperationId}:{l.EquipmentListingId}",
+                op.HoldExpiresAt,
+                l.SnapshotVersion);
+
+            var holdRes = await Inventory.CreateHoldAsync(holdReq, cancellationToken);
+            if (holdRes.IsFailure)
+            {
+                conflicts.Add(new CheckoutHoldConflict(
+                    l.CartItemId,
+                    l.EquipmentListingId,
+                    l.Quantity,
+                    CheckoutHoldConflictCode.InsufficientAvailability,
+                    holdRes.Error.Message));
+                break;
+            }
+
+            var rentalItemId = Guid.NewGuid();
+            heldLines.Add(new CheckoutHeldLine(l, rentalItemId, holdRes.Value.AllocationGroupId, holdRes.Value.AssignedAssets));
+        }
+
+        if (conflicts.Count > 0)
+        {
+            foreach (var held in heldLines)
+            {
+                await Inventory.ReleaseAllocationAsync(
+                    held.AllocationGroupId,
+                    new ReleaseAllocationRequest(op.OperationId, "Checkout aborted: hold failed"),
+                    cancellationToken);
+            }
+            op.MarkFailed("HOLD_REJECTED", "Hold failed", Clock.GetUtcNow());
+            await operations.UpdateAsync(op, cancellationToken);
+            await context.SaveChangesAsync(cancellationToken);
+            return CheckoutResult.From(CheckoutHoldResult.Rejected(conflicts));
+        }
+
+        IUnitOfWork uow = writerUnitOfWork != null ? writerUnitOfWork(context) : context;
+        CheckoutOrderWriter writer = new(orders, carts, OrderCodes, uow, NullLogger<CheckoutOrderWriter>.Instance);
+
+        Result<RentalOrder> orderResult;
+        try
+        {
+            orderResult = await writer.CreateOrderAsync(plan, heldLines, op.OperationId, op.ExpectedRentalOrderId, op.HoldExpiresAt, Clock.GetUtcNow(), cancellationToken);
+        }
+        catch (Exception)
+        {
+            foreach (var held in heldLines)
+            {
+                await Inventory.ReleaseAllocationAsync(
+                    held.AllocationGroupId,
+                    new ReleaseAllocationRequest(op.OperationId, "Checkout aborted: database failure saving order"),
+                    cancellationToken);
+            }
+            op.MarkFailed("DB_ERROR", "Database failure saving order", Clock.GetUtcNow());
+            await operations.UpdateAsync(op, cancellationToken);
+            await context.SaveChangesAsync(cancellationToken);
+            throw;
+        }
+
         if (orderResult.IsFailure)
         {
+            foreach (var held in heldLines)
+            {
+                await Inventory.ReleaseAllocationAsync(
+                    held.AllocationGroupId,
+                    new ReleaseAllocationRequest(op.OperationId, $"Checkout aborted: {orderResult.Error.Message}"),
+                    cancellationToken);
+            }
             op.MarkFailed(orderResult.Error.Code, orderResult.Error.Message, Clock.GetUtcNow());
+            await operations.UpdateAsync(op, cancellationToken);
             await context.SaveChangesAsync(cancellationToken);
             return CheckoutResult.Failure(orderResult.Error);
         }
@@ -191,11 +259,13 @@ internal sealed class CheckoutTestHarness
         if (invoiceResult.IsFailure)
         {
             op.MarkSucceeded(Clock.GetUtcNow(), invoiceStatus: "Failed");
+            await operations.UpdateAsync(op, cancellationToken);
             await context.SaveChangesAsync(cancellationToken);
             return CheckoutResult.OrderFailure(invoiceResult.Error, order);
         }
 
         op.MarkSucceeded(Clock.GetUtcNow(), invoiceStatus: "Ready");
+        await operations.UpdateAsync(op, cancellationToken);
         await context.SaveChangesAsync(cancellationToken);
 
         return CheckoutResult.Success(order, isReplay: false);
@@ -223,7 +293,35 @@ internal sealed class CheckoutTestHarness
         ExpiryWorkflowService expiry = new(
             orders, outbox, Locks, executor, context, configuration, NullLogger<ExpiryWorkflowService>.Instance, Clock);
 
-        return await expiry.ProcessPaymentTimeoutsAsync();
+        int expired = await expiry.ProcessPaymentTimeoutsAsync();
+
+        var releaseMessages = await context.RentalOutboxMessages
+            .Where(m => m.MessageType == KafkaContractSpec.CommandTypes.ReleaseAllocation && m.Status == "Pending")
+            .ToListAsync();
+
+        foreach (var msg in releaseMessages)
+        {
+            var env = JsonSerializer.Deserialize<KafkaMessageEnvelope<ReleaseAllocationCommandPayload>>(msg.Payload, JsonOptions);
+            if (env?.Payload != null)
+            {
+                var order = await orders.GetByIdWithDetailsAsync(env.Payload.RentalOrderId);
+                var item = order?.Items.FirstOrDefault(i => i.Id == env.Payload.RentalItemId);
+                if (item != null)
+                {
+                    await Inventory.ReleaseAllocationAsync(item.AllocationGroupId, new ReleaseAllocationRequest(env.Payload.OperationKey, env.Payload.Reason));
+                    var relReceipt = order?.OperationReceipts.FirstOrDefault(r => r.OperationId == env.Payload.OperationKey);
+                    relReceipt?.MarkSucceeded(Clock.GetUtcNow());
+                    if (order != null)
+                    {
+                        await orders.UpdateAsync(order);
+                    }
+                }
+            }
+            msg.MarkPublished(Clock.GetUtcNow());
+        }
+        await context.SaveChangesAsync();
+
+        return expired;
     }
 
     /// <summary>Các việc OperationRecoveryWorker sẽ nhặt lên ở lượt quét kế tiếp.</summary>

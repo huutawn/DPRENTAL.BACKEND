@@ -271,10 +271,10 @@ public sealed class RentalItemsControllerIntegrationTests
 
         var response = await client.PostAsync($"/api/v1/rental/items/{item.Id}/accept", null);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<SupplierDecisionResponse>();
         Assert.NotNull(body);
-        Assert.Equal("AwaitingHandover", body.Status);
+        Assert.Equal("PendingSupplierConfirmation", body.Status);
     }
 
     [Fact]

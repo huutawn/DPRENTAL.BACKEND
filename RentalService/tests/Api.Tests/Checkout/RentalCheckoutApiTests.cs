@@ -88,42 +88,36 @@ public sealed class RentalCheckoutApiTests
     }
 
     [Fact]
-    public async Task Submit_Returns201WithPayableOrder_Then200WithTheSameOrderOnReplay()
+    public async Task Submit_Returns202WithAcceptedOperation_Then202WithTheSameOperationOnReplay()
     {
         using CheckoutApiFactory factory = new();
         using HttpClient client = factory.CreateRenterClient("key-1");
 
         using HttpResponseMessage created = await client.PostAsJsonAsync(Route, factory.Request());
 
-        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, created.StatusCode);
         string createdJson = await created.Content.ReadAsStringAsync();
-        JsonElement order = JsonDocument.Parse(createdJson).RootElement;
-        Assert.Equal("DH-2026-000001", order.GetProperty("orderCode").GetString());
-        Assert.Equal("PENDING_PAYMENT", order.GetProperty("status").GetString());
-        Assert.Equal(Now.AddMinutes(30), order.GetProperty("paymentDeadline").GetDateTimeOffset());
-        Assert.Equal("INV-1", order.GetProperty("invoiceRef").GetString());
-        Assert.Equal("VND", order.GetProperty("currency").GetString());
-        Assert.Equal(3_000_000m, order.GetProperty("totalRentalAmount").GetDecimal());
-        Assert.Equal(4_000_000m, order.GetProperty("totalDepositAmount").GetDecimal());
-        Assert.Equal(Total, order.GetProperty("totalAmount").GetDecimal());
-        Assert.False(order.GetProperty("isReplay").GetBoolean());
+        JsonElement accepted = JsonDocument.Parse(createdJson).RootElement;
+        string operationId = accepted.GetProperty("operationId").GetString()!;
+        string statusUrl = accepted.GetProperty("statusUrl").GetString()!;
+        Assert.Contains(operationId, statusUrl);
 
-        // Mã máy và mã giữ lịch là dữ liệu nội bộ, không trả cho renter.
-        Assert.DoesNotContain("asset", createdJson, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("allocation", createdJson, StringComparison.OrdinalIgnoreCase);
-
+        // Replay with exact same key returns 202 Accepted with same operationId
         using HttpResponseMessage replayed = await client.PostAsJsonAsync(Route, factory.Request());
-
-        Assert.Equal(HttpStatusCode.OK, replayed.StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, replayed.StatusCode);
         JsonElement replay = await ReadAsync(replayed);
-        Assert.Equal(order.GetProperty("orderId").GetGuid(), replay.GetProperty("orderId").GetGuid());
-        Assert.True(replay.GetProperty("isReplay").GetBoolean());
-        Assert.Single(factory.Inventory.HoldRequests);
-        Assert.Single(factory.Payment.InvoiceRequests);
+        Assert.Equal(operationId, replay.GetProperty("operationId").GetString());
+
+        // Poll operation status endpoint
+        using HttpResponseMessage statusResponse = await client.GetAsync(statusUrl);
+        Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
+        JsonElement opStatus = await ReadAsync(statusResponse);
+        Assert.Equal(operationId, opStatus.GetProperty("operationId").GetString());
+        Assert.Equal("Processing", opStatus.GetProperty("status").GetString());
     }
 
     [Fact]
-    public async Task Submit_Returns503WithOrderCodeAndDeadline_WhenPaymentIsDown()
+    public async Task Submit_Returns202Accepted_AndCreatesPendingOperation_WhenPaymentIsDown()
     {
         using CheckoutApiFactory factory = new();
         factory.Payment.AlwaysFailWith = FakePaymentRentalClient.Down;
@@ -131,13 +125,11 @@ public sealed class RentalCheckoutApiTests
 
         using HttpResponseMessage response = await client.PostAsJsonAsync(Route, factory.Request());
 
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        JsonElement problem = await ReadAsync(response);
-        Assert.Equal("Checkout.InvoiceTemporarilyUnavailable", problem.GetProperty("title").GetString());
-        Assert.Equal("DH-2026-000001", problem.GetProperty("orderCode").GetString());
-        Assert.Equal(Now.AddMinutes(30), problem.GetProperty("paymentDeadline").GetDateTimeOffset());
-        Assert.True(problem.GetProperty("retryable").GetBoolean());
-        Assert.DoesNotContain("Payment.Unavailable", problem.GetRawText(), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        JsonElement accepted = await ReadAsync(response);
+        string operationId = accepted.GetProperty("operationId").GetString()!;
+        string statusUrl = accepted.GetProperty("statusUrl").GetString()!;
+        Assert.Contains(operationId, statusUrl);
     }
 
     [Fact]

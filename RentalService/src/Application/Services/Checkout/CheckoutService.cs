@@ -48,7 +48,7 @@ public sealed class CheckoutService : ICheckoutService
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    public async Task<Result<CheckoutOperationAcceptedResponse>> SubmitAsync(
+    public async Task<CheckoutSubmissionResult> SubmitAsync(
         CheckoutRenterContext renter,
         CheckoutRequest request,
         string idempotencyKey,
@@ -60,7 +60,7 @@ public sealed class CheckoutService : ICheckoutService
 
         if (renter.RenterId == Guid.Empty)
         {
-            return CheckoutErrors.Unauthenticated;
+            return CheckoutSubmissionResult.Failure(CheckoutErrors.Unauthenticated);
         }
 
         string operationId = CheckoutRules.DeriveOperationId(renter.RenterId, idempotencyKey);
@@ -73,7 +73,7 @@ public sealed class CheckoutService : ICheckoutService
         }
         catch (TimeoutException)
         {
-            return CheckoutErrors.InProgress;
+            return CheckoutSubmissionResult.Failure(CheckoutErrors.InProgress);
         }
 
         await using (renterLock)
@@ -84,32 +84,32 @@ public sealed class CheckoutService : ICheckoutService
             {
                 if (existingOp.RenterUserId != renter.RenterId || existingOp.RequestFingerprint != fingerprint)
                 {
-                    return CheckoutErrors.IdempotencyKeyReused;
+                    return CheckoutSubmissionResult.Failure(CheckoutErrors.IdempotencyKeyReused);
                 }
 
-                return new CheckoutOperationAcceptedResponse(
+                return CheckoutSubmissionResult.Success(new CheckoutOperationAcceptedResponse(
                     existingOp.OperationId,
-                    $"/api/v1/rental/checkout/operations/{existingOp.OperationId}");
+                    $"/api/v1/rental/checkout/operations/{existingOp.OperationId}"));
             }
 
             // 2. Kiểm tra giới hạn: Mỗi renter chỉ có 1 checkout đang chạy hoặc 1 đơn chờ thanh toán
             var activeOp = await _operationRepository.GetActiveOperationByRenterAsync(renter.RenterId, cancellationToken);
             if (activeOp is not null)
             {
-                return Error.Conflict("ACTIVE_CHECKOUT_IN_PROGRESS", "Bạn đang có một thao tác gửi đơn đang được xử lý.");
+                return CheckoutSubmissionResult.Failure(Error.Conflict("ACTIVE_CHECKOUT_IN_PROGRESS", "Bạn đang có một thao tác gửi đơn đang được xử lý."));
             }
 
             var pendingOrder = await _orders.GetPendingPaymentByRenterIdAsync(renter.RenterId, cancellationToken);
             if (pendingOrder is not null)
             {
-                return CheckoutErrors.PendingOrderExists;
+                return CheckoutSubmissionResult.Failure(CheckoutErrors.PendingOrderExists);
             }
 
             // 3. Chuẩn bị checkout (snapshot, bảng giá, giỏ hàng)
             var prepared = await _preparation.PrepareAsync(renter, request, cancellationToken);
             if (prepared.IsFailure)
             {
-                return prepared.Error;
+                return CheckoutSubmissionResult.From(prepared);
             }
 
             var plan = prepared.Plan;
@@ -148,7 +148,7 @@ public sealed class CheckoutService : ICheckoutService
                     {
                         await tx.RollbackAsync(cancellationToken);
                         _unitOfWork.DiscardChanges();
-                        return enqueueResult.Error;
+                        return CheckoutSubmissionResult.Failure(enqueueResult.Error);
                     }
 
                     lineStatuses.Add(new CheckoutItemHoldDescriptor(
@@ -174,9 +174,9 @@ public sealed class CheckoutService : ICheckoutService
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await tx.CommitAsync(cancellationToken);
 
-                return new CheckoutOperationAcceptedResponse(
+                return CheckoutSubmissionResult.Success(new CheckoutOperationAcceptedResponse(
                     operationId,
-                    $"/api/v1/rental/checkout/operations/{operationId}");
+                    $"/api/v1/rental/checkout/operations/{operationId}"));
             }
             catch (Exception)
             {

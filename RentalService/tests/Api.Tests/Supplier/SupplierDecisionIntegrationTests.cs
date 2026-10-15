@@ -1,3 +1,5 @@
+using Dprental.RentalService.Application.Kafka.Configuration;
+using Dprental.RentalService.Application.Kafka.Producers;
 #pragma warning disable CA1859
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Domain.IRepositories;
@@ -119,7 +121,8 @@ public sealed class SupplierDecisionIntegrationTests
         var time = new TestTimeProvider(now ?? FixedNow);
         var config = new ConfigurationBuilder().Build();
         var executor = new RentalOperationExecutor(orderRepo, receiptRepo, outboxRepo, lockManager, inventoryClient, paymentClient ?? new StubPaymentClient(), db, config, NullLogger<RentalOperationExecutor>.Instance, time);
-        return new SupplierDecisionService(orderRepo, executor, NullLogger<SupplierDecisionService>.Instance);
+        var inventoryCommands = new InventoryCommandProducer(outboxRepo, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), time);
+        return new SupplierDecisionService(orderRepo, executor, lockManager, inventoryCommands, db, time, NullLogger<SupplierDecisionService>.Instance);
     }
 
     private static IRentalCallerContext CreateUserCaller(Guid userId, string[]? roles = null)

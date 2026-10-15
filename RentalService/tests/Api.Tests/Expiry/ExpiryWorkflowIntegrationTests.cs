@@ -184,7 +184,7 @@ public sealed class ExpiryWorkflowIntegrationTests
 
         var result = await service.ExpireSingleOrderPaymentAsync(orderId);
 
-        Assert.True(result.IsSuccess);
+        Assert.True(result.IsSuccess, result.Error?.Code + ": " + result.Error?.Message);
         Assert.True(cancelCalled);
         Assert.True(releaseCalled);
         var reloaded = await db.RentalOrders.Include(o => o.Items).FirstAsync(o => o.Id == orderId);

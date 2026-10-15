@@ -578,6 +578,30 @@ public class RentalOrder
         }
 
         // If all items finished supplier decision:
+        var activeItems = _items.Where(i => i.Status is not (RentalItemStatus.Rejected or RentalItemStatus.Expired or RentalItemStatus.Cancelled)).ToList();
+        if (activeItems.Count > 0 && activeItems.All(i => i.Status is RentalItemStatus.InRental or RentalItemStatus.PendingSettlement or RentalItemStatus.Completed))
+        {
+            if (Status != RentalOrderStatus.InRental)
+            {
+                string from = Status.ToString();
+                Status = RentalOrderStatus.InRental;
+                UpdatedAt = utcNow;
+                AddStateTransition(new RentalStateTransition(
+                    Guid.NewGuid(),
+                    Id,
+                    null,
+                    from,
+                    RentalOrderStatus.InRental.ToString(),
+                    "OrderRollup",
+                    null,
+                    ActorRole.System,
+                    "All items handed over; rental in progress",
+                    utcNow,
+                    operationId));
+            }
+            return;
+        }
+
         // 1. Any item is accepted/awaiting handover (or beyond) -> Order moves to AwaitingHandover
         if (_items.Any(i => i.Status is RentalItemStatus.AwaitingHandover or RentalItemStatus.InRental or RentalItemStatus.PendingSettlement or RentalItemStatus.Completed))
         {

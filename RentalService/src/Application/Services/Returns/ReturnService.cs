@@ -41,12 +41,11 @@ public sealed class ReturnService(
             return Error.Validation("INVALID_IDEMPOTENCY_KEY", "Idempotency-Key is required (maximum 64 characters).");
         if (request?.Units is null || request.Units.Count == 0 || request.Units.Any(u => u is null || u.MediaIds is null))
             return Error.Validation("Return.InvalidUnits", "Return units and media collections are required.");
-        bool useKafka = string.Equals(configuration["Rental:InventoryReturn:Transport"],
-            "Kafka", StringComparison.OrdinalIgnoreCase);
-        if (useKafka && (!configuration.GetValue<bool>("Kafka:Enabled") ||
-            !configuration.GetValue("Rental:InventoryReturn:Enabled", true)))
-            return Error.ServiceUnavailable("INVENTORY_RETURN_KAFKA_DISABLED",
-                "Kafka and Inventory return processing must be enabled to record a Kafka-backed return.");
+        bool kafkaEnabled = configuration.GetValue("Kafka:Enabled", true);
+        if (!kafkaEnabled)
+        {
+            return Error.ServiceUnavailable("KAFKA_UNAVAILABLE", "Kafka service is disabled or unavailable.");
+        }
         Guid supplierId = caller.UserId.Value;
         var orderId = await repository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
         if (!orderId.HasValue) return RentalErrors.ItemNotFound;

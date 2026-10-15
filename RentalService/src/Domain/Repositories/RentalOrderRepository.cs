@@ -116,6 +116,10 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 _dbContext.RentalOrders.Update(order);
                 return Task.FromResult(true);
             }
+            else if (entry.State == EntityState.Unchanged)
+            {
+                entry.State = EntityState.Modified;
+            }
             // Register new children before DetectChanges discovers their non-empty GUIDs.
             foreach (var record in order.Items.SelectMany(i => i.ReturnRecords))
             {

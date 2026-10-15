@@ -337,7 +337,6 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
             services.AddDbContext<RentalServiceDbContext>(opt =>
             {
                 opt.UseNpgsql(connString);
-                opt.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
             });
             services.AddScoped<IRentalOrderRepository, RentalOrderRepository>();
             services.AddScoped<IOperationReceiptRepository, OperationReceiptRepository>();

@@ -1,3 +1,5 @@
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Producers;
 using System.Security.Claims;
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Clients;
@@ -72,11 +74,16 @@ public sealed class ReturnTests : IAsyncLifetime
     private static RentalCallerContext Caller(Guid id) => RentalCallerContext.FromClaimsPrincipal(
         new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", id.ToString())], "test")));
 
-    private ReturnService Service(RentalServiceDbContext db, IRentalMediaClient? media = null, IConfiguration? configuration = null) => new(
-        new RentalOrderRepository(db), new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
-        db, media ?? Mock.Of<IRentalMediaClient>(), _clock, new OutboxRepository(db), configuration ?? Configuration(),
-        Mock.Of<Dprental.RentalService.Application.Kafka.Producers.IInventoryCommandProducer>());
-
+    private ReturnService Service(RentalServiceDbContext db, IRentalMediaClient? media = null, IConfiguration? configuration = null)
+    {
+        var mockProducer = new Mock<IInventoryCommandProducer>();
+        mockProducer.Setup(x => x.EnqueueApplyReturnedUnitsAsync(It.IsAny<ApplyReturnedUnitsCommandPayload>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "ApplyReturnedUnits", "inventory.allocation.commands.v1", "key")));
+        return new(
+            new RentalOrderRepository(db), new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
+            db, media ?? Mock.Of<IRentalMediaClient>(), _clock, new OutboxRepository(db), configuration ?? Configuration(),
+            mockProducer.Object);
+    }
     private async Task<RentalItem> SeedAsync(int quantity = 2)
     {
         var order = NewOrder(quantity);
@@ -159,12 +166,11 @@ public sealed class ReturnTests : IAsyncLifetime
             Assert.Equal(saved, replay.Value);
             Assert.Equal(2, await db.ReturnRecords.CountAsync());
             Assert.Equal(2, await db.RentalOutboxMessages.CountAsync());
-            Assert.Equal(2, await db.RentalOperationReceipts.CountAsync(r => r.Action == RentalItem.MarkReturnedAction));
-            Assert.Equal(1, await db.RentalOperationReceipts.CountAsync(r => r.Action == RentalItem.BlockDamagedAction));
+            Assert.Equal(2, await db.RentalOperationReceipts.CountAsync(r => r.Action == RentalItem.ApplyReturnedUnitsAction));
             var pending = await new OperationReceiptRepository(db)
                 .GetPendingOperationDescriptorsExcludingActionsAsync(_clock.GetUtcNow(), 50,
-                    [RentalItem.MarkReturnedAction, RentalItem.BlockDamagedAction]);
-            Assert.DoesNotContain(pending, r => r.Action is RentalItem.MarkReturnedAction or RentalItem.BlockDamagedAction);
+                    [RentalItem.ApplyReturnedUnitsAction]);
+            Assert.DoesNotContain(pending, r => r.Action == RentalItem.ApplyReturnedUnitsAction);
             Assert.All(await db.RentalUnitAssignments.ToListAsync(), u => Assert.Null(u.AllocationClosedAt));
         }
     }

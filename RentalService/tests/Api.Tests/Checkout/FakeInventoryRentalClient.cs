@@ -12,6 +12,7 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
     private readonly Dictionary<string, CreateHoldResponse> _groupsByReference = [];
     private readonly Dictionary<Guid, string> _firstGroupByListing = [];
     private readonly HashSet<string> _releasedGroups = [];
+    private readonly object _syncLock = new();
 
     public List<CreateHoldRequest> HoldRequests { get; } = [];
 
@@ -34,51 +35,69 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
     public int CreatedGroupCount => _groupsByReference.Count;
 
     /// <summary>Số máy của Listing đang bị giữ bởi các nhóm chưa được nhả.</summary>
-    public int HeldUnits(Guid listingId) => _groupsByReference.Values
-        .Where(g => g.ListingId == listingId && !_releasedGroups.Contains(g.AllocationGroupId))
-        .Sum(g => g.AssignedAssets.Count);
+    public int HeldUnits(Guid listingId)
+    {
+        lock (_syncLock)
+        {
+            return _groupsByReference.Values
+                .Where(g => g.ListingId == listingId && !_releasedGroups.Contains(g.AllocationGroupId))
+                .Sum(g => g.AssignedAssets.Count);
+        }
+    }
 
-    public string GroupIdFor(Guid listingId) => _firstGroupByListing[listingId];
-
+    public string GroupIdFor(Guid listingId)
+    {
+        lock (_syncLock)
+        {
+            return _firstGroupByListing[listingId];
+        }
+    }
     public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default)
     {
-        HoldRequests.Add(request);
-        HoldTokens.Add(ct);
-
-        if (HoldErrors.TryGetValue(request.ListingId, out Error? error))
+        lock (_syncLock)
         {
-            return Task.FromResult(Result.Failure<CreateHoldResponse>(error));
+            HoldRequests.Add(request);
+            HoldTokens.Add(ct);
+
+            if (HoldErrors.TryGetValue(request.ListingId, out Error? error))
+            {
+                return Task.FromResult(Result.Failure<CreateHoldResponse>(error));
+            }
+
+            if (_groupsByReference.TryGetValue(request.ExternalReference, out CreateHoldResponse? existing))
+            {
+                return Task.FromResult(Result.Success(existing with { IsReplay = true }));
+            }
+
+            int currentHeld = _groupsByReference.Values
+                .Where(g => g.ListingId == request.ListingId && !_releasedGroups.Contains(g.AllocationGroupId))
+                .Sum(g => g.AssignedAssets.Count);
+
+            if (Capacities.TryGetValue(request.ListingId, out int capacity) &&
+                currentHeld + request.Quantity > capacity)
+            {
+                return Task.FromResult(Result.Failure<CreateHoldResponse>(Error.Conflict(
+                    InventoryContractSpec.ErrorCodes.InsufficientAvailability, "Không đủ máy trống.")));
+            }
+
+            int assignedCount = AssignedCountOverrides.GetValueOrDefault(request.ListingId, request.Quantity);
+            CreateHoldResponse created = new(
+                $"grp-{_groupsByReference.Count + 1}",
+                Enumerable.Range(0, assignedCount)
+                    .Select(_ => new AssignedAssetDto(Guid.NewGuid(), Guid.NewGuid(), "Held"))
+                    .ToList(),
+                request.RequestedHoldExpiresAt,
+                request.ListingId,
+                request.Quantity,
+                request.From,
+                request.To,
+                false,
+                "Held");
+
+            _groupsByReference[request.ExternalReference] = created;
+            _firstGroupByListing.TryAdd(request.ListingId, created.AllocationGroupId);
+            return Task.FromResult(Result.Success(created));
         }
-
-        if (_groupsByReference.TryGetValue(request.ExternalReference, out CreateHoldResponse? existing))
-        {
-            return Task.FromResult(Result.Success(existing with { IsReplay = true }));
-        }
-
-        if (Capacities.TryGetValue(request.ListingId, out int capacity) &&
-            HeldUnits(request.ListingId) + request.Quantity > capacity)
-        {
-            return Task.FromResult(Result.Failure<CreateHoldResponse>(Error.Conflict(
-                InventoryContractSpec.ErrorCodes.InsufficientAvailability, "Không đủ máy trống.")));
-        }
-
-        int assignedCount = AssignedCountOverrides.GetValueOrDefault(request.ListingId, request.Quantity);
-        CreateHoldResponse created = new(
-            $"grp-{_groupsByReference.Count + 1}",
-            Enumerable.Range(0, assignedCount)
-                .Select(_ => new AssignedAssetDto(Guid.NewGuid(), Guid.NewGuid(), "Held"))
-                .ToList(),
-            request.RequestedHoldExpiresAt,
-            request.ListingId,
-            request.Quantity,
-            request.From,
-            request.To,
-            false,
-            "Held");
-
-        _groupsByReference[request.ExternalReference] = created;
-        _firstGroupByListing.TryAdd(request.ListingId, created.AllocationGroupId);
-        return Task.FromResult(Result.Success(created));
     }
 
     public Task<Result<ReleaseAllocationResponse>> ReleaseAllocationAsync(
@@ -86,17 +105,21 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
         ReleaseAllocationRequest request,
         CancellationToken ct = default)
     {
-        Releases.Add(new(allocationGroupId, request, ct));
-        if (!FailRelease)
+        lock (_syncLock)
         {
-            _releasedGroups.Add(allocationGroupId);
-        }
+            Releases.Add(new(allocationGroupId, request, ct));
+            if (!FailRelease)
+            {
+                _releasedGroups.Add(allocationGroupId);
+            }
 
-        return Task.FromResult(FailRelease
-            ? Result.Failure<ReleaseAllocationResponse>(Error.ServiceUnavailable("Inventory.Unavailable", "Inventory không phản hồi."))
-            : Result.Success(new ReleaseAllocationResponse(
-                $"receipt-{Releases.Count}", request.OperationKey, allocationGroupId, DateTimeOffset.UnixEpoch, false)));
+            return Task.FromResult(FailRelease
+                ? Result.Failure<ReleaseAllocationResponse>(Error.ServiceUnavailable("Inventory.Unavailable", "Inventory không phản hồi."))
+                : Result.Success(new ReleaseAllocationResponse(
+                    $"receipt-{Releases.Count}", request.OperationKey, allocationGroupId, DateTimeOffset.UnixEpoch, false)));
+        }
     }
+
 
     public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) =>
         throw new NotSupportedException();

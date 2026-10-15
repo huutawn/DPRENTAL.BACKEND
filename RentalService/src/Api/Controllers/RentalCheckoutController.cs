@@ -71,6 +71,7 @@ public sealed class RentalCheckoutController(
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> Submit(
         [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
         [FromBody] CheckoutRequest request,
@@ -94,14 +95,24 @@ public sealed class RentalCheckoutController(
 
         if (result.IsFailure)
         {
-            return this.ToProblem(result.Error);
+            return ToProblem(result);
         }
 
-        var accepted = result.Value;
+        var accepted = result.Accepted!;
         Response.Headers.Location = accepted.StatusUrl;
         return Accepted(accepted.StatusUrl, accepted);
     }
 
+    /// <summary>
+    /// Lấy trạng thái của tác vụ gửi đơn hàng (checkout operation).
+    /// </summary>
+    /// <remarks>
+    /// Dùng để thăm dò kết quả xử lý bất đồng bộ từ lúc giữ lịch qua Kafka đến khi tạo đơn và hóa đơn.
+    /// </remarks>
+    /// <param name="operationId">Mã tác vụ gửi đơn.</param>
+    /// <param name="cancellationToken">Token hủy yêu cầu.</param>
+    /// <response code="200">Trạng thái hiện tại của tác vụ gửi đơn hàng.</response>
+    /// <response code="404">Không tìm thấy tác vụ gửi đơn tương ứng.</response>
     [HttpGet("operations/{operationId}")]
     [HttpGet("~/rental/checkout/operations/{operationId}")]
     [ProducesResponseType(typeof(CheckoutOperationStatusResponse), StatusCodes.Status200OK)]
@@ -124,7 +135,7 @@ public sealed class RentalCheckoutController(
     }
 
     /// <summary>Gắn chi tiết của bước bị lỗi vào problem details để client hiển thị đúng chỗ.</summary>
-    private ObjectResult ToProblem(CheckoutResult result)
+    private ObjectResult ToProblem(CheckoutSubmissionResult result)
     {
         ObjectResult problem = this.ToProblem(result.Error);
         if (problem.Value is not ProblemDetails details)
@@ -144,11 +155,6 @@ public sealed class RentalCheckoutController(
             details.Extensions["lines"] = result.LineIssues;
         }
 
-        if (result.HoldConflicts.Count > 0)
-        {
-            details.Extensions["conflicts"] = result.HoldConflicts;
-        }
-
         if (result.CurrentQuote is not null)
         {
             details.Extensions["currentQuote"] = CheckoutQuoteResponse.From(result.CurrentQuote);
@@ -157,12 +163,6 @@ public sealed class RentalCheckoutController(
         if (result.PendingOrderCode is not null)
         {
             details.Extensions["pendingOrderCode"] = result.PendingOrderCode;
-        }
-
-        if (result.Order is not null)
-        {
-            details.Extensions["orderCode"] = result.Order.OrderCode;
-            details.Extensions["paymentDeadline"] = result.Order.PaymentDeadline;
         }
 
         return problem;

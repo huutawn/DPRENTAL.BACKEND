@@ -41,14 +41,35 @@ public sealed partial class RentalOperationExecutor
             await CommitLocalChangesAsync(order, cancellationToken);
             return Result.Success();
         }
+        receipt.BeginProviderAttempt(now);
+        await CommitLocalChangesAsync(order, cancellationToken);
 
-        if (_inventoryClient != null)
+        var result = await _inventoryClient.MarkAssetsOverdueAsync(
+            item.AllocationGroupId, command.ProviderRequest, cancellationToken);
+        now = _timeProvider.GetUtcNow();
+        if (result.IsSuccess)
         {
-            await _inventoryClient.MarkAssetsOverdueAsync(item.AllocationGroupId, command.ProviderRequest, cancellationToken);
+            var response = result.Value;
+            if (string.IsNullOrWhiteSpace(response.ReceiptRef) ||
+                !string.Equals(response.OperationKey, command.ProviderRequest.OperationKey, StringComparison.Ordinal) ||
+                !string.Equals(response.AllocationGroupId, item.AllocationGroupId, StringComparison.Ordinal) ||
+                response.Units is not { Count: 1 } ||
+                response.Units[0].AllocationId != unit.AllocationId ||
+                response.Units[0].AssetId != unit.AssetId ||
+                string.IsNullOrWhiteSpace(response.Units[0].OverdueProtectionRef))
+            {
+                var invalid = Error.ServiceUnavailable("INVALID_OVERDUE_RESPONSE", "Inventory trả thông tin bảo vệ quá hạn không hợp lệ.");
+                RecordExecutionFailure(receipt, invalid, now, forceUncertain: true);
+                await CommitLocalChangesAsync(order, cancellationToken);
+                return invalid;
+            }
+            receipt.MarkSucceeded(now, JsonSerializer.Serialize(response, JsonOptions));
+            await CommitLocalChangesAsync(order, cancellationToken);
+            return Result.Success();
         }
 
-        receipt.MarkSucceeded(now);
+        RecordExecutionFailure(receipt, result.Error, now);
         await CommitLocalChangesAsync(order, cancellationToken);
-        return Result.Success();
+        return result.Error;
     }
 }
