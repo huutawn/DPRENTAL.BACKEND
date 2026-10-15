@@ -65,15 +65,12 @@ public sealed class RentalCheckoutController(
     /// <returns>Đơn hàng chờ thanh toán kèm mã hóa đơn và hạn thanh toán.</returns>
     [HttpPost]
     [Consumes("application/json")]
-    [ProducesResponseType(typeof(CheckoutResponse), StatusCodes.Status201Created)]
-    [ProducesResponseType(typeof(CheckoutResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(CheckoutOperationAcceptedResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status410Gone)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> Submit(
         [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
         [FromBody] CheckoutRequest request,
@@ -89,7 +86,7 @@ public sealed class RentalCheckoutController(
             return this.ToProblem(Error.Validation("INVALID_IDEMPOTENCY_KEY", "Idempotency-Key tối đa 64 ký tự."));
         }
 
-        CheckoutResult result = await checkout.SubmitAsync(
+        var result = await checkout.SubmitAsync(
             new CheckoutRenterContext(currentRenter.RenterId, callerContext.IsProfileCompleted),
             request,
             idempotencyKey,
@@ -97,11 +94,35 @@ public sealed class RentalCheckoutController(
 
         if (result.IsFailure)
         {
-            return ToProblem(result);
+            return this.ToProblem(result.Error);
         }
 
-        CheckoutResponse body = CheckoutResponse.From(result.Order!, result.IsReplay);
-        return result.IsReplay ? Ok(body) : StatusCode(StatusCodes.Status201Created, body);
+        var accepted = result.Value;
+        Response.Headers.Location = accepted.StatusUrl;
+        return Accepted(accepted.StatusUrl, accepted);
+    }
+
+    /// <summary>Xem trạng thái xử lý checkout.</summary>
+    /// <remarks>Trạng thái được cập nhật sau khi Inventory xác nhận giữ lịch và Payment tạo hóa đơn.</remarks>
+    [HttpGet("operations/{operationId}")]
+    [HttpGet("~/rental/checkout/operations/{operationId}")]
+    [ProducesResponseType(typeof(CheckoutOperationStatusResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetOperationStatus(
+        string operationId,
+        CancellationToken cancellationToken)
+    {
+        var result = await checkout.GetOperationStatusAsync(
+            operationId,
+            currentRenter.RenterId,
+            cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
     }
 
     /// <summary>Gắn chi tiết của bước bị lỗi vào problem details để client hiển thị đúng chỗ.</summary>

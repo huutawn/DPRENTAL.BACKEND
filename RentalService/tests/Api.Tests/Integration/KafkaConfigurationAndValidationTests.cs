@@ -135,7 +135,16 @@ public sealed class KafkaConfigurationAndValidationTests
             RequestedHoldExpiresAt: now.AddMinutes(30),
             ExpectedSnapshotVersion: "v1");
 
-        var command = new CreateHoldCommandPayload(orderId, itemId, "op-hold-1", holdRequest);
+        var command = new CreateHoldCommandPayload(
+            orderId,
+            itemId,
+            "op-hold-1",
+            holdRequest.ListingId,
+            holdRequest.Quantity,
+            holdRequest.From,
+            holdRequest.To,
+            holdRequest.RequestedHoldExpiresAt,
+            "Notes");
 
         var envelope = new KafkaMessageEnvelope<CreateHoldCommandPayload>(
             Guid.NewGuid(),
@@ -158,7 +167,7 @@ public sealed class KafkaConfigurationAndValidationTests
         var deserialized = JsonSerializer.Deserialize<KafkaMessageEnvelope<CreateHoldCommandPayload>>(json, JsonOptions);
         Assert.NotNull(deserialized);
         Assert.Equal(orderId, deserialized.Payload.RentalOrderId);
-        Assert.Equal(2, deserialized.Payload.Request.Quantity);
+        Assert.Equal(2, deserialized.Payload.Quantity);
     }
 
     [Fact]

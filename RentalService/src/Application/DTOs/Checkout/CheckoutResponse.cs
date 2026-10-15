@@ -82,3 +82,17 @@ public sealed record CheckoutQuoteLineResponse(
     decimal DepositPerUnit,
     decimal RentalAmount,
     decimal DepositAmount);
+
+public sealed record CheckoutOperationAcceptedResponse(
+    string OperationId,
+    string StatusUrl);
+
+public sealed record CheckoutOperationStatusResponse(
+    string OperationId,
+    string Status,
+    Guid? OrderId = null,
+    string? OrderCode = null,
+    CheckoutResponse? Order = null,
+    string? ErrorCode = null,
+    string? ErrorMessage = null,
+    string? InvoiceStatus = null);

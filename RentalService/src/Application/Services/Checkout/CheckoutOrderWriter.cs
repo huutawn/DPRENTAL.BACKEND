@@ -26,9 +26,18 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
     private readonly IRentalOrderRepository _orders;
     private readonly IRentalCartRepository _carts;
     private readonly IOrderCodeGenerator _orderCodes;
-    private readonly ICheckoutHoldOrchestrator _holds;
-    private readonly IUnitOfWork _unitOfWork;
+    private readonly ICheckoutHoldOrchestrator? _holds;
+    private readonly IUnitOfWork? _unitOfWork;
     private readonly ILogger<CheckoutOrderWriter> _logger;
+
+    public CheckoutOrderWriter(
+        IRentalOrderRepository orders,
+        IRentalCartRepository carts,
+        IOrderCodeGenerator orderCodes,
+        ILogger<CheckoutOrderWriter> logger)
+        : this(orders, carts, orderCodes, null!, null!, logger)
+    {
+    }
 
     public CheckoutOrderWriter(
         IRentalOrderRepository orders,
@@ -41,16 +50,35 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _carts = carts ?? throw new ArgumentNullException(nameof(carts));
         _orderCodes = orderCodes ?? throw new ArgumentNullException(nameof(orderCodes));
-        _holds = holds ?? throw new ArgumentNullException(nameof(holds));
-        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _holds = holds;
+        _unitOfWork = unitOfWork;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    public Task<Result<RentalOrder>> CreateOrderAsync(
+        CheckoutPlan plan,
+        IReadOnlyList<CheckoutHeldLine> heldLines,
+        string checkoutOperationId,
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken = default)
+    {
+        return CreateOrderAsync(
+            plan,
+            heldLines,
+            checkoutOperationId,
+            Guid.NewGuid(),
+            utcNow.AddMinutes(30),
+            utcNow,
+            cancellationToken);
     }
 
     public async Task<Result<RentalOrder>> CreateOrderAsync(
         CheckoutPlan plan,
         IReadOnlyList<CheckoutHeldLine> heldLines,
         string checkoutOperationId,
-        DateTimeOffset utcNow,
+        Guid expectedRentalOrderId,
+        DateTimeOffset holdExpiresAt,
+        DateTimeOffset orderCreatedAt,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -59,15 +87,20 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
 
         try
         {
-            return await SaveOrderAsync(plan, heldLines, checkoutOperationId, utcNow, cancellationToken);
+            return await SaveOrderAsync(
+                plan,
+                heldLines,
+                checkoutOperationId,
+                expectedRentalOrderId,
+                holdExpiresAt,
+                orderCreatedAt,
+                cancellationToken);
         }
         catch (Exception ex)
         {
-            // Lỗi ngoài dự kiến (database sập, renter ngắt kết nối giữa chừng): lỗi vẫn được ném ra ngoài,
-            // nhưng hold không được nằm lại mà không có đơn nào dùng.
             _logger.LogWarning(ex, "Checkout {CheckoutOperationId} hỏng trong lúc lưu đơn hàng.", checkoutOperationId);
-            _unitOfWork.DiscardChanges();
-            if (await IsConfirmedNotSavedAsync(checkoutOperationId))
+            _unitOfWork?.DiscardChanges();
+            if (_holds is not null && await IsConfirmedNotSavedAsync(checkoutOperationId))
             {
                 await _holds.ReleaseAllLinesAsync(heldLines);
             }
@@ -80,7 +113,9 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         CheckoutPlan plan,
         IReadOnlyList<CheckoutHeldLine> heldLines,
         string checkoutOperationId,
-        DateTimeOffset utcNow,
+        Guid expectedRentalOrderId,
+        DateTimeOffset holdExpiresAt,
+        DateTimeOffset orderCreatedAt,
         CancellationToken cancellationToken)
     {
         RentalCart? cart = await _carts.GetActiveByRenterIdAsync(plan.RenterId, cancellationToken);
@@ -89,10 +124,10 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
             return await FailAsync(heldLines, RentalErrors.CartNotFound);
         }
 
-        string orderCode = await _orderCodes.NextAsync(utcNow, cancellationToken);
+        string orderCode = await _orderCodes.NextAsync(orderCreatedAt, cancellationToken);
 
         Result<RentalOrder> order = RentalOrder.Create(
-            Guid.NewGuid(),
+            expectedRentalOrderId,
             orderCode,
             plan.RenterId,
             plan.Currency,
@@ -106,39 +141,41 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
             plan.TermsDocumentRef,
             plan.TermsContentHash,
             checkoutOperationId,
-            utcNow,
-            heldLines.Select(ToInitialItem));
+            orderCreatedAt,
+            heldLines.Select(ToInitialItem),
+            paymentDeadline: holdExpiresAt);
         if (order.IsFailure)
         {
             return await FailAsync(heldLines, order.Error);
         }
 
-        Result cartResult = cart.CompleteCheckout(plan.Lines.Select(l => l.CartItemId), utcNow);
+        Result cartResult = cart.CompleteCheckout(plan.Lines.Select(l => l.CartItemId), orderCreatedAt);
         if (cartResult.IsFailure)
         {
-            _unitOfWork.DiscardChanges();
+            _unitOfWork?.DiscardChanges();
             return await FailAsync(heldLines, cartResult.Error);
         }
 
         await _orders.CreateAsync(order.Value, cancellationToken);
-        try
+        if (_unitOfWork is not null)
         {
-            // Đơn, dòng thuê, phân bổ máy, điều khoản và thay đổi của giỏ được ghi trong cùng một transaction.
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException ex)
-        {
-            _unitOfWork.DiscardChanges();
-
-            // Lần gửi trùng (double-click) dùng chung hold với đơn đã tạo: trả đơn đó và không được nhả hold.
-            RentalOrder? existing = await _orders.GetByCheckoutOperationIdAsync(checkoutOperationId, cancellationToken);
-            if (existing is not null && existing.RenterId == plan.RenterId)
+            try
             {
-                return existing;
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
             }
+            catch (DbUpdateException ex)
+            {
+                _unitOfWork.DiscardChanges();
 
-            _logger.LogWarning(ex, "Không lưu được đơn hàng cho checkout {CheckoutOperationId}.", checkoutOperationId);
-            return await FailAsync(heldLines, CheckoutErrors.OrderNotSaved);
+                RentalOrder? existing = await _orders.GetByCheckoutOperationIdAsync(checkoutOperationId, cancellationToken);
+                if (existing is not null && existing.RenterId == plan.RenterId)
+                {
+                    return existing;
+                }
+
+                _logger.LogWarning(ex, "Không lưu được đơn hàng cho checkout {CheckoutOperationId}.", checkoutOperationId);
+                return await FailAsync(heldLines, CheckoutErrors.OrderNotSaved);
+            }
         }
 
         return order;
@@ -146,19 +183,17 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
 
     private async Task<Result<RentalOrder>> FailAsync(IReadOnlyList<CheckoutHeldLine> heldLines, Error error)
     {
-        await _holds.ReleaseAllLinesAsync(heldLines);
+        if (_holds is not null)
+        {
+            await _holds.ReleaseAllLinesAsync(heldLines);
+        }
         return error;
     }
 
-    /// <summary>
-    /// Chỉ trả <c>true</c> khi đọc được database và chắc chắn chưa có đơn của lần checkout này. Lần lưu có thể đã
-    /// thành công dù báo lỗi (mất kết nối sau khi commit), và nhả hold của một đơn đã lưu thì tệ hơn để hold tự hết hạn.
-    /// </summary>
     private async Task<bool> IsConfirmedNotSavedAsync(string checkoutOperationId)
     {
         try
         {
-            // Không dùng token của request: renter đã ngắt kết nối thì vẫn phải kiểm tra cho xong.
             return await _orders.GetByCheckoutOperationIdAsync(checkoutOperationId, CancellationToken.None) is null;
         }
         catch (Exception ex)

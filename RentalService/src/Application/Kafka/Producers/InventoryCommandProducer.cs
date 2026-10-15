@@ -3,7 +3,6 @@ using System.Text.Json;
 using Dprental.RentalService.Application.Kafka.Configuration;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Common;
-using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -82,67 +81,87 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
         Guid? causationId = null,
         CancellationToken cancellationToken = default)
     {
-        if (command == null)
-        {
-            return Error.Validation("INVALID_COMMAND", "CreateHoldCommandPayload cannot be null.");
-        }
-
-        if (command.RentalOrderId == Guid.Empty)
-        {
-            return Error.Validation("INVALID_RENTAL_ORDER_ID", "RentalOrderId cannot be empty.");
-        }
-
-        if (command.RentalItemId == Guid.Empty)
-        {
-            return Error.Validation("INVALID_RENTAL_ITEM_ID", "RentalItemId cannot be empty.");
-        }
-
-        if (string.IsNullOrWhiteSpace(command.OperationKey))
-        {
-            return Error.Validation("INVALID_OPERATION_KEY", "OperationKey cannot be empty.");
-        }
-
-        if (command.Request == null)
-        {
-            return Error.Validation("INVALID_REQUEST", "CreateHoldRequest cannot be null.");
-        }
-
-        if (command.Request.ListingId == Guid.Empty)
-        {
-            return Error.Validation("INVALID_LISTING_ID", "ListingId cannot be empty.");
-        }
-
-        if (command.Request.Quantity <= 0)
-        {
-            return Error.Validation("INVALID_QUANTITY", "Quantity must be greater than zero.");
-        }
-
-        if (command.Request.From > command.Request.To)
-        {
-            return Error.Validation("INVALID_DATE_RANGE", "ExpectedStartDate cannot be after ExpectedEndDate.");
-        }
-
-        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
-            KafkaContractSpec.Producers.RentalService,
-            KafkaContractSpec.CommandTypes.CreateHold,
-            command.OperationKey);
-
-        string topic = _kafkaOptions.InventoryCommandsTopic;
-        string partitionKey = command.RentalOrderId.ToString("D");
+        if (command == null) return Error.Validation("INVALID_COMMAND", "CreateHoldCommandPayload cannot be null.");
+        if (command.RentalOrderId == Guid.Empty) return Error.Validation("INVALID_RENTAL_ORDER_ID", "RentalOrderId cannot be empty.");
+        if (command.RentalItemId == Guid.Empty) return Error.Validation("INVALID_RENTAL_ITEM_ID", "RentalItemId cannot be empty.");
+        if (string.IsNullOrWhiteSpace(command.OperationKey)) return Error.Validation("INVALID_OPERATION_KEY", "OperationKey cannot be empty.");
+        if (command.EquipmentListingId == Guid.Empty) return Error.Validation("INVALID_LISTING_ID", "EquipmentListingId cannot be empty.");
+        if (command.Quantity <= 0) return Error.Validation("INVALID_QUANTITY", "Quantity must be greater than zero.");
 
         var envelope = new KafkaMessageEnvelope<CreateHoldCommandPayload>(
-            messageId,
-            KafkaContractSpec.CommandTypes.CreateHold,
-            KafkaContractSpec.CurrentEnvelopeVersion,
-            KafkaContractSpec.Producers.RentalService,
-            partitionKey,
-            utcNow,
-            correlationId,
-            causationId,
-            command);
+            MessageId: OutboxMessageIdGenerator.Generate(),
+            MessageType: KafkaContractSpec.CommandTypes.CreateHold,
+            Version: KafkaContractSpec.CurrentEnvelopeVersion,
+            Producer: KafkaContractSpec.Producers.RentalService,
+            AggregateId: command.RentalOrderId.ToString("D"),
+            OccurredAt: _timeProvider.GetUtcNow(),
+            CorrelationId: string.IsNullOrWhiteSpace(correlationId) ? command.RentalOrderId.ToString("D") : correlationId,
+            CausationId: causationId,
+            Payload: command);
 
-        return await _outboxWriter.EnqueueAsync(topic, partitionKey, envelope, cancellationToken);
+        return await _outboxWriter.EnqueueAsync(
+            _kafkaOptions.InventoryCommandsTopic,
+            command.RentalOrderId.ToString("D"),
+            envelope,
+            cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueExtendHoldAsync(
+        ExtendHoldCommandPayload command,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (command == null) return Error.Validation("INVALID_COMMAND", "ExtendHoldCommandPayload cannot be null.");
+        if (command.RentalOrderId == Guid.Empty) return Error.Validation("INVALID_RENTAL_ORDER_ID", "RentalOrderId cannot be empty.");
+        if (command.RentalItemId == Guid.Empty) return Error.Validation("INVALID_RENTAL_ITEM_ID", "RentalItemId cannot be empty.");
+        if (string.IsNullOrWhiteSpace(command.OperationKey)) return Error.Validation("INVALID_OPERATION_KEY", "OperationKey cannot be empty.");
+
+        var envelope = new KafkaMessageEnvelope<ExtendHoldCommandPayload>(
+            MessageId: OutboxMessageIdGenerator.Generate(),
+            MessageType: KafkaContractSpec.CommandTypes.ExtendHold,
+            Version: KafkaContractSpec.CurrentEnvelopeVersion,
+            Producer: KafkaContractSpec.Producers.RentalService,
+            AggregateId: command.RentalOrderId.ToString("D"),
+            OccurredAt: _timeProvider.GetUtcNow(),
+            CorrelationId: string.IsNullOrWhiteSpace(correlationId) ? command.RentalOrderId.ToString("D") : correlationId,
+            CausationId: causationId,
+            Payload: command);
+
+        return await _outboxWriter.EnqueueAsync(
+            _kafkaOptions.InventoryCommandsTopic,
+            command.RentalOrderId.ToString("D"),
+            envelope,
+            cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueConfirmAllocationAsync(
+        ConfirmAllocationCommandPayload command,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (command == null) return Error.Validation("INVALID_COMMAND", "ConfirmAllocationCommandPayload cannot be null.");
+        if (command.RentalOrderId == Guid.Empty) return Error.Validation("INVALID_RENTAL_ORDER_ID", "RentalOrderId cannot be empty.");
+        if (command.RentalItemId == Guid.Empty) return Error.Validation("INVALID_RENTAL_ITEM_ID", "RentalItemId cannot be empty.");
+        if (string.IsNullOrWhiteSpace(command.OperationKey)) return Error.Validation("INVALID_OPERATION_KEY", "OperationKey cannot be empty.");
+
+        var envelope = new KafkaMessageEnvelope<ConfirmAllocationCommandPayload>(
+            MessageId: OutboxMessageIdGenerator.Generate(),
+            MessageType: KafkaContractSpec.CommandTypes.ConfirmAllocation,
+            Version: KafkaContractSpec.CurrentEnvelopeVersion,
+            Producer: KafkaContractSpec.Producers.RentalService,
+            AggregateId: command.RentalOrderId.ToString("D"),
+            OccurredAt: _timeProvider.GetUtcNow(),
+            CorrelationId: string.IsNullOrWhiteSpace(correlationId) ? command.RentalOrderId.ToString("D") : correlationId,
+            CausationId: causationId,
+            Payload: command);
+
+        return await _outboxWriter.EnqueueAsync(
+            _kafkaOptions.InventoryCommandsTopic,
+            command.RentalOrderId.ToString("D"),
+            envelope,
+            cancellationToken);
     }
 
     public async Task<Result<ProducerEnqueueResult>> EnqueueReleaseAllocationAsync(
@@ -151,51 +170,57 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
         Guid? causationId = null,
         CancellationToken cancellationToken = default)
     {
-        if (command == null)
-        {
-            return Error.Validation("INVALID_COMMAND", "ReleaseAllocationCommandPayload cannot be null.");
-        }
-
-        if (command.RentalOrderId == Guid.Empty)
-        {
-            return Error.Validation("INVALID_RENTAL_ORDER_ID", "RentalOrderId cannot be empty.");
-        }
-
-        if (string.IsNullOrWhiteSpace(command.AllocationGroupId))
-        {
-            return Error.Validation("INVALID_ALLOCATION_GROUP_ID", "AllocationGroupId cannot be empty.");
-        }
-
-        if (string.IsNullOrWhiteSpace(command.OperationKey))
-        {
-            return Error.Validation("INVALID_OPERATION_KEY", "OperationKey cannot be empty.");
-        }
-
-        if (command.Request == null)
-        {
-            return Error.Validation("INVALID_REQUEST", "ReleaseAllocationRequest cannot be null.");
-        }
-
-        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
-            KafkaContractSpec.Producers.RentalService,
-            KafkaContractSpec.CommandTypes.ReleaseAllocation,
-            command.OperationKey);
-
-        string topic = _kafkaOptions.InventoryCommandsTopic;
-        string partitionKey = command.RentalOrderId.ToString("D");
+        if (command == null) return Error.Validation("INVALID_COMMAND", "ReleaseAllocationCommandPayload cannot be null.");
+        if (command.RentalOrderId == Guid.Empty) return Error.Validation("INVALID_RENTAL_ORDER_ID", "RentalOrderId cannot be empty.");
+        if (command.RentalItemId == Guid.Empty) return Error.Validation("INVALID_RENTAL_ITEM_ID", "RentalItemId cannot be empty.");
+        if (string.IsNullOrWhiteSpace(command.OperationKey)) return Error.Validation("INVALID_OPERATION_KEY", "OperationKey cannot be empty.");
+        if (string.IsNullOrWhiteSpace(command.Reason)) return Error.Validation("INVALID_REASON", "Reason cannot be empty.");
 
         var envelope = new KafkaMessageEnvelope<ReleaseAllocationCommandPayload>(
-            messageId,
-            KafkaContractSpec.CommandTypes.ReleaseAllocation,
-            KafkaContractSpec.CurrentEnvelopeVersion,
-            KafkaContractSpec.Producers.RentalService,
-            partitionKey,
-            utcNow,
-            correlationId,
-            causationId,
-            command);
+            MessageId: OutboxMessageIdGenerator.Generate(),
+            MessageType: KafkaContractSpec.CommandTypes.ReleaseAllocation,
+            Version: KafkaContractSpec.CurrentEnvelopeVersion,
+            Producer: KafkaContractSpec.Producers.RentalService,
+            AggregateId: command.RentalOrderId.ToString("D"),
+            OccurredAt: _timeProvider.GetUtcNow(),
+            CorrelationId: string.IsNullOrWhiteSpace(correlationId) ? command.RentalOrderId.ToString("D") : correlationId,
+            CausationId: causationId,
+            Payload: command);
 
-        return await _outboxWriter.EnqueueAsync(topic, partitionKey, envelope, cancellationToken);
+        return await _outboxWriter.EnqueueAsync(
+            _kafkaOptions.InventoryCommandsTopic,
+            command.RentalOrderId.ToString("D"),
+            envelope,
+            cancellationToken);
     }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueMarkAssetsHandedOverAsync(
+        MarkAssetsHandedOverCommandPayload command,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (command == null) return Error.Validation("INVALID_COMMAND", "MarkAssetsHandedOverCommandPayload cannot be null.");
+        if (command.RentalOrderId == Guid.Empty) return Error.Validation("INVALID_RENTAL_ORDER_ID", "RentalOrderId cannot be empty.");
+        if (command.RentalItemId == Guid.Empty) return Error.Validation("INVALID_RENTAL_ITEM_ID", "RentalItemId cannot be empty.");
+        if (string.IsNullOrWhiteSpace(command.OperationKey)) return Error.Validation("INVALID_OPERATION_KEY", "OperationKey cannot be empty.");
+
+        var envelope = new KafkaMessageEnvelope<MarkAssetsHandedOverCommandPayload>(
+            MessageId: OutboxMessageIdGenerator.Generate(),
+            MessageType: KafkaContractSpec.CommandTypes.MarkAssetsHandedOver,
+            Version: KafkaContractSpec.CurrentEnvelopeVersion,
+            Producer: KafkaContractSpec.Producers.RentalService,
+            AggregateId: command.RentalOrderId.ToString("D"),
+            OccurredAt: _timeProvider.GetUtcNow(),
+            CorrelationId: string.IsNullOrWhiteSpace(correlationId) ? command.RentalOrderId.ToString("D") : correlationId,
+            CausationId: causationId,
+            Payload: command);
+
+        return await _outboxWriter.EnqueueAsync(
+            _kafkaOptions.InventoryCommandsTopic,
+            command.RentalOrderId.ToString("D"),
+            envelope,
+            cancellationToken);
+    }
+
 }

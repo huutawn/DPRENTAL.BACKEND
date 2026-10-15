@@ -115,6 +115,7 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
         {
             var options = new DbContextOptionsBuilder<RentalServiceDbContext>()
                 .UseNpgsql(connString)
+                .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning))
                 .Options;
 
             await using (var context = new RentalServiceDbContext(options))
@@ -140,7 +141,8 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
                 Assert.Contains("rental_operation_receipts", tables);
                 Assert.Contains("rental_inbox_messages", tables);
                 Assert.Contains("rental_outbox_messages", tables);
-                Assert.Equal(14, tables.Count);
+                Assert.Contains("rental_checkout_operations", tables);
+                Assert.Equal(15, tables.Count);
             }
         }
         finally
@@ -159,6 +161,7 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
         {
             var options = new DbContextOptionsBuilder<RentalServiceDbContext>()
                 .UseNpgsql(connString)
+                .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning))
                 .Options;
 
             // 1. Migrate to InitialRentalModel
@@ -187,8 +190,8 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
                 """;
                 await cmd.ExecuteNonQueryAsync();
 
-                // 3. Migrate forward to latest migration
-                await migrator.MigrateAsync();
+                // 3. Migrate forward to PaymentAndSupplierConfirmationMigration
+                await migrator.MigrateAsync("20261010115857_PaymentAndSupplierConfirmationMigration");
 
                 // 4. Verify backfill
                 cmd.CommandText = $"SELECT \"Status\" FROM rental.rental_orders WHERE \"Id\" = '{orderId}';";
@@ -328,7 +331,7 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
                 // Add 3 pending messages
                 for (int i = 0; i < 3; i++)
                 {
-                    var msg = new RentalOutboxMessage(Guid.NewGuid(), "rental.events.v1", "key", "TestEvent", "{}", FixedNow);
+                    var msg = new RentalOutboxMessage(Guid.NewGuid(), "rental.events.v1", $"key-{i}", "TestEvent", "{}", FixedNow);
                     await outboxRepo.AddAsync(msg);
                 }
                 await ctx.SaveChangesAsync();

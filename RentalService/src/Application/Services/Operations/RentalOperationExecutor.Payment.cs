@@ -123,6 +123,11 @@ public sealed partial class RentalOperationExecutor
         var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == operationKey);
         if (receipt == null) return Error.NotFound("RECEIPT_NOT_FOUND", "Không tìm thấy receipt.");
 
+        if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired)
+        {
+            return Error.Conflict("MANUAL_REFUND_REQUIRED", "Tác vụ hoàn tiền late payment yêu cầu xử lý thủ công, không hỗ trợ gọi refund tự động.");
+        }
+
         return await RequestRefundInternalAsync(order, item, receipt, operationKey, cancellationToken);
     }
 
@@ -144,6 +149,11 @@ public sealed partial class RentalOperationExecutor
         CancellationToken cancellationToken)
     {
         if (receipt.IsSuccess && receipt.Status == RentalOperationReceipt.StatusSucceeded) return Result.Success();
+        if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired)
+        {
+            return Error.Conflict("MANUAL_REFUND_REQUIRED", "Tác vụ hoàn tiền late payment yêu cầu xử lý thủ công, không hỗ trợ gọi refund tự động.");
+        }
+
 
         // Strict prerequisite check: ReleaseAllocation must be confirmed Succeeded
         if (!string.IsNullOrWhiteSpace(receipt.PrerequisiteOperationId))
@@ -340,5 +350,88 @@ public sealed partial class RentalOperationExecutor
         CancellationToken cancellationToken)
     {
         return await ExecutePaymentExpiryAsync(order.Id, receipt.OperationId, cancellationToken);
+    }
+
+    internal async Task<Result> ExecuteCreateInvoiceAsync(
+        RentalOrder order,
+        RentalOperationReceipt receipt,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(order.InvoiceRef))
+        {
+            var now = _timeProvider.GetUtcNow();
+            if (!receipt.IsSuccess)
+            {
+                receipt.MarkSucceeded(now);
+                await CommitLocalChangesAsync(order, cancellationToken);
+            }
+
+            if (_checkoutOperationRepo != null)
+            {
+                var op = await _checkoutOperationRepo.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
+                if (op != null && op.InvoiceStatus != "Ready")
+                {
+                    op.SetInvoiceStatus("Ready", now);
+                    await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+            }
+
+            return Result.Success();
+        }
+
+        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
+        if (order.PaymentDeadline <= utcNow)
+        {
+            receipt.MarkFailed("ORDER_EXPIRED", "Payment deadline has passed; halting invoice creation.", utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+            await CommitLocalChangesAsync(order, cancellationToken);
+            return Error.Conflict("ORDER_EXPIRED", "Payment deadline has passed; halting invoice creation.");
+        }
+
+        receipt.BeginProviderAttempt(utcNow);
+        await CommitLocalChangesAsync(order, cancellationToken);
+
+        if (_invoiceIssuer == null)
+        {
+            return Error.Failure("INVOICE_ISSUER_UNAVAILABLE", "Invoice issuer is not configured.");
+        }
+
+        var invoiceResult = await _invoiceIssuer.EnsureInvoiceAsync(order, cancellationToken);
+        utcNow = _timeProvider.GetUtcNow();
+
+        if (invoiceResult.IsSuccess)
+        {
+            receipt.MarkSucceeded(utcNow);
+            await CommitLocalChangesAsync(order, cancellationToken);
+
+            if (_checkoutOperationRepo != null)
+            {
+                var op = await _checkoutOperationRepo.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
+                if (op != null)
+                {
+                    op.SetInvoiceStatus("Ready", utcNow);
+                    await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                }
+            }
+
+            return Result.Success();
+        }
+
+        RecordExecutionFailure(receipt, invoiceResult.Error, utcNow);
+        await CommitLocalChangesAsync(order, cancellationToken);
+
+        if (receipt.Status == RentalOperationReceipt.StatusFailed && _checkoutOperationRepo != null)
+        {
+            var op = await _checkoutOperationRepo.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
+            if (op != null)
+            {
+                op.SetInvoiceStatus("Failed", utcNow);
+                await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
+        }
+
+        return invoiceResult.Error;
     }
 }

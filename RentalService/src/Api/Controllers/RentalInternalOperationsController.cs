@@ -1,3 +1,4 @@
+using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Api.Filters;
 using Dprental.RentalService.Application.DTOs.Operations;
 using Dprental.RentalService.Application.IServices.Operations;
@@ -24,13 +25,16 @@ namespace Dprental.RentalService.Api.Controllers;
 public sealed class RentalInternalOperationsController : ControllerBase
 {
     private readonly IRentalOperationExecutor _operationExecutor;
+    private readonly IRentalOrderRepository _orderRepository;
     private readonly IRentalCallerContext _callerContext;
 
     public RentalInternalOperationsController(
         IRentalOperationExecutor operationExecutor,
+        IRentalOrderRepository orderRepository,
         IRentalCallerContext callerContext)
     {
         _operationExecutor = operationExecutor ?? throw new ArgumentNullException(nameof(operationExecutor));
+        _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _callerContext = callerContext ?? throw new ArgumentNullException(nameof(callerContext));
     }
 
@@ -130,5 +134,55 @@ public sealed class RentalInternalOperationsController : ControllerBase
         }
 
         return StatusCode(StatusCodes.Status202Accepted, result.Value);
+    }
+
+    [HttpGet("~/orders/{orderId:guid}/operations/{operationId}")]
+    [HttpGet("{orderId:guid}/operations/{operationId}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetOperationReceipt(
+        [FromRoute] Guid orderId,
+        [FromRoute] string operationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_callerContext.IsAuthenticated)
+        {
+            return this.ToProblem(Error.Unauthorized("AUTH_REQUIRED", "Yêu cầu đăng nhập."));
+        }
+
+        var order = await _orderRepository.GetByIdWithDetailsAsync(orderId, cancellationToken);
+        if (order is null)
+        {
+            return this.ToProblem(Error.NotFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng."));
+        }
+
+        bool isRenter = order.RenterId == _callerContext.UserId;
+        bool isSupplier = order.Items.Any(i => i.SupplierId == _callerContext.UserId);
+        if (!_callerContext.IsAdmin() && !isRenter && !isSupplier)
+        {
+            return this.ToProblem(Error.Forbidden("FORBIDDEN", "Không có quyền xem tác vụ của đơn hàng này."));
+        }
+
+        var receipt = order.OperationReceipts.FirstOrDefault(r => string.Equals(r.OperationId, operationId.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (receipt is null)
+        {
+            return this.ToProblem(Error.NotFound("OPERATION_NOT_FOUND", "Không tìm thấy tác vụ tương ứng."));
+        }
+
+        return Ok(new
+        {
+            receipt.Id,
+            receipt.RentalOrderId,
+            receipt.OperationId,
+            receipt.Action,
+            receipt.Status,
+            receipt.IsSuccess,
+            receipt.ErrorCode,
+            receipt.ErrorMessage,
+            receipt.CompletedAt,
+            receipt.CreatedAt
+        });
     }
 }

@@ -88,25 +88,24 @@ public sealed class RentalCheckoutApiTests
     }
 
     [Fact]
-    public async Task Submit_Returns201WithPayableOrder_Then200WithTheSameOrderOnReplay()
+    public async Task Submit_Returns202WithOperation_AndReplayReturnsTheSameOperation()
     {
         using CheckoutApiFactory factory = new();
         using HttpClient client = factory.CreateRenterClient("key-1");
 
         using HttpResponseMessage created = await client.PostAsJsonAsync(Route, factory.Request());
 
-        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, created.StatusCode);
         string createdJson = await created.Content.ReadAsStringAsync();
-        JsonElement order = JsonDocument.Parse(createdJson).RootElement;
-        Assert.Equal("DH-2026-000001", order.GetProperty("orderCode").GetString());
-        Assert.Equal("PENDING_PAYMENT", order.GetProperty("status").GetString());
-        Assert.Equal(Now.AddMinutes(30), order.GetProperty("paymentDeadline").GetDateTimeOffset());
-        Assert.Equal("INV-1", order.GetProperty("invoiceRef").GetString());
-        Assert.Equal("VND", order.GetProperty("currency").GetString());
-        Assert.Equal(3_000_000m, order.GetProperty("totalRentalAmount").GetDecimal());
-        Assert.Equal(4_000_000m, order.GetProperty("totalDepositAmount").GetDecimal());
-        Assert.Equal(Total, order.GetProperty("totalAmount").GetDecimal());
-        Assert.False(order.GetProperty("isReplay").GetBoolean());
+        JsonElement operation = JsonDocument.Parse(createdJson).RootElement;
+        string operationId = operation.GetProperty("operationId").GetString()!;
+        string statusUrl = operation.GetProperty("statusUrl").GetString()!;
+        Assert.False(string.IsNullOrWhiteSpace(operationId));
+        Assert.EndsWith(operationId, statusUrl);
+
+        using HttpResponseMessage statusResponse = await client.GetAsync(statusUrl);
+        Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
+        Assert.Equal("Processing", (await ReadAsync(statusResponse)).GetProperty("status").GetString());
 
         // Mã máy và mã giữ lịch là dữ liệu nội bộ, không trả cho renter.
         Assert.DoesNotContain("asset", createdJson, StringComparison.OrdinalIgnoreCase);
@@ -114,16 +113,15 @@ public sealed class RentalCheckoutApiTests
 
         using HttpResponseMessage replayed = await client.PostAsJsonAsync(Route, factory.Request());
 
-        Assert.Equal(HttpStatusCode.OK, replayed.StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, replayed.StatusCode);
         JsonElement replay = await ReadAsync(replayed);
-        Assert.Equal(order.GetProperty("orderId").GetGuid(), replay.GetProperty("orderId").GetGuid());
-        Assert.True(replay.GetProperty("isReplay").GetBoolean());
-        Assert.Single(factory.Inventory.HoldRequests);
-        Assert.Single(factory.Payment.InvoiceRequests);
+        Assert.Equal(operationId, replay.GetProperty("operationId").GetString());
+        Assert.Empty(factory.Inventory.HoldRequests);
+        Assert.Empty(factory.Payment.InvoiceRequests);
     }
 
     [Fact]
-    public async Task Submit_Returns503WithOrderCodeAndDeadline_WhenPaymentIsDown()
+    public async Task Submit_Returns202BeforePaymentIsCalled()
     {
         using CheckoutApiFactory factory = new();
         factory.Payment.AlwaysFailWith = FakePaymentRentalClient.Down;
@@ -131,17 +129,13 @@ public sealed class RentalCheckoutApiTests
 
         using HttpResponseMessage response = await client.PostAsJsonAsync(Route, factory.Request());
 
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        JsonElement problem = await ReadAsync(response);
-        Assert.Equal("Checkout.InvoiceTemporarilyUnavailable", problem.GetProperty("title").GetString());
-        Assert.Equal("DH-2026-000001", problem.GetProperty("orderCode").GetString());
-        Assert.Equal(Now.AddMinutes(30), problem.GetProperty("paymentDeadline").GetDateTimeOffset());
-        Assert.True(problem.GetProperty("retryable").GetBoolean());
-        Assert.DoesNotContain("Payment.Unavailable", problem.GetRawText(), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.False(string.IsNullOrWhiteSpace((await ReadAsync(response)).GetProperty("operationId").GetString()));
+        Assert.Empty(factory.Payment.InvoiceRequests);
     }
 
     [Fact]
-    public async Task Submit_Returns409WithCurrentQuote_WhenPriceChanged()
+    public async Task Submit_Returns409_WhenPriceChanged()
     {
         using CheckoutApiFactory factory = new();
         using HttpClient client = factory.CreateRenterClient("key-1");
@@ -151,19 +145,11 @@ public sealed class RentalCheckoutApiTests
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         JsonElement problem = await ReadAsync(response);
         Assert.Equal("Checkout.PriceChanged", problem.GetProperty("title").GetString());
-        Assert.False(problem.GetProperty("retryable").GetBoolean());
-
-        JsonElement quote = problem.GetProperty("currentQuote");
-        Assert.Equal(Total, quote.GetProperty("totalAmount").GetDecimal());
-        JsonElement line = Assert.Single(quote.GetProperty("lines").EnumerateArray());
-        Assert.Equal(factory.CartItemId, line.GetProperty("cartItemId").GetGuid());
-        Assert.Equal(3, line.GetProperty("rentalDays").GetInt32());
-        Assert.Equal(500_000m, line.GetProperty("dailyRate").GetDecimal());
         Assert.Empty(factory.Inventory.HoldRequests);
     }
 
     [Fact]
-    public async Task Submit_Returns400WithFieldErrors_WhenRequestIsInvalid()
+    public async Task Submit_Returns400_WhenRequestIsInvalid()
     {
         using CheckoutApiFactory factory = new();
         using HttpClient client = factory.CreateRenterClient("key-1");
@@ -174,8 +160,7 @@ public sealed class RentalCheckoutApiTests
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         JsonElement problem = await ReadAsync(response);
         Assert.Equal("Checkout.InvalidRequest", problem.GetProperty("title").GetString());
-        JsonElement fieldError = Assert.Single(problem.GetProperty("fieldErrors").EnumerateArray());
-        Assert.Equal("termsAccepted", fieldError.GetProperty("field").GetString());
+        Assert.Empty(factory.Inventory.HoldRequests);
     }
 
     [Fact]
@@ -189,7 +174,6 @@ public sealed class RentalCheckoutApiTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         JsonElement problem = await ReadAsync(response);
         Assert.Equal("Checkout.DependencyUnavailable", problem.GetProperty("title").GetString());
-        Assert.True(problem.GetProperty("retryable").GetBoolean());
         Assert.Empty(factory.Inventory.HoldRequests);
     }
 

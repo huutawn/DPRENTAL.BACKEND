@@ -63,7 +63,6 @@ public static class ApplicationServiceCollectionExtensions
 
         // Checkout
         services.AddScoped<ICheckoutPreparationService, CheckoutPreparationService>();
-        services.AddScoped<ICheckoutHoldOrchestrator, CheckoutHoldOrchestrator>();
         services.AddScoped<ICheckoutOrderWriter, CheckoutOrderWriter>();
         services.AddScoped<ICheckoutInvoiceIssuer, CheckoutInvoiceIssuer>();
         services.AddScoped<ICheckoutService, CheckoutService>();
@@ -98,6 +97,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddHostedService<OperationRecoveryWorker>();
         services.AddHostedService<ExpiryScannerWorker>();
         services.AddHostedService<OverdueProtectionWorker>();
+        services.AddHostedService<CheckoutTimeoutScannerWorker>();
 
         // Observability & TimeProvider
         services.AddSingleton<RentalMetrics>();

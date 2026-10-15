@@ -13,6 +13,8 @@ public interface IUnitOfWork
 {
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
+    Task<int> CommitAsync(CancellationToken cancellationToken = default) => SaveChangesAsync(cancellationToken);
+
     /// <summary>
     /// Bỏ mọi thay đổi chưa lưu đang được theo dõi. Gọi sau khi lưu thất bại để lần lưu sau
     /// trong cùng request không ghi lại dữ liệu hỏng.
