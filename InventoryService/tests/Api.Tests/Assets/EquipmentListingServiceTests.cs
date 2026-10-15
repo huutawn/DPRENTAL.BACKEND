@@ -39,7 +39,7 @@ public sealed class EquipmentListingServiceTests
         {
             var list = Store.Values
                 .Where(l => ids.Contains(l.Id))
-                .Select(l => new EquipmentListingBatchItem(l.Id, l.OwnerUserId, l.Name, l.ThumbnailMediaId, l.DailyRate, l.Currency, l.Status))
+                .Select(l => new EquipmentListingBatchItem(l.Id, l.OwnerUserId, l.Name, l.ThumbnailMediaId, l.DailyRate, l.Currency, l.Status, l.DepositAmount))
                 .ToList();
             return Task.FromResult<IReadOnlyList<EquipmentListingBatchItem>>(list);
         }
@@ -612,5 +612,142 @@ public sealed class EquipmentListingServiceTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_QUERY_PARAMETER", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task CreateListingAsync_DepositAmount_DefaultZeroAndCustom_Succeeds()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
+
+        using var specDoc = JsonDocument.Parse("{}");
+        // 1. Omitted depositAmount defaults to 0
+        var reqDefault = new CreateEquipmentListingRequest(
+            Guid.NewGuid(), Guid.NewGuid(), "Camera A", "FX3", "SN-DEF-1",
+            specDoc.RootElement.Clone(),
+            new RentalRateDto(100_000m, null, null, "VND"),
+            2024);
+        var resDefault = await service.CreateListingAsync(reqDefault, caller);
+        Assert.True(resDefault.IsSuccess);
+        Assert.Equal(0m, resDefault.Value.DepositAmount);
+        Assert.Equal(1, resDefault.Value.TotalQuantity);
+
+        // 2. Custom depositAmount 500,000 saves correctly
+        var reqCustom = new CreateEquipmentListingRequest(
+            Guid.NewGuid(), Guid.NewGuid(), "Camera B", "FX3", "SN-CUST-1",
+            specDoc.RootElement.Clone(),
+            new RentalRateDto(100_000m, null, null, "VND"),
+            2024,
+            DepositAmount: 500_000m);
+        var resCustom = await service.CreateListingAsync(reqCustom, caller);
+        Assert.True(resCustom.IsSuccess);
+        Assert.Equal(500_000m, resCustom.Value.DepositAmount);
+        Assert.Equal(1, resCustom.Value.TotalQuantity);
+    }
+
+    [Theory]
+    [InlineData(-100)]
+    [InlineData(1000000000000000000)]
+    public async Task CreateListingAsync_InvalidDepositAmount_ReturnsInvalidDepositAmount(decimal invalidDeposit)
+    {
+        var service = CreateService();
+        var caller = CreateHumanCaller(Guid.NewGuid(), "inventory.asset.manage");
+        using var specDoc = JsonDocument.Parse("{}");
+
+        var request = new CreateEquipmentListingRequest(
+            Guid.NewGuid(), Guid.NewGuid(), "Camera", "FX3", "SN-INV-1",
+            specDoc.RootElement.Clone(),
+            new RentalRateDto(100_000m, null, null, "VND"),
+            2024,
+            DepositAmount: invalidDeposit);
+        var result = await service.CreateListingAsync(request, caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_DEPOSIT_AMOUNT", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task PatchListingAsync_DepositAmount_PresenceTracking()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
+
+        var listingId = Guid.NewGuid();
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}",
+            100_000m, null, null, "VND", FixedNow, 2024,
+            depositAmount: 500_000m).Value;
+        _listingRepo.Add(listing);
+
+        // 1. Omitted depositAmount preserves existing 500,000
+        var patchNameOnly = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest
+        {
+            IsNameSpecified = true,
+            Name = "FX3 Updated"
+        }, caller);
+        Assert.True(patchNameOnly.IsSuccess);
+        Assert.Equal(500_000m, patchNameOnly.Value.DepositAmount);
+
+        // 2. Specified new amount 1,000,000 updates correctly
+        var patchNewDeposit = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest
+        {
+            IsDepositAmountSpecified = true,
+            DepositAmount = 1_000_000m
+        }, caller);
+        Assert.True(patchNewDeposit.IsSuccess);
+        Assert.Equal(1_000_000m, patchNewDeposit.Value.DepositAmount);
+
+        // 3. Specified 0 removes deposit requirement
+        var patchZero = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest
+        {
+            IsDepositAmountSpecified = true,
+            DepositAmount = 0m
+        }, caller);
+        Assert.True(patchZero.IsSuccess);
+        Assert.Equal(0m, patchZero.Value.DepositAmount);
+
+        // 4. Specified null is rejected with INVALID_DEPOSIT_AMOUNT
+        var patchNull = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest
+        {
+            IsDepositAmountSpecified = true,
+            DepositAmount = null
+        }, caller);
+        Assert.True(patchNull.IsFailure);
+        Assert.Equal("INVALID_DEPOSIT_AMOUNT", patchNull.Error.Code);
+
+        // 5. Specified negative is rejected with INVALID_DEPOSIT_AMOUNT
+        var patchNeg = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest
+        {
+            IsDepositAmountSpecified = true,
+            DepositAmount = -100m
+        }, caller);
+        Assert.True(patchNeg.IsFailure);
+        Assert.Equal("INVALID_DEPOSIT_AMOUNT", patchNeg.Error.Code);
+    }
+
+    [Fact]
+    public async Task PatchListingAsync_UnauthorizedUser_ReturnsForbidden()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var otherCaller = CreateHumanCaller(Guid.NewGuid(), "inventory.asset.manage");
+
+        var listingId = Guid.NewGuid();
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}",
+            100_000m, null, null, "VND", FixedNow, 2024,
+            depositAmount: 500_000m).Value;
+        _listingRepo.Add(listing);
+
+        var patch = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest
+        {
+            IsDepositAmountSpecified = true,
+            DepositAmount = 200_000m
+        }, otherCaller);
+
+        Assert.True(patch.IsFailure);
+        Assert.Equal("FORBIDDEN", patch.Error.Code);
     }
 }

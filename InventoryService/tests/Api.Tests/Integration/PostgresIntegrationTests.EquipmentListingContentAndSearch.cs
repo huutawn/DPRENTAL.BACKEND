@@ -33,6 +33,8 @@ namespace Dprental.InventoryService.Api.Tests.Integration;
 
 public sealed partial class PostgresEquipmentListingContentAndSearchTests : IClassFixture<PostgresFixture>
 {
+    private sealed record ListingMediaAndYearRow(Guid[] MediaIds, Guid? ThumbnailMediaId, int? ManufactureYear);
+
     private static readonly DateTimeOffset FixedNow = new(2026, 10, 12, 10, 0, 0, TimeSpan.Zero);
     private readonly PostgresFixture _fixture;
 
@@ -303,8 +305,11 @@ public sealed partial class PostgresEquipmentListingContentAndSearchTests : ICla
             var migrator = db.GetService<IMigrator>();
             await migrator.MigrateAsync("20261013000000_AddEquipmentListingMediaAndManufactureYear");
 
-            // Verify backfilled values via EF Core
-            var l1 = await db.EquipmentListings.AsNoTracking().SingleAsync(l => l.Id == listing1Id);
+            // Verify backfilled values
+            var l1 = await db.Database.SqlQuery<ListingMediaAndYearRow>($"""
+                SELECT media_ids AS "MediaIds", thumbnail_media_id AS "ThumbnailMediaId", manufacture_year AS "ManufactureYear"
+                FROM inventory.equipment_listings WHERE id = {listing1Id}
+            """).SingleAsync();
             Assert.Equal([thumb1], l1.MediaIds);
             Assert.Equal(thumb1, l1.ThumbnailMediaId);
             Assert.Equal(2021, l1.ManufactureYear);
@@ -313,19 +318,27 @@ public sealed partial class PostgresEquipmentListingContentAndSearchTests : ICla
             var l1LateAsset = await db.Assets.AsNoTracking().SingleAsync(a => a.Id == l1AssetLateId);
             Assert.Equal(2024, l1LateAsset.ManufactureYear);
 
-            var l2 = await db.EquipmentListings.AsNoTracking().SingleAsync(l => l.Id == listing2Id);
+            var l2 = await db.Database.SqlQuery<ListingMediaAndYearRow>($"""
+                SELECT media_ids AS "MediaIds", thumbnail_media_id AS "ThumbnailMediaId", manufacture_year AS "ManufactureYear"
+                FROM inventory.equipment_listings WHERE id = {listing2Id}
+            """).SingleAsync();
             Assert.Empty(l2.MediaIds);
             Assert.Null(l2.ThumbnailMediaId);
             Assert.Equal(2019, l2.ManufactureYear);
 
-            var l3 = await db.EquipmentListings.AsNoTracking().SingleAsync(l => l.Id == listing3Id);
+            var l3 = await db.Database.SqlQuery<ListingMediaAndYearRow>($"""
+                SELECT media_ids AS "MediaIds", thumbnail_media_id AS "ThumbnailMediaId", manufacture_year AS "ManufactureYear"
+                FROM inventory.equipment_listings WHERE id = {listing3Id}
+            """).SingleAsync();
             Assert.Empty(l3.MediaIds);
             Assert.Null(l3.ManufactureYear);
 
-            var l4 = await db.EquipmentListings.AsNoTracking().SingleAsync(l => l.Id == listing4Id);
+            var l4 = await db.Database.SqlQuery<ListingMediaAndYearRow>($"""
+                SELECT media_ids AS "MediaIds", thumbnail_media_id AS "ThumbnailMediaId", manufacture_year AS "ManufactureYear"
+                FROM inventory.equipment_listings WHERE id = {listing4Id}
+            """).SingleAsync();
             Assert.Empty(l4.MediaIds);
             Assert.Null(l4.ManufactureYear);
-
             // Verify DB constraints on manufacture_year (< 1900 rejected)
             await Assert.ThrowsAsync<PostgresException>(async () =>
             {

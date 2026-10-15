@@ -43,6 +43,7 @@ public static class PublicEquipmentListingMapper
             listing.SchemaVersion,
             sanitizedSpecs,
             rentalRateDto,
+            listing.DepositAmount,
             media,
             thumbnailUrl,
             totalQuantity,

@@ -19,6 +19,8 @@ public sealed class EquipmentListing
     public const decimal MaxRate = 999_999_999_999_999_999m;
     public const int MinManufactureYear = 1900;
     public const int MaxMediaCount = 20;
+    public const decimal MinDepositAmount = 0m;
+    public const decimal MaxDepositAmount = 999_999_999_999_999_999m;
     [Key]
     [Column("id")]
     public Guid Id { get; private set; }
@@ -65,6 +67,9 @@ public sealed class EquipmentListing
 
     [Column("monthly_rate", TypeName = "numeric(18,0)")]
     public decimal? MonthlyRate { get; private set; }
+    [Column("deposit_amount", TypeName = "numeric(18,0)")]
+    public decimal DepositAmount { get; private set; }
+
 
     [Column("currency")]
     [MaxLength(10)]
@@ -106,6 +111,7 @@ public sealed class EquipmentListing
         decimal? weeklyRate,
         decimal? monthlyRate,
         string currency,
+        decimal depositAmount,
         EquipmentListingStatus status,
         DateTimeOffset now)
     {
@@ -125,6 +131,7 @@ public sealed class EquipmentListing
         WeeklyRate = weeklyRate;
         MonthlyRate = monthlyRate;
         Currency = currency;
+        DepositAmount = depositAmount;
         Status = status;
         CreatedAt = now;
         UpdatedAt = now;
@@ -151,7 +158,8 @@ public sealed class EquipmentListing
         DateTimeOffset now,
         int? manufactureYear,
         IReadOnlyList<Guid>? mediaIds = null,
-        Guid? thumbnailMediaId = null)
+        Guid? thumbnailMediaId = null,
+        decimal depositAmount = 0m)
     {
         if (id == Guid.Empty)
         {
@@ -184,6 +192,12 @@ public sealed class EquipmentListing
         {
             return rateValidation.Error;
         }
+        var depositValidation = ValidateDepositAmount(depositAmount);
+        if (depositValidation.IsFailure)
+        {
+            return depositValidation.Error;
+        }
+
 
         var detailsValidation = ValidateDetails(name, description, model, mediaIds, thumbnailMediaId, schemaVersion, specValues);
         if (detailsValidation.IsFailure)
@@ -210,6 +224,7 @@ public sealed class EquipmentListing
             weeklyRate,
             monthlyRate,
             currency,
+            depositAmount,
             EquipmentListingStatus.Draft,
             now);
     }
@@ -295,6 +310,22 @@ public sealed class EquipmentListing
         Currency = currency;
         UpdatedAt = now;
 
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Cập nhật số tiền cọc cố định của Listing. 0 nghĩa là không yêu cầu cọc.
+    /// </summary>
+    public Result UpdateDepositAmount(decimal depositAmount, DateTimeOffset now)
+    {
+        var validation = ValidateDepositAmount(depositAmount);
+        if (validation.IsFailure)
+        {
+            return validation.Error;
+        }
+
+        DepositAmount = depositAmount;
+        UpdatedAt = now;
         return Result.Success();
     }
 
@@ -477,6 +508,19 @@ public sealed class EquipmentListing
             {
                 return Error.Validation("INVALID_MONTHLY_RATE", $"Giá thuê theo tháng phải là số nguyên từ {MinRate} đến {MaxRate}.");
             }
+        }
+
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Kiểm tra số tiền cọc hợp lệ: chỉ chấp nhận số nguyên từ 0 đến 999999999999999999.
+    /// </summary>
+    public static Result ValidateDepositAmount(decimal depositAmount)
+    {
+        if (decimal.Truncate(depositAmount) != depositAmount || depositAmount < MinDepositAmount || depositAmount > MaxDepositAmount)
+        {
+            return Error.Validation("INVALID_DEPOSIT_AMOUNT", $"Tiền cọc phải là số nguyên từ {MinDepositAmount} đến {MaxDepositAmount}.");
         }
 
         return Result.Success();

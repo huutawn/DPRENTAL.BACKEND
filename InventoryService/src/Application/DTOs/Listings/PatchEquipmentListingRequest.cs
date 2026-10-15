@@ -51,6 +51,10 @@ public sealed class PatchEquipmentListingRequest
     public bool IsStatusSpecified { get; set; }
     public EquipmentListingStatus? Status { get; set; }
 
+
+    [JsonIgnore]
+    public bool IsDepositAmountSpecified { get; set; }
+    public decimal? DepositAmount { get; set; }
     [JsonIgnore]
     public bool IsEmpty =>
         !IsBrandIdSpecified &&
@@ -62,5 +66,6 @@ public sealed class PatchEquipmentListingRequest
         !IsThumbnailMediaIdSpecified &&
         !IsSchemaVersionSpecified &&
         !IsSpecValuesSpecified &&
-        !IsStatusSpecified;
+        !IsStatusSpecified &&
+        !IsDepositAmountSpecified;
 }

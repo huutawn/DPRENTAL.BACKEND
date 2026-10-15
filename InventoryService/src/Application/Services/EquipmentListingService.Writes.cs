@@ -92,6 +92,13 @@ public sealed partial class EquipmentListingService
         {
             return rateValidation.Error;
         }
+        decimal targetDeposit = request.DepositAmount ?? 0m;
+        var depositValidation = EquipmentListing.ValidateDepositAmount(targetDeposit);
+        if (depositValidation.IsFailure)
+        {
+            return depositValidation.Error;
+        }
+
 
         if (request.SpecValues.ValueKind != JsonValueKind.Object)
         {
@@ -176,7 +183,8 @@ public sealed partial class EquipmentListingService
             now,
             yearValidation.Value,
             validMediaIds,
-            validThumb);
+            validThumb,
+            targetDeposit);
 
         if (listingResult.IsFailure)
         {
@@ -312,6 +320,20 @@ public sealed partial class EquipmentListingService
             return Error.Validation("INVALID_THUMBNAIL_MEDIA_ID", "Thumbnail Media ID không được rỗng.");
         }
 
+        if (request.IsDepositAmountSpecified)
+        {
+            if (!request.DepositAmount.HasValue)
+            {
+                return Error.Validation("INVALID_DEPOSIT_AMOUNT", "Tiền cọc không được là null.");
+            }
+
+            var depositValidation = EquipmentListing.ValidateDepositAmount(request.DepositAmount.Value);
+            if (depositValidation.IsFailure)
+            {
+                return depositValidation.Error;
+            }
+        }
+
         // 2. Merge snapshot với các field được truyền (omitted giữ nguyên)
         string targetName = request.IsNameSpecified ? request.Name!.Trim() : snapshot.Name;
         string? targetDescription = request.IsDescriptionSpecified
@@ -435,6 +457,15 @@ public sealed partial class EquipmentListingService
             if (detailsRes.IsFailure)
             {
                 return detailsRes.Error;
+            }
+
+            if (request.IsDepositAmountSpecified)
+            {
+                var depRes = listing.UpdateDepositAmount(request.DepositAmount!.Value, now);
+                if (depRes.IsFailure)
+                {
+                    return depRes.Error;
+                }
             }
 
             var revision = await ctx.GetNextSearchRevisionAsync(ct);

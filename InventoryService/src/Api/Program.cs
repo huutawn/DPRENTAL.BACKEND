@@ -45,6 +45,35 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
     var defaultFactory = options.InvalidModelStateResponseFactory;
     options.InvalidModelStateResponseFactory = context =>
     {
+        var hasDepositError = context.ModelState.Keys.Any(k => string.Equals(k, "depositAmount", StringComparison.OrdinalIgnoreCase) || k.EndsWith(".depositAmount", StringComparison.OrdinalIgnoreCase)) ||
+                              context.ModelState.Values.SelectMany(v => v.Errors).Any(e => (e.ErrorMessage != null && e.ErrorMessage.Contains("INVALID_DEPOSIT_AMOUNT", StringComparison.OrdinalIgnoreCase)) || (e.Exception?.Message != null && e.Exception.Message.Contains("INVALID_DEPOSIT_AMOUNT", StringComparison.OrdinalIgnoreCase)));
+        if (hasDepositError)
+        {
+            var depositMsg = context.ModelState.Values
+                .SelectMany(v => v.Errors)
+                .Select(e => !string.IsNullOrWhiteSpace(e.ErrorMessage) ? e.ErrorMessage : e.Exception?.Message)
+                .FirstOrDefault(msg => !string.IsNullOrWhiteSpace(msg) && msg.Contains("INVALID_DEPOSIT_AMOUNT", StringComparison.OrdinalIgnoreCase));
+
+            if (depositMsg != null && depositMsg.StartsWith("INVALID_DEPOSIT_AMOUNT: ", StringComparison.OrdinalIgnoreCase))
+            {
+                depositMsg = depositMsg["INVALID_DEPOSIT_AMOUNT: ".Length..];
+            }
+
+            var problem = new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "INVALID_DEPOSIT_AMOUNT",
+                Detail = depositMsg ?? "Giá trị tiền cọc không hợp lệ.",
+                Type = "https://tools.ietf.org/html/rfc9110#section-15.5.1"
+            };
+            problem.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+
+            return new BadRequestObjectResult(problem)
+            {
+                ContentTypes = { "application/problem+json" }
+            };
+        }
+
         var actionDesc = context.ActionDescriptor as ControllerActionDescriptor;
         if (actionDesc != null &&
             (string.Equals(actionDesc.ControllerName, "InventoryAssets", StringComparison.OrdinalIgnoreCase) ||

@@ -141,6 +141,7 @@ public sealed class PublicEquipmentListingsControllerTests
             1,
             doc.RootElement.Clone(),
             new RentalRateDto(100_000m, null, null, "VND"),
+            500_000m,
             [],
             null,
             5,

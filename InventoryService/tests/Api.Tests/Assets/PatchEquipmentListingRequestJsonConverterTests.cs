@@ -201,4 +201,74 @@ public sealed class PatchEquipmentListingRequestJsonConverterTests
         Assert.Contains("\"manufactureYear\":2025", json);
         Assert.Contains($"\"mediaIds\":[\"{m1:D}\"]", json);
     }
+
+    [Theory]
+    [InlineData("{\"depositAmount\":0}", 0)]
+    [InlineData("{\"depositAmount\":500000}", 500000)]
+    [InlineData("{\"depositAmount\":999999999999999999}", 999999999999999999)]
+    public void Read_ValidDepositAmount_SetsPresenceAndValue(string json, decimal expected)
+    {
+        var request = JsonSerializer.Deserialize<PatchEquipmentListingRequest>(json, Options);
+        Assert.NotNull(request);
+        Assert.True(request.IsDepositAmountSpecified);
+        Assert.Equal(expected, request.DepositAmount);
+    }
+
+    [Fact]
+    public void Read_NullDepositAmount_SetsPresenceWithNull()
+    {
+        var request = JsonSerializer.Deserialize<PatchEquipmentListingRequest>("{\"depositAmount\":null}", Options);
+        Assert.NotNull(request);
+        Assert.True(request.IsDepositAmountSpecified);
+        Assert.Null(request.DepositAmount);
+    }
+
+    [Fact]
+    public void Read_OmittedDepositAmount_IsNotSpecified()
+    {
+        var request = JsonSerializer.Deserialize<PatchEquipmentListingRequest>("{\"name\":\"New Camera\"}", Options);
+        Assert.NotNull(request);
+        Assert.False(request.IsDepositAmountSpecified);
+        Assert.Null(request.DepositAmount);
+    }
+
+    [Theory]
+    [InlineData("{\"depositAmount\":500000.5}")]
+    [InlineData("{\"depositAmount\":0.00000000000000000000000000000001}")]
+    [InlineData("{\"depositAmount\":\"not-a-number\"}")]
+    [InlineData("{\"depositAmount\":true}")]
+    [InlineData("{\"depositAmount\":{}}")]
+    [InlineData("{\"depositAmount\":[]}")]
+    public void Read_InvalidDepositAmount_FractionOrWrongType_ThrowsJsonException(string json)
+    {
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<PatchEquipmentListingRequest>(json, Options));
+    }
+
+    [Fact]
+    public void Write_IncludesDepositAmountWhenSpecified()
+    {
+        var reqWithVal = new PatchEquipmentListingRequest
+        {
+            IsDepositAmountSpecified = true,
+            DepositAmount = 500_000m
+        };
+        var jsonWithVal = JsonSerializer.Serialize(reqWithVal, Options);
+        Assert.Contains("\"depositAmount\":500000", jsonWithVal);
+
+        var reqWithNull = new PatchEquipmentListingRequest
+        {
+            IsDepositAmountSpecified = true,
+            DepositAmount = null
+        };
+        var jsonWithNull = JsonSerializer.Serialize(reqWithNull, Options);
+        Assert.Contains("\"depositAmount\":null", jsonWithNull);
+
+        var reqOmitted = new PatchEquipmentListingRequest
+        {
+            IsNameSpecified = true,
+            Name = "Sony"
+        };
+        var jsonOmitted = JsonSerializer.Serialize(reqOmitted, Options);
+        Assert.DoesNotContain("depositAmount", jsonOmitted);
+    }
 }

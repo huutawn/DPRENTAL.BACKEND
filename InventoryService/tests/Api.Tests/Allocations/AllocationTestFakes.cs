@@ -43,7 +43,7 @@ internal sealed class FakeListingRepository : IEquipmentListingRepository
     {
         var list = Store.Values
             .Where(l => ids.Contains(l.Id))
-            .Select(l => new EquipmentListingBatchItem(l.Id, l.OwnerUserId, l.Name, l.ThumbnailMediaId, l.DailyRate, l.Currency, l.Status))
+            .Select(l => new EquipmentListingBatchItem(l.Id, l.OwnerUserId, l.Name, l.ThumbnailMediaId, l.DailyRate, l.Currency, l.Status, l.DepositAmount))
             .ToList();
         return Task.FromResult<IReadOnlyList<EquipmentListingBatchItem>>(list);
     }
