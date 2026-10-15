@@ -9,6 +9,7 @@ public sealed class CalendarReadRequirement : IAuthorizationRequirement { }
 public sealed class AvailabilityReadRequirement : IAuthorizationRequirement { }
 public sealed class AllocationWriteRequirement : IAuthorizationRequirement { }
 public sealed class ManualAllocationRequirement : IAuthorizationRequirement { }
+public sealed class EquipmentListingBatchReadRequirement : IAuthorizationRequirement { }
 
 /// <summary>
 /// Authorization Handler tập trung xử lý toàn bộ 5 chính sách phân quyền của Inventory Service.
@@ -47,6 +48,10 @@ public sealed class InventoryAuthorizationHandler : IAuthorizationHandler
 
                 case ManualAllocationRequirement manualReq:
                     HandleManualAllocation(context, manualReq);
+                    break;
+
+                case EquipmentListingBatchReadRequirement batchReq:
+                    HandleEquipmentListingBatchRead(context, batchReq);
                     break;
             }
         }
@@ -95,6 +100,18 @@ public sealed class InventoryAuthorizationHandler : IAuthorizationHandler
     private void HandleAllocationWrite(AuthorizationHandlerContext context, AllocationWriteRequirement req)
     {
         if (InventoryAccessEvaluator.CanWriteAllocations(_caller))
+        {
+            context.Succeed(req);
+        }
+        else
+        {
+            context.Fail();
+        }
+    }
+
+    private void HandleEquipmentListingBatchRead(AuthorizationHandlerContext context, EquipmentListingBatchReadRequirement req)
+    {
+        if (InventoryAccessEvaluator.CanReadEquipmentListingBatch(_caller))
         {
             context.Succeed(req);
         }

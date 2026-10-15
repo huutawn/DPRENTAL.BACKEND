@@ -270,4 +270,21 @@ public static class InventoryAccessEvaluator
 
         return caller.Permissions.Contains(PermissionAssetManage) && caller.UserId == assetOwnerUserId;
     }
+
+    /// <summary>
+    /// Kiểm tra quyền đọc batch EquipmentListing:
+    /// - Chỉ Service u=svc có scope s=inventory.availability.read.
+    /// - Human (kể cả Admin) bị từ chối hoàn toàn.
+    /// </summary>
+    public static bool CanReadEquipmentListingBatch(IInventoryCallerContext caller)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated || !caller.IsService)
+        {
+            return false;
+        }
+
+        return caller.Scopes.Contains(ScopeAvailabilityRead);
+    }
 }

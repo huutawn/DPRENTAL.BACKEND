@@ -49,6 +49,11 @@ public interface IEquipmentListingRepository : IRepo<EquipmentListing, Guid>
     Task<EquipmentListingStatisticsResult> GetListingStatisticsAsync(EquipmentListingStatisticsCriteria criteria, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Lấy danh sách tóm tắt EquipmentListing theo tập ID bằng một truy vấn AsNoTracking, chỉ chọn các trường cần trả phục vụ Rental batch.
+    /// </summary>
+    Task<IReadOnlyList<EquipmentListingBatchItem>> GetBatchByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Đưa Listing mới vào hàng đợi lưu trữ.
     /// </summary>
     void Add(EquipmentListing listing);

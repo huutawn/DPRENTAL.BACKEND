@@ -81,4 +81,13 @@ public interface IEquipmentListingService
         EquipmentListingStatus? status,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Đọc thông tin tóm tắt danh sách EquipmentListing theo lô (batch) phục vụ Rental Service.
+    /// Yêu cầu Service principal có scope inventory.availability.read.
+    /// </summary>
+    Task<Result<EquipmentListingBatchResponse>> GetListingBatchAsync(
+        EquipmentListingBatchRequest request,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default);
 }

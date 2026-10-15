@@ -42,6 +42,10 @@ public static class InventoryAuthorizationExtensions
             options.AddPolicy(InventoryPolicies.ManualAllocation, policy =>
                 policy.RequireAuthenticatedUser()
                       .AddRequirements(new ManualAllocationRequirement()));
+
+            options.AddPolicy(InventoryPolicies.EquipmentListingBatchRead, policy =>
+                policy.RequireAuthenticatedUser()
+                      .AddRequirements(new EquipmentListingBatchReadRequirement()));
         });
 
         return services;
