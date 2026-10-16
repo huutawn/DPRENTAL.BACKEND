@@ -17,7 +17,7 @@ public class RentalOperationReceipt
     public const string StatusSucceeded = "Succeeded";
     public const string StatusFailed = "Failed";
     public const string StatusManualRefundRequired = "MANUAL_REFUND_REQUIRED";
-
+    public const string StatusManualReconciliationRequired = "MANUAL_RECONCILIATION_REQUIRED";
     public const string ClassificationTransient = "Transient";
     public const string ClassificationBusiness = "Business";
     public const string ClassificationUncertain = "Uncertain";
@@ -282,6 +282,19 @@ public class RentalOperationReceipt
         NextRetryAt = requestedAt;
         LastAttemptedAt = requestedAt;
         IsTransient = true;
+    }
+
+    internal void MarkManualReconciliationRequired(DateTimeOffset utcNow, string? reason = null)
+    {
+        Status = StatusManualReconciliationRequired;
+        IsSuccess = false;
+        IsTransient = false;
+        NextRetryAt = null;
+        LastAttemptedAt = utcNow;
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            ErrorMessage = reason;
+        }
     }
 
     internal void RecordRetryAttempt(DateTimeOffset attemptedAt, DateTimeOffset? nextRetryAt, string? errorMessage = null, string? classification = null)

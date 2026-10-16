@@ -41,6 +41,15 @@ public interface IRentalOrderRepository
         DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
 
+    Task<IReadOnlyList<Guid>> GetRenterResponseTimeoutItemIdsAsync(
+    DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<Guid>> GetDisputedItemIdsAsync(
+        int skip, int take, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<Guid>> GetSettlementReadyItemIdsAsync(
+        int batchSize, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<RenterCalendarItemRecord>> GetRenterCalendarItemsAsync(
         Guid renterId,
         DateOnly monthStart,

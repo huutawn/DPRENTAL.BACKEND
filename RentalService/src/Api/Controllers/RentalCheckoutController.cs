@@ -155,11 +155,6 @@ public sealed class RentalCheckoutController(
             details.Extensions["lines"] = result.LineIssues;
         }
 
-        if (result.HoldConflicts.Count > 0)
-        {
-            details.Extensions["conflicts"] = result.HoldConflicts;
-        }
-
         if (result.CurrentQuote is not null)
         {
             details.Extensions["currentQuote"] = CheckoutQuoteResponse.From(result.CurrentQuote);
@@ -168,12 +163,6 @@ public sealed class RentalCheckoutController(
         if (result.PendingOrderCode is not null)
         {
             details.Extensions["pendingOrderCode"] = result.PendingOrderCode;
-        }
-
-        if (result.Order is not null)
-        {
-            details.Extensions["orderCode"] = result.Order.OrderCode;
-            details.Extensions["paymentDeadline"] = result.Order.PaymentDeadline;
         }
 
         return problem;

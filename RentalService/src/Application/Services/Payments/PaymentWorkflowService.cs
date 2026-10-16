@@ -5,6 +5,7 @@ using System.Text.Json;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Producers;
+using Dprental.RentalService.Application.Kafka.Configuration;
 using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.Services.Operations;
@@ -84,7 +85,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             lockManager,
             operationExecutor,
             unitOfWork,
-            null!,
+            new InventoryCommandProducer(outboxRepository, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), timeProvider),
             configuration,
             logger,
             timeProvider)
@@ -372,22 +373,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         }
 
         // Direct invocation/tests outside lock executes hold/cleanup
-        if (order.Status == RentalOrderStatus.Paid)
-        {
-            foreach (var item in order.Items)
-            {
-                string opKey = RentalOperationExecutor.ComputeOperationKey("ExtendHold", $"{order.Id}:{item.Id}");
-                await _operationExecutor.ExecuteExtendHoldAsync(order.Id, item.Id, opKey, cancellationToken);
-            }
-        }
-        else if (order.LatePaymentRefundRequired)
-        {
-            foreach (var item in order.Items)
-            {
-                string relKey = RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
-                await _operationExecutor.ExecuteReleaseAllocationAsync(order.Id, item.Id, relKey, cancellationToken);
-            }
-        }
+
 
         return Result.Success();
     }

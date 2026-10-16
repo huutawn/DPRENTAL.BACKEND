@@ -39,7 +39,7 @@ public sealed class SwaggerDocumentationTests
                 Assert.True(operation.Value.GetProperty("responses").TryGetProperty("500", out _), $"{where} thiếu response 500");
             }
         }
-        Assert.Equal(19, operationCount);
+        Assert.Equal(23, operationCount);
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/returns", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/deductions", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/handover", out _));
@@ -49,9 +49,11 @@ public sealed class SwaggerDocumentationTests
         Assert.False(paths.TryGetProperty("/api/v1/rental/admin/suppliers/{supplierId}/confirmation-statistics", out _));
         Assert.False(paths.TryGetProperty("/api/v1/rental/internal/orders/{orderId}/operations/{operationId}/replay", out _));
         var checkoutResponses = paths.GetProperty("/api/v1/rental/checkout").GetProperty("post").GetProperty("responses");
-        // Checkout bất đồng bộ: chỉ trả 202 kèm statusUrl, đơn được tạo sau khi Inventory giữ lịch.
         Assert.True(checkoutResponses.TryGetProperty("202", out _));
         Assert.False(checkoutResponses.TryGetProperty("201", out _));
+        Assert.True(checkoutResponses.TryGetProperty("400", out _));
+        Assert.True(checkoutResponses.TryGetProperty("409", out _));
+        Assert.True(checkoutResponses.TryGetProperty("503", out _));
         Assert.True(checkoutResponses.TryGetProperty("503", out _));
         var cart = paths.GetProperty("/api/v1/rental/cart");
         Assert.True(cart.GetProperty("delete").GetProperty("responses").TryGetProperty("404", out _));

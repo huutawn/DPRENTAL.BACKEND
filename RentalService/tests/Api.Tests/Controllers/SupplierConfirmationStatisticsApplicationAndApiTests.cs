@@ -79,6 +79,17 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
         public Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(
             DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<Guid>>([]);
+        public Task<IReadOnlyList<Guid>> GetRenterResponseTimeoutItemIdsAsync(
+            DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Guid>>([]);
+
+        public Task<IReadOnlyList<Guid>> GetDisputedItemIdsAsync(
+            int skip, int take, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Guid>>([]);
+
+        public Task<IReadOnlyList<Guid>> GetSettlementReadyItemIdsAsync(
+            int batchSize, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Guid>>([]);
 
     }
 

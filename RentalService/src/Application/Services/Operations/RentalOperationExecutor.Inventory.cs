@@ -83,56 +83,13 @@ public sealed partial class RentalOperationExecutor
         if (_inventoryCommands != null)
         {
             var extendCmd = new ExtendHoldCommandPayload(order.Id, item.Id, receipt.OperationId, request.NewHoldExpiresAt);
-            await _inventoryCommands.EnqueueExtendHoldAsync(extendCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
-        }
-
-        Result<ExtendHoldResponse>? clientResult = null;
-        try
-        {
-            clientResult = await _inventoryClient.ExtendHoldAsync(item.AllocationGroupId, request, cancellationToken);
-        }
-        catch
-        {
-            // Ignore if client is stub/no-op
-        }
-
-        if (clientResult != null && clientResult.IsSuccess)
-        {
-            receipt.MarkSucceeded(utcNow, JsonSerializer.Serialize(clientResult.Value, JsonOptions));
-
-            var notifyEnvelope = new KafkaMessageEnvelope<RentalSupplierConfirmationRequestedPayload>(
-                Guid.NewGuid(),
-                KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested,
-                1,
-                KafkaContractSpec.Producers.RentalService,
-                order.Id.ToString("D"),
-                utcNow,
-                receipt.OperationId,
-                null,
-                new RentalSupplierConfirmationRequestedPayload(
-                    order.Id,
-                    item.Id,
-                    item.SupplierId,
-                    item.EquipmentListingId,
-                    item.Quantity,
-                    item.SupplierConfirmationDeadline ?? utcNow.AddHours(24)));
-
-            var outbox = new RentalOutboxMessage(
-                notifyEnvelope.MessageId,
-                _rentalEventsTopic,
-                order.Id.ToString("D"),
-                KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested,
-                JsonSerializer.Serialize(notifyEnvelope, JsonOptions),
-                utcNow);
-
-            await _outboxRepository.AddAsync(outbox, cancellationToken);
-            await CommitLocalChangesAsync(order, cancellationToken);
-            return Result.Success();
-        }
-
-        if (clientResult != null && clientResult.IsFailure && clientResult.Error.Code is InventoryContractSpec.ErrorCodes.HoldExpired or InventoryContractSpec.ErrorCodes.InvalidHoldExpiry)
-        {
-            return await HandleHoldFailureAsync(order, item, receipt, clientResult.Error.Message, cancellationToken);
+            var enqueueResult = await _inventoryCommands.EnqueueExtendHoldAsync(extendCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
+            if (enqueueResult.IsFailure)
+            {
+                RecordExecutionFailure(receipt, enqueueResult.Error, utcNow, forceUncertain: false);
+                await CommitLocalChangesAsync(order, cancellationToken);
+                return enqueueResult.Error;
+            }
         }
 
         receipt.MarkProcessing(utcNow);
@@ -211,33 +168,13 @@ public sealed partial class RentalOperationExecutor
         if (_inventoryCommands != null)
         {
             var releaseCmd = new ReleaseAllocationCommandPayload(order.Id, item.Id, receipt.OperationId, request.Reason);
-            await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
-        }
-
-        Result<ReleaseAllocationResponse>? clientResult = null;
-        try
-        {
-            clientResult = await _inventoryClient.ReleaseAllocationAsync(item.AllocationGroupId, request, cancellationToken);
-        }
-        catch
-        {
-            // Ignore
-        }
-
-        if (clientResult != null && clientResult.IsSuccess)
-        {
-            item.MarkAssignmentsReleased();
-            receipt.MarkSucceeded(utcNow, JsonSerializer.Serialize(clientResult.Value, JsonOptions));
-            await CommitLocalChangesAsync(order, cancellationToken);
-
-            string refundOpKey = ComputeOperationKey("RequestRefund", $"{order.Id}:{item.Id}");
-            var pendingRefund = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundOpKey && r.Status == RentalOperationReceipt.StatusPending);
-            if (pendingRefund != null)
+            var enqueueResult = await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
+            if (enqueueResult.IsFailure)
             {
-                await RequestRefundInternalAsync(order, item, pendingRefund, refundOpKey, cancellationToken);
+                RecordExecutionFailure(receipt, enqueueResult.Error, utcNow, forceUncertain: false);
+                await CommitLocalChangesAsync(order, cancellationToken);
+                return enqueueResult.Error;
             }
-
-            return Result.Success();
         }
 
         receipt.MarkProcessing(utcNow);

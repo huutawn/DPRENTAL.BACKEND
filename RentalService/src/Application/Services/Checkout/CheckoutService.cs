@@ -154,7 +154,6 @@ public sealed class CheckoutService : ICheckoutService
                     if (enqueueResult.IsFailure)
                     {
                         await tx.RollbackAsync(cancellationToken);
-                        _unitOfWork.DiscardChanges();
                         return enqueueResult.Error;
                     }
 
@@ -180,7 +179,6 @@ public sealed class CheckoutService : ICheckoutService
                 await _operationRepository.AddAsync(checkoutOp, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await tx.CommitAsync(cancellationToken);
-
                 return new CheckoutOperationAcceptedResponse(
                     operationId,
                     $"/api/v1/rental/checkout/operations/{operationId}");

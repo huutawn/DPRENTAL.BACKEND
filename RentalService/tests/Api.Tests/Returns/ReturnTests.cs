@@ -1,12 +1,13 @@
 using Dprental.RentalService.Domain.Errors;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Producers;
+using Dprental.RentalService.Application.Kafka.Configuration;
 using System.Security.Claims;
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Media;
 using Dprental.RentalService.Application.DTOs.Returns;
-using Dprental.RentalService.Application.Kafka.Configuration;
-using Dprental.RentalService.Application.Kafka.Contracts;
-using Dprental.RentalService.Application.Kafka.Producers;
+
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Returns;
 using Dprental.RentalService.Common;
@@ -27,7 +28,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Dprental.RentalService.Domain.IRepositories;
+
 using Dprental.RentalService.Api.Tests.Cart;
+using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Api.Tests.Returns;
 
@@ -86,7 +89,6 @@ public sealed class ReturnTests : IAsyncLifetime
             new RentalOrderRepository(db), new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
             db, media ?? Mock.Of<IRentalMediaClient>(), _clock, outbox, configuration ?? Configuration(), inventoryCommands);
     }
-
     private async Task<RentalItem> SeedAsync(int quantity = 2)
     {
         var order = NewOrder(quantity);
@@ -184,8 +186,8 @@ public sealed class ReturnTests : IAsyncLifetime
             Assert.Equal(["DAMAGED", "NORMAL"], conditions);
             var pending = await new OperationReceiptRepository(db)
                 .GetPendingOperationDescriptorsExcludingActionsAsync(_clock.GetUtcNow(), 50,
-                    [RentalItem.MarkReturnedAction, RentalItem.BlockDamagedAction]);
-            Assert.DoesNotContain(pending, r => r.Action is RentalItem.MarkReturnedAction or RentalItem.BlockDamagedAction);
+                    [RentalItem.ApplyReturnedUnitsAction]);
+            Assert.DoesNotContain(pending, r => r.Action == RentalItem.ApplyReturnedUnitsAction);
             Assert.All(await db.RentalUnitAssignments.ToListAsync(), u => Assert.Null(u.AllocationClosedAt));
         }
     }

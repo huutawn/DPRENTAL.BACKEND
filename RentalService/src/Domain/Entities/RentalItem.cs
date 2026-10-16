@@ -131,7 +131,7 @@ public partial class RentalItem
         _unitAssignments.Any(u => u.Status == RentalUnitAssignmentStatus.ReturnedDamaged);
 
     [ForeignKey(nameof(RentalOrderId))]
-    public RentalOrder? RentalOrder { get; private set; }
+    public RentalOrder? RentalOrder { get; internal set; }
 
     [ForeignKey(nameof(RentalSubOrderId))]
     public RentalSubOrder? RentalSubOrder { get; private set; }
@@ -313,6 +313,26 @@ public partial class RentalItem
             "Supplier accepted rental item",
             decisionAt,
             operationId));
+    }
+
+    internal void ApplyHandover(DateTimeOffset utcNow, string operationKey)
+    {
+        string from = Status.ToString();
+        Status = RentalItemStatus.InRental;
+
+
+        RentalOrder?.AddStateTransition(new RentalStateTransition(
+            Guid.NewGuid(),
+            RentalOrderId,
+            Id,
+            from,
+            RentalItemStatus.InRental.ToString(),
+            "MarkAssetsHandedOver",
+            SupplierId,
+            ActorRole.Supplier,
+            "Supplier completed handover of rental item",
+            utcNow,
+            operationKey));
     }
 
     internal void ApplySupplierReject(

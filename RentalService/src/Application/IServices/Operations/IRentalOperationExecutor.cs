@@ -63,6 +63,13 @@ public interface IRentalOperationExecutor
         string operationKey,
         CancellationToken cancellationToken = default);
 
+    Task<Result> RequestRefundDirectAsync(
+        RentalOrder order,
+        RentalItem item,
+        RentalOperationReceipt receipt,
+        string operationKey,
+        CancellationToken cancellationToken = default);
+
     Task<Result> ExecuteReconcileAcceptAsync(
         Guid orderId,
         Guid itemId,

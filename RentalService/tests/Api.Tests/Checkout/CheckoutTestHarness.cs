@@ -172,7 +172,9 @@ internal sealed class CheckoutTestHarness
         ExpiryWorkflowService expiry = new(
             orders, outbox, Locks, executor, context, configuration, NullLogger<ExpiryWorkflowService>.Instance, Clock);
 
-        return await expiry.ProcessPaymentTimeoutsAsync();
+        int expired = await expiry.ProcessPaymentTimeoutsAsync();
+        await Completion.RunInventoryAsync(Guid.Empty);
+        return expired;
     }
 
     /// <summary>Các việc OperationRecoveryWorker sẽ nhặt lên ở lượt quét kế tiếp.</summary>

@@ -93,6 +93,7 @@ public static class ApplicationServiceCollectionExtensions
 
         // Integration
         services.AddScoped<IRefundCompletedConsumer, RefundCompletedConsumer>();
+        services.AddScoped<IRentalSettledConsumer, RentalSettledConsumer>();
 
         // Kafka subsystem (producers, consumers, workers, options)
         services.AddKafka(configuration ?? new ConfigurationBuilder().Build());
@@ -114,8 +115,10 @@ public static class ApplicationServiceCollectionExtensions
 
         // Settlement
         services.AddScoped<IDeductionService, DeductionService>();
+        services.AddScoped<IDeductionResponseService, DeductionResponseService>();
         // trong khối Background Workers:
         services.AddHostedService<DeductionDeadlineWorker>();
+
 
         return services;
     }
