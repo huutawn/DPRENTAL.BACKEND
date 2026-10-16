@@ -88,4 +88,9 @@ public class MediaAsset
     /// Danh sách các phiên tải lên liên quan đến asset này.
     /// </summary>
     public ICollection<MediaUploadSession> UploadSessions { get; set; } = new List<MediaUploadSession>();
+
+    /// <summary>
+    /// Danh sách các biến thể hình ảnh (variants) đã được tạo cho asset này.
+    /// </summary>
+    public ICollection<MediaImageVariant> ImageVariants { get; set; } = new List<MediaImageVariant>();
 }

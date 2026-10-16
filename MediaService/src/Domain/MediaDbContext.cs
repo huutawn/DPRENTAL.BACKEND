@@ -17,6 +17,7 @@ public class MediaDbContext : DbContext
     public DbSet<MediaAsset> MediaAssets => Set<MediaAsset>();
     public DbSet<MediaUploadSession> MediaUploadSessions => Set<MediaUploadSession>();
     public DbSet<MediaCleanupItem> MediaCleanupItems => Set<MediaCleanupItem>();
+    public DbSet<MediaImageVariant> MediaImageVariants => Set<MediaImageVariant>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

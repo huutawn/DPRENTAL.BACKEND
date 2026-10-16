@@ -55,12 +55,7 @@ public partial class MediaUploadService
                     Error.NotFound("AssetNotFound", "Không tìm thấy thông tin Media liên kết."));
             }
 
-            return Result.Success(new MediaCompletedDto(
-                completedAsset.Id,
-                completedAsset.Status.ToString(),
-                completedAsset.OriginalFileName,
-                completedAsset.ActualContentType ?? completedAsset.DeclaredContentType,
-                completedAsset.ActualSizeBytes ?? completedAsset.DeclaredSizeBytes));
+            return Result.Success(ToCompletedDto(completedAsset));
         }
 
         // 4. Kiểm tra phiên đã bị từ chối trước đó
@@ -194,12 +189,40 @@ public partial class MediaUploadService
                     Error.Unprocessable("ChecksumMismatch", reason));
             }
 
-            // Ghi trạng thái và công việc dọn khóa tạm trong cùng một lần SaveChanges.
-            asset.Status = MediaStatus.Ready;
             asset.ActualContentType = detectedContentType;
             asset.ActualSizeBytes = actualLength;
             asset.ActualChecksumSha256 = actualSha256;
             asset.StorageKey = permanentKey;
+
+            if (ImageVariantPolicy.IsProcessableImage(detectedContentType))
+            {
+                stream.Position = 0;
+                var variantResult = await _variantService.ProcessAndStoreVariantsAsync(
+                    asset, stream, session, cancellationToken);
+
+                if (variantResult.IsFailure)
+                {
+                    if (variantResult.Error.Type == ErrorType.Unprocessable)
+                    {
+                        await MarkSessionAndAssetRejectedAsync(session, asset, variantResult.Error.Message, now, cancellationToken, permanentKey);
+                        return Result.Failure<MediaCompletedDto>(variantResult.Error);
+                    }
+
+                    await DeleteCopiedObjectBestEffortAsync(permanentKey);
+                    return Result.Failure<MediaCompletedDto>(variantResult.Error);
+                }
+
+                return Result.Success(new MediaCompletedDto(
+                    asset.Id,
+                    MediaStatus.Ready.ToString(),
+                    asset.OriginalFileName,
+                    detectedContentType,
+                    actualLength,
+                    ImageVariants: variantResult.Value));
+            }
+
+            // Ghi trạng thái và công việc dọn khóa tạm cho định dạng không sinh variant (ví dụ: PDF)
+            asset.Status = MediaStatus.Ready;
             asset.UpdatedAtUtc = now;
 
             session.Status = UploadSessionStatus.Completed;
@@ -224,7 +247,8 @@ public partial class MediaUploadService
                 asset.Status.ToString(),
                 asset.OriginalFileName,
                 detectedContentType,
-                actualLength));
+                actualLength,
+                ImageVariants: []));
         }
         catch (MediaWriteConflictException)
         {
@@ -232,15 +256,10 @@ public partial class MediaUploadService
             var reloadedSession = await _sessionRepository.GetByIdUntrackedAsync(uploadId, cancellationToken);
             if (reloadedSession?.Status == UploadSessionStatus.Completed)
             {
-                var reloadedAsset = reloadedSession.MediaAsset ?? await _assetRepository.GetByIdAsync(reloadedSession.MediaAssetId, cancellationToken);
-                if (reloadedAsset != null)
+                var reloadedAsset = await _assetRepository.GetByIdUntrackedAsync(reloadedSession.MediaAssetId, cancellationToken);
+                if (reloadedAsset != null && reloadedAsset.Status == MediaStatus.Ready)
                 {
-                    return Result.Success(new MediaCompletedDto(
-                        reloadedAsset.Id,
-                        reloadedAsset.Status.ToString(),
-                        reloadedAsset.OriginalFileName,
-                        reloadedAsset.ActualContentType ?? reloadedAsset.DeclaredContentType,
-                        reloadedAsset.ActualSizeBytes ?? reloadedAsset.DeclaredSizeBytes));
+                    return Result.Success(ToCompletedDto(reloadedAsset));
                 }
             }
 
@@ -264,6 +283,23 @@ public partial class MediaUploadService
         catch (Exception exception)
         {
             LogCopyCleanupFailure(_logger, exception, storageKey);
+            try
+            {
+                await _cleanupRepository.AddAsync(new MediaCleanupItem
+                {
+                    Id = Guid.NewGuid(),
+                    StorageKey = storageKey,
+                    Reason = "FailedOrphanCleanup",
+                    Status = CleanupItemStatus.Pending,
+                    CreatedAtUtc = DateTimeOffset.UtcNow,
+                    EligibleAtUtc = DateTimeOffset.UtcNow
+                }, CancellationToken.None);
+                await _unitOfWork.SaveChangesAsync(CancellationToken.None);
+            }
+            catch
+            {
+                // Ignore secondary cleanup queue failure
+            }
         }
     }
 

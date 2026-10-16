@@ -2,6 +2,7 @@ using Dprental.MediaService.Api.Security;
 using Dprental.MediaService.Application.DTOs;
 using Dprental.MediaService.Application.IServices;
 using Dprental.MediaService.Common;
+using Dprental.MediaService.Application.Policies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -137,22 +138,71 @@ public class MediaController : ControllerBase
         return ToActionResult(result, StatusCodes.Status200OK);
     }
 
-    /// <summary>Public URL ổn định; chỉ Media Ready và Public được chuyển hướng tới URL ký ngắn hạn.</summary>
+    /// <summary>Public URL ổn định; không có variant chuyển hướng tới URL ký ngắn hạn; có variant trả WebP 200 trực tiếp.</summary>
     [AllowAnonymous]
     [HttpGet("{mediaId:guid}/content")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status302Found)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetPublicContent(
-        Guid mediaId, [FromQuery] bool download, CancellationToken cancellationToken)
+        Guid mediaId,
+        [FromQuery] string? variant,
+        [FromQuery] bool download,
+        CancellationToken cancellationToken)
     {
-        var result = await _accessService.CreatePublicReadUrlAsync(mediaId, download, cancellationToken);
-        Response.Headers.CacheControl = "no-store";
-        Response.Headers["Referrer-Policy"] = "no-referrer";
-        LogPublicGrant(_logger, mediaId, result.IsSuccess ? "granted" : result.Error.Code, null);
-        return result.IsSuccess
-            ? Redirect(result.Value.Url)
-            : ToActionResult(result, StatusCodes.Status302Found);
-    }
+        bool isOriginalVariant = string.Equals(variant?.Trim(), ImageVariantPolicy.Original, StringComparison.OrdinalIgnoreCase);
 
+        if (download && !string.IsNullOrWhiteSpace(variant) && !isOriginalVariant)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "InvalidVariantDownload",
+                detail: "download=true chỉ dùng với bản gốc; kết hợp với variant trả 400.");
+        }
+
+        if (download || isOriginalVariant)
+        {
+            var origResult = await _accessService.CreatePublicReadUrlAsync(mediaId, download, cancellationToken);
+            Response.Headers.CacheControl = "no-store";
+            Response.Headers["Referrer-Policy"] = "no-referrer";
+            LogPublicGrant(_logger, mediaId, origResult.IsSuccess ? "granted" : origResult.Error.Code, null);
+            return origResult.IsSuccess
+                ? Redirect(origResult.Value.Url)
+                : ToActionResult(origResult, StatusCodes.Status302Found);
+        }
+
+        string? ifNoneMatch = Request.Headers.IfNoneMatch.FirstOrDefault();
+        var variantResult = await _accessService.GetPublicVariantContentAsync(mediaId, variant, ifNoneMatch, cancellationToken);
+        if (variantResult.IsFailure)
+        {
+            Response.Headers.CacheControl = "no-store";
+            return ToActionResult(variantResult, StatusCodes.Status200OK);
+        }
+
+        var content = variantResult.Value;
+        if (content.FallbackToOriginal)
+        {
+            var origResult = await _accessService.CreatePublicReadUrlAsync(mediaId, false, cancellationToken);
+            Response.Headers.CacheControl = "no-store";
+            Response.Headers["Referrer-Policy"] = "no-referrer";
+            LogPublicGrant(_logger, mediaId, origResult.IsSuccess ? "granted" : origResult.Error.Code, null);
+            return origResult.IsSuccess
+                ? Redirect(origResult.Value.Url)
+                : ToActionResult(origResult, StatusCodes.Status302Found);
+        }
+
+        string etag = $"\"{content.ChecksumSha256}\"";
+        Response.Headers.ETag = etag;
+        Response.Headers.CacheControl = "public, max-age=0, s-maxage=300, must-revalidate";
+
+        if (content.IsNotModified)
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        return File(content.ContentStream!, content.ContentType);
+    }
     /// <summary>Business Service đồng bộ Public/Private theo trạng thái entity nghiệp vụ (yêu cầu service media scope publish hoặc */*).</summary>
     [HttpPut("{mediaId:guid}/visibility")]
     [RequireApiKey]

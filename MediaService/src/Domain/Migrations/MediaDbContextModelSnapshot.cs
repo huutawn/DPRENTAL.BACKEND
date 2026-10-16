@@ -105,6 +105,13 @@ namespace MediaService.Domain.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("ClaimedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ClaimedByWorkerId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -113,6 +120,9 @@ namespace MediaService.Domain.Migrations
 
                     b.Property<string>("LastError")
                         .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("LeaseExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset?>("ProcessedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -141,7 +151,61 @@ namespace MediaService.Domain.Migrations
 
                     b.HasIndex("Status", "EligibleAtUtc");
 
+                    b.HasIndex("Status", "EligibleAtUtc", "LeaseExpiresAtUtc");
+
                     b.ToTable("media_cleanup_items", "media");
+                });
+
+            modelBuilder.Entity("Dprental.MediaService.Domain.Entities.MediaImageVariant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ChecksumSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Height")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("MediaAssetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ProcessingVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("VariantName")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int>("Width")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaAssetId", "ProcessingVersion", "VariantName")
+                        .IsUnique();
+
+                    b.ToTable("media_image_variants", "media");
                 });
 
             modelBuilder.Entity("Dprental.MediaService.Domain.Entities.MediaUploadSession", b =>
@@ -205,6 +269,17 @@ namespace MediaService.Domain.Migrations
                     b.ToTable("media_upload_sessions", "media");
                 });
 
+            modelBuilder.Entity("Dprental.MediaService.Domain.Entities.MediaImageVariant", b =>
+                {
+                    b.HasOne("Dprental.MediaService.Domain.Entities.MediaAsset", "MediaAsset")
+                        .WithMany("ImageVariants")
+                        .HasForeignKey("MediaAssetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaAsset");
+                });
+
             modelBuilder.Entity("Dprental.MediaService.Domain.Entities.MediaUploadSession", b =>
                 {
                     b.HasOne("Dprental.MediaService.Domain.Entities.MediaAsset", "MediaAsset")
@@ -218,6 +293,8 @@ namespace MediaService.Domain.Migrations
 
             modelBuilder.Entity("Dprental.MediaService.Domain.Entities.MediaAsset", b =>
                 {
+                    b.Navigation("ImageVariants");
+
                     b.Navigation("UploadSessions");
                 });
 #pragma warning restore 612, 618

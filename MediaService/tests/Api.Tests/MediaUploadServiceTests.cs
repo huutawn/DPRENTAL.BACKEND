@@ -22,13 +22,24 @@ public class MediaUploadServiceTests
     private readonly IMediaCleanupRepository _cleanup = Substitute.For<IMediaCleanupRepository>();
     private readonly IObjectStorageService _storage = Substitute.For<IObjectStorageService>();
     private readonly IMediaAccessService _access = Substitute.For<IMediaAccessService>();
+    private readonly IImageVariantService _variantService = Substitute.For<IImageVariantService>();
     private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
     private readonly MediaUploadService _sut;
     private MediaUploadSession? _storedSession;
 
     public MediaUploadServiceTests()
     {
-        _sut = new MediaUploadService(_sessions, _assets, _cleanup, _storage, _access, _unitOfWork,
+        _variantService.ProcessAndStoreVariantsAsync(
+            Arg.Any<MediaAsset>(), Arg.Any<Stream>(), Arg.Any<MediaUploadSession?>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var s = call.ArgAt<MediaUploadSession?>(2);
+                if (s != null) s.Status = Dprental.MediaService.Common.Enums.UploadSessionStatus.Completed;
+                var a = call.ArgAt<MediaAsset>(0);
+                a.Status = Dprental.MediaService.Common.Enums.MediaStatus.Ready;
+                return Result.Success<IReadOnlyList<MediaImageVariantDto>>([]);
+            });
+        _sut = new MediaUploadService(_sessions, _assets, _cleanup, _storage, _access, _variantService, _unitOfWork,
             Microsoft.Extensions.Options.Options.Create(new UploadSettings()),
             NullLogger<MediaUploadService>.Instance);
         _access.CreateUploaderPreviewUrlAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())

@@ -12,4 +12,8 @@ public sealed record MediaCompletedDto(
     string ContentType,
     long SizeBytes,
     string? PreviewUrl = null,
-    DateTimeOffset? PreviewUrlExpiresAtUtc = null);
+    DateTimeOffset? PreviewUrlExpiresAtUtc = null,
+    IReadOnlyList<MediaImageVariantDto>? ImageVariants = null)
+{
+    public IReadOnlyList<MediaImageVariantDto> ImageVariants { get; init; } = ImageVariants ?? [];
+}
