@@ -176,6 +176,7 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
         client.DefaultRequestHeaders.Add("X-Test-Renter-Id", Guid.NewGuid().ToString());
         using var foreign = await client.PostAsJsonAsync(route, request);
-        Assert.Equal(HttpStatusCode.Forbidden, foreign.StatusCode);
+        // Supplier khác nhận 404 như khi khoản thuê không tồn tại (IDOR).
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
     }
 }

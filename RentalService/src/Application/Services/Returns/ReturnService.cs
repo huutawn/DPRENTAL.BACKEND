@@ -36,8 +36,8 @@ public sealed class ReturnService(
         RecordReturnRequest request, string idempotencyKey, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(caller);
-        if (!caller.IsAuthenticated || caller.IsService || !caller.UserId.HasValue || caller.UserId == Guid.Empty)
-            return Error.Unauthorized("AUTH_REQUIRED", "Supplier authentication is required.");
+        Result<Guid> supplier = RentalAuthorizationPolicy.AuthorizeSupplierCaller(caller);
+        if (supplier.IsFailure) return supplier.Error;
         if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Trim().Length > 64)
             return Error.Validation("INVALID_IDEMPOTENCY_KEY", "Idempotency-Key is required (maximum 64 characters).");
         if (request?.Units is null || request.Units.Count == 0 || request.Units.Any(u => u is null || u.MediaIds is null))
@@ -48,14 +48,16 @@ public sealed class ReturnService(
             !configuration.GetValue("Rental:InventoryReturn:Enabled", true)))
             return Error.ServiceUnavailable("INVENTORY_RETURN_KAFKA_DISABLED",
                 "Kafka and Inventory return processing must be enabled to record a Kafka-backed return.");
-        Guid supplierId = caller.UserId.Value;
+        Guid supplierId = supplier.Value;
         var orderId = await repository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
         if (!orderId.HasValue) return RentalErrors.ItemNotFound;
         await using var orderLock = await locks.AcquireOrderLockAsync(orderId.Value, TimeSpan.FromSeconds(5), cancellationToken);
         var order = await repository.GetByIdWithDetailsAsync(orderId.Value, cancellationToken);
-        var item = order?.Items.FirstOrDefault(i => i.Id == itemId);
-        if (item is null || order is null) return RentalErrors.ItemNotFound;
-        if (item.SupplierId != supplierId) return RentalErrors.UnauthorizedSupplier;
+        if (order is null) return RentalErrors.ItemNotFound;
+        Result<RentalItem> owned = RentalAuthorizationPolicy.AuthorizeSupplierItem(
+            supplierId, order.Items.FirstOrDefault(i => i.Id == itemId));
+        if (owned.IsFailure) return owned.Error;
+        RentalItem item = owned.Value;
         string key = idempotencyKey.Trim();
         string payload = JsonSerializer.Serialize(new
         {

@@ -1,3 +1,4 @@
+using Dprental.RentalService.Domain.Errors;
 using System.Security.Claims;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Security.Jwt;
@@ -173,11 +174,11 @@ public sealed class AuthRentalContractAndPolicyTests
         IRentalCallerContext admin = CreateUserCaller(Guid.NewGuid(), roles: ["admin"]);
         Assert.True(RentalAuthorizationPolicy.AuthorizeOrderRead(admin, order).IsSuccess);
 
-        // 4. Stranger -> Forbidden
+        // 4. Stranger -> NotFound, the same error as a missing order (no IDOR probing)
         IRentalCallerContext stranger = CreateUserCaller(otherUserId);
         Result strangerRes = RentalAuthorizationPolicy.AuthorizeOrderRead(stranger, order);
         Assert.True(strangerRes.IsFailure);
-        Assert.Equal("Auth.Forbidden", strangerRes.Error.Code);
+        Assert.Equal(RentalErrors.OrderNotFound, strangerRes.Error);
     }
 
     [Fact]
@@ -196,11 +197,11 @@ public sealed class AuthRentalContractAndPolicyTests
         Assert.True(serviceRes.IsFailure);
         Assert.Equal("Auth.ServiceTokenNotAllowed", serviceRes.Error.Code);
 
-        // 3. Other user -> Forbidden
+        // 3. Other user -> NotFound, the same error as a missing order
         IRentalCallerContext other = CreateUserCaller(Guid.NewGuid());
         Result otherRes = RentalAuthorizationPolicy.AuthorizeRenterAction(other, order);
         Assert.True(otherRes.IsFailure);
-        Assert.Equal("Auth.Forbidden", otherRes.Error.Code);
+        Assert.Equal(RentalErrors.OrderNotFound, otherRes.Error);
     }
 
     [Fact]
@@ -220,11 +221,11 @@ public sealed class AuthRentalContractAndPolicyTests
         Assert.True(serviceRes.IsFailure);
         Assert.Equal("Auth.ServiceTokenNotAllowed", serviceRes.Error.Code);
 
-        // 3. User with Owner/Member role of another organization -> SupplierMismatch
+        // 3. User with Owner/Member role of another organization -> same NotFound as a missing item
         IRentalCallerContext otherOrgOwner = CreateUserCaller(Guid.NewGuid(), roles: ["owner", "member"]);
         Result mismatchRes = RentalAuthorizationPolicy.AuthorizeSupplierAction(otherOrgOwner, item);
         Assert.True(mismatchRes.IsFailure);
-        Assert.Equal("RentalItem.SupplierMismatch", mismatchRes.Error.Code);
+        Assert.Equal(RentalErrors.ItemNotFound, mismatchRes.Error);
     }
 
     [Fact]
@@ -271,11 +272,13 @@ public sealed class AuthRentalContractAndPolicyTests
         IRentalCallerContext admin = CreateUserCaller(Guid.NewGuid(), roles: ["admin"]);
         Assert.True(RentalAuthorizationPolicy.AuthorizeEvidenceRead(admin, order, item, evidenceMediaId).IsSuccess);
 
-        // 4. Stranger -> Forbidden
+        // 4. Stranger -> the same EvidenceNotFound as an unrelated media id (evidence ids cannot be probed)
         IRentalCallerContext stranger = CreateUserCaller(Guid.NewGuid());
         Result strangerRes = RentalAuthorizationPolicy.AuthorizeEvidenceRead(stranger, order, item, evidenceMediaId);
         Assert.True(strangerRes.IsFailure);
-        Assert.Equal("Auth.Forbidden", strangerRes.Error.Code);
+        Assert.Equal("Media.EvidenceNotFound", strangerRes.Error.Code);
+        Result unrelatedForStranger = RentalAuthorizationPolicy.AuthorizeEvidenceRead(stranger, order, item, unrelatedMediaId);
+        Assert.Equal(strangerRes.Error, unrelatedForStranger.Error);
 
         // 5. Service token -> ServiceTokenNotAllowed
         IRentalCallerContext service = CreateServiceCaller();

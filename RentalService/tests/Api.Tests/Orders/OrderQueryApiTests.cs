@@ -28,8 +28,6 @@ namespace Dprental.RentalService.Api.Tests.Orders;
 /// <summary>Gọi các API xem đơn qua HTTP với toàn bộ DI thật, chỉ thay database và cách xác thực.</summary>
 public sealed class OrderQueryApiTests
 {
-    private const string SubjectHeader = "X-Test-Sub";
-    private const string RolesHeader = "X-Test-Roles";
 
     [Fact]
     public async Task GetOrders_WithoutToken_Returns401()
@@ -228,96 +226,4 @@ public sealed class OrderQueryApiTests
     private static async Task<JsonElement> ReadAsync(HttpResponseMessage response) =>
         JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
 
-    private sealed class OrderApiFactory : WebApplicationFactory<Program>
-    {
-        private readonly string _dbName = Guid.NewGuid().ToString("N");
-
-        public Guid RenterId { get; } = Guid.NewGuid();
-
-        public Guid SupplierBinh { get; } = Guid.NewGuid();
-
-        public Guid SupplierCuong { get; } = Guid.NewGuid();
-
-        public HttpClient CreateClientFor(Guid userId, string? roles = null)
-        {
-            HttpClient client = CreateClient();
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
-            client.DefaultRequestHeaders.Add(SubjectHeader, userId.ToString("D"));
-            if (roles is not null)
-            {
-                client.DefaultRequestHeaders.Add(RolesHeader, roles);
-            }
-
-            return client;
-        }
-
-        /// <summary>Đơn của người thuê gồm máy xúc của Bình và máy trộn của Cường, đã thanh toán.</summary>
-        public RentalOrder SeedPaidMixedOrder()
-        {
-            RentalOrder order = OrderTestData.Paid(
-                OrderTestData.Order(
-                    RenterId,
-                    "DH-2026-000010",
-                    OrderTestData.Now,
-                    OrderTestData.Line(SupplierBinh, "Máy xúc CAT 320", "Máy xúc", "Caterpillar", 1, 3_000_000m, 20_000_000m),
-                    OrderTestData.Line(SupplierCuong, "Máy trộn bê tông 350L", "Máy trộn", "Hòa Phát", 2, 400_000m, 3_000_000m)),
-                OrderTestData.Now.AddMinutes(5));
-
-            using IServiceScope scope = Services.CreateScope();
-            RentalServiceDbContext context = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
-            context.RentalOrders.Add(order);
-            context.SaveChanges();
-            return order;
-        }
-
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
-        {
-            builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
-
-            builder.ConfigureTestServices(services =>
-            {
-                services.RemoveAll<IHostedService>();
-                services.RemoveAll<DbContextOptions<RentalServiceDbContext>>();
-                services.RemoveAll<IDbContextOptionsConfiguration<RentalServiceDbContext>>();
-                services.AddDbContext<RentalServiceDbContext>(options => options.UseInMemoryDatabase(_dbName));
-                services.RemoveAll<IOrderLockManager>();
-                services.AddSingleton<IOrderLockManager, FakeOrderLockManager>();
-                services.RemoveAll<TimeProvider>();
-                services.AddSingleton<TimeProvider>(new FixedTimeProvider(OrderTestData.Now.AddMinutes(10)));
-
-                services.AddAuthentication("TestScheme")
-                    .AddScheme<AuthenticationSchemeOptions, HeaderAuthHandler>("TestScheme", _ => { });
-            });
-        }
-    }
-
-    /// <summary>Dựng danh tính người gọi từ header của request.</summary>
-    private sealed class HeaderAuthHandler(
-        IOptionsMonitor<AuthenticationSchemeOptions> options,
-        ILoggerFactory logger,
-        UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
-    {
-        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
-        {
-            string? subject = Request.Headers[SubjectHeader];
-            if (string.IsNullOrWhiteSpace(subject))
-            {
-                return Task.FromResult(AuthenticateResult.NoResult());
-            }
-
-            List<Claim> claims =
-            [
-                new(RentalAuthClaims.Subject, subject),
-                new(RentalAuthClaims.ProfileCompleted, "true")
-            ];
-            string? roles = Request.Headers[RolesHeader];
-            if (!string.IsNullOrWhiteSpace(roles))
-            {
-                claims.Add(new Claim(RentalAuthClaims.Roles, roles));
-            }
-
-            ClaimsPrincipal principal = new(new ClaimsIdentity(claims, "TestScheme"));
-            return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, "TestScheme")));
-        }
-    }
 }

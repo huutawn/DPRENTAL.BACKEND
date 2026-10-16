@@ -22,8 +22,8 @@ public sealed class DeductionService(
         Guid itemId, IRentalCallerContext caller, SubmitDeductionRequest request,
         string idempotencyKey, CancellationToken cancellationToken = default)
     {
-        if (caller is null || !caller.IsAuthenticated || caller.IsService || caller.UserId is null || caller.UserId == Guid.Empty)
-            return Error.Unauthorized("AUTH_REQUIRED", "Supplier authentication is required.");
+        Result<Guid> supplier = RentalAuthorizationPolicy.AuthorizeSupplierCaller(caller);
+        if (supplier.IsFailure) return supplier.Error;
         if (request is null || request.EvidenceMediaIds is null || request.AffectedAssetIds is null)
             return Error.Validation("INVALID_DEDUCTION_REQUEST", "Deduction request is incomplete.");
         if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Trim().Length > 64)
@@ -33,10 +33,12 @@ public sealed class DeductionService(
         if (orderId is null) return RentalErrors.ItemNotFound;
         await using var orderLock = await locks.AcquireOrderLockAsync(orderId.Value, TimeSpan.FromSeconds(5), cancellationToken);
         RentalOrder? order = await orders.GetByIdWithDetailsAsync(orderId.Value, cancellationToken);
-        RentalItem? item = order?.Items.FirstOrDefault(i => i.Id == itemId);
-        if (item is null || order is null) return RentalErrors.ItemNotFound;
-        Guid supplierId = caller.UserId.Value;
-        if (item.SupplierId != supplierId) return RentalErrors.UnauthorizedSupplier;
+        if (order is null) return RentalErrors.ItemNotFound;
+        Guid supplierId = supplier.Value;
+        Result<RentalItem> owned = RentalAuthorizationPolicy.AuthorizeSupplierItem(
+            supplierId, order.Items.FirstOrDefault(i => i.Id == itemId));
+        if (owned.IsFailure) return owned.Error;
+        RentalItem item = owned.Value;
 
         string key = idempotencyKey.Trim();
         string payload = JsonSerializer.Serialize(new
