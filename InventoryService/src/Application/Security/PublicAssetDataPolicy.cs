@@ -52,7 +52,12 @@ public static class PublicAssetDataPolicy
 
         // Owner permissions
         "permissions", "permission",
-        "inventoryAssetManage", "inventory_asset_manage", "inventory.asset.manage"
+        "inventoryAssetManage", "inventory_asset_manage", "inventory.asset.manage",
+
+        // Warehouse internal & sensitive location data
+        "addressDetail", "address_detail", "address",
+        "latitude", "longitude", "coordinates", "lat", "lng",
+        "warehouseId", "warehouse_id"
     };
 
     /// <summary>

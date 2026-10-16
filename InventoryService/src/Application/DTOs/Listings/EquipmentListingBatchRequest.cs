@@ -8,5 +8,6 @@ namespace Dprental.InventoryService.Application.DTOs.Listings;
 /// </summary>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record EquipmentListingBatchRequest(
-    [property: JsonPropertyName("equipmentListingIds")] IReadOnlyList<Guid>? EquipmentListingIds
+    [property: JsonPropertyName("equipmentListingIds")] IReadOnlyList<Guid>? EquipmentListingIds,
+    [property: JsonPropertyName("includeWarehouse")] bool IncludeWarehouse = false
 );

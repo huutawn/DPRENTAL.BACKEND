@@ -26,6 +26,88 @@ namespace InventoryService.Domain.Migrations
 
             modelBuilder.HasSequence("search_projection_revision_seq", "inventory");
 
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AllocationOperationReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("ClosesGroup")
+                        .HasColumnType("boolean")
+                        .HasColumnName("closes_group");
+
+                    b.Property<string>("CommandType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("command_type");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("error_code");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("error_message");
+
+                    b.Property<string>("GroupReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("group_reference");
+
+                    b.Property<string>("OperationKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("operation_key");
+
+                    b.Property<string>("PayloadFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("payload_fingerprint");
+
+                    b.Property<Guid>("RentalOrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("rental_order_id");
+
+                    b.Property<string>("ResultPayloadJson")
+                        .HasColumnType("text")
+                        .HasColumnName("result_payload_json");
+
+                    b.Property<string>("SourceSystem")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("source_system");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RentalOrderId")
+                        .HasDatabaseName("ix_allocation_operation_receipts_order");
+
+                    b.HasIndex("SourceSystem", "GroupReference")
+                        .HasDatabaseName("ix_allocation_operation_receipts_group")
+                        .HasFilter("\"group_reference\" IS NOT NULL");
+
+                    b.HasIndex("SourceSystem", "OperationKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_allocation_operation_receipts_source_opkey");
+
+                    b.ToTable("allocation_operation_receipts", "inventory");
+                });
+
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AllocationTransition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -137,14 +219,14 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("hold_expires_at");
 
-                    b.Property<DateTimeOffset?>("ReturnedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("returned_at");
-
                     b.Property<string>("Notes")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
                         .HasColumnName("notes");
+
+                    b.Property<DateTimeOffset?>("ReturnedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("returned_at");
 
                     b.Property<string>("SourceSystem")
                         .IsRequired()
@@ -205,6 +287,8 @@ namespace InventoryService.Domain.Migrations
                         {
                             t.HasCheckConstraint("ck_asset_allocations_group_reference", "\"group_reference\" IS NULL OR (length(btrim(\"group_reference\")) > 0 AND length(\"group_reference\") <= 100)");
 
+                            t.HasCheckConstraint("ck_asset_allocations_handover_return", "(\"returned_at\" IS NULL OR \"handed_over_at\" IS NOT NULL) AND (\"returned_at\" IS NULL OR \"returned_at\" >= \"handed_over_at\")");
+
                             t.HasCheckConstraint("ck_asset_allocations_held_hold_expires_at", "\"status\" <> 1 OR \"hold_expires_at\" IS NOT NULL");
 
                             t.HasCheckConstraint("ck_asset_allocations_rental_period_order", "\"start_date\" <= \"end_date\"");
@@ -212,91 +296,7 @@ namespace InventoryService.Domain.Migrations
                             t.HasCheckConstraint("ck_asset_allocations_source_reference", "length(btrim(\"source_system\")) > 0 AND length(btrim(\"external_reference\")) > 0");
 
                             t.HasCheckConstraint("ck_asset_allocations_status", "\"status\" IN (1, 2, 5, 6)");
-
-                            t.HasCheckConstraint("ck_asset_allocations_handover_return", "(\"returned_at\" IS NULL OR \"handed_over_at\" IS NOT NULL) AND (\"returned_at\" IS NULL OR \"returned_at\" >= \"handed_over_at\")");
                         });
-                });
-
-            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AllocationOperationReceipt", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<bool>("ClosesGroup")
-                        .HasColumnType("boolean")
-                        .HasColumnName("closes_group");
-
-                    b.Property<string>("CommandType")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("command_type");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("ErrorCode")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("error_code");
-
-                    b.Property<string>("ErrorMessage")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
-                        .HasColumnName("error_message");
-
-                    b.Property<string>("GroupReference")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("group_reference");
-
-                    b.Property<string>("OperationKey")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("operation_key");
-
-                    b.Property<string>("PayloadFingerprint")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("payload_fingerprint");
-
-                    b.Property<Guid>("RentalOrderId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("rental_order_id");
-
-                    b.Property<string>("ResultPayloadJson")
-                        .HasColumnType("text")
-                        .HasColumnName("result_payload_json");
-
-                    b.Property<string>("SourceSystem")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("source_system");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer")
-                        .HasColumnName("status");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("RentalOrderId")
-                        .HasDatabaseName("ix_allocation_operation_receipts_order");
-
-                    b.HasIndex("SourceSystem", "GroupReference")
-                        .HasDatabaseName("ix_allocation_operation_receipts_group")
-                        .HasFilter("\"group_reference\" IS NOT NULL");
-
-                    b.HasIndex("SourceSystem", "OperationKey")
-                        .IsUnique()
-                        .HasDatabaseName("ix_allocation_operation_receipts_source_opkey");
-
-                    b.ToTable("allocation_operation_receipts", "inventory");
                 });
 
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.CalendarBlock", b =>
@@ -479,8 +479,8 @@ namespace InventoryService.Domain.Migrations
 
                             t.HasCheckConstraint("ck_equipment_listings_daily_rate", "daily_rate >= 1 AND daily_rate <= 999999999999999999 AND trunc(daily_rate) = daily_rate");
 
-
                             t.HasCheckConstraint("ck_equipment_listings_deposit_amount", "deposit_amount >= 0 AND deposit_amount <= 999999999999999999 AND trunc(deposit_amount) = deposit_amount");
+
                             t.HasCheckConstraint("ck_equipment_listings_description", "description IS NULL OR (description ~ '\\S' AND length(description) <= 2000)");
 
                             t.HasCheckConstraint("ck_equipment_listings_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid AND brand_id <> '00000000-0000-0000-0000-000000000000'::uuid");
@@ -996,6 +996,85 @@ namespace InventoryService.Domain.Migrations
                     b.ToTable("search_projection_jobs", "inventory");
                 });
 
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.Warehouse", b =>
+                {
+                    b.Property<Guid>("OwnerUserId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_user_id");
+
+                    b.Property<string>("AddressDetail")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("address_detail");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<double?>("Latitude")
+                        .HasColumnType("double precision")
+                        .HasColumnName("latitude");
+
+                    b.Property<double?>("Longitude")
+                        .HasColumnType("double precision")
+                        .HasColumnName("longitude");
+
+                    b.Property<string>("ProvinceCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("province_code");
+
+                    b.Property<string>("ProvinceName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("province_name");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<string>("WardCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("ward_code");
+
+                    b.Property<string>("WardName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("ward_name");
+
+                    b.HasKey("OwnerUserId");
+
+                    b.HasIndex("ProvinceCode", "WardCode")
+                        .HasDatabaseName("ix_warehouses_province_ward");
+
+                    b.ToTable("warehouses", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_warehouses_address_detail", "address_detail IS NULL OR (address_detail ~ '\\S' AND length(address_detail) <= 500)");
+
+                            t.HasCheckConstraint("ck_warehouses_identity", "owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_warehouses_latitude", "latitude IS NULL OR (latitude >= -90.0 AND latitude <= 90.0)");
+
+                            t.HasCheckConstraint("ck_warehouses_longitude", "longitude IS NULL OR (longitude >= -180.0 AND longitude <= 180.0)");
+
+                            t.HasCheckConstraint("ck_warehouses_province_code", "province_code IS NULL OR (province_code ~ '\\S' AND length(province_code) <= 20)");
+
+                            t.HasCheckConstraint("ck_warehouses_province_name", "province_name IS NULL OR (province_name ~ '\\S' AND length(province_name) <= 200)");
+
+                            t.HasCheckConstraint("ck_warehouses_ward_code", "ward_code IS NULL OR (ward_code ~ '\\S' AND length(ward_code) <= 20)");
+
+                            t.HasCheckConstraint("ck_warehouses_ward_name", "ward_name IS NULL OR (ward_name ~ '\\S' AND length(ward_name) <= 200)");
+                        });
+                });
+
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AllocationTransition", b =>
                 {
                     b.HasOne("Dprental.InventoryService.Domain.Entities.AssetAllocation", "Allocation")
@@ -1029,6 +1108,17 @@ namespace InventoryService.Domain.Migrations
                     b.Navigation("Asset");
                 });
 
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.EquipmentListing", b =>
+                {
+                    b.HasOne("Dprental.InventoryService.Domain.Entities.Warehouse", "Warehouse")
+                        .WithMany("Listings")
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Warehouse");
+                });
+
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.InventoryAsset", b =>
                 {
                     b.HasOne("Dprental.InventoryService.Domain.Entities.EquipmentListing", "Listing")
@@ -1055,6 +1145,11 @@ namespace InventoryService.Domain.Migrations
                     b.Navigation("Allocations");
 
                     b.Navigation("CalendarBlocks");
+                });
+
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.Warehouse", b =>
+                {
+                    b.Navigation("Listings");
                 });
 #pragma warning restore 612, 618
         }

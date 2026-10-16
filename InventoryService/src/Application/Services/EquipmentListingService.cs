@@ -331,6 +331,11 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
             return Error.Forbidden("FORBIDDEN", "Chỉ Service với scope inventory.availability.read mới có quyền đọc batch listing.");
         }
 
+        if (request.IncludeWarehouse && !InventoryAccessEvaluator.CanReadWarehouseBatch(caller))
+        {
+            return Error.Forbidden("FORBIDDEN", "Yêu cầu địa chỉ kho cần có scope inventory.warehouse.read.");
+        }
+
         var deduplicatedIds = new List<Guid>();
         var seenIds = new HashSet<Guid>();
         foreach (var id in request.EquipmentListingIds)
@@ -351,6 +356,19 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         {
             if (listingsById.TryGetValue(id, out var listing))
             {
+                EquipmentListingBatchWarehouseDto? warehouseDto = null;
+                if (request.IncludeWarehouse && listing.Warehouse != null)
+                {
+                    warehouseDto = new EquipmentListingBatchWarehouseDto(
+                        listing.Warehouse.AddressDetail,
+                        listing.Warehouse.ProvinceCode,
+                        listing.Warehouse.ProvinceName,
+                        listing.Warehouse.WardCode,
+                        listing.Warehouse.WardName,
+                        listing.Warehouse.Latitude,
+                        listing.Warehouse.Longitude);
+                }
+
                 items.Add(new EquipmentListingBatchItemResponse(
                     listing.Id,
                     listing.OwnerUserId,
@@ -359,7 +377,8 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
                     listing.DailyRate,
                     listing.Currency,
                     listing.Status.ToString(),
-                    listing.DepositAmount));
+                    listing.DepositAmount,
+                    warehouseDto));
             }
             else
             {

@@ -115,6 +115,10 @@ public sealed class SharedCalendarIntegrationTests : IClassFixture<PostgresFixtu
             FixedNow,
             2024).Value;
 
+        if (!await db.Warehouses.AnyAsync(w => w.OwnerUserId == ownerId))
+        {
+            db.Warehouses.Add(Warehouse.CreateWithAddress(ownerId, "123 Test Street", "01", "Thành phố Hà Nội", "00070", "Phường Hoàn Kiếm", 21.0, 105.8, FixedNow).Value);
+        }
         listing.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
         db.EquipmentListings.Add(listing);
 

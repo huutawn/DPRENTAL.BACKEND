@@ -25,6 +25,8 @@ public sealed class PublicEquipmentListingsController : ControllerBase
         "categoryId",
         "equipmentTypeId",
         "brandId",
+        "provinceCode",
+        "wardCode",
         "sort",
         "filters",
         "from",
@@ -72,7 +74,7 @@ public sealed class PublicEquipmentListingsController : ControllerBase
         {
             return this.ToProblem(Error.Validation(
                 "INVALID_QUERY_PARAMETER",
-                $"Query parameter '{invalidQueryKeys[0]}' không được hỗ trợ. Endpoint danh sách công khai chỉ chấp nhận: q, categoryId, equipmentTypeId, brandId, sort, filters, from, to, requestedQuantity, page, pageSize."));
+                $"Query parameter '{invalidQueryKeys[0]}' không được hỗ trợ. Endpoint danh sách công khai chỉ chấp nhận: q, categoryId, equipmentTypeId, brandId, provinceCode, wardCode, sort, filters, from, to, requestedQuantity, page, pageSize."));
         }
 
         // 3. Yêu cầu from và to phải được cung cấp đồng thời; từ chối chuỗi rỗng

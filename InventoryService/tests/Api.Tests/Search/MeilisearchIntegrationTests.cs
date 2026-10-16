@@ -267,6 +267,7 @@ public sealed partial class MeilisearchIntegrationTests : IAsyncLifetime, IAsync
             manufactureYear: 2023).Value;
         // Activate listing
         listing.UpdateStatus(EquipmentListingStatus.Active, hasUnitAcceptingBookings: true, now);
+        db.Warehouses.Add(Warehouse.CreateWithAddress(ownerId, "123 Street", "01", "Thành phố Hà Nội", "00070", "Phường Hoàn Kiếm", 21.0, 105.8, now).Value);
         db.EquipmentListings.Add(listing);
         await db.SaveChangesAsync();
 
@@ -353,6 +354,7 @@ public sealed partial class MeilisearchIntegrationTests : IAsyncLifetime, IAsync
                 now: now,
                 manufactureYear: 2023).Value;
             l.UpdateStatus(EquipmentListingStatus.Active, hasUnitAcceptingBookings: true, now);
+            db.Warehouses.Add(Warehouse.CreateWithAddress(l.OwnerUserId, "123 Street", "01", "Thành phố Hà Nội", "00070", "Phường Hoàn Kiếm", 21.0, 105.8, now).Value);
             db.EquipmentListings.Add(l);
         }
         await db.SaveChangesAsync();
@@ -416,6 +418,7 @@ public sealed partial class MeilisearchIntegrationTests : IAsyncLifetime, IAsync
             currency: "VND",
             now: now,
             manufactureYear: 2024).Value;
+        db.Warehouses.Add(Warehouse.CreateWithAddress(listing.OwnerUserId, "123 Street", "01", "Thành phố Hà Nội", "00070", "Phường Hoàn Kiếm", 21.0, 105.8, now).Value);
         db.EquipmentListings.Add(listing);
 
         // Add 2 assets to listing

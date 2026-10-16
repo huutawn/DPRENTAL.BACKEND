@@ -73,10 +73,28 @@ public sealed partial class EquipmentListingRepository
             parameters.Add(new NpgsqlParameter("pBrandId", filters.BrandId.Value));
         }
 
+        string warehouseJoin = "";
+        if (!string.IsNullOrWhiteSpace(filters.ProvinceCode) || !string.IsNullOrWhiteSpace(filters.WardCode))
+        {
+            warehouseJoin = "JOIN \"inventory\".\"warehouses\" w ON l.owner_user_id = w.owner_user_id";
+            if (!string.IsNullOrWhiteSpace(filters.ProvinceCode))
+            {
+                clauses.Add("w.province_code = @pProvinceCode");
+                parameters.Add(new NpgsqlParameter("pProvinceCode", filters.ProvinceCode.Trim()));
+            }
+
+            if (!string.IsNullOrWhiteSpace(filters.WardCode))
+            {
+                clauses.Add("w.ward_code = @pWardCode");
+                parameters.Add(new NpgsqlParameter("pWardCode", filters.WardCode.Trim()));
+            }
+        }
+
         string whereSql = string.Join(" AND ", clauses);
         string sql = $"""
             SELECT DISTINCT l.schema_version AS "Value" FROM "inventory"."equipment_listings" l
             {joinSql}
+            {warehouseJoin}
             WHERE {whereSql}
             ORDER BY "Value" ASC
             """;
@@ -121,6 +139,7 @@ public sealed partial class EquipmentListingRepository
                 .ToListAsync(cancellationToken);
             var ids = rows.Select(r => r.Id).ToList();
             var listings = await _context.EquipmentListings
+                .Include(l => l.Warehouse)
                 .Where(l => ids.Contains(l.Id))
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
@@ -192,6 +211,23 @@ public sealed partial class EquipmentListingRepository
         {
             clauses.Add("l.brand_id = @pBrandId");
             commonParams.Add(new NpgsqlParameter("pBrandId", filters.BrandId.Value));
+        }
+
+        string warehouseJoin = "";
+        if (!string.IsNullOrWhiteSpace(filters.ProvinceCode) || !string.IsNullOrWhiteSpace(filters.WardCode))
+        {
+            warehouseJoin = "JOIN \"inventory\".\"warehouses\" w ON l.owner_user_id = w.owner_user_id";
+            if (!string.IsNullOrWhiteSpace(filters.ProvinceCode))
+            {
+                clauses.Add("w.province_code = @pProvinceCode");
+                commonParams.Add(new NpgsqlParameter("pProvinceCode", filters.ProvinceCode.Trim()));
+            }
+
+            if (!string.IsNullOrWhiteSpace(filters.WardCode))
+            {
+                clauses.Add("w.ward_code = @pWardCode");
+                commonParams.Add(new NpgsqlParameter("pWardCode", filters.WardCode.Trim()));
+            }
         }
 
         AppendDynamicFilters(clauses, commonParams, filters);
@@ -296,6 +332,7 @@ public sealed partial class EquipmentListingRepository
         string countSql = $"""
             SELECT COUNT(*)::int AS "Value" FROM "inventory"."equipment_listings" l
             {joinSql}
+            {warehouseJoin}
             WHERE {filterWhere}
             """;
 
@@ -313,6 +350,7 @@ public sealed partial class EquipmentListingRepository
             SELECT l.id AS "Id", ({totalQtyExpr}) AS "TotalQuantity", ({availableQtyExpr}) AS "AvailableQuantity"
             FROM "inventory"."equipment_listings" l
             {joinSql}
+            {warehouseJoin}
             WHERE {filterWhere}
             {orderSql}
             LIMIT @pTake OFFSET @pSkip

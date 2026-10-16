@@ -305,14 +305,14 @@ public sealed class OutboxCacheInvalidationIntegrationTests : IClassFixture<Post
             var caller = new TestCaller { UserId = ownerId };
             var request = new CreateCalendarBlockRequest
             {
-                StartDate = new DateOnly(2026, 10, 15),
-                EndDate = new DateOnly(2026, 10, 18),
+                StartDate = new DateOnly(2026, 10, 18),
+                EndDate = new DateOnly(2026, 10, 20),
                 Reason = CalendarBlockReason.Maintenance,
                 Note = "Routine maintenance"
             };
 
             var res = await calService.CreateCalendarBlockAsync(assetId, request, caller);
-            Assert.True(res.IsSuccess);
+            Assert.True(res.IsSuccess, res.Error.ToString());
         }
 
         // Worker claim và invalidate cache

@@ -1,6 +1,7 @@
 using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Domain.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.InventoryService.Api.Tests.Integration;
 
@@ -50,6 +51,10 @@ public static class IntegrationTestHelper
             manufactureYear ?? 2024,
             actualMediaIds,
             thumbnailMediaId).Value;
+        if (!await db.Warehouses.AnyAsync(w => w.OwnerUserId == actualOwner))
+        {
+            db.Warehouses.Add(Warehouse.CreateWithAddress(actualOwner, "123 Test Street", "01", "Thành phố Hà Nội", "00070", "Phường Hoàn Kiếm", 21.0, 105.8, actualNow).Value);
+        }
         listing.UpdateStatus(EquipmentListingStatus.Active, true, actualNow);
         db.EquipmentListings.Add(listing);
 
@@ -117,6 +122,10 @@ public static class IntegrationTestHelper
             manufactureYear,
             actualMediaIds,
             thumbnailMediaId).Value;
+        if (!await db.Warehouses.AnyAsync(w => w.OwnerUserId == actualOwner))
+        {
+            db.Warehouses.Add(Warehouse.CreateWithAddress(actualOwner, "123 Test Street", "01", "Thành phố Hà Nội", "00070", "Phường Hoàn Kiếm", 21.0, 105.8, actualNow).Value);
+        }
         db.EquipmentListings.Add(listing);
 
         for (int i = 0; i < initialUnits; i++)
