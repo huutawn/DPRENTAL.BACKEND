@@ -13,6 +13,10 @@ public static class OrderQueryErrors
     public static readonly Error InvalidStatus =
         Error.Validation("Order.InvalidStatus", "Trạng thái lọc không hợp lệ.");
 
+    public static readonly Error InvalidDateRange = Error.Validation(
+        "Order.InvalidDateRange",
+        "createdFrom và createdTo phải là thời điểm ISO 8601 có Z hoặc ±HH:mm, và createdFrom nhỏ hơn createdTo.");
+
     // Đơn của người khác cũng trả lỗi này để không lộ việc mã đơn có tồn tại hay không.
     public static readonly Error OrderNotFound =
         Error.NotFound("Order.NotFound", "Không tìm thấy đơn hàng.");

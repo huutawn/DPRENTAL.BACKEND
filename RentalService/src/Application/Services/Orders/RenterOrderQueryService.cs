@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Orders;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.IServices.Orders;
@@ -14,11 +13,6 @@ namespace Dprental.RentalService.Application.Services.Orders;
 
 public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRenterOrderQueryService
 {
-    private const string RequestRefundAction = "RequestRefund";
-
-    // Cùng cách checkout ghi tài khoản hoàn tiền vào RefundDestinationRef.
-    private static readonly JsonSerializerOptions RefundAccountJsonOptions = new(JsonSerializerDefaults.Web);
-
     public async Task<Result<PagedResponse<RenterOrderSummaryResponse>>> GetMyOrdersAsync(
         int page,
         int pageSize,
@@ -88,10 +82,7 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             return OrderQueryErrors.OrderNotFound;
         }
 
-        HashSet<Guid> refundRequestedItemIds = order.OperationReceipts
-            .Where(r => r.Action == RequestRefundAction && r.TargetItemId.HasValue)
-            .Select(r => r.TargetItemId!.Value)
-            .ToHashSet();
+        HashSet<Guid> refundRequestedItemIds = OrderQueryMapper.RefundRequestedItemIds(order);
 
         List<RenterSubOrderResponse> subOrders = order.SubOrders
             .OrderBy(s => s.SubOrderCode, StringComparer.Ordinal)
@@ -109,9 +100,9 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             order.PaymentDeadline,
             order.InvoiceRef,
             order.PaymentConfirmedAt,
-            ToPaymentState(order),
+            OrderQueryMapper.ToPaymentState(order),
             OrderQueryMapper.ToDelivery(order),
-            ToRefundAccount(order.RefundDestinationRef),
+            OrderQueryMapper.ParseRefundAccount(order.RefundDestinationRef),
             totalRental,
             totalDeposit,
             totalRental + totalDeposit,
@@ -167,39 +158,10 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             item.SupplierConfirmationDeadline,
             item.SupplierDecisionAt,
             item.Status == RentalItemStatus.Rejected ? item.SupplierDecisionReason : null,
-            ToRefund(item, refundRequested),
+            OrderQueryMapper.ToRefund(item, refundRequested),
             OrderQueryMapper.ToHandover(item),
             OrderQueryMapper.ToReturns(item),
             OrderQueryMapper.ToSettlement(item));
-    }
-
-    private static RenterPaymentState ToPaymentState(RentalOrder order)
-    {
-        if (order.LatePaymentRefundRequired)
-        {
-            return RenterPaymentState.LatePaymentRefund;
-        }
-
-        if (order.PaymentConfirmedAt.HasValue)
-        {
-            return RenterPaymentState.Paid;
-        }
-
-        return order.Status == RentalOrderStatus.PendingPayment
-            ? RenterPaymentState.Pending
-            : RenterPaymentState.Expired;
-    }
-
-    private static RenterItemRefundResponse ToRefund(RentalItem item, bool refundRequested)
-    {
-        if (!string.IsNullOrWhiteSpace(item.RefundRef))
-        {
-            return new RenterItemRefundResponse(RenterRefundState.Completed, item.RefundRef);
-        }
-
-        return new RenterItemRefundResponse(
-            refundRequested ? RenterRefundState.Processing : RenterRefundState.None,
-            null);
     }
 
     /// <summary>Thông số được lưu dạng chuỗi JSON; trả ra dạng object. Chuỗi hỏng thì bỏ qua thay vì làm lỗi cả đơn.</summary>
@@ -214,37 +176,6 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
         {
             using JsonDocument document = JsonDocument.Parse(specValuesJson);
             return document.RootElement.ValueKind == JsonValueKind.Object ? document.RootElement.Clone() : null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Checkout lưu tài khoản hoàn tiền dạng JSON trong RefundDestinationRef. Đơn cũ lưu ORIGINAL_PAYMENT_SOURCE
-    /// (hoàn về nguồn thanh toán) nên không có tài khoản để trả.
-    /// </summary>
-    private static RenterRefundAccountResponse? ToRefundAccount(string refundDestinationRef)
-    {
-        if (string.IsNullOrWhiteSpace(refundDestinationRef) || !refundDestinationRef.TrimStart().StartsWith('{'))
-        {
-            return null;
-        }
-
-        try
-        {
-            CheckoutRefundAccountDto? account =
-                JsonSerializer.Deserialize<CheckoutRefundAccountDto>(refundDestinationRef, RefundAccountJsonOptions);
-            if (account is null ||
-                string.IsNullOrWhiteSpace(account.BankCode) ||
-                string.IsNullOrWhiteSpace(account.AccountNumber) ||
-                string.IsNullOrWhiteSpace(account.AccountHolderName))
-            {
-                return null;
-            }
-
-            return new RenterRefundAccountResponse(account.BankCode, account.AccountNumber, account.AccountHolderName);
         }
         catch (JsonException)
         {

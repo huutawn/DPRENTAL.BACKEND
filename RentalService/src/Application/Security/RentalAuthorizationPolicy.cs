@@ -196,6 +196,35 @@ public static class RentalAuthorizationPolicy
     }
 
     /// <summary>
+    /// Evaluates whether the caller may search and read any rental order, including internal references.
+    /// Invariant: Only authenticated human administrators; service tokens are refused.
+    /// </summary>
+    public static Result AuthorizeAdminOrderRead(IRentalCallerContext caller)
+    {
+        if (!caller.IsAuthenticated)
+        {
+            return Error.Unauthorized(ErrorCodes.Unauthorized, "Yêu cầu đăng nhập.");
+        }
+
+        if (caller.IsService)
+        {
+            return Error.Forbidden(ErrorCodes.ServiceTokenNotAllowed, "Service token không được tra cứu đơn thuê.");
+        }
+
+        if (!caller.UserId.HasValue)
+        {
+            return Error.Unauthorized(ErrorCodes.Unauthorized, "Yêu cầu danh tính người dùng hợp lệ.");
+        }
+
+        if (!caller.IsAdmin())
+        {
+            return Error.Forbidden(ErrorCodes.Forbidden, "Chỉ quản trị viên mới được tra cứu mọi đơn thuê.");
+        }
+
+        return Result.Success();
+    }
+
+    /// <summary>
     /// Evaluates whether the caller has authority to access private evidence media for a given rental item/order.
     /// Invariants:
     /// - Caller must be platform admin, the order's renter, or the item's supplier.

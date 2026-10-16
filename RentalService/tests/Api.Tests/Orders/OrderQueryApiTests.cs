@@ -29,6 +29,7 @@ namespace Dprental.RentalService.Api.Tests.Orders;
 public sealed class OrderQueryApiTests
 {
     private const string SubjectHeader = "X-Test-Sub";
+    private const string RolesHeader = "X-Test-Roles";
 
     [Fact]
     public async Task GetOrders_WithoutToken_Returns401()
@@ -91,6 +92,52 @@ public sealed class OrderQueryApiTests
         Assert.Equal(0, (await ReadAsync(pending)).GetProperty("totalCount").GetInt32());
         Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
         Assert.Equal("Order.InvalidStatus", (await ReadAsync(unknown)).GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task Admin_SearchesAndOpensAnyOrder_OthersAreRefused()
+    {
+        using OrderApiFactory factory = new();
+        RentalOrder order = factory.SeedPaidMixedOrder();
+        RentalItem mixers = order.Items.Single(i => i.SupplierId == factory.SupplierCuong);
+        using HttpClient admin = factory.CreateClientFor(Guid.NewGuid(), roles: "admin");
+        using HttpClient renter = factory.CreateClientFor(factory.RenterId);
+
+        using HttpResponseMessage byAsset =
+            await admin.GetAsync($"/api/v1/rental/admin/orders?assetId={mixers.UnitAssignments.First().AssetId}&itemStatus=PENDING_SUPPLIER_CONFIRMATION");
+        using HttpResponseMessage noMatch = await admin.GetAsync($"/api/v1/rental/admin/orders?renterId={Guid.NewGuid()}");
+        using HttpResponseMessage badGuid = await admin.GetAsync("/api/v1/rental/admin/orders?listingId=abc");
+        using HttpResponseMessage badDate = await admin.GetAsync("/api/v1/rental/admin/orders?createdFrom=2026-10-01");
+        using HttpResponseMessage detail = await admin.GetAsync($"/api/v1/rental/admin/orders/{order.Id}");
+        using HttpResponseMessage renterSearch = await renter.GetAsync("/api/v1/rental/admin/orders");
+        using HttpResponseMessage renterDetail = await renter.GetAsync($"/api/v1/rental/admin/orders/{order.Id}");
+        using HttpResponseMessage anonymous = await factory.CreateClient().GetAsync("/api/v1/rental/admin/orders");
+
+        Assert.Equal(HttpStatusCode.OK, byAsset.StatusCode);
+        JsonElement found = await ReadAsync(byAsset);
+        Assert.Equal(1, found.GetProperty("totalCount").GetInt32());
+        Assert.Equal(order.RenterId, found.GetProperty("items")[0].GetProperty("renterId").GetGuid());
+        Assert.Equal(0, (await ReadAsync(noMatch)).GetProperty("totalCount").GetInt32());
+        Assert.Equal(HttpStatusCode.BadRequest, badGuid.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, badDate.StatusCode);
+        Assert.Equal("Order.InvalidDateRange", (await ReadAsync(badDate)).GetProperty("title").GetString());
+
+        Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
+        JsonElement body = await ReadAsync(detail);
+        Assert.Equal($"INV-{order.OrderCode}", body.GetProperty("invoiceRef").GetString());
+        Assert.Equal("PAID", body.GetProperty("paymentState").GetString());
+        Assert.Equal("******6789", body.GetProperty("refundAccount").GetProperty("maskedAccountNumber").GetString());
+        Assert.False(body.GetProperty("refundAccount").TryGetProperty("accountNumber", out _));
+        JsonElement mixerLine = body.GetProperty("subOrders").EnumerateArray()
+            .SelectMany(s => s.GetProperty("items").EnumerateArray())
+            .Single(i => i.GetProperty("rentalItemId").GetGuid() == mixers.Id);
+        Assert.Equal(mixers.AllocationGroupId, mixerLine.GetProperty("allocationGroupId").GetString());
+        Assert.Equal(2, mixerLine.GetProperty("units").GetArrayLength());
+        Assert.True(body.GetProperty("history").GetArrayLength() > 0);
+
+        Assert.Equal(HttpStatusCode.Forbidden, renterSearch.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, renterDetail.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
     }
 
     [Fact]
@@ -191,11 +238,16 @@ public sealed class OrderQueryApiTests
 
         public Guid SupplierCuong { get; } = Guid.NewGuid();
 
-        public HttpClient CreateClientFor(Guid userId)
+        public HttpClient CreateClientFor(Guid userId, string? roles = null)
         {
             HttpClient client = CreateClient();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
             client.DefaultRequestHeaders.Add(SubjectHeader, userId.ToString("D"));
+            if (roles is not null)
+            {
+                client.DefaultRequestHeaders.Add(RolesHeader, roles);
+            }
+
             return client;
         }
 
@@ -253,11 +305,16 @@ public sealed class OrderQueryApiTests
                 return Task.FromResult(AuthenticateResult.NoResult());
             }
 
-            Claim[] claims =
+            List<Claim> claims =
             [
                 new(RentalAuthClaims.Subject, subject),
                 new(RentalAuthClaims.ProfileCompleted, "true")
             ];
+            string? roles = Request.Headers[RolesHeader];
+            if (!string.IsNullOrWhiteSpace(roles))
+            {
+                claims.Add(new Claim(RentalAuthClaims.Roles, roles));
+            }
 
             ClaimsPrincipal principal = new(new ClaimsIdentity(claims, "TestScheme"));
             return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, "TestScheme")));

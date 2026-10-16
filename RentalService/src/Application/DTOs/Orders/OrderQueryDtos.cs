@@ -122,7 +122,7 @@ public sealed record RenterOrderDetailResponse(
     DateTimeOffset PaymentDeadline,
     string? InvoiceRef,
     DateTimeOffset? PaidAt,
-    RenterPaymentState PaymentState,
+    OrderPaymentState PaymentState,
     OrderDeliveryResponse Delivery,
     RenterRefundAccountResponse? RefundAccount,
     decimal TotalRentalAmount,

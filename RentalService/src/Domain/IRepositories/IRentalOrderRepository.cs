@@ -93,4 +93,17 @@ public interface IRentalOrderRepository
         Guid subOrderId,
         Guid supplierId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Một trang đơn khớp điều kiện tìm của Admin, mới nhất trước.</summary>
+    Task<RecordPage<AdminOrderSummaryRecord>> SearchOrdersForAdminAsync(
+        AdminOrderSearchCriteria criteria,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Đơn kèm đơn con, dòng, máy đã gán, bàn giao, trả máy, đề xuất khấu trừ, lịch sử trạng thái và các yêu cầu hoàn
+    /// tiền; không lọc theo người sở hữu, chỉ dùng cho Admin. Không theo dõi thay đổi.
+    /// </summary>
+    Task<RentalOrder?> GetOrderForAdminAsync(Guid orderId, CancellationToken cancellationToken = default);
 }

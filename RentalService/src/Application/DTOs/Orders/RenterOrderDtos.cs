@@ -6,7 +6,7 @@ namespace Dprental.RentalService.Application.DTOs.Orders;
 /// <summary>
 /// Tình trạng thanh toán của đơn, suy ra từ trạng thái đơn và thời điểm Payment xác nhận.
 /// </summary>
-public enum RenterPaymentState
+public enum OrderPaymentState
 {
     /// <summary>Đơn đang chờ thanh toán.</summary>
     Pending = 0,
@@ -24,7 +24,7 @@ public enum RenterPaymentState
 /// <summary>
 /// Tình trạng hoàn tiền của một dòng thiết bị.
 /// </summary>
-public enum RenterRefundState
+public enum OrderRefundState
 {
     /// <summary>Dòng không có khoản hoàn nào.</summary>
     None = 0,
@@ -71,8 +71,8 @@ public sealed record OrderListingSnapshotResponse(
 /// </summary>
 /// <param name="State">Chưa có, đang hoàn hoặc đã hoàn.</param>
 /// <param name="RefundRef">Mã hoàn tiền bên PaymentService khi đã hoàn xong.</param>
-public sealed record RenterItemRefundResponse(
-    RenterRefundState State,
+public sealed record OrderItemRefundResponse(
+    OrderRefundState State,
     string? RefundRef);
 
 /// <summary>
@@ -161,7 +161,7 @@ public sealed record RenterOrderItemResponse(
     DateTimeOffset? SupplierConfirmationDeadline,
     DateTimeOffset? SupplierDecisionAt,
     string? RejectReason,
-    RenterItemRefundResponse Refund,
+    OrderItemRefundResponse Refund,
     OrderHandoverResponse? Handover,
     IReadOnlyList<OrderReturnResponse> Returns,
     OrderSettlementResponse? Settlement);

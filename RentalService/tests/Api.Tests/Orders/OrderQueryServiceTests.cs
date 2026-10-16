@@ -122,7 +122,7 @@ public sealed class OrderQueryServiceTests
         Assert.Equal("Kho Thủ Đức, TP.HCM", excavator.Listing.PickupLocation);
         Assert.Equal(excavatorItem.ThumbnailMediaIdSnapshot, excavator.Listing.ThumbnailMediaId);
         Assert.Equal(55, excavator.Listing.SpecValues!.Value.GetProperty("cong_suat_kw").GetInt32());
-        Assert.Equal(new RenterItemRefundResponse(RenterRefundState.None, null), excavator.Refund);
+        Assert.Equal(new OrderItemRefundResponse(OrderRefundState.None, null), excavator.Refund);
         Assert.Null(excavator.Handover);
         Assert.Empty(excavator.Returns);
         Assert.Null(excavator.Settlement);
@@ -131,7 +131,7 @@ public sealed class OrderQueryServiceTests
         Assert.Equal(_cuong, cuong.SupplierId);
         Assert.Equal(2, Assert.Single(cuong.Items).Quantity);
 
-        Assert.Equal(RenterPaymentState.Paid, order.PaymentState);
+        Assert.Equal(OrderPaymentState.Paid, order.PaymentState);
         Assert.Equal(new RenterRefundAccountResponse("VCB", "0123456789", "NGUYỄN VĂN AN"), order.RefundAccount);
     }
 
@@ -169,9 +169,9 @@ public sealed class OrderQueryServiceTests
         Result<RenterOrderDetailResponse> latePaid =
             await RenterService().GetMyOrderAsync(_latePaidOrder.Id, OrderTestData.User(_an));
 
-        Assert.Equal(RenterPaymentState.Pending, unpaid.Value.PaymentState);
+        Assert.Equal(OrderPaymentState.Pending, unpaid.Value.PaymentState);
         Assert.Null(unpaid.Value.PaidAt);
-        Assert.Equal(RenterPaymentState.LatePaymentRefund, latePaid.Value.PaymentState);
+        Assert.Equal(OrderPaymentState.LatePaymentRefund, latePaid.Value.PaymentState);
     }
 
     [Fact]
@@ -213,8 +213,8 @@ public sealed class OrderQueryServiceTests
 
         Assert.Equal(RentalItemStatus.Rejected, excavatorLine.Status);
         Assert.Equal("Máy đang bảo trì", excavatorLine.RejectReason);
-        Assert.Equal(new RenterItemRefundResponse(RenterRefundState.Processing, null), excavatorLine.Refund);
-        Assert.Equal(new RenterItemRefundResponse(RenterRefundState.Completed, "REF-2026-000001"), rammerLine.Refund);
+        Assert.Equal(new OrderItemRefundResponse(OrderRefundState.Processing, null), excavatorLine.Refund);
+        Assert.Equal(new OrderItemRefundResponse(OrderRefundState.Completed, "REF-2026-000001"), rammerLine.Refund);
     }
 
     [Fact]

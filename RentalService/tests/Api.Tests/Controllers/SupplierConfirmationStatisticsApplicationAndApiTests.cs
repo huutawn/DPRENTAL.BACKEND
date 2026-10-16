@@ -67,6 +67,8 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
         public Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(Guid renterId, RentalOrderStatus? status, int skip, int take, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RentalOrder?> GetRenterOrderWithSubOrdersAsync(Guid orderId, Guid renterId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(Guid supplierId, RentalItemStatus? itemStatus, int skip, int take, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<RecordPage<AdminOrderSummaryRecord>> SearchOrdersForAdminAsync(AdminOrderSearchCriteria criteria, int skip, int take, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<RentalOrder?> GetOrderForAdminAsync(Guid orderId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<RentalSubOrder?> GetPaidSubOrderForSupplierAsync(Guid subOrderId, Guid supplierId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Guid>> GetPendingPaymentExpiredOrderIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Guid>> GetPendingSupplierTimeoutItemIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken ct = default) => throw new NotImplementedException();

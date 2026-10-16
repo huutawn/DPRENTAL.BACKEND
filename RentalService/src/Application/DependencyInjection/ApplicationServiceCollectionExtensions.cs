@@ -70,6 +70,7 @@ public static class ApplicationServiceCollectionExtensions
         // Orders
         services.AddScoped<IRenterOrderQueryService, RenterOrderQueryService>();
         services.AddScoped<ISupplierSubOrderQueryService, SupplierSubOrderQueryService>();
+        services.AddScoped<IAdminOrderQueryService, AdminOrderQueryService>();
 
         // Returns
         services.AddScoped<IReturnService, ReturnService>();

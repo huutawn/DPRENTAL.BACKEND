@@ -99,6 +99,17 @@ internal static class OrderTestData
         return handover;
     }
 
+    /// <summary>
+    /// Nối dòng với đơn như EF làm khi load từ database, để quyết định của nhà cung cấp ghi được lịch sử trạng thái.
+    /// </summary>
+    public static void LinkItemsToOrder(RentalOrder order)
+    {
+        foreach (RentalItem item in order.Items)
+        {
+            typeof(RentalItem).GetProperty(nameof(RentalItem.RentalOrder))!.SetValue(item, order);
+        }
+    }
+
     /// <summary>Receipt RequestRefund mà luồng từ chối/hết hạn tạo khi yêu cầu PaymentService hoàn tiền dòng này.</summary>
     public static void RequestRefund(RentalOrder order, RentalItem item, DateTimeOffset requestedAt) =>
         order.AddOperationReceipt(new RentalOperationReceipt(

@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Orders;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.Security;
@@ -15,6 +17,10 @@ internal static class OrderQueryMapper
 {
     public const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
+    private const string RequestRefundAction = "RequestRefund";
+
+    // Cùng cách checkout ghi tài khoản hoàn tiền vào RefundDestinationRef.
+    private static readonly JsonSerializerOptions RefundAccountJsonOptions = new(JsonSerializerDefaults.Web);
 
     public static Result<Guid> RequirePersonalCaller(IRentalCallerContext caller)
     {
@@ -126,5 +132,73 @@ internal static class OrderQueryMapper
             item.FinalDeductionAmount,
             item.FinalDeductionAmount is { } deduction ? item.DepositAmount - deduction : null,
             item.FinancialClosureConfirmedAt);
+    }
+
+    /// <summary>Các dòng đã được yêu cầu PaymentService hoàn tiền (có receipt RequestRefund).</summary>
+    public static HashSet<Guid> RefundRequestedItemIds(RentalOrder order) => order.OperationReceipts
+        .Where(r => r.Action == RequestRefundAction && r.TargetItemId.HasValue)
+        .Select(r => r.TargetItemId!.Value)
+        .ToHashSet();
+
+    /// <summary>Có RefundRef là PaymentService đã hoàn xong; chỉ có yêu cầu là đang hoàn.</summary>
+    public static OrderItemRefundResponse ToRefund(RentalItem item, bool refundRequested)
+    {
+        if (!string.IsNullOrWhiteSpace(item.RefundRef))
+        {
+            return new OrderItemRefundResponse(OrderRefundState.Completed, item.RefundRef);
+        }
+
+        return new OrderItemRefundResponse(
+            refundRequested ? OrderRefundState.Processing : OrderRefundState.None,
+            null);
+    }
+
+    /// <summary>Trả trễ cũng có PaymentConfirmedAt nên phải xét cờ trả trễ trước.</summary>
+    public static OrderPaymentState ToPaymentState(RentalOrder order)
+    {
+        if (order.LatePaymentRefundRequired)
+        {
+            return OrderPaymentState.LatePaymentRefund;
+        }
+
+        if (order.PaymentConfirmedAt.HasValue)
+        {
+            return OrderPaymentState.Paid;
+        }
+
+        return order.Status == RentalOrderStatus.PendingPayment
+            ? OrderPaymentState.Pending
+            : OrderPaymentState.Expired;
+    }
+
+    /// <summary>
+    /// Checkout lưu tài khoản hoàn tiền dạng JSON trong RefundDestinationRef. Đơn cũ lưu ORIGINAL_PAYMENT_SOURCE
+    /// (hoàn về nguồn thanh toán) nên không có tài khoản; JSON hỏng hoặc thiếu ô cũng trả rỗng.
+    /// </summary>
+    public static RenterRefundAccountResponse? ParseRefundAccount(string refundDestinationRef)
+    {
+        if (string.IsNullOrWhiteSpace(refundDestinationRef) || !refundDestinationRef.TrimStart().StartsWith('{'))
+        {
+            return null;
+        }
+
+        try
+        {
+            CheckoutRefundAccountDto? account =
+                JsonSerializer.Deserialize<CheckoutRefundAccountDto>(refundDestinationRef, RefundAccountJsonOptions);
+            if (account is null ||
+                string.IsNullOrWhiteSpace(account.BankCode) ||
+                string.IsNullOrWhiteSpace(account.AccountNumber) ||
+                string.IsNullOrWhiteSpace(account.AccountHolderName))
+            {
+                return null;
+            }
+
+            return new RenterRefundAccountResponse(account.BankCode, account.AccountNumber, account.AccountHolderName);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 }

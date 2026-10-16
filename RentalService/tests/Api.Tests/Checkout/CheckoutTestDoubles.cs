@@ -193,6 +193,13 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
         Guid supplierId, RentalItemStatus? itemStatus, int skip, int take, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
+    public Task<RecordPage<AdminOrderSummaryRecord>> SearchOrdersForAdminAsync(
+        AdminOrderSearchCriteria criteria, int skip, int take, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<RentalOrder?> GetOrderForAdminAsync(Guid orderId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
     public Task<RentalSubOrder?> GetPaidSubOrderForSupplierAsync(
         Guid subOrderId, Guid supplierId, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
