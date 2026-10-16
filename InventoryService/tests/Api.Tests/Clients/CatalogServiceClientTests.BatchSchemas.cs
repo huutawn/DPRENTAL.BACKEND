@@ -61,7 +61,7 @@ public sealed partial class CatalogServiceClientTests
         var result = await client.GetEquipmentTypeSchemasBatchAsync(eqId, [1, 2]);
 
         Assert.True(result.IsSuccess);
-        var val = result.Value;
+        var val = result.Value.Value;
         Assert.Equal(eqId, val.EquipmentTypeId);
         Assert.Equal(2, val.CurrentSchemaVersion);
         Assert.Equal(2, val.Schemas.Count);
@@ -457,7 +457,7 @@ public sealed partial class CatalogServiceClientTests
         var result = await client.GetEquipmentTypeSchemasBatchAsync(eqId, [1]);
 
         Assert.True(result.IsSuccess);
-        var field = result.Value.Schemas[0].Fields[0];
+        var field = result.Value.Value.Schemas[0].Fields[0];
         Assert.Equal("f1", field.Key);
         Assert.True(field.Filterable);
         Assert.Null(field.Min);
@@ -508,11 +508,11 @@ public sealed partial class CatalogServiceClientTests
         var result = await client.GetEquipmentTypeSchemasBatchAsync(eqId, [1, 2]);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(eqId, result.Value.EquipmentTypeId);
-        Assert.Equal(2, result.Value.CurrentSchemaVersion);
-        Assert.Equal(2, result.Value.Schemas.Count);
+        Assert.Equal(eqId, result.Value.Value.EquipmentTypeId);
+        Assert.Equal(2, result.Value.Value.CurrentSchemaVersion);
+        Assert.Equal(2, result.Value.Value.Schemas.Count);
 
-        var v2 = result.Value.Schemas.First(s => s.Version == 2);
+        var v2 = result.Value.Value.Schemas.First(s => s.Version == 2);
         Assert.Equal(2, v2.Fields.Count);
         var numField = v2.Fields.First(f => f.Key == "capacityKg");
         Assert.Equal("number", numField.DataType);

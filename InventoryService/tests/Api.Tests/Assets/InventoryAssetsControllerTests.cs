@@ -34,14 +34,14 @@ public sealed class InventoryAssetsControllerTests
                 brandId, "BR-SONY", "Sony", true)));
         public Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success());
-        public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+        public Task<Result<Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(new CatalogBatchSchemasResponse(
                 equipmentTypeId,
                 1,
-                [new CatalogBatchSchemaItemResponse(1, [])])));
+                [new CatalogBatchSchemaItemResponse(1, [])]), DateTimeOffset.UtcNow.AddMinutes(5))));
 
-        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
+        public Task<Result<Dprental.InventoryService.Application.Caching.CachedRead<IReadOnlyList<Guid>>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<IReadOnlyList<Guid>>(Array.Empty<Guid>(), DateTimeOffset.UtcNow.AddMinutes(5))));
     }
 
     private sealed class StubMediaClient : IMediaServiceClient

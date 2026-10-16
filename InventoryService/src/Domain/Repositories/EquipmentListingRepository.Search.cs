@@ -122,16 +122,24 @@ public sealed partial class EquipmentListingRepository
                 IsolationLevel.RepeatableRead,
                 cancellationToken);
 
-            var (countSql, pageSql, countParams, pageParams) = BuildSearchSql(criteria);
+            var (countSql, pageSql, holdExpirySql, countParams, pageParams, holdParams) = BuildSearchSql(criteria);
 
             int totalCount = await _context.Database
                 .SqlQueryRaw<int>(countSql, countParams)
                 .SingleAsync(cancellationToken);
 
+            DateTimeOffset? nextAvailabilityChangeAtUtc = null;
+            if (holdExpirySql != null && holdParams != null)
+            {
+                nextAvailabilityChangeAtUtc = await _context.Database
+                    .SqlQueryRaw<DateTimeOffset?>(holdExpirySql, holdParams)
+                    .SingleOrDefaultAsync(cancellationToken);
+            }
+
             if (totalCount == 0)
             {
                 await transaction.CommitAsync(cancellationToken);
-                return new PublicEquipmentListingSearchResult(Array.Empty<PublicEquipmentListingItem>(), 0);
+                return new PublicEquipmentListingSearchResult(Array.Empty<PublicEquipmentListingItem>(), 0, nextAvailabilityChangeAtUtc);
             }
 
             var rows = await _context.Database
@@ -152,12 +160,12 @@ public sealed partial class EquipmentListingRepository
                 .Select(r => new PublicEquipmentListingItem(listingMap[r.Id], r.TotalQuantity, r.AvailableQuantity))
                 .ToList();
 
-            return new PublicEquipmentListingSearchResult(items, totalCount);
+            return new PublicEquipmentListingSearchResult(items, totalCount, nextAvailabilityChangeAtUtc);
         }
         throw new NotSupportedException("Public equipment listing search requires PostgreSQL relational provider.");
     }
 
-    private static (string CountSql, string PageSql, NpgsqlParameter[] CountParams, NpgsqlParameter[] PageParams) BuildSearchSql(
+    private static (string CountSql, string PageSql, string? HoldExpirySql, NpgsqlParameter[] CountParams, NpgsqlParameter[] PageParams, NpgsqlParameter[]? HoldParams) BuildSearchSql(
         EquipmentListingSearchCriteria criteria)
     {
         var clauses = new List<string>
@@ -356,6 +364,25 @@ public sealed partial class EquipmentListingRepository
             LIMIT @pTake OFFSET @pSkip
             """;
 
+        string? holdExpirySql = null;
+        NpgsqlParameter[]? holdParams = null;
+        if (hasInterval)
+        {
+            holdExpirySql = $"""
+                SELECT MIN(al.hold_expires_at) AS "Value"
+                FROM "inventory"."equipment_listings" l
+                {joinSql}
+                {warehouseJoin}
+                JOIN "inventory"."assets" a ON a.equipment_listing_id = l.id
+                JOIN "inventory"."asset_allocations" al ON al.asset_id = a.id
+                WHERE {baseWhere}
+                  AND a.accepting_bookings = TRUE
+                  AND al.status = @pHeldStatus
+                  AND al.hold_expires_at > @pEvaluationUtc
+                """;
+            holdParams = CloneParameters(commonParams);
+        }
+
         var countParams = CloneParameters(commonParams);
 
         var pageParamsList = commonParams.ToList();
@@ -363,7 +390,7 @@ public sealed partial class EquipmentListingRepository
         pageParamsList.Add(new NpgsqlParameter("pSkip", criteria.Skip));
         var pageParams = CloneParameters(pageParamsList);
 
-        return (countSql, pageSql, countParams, pageParams);
+        return (countSql, pageSql, holdExpirySql, countParams, pageParams, holdParams);
     }
 
 

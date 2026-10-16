@@ -28,8 +28,9 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IInventoryMediaService, InventoryMediaService>();
         services.AddScoped<IInventoryAllocationService, InventoryAllocationService>();
         services.AddOptions<InventoryCacheOptions>();
-        services.TryAddSingleton<IInventoryAvailabilityCache>(NoOpInventoryAvailabilityCache.Instance);
+        services.TryAddSingleton<IInventoryReadCache>(NoOpInventoryReadCache.Instance);
         services.AddScoped<IInventoryAvailabilityService, InventoryAvailabilityService>();
+        services.AddHostedService<CacheInvalidationWorker>();
 
         return services;
     }

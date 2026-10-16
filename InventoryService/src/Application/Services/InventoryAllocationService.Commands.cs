@@ -102,6 +102,13 @@ public sealed partial class InventoryAllocationService
             ctx.StageOutbox(outboxMsg);
         }
 
+        var groupScopes = new HashSet<string>(StringComparer.Ordinal) { $"listing:{listingId:D}", "public-discovery" };
+        foreach (var unit in chosenUnits)
+        {
+            groupScopes.Add($"asset:{unit.Id:D}");
+        }
+        ctx.StageCacheInvalidation(groupScopes);
+
         return (createdAllocations, chosenUnits);
     }
 
@@ -262,6 +269,13 @@ public sealed partial class InventoryAllocationService
                     var extendRes = alloc.ExtendHold(canonicalNewHoldExpiresAt, nowUtc, "system", command.OperationKey);
                     if (extendRes.IsFailure) return extendRes.Error;
                 }
+                var extendScopes = new HashSet<string>(StringComparer.Ordinal) { "public-discovery" };
+                foreach (var a in groupAllocations)
+                {
+                    extendScopes.Add($"asset:{a.AssetId:D}");
+                    extendScopes.Add($"listing:{a.Asset.EquipmentListingId:D}");
+                }
+                ctx.StageCacheInvalidation(extendScopes);
 
                 var mapping = groupAllocations.Select(a => new AllocationAssetMappingPayload(
                     a.Id, a.AssetId, a.Asset.AssetCode)).ToList();
@@ -334,6 +348,13 @@ public sealed partial class InventoryAllocationService
                     var allocateRes = alloc.Allocate(nowUtc, "system", command.OperationKey);
                     if (allocateRes.IsFailure) return allocateRes.Error;
                 }
+                var confirmScopes = new HashSet<string>(StringComparer.Ordinal) { "public-discovery" };
+                foreach (var a in groupAllocations)
+                {
+                    confirmScopes.Add($"asset:{a.AssetId:D}");
+                    confirmScopes.Add($"listing:{a.Asset.EquipmentListingId:D}");
+                }
+                ctx.StageCacheInvalidation(confirmScopes);
 
                 var mapping = groupAllocations.Select(a => new AllocationAssetMappingPayload(
                     a.Id, a.AssetId, a.Asset.AssetCode)).ToList();
@@ -436,6 +457,13 @@ public sealed partial class InventoryAllocationService
 
                     ctx.StageOutbox(InventoryAssetAvailabilityEvents.CreateAvailabilityChangedOutboxMessage(alloc.AssetId, nowUtc));
                 }
+                var releaseScopes = new HashSet<string>(StringComparer.Ordinal) { "public-discovery" };
+                foreach (var a in groupAllocations)
+                {
+                    releaseScopes.Add($"asset:{a.AssetId:D}");
+                    releaseScopes.Add($"listing:{a.Asset.EquipmentListingId:D}");
+                }
+                ctx.StageCacheInvalidation(releaseScopes);
 
                 var mapping = groupAllocations.Select(a => new AllocationAssetMappingPayload(
                     a.Id, a.AssetId, a.Asset.AssetCode)).ToList();
@@ -512,6 +540,13 @@ public sealed partial class InventoryAllocationService
 
                     ctx.StageOutbox(InventoryAssetAvailabilityEvents.CreateAvailabilityChangedOutboxMessage(alloc.AssetId, nowUtc));
                 }
+                var handoverScopes = new HashSet<string>(StringComparer.Ordinal) { "public-discovery" };
+                foreach (var a in groupAllocations)
+                {
+                    handoverScopes.Add($"asset:{a.AssetId:D}");
+                    handoverScopes.Add($"listing:{a.Asset.EquipmentListingId:D}");
+                }
+                ctx.StageCacheInvalidation(handoverScopes);
 
                 var mapping = groupAllocations.Select(a => new AllocationAssetMappingPayload(
                     a.Id, a.AssetId, a.Asset.AssetCode)).ToList();
@@ -657,6 +692,14 @@ public sealed partial class InventoryAllocationService
 
                     ctx.StageOutbox(InventoryAssetAvailabilityEvents.CreateAvailabilityChangedOutboxMessage(alloc.AssetId, nowUtc));
                 }
+                var returnScopes = new HashSet<string>(StringComparer.Ordinal) { "public-discovery" };
+                foreach (var unit in command.Units)
+                {
+                    var a = allocMap[unit.AllocationId];
+                    returnScopes.Add($"asset:{a.AssetId:D}");
+                    returnScopes.Add($"listing:{a.Asset.EquipmentListingId:D}");
+                }
+                ctx.StageCacheInvalidation(returnScopes);
 
                 var appliedPayload = new ReturnedUnitsAppliedPayload(
                     command.RentalOrderId,

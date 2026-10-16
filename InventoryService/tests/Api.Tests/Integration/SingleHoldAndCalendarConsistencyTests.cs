@@ -49,11 +49,6 @@ public sealed class SingleHoldAndCalendarConsistencyTests : IClassFixture<Postgr
         public Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success());
 
-        public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(equipmentTypeId, 1, [new CatalogBatchSchemaItemResponse(1, [])])));
-
-        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
     }
 
     private sealed class StubMediaClient : IMediaServiceClient
@@ -398,6 +393,8 @@ public sealed class SingleHoldAndCalendarConsistencyTests : IClassFixture<Postgr
         public Task<PublicEquipmentListingSearchResult> SearchPublicAsync(EquipmentListingSearchCriteria criteria, CancellationToken cancellationToken = default) =>
             _inner.SearchPublicAsync(criteria, cancellationToken);
 
+        public Task<IReadOnlyList<Guid>> GetListingIdsByOwnerKeysetAsync(Guid ownerUserId, Guid? afterListingId, int limit, CancellationToken cancellationToken) =>
+            _inner.GetListingIdsByOwnerKeysetAsync(ownerUserId, afterListingId, limit, cancellationToken);
         public void Add(EquipmentListing listing) => _inner.Add(listing);
         public void Update(EquipmentListing listing) => _inner.Update(listing);
     }

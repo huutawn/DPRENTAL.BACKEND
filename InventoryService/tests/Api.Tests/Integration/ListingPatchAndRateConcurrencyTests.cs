@@ -62,11 +62,6 @@ public sealed class ListingPatchAndRateConcurrencyTests : IClassFixture<Postgres
             return Task.FromResult(Result.Success());
         }
 
-        public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(equipmentTypeId, 1, [new CatalogBatchSchemaItemResponse(1, [])])));
-
-        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
     }
 
     private sealed class TrackingMediaClient : IMediaServiceClient
@@ -368,6 +363,8 @@ public sealed class ListingPatchAndRateConcurrencyTests : IClassFixture<Postgres
         public Task<PublicEquipmentListingSearchResult> SearchPublicAsync(EquipmentListingSearchCriteria criteria, CancellationToken cancellationToken = default) =>
             _inner.SearchPublicAsync(criteria, cancellationToken);
 
+        public Task<IReadOnlyList<Guid>> GetListingIdsByOwnerKeysetAsync(Guid ownerUserId, Guid? afterListingId, int limit, CancellationToken cancellationToken) =>
+            _inner.GetListingIdsByOwnerKeysetAsync(ownerUserId, afterListingId, limit, cancellationToken);
         public Task<EquipmentListing?> GetCalendarSnapshotAsync(Guid listingId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default) =>
             _inner.GetCalendarSnapshotAsync(listingId, startDate, endDate, cancellationToken);
 

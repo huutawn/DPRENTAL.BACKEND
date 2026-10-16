@@ -1,13 +1,15 @@
+using Dprental.InventoryService.Application.Caching;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 
-namespace Dprental.InventoryService.Application.Caching;
+namespace Dprental.InventoryService.Api.Caching;
 
 /// <summary>
-/// Mở rộng IServiceCollection đăng ký cấu hình và adapter cho Valkey Read Cache theo DPR-150.
+/// Mở rộng IServiceCollection đăng ký cấu hình và adapter cho Valkey Read Cache.
 /// </summary>
 public static class ValkeyCacheServiceCollectionExtensions
 {
@@ -15,7 +17,8 @@ public static class ValkeyCacheServiceCollectionExtensions
 
     public static IServiceCollection AddInventoryValkeyCache(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IHostEnvironment? environment = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -24,10 +27,21 @@ public static class ValkeyCacheServiceCollectionExtensions
         services.Configure<InventoryCacheOptions>(section);
 
         var options = section.Get<InventoryCacheOptions>() ?? new InventoryCacheOptions();
+        if (environment != null && string.IsNullOrWhiteSpace(options.EnvironmentName))
+        {
+            options.EnvironmentName = environment.EnvironmentName;
+        }
+
+        if (options.Enabled)
+        {
+            options.Validate();
+        }
+
+        services.AddSingleton<InventoryCacheMetrics>();
 
         if (!options.Enabled)
         {
-            services.AddSingleton<IInventoryAvailabilityCache>(NoOpInventoryAvailabilityCache.Instance);
+            services.AddSingleton<IInventoryReadCache>(NoOpInventoryReadCache.Instance);
             return services;
         }
 
@@ -39,9 +53,19 @@ public static class ValkeyCacheServiceCollectionExtensions
                 $"ConnectionStrings:{RedisConnectionStringName} là bắt buộc khi cache ({InventoryCacheOptions.SectionName}:Enabled) được kích hoạt.");
         }
 
-        if (options.TtlSeconds <= 0)
+        if (options.DynamicTtlSeconds <= 0)
         {
-            throw new InvalidOperationException($"{InventoryCacheOptions.SectionName}:TtlSeconds phải lớn hơn 0.");
+            throw new InvalidOperationException($"{InventoryCacheOptions.SectionName}:DynamicTtlSeconds phải lớn hơn 0.");
+        }
+
+        if (options.MetadataTtlSeconds <= 0)
+        {
+            throw new InvalidOperationException($"{InventoryCacheOptions.SectionName}:MetadataTtlSeconds phải lớn hơn 0.");
+        }
+
+        if (options.CatalogTtlSeconds <= 0)
+        {
+            throw new InvalidOperationException($"{InventoryCacheOptions.SectionName}:CatalogTtlSeconds phải lớn hơn 0.");
         }
 
         if (options.TimeoutMs <= 0)
@@ -62,12 +86,13 @@ public static class ValkeyCacheServiceCollectionExtensions
             return ConnectionMultiplexer.Connect(config);
         });
 
-        services.AddSingleton<IInventoryAvailabilityCache>(sp =>
-            new ValkeyInventoryAvailabilityCache(
+        services.AddSingleton<IInventoryReadCache>(sp =>
+            new ValkeyReadCache(
                 sp.GetRequiredService<IOptions<InventoryCacheOptions>>(),
                 sp.GetService<IConnectionMultiplexer>(),
                 sp.GetService<TimeProvider>(),
-                sp.GetService<ILogger<ValkeyInventoryAvailabilityCache>>()));
+                sp.GetService<InventoryCacheMetrics>(),
+                sp.GetService<ILogger<ValkeyReadCache>>()));
 
         return services;
     }

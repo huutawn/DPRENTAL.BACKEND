@@ -20,6 +20,8 @@ public sealed class CalendarService : ICalendarService
     private readonly IInventoryAssetRepository _assetRepository;
     private readonly IEquipmentListingRepository _listingRepository;
     private readonly IInventoryWriteTransaction _writeTransaction;
+    private readonly Dprental.InventoryService.Application.Caching.IInventoryReadCache _cache;
+    private readonly Dprental.InventoryService.Application.Caching.InventoryCacheOptions _cacheOptions;
     private readonly TimeProvider _timeProvider;
 
     public CalendarService(
@@ -27,10 +29,24 @@ public sealed class CalendarService : ICalendarService
         IEquipmentListingRepository listingRepository,
         IInventoryWriteTransaction writeTransaction,
         TimeProvider? timeProvider = null)
+        : this(assetRepository, listingRepository, writeTransaction, null, null, timeProvider)
+    {
+    }
+
+    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
+    public CalendarService(
+        IInventoryAssetRepository assetRepository,
+        IEquipmentListingRepository listingRepository,
+        IInventoryWriteTransaction writeTransaction,
+        Dprental.InventoryService.Application.Caching.IInventoryReadCache? cache,
+        Microsoft.Extensions.Options.IOptions<Dprental.InventoryService.Application.Caching.InventoryCacheOptions>? cacheOptions,
+        TimeProvider? timeProvider = null)
     {
         _assetRepository = assetRepository ?? throw new ArgumentNullException(nameof(assetRepository));
         _listingRepository = listingRepository ?? throw new ArgumentNullException(nameof(listingRepository));
         _writeTransaction = writeTransaction ?? throw new ArgumentNullException(nameof(writeTransaction));
+        _cache = cache ?? Dprental.InventoryService.Application.Caching.NoOpInventoryReadCache.Instance;
+        _cacheOptions = cacheOptions?.Value ?? new Dprental.InventoryService.Application.Caching.InventoryCacheOptions();
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -53,71 +69,109 @@ public sealed class CalendarService : ICalendarService
         {
             return Error.Forbidden("FORBIDDEN", "Chỉ người dùng cá nhân hợp lệ mới được truy cập lịch.");
         }
-
         var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
         var today = BusinessDateTime.ToVietnamDate(nowUtc);
         var horizon = today.Year == 9999 && today.Month > 6 ? DateOnly.MaxValue : today.AddMonths(6);
-        var asset = await _assetRepository.GetCalendarSnapshotAsync(assetId, today, horizon, cancellationToken);
-        if (asset is null)
+        string scope = $"asset:{assetId:D}";
+        string queryType = "calendar";
+        string inputHash = today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+        var pipelineResult = await _cache.GetOrCreateAsync<CachedCalendarPayload>(
+            scope,
+            queryType,
+            inputHash,
+            async (genToken, ct) =>
+            {
+                var asset = await _assetRepository.GetCalendarSnapshotAsync(assetId, today, horizon, ct);
+                if (asset is null)
+                {
+                    return Error.NotFound("ASSET_NOT_FOUND", $"Tài sản với ID {assetId} không tồn tại.");
+                }
+
+                var evaluationNowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+                var entries = new List<CalendarEntryResponse>();
+
+                foreach (var block in asset.CalendarBlocks)
+                {
+                    entries.Add(new CalendarEntryResponse
+                    {
+                        Id = block.Id,
+                        Type = "CalendarBlock",
+                        StartDate = block.StartDate,
+                        EndDate = block.EndDate,
+                        Reason = block.Reason.ToString(),
+                        Note = block.Notes,
+                        HoldExpiresAt = null
+                    });
+                }
+
+                foreach (var alloc in asset.Allocations)
+                {
+                    var displayInterval = AssetAvailabilityPolicy.GetDisplayOccupiedInterval(alloc, today, horizon, evaluationNowUtc);
+                    if (!displayInterval.HasValue)
+                    {
+                        continue;
+                    }
+
+                    entries.Add(new CalendarEntryResponse
+                    {
+                        Id = alloc.Id,
+                        Type = alloc.Status == AllocationStatus.Held ? "Held" : "Allocated",
+                        StartDate = displayInterval.Value.StartDate,
+                        EndDate = displayInterval.Value.EndDate,
+                        Reason = null,
+                        Note = null,
+                        HoldExpiresAt = alloc.Status == AllocationStatus.Held ? alloc.HoldExpiresAt : null
+                    });
+                }
+
+                var sortedEntries = entries
+                    .OrderBy(e => e.StartDate)
+                    .ThenBy(e => e.EndDate)
+                    .ThenBy(e => e.Type, StringComparer.Ordinal)
+                    .ThenBy(e => e.Id)
+                    .ToList();
+
+                var response = new CalendarResponse
+                {
+                    AssetId = asset.Id,
+                    StartDate = today,
+                    EndDate = horizon,
+                    Entries = sortedEntries
+                };
+
+                var baseTtl = TimeSpan.FromSeconds(_cacheOptions.DynamicTtlSeconds > 0 ? _cacheOptions.DynamicTtlSeconds : 15);
+                DateTimeOffset? nearestHold = asset.Allocations
+                    .Where(a => a.Status == AllocationStatus.Held && a.HoldExpiresAt.HasValue && a.HoldExpiresAt.Value > evaluationNowUtc)
+                    .Select(a => a.HoldExpiresAt)
+                    .OrderBy(t => t!.Value)
+                    .FirstOrDefault();
+
+                var deadline = Dprental.InventoryService.Application.Caching.CacheKeyHelper.CalculateOccupancyDeadline(
+                    evaluationNowUtc.Add(baseTtl),
+                    nearestHold,
+                    asset.Allocations,
+                    evaluationNowUtc);
+
+                DateTimeOffset? finalDeadline = deadline > evaluationNowUtc ? deadline : null;
+                return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CachedCalendarPayload>(
+                    new CachedCalendarPayload(asset.Listing.OwnerUserId, response),
+                    finalDeadline));
+            },
+            cancellationToken);
+
+        if (pipelineResult.IsFailure)
         {
-            return Error.NotFound("ASSET_NOT_FOUND", $"Tài sản với ID {assetId} không tồn tại.");
+            return pipelineResult.Error;
         }
 
-        if (!InventoryAccessEvaluator.CanAccessCalendar(caller, asset.Listing.OwnerUserId))
+        var payload = pipelineResult.Value;
+        if (!InventoryAccessEvaluator.CanAccessCalendar(caller, payload.OwnerUserId))
         {
             return Error.Forbidden("FORBIDDEN", "Bạn không có quyền truy cập lịch của tài sản này.");
         }
 
-        var entries = new List<CalendarEntryResponse>();
-
-        foreach (var block in asset.CalendarBlocks)
-        {
-            entries.Add(new CalendarEntryResponse
-            {
-                Id = block.Id,
-                Type = "CalendarBlock",
-                StartDate = block.StartDate,
-                EndDate = block.EndDate,
-                Reason = block.Reason.ToString(),
-                Note = block.Notes,
-                HoldExpiresAt = null
-            });
-        }
-
-        foreach (var alloc in asset.Allocations)
-        {
-            var displayInterval = AssetAvailabilityPolicy.GetDisplayOccupiedInterval(alloc, today, horizon, nowUtc);
-            if (!displayInterval.HasValue)
-            {
-                continue;
-            }
-
-            entries.Add(new CalendarEntryResponse
-            {
-                Id = alloc.Id,
-                Type = alloc.Status == AllocationStatus.Held ? "Held" : "Allocated",
-                StartDate = displayInterval.Value.StartDate,
-                EndDate = displayInterval.Value.EndDate,
-                Reason = null,
-                Note = null,
-                HoldExpiresAt = alloc.Status == AllocationStatus.Held ? alloc.HoldExpiresAt : null
-            });
-        }
-
-        var sortedEntries = entries
-            .OrderBy(e => e.StartDate)
-            .ThenBy(e => e.EndDate)
-            .ThenBy(e => e.Type, StringComparer.Ordinal)
-            .ThenBy(e => e.Id)
-            .ToList();
-
-        return new CalendarResponse
-        {
-            AssetId = asset.Id,
-            StartDate = today,
-            EndDate = horizon,
-            Entries = sortedEntries
-        };
+        return payload.Response;
     }
 
     /// <inheritdoc />
@@ -160,78 +214,115 @@ public sealed class CalendarService : ICalendarService
             validEnd = today.Year == 9999 && today.Month > 6 ? DateOnly.MaxValue : today.AddMonths(6);
         }
 
-        var snapshot = await _listingRepository.GetCalendarSnapshotAsync(listingId, validStart, validEnd, cancellationToken);
-        if (snapshot is null)
+        string listingScope = $"listing:{listingId:D}";
+        string listingQueryType = "listing-calendar";
+        string listingInputHash = Dprental.InventoryService.Application.Caching.CacheKeyHelper.ComputeWindowHash(validStart, validEnd);
+
+        var pipelineResult = await _cache.GetOrCreateAsync<CachedListingCalendarPayload>(
+            listingScope,
+            listingQueryType,
+            listingInputHash,
+            async (genToken, ct) =>
+            {
+                var snapshot = await _listingRepository.GetCalendarSnapshotAsync(listingId, validStart, validEnd, ct);
+                if (snapshot is null)
+                {
+                    return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+                }
+
+                var evaluationNowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+
+                var days = new List<ListingCalendarDayResponse>();
+                var d = validStart;
+                while (true)
+                {
+                    int occupied = 0;
+                    int blocked = 0;
+                    int available = 0;
+                    int suspendedOccupied = 0;
+                    int suspendedBlocked = 0;
+
+                    foreach (var unit in snapshot.Assets)
+                    {
+                        bool isOccupied = unit.Allocations.Any(al =>
+                        {
+                            var interval = AssetAvailabilityPolicy.GetOccupiedInterval(al, evaluationNowUtc);
+                            return interval.HasValue && interval.Value.StartDate <= d && interval.Value.EndDate >= d;
+                        });
+
+                        bool isBlocked = unit.CalendarBlocks.Any(cb =>
+                            cb.StartDate <= d &&
+                            cb.EndDate >= d);
+
+                        if (unit.AcceptingBookings)
+                        {
+                            if (isOccupied) occupied++;
+                            if (isBlocked) blocked++;
+                            if (!isOccupied && !isBlocked) available++;
+                        }
+                        else
+                        {
+                            if (isOccupied) suspendedOccupied++;
+                            if (isBlocked) suspendedBlocked++;
+                        }
+                    }
+
+                    days.Add(new ListingCalendarDayResponse(
+                        d,
+                        occupied,
+                        blocked,
+                        available,
+                        suspendedOccupied,
+                        suspendedBlocked));
+
+                    if (d == validEnd)
+                    {
+                        break;
+                    }
+                    d = d.AddDays(1);
+                }
+
+                int totalQuantity = snapshot.Assets.Count(a => a.AcceptingBookings);
+                var response = new ListingCalendarResponse(
+                    listingId,
+                    validStart,
+                    validEnd,
+                    totalQuantity,
+                    days);
+
+                var baseTtl = TimeSpan.FromSeconds(_cacheOptions.DynamicTtlSeconds > 0 ? _cacheOptions.DynamicTtlSeconds : 15);
+                var allAllocations = snapshot.Assets.SelectMany(a => a.Allocations);
+                DateTimeOffset? nearestHold = allAllocations
+                    .Where(al => al.Status == AllocationStatus.Held && al.HoldExpiresAt.HasValue && al.HoldExpiresAt.Value > evaluationNowUtc)
+                    .Select(al => al.HoldExpiresAt)
+                    .OrderBy(t => t!.Value)
+                    .FirstOrDefault();
+
+                var deadline = Dprental.InventoryService.Application.Caching.CacheKeyHelper.CalculateOccupancyDeadline(
+                    evaluationNowUtc.Add(baseTtl),
+                    nearestHold,
+                    allAllocations,
+                    evaluationNowUtc);
+
+                DateTimeOffset? finalDeadline = deadline > evaluationNowUtc ? deadline : null;
+                return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CachedListingCalendarPayload>(
+                    new CachedListingCalendarPayload(snapshot.OwnerUserId, response),
+                    finalDeadline));
+            },
+            cancellationToken);
+
+        if (pipelineResult.IsFailure)
         {
-            return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+            return pipelineResult.Error;
         }
 
-        if (!InventoryAccessEvaluator.CanAccessListingCalendar(caller, snapshot.OwnerUserId))
+        var payload = pipelineResult.Value;
+        if (!InventoryAccessEvaluator.CanAccessListingCalendar(caller, payload.OwnerUserId))
         {
             return Error.Forbidden("FORBIDDEN", "Bạn không có quyền truy cập lịch của Listing này.");
         }
 
-        // Lấy clock đánh giá occupancy SAU KHI snapshot I/O tải xong
-        var evaluationNowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
-
-        var days = new List<ListingCalendarDayResponse>();
-        var d = validStart;
-        while (true)
-        {
-            int occupied = 0;
-            int blocked = 0;
-            int available = 0;
-            int suspendedOccupied = 0;
-            int suspendedBlocked = 0;
-
-            foreach (var unit in snapshot.Assets)
-            {
-                bool isOccupied = unit.Allocations.Any(al =>
-                {
-                    var interval = AssetAvailabilityPolicy.GetOccupiedInterval(al, evaluationNowUtc);
-                    return interval.HasValue && interval.Value.StartDate <= d && interval.Value.EndDate >= d;
-                });
-
-                bool isBlocked = unit.CalendarBlocks.Any(cb =>
-                    cb.StartDate <= d &&
-                    cb.EndDate >= d);
-
-                if (unit.AcceptingBookings)
-                {
-                    if (isOccupied) occupied++;
-                    if (isBlocked) blocked++;
-                    if (!isOccupied && !isBlocked) available++;
-                }
-                else
-                {
-                    if (isOccupied) suspendedOccupied++;
-                    if (isBlocked) suspendedBlocked++;
-                }
-            }
-
-            days.Add(new ListingCalendarDayResponse(
-                d,
-                occupied,
-                blocked,
-                available,
-                suspendedOccupied,
-                suspendedBlocked));
-
-            if (d == validEnd)
-            {
-                break;
-            }
-            d = d.AddDays(1);
-        }
-
-        int totalQuantity = snapshot.Assets.Count(a => a.AcceptingBookings);
-
-        return Result.Success(new ListingCalendarResponse(
-            listingId,
-            validStart,
-            validEnd,
-            totalQuantity,
-            days));
+        return Result.Success(payload.Response);
     }
 
     /// <summary>
@@ -330,6 +421,7 @@ public sealed class CalendarService : ICalendarService
             // 8. Stage availability outbox message
             var outboxMessage = CreateAvailabilityChangedOutboxMessage(asset, nowUtc);
             ctx.StageOutbox(outboxMessage);
+            ctx.StageCacheInvalidation([$"asset:{asset.Id:D}", $"listing:{asset.EquipmentListingId:D}", "public-discovery"]);
 
             // 9. Trả response DTO
             var response = new CalendarBlockResponse(
@@ -396,6 +488,7 @@ public sealed class CalendarService : ICalendarService
             // 5. Stage availability outbox message
             var outboxMessage = CreateAvailabilityChangedOutboxMessage(asset, nowUtc);
             ctx.StageOutbox(outboxMessage);
+            ctx.StageCacheInvalidation([$"asset:{asset.Id:D}", $"listing:{asset.EquipmentListingId:D}", "public-discovery"]);
 
             return Result.Success(true);
         }, cancellationToken);
@@ -407,4 +500,14 @@ public sealed class CalendarService : ICalendarService
     {
         return InventoryAssetAvailabilityEvents.CreateAvailabilityChangedOutboxMessage(asset.Id, nowUtc);
     }
+
+    internal sealed record CachedCalendarPayload(
+        Guid OwnerUserId,
+        CalendarResponse Response
+    );
+
+    internal sealed record CachedListingCalendarPayload(
+        Guid OwnerUserId,
+        ListingCalendarResponse Response
+    );
 }

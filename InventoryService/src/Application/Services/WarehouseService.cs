@@ -13,6 +13,8 @@ public sealed class WarehouseService : IWarehouseService
     private readonly IWarehouseRepository _warehouseRepository;
     private readonly IVietnamDivisionsCatalog _divisionsCatalog;
     private readonly IInventoryWriteTransaction _writeTransaction;
+    private readonly Dprental.InventoryService.Application.Caching.IInventoryReadCache _cache;
+    private readonly Dprental.InventoryService.Application.Caching.InventoryCacheOptions _cacheOptions;
     private readonly TimeProvider _timeProvider;
 
     public WarehouseService(
@@ -20,11 +22,25 @@ public sealed class WarehouseService : IWarehouseService
         IVietnamDivisionsCatalog divisionsCatalog,
         IInventoryWriteTransaction writeTransaction,
         TimeProvider timeProvider)
+        : this(warehouseRepository, divisionsCatalog, writeTransaction, null, null, timeProvider)
+    {
+    }
+
+    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
+    public WarehouseService(
+        IWarehouseRepository warehouseRepository,
+        IVietnamDivisionsCatalog divisionsCatalog,
+        IInventoryWriteTransaction writeTransaction,
+        Dprental.InventoryService.Application.Caching.IInventoryReadCache? cache = null,
+        Microsoft.Extensions.Options.IOptions<Dprental.InventoryService.Application.Caching.InventoryCacheOptions>? cacheOptions = null,
+        TimeProvider? timeProvider = null)
     {
         _warehouseRepository = warehouseRepository ?? throw new ArgumentNullException(nameof(warehouseRepository));
         _divisionsCatalog = divisionsCatalog ?? throw new ArgumentNullException(nameof(divisionsCatalog));
         _writeTransaction = writeTransaction ?? throw new ArgumentNullException(nameof(writeTransaction));
-        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _cache = cache ?? Dprental.InventoryService.Application.Caching.NoOpInventoryReadCache.Instance;
+        _cacheOptions = cacheOptions?.Value ?? new Dprental.InventoryService.Application.Caching.InventoryCacheOptions();
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -45,13 +61,27 @@ public sealed class WarehouseService : IWarehouseService
         }
 
         var ownerUserId = caller.UserId.Value;
-        var warehouse = await _warehouseRepository.GetByOwnerUserIdAsync(ownerUserId, cancellationToken);
-        if (warehouse is null)
-        {
-            return Error.NotFound("WAREHOUSE_NOT_FOUND", "Người dùng chưa thiết lập kho.");
-        }
+        string scope = $"owner:{ownerUserId:D}";
+        string queryType = "warehouse";
+        string inputHash = "my";
 
-        return Result.Success(ToResponse(warehouse));
+        return await _cache.GetOrCreateAsync<WarehouseResponse>(
+            scope,
+            queryType,
+            inputHash,
+            async (genToken, ct) =>
+            {
+                var warehouse = await _warehouseRepository.GetByOwnerUserIdAsync(ownerUserId, ct);
+                if (warehouse is null)
+                {
+                    return Error.NotFound("WAREHOUSE_NOT_FOUND", "Người dùng chưa thiết lập kho.");
+                }
+
+                var response = ToResponse(warehouse);
+                var ttl = _timeProvider.GetUtcNow().AddSeconds(_cacheOptions.MetadataTtlSeconds > 0 ? _cacheOptions.MetadataTtlSeconds : 120);
+                return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<WarehouseResponse>(response, ttl));
+            },
+            cancellationToken);
     }
 
     /// <inheritdoc />
@@ -164,6 +194,13 @@ public sealed class WarehouseService : IWarehouseService
                 }
             }
 
+
+            if (_cacheOptions.Enabled)
+            {
+                ctx.StageWarehouseFanoutInvalidation(
+                    ownerUserId,
+                    [$"owner:{ownerUserId:D}", "public-discovery"]);
+            }
             return Result.Success(warehouse);
         }, cancellationToken);
 
