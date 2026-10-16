@@ -36,6 +36,21 @@ public sealed record SupplierDecisionResponse(
     string? DecisionReason,
     string? DecisionNote);
 
+/// <summary>
+/// DTO phản hồi sau khi Supplier nhận hoặc từ chối cả đơn con.
+/// </summary>
+/// <param name="SubOrderId">Mã định danh đơn con.</param>
+/// <param name="SubOrderCode">Mã đơn con hiển thị, ví dụ DH-2026-000001-01.</param>
+/// <param name="RentalOrderId">Mã định danh đơn cha.</param>
+/// <param name="Status">Trạng thái mới của mọi mục thuê trong đơn con (chuỗi PascalCase AwaitingHandover hoặc Rejected).</param>
+/// <param name="Items">Quyết định của từng mục thuê trong đơn con.</param>
+public sealed record SubOrderDecisionResponse(
+    Guid SubOrderId,
+    string SubOrderCode,
+    Guid RentalOrderId,
+    string Status,
+    IReadOnlyList<SupplierDecisionResponse> Items);
+
 public sealed record HandoverUnitObservationRequest(
     [Required] Guid AssignmentId,
     [Required] Dprental.RentalService.Common.Enums.UnitCondition Condition,

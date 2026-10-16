@@ -17,6 +17,10 @@ public interface IInventoryRentalClient
         ListingAvailabilityCheckRequest request,
         CancellationToken ct = default);
 
+    Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(
+        ListingRentalSnapshotsRequest request,
+        CancellationToken ct = default);
+
     Task<Result<CreateHoldResponse>> CreateHoldAsync(
         CreateHoldRequest request,
         CancellationToken ct = default);

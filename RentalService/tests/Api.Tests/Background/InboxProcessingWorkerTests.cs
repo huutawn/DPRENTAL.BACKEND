@@ -97,6 +97,7 @@ public sealed class InboxProcessingWorkerTests
         services.AddSingleton<IRefundCompletedConsumer>(new StubRefundConsumer());
         services.AddScoped<IKafkaOutboxWriter, KafkaOutboxWriter>();
         services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
+        services.AddScoped<IInventoryAllocationResultHandler, InventoryAllocationResultHandler>();
         services.AddSingleton(Options.Create(new KafkaOptions { Enabled = true }));
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
@@ -150,6 +151,7 @@ public sealed class InboxProcessingWorkerTests
         services.AddScoped<IKafkaOutboxWriter, KafkaOutboxWriter>();
         services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
         services.AddSingleton(Options.Create(new KafkaOptions { Enabled = true }));
+        services.AddScoped<IInventoryAllocationResultHandler, InventoryAllocationResultHandler>();
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 

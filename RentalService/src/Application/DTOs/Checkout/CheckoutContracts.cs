@@ -77,14 +77,13 @@ public sealed record CheckoutPlanLine(
     DateOnly ExpectedStartDate,
     DateOnly ExpectedEndDate,
     string ListingName,
-    string PickupLocation,
-    string SnapshotVersion,
     RentalItemListingSnapshotDto ListingSnapshot,
     decimal DailyRate,
     decimal DepositPerUnit,
     int RentalDays,
     decimal RentalAmount,
-    decimal DepositAmount);
+    decimal DepositAmount,
+    string? PickupLocationSnapshot = null);
 
 public sealed record CheckoutFieldError(string Field, string Code, string Message);
 

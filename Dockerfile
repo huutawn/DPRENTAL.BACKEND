@@ -17,9 +17,12 @@ RUN dotnet publish RentalService/src/Api/RentalService.Api.csproj \
     --configuration Release \
     --output /app/publish \
     --no-restore
-
 FROM build AS bundle-build
 COPY --from=ef-tools /tools /tools
+RUN /tools/dotnet-ef migrations has-pending-model-changes \
+    --project RentalService/src/Domain/RentalService.Domain.csproj \
+    --startup-project RentalService/src/Api/RentalService.Api.csproj \
+    --configuration Release
 RUN /tools/dotnet-ef migrations bundle \
     --project RentalService/src/Domain/RentalService.Domain.csproj \
     --startup-project RentalService/src/Api/RentalService.Api.csproj \

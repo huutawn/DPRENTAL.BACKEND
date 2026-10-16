@@ -40,6 +40,15 @@ public interface IRentalOrderRepository
         DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
 
+    Task<IReadOnlyList<Guid>> GetRenterResponseTimeoutItemIdsAsync(
+    DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<Guid>> GetDisputedItemIdsAsync(
+        int skip, int take, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<Guid>> GetSettlementReadyItemIdsAsync(
+        int batchSize, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<RenterCalendarItemRecord>> GetRenterCalendarItemsAsync(
         Guid renterId,
         DateOnly monthStart,
@@ -53,4 +62,35 @@ public interface IRentalOrderRepository
         DateTimeOffset toUtc,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Đơn con theo mã, không kèm dòng; không theo dõi thay đổi.</summary>
+    Task<RentalSubOrder?> GetSubOrderByIdAsync(Guid subOrderId, CancellationToken cancellationToken = default);
+
+    /// <summary>Một trang đơn của người thuê, mới nhất trước.</summary>
+    Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(
+        Guid renterId,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Đơn kèm các đơn con và dòng, chỉ khi đơn thuộc người thuê này; không theo dõi thay đổi.</summary>
+    Task<RentalOrder?> GetRenterOrderWithSubOrdersAsync(
+        Guid orderId,
+        Guid renterId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Một trang đơn con của nhà cung cấp, chỉ gồm đơn đã thanh toán đúng hạn, mới nhất trước.</summary>
+    Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(
+        Guid supplierId,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Đơn con kèm dòng và đơn cha, chỉ khi đơn con thuộc nhà cung cấp này và đơn đã thanh toán đúng hạn;
+    /// không theo dõi thay đổi.
+    /// </summary>
+    Task<RentalSubOrder?> GetPaidSubOrderForSupplierAsync(
+        Guid subOrderId,
+        Guid supplierId,
+        CancellationToken cancellationToken = default);
 }

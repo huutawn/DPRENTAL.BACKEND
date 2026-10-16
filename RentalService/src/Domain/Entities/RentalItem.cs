@@ -19,6 +19,8 @@ public partial class RentalItem
 
     public Guid RentalOrderId { get; private set; }
 
+    public Guid RentalSubOrderId { get; private set; }
+
     public Guid EquipmentListingId { get; private set; }
 
     public Guid SupplierId { get; private set; }
@@ -36,31 +38,28 @@ public partial class RentalItem
     [MaxLength(2000)]
     public string? ListingDescriptionSnapshot { get; private set; }
 
-    [Required]
+    // Nơi nhận, loại, hãng, model và thông số được để trống từ 15/10/2026: Inventory không còn trả các thông tin này.
+    // Đơn đặt trước đó vẫn giữ dữ liệu đã chụp.
     [MaxLength(500)]
-    public string PickupLocationSnapshot { get; private set; } = string.Empty;
+    public string? PickupLocationSnapshot { get; private set; }
 
-    public Guid EquipmentTypeId { get; private set; }
+    public Guid? EquipmentTypeId { get; private set; }
 
-    [Required]
     [MaxLength(200)]
-    public string EquipmentTypeNameSnapshot { get; private set; } = string.Empty;
+    public string? EquipmentTypeNameSnapshot { get; private set; }
 
-    public Guid BrandId { get; private set; }
+    public Guid? BrandId { get; private set; }
 
-    [Required]
     [MaxLength(200)]
-    public string BrandNameSnapshot { get; private set; } = string.Empty;
+    public string? BrandNameSnapshot { get; private set; }
 
-    [Required]
     [MaxLength(200)]
-    public string ModelSnapshot { get; private set; } = string.Empty;
+    public string? ModelSnapshot { get; private set; }
 
-    public int SpecSchemaVersionSnapshot { get; private set; }
+    public int? SpecSchemaVersionSnapshot { get; private set; }
 
-    [Required]
     [Column(TypeName = "jsonb")]
-    public string SpecValuesSnapshot { get; private set; } = "{}";
+    public string? SpecValuesSnapshot { get; private set; }
 
     public Guid? ThumbnailMediaIdSnapshot { get; private set; }
 
@@ -132,7 +131,10 @@ public partial class RentalItem
         _unitAssignments.Any(u => u.Status == RentalUnitAssignmentStatus.ReturnedDamaged);
 
     [ForeignKey(nameof(RentalOrderId))]
-    public RentalOrder? RentalOrder { get; private set; }
+    public RentalOrder? RentalOrder { get; internal set; }
+
+    [ForeignKey(nameof(RentalSubOrderId))]
+    public RentalSubOrder? RentalSubOrder { get; private set; }
 
     private readonly List<RentalUnitAssignment> _unitAssignments = [];
     public IReadOnlyCollection<RentalUnitAssignment> UnitAssignments => _unitAssignments.AsReadOnly();
@@ -151,6 +153,7 @@ public partial class RentalItem
     internal RentalItem(
         Guid id,
         Guid rentalOrderId,
+        Guid rentalSubOrderId,
         Guid equipmentListingId,
         Guid supplierId,
         int quantity,
@@ -158,7 +161,7 @@ public partial class RentalItem
         DateOnly expectedEndDate,
         string listingTitleSnapshot,
         string? listingDescriptionSnapshot,
-        string pickupLocationSnapshot,
+        string? pickupLocationSnapshot,
         decimal dailyRateSnapshot,
         decimal depositPerUnitSnapshot,
         string allocationGroupId,
@@ -167,6 +170,7 @@ public partial class RentalItem
     {
         Id = id;
         RentalOrderId = rentalOrderId;
+        RentalSubOrderId = rentalSubOrderId;
         EquipmentListingId = equipmentListingId;
         SupplierId = supplierId;
         Quantity = quantity;
@@ -181,12 +185,12 @@ public partial class RentalItem
         Status = RentalItemStatus.PendingPayment;
 
         EquipmentTypeId = listingSnapshot.EquipmentTypeId;
-        EquipmentTypeNameSnapshot = listingSnapshot.EquipmentTypeName.Trim();
+        EquipmentTypeNameSnapshot = listingSnapshot.EquipmentTypeName?.Trim();
         BrandId = listingSnapshot.BrandId;
-        BrandNameSnapshot = listingSnapshot.BrandName.Trim();
-        ModelSnapshot = listingSnapshot.Model.Trim();
+        BrandNameSnapshot = listingSnapshot.BrandName?.Trim();
+        ModelSnapshot = listingSnapshot.Model?.Trim();
         SpecSchemaVersionSnapshot = listingSnapshot.SpecSchemaVersion;
-        SpecValuesSnapshot = listingSnapshot.SpecValuesJson.Trim();
+        SpecValuesSnapshot = listingSnapshot.SpecValuesJson?.Trim();
         ThumbnailMediaIdSnapshot = listingSnapshot.ThumbnailMediaId;
 
         RentalAmount = RentalPricingPolicy.CalculateRentalAmount(dailyRateSnapshot, quantity, RentalDays);
@@ -257,11 +261,31 @@ public partial class RentalItem
         return plus24hUtc < cutoffUtc ? plus24hUtc : cutoffUtc;
     }
 
-    internal void RecordPaid(DateTimeOffset paidAt)
+    /// <summary>
+    /// Thời gian hold còn sống sau hạn xác nhận, để worker chốt nốt các mục supplier đã bấm nhận trước hạn.
+    /// </summary>
+    public static readonly TimeSpan ConfirmationGracePeriod = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Hold được gia hạn tới hạn xác nhận cộng <see cref="ConfirmationGracePeriod"/>,
+    /// nhưng phải hết trước 00:00 ngày giao theo giờ Việt Nam như luật của Inventory.
+    /// </summary>
+    public static DateTimeOffset CalculateConfirmationHoldExpiry(DateTimeOffset supplierConfirmationDeadline, DateOnly expectedStartDate)
+    {
+        TimeSpan vnOffset = TimeSpan.FromHours(7);
+        DateTimeOffset startOfDayVn = new(expectedStartDate.Year, expectedStartDate.Month, expectedStartDate.Day, 0, 0, 0, vnOffset);
+        DateTimeOffset lastSecondBeforeStartUtc = startOfDayVn.AddSeconds(-1).ToUniversalTime();
+        DateTimeOffset withGraceUtc = supplierConfirmationDeadline.ToUniversalTime() + ConfirmationGracePeriod;
+
+        return withGraceUtc < lastSecondBeforeStartUtc ? withGraceUtc : lastSecondBeforeStartUtc;
+    }
+
+    /// <param name="supplierConfirmationDeadline">Hạn xác nhận chung của cả đơn con chứa dòng này.</param>
+    internal void RecordPaid(DateTimeOffset supplierConfirmationDeadline)
     {
         if (!SupplierConfirmationDeadline.HasValue)
         {
-            SupplierConfirmationDeadline = CalculateSupplierConfirmationDeadline(paidAt, ExpectedStartDate);
+            SupplierConfirmationDeadline = supplierConfirmationDeadline;
         }
         Status = RentalItemStatus.PendingSupplierConfirmation;
     }
@@ -289,6 +313,26 @@ public partial class RentalItem
             "Supplier accepted rental item",
             decisionAt,
             operationId));
+    }
+
+    internal void ApplyHandover(DateTimeOffset utcNow, string operationKey)
+    {
+        string from = Status.ToString();
+        Status = RentalItemStatus.InRental;
+
+
+        RentalOrder?.AddStateTransition(new RentalStateTransition(
+            Guid.NewGuid(),
+            RentalOrderId,
+            Id,
+            from,
+            RentalItemStatus.InRental.ToString(),
+            "MarkAssetsHandedOver",
+            SupplierId,
+            ActorRole.Supplier,
+            "Supplier completed handover of rental item",
+            utcNow,
+            operationKey));
     }
 
     internal void ApplySupplierReject(

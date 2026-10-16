@@ -75,8 +75,14 @@ internal sealed class FakePaymentRentalClient : IPaymentRentalClient
             new CancelInvoiceResponse(request.InvoiceRef, true, DateTimeOffset.UnixEpoch, false)));
     }
 
-    public Task<Result<RequestRefundResponse>> RequestRefundAsync(RequestRefundRequest request, CancellationToken ct = default) =>
-        throw new NotSupportedException();
+    public List<RequestRefundRequest> RefundRequests { get; } = [];
+
+    public Task<Result<RequestRefundResponse>> RequestRefundAsync(RequestRefundRequest request, CancellationToken ct = default)
+    {
+        RefundRequests.Add(request);
+        return Task.FromResult(Result.Success(
+            new RequestRefundResponse($"ref-{RefundRequests.Count}", request.OperationKey, "Accepted", request.TotalRefundAmount, "VND", false)));
+    }
 
     public Task<Result<SettleRentalResponse>> SettleRentalAsync(SettleRentalRequest request, CancellationToken ct = default) =>
         throw new NotSupportedException();

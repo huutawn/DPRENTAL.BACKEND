@@ -43,6 +43,15 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         IRentalOrderRepository orders,
         IRentalCartRepository carts,
         IOrderCodeGenerator orderCodes,
+        IUnitOfWork unitOfWork,
+        ILogger<CheckoutOrderWriter> logger)
+        : this(orders, carts, orderCodes, null!, unitOfWork, logger)
+    {
+    }
+    public CheckoutOrderWriter(
+        IRentalOrderRepository orders,
+        IRentalCartRepository carts,
+        IOrderCodeGenerator orderCodes,
         ICheckoutHoldOrchestrator holds,
         IUnitOfWork unitOfWork,
         ILogger<CheckoutOrderWriter> logger)
@@ -118,6 +127,12 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         DateTimeOffset orderCreatedAt,
         CancellationToken cancellationToken)
     {
+        RentalOrder? existingOrder = await _orders.GetByCheckoutOperationIdAsync(checkoutOperationId, cancellationToken);
+        if (existingOrder is not null && existingOrder.RenterId == plan.RenterId)
+        {
+            return existingOrder;
+        }
+
         RentalCart? cart = await _carts.GetActiveByRenterIdAsync(plan.RenterId, cancellationToken);
         if (cart is null || cart.Id != plan.CartId)
         {
@@ -215,7 +230,7 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         held.Line.ExpectedEndDate,
         held.Line.ListingName,
         null,
-        held.Line.PickupLocation,
+        held.Line.PickupLocationSnapshot,
         held.Line.DailyRate,
         held.Line.DepositPerUnit,
         held.AllocationGroupId,

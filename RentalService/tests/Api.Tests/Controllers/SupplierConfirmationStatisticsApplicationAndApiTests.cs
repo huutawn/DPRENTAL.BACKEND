@@ -63,6 +63,11 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
         public Task<RentalOrder?> GetByIdWithDetailsAsync(Guid id, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RentalOrder?> GetByItemIdWithDetailsAsync(Guid itemId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Guid?> GetOrderIdByItemIdAsync(Guid itemId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<RentalSubOrder?> GetSubOrderByIdAsync(Guid subOrderId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(Guid renterId, int skip, int take, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<RentalOrder?> GetRenterOrderWithSubOrdersAsync(Guid orderId, Guid renterId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(Guid supplierId, int skip, int take, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<RentalSubOrder?> GetPaidSubOrderForSupplierAsync(Guid subOrderId, Guid supplierId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Guid>> GetPendingPaymentExpiredOrderIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Guid>> GetPendingSupplierTimeoutItemIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<RenterCalendarItemRecord>> GetRenterCalendarItemsAsync(Guid renterId, DateOnly monthStart, DateOnly monthEnd, IReadOnlyCollection<RentalItemStatus> targetStatuses, CancellationToken ct = default) => throw new NotImplementedException();
@@ -71,6 +76,17 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
             Task.FromResult<IReadOnlyList<Guid>>([]);
         public Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(
             DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Guid>>([]);
+        public Task<IReadOnlyList<Guid>> GetRenterResponseTimeoutItemIdsAsync(
+            DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Guid>>([]);
+
+        public Task<IReadOnlyList<Guid>> GetDisputedItemIdsAsync(
+            int skip, int take, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Guid>>([]);
+
+        public Task<IReadOnlyList<Guid>> GetSettlementReadyItemIdsAsync(
+            int batchSize, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<Guid>>([]);
 
     }

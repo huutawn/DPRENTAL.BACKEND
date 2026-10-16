@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.IServices.Checkout;
@@ -48,7 +49,7 @@ public sealed class CheckoutService : ICheckoutService
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    public async Task<Result<CheckoutOperationAcceptedResponse>> SubmitAsync(
+    public async Task<CheckoutSubmitResult> SubmitAsync(
         CheckoutRenterContext renter,
         CheckoutRequest request,
         string idempotencyKey,
@@ -102,14 +103,15 @@ public sealed class CheckoutService : ICheckoutService
             var pendingOrder = await _orders.GetPendingPaymentByRenterIdAsync(renter.RenterId, cancellationToken);
             if (pendingOrder is not null)
             {
-                return CheckoutErrors.PendingOrderExists;
+                return CheckoutPreparationResult.PendingOrder(pendingOrder.OrderCode);
             }
 
             // 3. Chuẩn bị checkout (snapshot, bảng giá, giỏ hàng)
             var prepared = await _preparation.PrepareAsync(renter, request, cancellationToken);
             if (prepared.IsFailure)
             {
-                return prepared.Error;
+                // Giữ nguyên chi tiết lỗi (fieldErrors, currentQuote, lines) để client hiển thị đúng chỗ.
+                return prepared;
             }
 
             var plan = prepared.Plan;
@@ -128,14 +130,19 @@ public sealed class CheckoutService : ICheckoutService
                     var rentalItemId = Guid.NewGuid();
                     var opKey = $"checkout:{expectedOrderId:N}:{rentalItemId:N}:hold";
 
+                    // Đơn lưu [từ, đến) không tính ngày cuối; Inventory nhận ngày dùng máy cuối có tính.
+                    // Thuê 18, 19, 20: đơn lưu [18, 21), gửi Inventory startDate 18, endDate 20.
+                    var (holdStartDate, holdEndDate) = RentalInventoryDateAdapter
+                        .ToInventoryDates(line.ExpectedStartDate, line.ExpectedEndDate).Value;
+
                     var holdCmd = new CreateHoldCommandPayload(
                         RentalOrderId: expectedOrderId,
                         RentalItemId: rentalItemId,
                         OperationKey: opKey,
                         EquipmentListingId: line.EquipmentListingId,
                         Quantity: line.Quantity,
-                        StartDate: line.ExpectedStartDate,
-                        EndDate: line.ExpectedEndDate,
+                        StartDate: holdStartDate,
+                        EndDate: holdEndDate,
                         HoldExpiresAt: holdExpiresAt,
                         Notes: $"Order checkout: item {rentalItemId}");
 
@@ -147,7 +154,6 @@ public sealed class CheckoutService : ICheckoutService
                     if (enqueueResult.IsFailure)
                     {
                         await tx.RollbackAsync(cancellationToken);
-                        _unitOfWork.DiscardChanges();
                         return enqueueResult.Error;
                     }
 
@@ -173,7 +179,6 @@ public sealed class CheckoutService : ICheckoutService
                 await _operationRepository.AddAsync(checkoutOp, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await tx.CommitAsync(cancellationToken);
-
                 return new CheckoutOperationAcceptedResponse(
                     operationId,
                     $"/api/v1/rental/checkout/operations/{operationId}");

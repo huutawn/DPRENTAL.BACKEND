@@ -116,6 +116,10 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 _dbContext.RentalOrders.Update(order);
                 return Task.FromResult(true);
             }
+            else if (entry.State == EntityState.Unchanged)
+            {
+                entry.State = EntityState.Modified;
+            }
             // Register new children before DetectChanges discovers their non-empty GUIDs.
             foreach (var record in order.Items.SelectMany(i => i.ReturnRecords))
             {
@@ -126,6 +130,11 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             {
                 if (_dbContext.Entry(proposal!).State == EntityState.Detached)
                     _dbContext.Entry(proposal!).State = EntityState.Added;
+            }
+            foreach (var dispute in order.Items.Select(i => i.DeductionProposal?.Dispute).Where(d => d is not null))
+            {
+                if (_dbContext.Entry(dispute!).State == EntityState.Detached)
+                    _dbContext.Entry(dispute!).State = EntityState.Added;
             }
             foreach (var receipt in order.OperationReceipts)
             {
@@ -306,6 +315,106 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
 
         return result ?? new SupplierConfirmationStatisticsRecord(0, 0, 0, 0);
     }
+
+    public async Task<RentalSubOrder?> GetSubOrderByIdAsync(Guid subOrderId, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalSubOrders
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == subOrderId, cancellationToken);
+    }
+
+    public async Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(
+        Guid renterId,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        IQueryable<RentalOrder> query = _dbContext.RentalOrders
+            .AsNoTracking()
+            .Where(o => o.RenterId == renterId);
+
+        int totalCount = await query.CountAsync(cancellationToken);
+        List<RenterOrderSummaryRecord> items = await query
+            .OrderByDescending(o => o.CreatedAt)
+            .ThenBy(o => o.Id)
+            .Skip(skip)
+            .Take(take)
+            .Select(o => new RenterOrderSummaryRecord(
+                o.Id,
+                o.OrderCode,
+                o.Status,
+                o.Currency,
+                o.Items.Sum(i => i.RentalAmount),
+                o.Items.Sum(i => i.DepositAmount),
+                o.Items.Count,
+                o.SubOrders.Count,
+                o.PaymentDeadline,
+                o.CreatedAt))
+            .ToListAsync(cancellationToken);
+
+        return new RecordPage<RenterOrderSummaryRecord>(items, totalCount);
+    }
+
+    public async Task<RentalOrder?> GetRenterOrderWithSubOrdersAsync(
+        Guid orderId,
+        Guid renterId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalOrders
+            .AsNoTracking()
+            .Include(o => o.SubOrders)
+                .ThenInclude(s => s.Items)
+            .FirstOrDefaultAsync(o => o.Id == orderId && o.RenterId == renterId, cancellationToken);
+    }
+
+    public async Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(
+        Guid supplierId,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        IQueryable<RentalSubOrder> query = PaidSubOrdersOf(supplierId);
+
+        int totalCount = await query.CountAsync(cancellationToken);
+        List<SupplierSubOrderSummaryRecord> items = await query
+            .OrderByDescending(s => s.CreatedAt)
+            .ThenBy(s => s.Id)
+            .Skip(skip)
+            .Take(take)
+            .Select(s => new SupplierSubOrderSummaryRecord(
+                s.Id,
+                s.SubOrderCode,
+                s.RentalOrder!.OrderCode,
+                s.RentalOrder.Currency,
+                s.Items.Sum(i => i.RentalAmount),
+                s.Items.Sum(i => i.DepositAmount),
+                s.Items.Select(i => i.Status).ToList(),
+                s.RentalOrder.PaymentConfirmedAt,
+                s.CreatedAt))
+            .ToListAsync(cancellationToken);
+
+        return new RecordPage<SupplierSubOrderSummaryRecord>(items, totalCount);
+    }
+
+    public async Task<RentalSubOrder?> GetPaidSubOrderForSupplierAsync(
+        Guid subOrderId,
+        Guid supplierId,
+        CancellationToken cancellationToken = default)
+    {
+        return await PaidSubOrdersOf(supplierId)
+            .Include(s => s.RentalOrder)
+            .Include(s => s.Items)
+            .FirstOrDefaultAsync(s => s.Id == subOrderId, cancellationToken);
+    }
+
+    // Nhà cung cấp chỉ thấy đơn sau khi người thuê đã thanh toán đúng hạn; thanh toán trễ sẽ được hoàn tiền.
+    private IQueryable<RentalSubOrder> PaidSubOrdersOf(Guid supplierId) =>
+        _dbContext.RentalSubOrders
+            .AsNoTracking()
+            .Where(s => s.SupplierId == supplierId &&
+                        s.RentalOrder!.PaymentConfirmedAt != null &&
+                        !s.RentalOrder.LatePaymentRefundRequired);
+
     public async Task<IReadOnlyList<Guid>> GetOverdueUnprotectedOrderIdsAsync(
     DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
     {
@@ -341,6 +450,52 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                      && i.FinalDeductionAmount == null
                      && i.DeductionProposal == null)
             .OrderBy(i => i.DeductionDeadline)
+            .Select(i => i.Id)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+    }
+    public async Task<IReadOnlyList<Guid>> GetRenterResponseTimeoutItemIdsAsync(
+    DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.PendingSettlement
+                     && i.FinalDeductionAmount == null
+                     && i.DeductionProposal != null
+                     && i.DeductionProposal.Status == DeductionProposalStatus.Submitted
+                     && i.DeductionProposal.RenterResponseDeadline < utcNow)
+            .OrderBy(i => i.DeductionProposal!.RenterResponseDeadline)
+            .Select(i => i.Id)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetDisputedItemIdsAsync(
+        int skip, int take, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.PendingSettlement
+                     && i.FinalDeductionAmount == null
+                     && i.DeductionProposal != null
+                     && i.DeductionProposal.Status == DeductionProposalStatus.Disputed)
+            .OrderBy(i => i.DeductionProposal!.RespondedAt)     // khiếu nại cũ nhất lên đầu
+            .Select(i => i.Id)
+            .Skip(skip).Take(take)
+            .ToListAsync(cancellationToken);
+    }
+    public async Task<IReadOnlyList<Guid>> GetSettlementReadyItemIdsAsync(
+    int batchSize, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.PendingSettlement
+                     && i.FinalDeductionAmount != null
+                     && i.InventoryClosureConfirmedAt != null
+                     && i.SettlementRef == null
+                     && !i.RentalOrder!.OperationReceipts.Any(r =>
+                            r.Action == RentalItem.SettleRentalAction && r.TargetItemId == i.Id))
+            .OrderBy(i => i.FinalDeductionAmount)   // thứ tự ổn định; thay bằng mốc chốt nếu có
             .Select(i => i.Id)
             .Take(batchSize)
             .ToListAsync(cancellationToken);

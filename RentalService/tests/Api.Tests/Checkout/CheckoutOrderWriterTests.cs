@@ -68,8 +68,6 @@ public sealed class CheckoutOrderWriterTests
             Start,
             End,
             "Sony A7 IV",
-            "Quận 1, TP.HCM",
-            "listing-v7",
             TestListingSnapshots.Default,
             500_000m,
             2_000_000m,
@@ -239,7 +237,7 @@ public sealed class CheckoutOrderWriterTests
             Assert.Equal(line.ExpectedStartDate, item.ExpectedStartDate);
             Assert.Equal(line.ExpectedEndDate, item.ExpectedEndDate);
             Assert.Equal(line.ListingName, item.ListingTitleSnapshot);
-            Assert.Equal(line.PickupLocation, item.PickupLocationSnapshot);
+            Assert.Equal(line.PickupLocationSnapshot, item.PickupLocationSnapshot);
             Assert.Equal(line.DailyRate, item.DailyRateSnapshot);
             Assert.Equal(line.DepositPerUnit, item.DepositPerUnitSnapshot);
             Assert.Equal(line.RentalAmount, item.RentalAmount);

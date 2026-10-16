@@ -26,16 +26,18 @@ public sealed class OperationRecoveryWorker : BackgroundService
 
         int pollSeconds = configuration.GetValue("Workers:OperationRecovery:PollingIntervalSeconds", 15);
         _pollingInterval = TimeSpan.FromSeconds(Math.Max(1, pollSeconds));
-        var excluded = new List<string>();
-        // Kafka return receipts are completed only by a validated Inventory result event.
-        excluded.Add(RentalItem.ApplyReturnedUnitsAction);
+        var excluded = new List<string>
+        {
+            RentalItem.ApplyReturnedUnitsAction,
+            RentalItem.MarkReturnedAction,
+            RentalItem.BlockDamagedAction,
+            "MarkAssetsHandedOver",
+            "ConfirmAllocation",
+            "ExtendHold",
+            "ReleaseAllocation"
+        };
         if (!configuration.GetValue("Rental:OverdueProtection:Enabled", true))
             excluded.Add(RentalItem.OverdueProtectionAction);
-        if (!configuration.GetValue("Rental:InventoryReturn:Enabled", true))
-        {
-            excluded.Add(RentalItem.MarkReturnedAction);
-            excluded.Add(RentalItem.BlockDamagedAction);
-        }
         _excludedActions = excluded.ToArray();
     }
 
@@ -120,6 +122,36 @@ public sealed class OperationRecoveryWorker : BackgroundService
             }
         }
 
+        // Reconcile handover/return commands pending > 30 minutes without acknowledgement
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<Dprental.RentalService.Domain.Repositories.RentalServiceDbContext>();
+            DateTimeOffset timeoutThreshold = utcNow.AddMinutes(-30);
+            var staleReceipts = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToListAsync(
+                db.RentalOperationReceipts.Where(r =>
+                    (r.Status == RentalOperationReceipt.StatusPending || r.Status == RentalOperationReceipt.StatusProcessing) &&
+                    (r.Action == "MarkAssetsHandedOver" ||
+                     r.Action == RentalItem.ApplyReturnedUnitsAction ||
+                     r.Action == RentalItem.MarkReturnedAction ||
+                     r.Action == RentalItem.BlockDamagedAction) &&
+                    r.CreatedAt <= timeoutThreshold),
+                cancellationToken);
+
+            if (staleReceipts.Count > 0)
+            {
+                foreach (var r in staleReceipts)
+                {
+                    r.MarkManualReconciliationRequired(utcNow, "Command acknowledgement timed out after 30 minutes; moved to manual reconciliation.");
+                }
+                await db.SaveChangesAsync(cancellationToken);
+                _logger.LogWarning("Marked {Count} stale handover/return receipts as MANUAL_RECONCILIATION_REQUIRED", staleReceipts.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error reconciling stale handover/return receipts");
+        }
         return processed;
     }
 }

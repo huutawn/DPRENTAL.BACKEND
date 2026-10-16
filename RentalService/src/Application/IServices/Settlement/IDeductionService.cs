@@ -13,4 +13,7 @@ public interface IDeductionService
     Task<int> ProcessDeductionTimeoutsAsync(CancellationToken cancellationToken = default);
 
     Task<Result> ExpireSingleItemDeductionAsync(Guid itemId, CancellationToken cancellationToken = default);
+
+    Task<int> ScheduleReadySettlementsAsync(CancellationToken cancellationToken = default);
+    Task<Result> ScheduleSettlementAsync(Guid itemId, CancellationToken cancellationToken = default);
 }

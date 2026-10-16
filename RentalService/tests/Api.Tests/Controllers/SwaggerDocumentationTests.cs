@@ -33,26 +33,36 @@ public sealed class SwaggerDocumentationTests
             foreach (var operation in path.Value.EnumerateObject().Where(p => methods.Contains(p.Name)))
             {
                 operationCount++;
-                Assert.False(string.IsNullOrWhiteSpace(operation.Value.GetProperty("summary").GetString()));
-                Assert.False(string.IsNullOrWhiteSpace(operation.Value.GetProperty("description").GetString()));
-                Assert.True(operation.Value.GetProperty("responses").TryGetProperty("500", out _));
+                string where = $"{operation.Name.ToUpperInvariant()} {path.Name}";
+                Assert.True(operation.Value.TryGetProperty("summary", out JsonElement summary) && !string.IsNullOrWhiteSpace(summary.GetString()), $"{where} thiếu summary");
+                Assert.True(operation.Value.TryGetProperty("description", out JsonElement description) && !string.IsNullOrWhiteSpace(description.GetString()), $"{where} thiếu description");
+                Assert.True(operation.Value.GetProperty("responses").TryGetProperty("500", out _), $"{where} thiếu response 500");
             }
         }
-        Assert.Equal(11, operationCount);
+        Assert.Equal(21, operationCount);
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/returns", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/deductions", out _));
+        Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/handover", out _));
+        Assert.False(paths.TryGetProperty("/api/v1/rental/items/{itemId}/accept", out _));
         Assert.False(paths.TryGetProperty("/rental/cart", out _));
         Assert.False(paths.TryGetProperty("/rental/checkout", out _));
         Assert.False(paths.TryGetProperty("/api/v1/rental/admin/suppliers/{supplierId}/confirmation-statistics", out _));
         Assert.False(paths.TryGetProperty("/api/v1/rental/internal/orders/{orderId}/operations/{operationId}/replay", out _));
         var checkoutResponses = paths.GetProperty("/api/v1/rental/checkout").GetProperty("post").GetProperty("responses");
-        Assert.True(checkoutResponses.TryGetProperty("201", out _));
-        Assert.True(checkoutResponses.TryGetProperty("200", out _));
+        Assert.True(checkoutResponses.TryGetProperty("202", out _));
+        Assert.False(checkoutResponses.TryGetProperty("201", out _));
+        Assert.True(checkoutResponses.TryGetProperty("400", out _));
+        Assert.True(checkoutResponses.TryGetProperty("409", out _));
+        Assert.True(checkoutResponses.TryGetProperty("503", out _));
         Assert.True(checkoutResponses.TryGetProperty("503", out _));
         var cart = paths.GetProperty("/api/v1/rental/cart");
         Assert.True(cart.GetProperty("delete").GetProperty("responses").TryGetProperty("404", out _));
         var calendarResponses = paths.GetProperty("/api/v1/rental/me/calendar").GetProperty("get").GetProperty("responses");
         Assert.False(calendarResponses.TryGetProperty("404", out _));
         Assert.False(calendarResponses.TryGetProperty("409", out _));
+        Assert.True(paths.TryGetProperty("/api/v1/rental/orders", out _));
+        Assert.True(paths.GetProperty("/api/v1/rental/orders/{orderId}").GetProperty("get").GetProperty("responses").TryGetProperty("404", out _));
+        Assert.True(paths.TryGetProperty("/api/v1/rental/supplier/sub-orders", out _));
+        Assert.True(paths.GetProperty("/api/v1/rental/supplier/sub-orders/{subOrderId}").GetProperty("get").GetProperty("responses").TryGetProperty("404", out _));
     }
 }

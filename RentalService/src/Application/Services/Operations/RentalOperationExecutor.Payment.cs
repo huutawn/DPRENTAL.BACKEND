@@ -131,6 +131,16 @@ public sealed partial class RentalOperationExecutor
         return await RequestRefundInternalAsync(order, item, receipt, operationKey, cancellationToken);
     }
 
+    public Task<Result> RequestRefundDirectAsync(
+        RentalOrder order,
+        RentalItem item,
+        RentalOperationReceipt receipt,
+        string operationKey,
+        CancellationToken cancellationToken = default)
+    {
+        return RequestRefundInternalAsync(order, item, receipt, operationKey, cancellationToken);
+    }
+
     internal async Task<Result> RequestRefundCoreAsync(
         RentalOrder order,
         RentalItem item,
@@ -273,6 +283,7 @@ public sealed partial class RentalOperationExecutor
                 return cancelRes;
             }
         }
+
 
         // 2. Release all allocation groups
         var releaseKeys = new List<(RentalItem item, string releaseKey)>();

@@ -5,7 +5,7 @@ using Dprental.RentalService.Common;
 namespace Dprental.RentalService.Api.Tests.Checkout;
 
 /// <summary>
-/// Inventory giả cho test giữ lịch: ghi lại mọi lời gọi hold/release và replay theo ExternalReference.
+/// Inventory giả cho test giữ lịch: ghi lại mọi lời gọi hold/release và replay theo GroupReference như Inventory thật.
 /// </summary>
 internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
 {
@@ -35,8 +35,8 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
 
     /// <summary>Số máy của Listing đang bị giữ bởi các nhóm chưa được nhả.</summary>
     public int HeldUnits(Guid listingId) => _groupsByReference.Values
-        .Where(g => g.ListingId == listingId && !_releasedGroups.Contains(g.AllocationGroupId))
-        .Sum(g => g.AssignedAssets.Count);
+        .Where(g => g.ListingId == listingId && !_releasedGroups.Contains(g.GroupReference))
+        .Sum(g => g.Allocations.Count);
 
     public string GroupIdFor(Guid listingId) => _firstGroupByListing[listingId];
 
@@ -50,7 +50,7 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
             return Task.FromResult(Result.Failure<CreateHoldResponse>(error));
         }
 
-        if (_groupsByReference.TryGetValue(request.ExternalReference, out CreateHoldResponse? existing))
+        if (_groupsByReference.TryGetValue(request.GroupReference, out CreateHoldResponse? existing))
         {
             return Task.FromResult(Result.Success(existing with { IsReplay = true }));
         }
@@ -64,20 +64,17 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
 
         int assignedCount = AssignedCountOverrides.GetValueOrDefault(request.ListingId, request.Quantity);
         CreateHoldResponse created = new(
-            $"grp-{_groupsByReference.Count + 1}",
-            Enumerable.Range(0, assignedCount)
-                .Select(_ => new AssignedAssetDto(Guid.NewGuid(), Guid.NewGuid(), "Held"))
-                .ToList(),
-            request.RequestedHoldExpiresAt,
             request.ListingId,
+            request.SourceSystem,
+            request.GroupReference,
             request.Quantity,
-            request.From,
-            request.To,
-            false,
-            "Held");
+            Enumerable.Range(0, assignedCount)
+                .Select(_ => new HeldAllocationDto(Guid.NewGuid(), Guid.NewGuid(), "Held"))
+                .ToList(),
+            false);
 
-        _groupsByReference[request.ExternalReference] = created;
-        _firstGroupByListing.TryAdd(request.ListingId, created.AllocationGroupId);
+        _groupsByReference[request.GroupReference] = created;
+        _firstGroupByListing.TryAdd(request.ListingId, created.GroupReference);
         return Task.FromResult(Result.Success(created));
     }
 
@@ -98,11 +95,17 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
                 $"receipt-{Releases.Count}", request.OperationKey, allocationGroupId, DateTimeOffset.UnixEpoch, false)));
     }
 
+    /// <summary>Khi chạy qua DI chỉ có một Inventory client: câu hỏi về Listing và lịch trống chuyển sang bản giả này.</summary>
+    public FakeInventoryListingClient? Listings { get; set; }
+
     public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) =>
-        throw new NotSupportedException();
+        Listings?.GetListingRentalSnapshotAsync(listingId, ct) ?? throw new NotSupportedException();
 
     public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) =>
-        throw new NotSupportedException();
+        Listings?.CheckListingAvailabilityAsync(request, ct) ?? throw new NotSupportedException();
+
+    public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) =>
+        Listings?.GetListingRentalSnapshotsAsync(request, ct) ?? throw new NotSupportedException();
 
     public Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) =>
         throw new NotSupportedException();

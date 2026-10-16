@@ -23,14 +23,11 @@ public sealed class CheckoutPreparationServiceTests
     private readonly Guid _renterId = Guid.NewGuid();
     private readonly Guid _supplierId = Guid.NewGuid();
     private readonly Guid _listingId = Guid.NewGuid();
-    private readonly Guid _equipmentTypeId = Guid.NewGuid();
-    private readonly Guid _brandId = Guid.NewGuid();
     private readonly Guid _thumbnailMediaId = Guid.NewGuid();
 
     private readonly FakeCartRepository _carts = new();
     private readonly FakeOrderRepository _orders = new();
     private readonly FakeInventoryListingClient _inventory = new();
-    private readonly FakeCatalogReferenceClient _catalog = new();
     private readonly RentalCart _cart;
     private readonly Guid _cartItemId;
 
@@ -42,31 +39,16 @@ public sealed class CheckoutPreparationServiceTests
 
         _inventory.Listings[_listingId] = Listing(_listingId);
         _inventory.AvailableQuantities[_listingId] = 10;
-        _catalog.EquipmentTypeNames[_equipmentTypeId] = "Máy ảnh";
-        _catalog.BrandNames[_brandId] = "Sony";
     }
 
     private Guid AddCartItem(Guid listingId, int quantity, DateOnly start, DateOnly end) =>
         _cart.AddItem(Guid.NewGuid(), listingId, _supplierId, quantity, start, end, Now).Value.Id;
 
-    private InventoryListingDto Listing(Guid id) => new(
-        id,
-        _supplierId,
-        true,
-        " Sony A7 IV ",
-        _equipmentTypeId,
-        _brandId,
-        "A7 IV",
-        3,
-        """{"sensor":"full-frame"}""",
-        _thumbnailMediaId,
-        500_000m,
-        2_000_000m,
-        "VND",
-        "Quận 1, TP.HCM",
-        "listing-v7");
+    private ListingRentalSnapshotDto Listing(Guid id) =>
+        TestListings.Create(id, _supplierId, " Sony A7 IV ", 500_000m, thumbnailMediaId: _thumbnailMediaId);
 
-    private CheckoutRequest Request(decimal expectedTotal = 7_000_000m, params Guid[] cartItemIds) => new(
+    // 2 máy x 500.000 x 3 ngày; Inventory chưa có tiền cọc nên cọc = 0.
+    private CheckoutRequest Request(decimal expectedTotal = 3_000_000m, params Guid[] cartItemIds) => new(
         cartItemIds.Length == 0 ? [_cartItemId] : cartItemIds,
         new(" Hồ Chí Minh ", "123 Nguyễn Huệ, Quận 1", "Nguyễn Văn A", "0901234567", "  "),
         new("VCB", "0123456789", "NGUYEN VAN A"),
@@ -76,11 +58,10 @@ public sealed class CheckoutPreparationServiceTests
 
     private CheckoutRenterContext Renter(bool profileCompleted = true) => new(_renterId, profileCompleted);
 
-    private CheckoutPreparationService CreateService(DateTimeOffset? utcNow = null) => new(
+    private CheckoutPreparationService CreateService(DateTimeOffset? utcNow = null, IInventoryRentalClient? inventory = null) => new(
         _carts,
         _orders,
-        _inventory,
-        _catalog,
+        inventory ?? _inventory,
         Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
         {
             CurrentVersion = "v1.0",
@@ -145,26 +126,23 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(_listingId, line.EquipmentListingId);
         Assert.Equal(_supplierId, line.SupplierId);
         Assert.Equal("Sony A7 IV", line.ListingName);
-        Assert.Equal("Quận 1, TP.HCM", line.PickupLocation);
-        Assert.Equal("listing-v7", line.SnapshotVersion);
         Assert.Equal(2, line.Quantity);
         Assert.Equal(3, line.RentalDays);
         // Đơn hàng lưu [từ, đến): ngày kết thúc lùi một ngày so với ngày trả trong giỏ.
         Assert.Equal(new DateOnly(2026, 10, 12), line.ExpectedStartDate);
         Assert.Equal(new DateOnly(2026, 10, 15), line.ExpectedEndDate);
-        Assert.Equal((new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 15)), Assert.Single(_inventory.AvailabilityPeriods));
+        // Inventory nhận ngày dùng máy cuối có tính, giống giỏ: 12, 13, 14.
+        Assert.Equal((new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 14)), Assert.Single(_inventory.AvailabilityPeriods));
         Assert.Equal(500_000m, line.DailyRate);
-        Assert.Equal(2_000_000m, line.DepositPerUnit);
+        Assert.Equal(0m, line.DepositPerUnit);
         Assert.Equal(3_000_000m, line.RentalAmount);
-        Assert.Equal(4_000_000m, line.DepositAmount);
-        Assert.Equal(
-            new RentalItemListingSnapshotDto(
-                _equipmentTypeId, "Máy ảnh", _brandId, "Sony", "A7 IV", 3, """{"sensor":"full-frame"}""", _thumbnailMediaId),
-            line.ListingSnapshot);
+        Assert.Equal(0m, line.DepositAmount);
+        // Inventory chỉ trả tên, giá và ảnh: snapshot chỉ còn ảnh, các thông tin khác để trống.
+        Assert.Equal(RentalItemListingSnapshotDto.ThumbnailOnly(_thumbnailMediaId), line.ListingSnapshot);
 
         Assert.Equal(3_000_000m, plan.TotalRentalAmount);
-        Assert.Equal(4_000_000m, plan.TotalDepositAmount);
-        Assert.Equal(7_000_000m, plan.TotalAmount);
+        Assert.Equal(0m, plan.TotalDepositAmount);
+        Assert.Equal(3_000_000m, plan.TotalAmount);
     }
 
     [Fact]
@@ -198,7 +176,7 @@ public sealed class CheckoutPreparationServiceTests
                     line.ExpectedEndDate,
                     line.ListingName,
                     null,
-                    line.PickupLocation,
+                    null,
                     line.DailyRate,
                     line.DepositPerUnit,
                     "rental-item:1",
@@ -220,7 +198,7 @@ public sealed class CheckoutPreparationServiceTests
     {
         Guid oneDayItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 20));
 
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(2_500_000m, oneDayItem));
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(500_000m, oneDayItem));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Plan.Lines.Single().RentalDays);
@@ -242,6 +220,21 @@ public sealed class CheckoutPreparationServiceTests
         CheckoutPreparationResult result = await CreateService().PrepareAsync(new(Guid.Empty, true), Request());
 
         Assert.Equal(CheckoutErrors.Unauthenticated, result.Error);
+    }
+
+    [Fact]
+    public async Task Prepare_WithWarehouseInListingSnapshot_FormatsPickupLocationWithCoordinates()
+    {
+        _inventory.Listings[_listingId] = _inventory.Listings[_listingId] with
+        {
+            Warehouse = new ListingWarehouseDto("123 Le Loi", "79", "Thành phố Hồ Chí Minh", "25747", "Phường Thủ Dầu Một", 10.7769, 106.7009)
+        };
+
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Plan);
+        Assert.Equal("123 Le Loi, Phường Thủ Dầu Một, Thành phố Hồ Chí Minh (10.776900, 106.700900)", result.Plan.Lines[0].PickupLocationSnapshot);
     }
 
     [Fact]
@@ -302,7 +295,7 @@ public sealed class CheckoutPreparationServiceTests
     [Fact]
     public async Task Prepare_RejectsCartItemThatIsNotInRentersCart()
     {
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(7_000_000m, Guid.NewGuid()));
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(3_000_000m, Guid.NewGuid()));
 
         Assert.Equal(RentalErrors.CartItemNotFound, result.Error);
         Assert.Equal(0, _inventory.ListingReadCount);
@@ -324,10 +317,25 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Fact]
-    public async Task Prepare_AcceptsStartDateThatIsTomorrowInVietnamTime()
+    public async Task Prepare_RejectsStartDateLessThanThreeDaysAheadInVietnamTime()
     {
-        // 16:30 UTC ngày 11/10 là 23:30 ngày 11/10 giờ Việt Nam, nên ngày giao 12/10 là "ngày mai".
-        DateTimeOffset beforeMidnightIct = new(2026, 10, 11, 16, 30, 0, TimeSpan.Zero);
+        // 17:30 UTC ngày 09/10 là 00:30 ngày 10/10 giờ Việt Nam: ngày thuê sớm nhất là 13/10, nên 12/10 bị chặn.
+        DateTimeOffset justAfterMidnightIct = new(2026, 10, 9, 17, 30, 0, TimeSpan.Zero);
+
+        CheckoutPreparationResult result = await CreateService(justAfterMidnightIct).PrepareAsync(Renter(), Request());
+
+        Assert.Equal(CheckoutErrors.InvalidRentalDates, result.Error);
+        CheckoutLineIssue issue = Assert.Single(result.LineIssues);
+        Assert.Equal(CheckoutLineIssueCode.StartDateNotInFuture, issue.Code);
+        Assert.Equal("Phải đặt trước ít nhất 3 ngày, ngày bắt đầu thuê sớm nhất là 13/10/2026.", issue.Message);
+        Assert.Equal(0, _inventory.ListingReadCount);
+    }
+
+    [Fact]
+    public async Task Prepare_AcceptsStartDateExactlyThreeDaysAheadInVietnamTime()
+    {
+        // 16:30 UTC ngày 09/10 là 23:30 ngày 09/10 giờ Việt Nam: ngày thuê sớm nhất là 12/10.
+        DateTimeOffset beforeMidnightIct = new(2026, 10, 9, 16, 30, 0, TimeSpan.Zero);
 
         CheckoutPreparationResult result = await CreateService(beforeMidnightIct).PrepareAsync(Renter(), Request());
 
@@ -357,7 +365,7 @@ public sealed class CheckoutPreparationServiceTests
         Guid missingListing = Guid.NewGuid();
         Guid ownListing = Guid.NewGuid();
         Guid scarceListing = Guid.NewGuid();
-        _inventory.Listings[inactiveListing] = Listing(inactiveListing) with { IsActive = false };
+        _inventory.Listings[inactiveListing] = Listing(inactiveListing) with { Status = "Inactive" };
         _inventory.Listings[ownListing] = Listing(ownListing) with { OwnerUserId = _renterId };
         _inventory.Listings[scarceListing] = Listing(scarceListing);
         _inventory.AvailableQuantities[scarceListing] = 3;
@@ -386,18 +394,13 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Theory]
-    [InlineData(null, 2_000_000, "VND")]
-    [InlineData(0, 2_000_000, "VND")]
-    [InlineData(500_000, null, "VND")]
-    [InlineData(500_000, -1, "VND")]
-    [InlineData(500_000, 2_000_000, "USD")]
-    [InlineData(500_000, 2_000_000, null)]
-    public async Task Prepare_RejectsListingWithoutUsablePricing(int? dailyRate, int? deposit, string? currency)
+    [InlineData(0, "VND")]
+    [InlineData(500_000, "USD")]
+    public async Task Prepare_RejectsListingWithoutUsablePricing(int dailyRate, string currency)
     {
         _inventory.Listings[_listingId] = Listing(_listingId) with
         {
             DailyRate = dailyRate,
-            DepositPerUnit = deposit,
             Currency = currency
         };
 
@@ -407,26 +410,26 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(CheckoutLineIssueCode.ListingUnavailable, Assert.Single(result.LineIssues).Code);
     }
 
-    [Fact]
-    public async Task Prepare_AcceptsZeroDeposit()
+    public static TheoryData<string> IncompleteSnapshotFields => ["OwnerUserId", "Name", "Status", "Currency"];
+
+    [Theory]
+    [MemberData(nameof(IncompleteSnapshotFields))]
+    public async Task Prepare_WhenInventorySnapshotMissesContractFields_ReportsDependencyUnavailable(string missingField)
     {
-        _inventory.Listings[_listingId] = Listing(_listingId) with { DepositPerUnit = 0m };
-
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(3_000_000m));
-
-        Assert.True(result.IsSuccess);
-        Assert.Equal(0m, result.Plan.TotalDepositAmount);
-    }
-
-    [Fact]
-    public async Task Prepare_RejectsListingWhoseBrandIsNoLongerPublicInCatalog()
-    {
-        _catalog.BrandNames.Clear();
+        ListingRentalSnapshotDto listing = Listing(_listingId);
+        _inventory.Listings[_listingId] = missingField switch
+        {
+            "OwnerUserId" => listing with { OwnerUserId = Guid.Empty },
+            "Name" => listing with { Name = " " },
+            "Status" => listing with { Status = null! },
+            _ => listing with { Currency = null! }
+        };
 
         CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
 
-        Assert.Equal(CheckoutErrors.ItemsUnavailable, result.Error);
-        Assert.Equal(CheckoutLineIssueCode.ListingUnavailable, Assert.Single(result.LineIssues).Code);
+        // Inventory gửi thiếu trường bắt buộc là lỗi phụ thuộc (503), không báo khách là thiết bị ngừng cho thuê.
+        Assert.Equal(CheckoutErrors.DependencyUnavailable, result.Error);
+        Assert.Empty(result.LineIssues);
     }
 
     [Fact]
@@ -434,12 +437,12 @@ public sealed class CheckoutPreparationServiceTests
     {
         _inventory.Listings[_listingId] = Listing(_listingId) with { DailyRate = 600_000m };
 
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(7_000_000m));
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(3_000_000m));
 
         Assert.Equal(CheckoutErrors.PriceChanged, result.Error);
         Assert.NotNull(result.CurrentQuote);
         Assert.Equal(600_000m, result.CurrentQuote.Lines.Single().DailyRate);
-        Assert.Equal(3_600_000m + 4_000_000m, result.CurrentQuote.TotalAmount);
+        Assert.Equal(3_600_000m, result.CurrentQuote.TotalAmount);
     }
 
     [Fact]
@@ -464,27 +467,111 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Fact]
-    public async Task Prepare_ReturnsDependencyUnavailable_WhenCatalogFails()
+    public async Task Prepare_CallsInventoryOnceForListingsAndOnceForAvailability_WholeCart()
     {
-        _catalog.Fail = true;
+        Guid secondItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 21));
 
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
+        CheckoutPreparationResult result = await CreateService()
+            .PrepareAsync(Renter(), Request(3_000_000m + 1_000_000m, _cartItemId, secondItem));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(2, result.Plan.Lines.Count);
+        // Một lần gọi cho Listing (hai dòng cùng Listing nên chỉ hỏi một mã); lịch thì mỗi dòng một lần.
+        Assert.Equal(1, _inventory.ListingReadCount);
+        Assert.Equal([_listingId], _inventory.RequestedListingIds);
+        Assert.Equal(2, _inventory.AvailabilityCheckCount);
+        Assert.Equal(
+            [(new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 14)), (new DateOnly(2026, 10, 20), new DateOnly(2026, 10, 21))],
+            _inventory.AvailabilityPeriods);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenInventoryOmitsAListingFromBothResultsAndNotFound_ReportsDependencyUnavailable()
+    {
+        BrokenInventory inventory = new(_inventory) { DropSnapshots = true };
+
+        CheckoutPreparationResult result = await CreateService(inventory: inventory).PrepareAsync(Renter(), Request());
 
         Assert.Equal(CheckoutErrors.DependencyUnavailable, result.Error);
     }
 
     [Fact]
-    public async Task Prepare_ReadsEachListingAndCatalogEntryOnce_ForLinesOfTheSameListing()
+    public async Task Prepare_WhenInventoryReturnsAListingThatWasNotAskedFor_ReportsDependencyUnavailable()
     {
-        Guid secondItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 21));
+        BrokenInventory inventory = new(_inventory) { ExtraSnapshot = Listing(Guid.NewGuid()) };
 
-        CheckoutPreparationResult result = await CreateService()
-            .PrepareAsync(Renter(), Request(7_000_000m + 3_000_000m, _cartItemId, secondItem));
+        CheckoutPreparationResult result = await CreateService(inventory: inventory).PrepareAsync(Renter(), Request());
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal(2, result.Plan.Lines.Count);
-        Assert.Equal(1, _inventory.ListingReadCount);
-        Assert.Equal(2, _inventory.AvailabilityCheckCount);
-        Assert.Equal(2, _catalog.CallCount);
+        Assert.Equal(CheckoutErrors.DependencyUnavailable, result.Error);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenInventoryAnswersAvailabilityForOtherDates_ReportsDependencyUnavailable()
+    {
+        BrokenInventory inventory = new(_inventory) { ShiftAvailabilityEndDate = true };
+
+        CheckoutPreparationResult result = await CreateService(inventory: inventory).PrepareAsync(Renter(), Request());
+
+        Assert.Equal(CheckoutErrors.DependencyUnavailable, result.Error);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenListingDisappearsBeforeAvailabilityCheck_ReportsListingUnavailable()
+    {
+        BrokenInventory inventory = new(_inventory) { AvailabilityListingNotFound = true };
+
+        CheckoutPreparationResult result = await CreateService(inventory: inventory).PrepareAsync(Renter(), Request());
+
+        Assert.Equal(CheckoutErrors.ItemsUnavailable, result.Error);
+        Assert.Equal(CheckoutLineIssueCode.ListingUnavailable, Assert.Single(result.LineIssues).Code);
+    }
+
+    /// <summary>Bọc Inventory giả để trả kết quả sai hợp đồng.</summary>
+    private sealed class BrokenInventory(FakeInventoryListingClient inner) : IInventoryRentalClient
+    {
+        public bool DropSnapshots { get; init; }
+
+        public ListingRentalSnapshotDto? ExtraSnapshot { get; init; }
+
+        public bool ShiftAvailabilityEndDate { get; init; }
+
+        public bool AvailabilityListingNotFound { get; init; }
+
+        public async Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default)
+        {
+            Result<ListingRentalSnapshotsResponse> result = await inner.GetListingRentalSnapshotsAsync(request, ct);
+            if (DropSnapshots)
+            {
+                return Result.Success(new ListingRentalSnapshotsResponse([], []));
+            }
+
+            return ExtraSnapshot is null
+                ? result
+                : Result.Success(result.Value with { Items = [.. result.Value.Items, ExtraSnapshot] });
+        }
+
+        public async Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default)
+        {
+            if (AvailabilityListingNotFound)
+            {
+                return Result.Failure<ListingAvailabilityCheckResponse>(
+                    Error.NotFound(InventoryContractSpec.ErrorCodes.ListingNotFound, "Listing không tồn tại."));
+            }
+
+            Result<ListingAvailabilityCheckResponse> result = await inner.CheckListingAvailabilityAsync(request, ct);
+            return ShiftAvailabilityEndDate
+                ? Result.Success(result.Value with { EndDate = result.Value.EndDate.AddDays(1) })
+                : result;
+        }
+
+        public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(string allocationGroupId, ConfirmAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<ReleaseAllocationResponse>> ReleaseAllocationAsync(string allocationGroupId, ReleaseAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<CancelAllocationResponse>> CancelAllocationAsync(string allocationGroupId, CancelAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<MarkAssetsOverdueResponse>> MarkAssetsOverdueAsync(string allocationGroupId, MarkAssetsOverdueRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<MarkAssetsReturnedResponse>> MarkAssetsReturnedAsync(string allocationGroupId, MarkAssetsReturnedRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<BlockDamagedAssetsResponse>> BlockDamagedAssetsAsync(string allocationGroupId, BlockDamagedAssetsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

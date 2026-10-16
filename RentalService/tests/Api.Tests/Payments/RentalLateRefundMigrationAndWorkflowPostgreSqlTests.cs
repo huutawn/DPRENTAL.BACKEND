@@ -104,11 +104,12 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
         {
             var options = PostgresTestDatabaseHelper.CreateOptions(connString);
 
-            // 1. Migrate up to 20261012082545_AddOrderCodeSequence (migration immediately before late-refund migration)
+            // 1. Migrate up to 20261015004900_MakeRentalItemListingDetailsOptional (migration immediately before late-refund migration;
+            // dữ liệu mẫu ghi bằng model hiện tại nên schema phải đã có đơn con)
             await using (var ctx = new RentalServiceDbContext(options))
             {
                 var migrator = ctx.Database.GetService<IMigrator>();
-                await migrator.MigrateAsync("20261012082545_AddOrderCodeSequence");
+                await migrator.MigrateAsync("20261015004900_MakeRentalItemListingDetailsOptional");
             }
 
             Guid orderLateId = Guid.NewGuid();
@@ -309,12 +310,12 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
                 order.MarkPaymentExpired(pastTime.AddMinutes(5), "op-exp");
                 order.MarkAsLatePayment("INV-001", "PAY-LATE", pastTime.AddMinutes(5), pastTime.AddMinutes(10));
 
-                string relOpKey = RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{orderId}:{itemId}");
-                var relReceipt = RentalOperationReceipt.CreatePending(
-                    Guid.NewGuid(), orderId, relOpKey, "ReleaseAllocation",
-                    "fp-rel-test", pastTime, itemId,
-                    JsonSerializer.Serialize(new ReleaseAllocationRequest(relOpKey, "Late payment release"), JsonOptions));
-                order.AddOperationReceipt(relReceipt);
+                string cancelOpKey = RentalOperationExecutor.ComputeOperationKey("CancelInvoice", $"{orderId}");
+                var cancelReceipt = RentalOperationReceipt.CreatePending(
+                    Guid.NewGuid(), orderId, cancelOpKey, "CancelInvoice",
+                    "fp-cancel-test", pastTime, itemId,
+                    JsonSerializer.Serialize(new CancelInvoiceRequest(orderId, "INV-001", "Late payment cancel", cancelOpKey), JsonOptions));
+                order.AddOperationReceipt(cancelReceipt);
 
                 var refundReceipt = new RentalOperationReceipt(
                     Guid.NewGuid(), orderId, RentalOperationExecutor.ComputeOperationKey("RequestRefund", $"{orderId}:{itemId}"), "RequestRefund",
@@ -337,7 +338,6 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
             services.AddDbContext<RentalServiceDbContext>(opt =>
             {
                 opt.UseNpgsql(connString);
-                opt.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
             });
             services.AddScoped<IRentalOrderRepository, RentalOrderRepository>();
             services.AddScoped<IOperationReceiptRepository, OperationReceiptRepository>();
@@ -384,8 +384,8 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
 
             await using (var verifyCtx = new RentalServiceDbContext(options))
             {
-                var rel = await verifyCtx.RentalOperationReceipts.SingleAsync(r => r.Action == "ReleaseAllocation");
-                Assert.Equal(RentalOperationReceipt.StatusSucceeded, rel.Status);
+                var can = await verifyCtx.RentalOperationReceipts.SingleAsync(r => r.Action == "CancelInvoice");
+                Assert.Equal(RentalOperationReceipt.StatusSucceeded, can.Status);
 
                 var refund = await verifyCtx.RentalOperationReceipts.SingleAsync(r => r.Action == "RequestRefund");
                 Assert.Equal(RentalOperationReceipt.StatusManualRefundRequired, refund.Status);
@@ -627,7 +627,7 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
             throw new NotImplementedException();
 
         public Task<Result<CancelInvoiceResponse>> CancelInvoiceAsync(CancelInvoiceRequest request, CancellationToken ct = default) =>
-            throw new NotImplementedException();
+            Task.FromResult(Result.Success(new CancelInvoiceResponse(request.InvoiceRef, true, DateTimeOffset.UtcNow, false)));
 
         public Task<Result<RequestRefundResponse>> RequestRefundAsync(RequestRefundRequest request, CancellationToken ct = default)
         {
@@ -649,6 +649,7 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
 
         public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(string allocationGroupId, ConfirmAllocationRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<CancelAllocationResponse>> CancelAllocationAsync(string allocationGroupId, CancelAllocationRequest request, CancellationToken ct = default) => throw new NotImplementedException();
@@ -667,10 +668,13 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
         public Task<Result> ExecuteExtendHoldAsync(Guid orderId, Guid itemId, string operationKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result<SupplierDecisionResponse>> ExecuteSupplierAcceptAsync(Guid orderId, Guid itemId, Guid supplierId, string idempotencyKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result<SupplierDecisionResponse>> ExecuteSupplierRejectAsync(Guid orderId, Guid itemId, Guid supplierId, string reason, string? note, string idempotencyKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Result<IReadOnlyList<SupplierDecisionResponse>>> ExecuteSubOrderAcceptAsync(Guid orderId, Guid subOrderId, Guid supplierId, string idempotencyKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Result<IReadOnlyList<SupplierDecisionResponse>>> ExecuteSubOrderRejectAsync(Guid orderId, Guid subOrderId, Guid supplierId, string reason, string? note, string idempotencyKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result> ExecuteReconcileAcceptAsync(Guid orderId, Guid itemId, string acceptOperationKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result> ExecuteCancelInvoiceAsync(Guid orderId, string operationKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result> ExecuteReleaseAllocationAsync(Guid orderId, Guid itemId, string operationKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result> ExecuteRequestRefundAsync(Guid orderId, Guid itemId, string operationKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Result> RequestRefundDirectAsync(RentalOrder order, RentalItem item, RentalOperationReceipt receipt, string operationKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result> ExecutePaymentExpiryAsync(Guid orderId, string operationKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result> ExecuteScheduledOperationAsync(OperationReceiptDescriptor descriptor, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result> ReplayStoredOperationAsync(Guid orderId, string operationId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
@@ -696,6 +700,14 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
         public Task<SupplierConfirmationStatisticsRecord> GetSupplierConfirmationStatisticsAsync(Guid supplierId, DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Guid>> GetOverdueUnprotectedOrderIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<Guid>> GetRenterResponseTimeoutItemIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<Guid>> GetDisputedItemIdsAsync(int skip, int take, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<Guid>> GetSettlementReadyItemIdsAsync(int batchSize, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<RentalSubOrder?> GetSubOrderByIdAsync(Guid subOrderId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(Guid renterId, int skip, int take, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<RentalOrder?> GetRenterOrderWithSubOrdersAsync(Guid orderId, Guid renterId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(Guid supplierId, int skip, int take, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<RentalSubOrder?> GetPaidSubOrderForSupplierAsync(Guid subOrderId, Guid supplierId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 
     private sealed class Mock<T> where T : class
