@@ -1,6 +1,6 @@
-using Dprental.PaymentService.Application.Kafka;
 using Dprental.PaymentService.Application.Background;
 using Dprental.PaymentService.Application.IServices;
+using Dprental.PaymentService.Application.Kafka;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Application.Services;
 using Microsoft.Extensions.Configuration;
@@ -33,16 +33,21 @@ public static class ApplicationServiceCollectionExtensions
         services.AddOptions<PaymentKafkaOptions>()
             .Bind(configuration.GetSection(PaymentKafkaOptions.SectionName))
             .ValidateDataAnnotations()
-            .Validate(o => !o.Enabled || !string.IsNullOrWhiteSpace(o.BootstrapServers),
-                "Kafka BootstrapServers must be provided when Kafka is enabled.")
+            .Validate(o => !o.Enabled ||
+                (!string.IsNullOrWhiteSpace(o.BootstrapServers) &&
+                 !string.IsNullOrWhiteSpace(o.Topic) &&
+                 o.BatchSize > 0 && o.PollingIntervalSeconds > 0 &&
+                 o.DeliveryTimeoutSeconds > 0 && o.LeaseDurationSeconds > 0),
+                "Enabled Kafka requires broker, topic and positive worker settings.")
             .ValidateOnStart();
-
         services.AddSingleton(TimeProvider.System);
 
         services.AddScoped<IInvoiceCreationService, InvoiceCreationService>();
         services.AddScoped<IInvoiceLifecycleService, InvoiceLifecycleService>();
         services.AddScoped<IInvoicePaymentProcessor, InvoicePaymentProcessor>();
         services.AddScoped<IInvoiceService, InvoiceService>();
+        services.AddScoped<ISettlementService, SettlementService>();
+        services.AddScoped<IManualRefundService, ManualRefundService>();
         services.AddSingleton<IInvoicePaidKafkaProducer, InvoicePaidKafkaProducer>();
 
         services.AddHostedService<InvoiceExpiryWorker>();

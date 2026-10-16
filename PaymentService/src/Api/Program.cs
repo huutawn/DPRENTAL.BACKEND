@@ -1,12 +1,12 @@
 using System.IO;
 using System.Net;
-using Microsoft.AspNetCore.HttpOverrides;
 using Dprental.PaymentService.Api.Exceptions;
 using Dprental.PaymentService.Api.Security;
 using Dprental.PaymentService.Application.DependencyInjection;
-using Dprental.PaymentService.Domain.Repository;
 using Dprental.PaymentService.Domain.Persistence;
+using Dprental.PaymentService.Domain.Repository;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -26,12 +26,29 @@ builder.Services.AddAuthorization(options =>
             ctx.User.HasScope("payment.invoice.write"));
     });
 
+    options.AddPolicy("SettlementServicePolicy", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+            ctx.User.IsServiceToken() &&
+            ctx.User.HasServiceAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ServiceAudience") ?? "payment-api") &&
+            ctx.User.HasScope("payment.settlement.write"));
+    });
+
     options.AddPolicy("InvoiceRenterPolicy", policy =>
     {
         policy.RequireAuthenticatedUser();
         policy.RequireAssertion(ctx =>
             ctx.User.HasClientAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ClientAudience") ?? "dprental-clients") &&
             ctx.User.TryGetSubjectUserId(out _));
+    });
+
+    options.AddPolicy("ManualRefundAdminPolicy", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+            ctx.User.HasClientAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ClientAudience") ?? "dprental-clients") &&
+            ctx.User.IsPlatformAdmin() && ctx.User.TryGetSubjectUserId(out _));
     });
 });
 

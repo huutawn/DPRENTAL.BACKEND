@@ -1,7 +1,8 @@
 using Dprental.PaymentService.Domain.IRepository;
+using Dprental.PaymentService.Domain.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Dprental.PaymentService.Domain.Persistence;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Dprental.PaymentService.Domain.Repository;
 
@@ -22,7 +23,10 @@ public static class DomainRepositoriesServiceCollectionExtensions
         services.AddDbContext<PaymentServiceDbContext>(options =>
             options.UseNpgsql(connectionString));
 
+        services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<IInvoiceRepository, EfInvoiceRepository>();
+        services.AddScoped<ISettlementLedger, EfSettlementLedger>();
+        services.AddScoped<IManualRefundRepository, EfManualRefundRepository>();
         services.AddScoped<IOutboxRepository, EfOutboxRepository>();
 
         return services;

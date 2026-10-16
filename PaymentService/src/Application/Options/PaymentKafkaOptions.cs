@@ -1,3 +1,5 @@
+using Confluent.Kafka;
+
 namespace Dprental.PaymentService.Application.Options;
 
 public sealed class PaymentKafkaOptions
@@ -13,4 +15,10 @@ public sealed class PaymentKafkaOptions
     public int MaxBackoffSeconds { get; set; } = 60;
     public int BatchSize { get; set; } = 20;
     public bool Enabled { get; set; } = true;
+    public string ClientId { get; set; } = "payment-service";
+    public SecurityProtocol? SecurityProtocol { get; set; }
+    public SaslMechanism? SaslMechanism { get; set; }
+    public string? SaslUsername { get; set; }
+    public string? SaslPassword { get; set; }
+    public string? SslCaLocation { get; set; }
 }

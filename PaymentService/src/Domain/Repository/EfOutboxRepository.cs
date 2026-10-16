@@ -33,15 +33,21 @@ public sealed class EfOutboxRepository : IOutboxRepository
 
         var candidates = await _dbContext.OutboxMessages
             .FromSql($"""
-                SELECT *
-                FROM outbox_messages
-                WHERE "PublishedAt" IS NULL
-                  AND ("LockedUntilUtc" IS NULL OR "LockedUntilUtc" < {utcNow})
-                  AND ("NextRetryAt" IS NULL OR "NextRetryAt" <= {utcNow})
-                  AND "RetryCount" < {maxRetries}
-                ORDER BY "CreatedAt" ASC
+                SELECT m.*
+                FROM outbox_messages m
+                WHERE m."PublishedAt" IS NULL
+                  AND (m."LockedUntilUtc" IS NULL OR m."LockedUntilUtc" < {utcNow})
+                  AND (m."NextRetryAt" IS NULL OR m."NextRetryAt" <= {utcNow})
+                  AND m."RetryCount" < {maxRetries}
+                  AND NOT EXISTS (
+                      SELECT 1 FROM outbox_messages earlier
+                      WHERE earlier."AggregateId" = m."AggregateId"
+                        AND earlier."PublishedAt" IS NULL
+                        AND (earlier."CreatedAt", earlier."Id") < (m."CreatedAt", m."Id")
+                  )
+                ORDER BY m."CreatedAt" ASC, m."Id" ASC
                 LIMIT {batchSize}
-                FOR UPDATE SKIP LOCKED
+                FOR UPDATE OF m SKIP LOCKED
                 """)
             .ToListAsync(cancellationToken);
 

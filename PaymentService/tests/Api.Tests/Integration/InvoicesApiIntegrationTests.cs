@@ -12,6 +12,7 @@ using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Domain.Repository;
 using Dprental.PaymentService.Domain.Persistence;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
@@ -21,6 +22,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -62,8 +64,11 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
                 builder.UseSetting("Authentication:Jwt:ClientAudience", ClientAudience);
                 builder.UseSetting("Authentication:Jwt:JwksUri", "http://localhost/jwks");
 
+                builder.ConfigureLogging(logging => logging.ClearProviders());
+
                 builder.ConfigureTestServices(services =>
                 {
+                    services.AddDataProtection().UseEphemeralDataProtectionProvider();
                     services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, opt =>
                     {
                         opt.TokenValidationParameters.ValidIssuer = Issuer;

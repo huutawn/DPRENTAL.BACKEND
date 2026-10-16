@@ -28,11 +28,23 @@ public sealed class InvoicePaidKafkaProducer : IInvoicePaidKafkaProducer, IDispo
             var producerConfig = new ProducerConfig
             {
                 BootstrapServers = config.BootstrapServers,
+                ClientId = config.ClientId,
                 EnableIdempotence = true,
                 Acks = Acks.All,
                 MessageTimeoutMs = config.DeliveryTimeoutSeconds * 1000,
                 SocketTimeoutMs = config.DeliveryTimeoutSeconds * 1000
             };
+
+            if (config.SecurityProtocol.HasValue)
+                producerConfig.SecurityProtocol = config.SecurityProtocol.Value;
+            if (config.SaslMechanism.HasValue)
+                producerConfig.SaslMechanism = config.SaslMechanism.Value;
+            if (!string.IsNullOrWhiteSpace(config.SaslUsername))
+                producerConfig.SaslUsername = config.SaslUsername;
+            if (!string.IsNullOrWhiteSpace(config.SaslPassword))
+                producerConfig.SaslPassword = config.SaslPassword;
+            if (!string.IsNullOrWhiteSpace(config.SslCaLocation))
+                producerConfig.SslCaLocation = config.SslCaLocation;
 
             _producer = new ProducerBuilder<string, string>(producerConfig).Build();
         }
@@ -52,7 +64,9 @@ public sealed class InvoicePaidKafkaProducer : IInvoicePaidKafkaProducer, IDispo
             Timestamp = new Timestamp(DateTime.UtcNow)
         };
 
-        await _producer.ProduceAsync(topic, message, cancellationToken);
+        var delivery = await _producer.ProduceAsync(topic, message, cancellationToken);
+        if (delivery.Status != PersistenceStatus.Persisted)
+            throw new InvalidOperationException($"Kafka did not confirm persistence: {delivery.Status}");
     }
 
     public void Dispose()

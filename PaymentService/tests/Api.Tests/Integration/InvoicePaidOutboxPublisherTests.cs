@@ -81,6 +81,51 @@ public class InvoicePaidOutboxPublisherTests
     }
 
     [Fact]
+    public async Task Publisher_delivers_rental_settled_after_earlier_invoice_paid_for_same_order()
+    {
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            var orderId = Guid.NewGuid();
+            var now = FixedNow;
+            await using (var db = new PaymentServiceDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+                db.OutboxMessages.Add(OutboxMessage.Create(Guid.NewGuid(), "InvoicePaid", "RentalOrder",
+                    orderId.ToString("D"), "{\"messageType\":\"InvoicePaid\"}", now.AddMinutes(-1)));
+                db.OutboxMessages.Add(OutboxMessage.Create(Guid.NewGuid(), "RentalSettled", "RentalOrder",
+                    orderId.ToString("D"), "{\"messageType\":\"RentalSettled\"}", now));
+                await db.SaveChangesAsync();
+            }
+
+            var clock = new FakeTimeProvider(now);
+            var (provider, producer, _) = BuildTestServices(connectionString, clock);
+            using (provider as IDisposable)
+            {
+                var worker = new InvoicePaidOutboxPublisherWorker(
+                    provider.GetRequiredService<IServiceScopeFactory>(),
+                    provider.GetRequiredService<IOptionsMonitor<PaymentKafkaOptions>>(),
+                    NullLogger<InvoicePaidOutboxPublisherWorker>.Instance, clock);
+
+                Assert.Equal(1, await worker.ProcessPendingMessagesAsync(CancellationToken.None));
+                Assert.Single(producer.ProducedMessages);
+                Assert.Contains("InvoicePaid", producer.ProducedMessages.Single().Payload, StringComparison.Ordinal);
+                Assert.Equal(1, await worker.ProcessPendingMessagesAsync(CancellationToken.None));
+                Assert.Equal(2, producer.ProducedMessages.Count);
+                Assert.All(producer.ProducedMessages, produced =>
+                    Assert.Equal(orderId.ToString("D"), produced.Key));
+                await using var verify = new PaymentServiceDbContext(options);
+                Assert.Equal(2, await verify.OutboxMessages.CountAsync(x => x.PublishedAt != null));
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
     public async Task ProcessPendingMessages_ClaimsAndPublishesWithOrderKey_AndMarksPublished()
     {
         var (connString, dbName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();

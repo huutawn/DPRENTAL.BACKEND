@@ -2,10 +2,13 @@ using System.Net;
 using System.Diagnostics.CodeAnalysis;
 using Dprental.PaymentService.Api.Filters;
 using Dprental.PaymentService.Common;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Dprental.PaymentService.Api.Tests;
@@ -58,8 +61,12 @@ public sealed class CommonBoundaryTests
                 builder.UseSetting("ConnectionStrings:Postgres",
                     "Host=localhost;Database=test;Username=test;Password=test");
                 builder.UseSetting("Security:ForwardedHeaders:KnownProxies:0", "127.0.0.1");
-                builder.ConfigureTestServices(services => services.AddControllers()
-                    .AddApplicationPart(typeof(BoundaryTestController).Assembly));
+                builder.ConfigureLogging(logging => logging.ClearProviders());
+                builder.ConfigureTestServices(services =>
+                {
+                    services.AddDataProtection().UseEphemeralDataProtectionProvider();
+                    services.AddControllers().AddApplicationPart(typeof(BoundaryTestController).Assembly);
+                });
             });
         using HttpClient client = factory.CreateClient();
         client.DefaultRequestHeaders.Accept.ParseAdd(accept);
