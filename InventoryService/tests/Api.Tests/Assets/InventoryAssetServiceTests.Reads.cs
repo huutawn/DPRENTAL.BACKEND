@@ -221,14 +221,14 @@ public sealed partial class InventoryAssetServiceTests
     public async Task ListAssetsAsync_FieldMissingOrNotFilterableInCurrentSchema_Returns400()
     {
         var eqId = Guid.NewGuid();
-        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(new CatalogBatchSchemasResponse(
             id,
             1,
             [
                 new CatalogBatchSchemaItemResponse(1, [
                     new CatalogBatchFieldResponse("allowed", "Allowed", "text", true, false, false, 0, null, null, null, null, null)
                 ])
-            ])));
+            ]), DateTimeOffset.UtcNow.AddMinutes(5))));
 
         var service = CreateService();
         var caller = new TestCaller(Guid.NewGuid());
@@ -246,7 +246,7 @@ public sealed partial class InventoryAssetServiceTests
     public async Task ListAssetsAsync_EnumFilterWithInvalidOption_Returns400()
     {
         var eqId = Guid.NewGuid();
-        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(new CatalogBatchSchemasResponse(
             id,
             1,
             [
@@ -255,7 +255,7 @@ public sealed partial class InventoryAssetServiceTests
                         [new CatalogBatchOptionResponse("diesel", "Diesel"), new CatalogBatchOptionResponse("electric", "Electric")],
                         null, null)
                 ])
-            ])));
+            ]), DateTimeOffset.UtcNow.AddMinutes(5))));
 
         var service = CreateService();
         var caller = new TestCaller(Guid.NewGuid());
@@ -277,7 +277,7 @@ public sealed partial class InventoryAssetServiceTests
         _repo.Add(asset1);
         _repo.Add(asset2);
 
-        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(new CatalogBatchSchemasResponse(
             id,
             2,
             [
@@ -287,7 +287,7 @@ public sealed partial class InventoryAssetServiceTests
                 new CatalogBatchSchemaItemResponse(2, [
                     new CatalogBatchFieldResponse("capacity", "Cap", "number", true, true, false, 0, 0, 10000, null, "kg", null)
                 ])
-            ])));
+            ]), DateTimeOffset.UtcNow.AddMinutes(5))));
 
         var service = CreateService();
         var caller = new TestCaller(ownerId);
@@ -308,14 +308,14 @@ public sealed partial class InventoryAssetServiceTests
     public async Task ListAssetsAsync_NumberFilter_DecimalOverflow_Returns400(string overflowNumber)
     {
         var eqId = Guid.NewGuid();
-        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(new CatalogBatchSchemasResponse(
             id,
             1,
             [
                 new CatalogBatchSchemaItemResponse(1, [
                     new CatalogBatchFieldResponse("capacity", "Cap", "number", true, true, false, 0, null, null, null, null, null)
                 ])
-            ])));
+            ]), DateTimeOffset.UtcNow.AddMinutes(5))));
 
         var service = CreateService();
         var caller = new TestCaller(Guid.NewGuid());
@@ -332,14 +332,14 @@ public sealed partial class InventoryAssetServiceTests
     public async Task ListAssetsAsync_NumberFilter_ValidDecimalBoundaries_Succeeds()
     {
         var eqId = Guid.NewGuid();
-        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+        _catalogClient.BatchSchemasHandler = (id, versions) => Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(new CatalogBatchSchemasResponse(
             id,
             1,
             [
                 new CatalogBatchSchemaItemResponse(1, [
                     new CatalogBatchFieldResponse("capacity", "Cap", "number", true, true, false, 0, null, null, null, null, null)
                 ])
-            ])));
+            ]), DateTimeOffset.UtcNow.AddMinutes(5))));
 
         var service = CreateService();
         var caller = new TestCaller(Guid.NewGuid());
@@ -412,10 +412,10 @@ public sealed partial class InventoryAssetServiceTests
         _catalogClient.BatchSchemasHandler = (typeId, versions) =>
         {
             versionsRequestedToCatalog = versions;
-            return Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+            return Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(new CatalogBatchSchemasResponse(
                 typeId, 2, [new CatalogBatchSchemaItemResponse(2, [
                     new CatalogBatchFieldResponse("cap", "Cap", "number", true, true, false, 0, 0, 100, null, "t", null)
-                ])])));
+                ])]), DateTimeOffset.UtcNow.AddMinutes(5))));
         };
 
         // Query with acceptingBookings = true

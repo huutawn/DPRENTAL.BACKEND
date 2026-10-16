@@ -97,6 +97,7 @@ public sealed partial class InventoryAssetService
             }
             var revAsset = await ctx.GetNextSearchRevisionAsync(ct);
             ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(asset.Id, "Upsert", revAsset, now, ctx.SearchBackfillRunId));
+            ctx.StageCacheInvalidation([$"asset:{asset.Id:D}", $"listing:{asset.EquipmentListingId:D}", $"owner:{asset.Listing.OwnerUserId:D}", "public-discovery"]);
             return Result.Success(asset);
         }, cancellationToken);
 
@@ -181,6 +182,7 @@ public sealed partial class InventoryAssetService
             ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(asset.Id, "Upsert", revAsset, now, ctx.SearchBackfillRunId));
             ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(asset.EquipmentListingId, "Upsert", revListing, false, now, ctx.SearchBackfillRunId));
 
+            ctx.StageCacheInvalidation([$"asset:{asset.Id:D}", $"listing:{asset.EquipmentListingId:D}", $"owner:{asset.Listing.OwnerUserId:D}", "public-discovery"]);
             return Result.Success(asset);
         }, cancellationToken);
 

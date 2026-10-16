@@ -331,6 +331,29 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<Guid>> GetListingIdsByOwnerKeysetAsync(
+        Guid ownerUserId,
+        Guid? afterListingId,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var query = _context.EquipmentListings
+            .AsNoTracking()
+            .Where(l => l.OwnerUserId == ownerUserId);
+
+        if (afterListingId.HasValue && afterListingId.Value != Guid.Empty)
+        {
+            query = query.Where(l => l.Id > afterListingId.Value);
+        }
+
+        return await query
+            .OrderBy(l => l.Id)
+            .Take(limit)
+            .Select(l => l.Id)
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
     public void Add(EquipmentListing listing)
     {
         ArgumentNullException.ThrowIfNull(listing);

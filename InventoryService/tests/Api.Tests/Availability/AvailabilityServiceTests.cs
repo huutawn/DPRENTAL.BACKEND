@@ -3,6 +3,7 @@ using Dprental.InventoryService.Application.Caching;
 using Dprental.InventoryService.Application.DTOs.Availability;
 using Dprental.InventoryService.Application.Services;
 using Dprental.InventoryService.Common.Enums;
+using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Domain.IRepositories;
 using Dprental.InventoryService.Domain.ValueObjects;
@@ -24,14 +25,14 @@ public sealed class AvailabilityServiceTests
         var options = Options.Create(new InventoryCacheOptions
         {
             Enabled = false,
-            TtlSeconds = 60,
+            DynamicTtlSeconds = 60,
             TimeoutMs = 500
         });
 
         _service = new InventoryAvailabilityService(
             _assetRepository,
             _listingRepository,
-            NoOpInventoryAvailabilityCache.Instance,
+            NoOpInventoryReadCache.Instance,
             options,
             _timeProvider);
     }
@@ -273,7 +274,7 @@ public sealed class AvailabilityServiceTests
         });
 
         var options = Options.Create(new InventoryCacheOptions { Enabled = false });
-        var serviceWithDelayedRepo = new InventoryAvailabilityService(delayedRepo, _listingRepository, NoOpInventoryAvailabilityCache.Instance, options, _timeProvider);
+        var serviceWithDelayedRepo = new InventoryAvailabilityService(delayedRepo, _listingRepository, NoOpInventoryReadCache.Instance, options, _timeProvider);
         var request = new CheckAvailabilityBatchRequest(new[] { assetId }, windowStart, windowEnd);
         var result = await serviceWithDelayedRepo.CheckAvailabilityBatchAsync(request);
 
@@ -290,7 +291,7 @@ public sealed class AvailabilityServiceTests
         _assetRepository.Add(asset);
 
         var fakeCache = new InspectableFakeCache();
-        var options = Options.Create(new InventoryCacheOptions { Enabled = true, TtlSeconds = 5 });
+        var options = Options.Create(new InventoryCacheOptions { Enabled = true, DynamicTtlSeconds = 5 });
         var service = new InventoryAvailabilityService(_assetRepository, _listingRepository, fakeCache, options, _timeProvider);
 
         var result = await service.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
@@ -315,7 +316,7 @@ public sealed class AvailabilityServiceTests
         _assetRepository.Add(asset);
 
         var fakeCache = new InspectableFakeCache();
-        var options = Options.Create(new InventoryCacheOptions { Enabled = true, TtlSeconds = 60 });
+        var options = Options.Create(new InventoryCacheOptions { Enabled = true, DynamicTtlSeconds = 60 });
         var service = new InventoryAvailabilityService(_assetRepository, _listingRepository, fakeCache, options, _timeProvider);
 
         var result = await service.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
@@ -343,7 +344,7 @@ public sealed class AvailabilityServiceTests
             _timeProvider.Advance(TimeSpan.FromSeconds(5));
         });
 
-        var options = Options.Create(new InventoryCacheOptions { Enabled = true, TtlSeconds = 60 });
+        var options = Options.Create(new InventoryCacheOptions { Enabled = true, DynamicTtlSeconds = 60 });
         var service = new InventoryAvailabilityService(_assetRepository, _listingRepository, midIoExpiringCache, options, _timeProvider);
 
         var result = await service.GetBusyRangesAsync(assetId, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
@@ -446,27 +447,64 @@ public sealed class AvailabilityServiceTests
         public void Update(InventoryAsset asset) => _inner.Update(asset);
     }
 
-    private sealed class InspectableFakeCache : IInventoryAvailabilityCache
+    private sealed class InspectableFakeCache : IInventoryReadCache
     {
         public bool IsEnabled => true;
-        public List<(Guid AssetId, string MonthKey, IReadOnlyList<BusyRangeDto> Ranges, DateTimeOffset ExpiresAtUtc)> SetCalls { get; } = new();
+        public List<(string Scope, string QueryType, string Key, object Value, DateTimeOffset ExpiresAtUtc)> SetCalls { get; } = new();
 
-        public Task<IReadOnlyDictionary<string, CachedMonthRanges?>> GetMonthRangesBulkAsync(Guid assetId, IReadOnlyList<string> monthKeys, DateTimeOffset nowUtc, CancellationToken cancellationToken = default)
+        public Task<CacheReadResult<T>> GetAsync<T>(string scope, string queryType, string inputHash, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new CacheReadResult<T>(default, "test-gen", false));
+
+        public Task<bool> SetAsync<T>(string scope, string queryType, string inputHash, T value, string expectedGenerationToken, DateTimeOffset expiresAtUtc, CancellationToken cancellationToken = default)
         {
-            IReadOnlyDictionary<string, CachedMonthRanges?> res = monthKeys.ToDictionary(k => k, _ => (CachedMonthRanges?)null);
+            SetCalls.Add((scope, queryType, inputHash, value!, expiresAtUtc));
+            return Task.FromResult(true);
+        }
+
+        public Task<IReadOnlyDictionary<string, CacheReadResult<T>>> GetBulkAsync<T>(string scope, string queryType, IReadOnlyList<string> inputHashes, CancellationToken cancellationToken = default)
+        {
+            IReadOnlyDictionary<string, CacheReadResult<T>> res = inputHashes.ToDictionary(k => k, _ => new CacheReadResult<T>(default, "test-gen", false));
             return Task.FromResult(res);
         }
 
-        public Task SetMonthRangesAsync(Guid assetId, string monthKey, IReadOnlyList<BusyRangeDto> ranges, DateTimeOffset expiresAtUtc, CancellationToken cancellationToken = default)
+        public Task SetBulkAsync<T>(string scope, string queryType, IReadOnlyList<(string InputHash, T Value, DateTimeOffset ExpiresAtUtc)> items, string expectedGenerationToken, CancellationToken cancellationToken = default)
         {
-            SetCalls.Add((assetId, monthKey, ranges, expiresAtUtc));
+            foreach (var item in items)
+            {
+                SetCalls.Add((scope, queryType, item.InputHash, item.Value!, item.ExpiresAtUtc));
+            }
             return Task.CompletedTask;
         }
 
-        public Task InvalidateAssetAsync(Guid assetId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public async Task<Result<T>> GetOrCreateAsync<T>(string scope, string queryType, string inputHash, Func<string, CancellationToken, Task<Result<CachedRead<T>>>> factory, CancellationToken cancellationToken = default)
+        {
+            var res = await factory("test-gen", cancellationToken);
+            if (res.IsFailure) return res.Error;
+            return Result.Success(res.Value.Value);
+        }
+
+        public async Task<Result<IReadOnlyDictionary<CacheTarget, T>>> GetOrCreateBulkAsync<T>(
+            IReadOnlyList<CacheTarget> targets,
+            Func<IReadOnlyList<CacheTarget>, CancellationToken, Task<Result<IReadOnlyDictionary<CacheTarget, CachedRead<T>>>>> factory,
+            CancellationToken cancellationToken = default)
+        {
+            var res = await factory(targets, cancellationToken);
+            if (res.IsFailure) return res.Error;
+            foreach (var kv in res.Value)
+            {
+                if (kv.Value.ExpiresAtUtc.HasValue)
+                {
+                    SetCalls.Add((kv.Key.Scope, kv.Key.QueryType, kv.Key.InputHash, kv.Value.Value!, kv.Value.ExpiresAtUtc.Value));
+                }
+            }
+            return Result.Success<IReadOnlyDictionary<CacheTarget, T>>(res.Value.ToDictionary(kv => kv.Key, kv => kv.Value.Value));
+        }
+
+        public Task InvalidateScopeAsync(string scope, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task InvalidateScopesAsync(IEnumerable<string> scopes, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
-    private sealed class MidIoExpiringCache : IInventoryAvailabilityCache
+    private sealed class MidIoExpiringCache : IInventoryReadCache
     {
         private readonly DateTimeOffset _expiry;
         private readonly Action _beforeNextOperation;
@@ -479,20 +517,45 @@ public sealed class AvailabilityServiceTests
             _beforeNextOperation = beforeNextOperation;
         }
 
-        public Task<IReadOnlyDictionary<string, CachedMonthRanges?>> GetMonthRangesBulkAsync(Guid assetId, IReadOnlyList<string> monthKeys, DateTimeOffset nowUtc, CancellationToken cancellationToken = default)
+        public Task<CacheReadResult<T>> GetAsync<T>(string scope, string queryType, string inputHash, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new CacheReadResult<T>(default, "test-gen", false));
+
+        public Task<bool> SetAsync<T>(string scope, string queryType, string inputHash, T value, string expectedGenerationToken, DateTimeOffset expiresAtUtc, CancellationToken cancellationToken = default) =>
+            Task.FromResult(true);
+
+        public Task<IReadOnlyDictionary<string, CacheReadResult<T>>> GetBulkAsync<T>(string scope, string queryType, IReadOnlyList<string> inputHashes, CancellationToken cancellationToken = default)
         {
             var ranges = new[] { new BusyRangeDto(new DateOnly(2026, 10, 5), new DateOnly(2026, 10, 8)) };
             var hit = new CachedMonthRanges(ranges, _expiry);
-            IReadOnlyDictionary<string, CachedMonthRanges?> res = monthKeys.ToDictionary(k => k, _ => (CachedMonthRanges?)hit);
+            IReadOnlyDictionary<string, CacheReadResult<T>> res = inputHashes.ToDictionary(k => k, _ => new CacheReadResult<T>((T)(object)hit, "test-gen", true));
 
-            // Trigger mid-IO clock advance right after returning hit
             _beforeNextOperation();
-
             return Task.FromResult(res);
         }
 
-        public Task SetMonthRangesAsync(Guid assetId, string monthKey, IReadOnlyList<BusyRangeDto> ranges, DateTimeOffset expiresAtUtc, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task InvalidateAssetAsync(Guid assetId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task SetBulkAsync<T>(string scope, string queryType, IReadOnlyList<(string InputHash, T Value, DateTimeOffset ExpiresAtUtc)> items, string expectedGenerationToken, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public async Task<Result<T>> GetOrCreateAsync<T>(string scope, string queryType, string inputHash, Func<string, CancellationToken, Task<Result<CachedRead<T>>>> factory, CancellationToken cancellationToken = default)
+        {
+            var res = await factory("test-gen", cancellationToken);
+            if (res.IsFailure) return res.Error;
+            return Result.Success(res.Value.Value);
+        }
+
+        public Task<Result<IReadOnlyDictionary<CacheTarget, T>>> GetOrCreateBulkAsync<T>(
+            IReadOnlyList<CacheTarget> targets,
+            Func<IReadOnlyList<CacheTarget>, CancellationToken, Task<Result<IReadOnlyDictionary<CacheTarget, CachedRead<T>>>>> factory,
+            CancellationToken cancellationToken = default)
+        {
+            var ranges = new[] { new BusyRangeDto(new DateOnly(2026, 10, 5), new DateOnly(2026, 10, 8)) };
+            var hit = new CachedMonthRanges(ranges, _expiry);
+            var dict = targets.ToDictionary(t => t, _ => (T)(object)hit);
+            _beforeNextOperation();
+            return Task.FromResult(Result.Success<IReadOnlyDictionary<CacheTarget, T>>(dict));
+        }
+
+        public Task InvalidateScopeAsync(string scope, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task InvalidateScopesAsync(IEnumerable<string> scopes, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class FakeAssetRepository : IInventoryAssetRepository
@@ -545,6 +608,13 @@ public sealed class AvailabilityServiceTests
 
         public Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(id, out var l) && l.Status == EquipmentListingStatus.Active ? l : null);
+        public Task<IReadOnlyList<Guid>> GetListingIdsByOwnerKeysetAsync(Guid ownerUserId, Guid? afterListingId, int limit, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<Guid>>(Store.Values
+                .Where(l => l.OwnerUserId == ownerUserId && (!afterListingId.HasValue || l.Id > afterListingId.Value))
+                .OrderBy(l => l.Id)
+                .Take(limit)
+                .Select(l => l.Id)
+                .ToList());
         public Task<IReadOnlyList<EquipmentListingBatchItem>> GetBatchByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken = default)
         {
             var list = Store.Values

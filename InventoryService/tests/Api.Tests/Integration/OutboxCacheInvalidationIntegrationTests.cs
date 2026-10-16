@@ -1,9 +1,7 @@
-using System.Data;
+using Dprental.InventoryService.Api.Caching;
 using Dprental.InventoryService.Application.Caching;
-using Dprental.InventoryService.Application.DTOs.Availability;
 using Dprental.InventoryService.Application.DTOs.Calendar;
 using Dprental.InventoryService.Application.Kafka.Contracts;
-using Dprental.InventoryService.Application.Kafka.Options;
 using Dprental.InventoryService.Application.Kafka.Outbox;
 using Dprental.InventoryService.Application.Kafka.Transport;
 using Dprental.InventoryService.Application.Security;
@@ -26,9 +24,7 @@ public sealed class OutboxCacheInvalidationIntegrationTests : IClassFixture<Post
 {
     private readonly string _postgresConn;
     private readonly ValkeyFixture _valkey;
-    private const string KafkaBootstrapServers = "127.0.0.1:29092";
     private static readonly DateTimeOffset FixedNow = new(2026, 10, 5, 10, 0, 0, TimeSpan.Zero);
-    private static readonly string[] MonthKey202610Array = ["202610"];
 
     public OutboxCacheInvalidationIntegrationTests(PostgresFixture postgresFixture, ValkeyFixture valkeyFixture)
     {
@@ -53,15 +49,18 @@ public sealed class OutboxCacheInvalidationIntegrationTests : IClassFixture<Post
         return sp.GetRequiredService<IServiceScopeFactory>();
     }
 
-    private ValkeyInventoryAvailabilityCache CreateValkeyCache()
+    private ValkeyReadCache CreateValkeyCache()
     {
         var options = Options.Create(new InventoryCacheOptions
         {
             Enabled = true,
-            TtlSeconds = 60,
-            TimeoutMs = 500
+            DynamicTtlSeconds = 15,
+            MetadataTtlSeconds = 120,
+            CatalogTtlSeconds = 120,
+            TimeoutMs = 500,
+            EnvironmentName = "development"
         });
-        return new ValkeyInventoryAvailabilityCache(options, _valkey.Multiplexer, null, NullLogger<ValkeyInventoryAvailabilityCache>.Instance);
+        return new ValkeyReadCache(options, _valkey.Multiplexer, null, new InventoryCacheMetrics(), NullLogger<ValkeyReadCache>.Instance);
     }
 
     private sealed class FakeKafkaProducer : IKafkaProducer
@@ -81,20 +80,6 @@ public sealed class OutboxCacheInvalidationIntegrationTests : IClassFixture<Post
         }
     }
 
-    private sealed class ThrowingCache : IInventoryAvailabilityCache
-    {
-        public bool IsEnabled => true;
-
-        public Task<IReadOnlyDictionary<string, CachedMonthRanges?>> GetMonthRangesBulkAsync(Guid assetId, IReadOnlyList<string> monthKeys, DateTimeOffset nowUtc, CancellationToken cancellationToken = default) =>
-            throw new RedisException("Simulated network failure");
-
-        public Task SetMonthRangesAsync(Guid assetId, string monthKey, IReadOnlyList<BusyRangeDto> ranges, DateTimeOffset expiresAtUtc, CancellationToken cancellationToken = default) =>
-            throw new RedisException("Simulated network failure");
-
-        public Task InvalidateAssetAsync(Guid assetId, CancellationToken cancellationToken = default) =>
-            throw new RedisException("Simulated network failure");
-    }
-
     private sealed class TestCaller : IInventoryCallerContext
     {
         public bool IsAuthenticated => true;
@@ -109,24 +94,12 @@ public sealed class OutboxCacheInvalidationIntegrationTests : IClassFixture<Post
     }
 
     [Fact]
-    public async Task CommittedEvent_DeletesAllMonthKeys_AndPublishesKafka()
+    public async Task OutboxPublisherWorker_PublishesKafka_WithoutCouplingToCache()
     {
-        await _valkey.FlushDbAsync();
         var assetId = Guid.NewGuid();
-        var valkeyCache = CreateValkeyCache();
         var now = DateTimeOffset.UtcNow;
 
-        // 1. Setup cached months in Valkey
-        var ranges = new[] { new BusyRangeDto(new DateOnly(2026, 10, 5), new DateOnly(2026, 10, 8)) };
-        await valkeyCache.SetMonthRangesAsync(assetId, "202610", ranges, now.AddMinutes(5));
-        await valkeyCache.SetMonthRangesAsync(assetId, "202611", ranges, now.AddMinutes(5));
-
-        var redisDb = _valkey.Multiplexer.GetDatabase();
-        Assert.True(await redisDb.KeyExistsAsync($"inventory:asset:{assetId:D}:busy:202610"));
-        Assert.True(await redisDb.KeyExistsAsync($"inventory:asset:{assetId:D}:busy:202611"));
-        Assert.True(await redisDb.KeyExistsAsync($"inventory:asset:{assetId:D}:months"));
-
-        // 2. Stage and commit Outbox message
+        // 1. Stage and commit Outbox message
         var outboxMsg = InventoryAssetAvailabilityEvents.CreateAvailabilityChangedOutboxMessage(assetId, now);
         await using (var db = CreateDbContext())
         {
@@ -134,23 +107,18 @@ public sealed class OutboxCacheInvalidationIntegrationTests : IClassFixture<Post
             await db.SaveChangesAsync();
         }
 
-        // 3. Process batch via worker
+        // 2. Process batch via OutboxPublisherWorker (without cache dependency)
         var scopeFactory = CreateScopeFactory();
         var producer = new FakeKafkaProducer();
-        var worker = new OutboxPublisherWorker(scopeFactory, producer, valkeyCache);
+        var worker = new OutboxPublisherWorker(scopeFactory, producer);
 
         int processed = await worker.ProcessBatchAsync();
         Assert.True(processed >= 1);
 
-        // 4. Verify Kafka publication
+        // 3. Verify Kafka publication
         Assert.Contains(producer.ProducedMessages, m => m.Key == assetId.ToString("D") && m.Topic == KafkaTopics.InventoryAssetEventsV1);
 
-        // 5. Verify Valkey cache was invalidated!
-        Assert.False(await redisDb.KeyExistsAsync($"inventory:asset:{assetId:D}:busy:202610"));
-        Assert.False(await redisDb.KeyExistsAsync($"inventory:asset:{assetId:D}:busy:202611"));
-        Assert.False(await redisDb.KeyExistsAsync($"inventory:asset:{assetId:D}:months"));
-
-        // 6. Verify Outbox message marked as published in PostgreSQL
+        // 4. Verify Outbox message marked as published in PostgreSQL
         await using (var verifyDb = CreateDbContext())
         {
             var msg = await verifyDb.OutboxMessages.FirstAsync(m => m.Id == outboxMsg.Id);
@@ -159,212 +127,133 @@ public sealed class OutboxCacheInvalidationIntegrationTests : IClassFixture<Post
     }
 
     [Fact]
-    public async Task CommittedEvent_WithRealKafkaBroker_InvalidatesValkeyCache_AndPublishesSuccessfully()
+    public async Task CacheInvalidationWorker_ClaimsAndExecutesJob_RotatesValkeyGenerationToken()
     {
         await _valkey.FlushDbAsync();
-        var assetId = Guid.NewGuid();
-        var valkeyCache = CreateValkeyCache();
-        var now = DateTimeOffset.UtcNow;
+        using var valkeyCache = CreateValkeyCache();
+        var scope = "listing:test-inval";
 
-        var ranges = new[] { new BusyRangeDto(new DateOnly(2026, 10, 5), new DateOnly(2026, 10, 8)) };
-        await valkeyCache.SetMonthRangesAsync(assetId, "202610", ranges, now.AddMinutes(5));
+        // 1. Initial read creates generation token
+        var r1 = await valkeyCache.GetAsync<string>(scope, "detail", "hash");
+        var token1 = r1.GenerationToken;
+        Assert.False(string.IsNullOrWhiteSpace(token1));
 
-        var redisDb = _valkey.Multiplexer.GetDatabase();
-        Assert.True(await redisDb.KeyExistsAsync($"inventory:asset:{assetId:D}:busy:202610"));
-
-        var outboxMsg = InventoryAssetAvailabilityEvents.CreateAvailabilityChangedOutboxMessage(assetId, now);
+        // 2. Stage invalidation job directly into database
+        var job = CacheInvalidationJob.Create(Guid.NewGuid(), new[] { scope }, DateTimeOffset.UtcNow);
         await using (var db = CreateDbContext())
         {
-            db.OutboxMessages.Add(outboxMsg);
+            db.CacheInvalidationJobs.Add(job);
             await db.SaveChangesAsync();
         }
 
-        // Tạo real Kafka producer kết nối tới 127.0.0.1:29092
-        var kafkaOpts = Options.Create(new KafkaOptions
-        {
-            BootstrapServers = KafkaBootstrapServers,
-            ClientId = "test-real-kafka-worker",
-            DeliveryTimeoutMs = 10000
-        });
-
-        using var realProducer = new KafkaProducer(kafkaOpts);
+        // 3. Run CacheInvalidationWorker batch
         var scopeFactory = CreateScopeFactory();
-        var worker = new OutboxPublisherWorker(scopeFactory, realProducer, valkeyCache);
+        var worker = new CacheInvalidationWorker(scopeFactory, valkeyCache);
+        int claimed = await worker.ProcessBatchAsync();
+        Assert.True(claimed >= 1);
 
-        int processed = await worker.ProcessBatchAsync();
-        Assert.True(processed >= 1);
-
-        // Verify Valkey cache was invalidated
-        Assert.False(await redisDb.KeyExistsAsync($"inventory:asset:{assetId:D}:busy:202610"));
-
-        // Verify Outbox message acknowledged by real Kafka broker
+        // 4. Verify job is marked as Completed
         await using (var verifyDb = CreateDbContext())
         {
-            var msg = await verifyDb.OutboxMessages.FirstAsync(m => m.Id == outboxMsg.Id);
-            Assert.NotNull(msg.PublishedAt);
+            var completedJob = await verifyDb.CacheInvalidationJobs.FirstAsync(j => j.Id == job.Id);
+            Assert.Equal(CacheInvalidationJob.StatusCompleted, completedJob.Status);
+            Assert.NotNull(completedJob.ProcessedAt);
+            Assert.Null(completedJob.LockLeaseToken);
         }
+
+        // 5. Verify Valkey generation token changed!
+        var r2 = await valkeyCache.GetAsync<string>(scope, "detail", "hash");
+        var token2 = r2.GenerationToken;
+        Assert.NotEqual(token1, token2);
     }
 
     [Fact]
-    public async Task RollbackOrUncommittedTransaction_DoesNotInvalidateCache()
+    public async Task Mutation_StagesCacheInvalidationJob_CommittedInSameTransaction()
     {
-        await _valkey.FlushDbAsync();
-        var assetId = Guid.NewGuid();
-        var valkeyCache = CreateValkeyCache();
-        var now = DateTimeOffset.UtcNow;
-
-        var ranges = new[] { new BusyRangeDto(new DateOnly(2026, 10, 5), new DateOnly(2026, 10, 8)) };
-        await valkeyCache.SetMonthRangesAsync(assetId, "202610", ranges, now.AddMinutes(5));
-
-        var redisDb = _valkey.Multiplexer.GetDatabase();
-        Assert.True(await redisDb.KeyExistsAsync($"inventory:asset:{assetId:D}:busy:202610"));
-
-        // Uncommitted / rolled back transaction
-        var outboxMsg = InventoryAssetAvailabilityEvents.CreateAvailabilityChangedOutboxMessage(assetId, now);
-        await using (var db = CreateDbContext())
-        {
-            await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted);
-            db.OutboxMessages.Add(outboxMsg);
-            await db.SaveChangesAsync();
-            await tx.RollbackAsync();
-        }
-
-        // Run worker
-        var scopeFactory = CreateScopeFactory();
-        var producer = new FakeKafkaProducer();
-        var worker = new OutboxPublisherWorker(scopeFactory, producer, valkeyCache);
-
-        int processed = await worker.ProcessBatchAsync();
-        Assert.Equal(0, processed);
-
-        // Cache remains intact!
-        Assert.True(await redisDb.KeyExistsAsync($"inventory:asset:{assetId:D}:busy:202610"));
-    }
-
-    [Fact]
-    public async Task InvalidationFailure_PreservesDatabaseSuccess_And_KafkaPublication()
-    {
-        var assetId = Guid.NewGuid();
-        var throwingCache = new ThrowingCache();
-        var now = DateTimeOffset.UtcNow;
-
-        var outboxMsg = InventoryAssetAvailabilityEvents.CreateAvailabilityChangedOutboxMessage(assetId, now);
-        await using (var db = CreateDbContext())
-        {
-            db.OutboxMessages.Add(outboxMsg);
-            await db.SaveChangesAsync();
-        }
-
-        var scopeFactory = CreateScopeFactory();
-        var producer = new FakeKafkaProducer();
-        var worker = new OutboxPublisherWorker(scopeFactory, producer, throwingCache);
-
-        // Worker should NOT crash when cache invalidation fails
-        int processed = await worker.ProcessBatchAsync();
-        Assert.True(processed >= 1);
-
-        // Kafka message was successfully produced
-        Assert.Contains(producer.ProducedMessages, m => m.Key == assetId.ToString("D") && m.Topic == KafkaTopics.InventoryAssetEventsV1);
-
-        // Outbox record is marked published in DB
-        await using (var verifyDb = CreateDbContext())
-        {
-            var msg = await verifyDb.OutboxMessages.FirstAsync(m => m.Id == outboxMsg.Id);
-            Assert.NotNull(msg.PublishedAt);
-        }
-    }
-
-    [Fact]
-    public async Task RealMutationViaCalendarService_StagesOutboxAndInvalidatesCache()
-    {
-        await _valkey.FlushDbAsync();
         var ownerId = Guid.NewGuid();
         var assetId = Guid.NewGuid();
 
-        await using (var seedDb = CreateDbContext())
+        await using (var initDb = CreateDbContext())
         {
-            await IntegrationTestHelper.InsertTestAssetAsync(seedDb, assetId: assetId, ownerId: ownerId, model: "MutationAsset", now: FixedNow);
+            await IntegrationTestHelper.InsertTestAssetAsync(initDb, assetId: assetId, ownerId: ownerId, now: FixedNow);
         }
 
-        var valkeyCache = CreateValkeyCache();
-        var ranges = new[] { new BusyRangeDto(new DateOnly(2026, 10, 5), new DateOnly(2026, 10, 8)) };
-        await valkeyCache.SetMonthRangesAsync(assetId, "202610", ranges, DateTimeOffset.UtcNow.AddMinutes(5));
-
-        var redisDb = _valkey.Multiplexer.GetDatabase();
-        Assert.True(await redisDb.KeyExistsAsync($"inventory:asset:{assetId:D}:busy:202610"));
-
-        // Thực hiện mutation qua CalendarService
         var scopeFactory = CreateScopeFactory();
-        await using (var scope = scopeFactory.CreateAsyncScope())
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var assetRepo = scope.ServiceProvider.GetRequiredService<IInventoryAssetRepository>();
+        var listingRepo = scope.ServiceProvider.GetRequiredService<IEquipmentListingRepository>();
+        var tx = scope.ServiceProvider.GetRequiredService<IInventoryWriteTransaction>();
+
+        var calendarService = new CalendarService(assetRepo, listingRepo, tx);
+        var caller = new TestCaller { UserId = ownerId };
+
+        var req = new CreateCalendarBlockRequest
         {
-            var writeTx = scope.ServiceProvider.GetRequiredService<IInventoryWriteTransaction>();
-            var assetRepo = scope.ServiceProvider.GetRequiredService<IInventoryAssetRepository>();
-            var listingRepo = scope.ServiceProvider.GetRequiredService<IEquipmentListingRepository>();
-            var calService = new CalendarService(assetRepo, listingRepo, writeTx);
+            StartDate = new DateOnly(2026, 10, 20),
+            EndDate = new DateOnly(2026, 10, 25),
+            Reason = CalendarBlockReason.Maintenance,
+            Note = "Test maintenance"
+        };
 
-            var caller = new TestCaller { UserId = ownerId };
-            var request = new CreateCalendarBlockRequest
-            {
-                StartDate = new DateOnly(2026, 10, 18),
-                EndDate = new DateOnly(2026, 10, 20),
-                Reason = CalendarBlockReason.Maintenance,
-                Note = "Routine maintenance"
-            };
+        // Mutation creates block and commits in transaction
+        var result = await calendarService.CreateCalendarBlockAsync(assetId, req, caller);
+        Assert.True(result.IsSuccess);
 
-            var res = await calService.CreateCalendarBlockAsync(assetId, request, caller);
-            Assert.True(res.IsSuccess, res.Error.ToString());
+        // Verify that a cache invalidation job was staged and committed!
+        await using var verifyDb = CreateDbContext();
+        var job = await verifyDb.CacheInvalidationJobs
+            .FirstOrDefaultAsync(j => j.Status == CacheInvalidationJob.StatusPending &&
+                                      j.Scopes.Contains($"asset:{assetId:D}"));
+
+        Assert.NotNull(job);
+        Assert.Contains($"asset:{assetId:D}", job.Scopes);
+        Assert.Contains("public-discovery", job.Scopes);
+    }
+
+    [Fact]
+    public async Task ValkeyOutage_CacheInvalidationWorker_RetriesWithBackoff_JobNotLost()
+    {
+        // Multiplexer pointing to unreachable endpoint
+        var brokenConfig = ConfigurationOptions.Parse("127.0.0.1:59999");
+        brokenConfig.AbortOnConnectFail = false;
+        brokenConfig.ConnectTimeout = 100;
+        brokenConfig.SyncTimeout = 100;
+        brokenConfig.AsyncTimeout = 100;
+        var brokenMux = await ConnectionMultiplexer.ConnectAsync(brokenConfig);
+
+        var brokenOptions = Options.Create(new InventoryCacheOptions
+        {
+            Enabled = true,
+            DynamicTtlSeconds = 15,
+            TimeoutMs = 100,
+            EnvironmentName = "development"
+        });
+
+        using var brokenCache = new ValkeyReadCache(brokenOptions, brokenMux, null, new InventoryCacheMetrics(), NullLogger<ValkeyReadCache>.Instance);
+
+        // Stage job
+        var job = CacheInvalidationJob.Create(Guid.NewGuid(), ["asset:broken-test"], DateTimeOffset.UtcNow);
+        await using (var db = CreateDbContext())
+        {
+            db.CacheInvalidationJobs.Add(job);
+            await db.SaveChangesAsync();
         }
 
-        // Worker claim và invalidate cache
-        var producer = new FakeKafkaProducer();
-        var worker = new OutboxPublisherWorker(scopeFactory, producer, valkeyCache);
-        int processed = await worker.ProcessBatchAsync();
-        Assert.True(processed >= 1);
+        var scopeFactory = CreateScopeFactory();
+        var worker = new CacheInvalidationWorker(scopeFactory, brokenCache);
 
-        // Cache cho asset đã được invalidate!
-        Assert.False(await redisDb.KeyExistsAsync($"inventory:asset:{assetId:D}:busy:202610"));
-    }
+        // Process batch: Valkey call fails
+        int count = await worker.ProcessBatchAsync();
+        Assert.Equal(1, count);
 
-    [Fact]
-    public async Task BarrierFillRace_DelayedFillSelfExpiresByInitialDeadline()
-    {
-        await _valkey.FlushDbAsync();
-        var assetId = Guid.NewGuid();
-        var valkeyCache = CreateValkeyCache();
-
-        var t0 = DateTimeOffset.UtcNow;
-        // Deadline ban đầu là T0 + 2s
-        var deadline = t0.AddSeconds(2);
-        var ranges = new[] { new BusyRangeDto(new DateOnly(2026, 10, 5), new DateOnly(2026, 10, 8)) };
-
-        // 1. Thread 2: Mutation diễn ra và invalidate cache
-        await valkeyCache.InvalidateAssetAsync(assetId);
-
-        // 2. Thread 1: Delayed fill ghi lại kết quả snapshot nhưng neo theo deadline ban đầu T0 + 2s
-        await valkeyCache.SetMonthRangesAsync(assetId, "202610", ranges, deadline);
-
-        // Đọc tại T0 -> hit
-        var r1 = await valkeyCache.GetMonthRangesBulkAsync(assetId, MonthKey202610Array, t0);
-        Assert.NotNull(r1["202610"]);
-
-        // Khi thời gian vượt qua deadline ban đầu -> tự hết hạn theo deadline mà không cần background cleanup
-        var r2 = await valkeyCache.GetMonthRangesBulkAsync(assetId, MonthKey202610Array, t0.AddSeconds(3));
-        Assert.Null(r2["202610"]);
-    }
-
-    [Fact]
-    public async Task ReplayIdempotent_RepeatedInvalidation_Succeeds()
-    {
-        await _valkey.FlushDbAsync();
-        var assetId = Guid.NewGuid();
-        var valkeyCache = CreateValkeyCache();
-
-        // Calling Invalidate multiple times does not throw
-        await valkeyCache.InvalidateAssetAsync(assetId);
-        await valkeyCache.InvalidateAssetAsync(assetId);
-        await valkeyCache.InvalidateAssetAsync(assetId);
-
-        var redisDb = _valkey.Multiplexer.GetDatabase();
-        Assert.False(await redisDb.KeyExistsAsync($"inventory:asset:{assetId:D}:months"));
+        // Verify job was NOT lost; status remains Pending with retry count incremented and future NextAttemptAt!
+        await using (var verifyDb = CreateDbContext())
+        {
+            var retriedJob = await verifyDb.CacheInvalidationJobs.FirstAsync(j => j.Id == job.Id);
+            Assert.Equal(CacheInvalidationJob.StatusPending, retriedJob.Status);
+            Assert.Equal(1, retriedJob.RetryCount);
+            Assert.True(retriedJob.NextAttemptAt > DateTimeOffset.UtcNow);
+            Assert.NotNull(retriedJob.LastError);
+        }
     }
 }

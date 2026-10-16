@@ -196,6 +196,8 @@ public sealed partial class InventoryAssetServiceTests
         {
             StagedOutbox.Add(message);
         }
+        public void StageCacheInvalidation(IEnumerable<string> scopes) { }
+        public void StageWarehouseFanoutInvalidation(Guid ownerUserId, IEnumerable<string>? initialScopes = null) { }
     }
 
     private sealed class FakeWriteTransaction : IInventoryWriteTransaction
@@ -264,7 +266,7 @@ public sealed partial class InventoryAssetServiceTests
         public Func<Guid, Task<Result<CatalogEquipmentTypeResponse>>>? LookupHandler { get; set; }
         public Func<Guid, Task<Result<CatalogBrandResponse>>>? BrandHandler { get; set; }
         public Func<Guid, int, string, Task<Result>>? SpecHandler { get; set; }
-        public Func<Guid, IReadOnlyList<int>, Task<Result<CatalogBatchSchemasResponse>>>? BatchSchemasHandler { get; set; }
+        public Func<Guid, IReadOnlyList<int>, Task<Result<Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>>>>? BatchSchemasHandler { get; set; }
         public int LookupCalls { get; private set; }
         public int BrandCalls { get; private set; }
         public int SpecCalls { get; private set; }
@@ -296,19 +298,19 @@ public sealed partial class InventoryAssetServiceTests
                 : Task.FromResult(Result.Success());
         }
 
-        public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default)
+        public Task<Result<Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default)
         {
             BatchSchemasCalls++;
             return BatchSchemasHandler is not null
                 ? BatchSchemasHandler(equipmentTypeId, versions)
-                : Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+                : Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(new CatalogBatchSchemasResponse(
                     equipmentTypeId,
                     1,
-                    [new CatalogBatchSchemaItemResponse(1, [])])));
+                    [new CatalogBatchSchemaItemResponse(1, [])]), DateTimeOffset.UtcNow.AddMinutes(5))));
         }
 
-        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
+        public Task<Result<Dprental.InventoryService.Application.Caching.CachedRead<IReadOnlyList<Guid>>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<IReadOnlyList<Guid>>(Array.Empty<Guid>(), DateTimeOffset.UtcNow.AddMinutes(5))));
     }
 
     private sealed class FakeMediaClient : IMediaServiceClient

@@ -39,6 +39,13 @@ internal sealed class FakeListingRepository : IEquipmentListingRepository
 
     public Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         Task.FromResult(Store.TryGetValue(id, out var l) && l.Status == EquipmentListingStatus.Active ? l : null);
+    public Task<IReadOnlyList<Guid>> GetListingIdsByOwnerKeysetAsync(Guid ownerUserId, Guid? afterListingId, int limit, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<Guid>>(Store.Values
+            .Where(l => l.OwnerUserId == ownerUserId && (!afterListingId.HasValue || l.Id > afterListingId.Value))
+            .OrderBy(l => l.Id)
+            .Take(limit)
+            .Select(l => l.Id)
+            .ToList());
     public Task<IReadOnlyList<EquipmentListingBatchItem>> GetBatchByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken = default)
     {
         var list = Store.Values
@@ -264,6 +271,12 @@ internal sealed class FakeWriteContext : IInventoryWriteContext
     public Task<long> GetNextSearchRevisionAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(1L);
 
+    public List<string[]> InvalidationCalls { get; } = new();
+    public List<(Guid OwnerUserId, string[]? InitialScopes)> FanoutCalls { get; } = new();
+    public void StageCacheInvalidation(IEnumerable<string> scopes) =>
+        InvalidationCalls.Add(scopes.ToArray());
+    public void StageWarehouseFanoutInvalidation(Guid ownerUserId, IEnumerable<string>? initialScopes = null) =>
+        FanoutCalls.Add((ownerUserId, initialScopes?.ToArray()));
     public FakeWriteContext(
         Guid assetId,
         IInventoryAssetRepository assets,

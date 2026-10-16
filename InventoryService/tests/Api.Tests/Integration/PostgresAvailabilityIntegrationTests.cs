@@ -210,7 +210,7 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
         var repo = new InventoryAssetRepository(queryDb);
         var listingRepo = new EquipmentListingRepository(queryDb);
         var timeProvider = new TestTimeProvider(InitialNow);
-        var service = new InventoryAvailabilityService(repo, listingRepo, NoOpInventoryAvailabilityCache.Instance, timeProvider);
+        var service = new InventoryAvailabilityService(repo, listingRepo, NoOpInventoryReadCache.Instance, timeProvider);
 
         var request = new CheckAvailabilityBatchRequest(
             new[] { freeAsset.Id, disabledAsset.Id, blockedAsset.Id, heldAsset.Id, expiredAsset.Id, missingId },
@@ -250,7 +250,7 @@ public sealed class PostgresAvailabilityIntegrationTests : IClassFixture<Postgre
         var repo = new InventoryAssetRepository(queryDb);
         var listingRepo = new EquipmentListingRepository(queryDb);
         var timeProvider = new TestTimeProvider(InitialNow);
-        var service = new InventoryAvailabilityService(repo, listingRepo, NoOpInventoryAvailabilityCache.Instance, timeProvider);
+        var service = new InventoryAvailabilityService(repo, listingRepo, NoOpInventoryReadCache.Instance, timeProvider);
 
         var result = await service.GetBusyRangesAsync(asset.Id, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
         Assert.True(result.IsSuccess);

@@ -54,6 +54,10 @@ public interface IEquipmentListingRepository : IRepo<EquipmentListing, Guid>
     Task<IReadOnlyList<EquipmentListingBatchItem>> GetBatchByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Lấy danh sách ID các Listing thuộc về người sở hữu theo keyset (ID tăng dần) phục vụ fanout invalidation.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> GetListingIdsByOwnerKeysetAsync(Guid ownerUserId, Guid? afterListingId, int limit, CancellationToken cancellationToken);
+    /// <summary>
     /// Đưa Listing mới vào hàng đợi lưu trữ.
     /// </summary>
     void Add(EquipmentListing listing);

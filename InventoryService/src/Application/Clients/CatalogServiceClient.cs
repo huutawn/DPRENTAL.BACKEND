@@ -54,17 +54,36 @@ public sealed partial class CatalogServiceClient : ICatalogServiceClient
     private readonly CatalogServiceOptions _options;
     private readonly ILogger<CatalogServiceClient>? _logger;
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly Dprental.InventoryService.Application.Caching.IInventoryReadCache _cache;
+    private readonly Dprental.InventoryService.Application.Caching.InventoryCacheOptions _cacheOptions;
+    private readonly TimeProvider _timeProvider;
 
     public CatalogServiceClient(
         HttpClient httpClient,
         IOptions<CatalogServiceOptions> options,
         IHttpContextAccessor httpContextAccessor,
         ILogger<CatalogServiceClient>? logger = null)
+        : this(httpClient, options, httpContextAccessor, null, null, null, logger)
+    {
+    }
+
+    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
+    public CatalogServiceClient(
+        HttpClient httpClient,
+        IOptions<CatalogServiceOptions> options,
+        IHttpContextAccessor httpContextAccessor,
+        Dprental.InventoryService.Application.Caching.IInventoryReadCache? cache,
+        Microsoft.Extensions.Options.IOptions<Dprental.InventoryService.Application.Caching.InventoryCacheOptions>? cacheOptions,
+        TimeProvider? timeProvider = null,
+        ILogger<CatalogServiceClient>? logger = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         ArgumentNullException.ThrowIfNull(options);
         _options = options.Value ?? throw new ArgumentException("CatalogServiceOptions không được null.", nameof(options));
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
+        _cache = cache ?? Dprental.InventoryService.Application.Caching.NoOpInventoryReadCache.Instance;
+        _cacheOptions = cacheOptions?.Value ?? new Dprental.InventoryService.Application.Caching.InventoryCacheOptions();
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
     }
 

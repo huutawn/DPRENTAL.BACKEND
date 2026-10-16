@@ -50,14 +50,6 @@ public sealed class GroupHoldAndLockCoordinationIntegrationTests : IClassFixture
         public Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success());
 
-        public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
-                equipmentTypeId,
-                1,
-                [new CatalogBatchSchemaItemResponse(1, [])])));
-
-        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
     }
 
     private sealed class StubMediaClient : IMediaServiceClient

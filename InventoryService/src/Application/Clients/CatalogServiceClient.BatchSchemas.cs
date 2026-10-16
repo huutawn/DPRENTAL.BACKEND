@@ -8,6 +8,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Dprental.InventoryService.Common;
+using Dprental.InventoryService.Application.Caching;
 
 namespace Dprental.InventoryService.Application.Clients;
 
@@ -22,7 +23,7 @@ public sealed partial class CatalogServiceClient
     };
 
     /// <inheritdoc />
-    public async Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(
+    public async Task<Result<CachedRead<CatalogBatchSchemasResponse>>> GetEquipmentTypeSchemasBatchAsync(
         Guid equipmentTypeId,
         IReadOnlyList<int> versions,
         CancellationToken cancellationToken = default)
@@ -31,123 +32,148 @@ public sealed partial class CatalogServiceClient
         {
             return Error.Validation("INVALID_EQUIPMENT_TYPE_ID", "Equipment Type ID không được rỗng.");
         }
+        string scope = "catalog";
+        string queryType = "batch-schemas";
+        var normalizedVersions = (versions ?? Array.Empty<int>()).Distinct().OrderBy(v => v).ToList();
+        string inputHash = $"{equipmentTypeId:D}_{string.Join(",", normalizedVersions)}";
 
-        string relativeUri = $"api/v1/catalog/equipment-types/{equipmentTypeId:D}/schemas/batch";
-
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Post, relativeUri);
-            string? token = GetAccessToken();
-            if (!string.IsNullOrWhiteSpace(token))
+        var pipelineResult = await _cache.GetOrCreateAsync<CatalogBatchSchemasResponse>(
+            scope,
+            queryType,
+            inputHash,
+            async (genToken, ct) =>
             {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            }
-
-            var payload = new { versions = versions ?? Array.Empty<int>() };
-            request.Content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions), Encoding.UTF8, "application/json");
-
-            using var response = await _httpClient.SendAsync(request, cancellationToken);
-
-            if (response.StatusCode == HttpStatusCode.NotFound)
-            {
-                var content = await response.Content.ReadAsStringAsync(cancellationToken);
-                if (!string.IsNullOrWhiteSpace(content))
-                {
-                    try
-                    {
-                        var problem = JsonSerializer.Deserialize<RemoteProblemDetails>(content, JsonOptions);
-                        if (problem is not null && !string.IsNullOrWhiteSpace(problem.Title))
-                        {
-                            // Chỉ map 404 có mã contract: EquipmentType.NotFound hoặc EquipmentType.SchemaNotFound
-                            if (string.Equals(problem.Title, "EquipmentType.NotFound", StringComparison.OrdinalIgnoreCase) ||
-                                string.Equals(problem.Title, "EquipmentType.SchemaNotFound", StringComparison.OrdinalIgnoreCase))
-                            {
-                                return Error.Validation(problem.Title, problem.Detail ?? problem.Title);
-                            }
-
-                            // 404 ngoài contract (RouteNotFound, Gateway, v.v.)
-                            return Error.Unavailable("CATALOG_SERVICE_ERROR", $"CatalogService trả về mã lỗi HTTP 404 ngoài contract: '{problem.Title}'.");
-                        }
-                    }
-                    catch (JsonException)
-                    {
-                        // Malformed 404
-                    }
-                }
-
-                // Response rỗng, HTML hoặc không thuộc contract -> 503
-                return Error.Unavailable("CATALOG_SERVICE_ERROR", "CatalogService trả về mã lỗi HTTP 404 ngoài contract hoặc nội dung không hợp lệ.");
-            }
-
-            if (response.StatusCode == HttpStatusCode.BadRequest)
-            {
-                var content = await response.Content.ReadAsStringAsync(cancellationToken);
-                if (!string.IsNullOrWhiteSpace(content))
-                {
-                    try
-                    {
-                        var problem = JsonSerializer.Deserialize<RemoteProblemDetails>(content, JsonOptions);
-                        if (problem is not null && !string.IsNullOrWhiteSpace(problem.Title))
-                        {
-                            // Chỉ map 400 có mã contract: Catalog.InvalidRequest
-                            if (string.Equals(problem.Title, "Catalog.InvalidRequest", StringComparison.OrdinalIgnoreCase))
-                            {
-                                return Error.Validation(problem.Title, problem.Detail ?? problem.Title);
-                            }
-
-                            return Error.Unavailable("CATALOG_SERVICE_ERROR", $"CatalogService trả về mã lỗi HTTP 400 ngoài contract: '{problem.Title}'.");
-                        }
-                    }
-                    catch (JsonException)
-                    {
-                        // Malformed 400
-                    }
-                }
-
-                return Error.Unavailable("CATALOG_SERVICE_ERROR", "CatalogService trả về mã lỗi HTTP 400 ngoài contract hoặc nội dung không hợp lệ.");
-            }
-
-            if (response.StatusCode == HttpStatusCode.OK)
-            {
-                var content = await response.Content.ReadAsStringAsync(cancellationToken);
-                if (string.IsNullOrWhiteSpace(content))
-                {
-                    return Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "CatalogService trả về nội dung rỗng.");
-                }
-
-                JsonDocument doc;
+                string relativeUri = $"api/v1/catalog/equipment-types/{equipmentTypeId:D}/schemas/batch";
                 try
                 {
-                    doc = JsonDocument.Parse(content);
-                }
-                catch (JsonException ex)
-                {
-                    if (_logger is not null) LogJsonError(_logger, "get-schemas-batch", ex);
-                    return Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "Phản hồi từ CatalogService không đúng định dạng JSON.");
-                }
+                    using var request = new HttpRequestMessage(HttpMethod.Post, relativeUri);
+                    string? token = GetAccessToken();
+                    if (!string.IsNullOrWhiteSpace(token))
+                    {
+                        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                    }
 
-                using (doc)
-                {
-                    return ParseBatchSchemasResponse(doc.RootElement, equipmentTypeId, versions);
-                }
-            }
+                    var payload = new { versions = versions ?? Array.Empty<int>() };
+                    request.Content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions), Encoding.UTF8, "application/json");
 
-            return Error.Unavailable("CATALOG_SERVICE_ERROR", $"CatalogService trả về mã lỗi HTTP {(int)response.StatusCode}.");
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    using var response = await _httpClient.SendAsync(request, ct);
+
+                    if (response.StatusCode == HttpStatusCode.NotFound)
+                    {
+                        var content = await response.Content.ReadAsStringAsync(ct);
+                        if (!string.IsNullOrWhiteSpace(content))
+                        {
+                            try
+                            {
+                                var problem = JsonSerializer.Deserialize<RemoteProblemDetails>(content, JsonOptions);
+                                if (problem is not null && !string.IsNullOrWhiteSpace(problem.Title))
+                                {
+                                    // Chỉ map 404 có mã contract: EquipmentType.NotFound hoặc EquipmentType.SchemaNotFound
+                                    if (string.Equals(problem.Title, "EquipmentType.NotFound", StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(problem.Title, "EquipmentType.SchemaNotFound", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        return Error.Validation(problem.Title, problem.Detail ?? problem.Title);
+                                    }
+
+                                    // 404 ngoài contract (RouteNotFound, Gateway, v.v.)
+                                    return Error.Unavailable("CATALOG_SERVICE_ERROR", $"CatalogService trả về mã lỗi HTTP 404 ngoài contract: '{problem.Title}'.");
+                                }
+                            }
+                            catch (JsonException)
+                            {
+                                // Malformed 404
+                            }
+                        }
+
+                        // Response rỗng, HTML hoặc không thuộc contract -> 503
+                        return Error.Unavailable("CATALOG_SERVICE_ERROR", "CatalogService trả về mã lỗi HTTP 404 ngoài contract hoặc nội dung không hợp lệ.");
+                    }
+
+                    if (response.StatusCode == HttpStatusCode.BadRequest)
+                    {
+                        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+                        if (!string.IsNullOrWhiteSpace(content))
+                        {
+                            try
+                            {
+                                var problem = JsonSerializer.Deserialize<RemoteProblemDetails>(content, JsonOptions);
+                                if (problem is not null && !string.IsNullOrWhiteSpace(problem.Title))
+                                {
+                                    // Chỉ map 400 có mã contract: Catalog.InvalidRequest
+                                    if (string.Equals(problem.Title, "Catalog.InvalidRequest", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        return Error.Validation(problem.Title, problem.Detail ?? problem.Title);
+                                    }
+
+                                    return Error.Unavailable("CATALOG_SERVICE_ERROR", $"CatalogService trả về mã lỗi HTTP 400 ngoài contract: '{problem.Title}'.");
+                                }
+                            }
+                            catch (JsonException)
+                            {
+                                // Malformed 400
+                            }
+                        }
+
+                        return Error.Unavailable("CATALOG_SERVICE_ERROR", "CatalogService trả về mã lỗi HTTP 400 ngoài contract hoặc nội dung không hợp lệ.");
+                    }
+
+                    if (response.StatusCode == HttpStatusCode.OK)
+                    {
+                        var content = await response.Content.ReadAsStringAsync(ct);
+                        if (string.IsNullOrWhiteSpace(content))
+                        {
+                            return Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "CatalogService trả về nội dung rỗng.");
+                        }
+
+                        JsonDocument doc;
+                        try
+                        {
+                            doc = JsonDocument.Parse(content);
+                        }
+                        catch (JsonException ex)
+                        {
+                            if (_logger is not null) LogJsonError(_logger, "get-schemas-batch", ex);
+                            return Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "Phản hồi từ CatalogService không đúng định dạng JSON.");
+                        }
+
+                        using (doc)
+                        {
+                            var parseResult = ParseBatchSchemasResponse(doc.RootElement, equipmentTypeId, versions);
+                            if (parseResult.IsFailure)
+                            {
+                                return parseResult.Error;
+                            }
+                            var ttl = _timeProvider.GetUtcNow().AddSeconds(_cacheOptions.CatalogTtlSeconds > 0 ? _cacheOptions.CatalogTtlSeconds : 120);
+                            return Result.Success(new CachedRead<CatalogBatchSchemasResponse>(parseResult.Value, ttl));
+                        }
+                    }
+
+                    return Error.Unavailable("CATALOG_SERVICE_ERROR", $"CatalogService trả về mã lỗi HTTP {(int)response.StatusCode}.");
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    if (_logger is not null) LogTimeoutResource(_logger, equipmentTypeId.ToString("D"), "get-schemas-batch", ex);
+                    return Error.Unavailable("CATALOG_SERVICE_TIMEOUT", "Hết thời gian chờ phản hồi từ CatalogService.");
+                }
+                catch (HttpRequestException ex)
+                {
+                    if (_logger is not null) LogNetworkErrorResource(_logger, equipmentTypeId.ToString("D"), "get-schemas-batch", ex);
+                    return Error.Unavailable("CATALOG_SERVICE_NETWORK_ERROR", "Không thể kết nối tới CatalogService.");
+                }
+            },
+            cancellationToken);
+
+        if (pipelineResult.IsFailure)
         {
-            throw;
+            return pipelineResult.Error;
         }
-        catch (OperationCanceledException ex)
-        {
-            if (_logger is not null) LogTimeoutResource(_logger, equipmentTypeId.ToString("D"), "get-schemas-batch", ex);
-            return Error.Unavailable("CATALOG_SERVICE_TIMEOUT", "Hết thời gian chờ phản hồi từ CatalogService.");
-        }
-        catch (HttpRequestException ex)
-        {
-            if (_logger is not null) LogNetworkErrorResource(_logger, equipmentTypeId.ToString("D"), "get-schemas-batch", ex);
-            return Error.Unavailable("CATALOG_SERVICE_NETWORK_ERROR", "Không thể kết nối tới CatalogService.");
-        }
+
+        var deadline = _timeProvider.GetUtcNow().AddSeconds(_cacheOptions.CatalogTtlSeconds > 0 ? _cacheOptions.CatalogTtlSeconds : 120);
+        return Result.Success(new CachedRead<CatalogBatchSchemasResponse>(pipelineResult.Value, deadline));
     }
 
     private static Result<CatalogBatchSchemasResponse> ParseBatchSchemasResponse(

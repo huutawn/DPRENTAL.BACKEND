@@ -32,6 +32,8 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
     private readonly TimeProvider _timeProvider;
     private readonly IInventorySearchIndexService? _searchIndexService;
     private readonly ILogger<InventoryAssetService>? _logger;
+    private readonly Dprental.InventoryService.Application.Caching.IInventoryReadCache _cache;
+    private readonly Dprental.InventoryService.Application.Caching.InventoryCacheOptions _cacheOptions;
 
     public InventoryAssetService(
         IInventoryAssetRepository assetRepository,
@@ -43,6 +45,23 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
         TimeProvider? timeProvider = null,
         IInventorySearchIndexService? searchIndexService = null,
         ILogger<InventoryAssetService>? logger = null)
+        : this(assetRepository, writeTransaction, catalogClient, mediaService, queryValidator, filterResolver, null, null, timeProvider, searchIndexService, logger)
+    {
+    }
+
+    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
+    public InventoryAssetService(
+        IInventoryAssetRepository assetRepository,
+        IInventoryWriteTransaction writeTransaction,
+        ICatalogServiceClient catalogClient,
+        IInventoryMediaService mediaService,
+        AssetSearchQueryValidator queryValidator,
+        AssetSearchFilterResolver filterResolver,
+        Dprental.InventoryService.Application.Caching.IInventoryReadCache? cache = null,
+        Microsoft.Extensions.Options.IOptions<Dprental.InventoryService.Application.Caching.InventoryCacheOptions>? cacheOptions = null,
+        TimeProvider? timeProvider = null,
+        IInventorySearchIndexService? searchIndexService = null,
+        ILogger<InventoryAssetService>? logger = null)
     {
         _assetRepository = assetRepository ?? throw new ArgumentNullException(nameof(assetRepository));
         _writeTransaction = writeTransaction ?? throw new ArgumentNullException(nameof(writeTransaction));
@@ -50,6 +69,8 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
         _mediaService = mediaService ?? throw new ArgumentNullException(nameof(mediaService));
         _queryValidator = queryValidator ?? throw new ArgumentNullException(nameof(queryValidator));
         _filterResolver = filterResolver ?? throw new ArgumentNullException(nameof(filterResolver));
+        _cache = cache ?? Dprental.InventoryService.Application.Caching.NoOpInventoryReadCache.Instance;
+        _cacheOptions = cacheOptions?.Value ?? new Dprental.InventoryService.Application.Caching.InventoryCacheOptions();
         _timeProvider = timeProvider ?? TimeProvider.System;
         _searchIndexService = searchIndexService;
         _logger = logger;
@@ -71,20 +92,43 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
             return callerCheck.Error;
         }
 
-        var asset = await _assetRepository.GetByIdAsync(assetId, cancellationToken);
-        if (asset is null)
+        string scope = $"asset:{assetId:D}";
+        string queryType = "asset-detail";
+        string inputHash = "detail";
+
+        var pipelineResult = await _cache.GetOrCreateAsync<CachedAssetDetailPayload>(
+            scope,
+            queryType,
+            inputHash,
+            async (genToken, ct) =>
+            {
+                var asset = await _assetRepository.GetByIdAsync(assetId, ct);
+                if (asset is null)
+                {
+                    return Error.NotFound("ASSET_NOT_FOUND", "Tài sản không tồn tại.");
+                }
+
+                var response = InventoryAssetMapper.ToResponse(asset);
+                var ttl = _timeProvider.GetUtcNow().AddSeconds(_cacheOptions.MetadataTtlSeconds > 0 ? _cacheOptions.MetadataTtlSeconds : 120);
+                return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CachedAssetDetailPayload>(
+                    new CachedAssetDetailPayload(asset.Listing.OwnerUserId, response),
+                    ttl));
+            },
+            cancellationToken);
+
+        if (pipelineResult.IsFailure)
         {
-            return Error.NotFound("ASSET_NOT_FOUND", "Tài sản không tồn tại.");
+            return pipelineResult.Error;
         }
 
-        if (!InventoryAccessEvaluator.CanManageAsset(caller, asset.Listing.OwnerUserId))
+        var payload = pipelineResult.Value;
+        if (!InventoryAccessEvaluator.CanManageAsset(caller, payload.OwnerUserId))
         {
             return Error.Forbidden("FORBIDDEN", "Không có quyền truy cập tài sản này.");
         }
 
-        return Result.Success(InventoryAssetMapper.ToResponse(asset));
+        return payload.Response;
     }
-
     /// <summary>
     /// Lấy danh sách tài sản phân trang của người dùng hiện tại (JWT sub).
     /// </summary>
@@ -119,90 +163,125 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
         }
         var validated = valResult.Value;
 
-        IReadOnlyList<Guid>? candidateIds = null;
-        string backend = "postgres";
-
-        if (!string.IsNullOrWhiteSpace(validated.SearchKeyword) && _searchIndexService != null)
+        var structCheck = AssetSearchFilterResolver.ValidateStructure(request.Filters, validated.EquipmentTypeId);
+        if (structCheck.IsFailure)
         {
-            var candidateResult = await _searchIndexService.SearchOwnerAssetCandidatesAsync(
-                new OwnerAssetSearchIndexQuery(
-                    ownerUserId,
-                    validated.SearchKeyword,
+            return structCheck.Error;
+        }
+
+        string searchScope = $"owner:{ownerUserId:D}";
+        string searchQueryType = "owner-assets";
+        string searchHash = Dprental.InventoryService.Application.Caching.CacheKeyHelper.ComputeOwnerAssetSearchHash(
+            request.Page,
+            request.PageSize,
+            request.Q,
+            request.EquipmentTypeId,
+            request.BrandId,
+            request.ManufactureYearFrom,
+            request.ManufactureYearTo,
+            request.AcceptingBookings,
+            request.Sort,
+            request.Filters);
+
+        return await _cache.GetOrCreateAsync<SearchExecution<PagedResponse<InventoryAssetResponse>>>(
+            searchScope,
+            searchQueryType,
+            searchHash,
+            async (genToken, ct) =>
+            {
+                IReadOnlyList<Guid>? candidateIds = null;
+                string backend = "postgres";
+
+                if (!string.IsNullOrWhiteSpace(validated.SearchKeyword) && _searchIndexService != null)
+                {
+                    var candidateResult = await _searchIndexService.SearchOwnerAssetCandidatesAsync(
+                        new OwnerAssetSearchIndexQuery(
+                            ownerUserId,
+                            validated.SearchKeyword,
+                            validated.EquipmentTypeId,
+                            validated.BrandId,
+                            request.AcceptingBookings,
+                            validated.ManufactureYearFrom,
+                            validated.ManufactureYearTo),
+                        ct);
+
+                    if (candidateResult.IsFailure && candidateResult.Error.Code is
+                        "SEARCH_CREDENTIALS_INVALID" or "SEARCH_CONFIGURATION_INVALID")
+                        return candidateResult.Error;
+
+                    if (candidateResult.IsSuccess && !candidateResult.Value.IsTruncated)
+                    {
+                        candidateIds = candidateResult.Value.CandidateIds;
+                        backend = "meilisearch";
+                    }
+                    else
+                    {
+                        _logger?.LogWarning(
+                            "Meilisearch query failed or candidates truncated for query '{Keyword}'. Falling back to PostgreSQL.",
+                            validated.SearchKeyword);
+                        candidateIds = null;
+                        backend = "postgres";
+                    }
+                }
+
+                var resolveResult = await _filterResolver.ResolveAsync(
+                    request.Filters,
                     validated.EquipmentTypeId,
-                    validated.BrandId,
-                    request.AcceptingBookings,
-                    validated.ManufactureYearFrom,
-                    validated.ManufactureYearTo),
-                cancellationToken);
+                    cancellationToken => _assetRepository.GetDistinctSchemaVersionsForOwnerAsync(
+                        new OwnerAssetSearchCriteria(
+                            ownerUserId,
+                            new AssetSearchFilters(
+                                candidateIds == null ? validated.SearchKeyword : null,
+                                validated.EquipmentTypeId,
+                                validated.BrandId,
+                                validated.ManufactureYearFrom,
+                                validated.ManufactureYearTo,
+                                CandidateIds: candidateIds),
+                            acceptingBookings: request.AcceptingBookings),
+                        cancellationToken),
+                    isFieldForbidden: null,
+                    ct);
+                if (resolveResult.IsFailure)
+                {
+                    return resolveResult.Error;
+                }
+                var resolvedFilters = resolveResult.Value;
 
-            if (candidateResult.IsFailure && candidateResult.Error.Code is
-                "SEARCH_CREDENTIALS_INVALID" or "SEARCH_CONFIGURATION_INVALID")
-                return candidateResult.Error;
+                var searchFilters = new AssetSearchFilters(
+                    SearchKeyword: candidateIds == null ? validated.SearchKeyword : null,
+                    EquipmentTypeId: validated.EquipmentTypeId,
+                    BrandId: validated.BrandId,
+                    ManufactureYearFrom: validated.ManufactureYearFrom,
+                    ManufactureYearTo: validated.ManufactureYearTo,
+                    Sort: validated.Sort,
+                    CompatibleSchemaVersions: resolvedFilters.CompatibleSchemaVersions,
+                    DynamicFilters: resolvedFilters.Criteria,
+                    CandidateIds: candidateIds);
 
-            if (candidateResult.IsSuccess && !candidateResult.Value.IsTruncated)
-            {
-                candidateIds = candidateResult.Value.CandidateIds;
-                backend = "meilisearch";
-            }
-            else
-            {
-                _logger?.LogWarning(
-                    "Meilisearch query failed or candidates truncated for query '{Keyword}'. Falling back to PostgreSQL.",
-                    validated.SearchKeyword);
-                candidateIds = null;
-                backend = "postgres";
-            }
-        }
+                var searchCriteria = new OwnerAssetSearchCriteria(
+                    ownerUserId: ownerUserId,
+                    filters: searchFilters,
+                    acceptingBookings: request.AcceptingBookings,
+                    skip: validated.Skip,
+                    take: validated.Take);
+                var items = await _assetRepository.SearchForOwnerAsync(searchCriteria, ct);
+                var totalCount = await _assetRepository.CountForOwnerAsync(searchCriteria, ct);
+                int totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling((double)totalCount / validated.Take);
 
+                var responseList = items.Select(InventoryAssetMapper.ToResponse).ToList();
+                var paged = new PagedResponse<InventoryAssetResponse>(responseList, request.Page, request.PageSize, totalCount, totalPages);
+                var searchExecutionResult = new SearchExecution<PagedResponse<InventoryAssetResponse>>(paged, backend);
 
-        var resolveResult = await _filterResolver.ResolveAsync(
-            request.Filters,
-            validated.EquipmentTypeId,
-            ct => _assetRepository.GetDistinctSchemaVersionsForOwnerAsync(
-                new OwnerAssetSearchCriteria(
-                    ownerUserId,
-                    new AssetSearchFilters(
-                        candidateIds == null ? validated.SearchKeyword : null,
-                        validated.EquipmentTypeId,
-                        validated.BrandId,
-                        validated.ManufactureYearFrom,
-                        validated.ManufactureYearTo,
-                        CandidateIds: candidateIds),
-                    acceptingBookings: request.AcceptingBookings),
-                ct),
-            isFieldForbidden: null,
+                var ttl = _timeProvider.GetUtcNow().AddSeconds(_cacheOptions.MetadataTtlSeconds > 0 ? _cacheOptions.MetadataTtlSeconds : 120);
+                return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<SearchExecution<PagedResponse<InventoryAssetResponse>>>(searchExecutionResult, ttl));
+            },
             cancellationToken);
-        if (resolveResult.IsFailure)
-        {
-            return resolveResult.Error;
-        }
-        var resolvedFilters = resolveResult.Value;
-
-        var searchFilters = new AssetSearchFilters(
-            SearchKeyword: candidateIds == null ? validated.SearchKeyword : null,
-            EquipmentTypeId: validated.EquipmentTypeId,
-            BrandId: validated.BrandId,
-            ManufactureYearFrom: validated.ManufactureYearFrom,
-            ManufactureYearTo: validated.ManufactureYearTo,
-            Sort: validated.Sort,
-            CompatibleSchemaVersions: resolvedFilters.CompatibleSchemaVersions,
-            DynamicFilters: resolvedFilters.Criteria,
-            CandidateIds: candidateIds);
-
-        var searchCriteria = new OwnerAssetSearchCriteria(
-            ownerUserId: ownerUserId,
-            filters: searchFilters,
-            acceptingBookings: request.AcceptingBookings,
-            skip: validated.Skip,
-            take: validated.Take);
-        var items = await _assetRepository.SearchForOwnerAsync(searchCriteria, cancellationToken);
-        var totalCount = await _assetRepository.CountForOwnerAsync(searchCriteria, cancellationToken);
-        var totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling((double)totalCount / validated.Take);
-
-        var responseList = items.Select(InventoryAssetMapper.ToResponse).ToList();
-        var paged = new PagedResponse<InventoryAssetResponse>(responseList, request.Page, request.PageSize, totalCount, totalPages);
-        return Result.Success(new SearchExecution<PagedResponse<InventoryAssetResponse>>(paged, backend));
     }
+
+    internal sealed record CachedAssetDetailPayload(
+        Guid OwnerUserId,
+        InventoryAssetResponse Response
+    );
 
 
     private static Result CheckAuthenticatedHuman(IInventoryCallerContext caller)

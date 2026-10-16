@@ -145,6 +145,7 @@ public sealed partial class InventoryAllocationService : IInventoryAllocationSer
             // g. Stage availability Outbox message
             var outboxMessage = InventoryAssetAvailabilityEvents.CreateAvailabilityChangedOutboxMessage(assetId, nowUtc);
             ctx.StageOutbox(outboxMessage);
+            ctx.StageCacheInvalidation([$"asset:{assetId:D}", $"listing:{asset.EquipmentListingId:D}", "public-discovery"]);
 
             return Result.Success(new CreateHoldResult(InventoryAllocationMapper.ToResponse(hold), IsReplay: false));
         }, cancellationToken);
@@ -410,6 +411,11 @@ public sealed partial class InventoryAllocationService : IInventoryAllocationSer
             // Không query overlap lại.
             // Không kiểm tra AcceptingBookings.
             // Không phát availability event.
+            var asset = await ctx.Assets.GetByIdAsync(assetId, ct);
+            if (asset != null)
+            {
+                ctx.StageCacheInvalidation([$"asset:{assetId:D}", $"listing:{asset.EquipmentListingId:D}", "public-discovery"]);
+            }
 
             return Result.Success(InventoryAllocationMapper.ToResponse(allocation));
         }, cancellationToken);

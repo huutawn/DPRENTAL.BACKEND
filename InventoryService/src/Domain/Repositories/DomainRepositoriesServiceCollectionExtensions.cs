@@ -31,6 +31,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
         services.AddScoped<IInboxStore, InboxStore>();
         services.AddScoped<ISearchProjectionStore, SearchProjectionStore>();
 
+        services.AddScoped<ICacheInvalidationStore, CacheInvalidationStore>();
         services.AddScoped<IInventoryWriteTransaction, InventoryWriteTransaction>();
 
         return services;
