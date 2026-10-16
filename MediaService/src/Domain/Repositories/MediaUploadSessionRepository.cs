@@ -18,6 +18,7 @@ public class MediaUploadSessionRepository : IMediaUploadSessionRepository
     {
         return await _context.MediaUploadSessions
             .Include(s => s.MediaAsset)
+            .ThenInclude(a => a!.ImageVariants)
             .FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
     }
 
@@ -25,6 +26,7 @@ public class MediaUploadSessionRepository : IMediaUploadSessionRepository
     {
         return await _context.MediaUploadSessions.AsNoTracking()
             .Include(s => s.MediaAsset)
+            .ThenInclude(a => a!.ImageVariants)
             .FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
     }
 
@@ -35,6 +37,7 @@ public class MediaUploadSessionRepository : IMediaUploadSessionRepository
     {
         return await _context.MediaUploadSessions
             .Include(s => s.MediaAsset)
+            .ThenInclude(a => a!.ImageVariants)
             .FirstOrDefaultAsync(
                 s => s.CallerIdentity == callerIdentity && s.IdempotencyKey == idempotencyKey,
                 cancellationToken);

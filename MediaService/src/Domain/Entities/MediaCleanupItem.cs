@@ -44,6 +44,21 @@ public class MediaCleanupItem
     /// </summary>
     public DateTimeOffset EligibleAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
+
+    /// <summary>
+    /// Thời điểm worker nhận claim (khóa lease) để xử lý dọn dẹp.
+    /// </summary>
+    public DateTimeOffset? ClaimedAtUtc { get; set; }
+
+    /// <summary>
+    /// Thời điểm lease hết hạn. Nếu worker bị crash trước hạn này, worker khác có thể reclaim.
+    /// </summary>
+    public DateTimeOffset? LeaseExpiresAtUtc { get; set; }
+
+    /// <summary>
+    /// Định danh worker đang giữ lease.
+    /// </summary>
+    public string? ClaimedByWorkerId { get; set; }
     /// <summary>
     /// Thời điểm tác vụ được xử lý hoàn tất hoặc dừng retry.
     /// </summary>

@@ -16,18 +16,14 @@ namespace Dprental.MediaService.Api.Tests;
 [Collection("Integration")]
 public class MediaIntegrationTests
 {
-    private static byte[] ValidJpeg(int size = 1024)
+    private static byte[] ValidJpeg(int width = 100, int height = 100)
     {
-        byte[] bytes = new byte[size];
-        bytes[0] = 0xFF;
-        bytes[1] = 0xD8;
-        bytes[2] = 0xFF;
-        bytes[3] = 0xE0;
-        bytes[4] = 0x00;
-        bytes[5] = 0x10;
-        bytes[6] = 0x4A;
-        bytes[7] = 0x46;
-        return bytes;
+        using var bitmap = new SkiaSharp.SKBitmap(width, height);
+        using var canvas = new SkiaSharp.SKCanvas(bitmap);
+        canvas.Clear(SkiaSharp.SKColors.CornflowerBlue);
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, 80);
+        return data.ToArray();
     }
 
     private static MultipartFormDataContent Form(byte[] bytes, string contentType = "image/jpeg", string fileName = "excavator.jpg")
@@ -159,7 +155,10 @@ public class MediaIntegrationTests
         using var previewClient = new HttpClient();
         using var previewDownload = await previewClient.GetAsync(uploaded.PreviewUrl);
         Assert.Equal(HttpStatusCode.OK, previewDownload.StatusCode);
-        Assert.Equal(jpeg, await previewDownload.Content.ReadAsByteArrayAsync());
+        byte[] previewBytes = await previewDownload.Content.ReadAsByteArrayAsync();
+        Assert.NotEmpty(previewBytes);
+        using var previewBitmap = SkiaSharp.SKBitmap.Decode(previewBytes);
+        Assert.NotNull(previewBitmap);
         string uploadJson = await uploadResponse.Content.ReadAsStringAsync();
         Assert.DoesNotContain("uploadUrl", uploadJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("uploadId", uploadJson, StringComparison.OrdinalIgnoreCase);
@@ -204,7 +203,7 @@ public class MediaIntegrationTests
             new ChangeMediaVisibilityRequest("public"));
         Assert.Equal(HttpStatusCode.OK, publish.StatusCode);
         using var anonymous = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        using var publicResponse = await anonymous.GetAsync($"/api/v1/media/{uploaded.MediaId}/content");
+        using var publicResponse = await anonymous.GetAsync($"/api/v1/media/{uploaded.MediaId}/content?variant=original");
         Assert.Equal(HttpStatusCode.Redirect, publicResponse.StatusCode);
         Assert.NotNull(publicResponse.Headers.Location);
         using var publicDownload = await storageClient.GetAsync(publicResponse.Headers.Location);

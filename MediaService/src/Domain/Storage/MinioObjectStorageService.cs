@@ -76,7 +76,8 @@ public class MinioObjectStorageService : IObjectStorageService
             .WithHeaders(new Dictionary<string, string>
             {
                 ["response-content-type"] = contentType,
-                ["response-content-disposition"] = disposition
+                ["response-content-disposition"] = disposition,
+                ["response-cache-control"] = "private, no-store"
             });
 
         string url = await _presignClient.PresignedGetObjectAsync(args);

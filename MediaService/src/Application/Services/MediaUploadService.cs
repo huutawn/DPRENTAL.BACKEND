@@ -22,6 +22,7 @@ public partial class MediaUploadService : IMediaUploadService
     private readonly IMediaCleanupRepository _cleanupRepository;
     private readonly IObjectStorageService _objectStorageService;
     private readonly IMediaAccessService _accessService;
+    private readonly IImageVariantService _variantService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<MediaUploadService> _logger;
     private readonly TimeSpan _sessionLifetime;
@@ -32,6 +33,7 @@ public partial class MediaUploadService : IMediaUploadService
         IMediaCleanupRepository cleanupRepository,
         IObjectStorageService objectStorageService,
         IMediaAccessService accessService,
+        IImageVariantService variantService,
         IUnitOfWork unitOfWork,
         IOptions<UploadSettings> settings,
         ILogger<MediaUploadService> logger)
@@ -41,6 +43,7 @@ public partial class MediaUploadService : IMediaUploadService
         _cleanupRepository = cleanupRepository ?? throw new ArgumentNullException(nameof(cleanupRepository));
         _objectStorageService = objectStorageService ?? throw new ArgumentNullException(nameof(objectStorageService));
         _accessService = accessService ?? throw new ArgumentNullException(nameof(accessService));
+        _variantService = variantService ?? throw new ArgumentNullException(nameof(variantService));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _sessionLifetime = TimeSpan.FromMinutes(settings?.Value.SessionLifetimeMinutes
@@ -290,10 +293,28 @@ public partial class MediaUploadService : IMediaUploadService
         return Result.Success(completed);
     }
 
-    private static MediaCompletedDto ToCompletedDto(MediaAsset asset) => new(
-        asset.Id, asset.Status.ToString(), asset.OriginalFileName,
-        asset.ActualContentType ?? asset.DeclaredContentType,
-        asset.ActualSizeBytes ?? asset.DeclaredSizeBytes);
+    private static MediaCompletedDto ToCompletedDto(MediaAsset asset)
+    {
+        var variantDtos = (asset.ImageVariants ?? [])
+            .Where(v => v.ProcessingVersion == ImageVariantPolicy.CurrentProcessingVersion)
+            .OrderBy(v => v.Width)
+            .Select(v => new MediaImageVariantDto(
+                v.VariantName,
+                v.Width,
+                v.Height,
+                v.ContentType,
+                v.SizeBytes,
+                ImageVariantPolicy.BuildContentPath(asset.Id, v.VariantName)))
+            .ToList();
+
+        return new MediaCompletedDto(
+            asset.Id,
+            asset.Status.ToString(),
+            asset.OriginalFileName,
+            asset.ActualContentType ?? asset.DeclaredContentType,
+            asset.ActualSizeBytes ?? asset.DeclaredSizeBytes,
+            ImageVariants: variantDtos);
+    }
 
     private static string ComputePayloadHash(UploadMediaRequest request, string fileHash)
     {

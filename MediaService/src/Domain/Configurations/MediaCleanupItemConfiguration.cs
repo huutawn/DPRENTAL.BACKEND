@@ -36,6 +36,11 @@ public class MediaCleanupItemConfiguration : IEntityTypeConfiguration<MediaClean
         builder.Property(c => c.EligibleAtUtc)
             .IsRequired();
 
+        builder.Property(c => c.ClaimedByWorkerId)
+            .HasMaxLength(100);
+
+        builder.HasIndex(c => new { c.Status, c.EligibleAtUtc, c.LeaseExpiresAtUtc });
+
         builder.HasIndex(c => new { c.Status, c.EligibleAtUtc });
     }
 }
