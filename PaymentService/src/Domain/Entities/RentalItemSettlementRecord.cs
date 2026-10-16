@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using Dprental.PaymentService.Common;
 
 namespace Dprental.PaymentService.Domain.Entities;
 
@@ -12,7 +13,7 @@ public sealed class RentalItemSettlementRecord
     [Required, MaxLength(64)]
     public string SettlementRef { get; private set; } = default!;
 
-    [Required, MaxLength(64)]   // khớp OperationReceipt.OperationKey (key hiện tại dài 56 ký tự)
+    [Required, MaxLength(64)]
     public string OperationKey { get; private set; } = default!;
 
     [Required] public Guid InvoiceId { get; private set; }
@@ -32,14 +33,25 @@ public sealed class RentalItemSettlementRecord
     [Column(TypeName = "numeric(18,0)")] public decimal SupplierPayable { get; private set; }
 
     [Required]
+    public SettlementState Status { get; private set; }
+
+    [Required]
     public DateTimeOffset CreatedAt { get; private set; }
+
+    public DateTimeOffset? CompletedAt { get; private set; }
 
     public List<SettlementLedgerEntry> Entries { get; private set; } = new();
 
+    public ManualRefundRequirement? RefundRequirement { get; private set; }
+
     private RentalItemSettlementRecord() { }
 
-    public static RentalItemSettlementRecord From(RentalItemSettlement s, DateTimeOffset now)
+    public static RentalItemSettlementRecord From(RentalItemSettlement s, Invoice invoice, DateTimeOffset now)
     {
+        ArgumentNullException.ThrowIfNull(invoice);
+        if (string.IsNullOrWhiteSpace(invoice.PaymentRef))
+            throw new InvalidOperationException("Paid invoice must have a payment reference.");
+
         var id = Guid.NewGuid();
         var record = new RentalItemSettlementRecord
         {
@@ -66,6 +78,34 @@ public sealed class RentalItemSettlementRecord
         record.Entries.Add(SettlementLedgerEntry.Create(id, SettlementEntryType.SupplierPayable, s.SupplierPayable, now));
         record.Entries.Add(SettlementLedgerEntry.Create(id, SettlementEntryType.PlatformFee, s.PlatformFeeAmount, now));
         record.Entries.Add(SettlementLedgerEntry.Create(id, SettlementEntryType.DepositRefundDue, s.DepositRefundDue, now));
+
+        if (s.DepositRefundDue > 0)
+        {
+            // Còn tiền cọc phải hoàn: chưa đóng tài chính, tạo đúng một yêu cầu hoàn thủ công.
+            record.Status = SettlementState.PendingManualRefund;
+            record.RefundRequirement = ManualRefundRequirement.CreatePending(
+                id, s.InvoiceId, s.RentalItemId, invoice.RenterId,
+                invoice.PaymentRef, s.DepositRefundDue, now);
+        }
+        else
+        {
+            record.Status = SettlementState.Completed;
+            record.CompletedAt = now;
+        }
+
         return record;
+    }
+
+    public Result CompleteAfterRefund(ManualRefundRequirement refund, DateTimeOffset now)
+    {
+        if (refund.SettlementId != Id || DepositRefundDue <= 0 ||
+            refund.Status != ManualRefundStatus.Completed)
+            return Error.Conflict("Payment.RefundNotCompleted", "Chưa xác nhận hoàn đủ tiền cọc cho settlement này.");
+
+        if (Status == SettlementState.Completed) return Result.Success();
+
+        Status = SettlementState.Completed;
+        CompletedAt = now.ToUniversalTime();
+        return Result.Success();
     }
 }

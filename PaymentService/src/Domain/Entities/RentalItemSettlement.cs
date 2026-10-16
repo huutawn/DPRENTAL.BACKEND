@@ -10,11 +10,11 @@ public sealed class RentalItemSettlement
 {
     public const decimal DefaultPlatformFeeRate = 0.10m;
     public const int MaxDecisionRefLength = 256;
+    public const int MaxOperationKeyLength = 64;
 
     /// <summary>Khóa idempotency ổn định: một RentalItem chỉ settle một lần.</summary>
     public string OperationKey { get; }
 
-    // Tham chiếu để đối chiếu hóa đơn khi persistence.
     public Guid InvoiceId { get; }
     public Guid InvoiceItemId { get; }
     public Guid RentalItemId { get; }
@@ -65,11 +65,6 @@ public sealed class RentalItemSettlement
     {
         ArgumentNullException.ThrowIfNull(invoiceItem);
 
-        if (string.IsNullOrWhiteSpace(operationKey) || operationKey.Trim().Length > 64)
-        {
-            return Error.Validation("Payment.InvalidOperationKey", "OperationKey không được rỗng và tối đa 64 ký tự.");
-        }
-
         var trimmedRef = decisionRef?.Trim();
         if (string.IsNullOrEmpty(trimmedRef))
         {
@@ -81,6 +76,13 @@ public sealed class RentalItemSettlement
             return Error.Validation(
                 "Payment.DecisionRefTooLong",
                 $"DecisionRef không được vượt quá {MaxDecisionRefLength} ký tự.");
+        }
+
+        if (string.IsNullOrWhiteSpace(operationKey) || operationKey.Trim().Length > MaxOperationKeyLength)
+        {
+            return Error.Validation(
+                "Payment.InvalidOperationKey",
+                $"OperationKey phải có từ 1 đến {MaxOperationKeyLength} ký tự.");
         }
 
         var deductionCheck = VndAmountValidator.ValidateVndAmount(finalDeductionAmount, "Tiền khấu trừ cọc");
@@ -106,7 +108,7 @@ public sealed class RentalItemSettlement
         if (payableCheck.IsFailure) return payableCheck.Error;
 
         return Result.Success(new RentalItemSettlement(
-            operationKey,
+            operationKey.Trim(),
             invoiceItem.InvoiceId,
             invoiceItem.Id,
             invoiceItem.RentalItemId,

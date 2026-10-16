@@ -1,6 +1,6 @@
 # Rental–Payment settlement contract v1 (proposal)
 
-Status: **PROPOSED — chờ Rental/Payment cùng freeze**. Tài liệu này đối chiếu task *Rental Settlement, Deposit & Platform Fee* với contract hiện có trên `origin/rental/develop`. Payment đã định nghĩa DTO tương thích; chưa có endpoint, migration, chuyển khoản hoặc publisher.
+Status: **Contract v1 đang triển khai — chờ Rental/Payment cùng freeze**. Payment đã có endpoint settlement, migration, xác nhận hoàn cọc thủ công và outbox publisher. Chuyển khoản vẫn do admin thực hiện ngoài hệ thống.
 
 ## Ranh giới trách nhiệm
 
@@ -56,4 +56,8 @@ Các mã chưa có trong `PaymentContractSpec` là **đề xuất**, cần Renta
 
 ## Phạm vi triển khai sau khi freeze
 
-Subtask 2–6 sẽ bổ sung domain calculation, persistence/migration, API, manual refund confirmation, outbox/publisher và kiểm thử. Automatic refund API, late fee và charge vượt deposit nằm ngoài MVP. Trong docs/code triển khai phải ghi rõ TODO cho refund automation, không giả lập đã chuyển tiền.
+Subtask 2–6 đã có domain calculation, persistence/migration, API, manual refund confirmation và outbox publisher. Admin phải chuyển khoản thật trước khi gọi `POST /api/v1/manual-refunds/{requirementId}/complete`; token phải có audience `dprental-clients` và role Auth `adm` hoặc `adp`. Cùng mã chuyển khoản được replay; mã khác bị từ chối. Xác nhận và `RentalSettled` outbox commit cùng transaction.
+
+Kafka mặc định tắt. Để phát event, cấu hình `Kafka:Enabled=true`, `Kafka:BootstrapServers` và topic `payment.events.v1` (nếu broker yêu cầu xác thực, cấu hình thêm SecurityProtocol/SaslMechanism/SaslUsername/SaslPassword hoặc SslCaLocation). Publisher chỉ đánh dấu `PublishedAt` sau khi broker xác nhận persist. Lỗi gửi giữ message pending để retry. Nếu broker đã nhận nhưng DB chưa commit thì message có thể được gửi lại; consumer phải deduplicate bằng `messageId`. Cần broker Kafka thực và Rental consumer để xác nhận end-to-end ngoài test với transport fake.
+
+TODO sau MVP: tự động hoàn tiền qua provider thay cho chuyển khoản admin. Không suy ra tiền đã chuyển từ việc tạo `ManualRefundRequirement` hoặc nhận lệnh settlement. Late fee và charge vượt deposit nằm ngoài MVP.

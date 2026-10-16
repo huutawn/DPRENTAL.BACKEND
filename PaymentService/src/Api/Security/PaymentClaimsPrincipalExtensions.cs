@@ -19,6 +19,13 @@ public static class PaymentClaimsPrincipalExtensions
         return string.Equals(user.FindFirst("u")?.Value, "svc", StringComparison.Ordinal);
     }
 
+    public static bool IsPlatformAdmin(this ClaimsPrincipal user)
+    {
+        if (user.IsServiceToken()) return false;
+        return user.FindAll("r").Concat(user.FindAll("role"))
+            .Any(c => c.Value is "adm" or "adp" or "admin" or "admin_platform");
+    }
+
     public static bool HasScope(this ClaimsPrincipal user, string scope)
     {
         var scopes = user.FindAll("s")

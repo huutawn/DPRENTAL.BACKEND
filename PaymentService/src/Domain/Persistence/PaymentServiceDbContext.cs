@@ -16,7 +16,7 @@ public sealed class PaymentServiceDbContext : DbContext
     public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
     public DbSet<RentalItemSettlementRecord> RentalItemSettlements => Set<RentalItemSettlementRecord>();
     public DbSet<SettlementLedgerEntry> SettlementLedgerEntries => Set<SettlementLedgerEntry>();
-
+    public DbSet<ManualRefundRequirement> ManualRefundRequirements => Set<ManualRefundRequirement>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -50,14 +50,19 @@ public sealed class PaymentServiceDbContext : DbContext
             b.HasIndex(t => t.PaymentRef);
             b.HasIndex(t => t.InvoiceRef);
         });
+
         modelBuilder.Entity<RentalItemSettlementRecord>(b =>
         {
             b.HasIndex(x => x.OperationKey).IsUnique();
             b.HasIndex(x => x.RentalItemId).IsUnique();
             b.HasIndex(x => x.SettlementRef).IsUnique();
+            b.Property(x => x.Status).HasConversion<int>();
 
             b.HasMany(x => x.Entries).WithOne(x => x.Settlement)
                 .HasForeignKey(x => x.SettlementId).OnDelete(DeleteBehavior.Restrict);
+
+            b.HasOne(x => x.RefundRequirement).WithOne(x => x.Settlement)
+                .HasForeignKey<ManualRefundRequirement>(x => x.SettlementId).OnDelete(DeleteBehavior.Restrict);
 
             b.HasOne<InvoiceItem>().WithMany()
                 .HasForeignKey(x => x.InvoiceItemId).OnDelete(DeleteBehavior.Restrict);
@@ -73,6 +78,7 @@ public sealed class PaymentServiceDbContext : DbContext
                     "\"PlatformFeeRate\" >= 0 AND \"PlatformFeeRate\" <= 1");
                 t.HasCheckConstraint("ck_settlement_money_balance",
                     "\"SupplierPayable\" + \"PlatformFeeAmount\" + \"DepositRefundDue\" = \"RentalAmount\" + \"DepositAmount\"");
+                t.HasCheckConstraint("ck_settlement_status_valid", "\"Status\" IN (1, 2)");
             });
         });
 
@@ -81,6 +87,19 @@ public sealed class PaymentServiceDbContext : DbContext
             b.HasIndex(x => new { x.SettlementId, x.EntryType }).IsUnique();
             b.Property(x => x.EntryType).HasConversion<int>();
             b.ToTable(t => t.HasCheckConstraint("ck_settlement_entry_amount_non_negative", "\"Amount\" >= 0"));
+        });
+
+        modelBuilder.Entity<ManualRefundRequirement>(b =>
+        {
+            b.HasIndex(x => x.SettlementId).IsUnique();      // đúng một requirement cho mỗi settlement
+            b.HasIndex(x => x.RentalItemId).IsUnique();
+            b.HasIndex(x => x.RequirementRef).IsUnique();
+            b.Property(x => x.Status).HasConversion<int>();
+            b.ToTable(t =>
+            {
+                t.HasCheckConstraint("ck_manual_refund_amount_positive", "\"Amount\" > 0");
+                t.HasCheckConstraint("ck_manual_refund_status_valid", "\"Status\" IN (1, 2)");
+            });
         });
     }
 }

@@ -44,8 +44,109 @@ public sealed class SettlementLedgerPersistenceTests
                 Assert.Equal(70_000m, record.DepositRefundDue);
                 Assert.Equal(110_000m, record.SupplierPayable);
                 Assert.Equal(3, record.Entries.Count);
+                Assert.Equal(SettlementState.PendingManualRefund, record.Status);
+                Assert.Null(record.CompletedAt);
+                var refund = await context.ManualRefundRequirements.SingleAsync();
+                Assert.Equal(70_000m, refund.Amount);
+                Assert.Equal(ManualRefundStatus.PendingManualRefund, refund.Status);
+                Assert.Equal(record.RentalItemId, refund.RentalItemId);
+                Assert.NotEqual(Guid.Empty, refund.RenterId);
+                Assert.False(string.IsNullOrWhiteSpace(refund.PaymentRef));
+                Assert.Empty(await context.OutboxMessages.ToListAsync());
                 Assert.Single(await context.OperationReceipts.ToListAsync(CancellationToken.None));
             }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task Full_deduction_completes_and_writes_one_rental_settled_event()
+    {
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            InvoiceItem item = await SeedInvoiceAsync(options, paid: true);
+            var settlement = RentalItemSettlement.Create(item, item.DepositAmount, "DEC-FULL", "settle-full").Value;
+
+            await using (var context = new PaymentServiceDbContext(options))
+            {
+                var result = await new EfSettlementLedger(context, TimeProvider.System)
+                    .RecordSettlementAsync(settlement, CancellationToken.None);
+                Assert.True(result.IsSuccess);
+                Assert.Equal(SettlementState.Completed, result.Value.State);
+                Assert.Null(result.Value.ManualRefundRef);
+            }
+
+            await using (var context = new PaymentServiceDbContext(options))
+            {
+                var replay = await new EfSettlementLedger(context, TimeProvider.System)
+                    .RecordSettlementAsync(settlement, CancellationToken.None);
+                Assert.True(replay.IsSuccess);
+                Assert.Equal(SettlementState.Completed, replay.Value.State);
+                Assert.Empty(await context.ManualRefundRequirements.ToListAsync());
+                var message = await context.OutboxMessages.SingleAsync();
+                Assert.Equal("RentalSettled", message.MessageType);
+                using var envelope = System.Text.Json.JsonDocument.Parse(message.Payload);
+                Assert.Equal("RentalSettled", envelope.RootElement.GetProperty("messageType").GetString());
+                Assert.Equal(0m, envelope.RootElement.GetProperty("payload")
+                    .GetProperty("refundedDepositAmount").GetDecimal());
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task Concurrent_manual_refund_confirmations_complete_once_and_emit_one_event()
+    {
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            InvoiceItem item = await SeedInvoiceAsync(options, paid: true);
+            var settlement = RentalItemSettlement.Create(item, 20_000m, "DEC-REFUND", "settle-refund").Value;
+            Guid requirementId;
+            await using (var db = new PaymentServiceDbContext(options))
+            {
+                var result = await new EfSettlementLedger(db, TimeProvider.System)
+                    .RecordSettlementAsync(settlement, CancellationToken.None);
+                Assert.True(result.IsSuccess);
+                requirementId = await db.ManualRefundRequirements.Select(x => x.Id).SingleAsync();
+            }
+
+            var adminId = Guid.NewGuid();
+            async Task<Dprental.PaymentService.Common.Result<Dprental.PaymentService.Domain.IRepository.ManualRefundCompletion>> ConfirmAsync(string reference)
+            {
+                await using var db = new PaymentServiceDbContext(options);
+                return await new EfManualRefundRepository(db, TimeProvider.System)
+                    .CompleteAsync(requirementId, reference, adminId, CancellationToken.None);
+            }
+
+            var results = await Task.WhenAll(ConfirmAsync("BANK-123"), ConfirmAsync("BANK-123"));
+            Assert.All(results, result => Assert.True(result.IsSuccess));
+            Assert.Single(results, result => !result.Value.IsReplay);
+            Assert.Single(results, result => result.Value.IsReplay);
+
+            var conflicting = await ConfirmAsync("BANK-OTHER");
+            Assert.True(conflicting.IsFailure);
+            Assert.Equal("Payment.RefundAlreadyCompleted", conflicting.Error.Code);
+
+            await using var verify = new PaymentServiceDbContext(options);
+            var refund = await verify.ManualRefundRequirements.SingleAsync();
+            var record = await verify.RentalItemSettlements.SingleAsync();
+            Assert.Equal(ManualRefundStatus.Completed, refund.Status);
+            Assert.Equal(SettlementState.Completed, record.Status);
+            Assert.Equal(adminId, refund.CompletedBy);
+            var message = await verify.OutboxMessages.SingleAsync();
+            using var json = System.Text.Json.JsonDocument.Parse(message.Payload);
+            Assert.Equal("BANK-123", json.RootElement.GetProperty("payload").GetProperty("refundRef").GetString());
+            Assert.Equal(70_000m, json.RootElement.GetProperty("payload").GetProperty("refundedDepositAmount").GetDecimal());
         }
         finally
         {

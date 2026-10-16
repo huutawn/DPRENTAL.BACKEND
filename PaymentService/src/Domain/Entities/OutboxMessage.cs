@@ -55,4 +55,10 @@ public sealed class OutboxMessage
             PublishedAt = null
         };
     }
+
+    public void MarkPublished(DateTimeOffset publishedAt)
+    {
+        if (PublishedAt is not null) return;
+        PublishedAt = publishedAt.ToUniversalTime();
+    }
 }
