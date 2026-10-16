@@ -63,7 +63,15 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
                 l.DailyRate,
                 l.Currency,
                 l.Status,
-                l.DepositAmount))
+                l.DepositAmount,
+                l.Warehouse != null ? new EquipmentListingBatchWarehouse(
+                    l.Warehouse.AddressDetail,
+                    l.Warehouse.ProvinceCode,
+                    l.Warehouse.ProvinceName,
+                    l.Warehouse.WardCode,
+                    l.Warehouse.WardName,
+                    l.Warehouse.Latitude,
+                    l.Warehouse.Longitude) : null))
             .ToListAsync(cancellationToken);
     }
 
@@ -299,6 +307,7 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
             .AsNoTrackingWithIdentityResolution()
             .AsSplitQuery()
             .Where(l => l.Id == listingId)
+            .Include(l => l.Warehouse)
             .Include(l => l.Assets)
                 .ThenInclude(a => a.CalendarBlocks.Where(cb => cb.StartDate <= endDate && cb.EndDate >= startDate))
             .Include(l => l.Assets)

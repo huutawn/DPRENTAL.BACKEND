@@ -89,6 +89,7 @@ public sealed class EquipmentListing
     public uint Version { get; set; }
 
     public ICollection<InventoryAsset> Assets { get; private set; } = new List<InventoryAsset>();
+    public Warehouse? Warehouse { get; private set; }
 
     private EquipmentListing()
     {
@@ -336,7 +337,8 @@ public sealed class EquipmentListing
     public Result UpdateStatus(
         EquipmentListingStatus newStatus,
         bool hasUnitAcceptingBookings,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        bool hasValidWarehouseAddress = true)
     {
         if (!Enum.IsDefined(newStatus))
         {
@@ -347,10 +349,17 @@ public sealed class EquipmentListing
         {
             return Result.Success();
         }
-
-        if (newStatus == EquipmentListingStatus.Active && !hasUnitAcceptingBookings)
+        if (newStatus == EquipmentListingStatus.Active)
         {
-            return Error.Validation("LISTING_NEEDS_ACTIVE_UNIT", "Listing cần ít nhất một thiết bị nhận đặt lịch để chuyển sang trạng thái Active.");
+            if (!hasValidWarehouseAddress)
+            {
+                return Error.Validation("WAREHOUSE_ADDRESS_REQUIRED", "Cần thiết lập địa chỉ kho hợp lệ trước khi chuyển Listing sang trạng thái Active.");
+            }
+
+            if (!hasUnitAcceptingBookings)
+            {
+                return Error.Validation("LISTING_NEEDS_ACTIVE_UNIT", "Listing cần ít nhất một thiết bị nhận đặt lịch để chuyển sang trạng thái Active.");
+            }
         }
 
         Status = newStatus;

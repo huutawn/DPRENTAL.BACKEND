@@ -27,6 +27,7 @@ public sealed partial class MeilisearchIntegrationTests
         var brand = Guid.NewGuid();
         _db.Database.SetCommandTimeout(120);
         await _db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO inventory.warehouses (owner_user_id, created_at, updated_at) VALUES ({owner}, now(), now());
             INSERT INTO inventory.equipment_listings
                 (id, owner_user_id, equipment_type_id, brand_id, name, model, description,
                  schema_version, spec_values, media_ids, manufacture_year, daily_rate, currency, status, created_at, updated_at)

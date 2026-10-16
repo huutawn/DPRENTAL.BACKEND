@@ -38,6 +38,7 @@ public sealed class PostgresPublicAvailabilityParityTests : IClassFixture<Postgr
         var candidatePeriod = new RentalPeriod(new DateOnly(2026, 12, 5), new DateOnly(2026, 12, 10));
 
         var scenarios = new List<(EquipmentListing Listing, InventoryAsset Asset, List<AssetAllocation> Allocs, List<CalendarBlock> Blocks)>();
+        db.Warehouses.Add(Warehouse.CreateWithAddress(ownerId, "123 Street", "01", "Thành phố Hà Nội", "00070", "Phường Hoàn Kiếm", 21.0, 105.8, FixedEvaluationNow).Value);
 
         for (int i = 1; i <= 14; i++)
         {
@@ -233,6 +234,7 @@ public sealed class PostgresPublicAvailabilityParityTests : IClassFixture<Postgr
         var ownerId = Guid.NewGuid();
         var singleDay = new DateOnly(2026, 12, 5);
         var candidatePeriod = new RentalPeriod(singleDay, singleDay);
+        db.Warehouses.Add(Warehouse.CreateWithAddress(ownerId, "123 Street", "01", "Thành phố Hà Nội", "00070", "Phường Hoàn Kiếm", 21.0, 105.8, FixedEvaluationNow).Value);
 
         var l1Id = Guid.NewGuid();
         var a1Id = Guid.NewGuid();

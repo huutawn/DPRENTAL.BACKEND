@@ -386,4 +386,89 @@ public sealed class PublicEquipmentListingServiceTests
         Assert.True(resultQty.IsFailure);
         Assert.Equal("INVALID_QUERY_PARAMETER", resultQty.Error.Code);
     }
+
+    [Fact]
+    public async Task List_InvalidProvinceCode_ReturnsInvalidLocation()
+    {
+        var service = CreateService();
+        var req = new ListPublicEquipmentListingsRequest(ProvinceCode: "INVALID_PROVINCE_999");
+
+        var result = await service.ListPublicListingsAsync(req);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_LOCATION", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task List_MismatchedProvinceAndWard_ReturnsInvalidLocation()
+    {
+        var service = CreateService();
+        // Province 79 is HCM, ward 00070 is Hoan Kiem in Ha Noi
+        var req = new ListPublicEquipmentListingsRequest(ProvinceCode: "79", WardCode: "00070");
+
+        var result = await service.ListPublicListingsAsync(req);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_LOCATION", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task List_WardWithoutProvince_ReturnsInvalidLocation()
+    {
+        var service = CreateService();
+        var req = new ListPublicEquipmentListingsRequest(WardCode: "00070");
+
+        var result = await service.ListPublicListingsAsync(req);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_LOCATION", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task List_ValidProvinceAndWard_PassesCriteriaToRepository()
+    {
+        var service = CreateService();
+        var req = new ListPublicEquipmentListingsRequest(ProvinceCode: "01", WardCode: "00070");
+
+        var result = await service.ListPublicListingsAsync(req);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(_repo.LastCapturedCriteria);
+        Assert.Equal("01", _repo.LastCapturedCriteria.Filters.ProvinceCode);
+        Assert.Equal("00070", _repo.LastCapturedCriteria.Filters.WardCode);
+    }
+
+    [Fact]
+    public async Task GetById_ExposesWarehouseAreaWithoutSensitiveCoordinatesOrAddress()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var listingId = Guid.NewGuid();
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", "Desc", "FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow, 2024).Value;
+        var warehouse = Warehouse.CreateWithAddress(
+            ownerId, "123 Secret Alley", "01", "Thành phố Hà Nội", "00070", "Phường Hoàn Kiếm", 21.025, 105.856, FixedNow).Value;
+        typeof(EquipmentListing).GetProperty(nameof(EquipmentListing.Warehouse))!.SetValue(listing, warehouse);
+        typeof(EquipmentListing).GetProperty(nameof(EquipmentListing.Status))!.SetValue(listing, EquipmentListingStatus.Active);
+        _repo.Store[listingId] = listing;
+
+        var result = await service.GetPublicListingByIdAsync(listingId);
+
+        Assert.True(result.IsSuccess);
+        var response = result.Value;
+        Assert.NotNull(response.WarehouseArea);
+        Assert.Equal("01", response.WarehouseArea.ProvinceCode);
+        Assert.Equal("Thành phố Hà Nội", response.WarehouseArea.ProvinceName);
+        Assert.Equal("00070", response.WarehouseArea.WardCode);
+        Assert.Equal("Phường Hoàn Kiếm", response.WarehouseArea.WardName);
+
+        // Verify serialization does not contain secret fields
+        var json = System.Text.Json.JsonSerializer.Serialize(response);
+        Assert.DoesNotContain("Secret Alley", json);
+        Assert.DoesNotContain("21.025", json);
+        Assert.DoesNotContain("105.856", json);
+        Assert.DoesNotContain("latitude", json);
+        Assert.DoesNotContain("longitude", json);
+        Assert.DoesNotContain("addressDetail", json);
+    }
 }

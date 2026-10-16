@@ -13,4 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="../Domain/InventoryService.Domain.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Locations/vietnam-divisions.json" />
+  </ItemGroup>
 </Project>

@@ -28,7 +28,7 @@ public sealed partial class EquipmentListingService
             return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
         }
 
-        if (!InventoryAccessEvaluator.CanCreateListing(caller))
+        if (!InventoryAccessEvaluator.CanManageOwnInventory(caller))
         {
             return Error.Forbidden("FORBIDDEN", "Người dùng không có quyền quản lý kho tài sản.");
         }
@@ -201,6 +201,14 @@ public sealed partial class EquipmentListingService
         var asset = assetResult.Value;
         var txResult = await _writeTransaction.ExecuteListingWriteAsync(listingId, async (ctx, ct) =>
         {
+            await ctx.AcquireWarehouseLockAsync(listing.OwnerUserId, ct);
+
+            var warehouse = await ctx.Warehouses.GetByOwnerUserIdAsync(listing.OwnerUserId, ct);
+            if (warehouse is null)
+            {
+                warehouse = Warehouse.CreateDraft(listing.OwnerUserId, now);
+                ctx.Warehouses.Add(warehouse);
+            }
             ctx.Listings.Add(listing);
             ctx.Assets.Add(asset);
             var revListing = await ctx.GetNextSearchRevisionAsync(ct);
@@ -428,13 +436,21 @@ public sealed partial class EquipmentListingService
             if (request.IsStatusSpecified)
             {
                 bool hasAcceptingBookingsUnit = false;
+                bool hasValidWarehouseAddress = true;
                 if (request.Status!.Value == EquipmentListingStatus.Active)
                 {
+                    var warehouse = await ctx.Warehouses.GetByOwnerUserIdAsync(listing.OwnerUserId, ct);
+                    hasValidWarehouseAddress = warehouse is not null && warehouse.HasValidAddress;
+                    if (!hasValidWarehouseAddress)
+                    {
+                        return Error.Validation("WAREHOUSE_ADDRESS_REQUIRED", "Cần thiết lập địa chỉ kho hợp lệ trước khi chuyển Listing sang trạng thái Active.");
+                    }
+
                     int totalActiveUnits = await ctx.Listings.GetTotalQuantityAsync(id, ct);
                     hasAcceptingBookingsUnit = totalActiveUnits > 0;
                 }
 
-                var statusRes = listing.UpdateStatus(request.Status.Value, hasAcceptingBookingsUnit, now);
+                var statusRes = listing.UpdateStatus(request.Status.Value, hasAcceptingBookingsUnit, now, hasValidWarehouseAddress);
                 if (statusRes.IsFailure)
                 {
                     return statusRes.Error;

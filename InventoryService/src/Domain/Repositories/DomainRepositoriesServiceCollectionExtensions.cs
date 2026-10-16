@@ -25,6 +25,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
         services.AddScoped<IInventoryAssetRepository, InventoryAssetRepository>();
         services.AddScoped<IAssetAllocationRepository, AssetAllocationRepository>();
         services.AddScoped<ICalendarBlockRepository, CalendarBlockRepository>();
+        services.AddScoped<IWarehouseRepository, WarehouseRepository>();
 
         services.AddScoped<IOutboxStore, OutboxStore>();
         services.AddScoped<IInboxStore, InboxStore>();

@@ -646,6 +646,10 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
         Assert.NotNull(asset2);
         Assert.Equal(2023, asset2.ManufactureYear);
 
+        var whPayload1 = new { addressDetail = "123 Le Loi", provinceCode = "01", wardCode = "00070", latitude = 21.0, longitude = 105.8 };
+        var whResp1 = await client.PutAsJsonAsync("api/v1/inventory/warehouse/me", whPayload1);
+        Assert.Equal(HttpStatusCode.OK, whResp1.StatusCode);
+
         // 3. Sửa năm listing sang 2025 và bật Active; không đổi asset cũ; asset mới nhận 2025
         var patchYearAndActive = new { manufactureYear = 2025, status = "Active" };
         var patchResp1 = await client.PatchAsync($"api/v1/inventory/equipment-listings/{created.Id:D}",
@@ -1011,6 +1015,10 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
         var patchOtherResp = await otherClient.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
             new StringContent("{\"depositAmount\":200000}", Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.Forbidden, patchOtherResp.StatusCode);
+
+        var whPayload2 = new { addressDetail = "456 Tran Phu", provinceCode = "01", wardCode = "00070", latitude = 21.0, longitude = 105.8 };
+        var whResp2 = await client.PutAsJsonAsync("api/v1/inventory/warehouse/me", whPayload2);
+        Assert.Equal(HttpStatusCode.OK, whResp2.StatusCode);
 
         // 8. Activate listing and test Public Detail and Batch Read consistency
         var patchActiveResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",

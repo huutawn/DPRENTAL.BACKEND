@@ -376,4 +376,75 @@ public sealed class EquipmentListingBatchServiceTests
         Assert.Equal("Active", item.Status);
         Assert.Equal(500_000m, item.DepositAmount);
     }
+
+    [Fact]
+    public async Task GetListingBatchAsync_IncludeWarehouse_WithoutWarehouseReadScope_ReturnsForbidden()
+    {
+        var service = CreateService();
+        // Caller only has availability.read, missing warehouse.read
+        var caller = CreateServiceCaller(InventoryAccessEvaluator.ScopeAvailabilityRead);
+
+        var listing = AddListing();
+        var request = new EquipmentListingBatchRequest([listing.Id], IncludeWarehouse: true);
+
+        var result = await service.GetListingBatchAsync(request, caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FORBIDDEN", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task GetListingBatchAsync_IncludeWarehouse_WithWarehouseReadScope_ReturnsWarehouseDetails()
+    {
+        var service = CreateService();
+        var caller = CreateServiceCaller(
+            InventoryAccessEvaluator.ScopeAvailabilityRead,
+            InventoryAccessEvaluator.ScopeWarehouseRead);
+
+        var ownerId = Guid.NewGuid();
+        var listing = AddListing(ownerUserId: ownerId);
+        var warehouse = Warehouse.CreateWithAddress(
+            ownerId, "123 Le Loi", "79", "Thành phố Hồ Chí Minh", "25747", "Phường Thủ Dầu Một", 10.7, 106.7, FixedNow).Value;
+        // Wire warehouse navigation
+        typeof(EquipmentListing).GetProperty(nameof(EquipmentListing.Warehouse))!.SetValue(listing, warehouse);
+
+        var request = new EquipmentListingBatchRequest([listing.Id], IncludeWarehouse: true);
+
+        var result = await service.GetListingBatchAsync(request, caller);
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value.Items);
+        Assert.NotNull(item.Warehouse);
+        Assert.Equal("123 Le Loi", item.Warehouse.AddressDetail);
+        Assert.Equal("79", item.Warehouse.ProvinceCode);
+        Assert.Equal("Thành phố Hồ Chí Minh", item.Warehouse.ProvinceName);
+        Assert.Equal("25747", item.Warehouse.WardCode);
+        Assert.Equal("Phường Thủ Dầu Một", item.Warehouse.WardName);
+        Assert.Equal(10.7, item.Warehouse.Latitude);
+        Assert.Equal(106.7, item.Warehouse.Longitude);
+    }
+
+    [Fact]
+    public async Task GetListingBatchAsync_DefaultIncludeWarehouseFalse_WarehouseDetailsAreNull()
+    {
+        var service = CreateService();
+        var caller = CreateServiceCaller(
+            InventoryAccessEvaluator.ScopeAvailabilityRead,
+            InventoryAccessEvaluator.ScopeWarehouseRead);
+
+        var ownerId = Guid.NewGuid();
+        var listing = AddListing(ownerUserId: ownerId);
+        var warehouse = Warehouse.CreateWithAddress(
+            ownerId, "123 Le Loi", "79", "Thành phố Hồ Chí Minh", "25747", "Phường Thủ Dầu Một", 10.7, 106.7, FixedNow).Value;
+        typeof(EquipmentListing).GetProperty(nameof(EquipmentListing.Warehouse))!.SetValue(listing, warehouse);
+
+        // IncludeWarehouse defaults to false
+        var request = new EquipmentListingBatchRequest([listing.Id]);
+
+        var result = await service.GetListingBatchAsync(request, caller);
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value.Items);
+        Assert.Null(item.Warehouse);
+    }
 }

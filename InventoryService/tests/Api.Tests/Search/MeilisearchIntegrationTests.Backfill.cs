@@ -1,6 +1,7 @@
 using Dprental.InventoryService.Application.Kafka.Outbox;
 using Dprental.InventoryService.Application.Search.Adapters;
 using Dprental.InventoryService.Domain.Entities;
+using Dprental.InventoryService.Domain.Repositories;
 using Dprental.InventoryService.Common.Enums;
 using Meilisearch;
 using Microsoft.EntityFrameworkCore;
@@ -13,10 +14,15 @@ namespace Dprental.InventoryService.Api.Tests.Search;
 
 public sealed partial class MeilisearchIntegrationTests
 {
-    private static EquipmentListing NewListing(string name, bool active = true)
+    private static EquipmentListing NewListing(string name, bool active = true, InventoryServiceDbContext? db = null)
     {
         var now = DateTimeOffset.UtcNow;
-        var listing = EquipmentListing.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+        var ownerId = Guid.NewGuid();
+        if (db != null)
+        {
+            db.Warehouses.Add(Warehouse.CreateWithAddress(ownerId, "123 Street", "01", "Thành phố Hà Nội", "00070", "Phường Hoàn Kiếm", 21.0, 105.8, now).Value);
+        }
+        var listing = EquipmentListing.Create(Guid.NewGuid(), ownerId, Guid.NewGuid(), Guid.NewGuid(),
             name, "Description", name, 1, "{}", 100000, null, null, "VND", now, 2024).Value;
         if (active) listing.UpdateStatus(EquipmentListingStatus.Active, true, now);
         return listing;
@@ -25,7 +31,7 @@ public sealed partial class MeilisearchIntegrationTests
     [Fact]
     public async Task Fanout_MoreThan500Assets_RepeatsForEveryNewMetadataRevision()
     {
-        var listing = NewListing("Fanout camera");
+        var listing = NewListing("Fanout camera", db: _db);
         _db.EquipmentListings.Add(listing);
         for (int i = 0; i < 501; i++)
             _db.Assets.Add(InventoryAsset.Create(Guid.NewGuid(), listing.Id, $"SERIAL-{i}", DateTimeOffset.UtcNow, 2024).Value);
@@ -47,9 +53,9 @@ public sealed partial class MeilisearchIntegrationTests
     [Fact]
     public async Task OnlineBackfill_ReplaysAllUnpublishedEvents_InactivePrivateAndDeletedProjections()
     {
-        var inactive = NewListing("Inactive old camera");
-        var privateListing = NewListing("Private draft camera", active: false);
-        var deleted = NewListing("Deleted camera");
+        var inactive = NewListing("Inactive old camera", db: _db);
+        var privateListing = NewListing("Private draft camera", active: false, db: _db);
+        var deleted = NewListing("Deleted camera", db: _db);
         _db.EquipmentListings.AddRange(inactive, privateListing, deleted);
         var asset = InventoryAsset.Create(Guid.NewGuid(), inactive.Id, "DELETED-SERIAL", DateTimeOffset.UtcNow, 2024).Value;
         _db.Assets.Add(asset);

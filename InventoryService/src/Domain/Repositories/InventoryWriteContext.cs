@@ -20,6 +20,7 @@ public sealed class InventoryWriteContext : IInventoryWriteContext
         IInventoryAssetRepository assets,
         IAssetAllocationRepository allocations,
         ICalendarBlockRepository calendarBlocks,
+        IWarehouseRepository warehouses,
         IEnumerable<Guid>? initiallyLockedAssets = null)
     {
         _context = context ?? throw new ArgumentNullException(nameof(context));
@@ -29,6 +30,7 @@ public sealed class InventoryWriteContext : IInventoryWriteContext
         Assets = assets ?? throw new ArgumentNullException(nameof(assets));
         Allocations = allocations ?? throw new ArgumentNullException(nameof(allocations));
         CalendarBlocks = calendarBlocks ?? throw new ArgumentNullException(nameof(calendarBlocks));
+        Warehouses = warehouses ?? throw new ArgumentNullException(nameof(warehouses));
 
         if (initiallyLockedAssets != null)
         {
@@ -64,7 +66,28 @@ public sealed class InventoryWriteContext : IInventoryWriteContext
     /// <inheritdoc />
     public ICalendarBlockRepository CalendarBlocks { get; }
 
+    /// <inheritdoc />
+    public IWarehouseRepository Warehouses { get; }
+
     public HashSet<Guid> LockedAssetIds { get; } = new();
+    public HashSet<Guid> LockedWarehouseOwnerUserIds { get; } = new();
+
+    /// <inheritdoc />
+    public async Task AcquireWarehouseLockAsync(Guid ownerUserId, CancellationToken cancellationToken = default)
+    {
+        if (ownerUserId == Guid.Empty)
+        {
+            throw new ArgumentException("OwnerUserId không được để trống khi lấy khóa kho.", nameof(ownerUserId));
+        }
+
+        if (LockedWarehouseOwnerUserIds.Add(ownerUserId))
+        {
+            await _context.Database.ExecuteSqlRawAsync(
+                "SELECT pg_advisory_xact_lock({0});",
+                [AssetLockKey.FromWarehouseOwnerUserId(ownerUserId)],
+                cancellationToken);
+        }
+    }
 
     /// <inheritdoc />
     public async Task AcquireAssetLocksAsync(IEnumerable<Guid> assetIds, CancellationToken cancellationToken = default)

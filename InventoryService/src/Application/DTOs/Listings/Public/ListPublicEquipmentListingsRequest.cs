@@ -8,6 +8,8 @@ public sealed record ListPublicEquipmentListingsRequest(
     Guid? CategoryId = null,
     Guid? EquipmentTypeId = null,
     Guid? BrandId = null,
+    string? ProvinceCode = null,
+    string? WardCode = null,
     string? Sort = null,
     string? Filters = null,
     DateOnly? From = null,
