@@ -36,6 +36,27 @@ internal static class OrderQueryMapper
     public static (int Page, int PageSize) NormalizePaging(int page, int pageSize) =>
         (Math.Max(1, page), Math.Clamp(pageSize, 1, MaxPageSize));
 
+    /// <summary>
+    /// Đọc trạng thái lọc theo đúng dạng API trả ra (PENDING_PAYMENT), chấp nhận cả PendingPayment.
+    /// Rỗng là không lọc; số hoặc tên lạ là lỗi.
+    /// </summary>
+    public static Result<TEnum?> ParseStatusFilter<TEnum>(string? value)
+        where TEnum : struct, Enum
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return Result.Success<TEnum?>(null);
+        }
+
+        string name = value.Trim().Replace("_", string.Empty, StringComparison.Ordinal);
+        if (!name.All(char.IsAsciiLetter) || !Enum.TryParse(name, ignoreCase: true, out TEnum status))
+        {
+            return OrderQueryErrors.InvalidStatus;
+        }
+
+        return Result.Success<TEnum?>(status);
+    }
+
     public static PagedResponse<T> ToPage<T>(IReadOnlyList<T> items, int page, int pageSize, int totalCount) =>
         new(items, page, pageSize, totalCount, totalCount == 0 ? 0 : (int)Math.Ceiling((double)totalCount / pageSize));
 

@@ -10,6 +10,9 @@ public static class OrderQueryErrors
     public static readonly Error PersonalAccountRequired =
         Error.Forbidden("Order.PersonalAccountRequired", "Chỉ tài khoản cá nhân mới xem được đơn hàng.");
 
+    public static readonly Error InvalidStatus =
+        Error.Validation("Order.InvalidStatus", "Trạng thái lọc không hợp lệ.");
+
     // Đơn của người khác cũng trả lỗi này để không lộ việc mã đơn có tồn tại hay không.
     public static readonly Error OrderNotFound =
         Error.NotFound("Order.NotFound", "Không tìm thấy đơn hàng.");

@@ -11,6 +11,8 @@ namespace Dprental.RentalService.Domain.Repositories;
 /// </summary>
 public sealed class RentalOrderRepository : IRentalOrderRepository
 {
+    private const string RequestRefundAction = "RequestRefund";
+
     private readonly RentalServiceDbContext _dbContext;
 
     public RentalOrderRepository(RentalServiceDbContext dbContext)
@@ -316,6 +318,7 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
 
     public async Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(
         Guid renterId,
+        RentalOrderStatus? status,
         int skip,
         int take,
         CancellationToken cancellationToken = default)
@@ -323,6 +326,10 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
         IQueryable<RentalOrder> query = _dbContext.RentalOrders
             .AsNoTracking()
             .Where(o => o.RenterId == renterId);
+        if (status.HasValue)
+        {
+            query = query.Where(o => o.Status == status.Value);
+        }
 
         int totalCount = await query.CountAsync(cancellationToken);
         List<RenterOrderSummaryRecord> items = await query
@@ -351,10 +358,23 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
         Guid renterId,
         CancellationToken cancellationToken = default)
     {
+        // Chỉ lấy receipt RequestRefund để biết dòng nào đang được hoàn; các receipt khác mang JSON lớn và không cần ở đây.
         return await _dbContext.RentalOrders
             .AsNoTracking()
+            .AsSplitQuery()
             .Include(o => o.SubOrders)
                 .ThenInclude(s => s.Items)
+                    .ThenInclude(i => i.UnitAssignments)
+            .Include(o => o.SubOrders)
+                .ThenInclude(s => s.Items)
+                    .ThenInclude(i => i.HandoverRecord)
+            .Include(o => o.SubOrders)
+                .ThenInclude(s => s.Items)
+                    .ThenInclude(i => i.ReturnRecords)
+            .Include(o => o.SubOrders)
+                .ThenInclude(s => s.Items)
+                    .ThenInclude(i => i.DeductionProposal)
+            .Include(o => o.OperationReceipts.Where(r => r.Action == RequestRefundAction))
             .FirstOrDefaultAsync(o => o.Id == orderId && o.RenterId == renterId, cancellationToken);
     }
 

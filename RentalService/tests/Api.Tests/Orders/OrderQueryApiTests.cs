@@ -59,12 +59,38 @@ public sealed class OrderQueryApiTests
         Assert.Equal(2, body.GetProperty("subOrders").GetArrayLength());
         JsonElement firstItem = body.GetProperty("subOrders")[0].GetProperty("items")[0];
         Assert.Equal("2026-10-14", firstItem.GetProperty("endDate").GetString());
-        // Dòng máy chỉ có tên, số lượng và ngày; trạng thái nằm ở đơn con.
-        Assert.Equal(["name", "quantity", "startDate", "endDate"], firstItem.EnumerateObject().Select(p => p.Name));
+        Assert.Equal("PENDING_SUPPLIER_CONFIRMATION", firstItem.GetProperty("status").GetString());
+        Assert.Equal(3_000_000m, firstItem.GetProperty("dailyRate").GetDecimal());
+        Assert.Equal("NONE", firstItem.GetProperty("refund").GetProperty("state").GetString());
+        Assert.Equal(55, firstItem.GetProperty("listing").GetProperty("specValues").GetProperty("cong_suat_kw").GetInt32());
         Assert.Equal("PENDING_SUPPLIER_CONFIRMATION", body.GetProperty("subOrders")[0].GetProperty("status").GetString());
+        Assert.Equal("PAID", body.GetProperty("paymentState").GetString());
+        Assert.Equal("0123456789", body.GetProperty("refundAccount").GetProperty("accountNumber").GetString());
+        Assert.DoesNotContain("assetId", body.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("allocation", body.GetRawText(), StringComparison.OrdinalIgnoreCase);
 
         Assert.Equal(HttpStatusCode.NotFound, other.StatusCode);
         Assert.Equal("Order.NotFound", (await ReadAsync(other)).GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task Renter_FiltersOrdersByStatus_AndUnknownStatusIs400()
+    {
+        using OrderApiFactory factory = new();
+        RentalOrder order = factory.SeedPaidMixedOrder();
+        using HttpClient renter = factory.CreateClientFor(factory.RenterId);
+
+        using HttpResponseMessage paid = await renter.GetAsync("/api/v1/rental/orders?status=PAID");
+        using HttpResponseMessage pending = await renter.GetAsync("/api/v1/rental/orders?status=PENDING_PAYMENT");
+        using HttpResponseMessage unknown = await renter.GetAsync("/api/v1/rental/orders?status=SHIPPED");
+
+        Assert.Equal(HttpStatusCode.OK, paid.StatusCode);
+        JsonElement paidPage = await ReadAsync(paid);
+        Assert.Equal(1, paidPage.GetProperty("totalCount").GetInt32());
+        Assert.Equal(order.OrderCode, paidPage.GetProperty("items")[0].GetProperty("orderCode").GetString());
+        Assert.Equal(0, (await ReadAsync(pending)).GetProperty("totalCount").GetInt32());
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+        Assert.Equal("Order.InvalidStatus", (await ReadAsync(unknown)).GetProperty("title").GetString());
     }
 
     [Fact]

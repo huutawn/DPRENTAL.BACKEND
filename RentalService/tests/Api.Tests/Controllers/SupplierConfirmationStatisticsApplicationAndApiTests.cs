@@ -64,7 +64,7 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
         public Task<RentalOrder?> GetByItemIdWithDetailsAsync(Guid itemId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Guid?> GetOrderIdByItemIdAsync(Guid itemId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RentalSubOrder?> GetSubOrderByIdAsync(Guid subOrderId, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(Guid renterId, int skip, int take, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(Guid renterId, RentalOrderStatus? status, int skip, int take, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RentalOrder?> GetRenterOrderWithSubOrdersAsync(Guid orderId, Guid renterId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(Guid supplierId, int skip, int take, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RentalSubOrder?> GetPaidSubOrderForSupplierAsync(Guid subOrderId, Guid supplierId, CancellationToken ct = default) => throw new NotImplementedException();

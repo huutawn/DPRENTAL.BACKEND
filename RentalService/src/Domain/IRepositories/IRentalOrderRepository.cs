@@ -1,3 +1,4 @@
+using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 
 namespace Dprental.RentalService.Domain.IRepositories;
@@ -56,14 +57,18 @@ public interface IRentalOrderRepository
     /// <summary>Đơn con theo mã, không kèm dòng; không theo dõi thay đổi.</summary>
     Task<RentalSubOrder?> GetSubOrderByIdAsync(Guid subOrderId, CancellationToken cancellationToken = default);
 
-    /// <summary>Một trang đơn của người thuê, mới nhất trước.</summary>
+    /// <summary>Một trang đơn của người thuê, mới nhất trước; <paramref name="status"/> rỗng là mọi trạng thái.</summary>
     Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(
         Guid renterId,
+        RentalOrderStatus? status,
         int skip,
         int take,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Đơn kèm các đơn con và dòng, chỉ khi đơn thuộc người thuê này; không theo dõi thay đổi.</summary>
+    /// <summary>
+    /// Đơn kèm các đơn con, dòng, bàn giao, trả máy, đề xuất khấu trừ và các yêu cầu hoàn tiền, chỉ khi đơn thuộc
+    /// người thuê này; không theo dõi thay đổi.
+    /// </summary>
     Task<RentalOrder?> GetRenterOrderWithSubOrdersAsync(
         Guid orderId,
         Guid renterId,
