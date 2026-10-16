@@ -237,8 +237,7 @@ public sealed class CheckoutOrderWriterTests
             Assert.Equal(line.ExpectedStartDate, item.ExpectedStartDate);
             Assert.Equal(line.ExpectedEndDate, item.ExpectedEndDate);
             Assert.Equal(line.ListingName, item.ListingTitleSnapshot);
-            // Inventory không trả nơi nhận máy nên đơn để trống.
-            Assert.Null(item.PickupLocationSnapshot);
+            Assert.Equal(line.PickupLocationSnapshot, item.PickupLocationSnapshot);
             Assert.Equal(line.DailyRate, item.DailyRateSnapshot);
             Assert.Equal(line.DepositPerUnit, item.DepositPerUnitSnapshot);
             Assert.Equal(line.RentalAmount, item.RentalAmount);

@@ -159,7 +159,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         // 1. Một lần gọi cho mọi Listing của các dòng đã chọn.
         List<Guid> listingIds = items.Select(i => i.EquipmentListingId).Distinct().ToList();
         Result<ListingRentalSnapshotsResponse> snapshotsResult = await _inventory.GetListingRentalSnapshotsAsync(
-            new ListingRentalSnapshotsRequest(listingIds), cancellationToken);
+            new ListingRentalSnapshotsRequest(listingIds, IncludeWarehouse: true), cancellationToken);
         if (snapshotsResult.IsFailure ||
             !TryIndexSnapshots(listingIds, snapshotsResult.Value, out Dictionary<Guid, ListingRentalSnapshotDto> listings))
         {
@@ -268,6 +268,28 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         decimal dailyRate = listing.DailyRate;
         int rentalDays = RentalPricingPolicy.CalculateRentalDays(orderStartDate, orderEndDate);
 
+        string? pickupLocationSnapshot = null;
+        if (listing.Warehouse != null)
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(listing.Warehouse.AddressDetail)) parts.Add(listing.Warehouse.AddressDetail.Trim());
+            if (!string.IsNullOrWhiteSpace(listing.Warehouse.WardName)) parts.Add(listing.Warehouse.WardName.Trim());
+            if (!string.IsNullOrWhiteSpace(listing.Warehouse.ProvinceName)) parts.Add(listing.Warehouse.ProvinceName.Trim());
+            var text = string.Join(", ", parts);
+            if (listing.Warehouse.Latitude.HasValue && listing.Warehouse.Longitude.HasValue)
+            {
+                var latStr = listing.Warehouse.Latitude.Value.ToString("F6", System.Globalization.CultureInfo.InvariantCulture);
+                var lngStr = listing.Warehouse.Longitude.Value.ToString("F6", System.Globalization.CultureInfo.InvariantCulture);
+                pickupLocationSnapshot = string.IsNullOrWhiteSpace(text)
+                    ? $"{latStr}, {lngStr}"
+                    : $"{text} ({latStr}, {lngStr})";
+            }
+            else
+            {
+                pickupLocationSnapshot = string.IsNullOrWhiteSpace(text) ? null : text;
+            }
+        }
+
         return new(
             item.Id,
             item.EquipmentListingId,
@@ -281,7 +303,8 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             CheckoutRules.DepositPerUnit,
             rentalDays,
             RentalPricingPolicy.CalculateRentalAmount(dailyRate, item.Quantity, rentalDays),
-            RentalPricingPolicy.CalculateDepositAmount(CheckoutRules.DepositPerUnit, item.Quantity));
+            RentalPricingPolicy.CalculateDepositAmount(CheckoutRules.DepositPerUnit, item.Quantity),
+            pickupLocationSnapshot);
     }
 
     private static bool MatchesLine(ListingAvailabilityCheckResponse response, RentalCartItem item) =>

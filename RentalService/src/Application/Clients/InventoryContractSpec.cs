@@ -64,6 +64,7 @@ public static class InventoryContractSpec
     public static class Scopes
     {
         public const string ReadAvailability = "inventory.availability.read";
+        public const string ReadWarehouse = "inventory.warehouse.read";
         public const string WriteAllocation = "inventory.allocation.write";
     }
 }

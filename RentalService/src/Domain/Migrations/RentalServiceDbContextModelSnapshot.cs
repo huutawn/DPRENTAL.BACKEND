@@ -456,8 +456,8 @@ namespace RentalService.Domain.Migrations
                         .HasColumnType("character varying(200)");
 
                     b.Property<string>("PickupLocationSnapshot")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
 
                     b.Property<int>("Quantity")
                         .HasColumnType("integer");

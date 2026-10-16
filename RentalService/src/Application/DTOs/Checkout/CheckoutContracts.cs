@@ -82,7 +82,8 @@ public sealed record CheckoutPlanLine(
     decimal DepositPerUnit,
     int RentalDays,
     decimal RentalAmount,
-    decimal DepositAmount);
+    decimal DepositAmount,
+    string? PickupLocationSnapshot = null);
 
 public sealed record CheckoutFieldError(string Field, string Code, string Message);
 

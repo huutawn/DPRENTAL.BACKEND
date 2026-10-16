@@ -74,25 +74,35 @@ internal static class OrderQueryMapper
         order.DeliveryAddress,
         order.DeliveryNote);
 
-    public static OrderItemResponse ToItem(RentalItem item)
+    public static OrderItemResponse ToItem(RentalItem item, bool isSupplier = false)
     {
         // Đơn lưu ngày trả máy (không tính); trả ra ngày dùng cuối (có tính) như giỏ hàng.
         Result<(DateOnly StartDate, DateOnly EndDate)> dates =
             RentalInventoryDateAdapter.ToInventoryDates(item.ExpectedStartDate, item.ExpectedEndDate);
         DateOnly endDate = dates.IsSuccess ? dates.Value.EndDate : item.ExpectedEndDate;
 
+        // Khách chỉ được xem địa chỉ thật sau khi chủ xác nhận đơn (Status >= AwaitingHandover).
+        // Nhà cung cấp xem được địa chỉ bất kỳ lúc nào.
+        bool canSeeRealAddress = isSupplier || item.Status is Dprental.RentalService.Common.Enums.RentalItemStatus.AwaitingHandover
+            or Dprental.RentalService.Common.Enums.RentalItemStatus.InRental
+            or Dprental.RentalService.Common.Enums.RentalItemStatus.PendingSettlement
+            or Dprental.RentalService.Common.Enums.RentalItemStatus.Completed;
+
+        string? pickupLocation = canSeeRealAddress ? item.PickupLocationSnapshot : null;
+
         return new OrderItemResponse(
             item.ListingTitleSnapshot,
             item.Quantity,
             item.ExpectedStartDate,
-            endDate);
+            endDate,
+            pickupLocation);
     }
 
     /// <summary>Các dòng theo thứ tự ngày giao rồi mã dòng, để kết quả ổn định giữa các lần gọi.</summary>
-    public static List<OrderItemResponse> ToItems(IEnumerable<RentalItem> items) => items
+    public static List<OrderItemResponse> ToItems(IEnumerable<RentalItem> items, bool isSupplier = false) => items
         .OrderBy(i => i.ExpectedStartDate)
         .ThenBy(i => i.Id)
-        .Select(ToItem)
+        .Select(i => ToItem(i, isSupplier))
         .ToList();
 
     public static OrderHandoverResponse? ToHandover(RentalItem item) => item.HandoverRecord is { } handover

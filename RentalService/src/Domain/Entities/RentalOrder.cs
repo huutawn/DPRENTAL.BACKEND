@@ -301,7 +301,7 @@ public class RentalOrder
             if (depositAmountCheck.IsFailure) return depositAmountCheck.Error;
 
             if (string.IsNullOrWhiteSpace(itemDto.ListingTitleSnapshot) || itemDto.ListingTitleSnapshot.Trim().Length > 200 ||
-                !IsValidOptionalText(itemDto.PickupLocationSnapshot, 500) ||
+                !IsValidOptionalText(itemDto.PickupLocationSnapshot, RentalItem.MaxPickupLocationSnapshotLength) ||
                 string.IsNullOrWhiteSpace(itemDto.AllocationGroupId) || itemDto.AllocationGroupId.Trim().Length > 64)
             {
                 return RentalErrors.InvalidSnapshot;

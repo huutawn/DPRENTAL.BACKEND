@@ -6,6 +6,15 @@ namespace Dprental.RentalService.Application.DTOs.Inventory;
 // 1. GetListingRentalSnapshot
 // Theo dạng Inventory đưa ngày 15/10/2026: chỉ những gì Rental cần để tính tiền, chia đơn con và hiển thị.
 // Inventory chưa có tiền cọc, Rental tạm tính cọc = 0.
+public sealed record ListingWarehouseDto(
+    string? AddressDetail,
+    string? ProvinceCode,
+    string? ProvinceName,
+    string? WardCode,
+    string? WardName,
+    double? Latitude,
+    double? Longitude);
+
 public sealed record ListingRentalSnapshotDto(
     Guid Id,
     Guid OwnerUserId,
@@ -13,7 +22,9 @@ public sealed record ListingRentalSnapshotDto(
     Guid? ThumbnailMediaId,
     decimal DailyRate,
     string Currency,
-    string Status);
+    string Status,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    ListingWarehouseDto? Warehouse = null);
 
 // 2. CheckListingAvailability: POST /equipment-listings/{listingId}/availability/check, đúng dạng Inventory.
 // EndDate là ngày dùng máy cuối cùng (có tính): thuê 18, 19, 20 thì gửi startDate 18, endDate 20.
@@ -35,7 +46,9 @@ public sealed record ListingAvailabilityCheckResponse(
 // 1b. GetListingRentalSnapshots (theo danh sách): POST /equipment-listings/batch, checkout đọc mọi Listing của giỏ trong một lần gọi.
 // Inventory nhận 1–100 mã, bỏ mã trùng và từ chối ô lạ.
 public sealed record ListingRentalSnapshotsRequest(
-    IReadOnlyList<Guid> EquipmentListingIds);
+    IReadOnlyList<Guid> EquipmentListingIds,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    bool IncludeWarehouse = false);
 
 public sealed record ListingRentalSnapshotsResponse(
     IReadOnlyList<ListingRentalSnapshotDto> Items,

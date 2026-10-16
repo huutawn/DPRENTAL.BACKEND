@@ -41,11 +41,14 @@ public sealed record OrderDeliveryResponse(
 /// <param name="Quantity">Số máy thuê.</param>
 /// <param name="StartDate">Ngày đầu tiên dùng máy.</param>
 /// <param name="EndDate">Ngày cuối cùng dùng máy (có tính), giống cách giỏ hàng hiển thị.</param>
+/// <param name="PickupLocation">Địa chỉ kho nhận máy.</param>
 public sealed record OrderItemResponse(
     string Name,
     int Quantity,
     DateOnly StartDate,
-    DateOnly EndDate);
+    DateOnly EndDate,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? PickupLocation = null);
 
 /// <summary>
 /// Một đơn trong danh sách đơn của người thuê.
