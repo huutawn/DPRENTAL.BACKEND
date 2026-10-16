@@ -157,6 +157,9 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
             b.Property(i => i.FinalDeductionAmount)
                 .HasPrecision(18, 2);
 
+            b.Property(i => i.PickupLocationSnapshot)
+                .HasMaxLength(RentalItem.MaxPickupLocationSnapshotLength);
+
             b.HasIndex(i => i.SupplierDecisionBy);
 
             b.Property(i => i.SupplierDecisionNote)

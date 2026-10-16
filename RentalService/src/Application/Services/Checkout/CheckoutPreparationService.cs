@@ -278,9 +278,11 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             var text = string.Join(", ", parts);
             if (listing.Warehouse.Latitude.HasValue && listing.Warehouse.Longitude.HasValue)
             {
+                var latStr = listing.Warehouse.Latitude.Value.ToString("F6", System.Globalization.CultureInfo.InvariantCulture);
+                var lngStr = listing.Warehouse.Longitude.Value.ToString("F6", System.Globalization.CultureInfo.InvariantCulture);
                 pickupLocationSnapshot = string.IsNullOrWhiteSpace(text)
-                    ? $"{listing.Warehouse.Latitude.Value:F6}, {listing.Warehouse.Longitude.Value:F6}"
-                    : $"{text} ({listing.Warehouse.Latitude.Value:F6}, {listing.Warehouse.Longitude.Value:F6})";
+                    ? $"{latStr}, {lngStr}"
+                    : $"{text} ({latStr}, {lngStr})";
             }
             else
             {
