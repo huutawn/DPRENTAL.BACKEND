@@ -41,8 +41,11 @@ public sealed class PaymentServiceDbContext : DbContext
             b.HasIndex(r => r.RentalOrderId);
         });
 
-        modelBuilder.Entity<OutboxMessage>()
-            .HasIndex(o => o.PublishedAt);
+        modelBuilder.Entity<OutboxMessage>(b =>
+        {
+            b.HasIndex(o => o.PublishedAt);
+            b.HasIndex(o => new { o.PublishedAt, o.LockedUntilUtc, o.NextRetryAt, o.RetryCount });
+        });
 
         modelBuilder.Entity<PaymentTransaction>(b =>
         {

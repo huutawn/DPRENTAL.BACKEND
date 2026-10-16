@@ -32,16 +32,14 @@ public static class ApplicationServiceCollectionExtensions
 
         services.AddOptions<PaymentKafkaOptions>()
             .Bind(configuration.GetSection(PaymentKafkaOptions.SectionName))
+            .ValidateDataAnnotations()
             .Validate(o => !o.Enabled ||
                 (!string.IsNullOrWhiteSpace(o.BootstrapServers) &&
-                 !string.IsNullOrWhiteSpace(o.PaymentEventsTopic) &&
-                 o.BatchSize > 0 && o.PollIntervalSeconds > 0 && o.DeliveryTimeoutSeconds > 0),
+                 !string.IsNullOrWhiteSpace(o.Topic) &&
+                 o.BatchSize > 0 && o.PollingIntervalSeconds > 0 &&
+                 o.DeliveryTimeoutSeconds > 0 && o.LeaseDurationSeconds > 0),
                 "Enabled Kafka requires broker, topic and positive worker settings.")
             .ValidateOnStart();
-
-        if (configuration.GetValue<bool>("Kafka:Enabled"))
-            services.AddSingleton<IEventTransport, KafkaEventTransport>();
-
         services.AddSingleton(TimeProvider.System);
 
         services.AddScoped<IInvoiceCreationService, InvoiceCreationService>();
@@ -50,9 +48,10 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IInvoiceService, InvoiceService>();
         services.AddScoped<ISettlementService, SettlementService>();
         services.AddScoped<IManualRefundService, ManualRefundService>();
+        services.AddSingleton<IInvoicePaidKafkaProducer, InvoicePaidKafkaProducer>();
 
         services.AddHostedService<InvoiceExpiryWorker>();
-        services.AddHostedService<PaymentOutboxPublisherWorker>();
+        services.AddHostedService<InvoicePaidOutboxPublisherWorker>();
 
         return services;
     }

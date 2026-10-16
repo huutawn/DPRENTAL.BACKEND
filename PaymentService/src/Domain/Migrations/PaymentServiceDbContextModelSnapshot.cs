@@ -286,6 +286,17 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("LastErrorMessage")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("LockedBy")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset?>("LockedUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("MessageId")
                         .HasColumnType("uuid");
 
@@ -294,6 +305,9 @@ namespace Dprental.PaymentService.Domain.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<DateTimeOffset?>("NextRetryAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Payload")
                         .IsRequired()
                         .HasColumnType("text");
@@ -301,9 +315,14 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.Property<DateTimeOffset?>("PublishedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("integer");
+
                     b.HasKey("Id");
 
                     b.HasIndex("PublishedAt");
+
+                    b.HasIndex("PublishedAt", "LockedUntilUtc", "NextRetryAt", "RetryCount");
 
                     b.ToTable("outbox_messages");
                 });
