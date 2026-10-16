@@ -1,15 +1,22 @@
-﻿using Dprental.PaymentService.Domain.Entities;
+﻿using Dprental.PaymentService.Common;
+using Dprental.PaymentService.Domain.Entities;
 
 namespace Dprental.PaymentService.Domain.IRepository;
 
+public enum SettlementWriteOutcome { Created, Replayed }
+
+public sealed record SettlementWriteResult(
+    Guid SettlementId,
+    string SettlementRef,
+    SettlementWriteOutcome Outcome);
+
 /// <summary>
-/// Ghi toàn bộ settlement (khoản supplier được hưởng và các khoản kế toán) trong MỘT thao tác.
-/// Contract cho subtask 3, nơi triển khai nguyên tử bằng một transaction:
-/// - Hoặc ghi đủ tất cả bút toán, hoặc không ghi gì.
-/// - Idempotent theo <see cref="RentalItemSettlement.OperationKey"/>: gọi lại với cùng key
-///   và cùng số tiền thì không ghi thêm; cùng key nhưng khác số tiền hoặc DecisionRef là xung đột.
+/// Ghi toàn bộ settlement trong MỘT transaction (record + 3 bút toán + receipt).
+/// - Cùng OperationKey, cùng payload: trả lại cùng SettlementRef (Replayed), không ghi thêm.
+/// - Cùng OperationKey khác payload, hoặc khác key nhưng cùng RentalItemId: lỗi Conflict.
 /// </summary>
 public interface ISettlementLedger
 {
-    Task RecordSettlementAsync(RentalItemSettlement settlement, CancellationToken ct);
+    Task<Result<SettlementWriteResult>> RecordSettlementAsync(
+        RentalItemSettlement settlement, CancellationToken ct);
 }

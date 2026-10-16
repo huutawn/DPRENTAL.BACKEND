@@ -42,6 +42,8 @@ export ConnectionStrings__Postgres="Host=127.0.0.1;Port=${POSTGRES_PORT};Databas
 dotnet run --project PaymentService/src/Api/PaymentService.Api.csproj
 ```
 
+Trên PowerShell, chạy `./scripts/run-payment-api.ps1` để nạp `.env` và khởi động API tại `http://127.0.0.1:46280`. Script từ chối cấu hình trỏ tới database `rentalservice`.
+
 API dùng cổng riêng trong `launchSettings.json`. Cấu hình kết nối trống sẽ làm API dừng ngay lúc khởi động.
 
 ## Build và Test

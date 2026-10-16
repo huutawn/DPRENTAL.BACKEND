@@ -45,6 +45,8 @@ public sealed class PostgresMigrationAndPersistenceTests
             Assert.Contains("invoice_items", tables);
             Assert.Contains("operation_receipts", tables);
             Assert.Contains("outbox_messages", tables);
+            Assert.Contains("rental_item_settlements", tables);
+            Assert.Contains("settlement_ledger_entries", tables);
 
             // Verify numeric(18,0) column data type
             await using var cmdNumeric = conn.CreateCommand();
@@ -84,6 +86,9 @@ public sealed class PostgresMigrationAndPersistenceTests
             Assert.Contains("IX_invoices_PaymentRef", indexes);
             Assert.Contains("IX_operation_receipts_OperationKey", indexes);
             Assert.Contains("IX_invoice_items_InvoiceId_RentalItemId", indexes);
+            Assert.Contains("IX_rental_item_settlements_OperationKey", indexes);
+            Assert.Contains("IX_rental_item_settlements_RentalItemId", indexes);
+            Assert.Contains("IX_settlement_ledger_entries_SettlementId_EntryType", indexes);
         }
         finally
         {

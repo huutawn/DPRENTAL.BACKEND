@@ -337,6 +337,117 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.ToTable("payment_transactions");
                 });
 
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.RentalItemSettlementRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DecisionRef")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<decimal>("DepositAmount")
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<decimal>("DepositRefundDue")
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<decimal>("FinalDeductionAmount")
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<Guid>("InvoiceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("InvoiceItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("OperationKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<decimal>("PlatformFeeAmount")
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<decimal>("PlatformFeeRate")
+                        .HasColumnType("numeric(5,4)");
+
+                    b.Property<decimal>("RentalAmount")
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<Guid>("RentalItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SettlementRef")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("SupplierPayable")
+                        .HasColumnType("numeric(18,0)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InvoiceItemId");
+
+                    b.HasIndex("OperationKey")
+                        .IsUnique();
+
+                    b.HasIndex("RentalItemId")
+                        .IsUnique();
+
+                    b.HasIndex("SettlementRef")
+                        .IsUnique();
+
+                    b.ToTable("rental_item_settlements", t =>
+                        {
+                            t.HasCheckConstraint("ck_settlement_amounts_non_negative", "\"RentalAmount\" >= 0 AND \"DepositAmount\" >= 0 AND \"FinalDeductionAmount\" >= 0 AND \"DepositRefundDue\" >= 0 AND \"PlatformFeeAmount\" >= 0 AND \"SupplierPayable\" >= 0");
+
+                            t.HasCheckConstraint("ck_settlement_deduction_le_deposit", "\"FinalDeductionAmount\" <= \"DepositAmount\"");
+
+                            t.HasCheckConstraint("ck_settlement_fee_rate_range", "\"PlatformFeeRate\" >= 0 AND \"PlatformFeeRate\" <= 1");
+
+                            t.HasCheckConstraint("ck_settlement_money_balance", "\"SupplierPayable\" + \"PlatformFeeAmount\" + \"DepositRefundDue\" = \"RentalAmount\" + \"DepositAmount\"");
+                        });
+                });
+
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.SettlementLedgerEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("EntryType")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SettlementId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SettlementId", "EntryType")
+                        .IsUnique();
+
+                    b.ToTable("settlement_ledger_entries", t =>
+                        {
+                            t.HasCheckConstraint("ck_settlement_entry_amount_non_negative", "\"Amount\" >= 0");
+                        });
+                });
+
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.InvoiceItem", b =>
                 {
                     b.HasOne("Dprental.PaymentService.Domain.Entities.Invoice", "Invoice")
@@ -348,9 +459,34 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.Navigation("Invoice");
                 });
 
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.RentalItemSettlementRecord", b =>
+                {
+                    b.HasOne("Dprental.PaymentService.Domain.Entities.InvoiceItem", null)
+                        .WithMany()
+                        .HasForeignKey("InvoiceItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.SettlementLedgerEntry", b =>
+                {
+                    b.HasOne("Dprental.PaymentService.Domain.Entities.RentalItemSettlementRecord", "Settlement")
+                        .WithMany("Entries")
+                        .HasForeignKey("SettlementId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Settlement");
+                });
+
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.Invoice", b =>
                 {
                     b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.RentalItemSettlementRecord", b =>
+                {
+                    b.Navigation("Entries");
                 });
 #pragma warning restore 612, 618
         }
