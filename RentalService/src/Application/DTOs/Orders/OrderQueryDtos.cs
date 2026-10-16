@@ -184,4 +184,4 @@ public sealed record SupplierSubOrderDetailResponse(
     decimal TotalRentalAmount,
     decimal TotalDepositAmount,
     decimal TotalAmount,
-    IReadOnlyList<OrderItemResponse> Items);
+    IReadOnlyList<SupplierOrderItemResponse> Items);

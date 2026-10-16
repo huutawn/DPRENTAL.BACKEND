@@ -229,16 +229,16 @@ public sealed class OrderQueryServiceTests
         RenterOrderItemResponse line = result.Value.SubOrders.SelectMany(s => s.Items).Single(i => i.RentalItemId == mixers.Id);
         Assert.Equal(RentalItemStatus.PendingSettlement, line.Status);
         Assert.Equal(
-            new RenterHandoverResponse(OrderTestData.Now.AddDays(3), "Giao tại công trình", null),
+            new OrderHandoverResponse(OrderTestData.Now.AddDays(3), "Giao tại công trình", null),
             line.Handover);
 
         // Một máy trộn trả bình thường, một máy vỡ thùng.
-        RenterReturnResponse returned = Assert.Single(line.Returns);
+        OrderReturnResponse returned = Assert.Single(line.Returns);
         Assert.Equal(OrderTestData.Now.AddDays(6), returned.ActualReturnAt);
         Assert.Equal(1, returned.NormalUnits);
         Assert.Equal(1, returned.DamagedUnits);
 
-        RenterSettlementResponse settlement = line.Settlement!;
+        OrderSettlementResponse settlement = line.Settlement!;
         Assert.Equal(OrderTestData.Now.AddDays(6), settlement.ReturnsCompletedAt);
         Assert.Equal(OrderTestData.Now.AddDays(8), settlement.DeductionDeadline);
         Assert.Equal(DeductionProposalStatus.Submitted, settlement.DeductionStatus);
@@ -302,7 +302,7 @@ public sealed class OrderQueryServiceTests
         await SeedAsync();
 
         Result<PagedResponse<SupplierSubOrderSummaryResponse>> result =
-            await SupplierService().GetMySubOrdersAsync(1, 20, OrderTestData.User(_binh));
+            await SupplierService().GetMySubOrdersAsync(1, 20, null, OrderTestData.User(_binh));
 
         Assert.True(result.IsSuccess);
         // Không có đơn chưa thanh toán và đơn thanh toán trễ của An.
@@ -358,6 +358,106 @@ public sealed class OrderQueryServiceTests
     }
 
     [Fact]
+    public async Task Supplier_ListFiltersByItemStatus_ForEachWorkQueue()
+    {
+        await SeedAsync();
+        RentalOrder lifecycle = await SeedLifecycleOrderAsync();
+
+        async Task<List<string>> Queue(Guid supplierId, string status)
+        {
+            Result<PagedResponse<SupplierSubOrderSummaryResponse>> result =
+                await SupplierService().GetMySubOrdersAsync(1, 20, status, OrderTestData.User(supplierId));
+            Assert.True(result.IsSuccess);
+            Assert.Equal(result.Value.Items.Count, result.Value.TotalCount);
+            return result.Value.Items.Select(s => s.SubOrderCode).ToList();
+        }
+
+        Assert.Equal([$"{_paidMixedOrder.OrderCode}-02"], await Queue(_cuong, "PENDING_SUPPLIER_CONFIRMATION"));
+        Assert.Equal([$"{lifecycle.OrderCode}-02"], await Queue(_cuong, "PENDING_SETTLEMENT"));
+        Assert.Empty(await Queue(_cuong, "IN_RENTAL"));
+        Assert.Empty(await Queue(_cuong, "COMPLETED"));
+        Assert.Equal([$"{lifecycle.OrderCode}-01"], await Queue(_binh, "rejected"));
+        Assert.Equal(
+            [$"{_otherRentersOrder.OrderCode}-01", $"{_paidMixedOrder.OrderCode}-01"],
+            await Queue(_binh, "PendingSupplierConfirmation"));
+    }
+
+    [Theory]
+    [InlineData("SHIPPED")]
+    [InlineData("5")]
+    [InlineData("IN_RENTAL,COMPLETED")]
+    public async Task Supplier_ListWithUnknownStatus_IsRejected(string status)
+    {
+        await SeedAsync();
+
+        Result<PagedResponse<SupplierSubOrderSummaryResponse>> result =
+            await SupplierService().GetMySubOrdersAsync(1, 20, status, OrderTestData.User(_cuong));
+
+        Assert.Equal("Order.InvalidStatus", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Supplier_SubOrderDetail_ShowsOwnUnitsHandoverReturnsAndSettlement()
+    {
+        RentalOrder order = await SeedLifecycleOrderAsync();
+        RentalItem mixers = order.Items.Single(i => i.SupplierId == _cuong);
+        List<RentalUnitAssignment> assigned = mixers.UnitAssignments.OrderBy(u => u.Id).ToList();
+
+        Result<SupplierSubOrderDetailResponse> result = await SupplierService().GetMySubOrderAsync(
+            order.SubOrders.Single(s => s.SupplierId == _cuong).Id, OrderTestData.User(_cuong));
+
+        Assert.True(result.IsSuccess);
+        SupplierOrderItemResponse line = Assert.Single(result.Value.Items);
+        Assert.Equal(mixers.Id, line.RentalItemId);
+        Assert.Equal(RentalItemStatus.PendingSettlement, line.Status);
+        Assert.Equal(400_000m, line.DailyRate);
+        Assert.Equal(3_000_000m, line.DepositPerUnit);
+        Assert.Equal(6_000_000m, line.DepositAmount);
+        Assert.Equal(OrderTestData.Now.AddDays(3), line.Handover!.ActualHandoverAt);
+
+        OrderReturnResponse returned = Assert.Single(line.Returns);
+        Assert.Equal(1, returned.NormalUnits);
+        Assert.Equal(1, returned.DamagedUnits);
+        Assert.Equal(1_500_000m, line.Settlement!.ProposedDeductionAmount);
+
+        // Nhà cung cấp cần assignmentId để ghi nhận trả máy và assetId để đề xuất khấu trừ.
+        Assert.Equal(
+            assigned.Select(u => new SupplierUnitResponse(u.Id, u.AssetId, u.Status, u.ReturnCondition)),
+            line.Units);
+        Assert.Equal(
+            [UnitCondition.Normal, UnitCondition.Damaged],
+            line.Units.Select(u => u.ReturnCondition!.Value).Order());
+    }
+
+    [Fact]
+    public async Task Supplier_SubOrderDetail_NeverExposesRefundsOrOtherSuppliersEquipment()
+    {
+        RentalOrder order = await SeedLifecycleOrderAsync();
+
+        Result<SupplierSubOrderDetailResponse> cuongs = await SupplierService().GetMySubOrderAsync(
+            order.SubOrders.Single(s => s.SupplierId == _cuong).Id, OrderTestData.User(_cuong));
+        Result<SupplierSubOrderDetailResponse> binhs = await SupplierService().GetMySubOrderAsync(
+            order.SubOrders.Single(s => s.SupplierId == _binh).Id, OrderTestData.User(_binh));
+
+        string cuongsJson = JsonSerializer.Serialize(cuongs.Value, WebJson);
+        Assert.DoesNotContain("Máy xúc", cuongsJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("0123456789", cuongsJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("refundRef", cuongsJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("refundAccount", cuongsJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("allocation", cuongsJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("paymentRef", cuongsJson, StringComparison.OrdinalIgnoreCase);
+        foreach (Guid asset in order.Items.Where(i => i.SupplierId == _binh).SelectMany(i => i.UnitAssignments).Select(u => u.AssetId))
+        {
+            Assert.DoesNotContain(asset.ToString(), cuongsJson, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Bình đã hoàn tiền máy đầm cho người thuê nhưng không thấy mã hoàn.
+        string binhsJson = JsonSerializer.Serialize(binhs.Value, WebJson);
+        Assert.DoesNotContain("REF-2026-000001", binhsJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("Máy trộn", binhsJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Queries_RejectAnonymousAndServiceCallers()
     {
         await SeedAsync();
@@ -365,7 +465,7 @@ public sealed class OrderQueryServiceTests
         Result<PagedResponse<RenterOrderSummaryResponse>> anonymous =
             await RenterService().GetMyOrdersAsync(1, 20, null, OrderTestData.Anonymous());
         Result<PagedResponse<SupplierSubOrderSummaryResponse>> service =
-            await SupplierService().GetMySubOrdersAsync(1, 20, OrderTestData.Service());
+            await SupplierService().GetMySubOrdersAsync(1, 20, null, OrderTestData.Service());
 
         Assert.Equal(ErrorType.Unauthorized, anonymous.Error.Type);
         Assert.Equal(ErrorType.Forbidden, service.Error.Type);

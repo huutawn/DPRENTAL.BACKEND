@@ -380,11 +380,16 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
 
     public async Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(
         Guid supplierId,
+        RentalItemStatus? itemStatus,
         int skip,
         int take,
         CancellationToken cancellationToken = default)
     {
         IQueryable<RentalSubOrder> query = PaidSubOrdersOf(supplierId);
+        if (itemStatus.HasValue)
+        {
+            query = query.Where(s => s.Items.Any(i => i.Status == itemStatus.Value));
+        }
 
         int totalCount = await query.CountAsync(cancellationToken);
         List<SupplierSubOrderSummaryRecord> items = await query
@@ -413,8 +418,16 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
         CancellationToken cancellationToken = default)
     {
         return await PaidSubOrdersOf(supplierId)
+            .AsSplitQuery()
             .Include(s => s.RentalOrder)
             .Include(s => s.Items)
+                .ThenInclude(i => i.UnitAssignments)
+            .Include(s => s.Items)
+                .ThenInclude(i => i.HandoverRecord)
+            .Include(s => s.Items)
+                .ThenInclude(i => i.ReturnRecords)
+            .Include(s => s.Items)
+                .ThenInclude(i => i.DeductionProposal)
             .FirstOrDefaultAsync(s => s.Id == subOrderId, cancellationToken);
     }
 

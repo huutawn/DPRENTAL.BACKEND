@@ -74,15 +74,19 @@ public interface IRentalOrderRepository
         Guid renterId,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Một trang đơn con của nhà cung cấp, chỉ gồm đơn đã thanh toán đúng hạn, mới nhất trước.</summary>
+    /// <summary>
+    /// Một trang đơn con của nhà cung cấp, chỉ gồm đơn đã thanh toán đúng hạn, mới nhất trước;
+    /// <paramref name="itemStatus"/> có giá trị thì chỉ lấy đơn con có ít nhất một dòng ở trạng thái đó.
+    /// </summary>
     Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(
         Guid supplierId,
+        RentalItemStatus? itemStatus,
         int skip,
         int take,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Đơn con kèm dòng và đơn cha, chỉ khi đơn con thuộc nhà cung cấp này và đơn đã thanh toán đúng hạn;
+    /// Đơn con kèm đơn cha, dòng, máy đã gán, bàn giao, trả máy và đề xuất khấu trừ, chỉ khi đơn con thuộc nhà cung cấp này và đơn đã thanh toán đúng hạn;
     /// không theo dõi thay đổi.
     /// </summary>
     Task<RentalSubOrder?> GetPaidSubOrderForSupplierAsync(

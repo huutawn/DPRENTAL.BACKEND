@@ -94,6 +94,41 @@ public sealed class OrderQueryApiTests
     }
 
     [Fact]
+    public async Task Supplier_FiltersWorkQueueByItemStatus_AndSeesOwnUnits()
+    {
+        using OrderApiFactory factory = new();
+        RentalOrder order = factory.SeedPaidMixedOrder();
+        RentalSubOrder cuongsSubOrder = order.SubOrders.Single(s => s.SupplierId == factory.SupplierCuong);
+        RentalItem mixers = cuongsSubOrder.Items.Single();
+        using HttpClient cuong = factory.CreateClientFor(factory.SupplierCuong);
+
+        using HttpResponseMessage waiting =
+            await cuong.GetAsync("/api/v1/rental/supplier/sub-orders?status=PENDING_SUPPLIER_CONFIRMATION");
+        using HttpResponseMessage inRental = await cuong.GetAsync("/api/v1/rental/supplier/sub-orders?status=IN_RENTAL");
+        using HttpResponseMessage unknown = await cuong.GetAsync("/api/v1/rental/supplier/sub-orders?status=SHIPPED");
+        using HttpResponseMessage detail = await cuong.GetAsync($"/api/v1/rental/supplier/sub-orders/{cuongsSubOrder.Id}");
+
+        Assert.Equal(cuongsSubOrder.SubOrderCode,
+            (await ReadAsync(waiting)).GetProperty("items")[0].GetProperty("subOrderCode").GetString());
+        Assert.Equal(0, (await ReadAsync(inRental)).GetProperty("totalCount").GetInt32());
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+        Assert.Equal("Order.InvalidStatus", (await ReadAsync(unknown)).GetProperty("title").GetString());
+
+        Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
+        JsonElement line = (await ReadAsync(detail)).GetProperty("items")[0];
+        Assert.Equal(mixers.Id, line.GetProperty("rentalItemId").GetGuid());
+        Assert.Equal("PENDING_SUPPLIER_CONFIRMATION", line.GetProperty("status").GetString());
+        Assert.Equal(400_000m, line.GetProperty("dailyRate").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, line.GetProperty("handover").ValueKind);
+        Assert.Equal(
+            mixers.UnitAssignments.Select(u => u.AssetId).Order(),
+            line.GetProperty("units").EnumerateArray().Select(u => u.GetProperty("assetId").GetGuid()).Order());
+        Assert.All(line.GetProperty("units").EnumerateArray(),
+            u => Assert.Equal("ASSIGNED", u.GetProperty("status").GetString()));
+        Assert.False(line.TryGetProperty("refund", out _));
+    }
+
+    [Fact]
     public async Task Supplier_ListsOnlyOwnSubOrder_AndCannotOpenAnotherSuppliersSubOrder()
     {
         using OrderApiFactory factory = new();

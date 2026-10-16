@@ -190,7 +190,7 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
         throw new NotSupportedException();
 
     public Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(
-        Guid supplierId, int skip, int take, CancellationToken cancellationToken = default) =>
+        Guid supplierId, RentalItemStatus? itemStatus, int skip, int take, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
     public Task<RentalSubOrder?> GetPaidSubOrderForSupplierAsync(

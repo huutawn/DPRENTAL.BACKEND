@@ -3,6 +3,7 @@ using Dprental.RentalService.Application.DTOs.Orders;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
+using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 
 namespace Dprental.RentalService.Application.Services.Orders;
@@ -87,4 +88,43 @@ internal static class OrderQueryMapper
         .ThenBy(i => i.Id)
         .Select(ToItem)
         .ToList();
+
+    public static OrderHandoverResponse? ToHandover(RentalItem item) => item.HandoverRecord is { } handover
+        ? new OrderHandoverResponse(handover.ActualHandoverAt, handover.Note, handover.RenterAcknowledgedAt)
+        : null;
+
+    /// <summary>Mỗi lần trả kèm số máy bình thường và hư hỏng.</summary>
+    public static List<OrderReturnResponse> ToReturns(RentalItem item) => item.ReturnRecords
+        .OrderBy(r => r.ActualReturnAt)
+        .ThenBy(r => r.Id)
+        .Select(r =>
+        {
+            List<RentalUnitAssignment> units = item.UnitAssignments.Where(u => u.ReturnRecordId == r.Id).ToList();
+            return new OrderReturnResponse(
+                r.ActualReturnAt,
+                r.Note,
+                units.Count(u => u.ReturnCondition == UnitCondition.Normal),
+                units.Count(u => u.ReturnCondition == UnitCondition.Damaged));
+        })
+        .ToList();
+
+    /// <summary>Rỗng khi chưa trả đủ máy và chưa có đề xuất khấu trừ.</summary>
+    public static OrderSettlementResponse? ToSettlement(RentalItem item)
+    {
+        if (!item.ReturnsCompletedAt.HasValue && item.DeductionProposal is null)
+        {
+            return null;
+        }
+
+        DeductionProposal? proposal = item.DeductionProposal;
+        return new OrderSettlementResponse(
+            item.ReturnsCompletedAt,
+            item.DeductionDeadline,
+            proposal?.Status,
+            proposal?.TotalProposedAmount,
+            proposal?.RenterResponseDeadline,
+            item.FinalDeductionAmount,
+            item.FinalDeductionAmount is { } deduction ? item.DepositAmount - deduction : null,
+            item.FinancialClosureConfirmedAt);
+    }
 }

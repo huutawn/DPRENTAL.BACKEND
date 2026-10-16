@@ -81,7 +81,7 @@ public sealed record RenterItemRefundResponse(
 /// <param name="ActualHandoverAt">Thời điểm nhà cung cấp giao máy.</param>
 /// <param name="Note">Ghi chú lúc giao.</param>
 /// <param name="RenterAcknowledgedAt">Thời điểm người thuê xác nhận đã nhận, rỗng khi chưa xác nhận.</param>
-public sealed record RenterHandoverResponse(
+public sealed record OrderHandoverResponse(
     DateTimeOffset ActualHandoverAt,
     string? Note,
     DateTimeOffset? RenterAcknowledgedAt);
@@ -93,7 +93,7 @@ public sealed record RenterHandoverResponse(
 /// <param name="Note">Ghi chú lúc trả.</param>
 /// <param name="NormalUnits">Số máy trả bình thường trong lần này.</param>
 /// <param name="DamagedUnits">Số máy trả hư hỏng trong lần này.</param>
-public sealed record RenterReturnResponse(
+public sealed record OrderReturnResponse(
     DateTimeOffset ActualReturnAt,
     string? Note,
     int NormalUnits,
@@ -110,7 +110,7 @@ public sealed record RenterReturnResponse(
 /// <param name="FinalDeductionAmount">Số tiền khấu trừ đã chốt.</param>
 /// <param name="DepositRefundAmount">Tiền cọc được hoàn = tiền cọc - khấu trừ đã chốt.</param>
 /// <param name="SettledAt">Thời điểm PaymentService xác nhận quyết toán xong.</param>
-public sealed record RenterSettlementResponse(
+public sealed record OrderSettlementResponse(
     DateTimeOffset? ReturnsCompletedAt,
     DateTimeOffset? DeductionDeadline,
     DeductionProposalStatus? DeductionStatus,
@@ -162,6 +162,6 @@ public sealed record RenterOrderItemResponse(
     DateTimeOffset? SupplierDecisionAt,
     string? RejectReason,
     RenterItemRefundResponse Refund,
-    RenterHandoverResponse? Handover,
-    IReadOnlyList<RenterReturnResponse> Returns,
-    RenterSettlementResponse? Settlement);
+    OrderHandoverResponse? Handover,
+    IReadOnlyList<OrderReturnResponse> Returns,
+    OrderSettlementResponse? Settlement);

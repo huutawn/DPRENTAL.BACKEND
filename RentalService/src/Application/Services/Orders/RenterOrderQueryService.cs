@@ -168,11 +168,9 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             item.SupplierDecisionAt,
             item.Status == RentalItemStatus.Rejected ? item.SupplierDecisionReason : null,
             ToRefund(item, refundRequested),
-            item.HandoverRecord is { } handover
-                ? new RenterHandoverResponse(handover.ActualHandoverAt, handover.Note, handover.RenterAcknowledgedAt)
-                : null,
-            ToReturns(item),
-            ToSettlement(item));
+            OrderQueryMapper.ToHandover(item),
+            OrderQueryMapper.ToReturns(item),
+            OrderQueryMapper.ToSettlement(item));
     }
 
     private static RenterPaymentState ToPaymentState(RentalOrder order)
@@ -202,40 +200,6 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
         return new RenterItemRefundResponse(
             refundRequested ? RenterRefundState.Processing : RenterRefundState.None,
             null);
-    }
-
-    /// <summary>Mỗi lần trả kèm số máy bình thường và hư hỏng; không trả máy cụ thể nào.</summary>
-    private static List<RenterReturnResponse> ToReturns(RentalItem item) => item.ReturnRecords
-        .OrderBy(r => r.ActualReturnAt)
-        .ThenBy(r => r.Id)
-        .Select(r =>
-        {
-            List<RentalUnitAssignment> units = item.UnitAssignments.Where(u => u.ReturnRecordId == r.Id).ToList();
-            return new RenterReturnResponse(
-                r.ActualReturnAt,
-                r.Note,
-                units.Count(u => u.ReturnCondition == UnitCondition.Normal),
-                units.Count(u => u.ReturnCondition == UnitCondition.Damaged));
-        })
-        .ToList();
-
-    private static RenterSettlementResponse? ToSettlement(RentalItem item)
-    {
-        if (!item.ReturnsCompletedAt.HasValue && item.DeductionProposal is null)
-        {
-            return null;
-        }
-
-        DeductionProposal? proposal = item.DeductionProposal;
-        return new RenterSettlementResponse(
-            item.ReturnsCompletedAt,
-            item.DeductionDeadline,
-            proposal?.Status,
-            proposal?.TotalProposedAmount,
-            proposal?.RenterResponseDeadline,
-            item.FinalDeductionAmount,
-            item.FinalDeductionAmount is { } deduction ? item.DepositAmount - deduction : null,
-            item.FinancialClosureConfirmedAt);
     }
 
     /// <summary>Thông số được lưu dạng chuỗi JSON; trả ra dạng object. Chuỗi hỏng thì bỏ qua thay vì làm lỗi cả đơn.</summary>
