@@ -17,7 +17,7 @@ public sealed partial class MeilisearchIntegrationTests
     [Fact]
     public async Task HttpSearch_PreservesWirePayloadAndBackendHeader_WithStrictCredentialErrors()
     {
-        var listing = NewListing("Máy ảnh HTTP");
+        var listing = NewListing("Máy ảnh HTTP", db: _db);
         _db.EquipmentListings.Add(listing);
         await _db.SaveChangesAsync();
         await _store.UpsertJobAsync("EquipmentListing", listing.Id, "Upsert", 1, false, DateTimeOffset.UtcNow);

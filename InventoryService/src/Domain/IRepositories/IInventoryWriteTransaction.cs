@@ -26,6 +26,16 @@ public interface IInventoryWriteTransaction
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Thực thi thao tác ghi nguyên tử trên mức kho của bên cho thuê (Warehouse).
+    /// Khóa OwnerUserId bằng advisory lock trước khi thực thi.
+    /// </summary>
+    Task<Result<T>> ExecuteWarehouseWriteAsync<T>(
+        Guid ownerUserId,
+        Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation,
+        CancellationToken cancellationToken = default) =>
+        throw new NotImplementedException();
+
+    /// <summary>
     /// Thực thi thao tác giữ chỗ theo nhóm (Group Hold).
     /// Thứ tự khóa thống nhất: (sourceSystem, groupReference) -> ListingId -> Asset IDs theo thứ tự tăng dần.
     /// </summary>

@@ -32,7 +32,7 @@ public sealed partial class MeilisearchIntegrationTests
         await using var services = collection.BuildServiceProvider();
         using var producer = new KafkaProducer(options);
         using var consumer = new KafkaConsumerWorker(services.GetRequiredService<IServiceScopeFactory>(), registry, options, producer);
-        var listing = NewListing("Kafka camera unique");
+        var listing = NewListing("Kafka camera unique", db: _db);
         _db.EquipmentListings.Add(listing);
         var source = SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", 1, false, DateTimeOffset.UtcNow);
         // Isolate broker traffic while keeping the production envelope, publisher, consumer and handler unchanged.

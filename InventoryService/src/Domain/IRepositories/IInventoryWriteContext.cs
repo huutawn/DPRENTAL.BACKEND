@@ -39,6 +39,17 @@ public interface IInventoryWriteContext
     ICalendarBlockRepository CalendarBlocks { get; }
 
     /// <summary>
+    /// Repository quản lý kho của các bên cho thuê.
+    /// </summary>
+    IWarehouseRepository Warehouses => null!;
+
+    /// <summary>
+    /// Khóa độc quyền kho của bên cho thuê bằng PostgreSQL advisory transaction lock.
+    /// </summary>
+    Task AcquireWarehouseLockAsync(Guid ownerUserId, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    /// <summary>
     /// Khóa bổ sung các đơn vị tài sản vật lý theo thứ tự ID tăng dần trong cùng transaction boundary.
     /// </summary>
     Task AcquireAssetLocksAsync(IEnumerable<Guid> assetIds, CancellationToken cancellationToken = default);

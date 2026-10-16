@@ -138,6 +138,43 @@ public sealed class InventoryWriteTransaction : IInventoryWriteTransaction
             },
             cancellationToken);
     }
+    /// <inheritdoc />
+    public async Task<Result<T>> ExecuteWarehouseWriteAsync<T>(
+        Guid ownerUserId,
+        Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation,
+        CancellationToken cancellationToken = default)
+    {
+        if (ownerUserId == Guid.Empty)
+        {
+            return Error.Validation("INVALID_OWNER_ID", "OwnerUserId không được để trống khi thực thi transaction.");
+        }
+
+        ArgumentNullException.ThrowIfNull(operation);
+
+        return await ExecuteWithinBoundaryAsync(
+            $"WarehouseWrite:{ownerUserId}",
+            async (db, services, ct) =>
+            {
+                var context = CreateWriteContext(db, Guid.Empty, null, services);
+                await context.AcquireWarehouseLockAsync(ownerUserId, ct);
+                var result = await operation(context, ct);
+
+                if (result.IsFailure)
+                {
+                    return result;
+                }
+
+                var validationResult = await ValidateWriteScopeAsync(db, null, context.LockedAssetIds, ct);
+                if (validationResult.IsFailure)
+                {
+                    return validationResult.Error;
+                }
+
+                return result;
+            },
+            cancellationToken);
+    }
+
 
     /// <inheritdoc />
     public async Task<Result<T>> ExecuteGroupHoldAsync<T>(
@@ -413,6 +450,7 @@ public sealed class InventoryWriteTransaction : IInventoryWriteTransaction
             services.GetRequiredService<IInventoryAssetRepository>(),
             services.GetRequiredService<IAssetAllocationRepository>(),
             services.GetRequiredService<ICalendarBlockRepository>(),
+            services.GetRequiredService<IWarehouseRepository>(),
             initiallyLockedAssets);
     }
 
@@ -516,6 +554,22 @@ public sealed class InventoryWriteTransaction : IInventoryWriteTransaction
                 if (lockedAssetIds.Count > 0 && !lockedAssetIds.Contains(targetAssetId.Value))
                 {
                     return Error.Conflict("ASSET_LOCK_MISMATCH", "Dữ liệu ghi không thuộc tài sản đang giữ khóa.");
+                }
+            }
+            else if (entry.Entity is Warehouse)
+            {
+                if (entry.State == EntityState.Deleted)
+                {
+                    return Error.Conflict("WAREHOUSE_DELETE_FORBIDDEN", "Không được xóa kho lưu trữ.");
+                }
+
+                if (entry.State == EntityState.Modified)
+                {
+                    if (entry.Properties.Any(p => p.IsModified && p.OriginalValue is Guid orig && p.CurrentValue is Guid curr && orig != curr &&
+                        p.Metadata.Name == nameof(Warehouse.OwnerUserId)))
+                    {
+                        return Error.Conflict("WAREHOUSE_IDENTITY_IMMUTABLE", "Không được đổi OwnerUserId của kho.");
+                    }
                 }
             }
         }

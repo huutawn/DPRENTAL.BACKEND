@@ -9,13 +9,14 @@ public static class InventoryAccessEvaluator
     public const string PermissionAssetManage = "inventory.asset.manage";
     public const string ScopeAllocationWrite = "inventory.allocation.write";
     public const string ScopeAvailabilityRead = "inventory.availability.read";
+    public const string ScopeWarehouseRead = "inventory.warehouse.read";
 
     /// <summary>
-    /// Kiểm tra quyền tạo mới EquipmentListing:
+    /// Kiểm tra quyền quản lý inventory của chính mình (Tạo Listing, Thiết lập/Cập nhật Kho):
     /// - Chỉ Human có permission inventory.asset.manage hoặc Human Admin (r=adm).
     /// - Service principal bị từ chối.
     /// </summary>
-    public static bool CanCreateListing(IInventoryCallerContext caller)
+    public static bool CanManageOwnInventory(IInventoryCallerContext caller)
     {
         ArgumentNullException.ThrowIfNull(caller);
 
@@ -286,5 +287,21 @@ public static class InventoryAccessEvaluator
         }
 
         return caller.Scopes.Contains(ScopeAvailabilityRead);
+    }
+
+    /// <summary>
+    /// Kiểm tra quyền đọc thông tin kho đầy đủ trong batch EquipmentListing:
+    /// - Chỉ Service u=svc có scope s=inventory.warehouse.read.
+    /// </summary>
+    public static bool CanReadWarehouseBatch(IInventoryCallerContext caller)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated || !caller.IsService)
+        {
+            return false;
+        }
+
+        return caller.Scopes.Contains(ScopeWarehouseRead);
     }
 }

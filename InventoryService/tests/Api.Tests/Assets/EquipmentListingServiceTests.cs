@@ -141,6 +141,27 @@ public sealed class EquipmentListingServiceTests
         public void Update(InventoryAsset asset) => Store[asset.Id] = asset;
     }
 
+    private sealed class FakeWarehouseRepository : IWarehouseRepository
+    {
+        public readonly Dictionary<Guid, Warehouse> Store = new();
+
+        public Task<Warehouse?> GetByOwnerUserIdAsync(Guid ownerUserId, CancellationToken cancellationToken = default)
+        {
+            Store.TryGetValue(ownerUserId, out var warehouse);
+            return Task.FromResult(warehouse);
+        }
+
+        public Task<bool> ExistsAsync(Guid ownerUserId, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Store.ContainsKey(ownerUserId));
+        }
+
+        public void Add(Warehouse warehouse)
+        {
+            Store[warehouse.OwnerUserId] = warehouse;
+        }
+    }
+
     private sealed class FakeWriteContext : IInventoryWriteContext
     {
         public Guid? SearchBackfillRunId => null;
@@ -148,14 +169,16 @@ public sealed class EquipmentListingServiceTests
         public Guid? ListingId { get; }
         public IEquipmentListingRepository Listings { get; }
         public IInventoryAssetRepository Assets { get; }
+        public IWarehouseRepository Warehouses { get; }
         public IAssetAllocationRepository Allocations => throw new NotImplementedException();
         public ICalendarBlockRepository CalendarBlocks => throw new NotImplementedException();
 
-        public FakeWriteContext(Guid? listingId, IEquipmentListingRepository listings, IInventoryAssetRepository assets)
+        public FakeWriteContext(Guid? listingId, IEquipmentListingRepository listings, IInventoryAssetRepository assets, IWarehouseRepository warehouses)
         {
             ListingId = listingId;
             Listings = listings;
             Assets = assets;
+            Warehouses = warehouses;
         }
 
         public Task AcquireAssetLocksAsync(IEnumerable<Guid> assetIds, CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -167,7 +190,7 @@ public sealed class EquipmentListingServiceTests
     {
         private readonly FakeListingRepository _listings;
         private readonly FakeAssetRepository _assets;
-
+        public readonly FakeWarehouseRepository Warehouses = new();
         public FakeWriteTransaction(FakeListingRepository listings, FakeAssetRepository assets)
         {
             _listings = listings;
@@ -175,16 +198,16 @@ public sealed class EquipmentListingServiceTests
         }
 
         public Task<Result<T>> ExecuteAsync<T>(Guid assetId, Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation, CancellationToken cancellationToken = default) =>
-            operation(new FakeWriteContext(null, _listings, _assets), cancellationToken);
+            operation(new FakeWriteContext(null, _listings, _assets, Warehouses), cancellationToken);
 
         public Task<Result<T>> ExecuteListingWriteAsync<T>(Guid listingId, Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation, CancellationToken cancellationToken = default) =>
-            operation(new FakeWriteContext(listingId, _listings, _assets), cancellationToken);
+            operation(new FakeWriteContext(listingId, _listings, _assets, Warehouses), cancellationToken);
 
         public Task<Result<T>> ExecuteGroupHoldAsync<T>(string sourceSystem, string groupReference, Guid listingId, Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation, CancellationToken cancellationToken = default) =>
-            operation(new FakeWriteContext(listingId, _listings, _assets), cancellationToken);
+            operation(new FakeWriteContext(listingId, _listings, _assets, Warehouses), cancellationToken);
 
         public Task<Result<T>> ExecuteAllocationCommandAsync<T>(string sourceSystem, string operationKey, string groupReference, Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation, CancellationToken cancellationToken = default) =>
-            operation(new FakeWriteContext(null, _listings, _assets), cancellationToken);
+            operation(new FakeWriteContext(null, _listings, _assets, Warehouses), cancellationToken);
     }
 
     private sealed class FakeCatalogClient : ICatalogServiceClient
@@ -220,18 +243,23 @@ public sealed class EquipmentListingServiceTests
 
     private readonly FakeListingRepository _listingRepo = new();
     private readonly FakeAssetRepository _assetRepo = new();
+    private readonly FakeWriteTransaction _writeTx;
     private readonly FakeCatalogClient _catalogClient = new();
     private readonly FakeMediaService _mediaService = new();
     private readonly TestTimeProvider _clock = new(FixedNow);
 
+    public EquipmentListingServiceTests()
+    {
+        _writeTx = new FakeWriteTransaction(_listingRepo, _assetRepo);
+    }
+
     private EquipmentListingService CreateService()
     {
-        var writeTx = new FakeWriteTransaction(_listingRepo, _assetRepo);
         var mediaOptions = Options.Create(new MediaServiceOptions { PublicGatewayUrl = "https://gateway.example" });
         return new EquipmentListingService(
             _listingRepo,
             _assetRepo,
-            writeTx,
+            _writeTx,
             _catalogClient,
             _mediaService,
             mediaOptions,
@@ -340,6 +368,8 @@ public sealed class EquipmentListingServiceTests
         var ownerId = Guid.NewGuid();
         var caller = CreateHumanCaller(ownerId);
 
+        _writeTx.Warehouses.Add(Warehouse.CreateWithAddress(ownerId, "123 Le Loi", "01", "Hà Nội", "00004", "Ba Đình", 21.0, 105.8, FixedNow).Value);
+
         var listingId = Guid.NewGuid();
         var listing = EquipmentListing.Create(
             listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
@@ -355,6 +385,30 @@ public sealed class EquipmentListingServiceTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("LISTING_NEEDS_ACTIVE_UNIT", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task PatchListingAsync_ToActiveWithoutWarehouseAddress_FailsWithWarehouseAddressRequired()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId);
+
+        var listingId = Guid.NewGuid();
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        _listingRepo.Add(listing);
+
+        var patch = new PatchEquipmentListingRequest
+        {
+            IsStatusSpecified = true,
+            Status = EquipmentListingStatus.Active
+        };
+
+        var result = await service.PatchListingAsync(listingId, patch, caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("WAREHOUSE_ADDRESS_REQUIRED", result.Error.Code);
     }
 
     [Fact]

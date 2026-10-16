@@ -29,6 +29,7 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
     private readonly TimeProvider _timeProvider;
     private readonly IInventorySearchIndexService? _searchIndexService;
     private readonly ILogger<PublicEquipmentListingService>? _logger;
+    private readonly Locations.IVietnamDivisionsCatalog _divisionsCatalog;
     public PublicEquipmentListingService(
         IEquipmentListingRepository listingRepository,
         AssetSearchQueryValidator queryValidator,
@@ -37,7 +38,8 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
         TimeProvider? timeProvider = null,
         IInventorySearchIndexService? searchIndexService = null,
         ILogger<PublicEquipmentListingService>? logger = null,
-        ICatalogServiceClient? catalogClient = null)
+        ICatalogServiceClient? catalogClient = null,
+        Locations.IVietnamDivisionsCatalog? divisionsCatalog = null)
     {
         _listingRepository = listingRepository ?? throw new ArgumentNullException(nameof(listingRepository));
         _queryValidator = queryValidator ?? throw new ArgumentNullException(nameof(queryValidator));
@@ -48,6 +50,7 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
         _timeProvider = timeProvider ?? TimeProvider.System;
         _searchIndexService = searchIndexService;
         _logger = logger;
+        _divisionsCatalog = divisionsCatalog ?? new Locations.VietnamDivisionsCatalog();
     }
 
     /// <inheritdoc />
@@ -115,6 +118,26 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
         if (valResult.IsFailure)
         {
             return valResult.Error;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.WardCode))
+        {
+            if (string.IsNullOrWhiteSpace(request.ProvinceCode))
+            {
+                return Error.Validation("INVALID_LOCATION", "Lọc theo phường/xã yêu cầu phải cung cấp mã tỉnh/thành phố tương ứng.");
+            }
+
+            if (!_divisionsCatalog.IsValidPair(request.ProvinceCode, request.WardCode, out _, out _))
+            {
+                return Error.Validation("INVALID_LOCATION", "Cặp tỉnh/thành phố và phường/xã không hợp lệ.");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(request.ProvinceCode))
+        {
+            if (!_divisionsCatalog.IsValidProvince(request.ProvinceCode, out _))
+            {
+                return Error.Validation("INVALID_LOCATION", "Mã tỉnh/thành phố không hợp lệ.");
+            }
         }
 
         var validated = valResult.Value;
@@ -233,7 +256,9 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
                     EquipmentTypeId: effectiveEquipmentTypeId,
                     BrandId: validated.BrandId,
                     CandidateIds: candidateIds,
-                    EquipmentTypeIds: effectiveEquipmentTypeIds),
+                    EquipmentTypeIds: effectiveEquipmentTypeIds,
+                    ProvinceCode: request.ProvinceCode,
+                    WardCode: request.WardCode),
                 ct),
             isFieldForbidden: PublicAssetDataPolicy.IsReservedPropertyName,
             cancellationToken);
@@ -265,7 +290,9 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
             CompatibleSchemaVersions: resolvedFilters.CompatibleSchemaVersions,
             DynamicFilters: resolvedFilters.Criteria,
             CandidateIds: candidateIds,
-            EquipmentTypeIds: effectiveEquipmentTypeIds);
+            EquipmentTypeIds: effectiveEquipmentTypeIds,
+            ProvinceCode: request.ProvinceCode,
+            WardCode: request.WardCode);
         var searchCriteria = new EquipmentListingSearchCriteria(
             filters: searchFilters,
             availabilityFrom: availabilityFrom,

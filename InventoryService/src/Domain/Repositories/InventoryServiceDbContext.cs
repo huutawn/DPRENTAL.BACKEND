@@ -26,6 +26,11 @@ public sealed class InventoryServiceDbContext : DbContext
     /// Bảng quản lý danh mục niêm yết thiết bị.
     /// </summary>
     public DbSet<EquipmentListing> EquipmentListings => Set<EquipmentListing>();
+    /// <summary>
+    /// Bảng quản lý kho lưu trữ của các bên cho thuê thiết bị.
+    /// </summary>
+    public DbSet<Warehouse> Warehouses => Set<Warehouse>();
+
 
     /// <summary>
     /// Bảng quản lý các lượt phân bổ lịch tài sản.
@@ -75,6 +80,7 @@ public sealed class InventoryServiceDbContext : DbContext
     public InventoryServiceDbContext(DbContextOptions<InventoryServiceDbContext> options) : base(options)
     {
     }
+
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -174,9 +180,72 @@ public sealed class InventoryServiceDbContext : DbContext
                 .WithOne(a => a.Listing)
                 .HasForeignKey(a => a.EquipmentListingId)
                 .OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(l => l.Warehouse)
+                .WithMany(w => w.Listings)
+                .HasForeignKey(l => l.OwnerUserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // 2. Cấu hình thực thể InventoryAsset
+        // Cấu hình thực thể Warehouse
+        modelBuilder.Entity<Warehouse>(b =>
+        {
+            b.ToTable("warehouses", SchemaName, t =>
+            {
+                t.HasCheckConstraint("ck_warehouses_identity", "owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+                t.HasCheckConstraint("ck_warehouses_latitude", "latitude IS NULL OR (latitude >= -90.0 AND latitude <= 90.0)");
+                t.HasCheckConstraint("ck_warehouses_longitude", "longitude IS NULL OR (longitude >= -180.0 AND longitude <= 180.0)");
+                t.HasCheckConstraint("ck_warehouses_address_detail", "address_detail IS NULL OR (address_detail ~ '\\S' AND length(address_detail) <= 500)");
+                t.HasCheckConstraint("ck_warehouses_province_code", "province_code IS NULL OR (province_code ~ '\\S' AND length(province_code) <= 20)");
+                t.HasCheckConstraint("ck_warehouses_province_name", "province_name IS NULL OR (province_name ~ '\\S' AND length(province_name) <= 200)");
+                t.HasCheckConstraint("ck_warehouses_ward_code", "ward_code IS NULL OR (ward_code ~ '\\S' AND length(ward_code) <= 20)");
+                t.HasCheckConstraint("ck_warehouses_ward_name", "ward_name IS NULL OR (ward_name ~ '\\S' AND length(ward_name) <= 200)");
+            });
+
+            b.HasKey(w => w.OwnerUserId);
+
+            b.HasIndex(w => new { w.ProvinceCode, w.WardCode })
+                .HasDatabaseName("ix_warehouses_province_ward");
+
+            b.Property(w => w.OwnerUserId)
+                .HasColumnName("owner_user_id")
+                .IsRequired();
+
+            b.Property(w => w.AddressDetail)
+                .HasColumnName("address_detail")
+                .HasMaxLength(500);
+
+            b.Property(w => w.ProvinceCode)
+                .HasColumnName("province_code")
+                .HasMaxLength(20);
+
+            b.Property(w => w.ProvinceName)
+                .HasColumnName("province_name")
+                .HasMaxLength(200);
+
+            b.Property(w => w.WardCode)
+                .HasColumnName("ward_code")
+                .HasMaxLength(20);
+
+            b.Property(w => w.WardName)
+                .HasColumnName("ward_name")
+                .HasMaxLength(200);
+
+            b.Property(w => w.Latitude)
+                .HasColumnName("latitude");
+
+            b.Property(w => w.Longitude)
+                .HasColumnName("longitude");
+
+            b.Property(w => w.CreatedAt)
+                .HasColumnName("created_at")
+                .IsRequired();
+
+            b.Property(w => w.UpdatedAt)
+                .HasColumnName("updated_at")
+                .IsRequired();
+        });
+
         modelBuilder.Entity<InventoryAsset>(b =>
         {
             b.ToTable("assets", SchemaName, t =>

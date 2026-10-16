@@ -88,6 +88,21 @@ public sealed class PublicEquipmentListingsControllerTests
     }
 
     [Fact]
+    public async Task List_ProvinceAndWardQueryParameters_AllowedInWhitelist()
+    {
+        var query = new QueryCollection(new Dictionary<string, StringValues>
+        {
+            ["provinceCode"] = "01",
+            ["wardCode"] = "00070"
+        });
+        _controller.HttpContext.Request.Query = query;
+
+        var result = await _controller.List(new ListPublicEquipmentListingsRequest(ProvinceCode: "01", WardCode: "00070"));
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(StatusCodes.Status200OK, okResult.StatusCode);
+    }
+
+    [Fact]
     public async Task List_FromWithoutTo_Returns400()
     {
         var query = new QueryCollection(new Dictionary<string, StringValues>

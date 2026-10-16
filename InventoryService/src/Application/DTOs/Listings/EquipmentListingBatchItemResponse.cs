@@ -14,5 +14,6 @@ public sealed record EquipmentListingBatchItemResponse(
     [property: JsonPropertyName("dailyRate")] decimal DailyRate,
     [property: JsonPropertyName("currency")] string Currency,
     [property: JsonPropertyName("status")] string Status,
-    [property: JsonPropertyName("depositAmount")] decimal DepositAmount
+    [property: JsonPropertyName("depositAmount")] decimal DepositAmount,
+    [property: JsonPropertyName("warehouse")] EquipmentListingBatchWarehouseDto? Warehouse = null
 );

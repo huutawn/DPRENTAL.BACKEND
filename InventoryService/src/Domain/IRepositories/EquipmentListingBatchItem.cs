@@ -13,5 +13,16 @@ public sealed record EquipmentListingBatchItem(
     decimal DailyRate,
     string Currency,
     EquipmentListingStatus Status,
-    decimal DepositAmount
+    decimal DepositAmount,
+    EquipmentListingBatchWarehouse? Warehouse = null
+);
+
+public sealed record EquipmentListingBatchWarehouse(
+    string? AddressDetail,
+    string? ProvinceCode,
+    string? ProvinceName,
+    string? WardCode,
+    string? WardName,
+    double? Latitude,
+    double? Longitude
 );

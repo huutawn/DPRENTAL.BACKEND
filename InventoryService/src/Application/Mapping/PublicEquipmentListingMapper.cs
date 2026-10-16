@@ -31,6 +31,15 @@ public static class PublicEquipmentListingMapper
 
         var media = MediaContentUrlBuilder.BuildList(publicGatewayUrl, listing.MediaIds);
         string? thumbnailUrl = MediaContentUrlBuilder.Build(publicGatewayUrl, listing.ThumbnailMediaId);
+        WarehouseAreaDto? warehouseArea = null;
+        if (listing.Warehouse is not null)
+        {
+            warehouseArea = new WarehouseAreaDto(
+                listing.Warehouse.ProvinceCode,
+                listing.Warehouse.ProvinceName,
+                listing.Warehouse.WardCode,
+                listing.Warehouse.WardName);
+        }
 
         return new PublicEquipmentListingResponse(
             listing.Id,
@@ -47,6 +56,7 @@ public static class PublicEquipmentListingMapper
             media,
             thumbnailUrl,
             totalQuantity,
-            availableQuantity);
-    }
+            availableQuantity,
+            warehouseArea);
+}
 }

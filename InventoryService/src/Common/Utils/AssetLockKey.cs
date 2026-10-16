@@ -28,6 +28,16 @@ public static class AssetLockKey
         byte[] hash = SHA256.HashData(input);
         return BinaryPrimitives.ReadInt64LittleEndian(hash);
     }
+    /// <summary>
+    /// Chuyển đổi định danh Guid của OwnerUserId thành số nguyên 64-bit trong namespace "warehouse:".
+    /// </summary>
+    public static long FromWarehouseOwnerUserId(Guid ownerUserId)
+    {
+        byte[] input = [.. "warehouse:"u8, .. ownerUserId.ToByteArray()];
+        byte[] hash = SHA256.HashData(input);
+        return BinaryPrimitives.ReadInt64LittleEndian(hash);
+    }
+
 
     /// <summary>
     /// Chuyển đổi bộ khóa (sourceSystem, groupReference) của request group thành số nguyên 64-bit trong namespace "group:".

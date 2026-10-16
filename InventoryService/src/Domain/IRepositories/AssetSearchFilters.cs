@@ -36,4 +36,6 @@ public sealed record AssetSearchFilters(
     IReadOnlyList<int>? CompatibleSchemaVersions = null,
     IReadOnlyList<AssetDynamicFilterCriterion>? DynamicFilters = null,
     IReadOnlyList<Guid>? CandidateIds = null,
-    IReadOnlyList<Guid>? EquipmentTypeIds = null);
+    IReadOnlyList<Guid>? EquipmentTypeIds = null,
+    string? ProvinceCode = null,
+    string? WardCode = null);
