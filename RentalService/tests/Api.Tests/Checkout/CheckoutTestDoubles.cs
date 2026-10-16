@@ -194,7 +194,7 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
         throw new NotSupportedException();
 
     public Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(
-        Guid renterId, int skip, int take, CancellationToken cancellationToken = default) =>
+        Guid renterId, RentalOrderStatus? status, int skip, int take, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
     public Task<RentalOrder?> GetRenterOrderWithSubOrdersAsync(
@@ -202,7 +202,14 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
         throw new NotSupportedException();
 
     public Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(
-        Guid supplierId, int skip, int take, CancellationToken cancellationToken = default) =>
+        Guid supplierId, RentalItemStatus? itemStatus, int skip, int take, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<RecordPage<AdminOrderSummaryRecord>> SearchOrdersForAdminAsync(
+        AdminOrderSearchCriteria criteria, int skip, int take, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
+    public Task<RentalOrder?> GetOrderForAdminAsync(Guid orderId, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
     public Task<RentalSubOrder?> GetPaidSubOrderForSupplierAsync(

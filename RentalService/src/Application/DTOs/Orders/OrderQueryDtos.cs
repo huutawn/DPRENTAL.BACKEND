@@ -93,7 +93,7 @@ public sealed record RenterSubOrderResponse(
     decimal TotalRentalAmount,
     decimal TotalDepositAmount,
     decimal TotalAmount,
-    IReadOnlyList<OrderItemResponse> Items);
+    IReadOnlyList<RenterOrderItemResponse> Items);
 
 /// <summary>
 /// Chi tiết đơn cha mà người thuê xem: toàn bộ đơn con và thiết bị.
@@ -106,7 +106,9 @@ public sealed record RenterSubOrderResponse(
 /// <param name="PaymentDeadline">Hạn thanh toán.</param>
 /// <param name="InvoiceRef">Mã hóa đơn bên PaymentService, rỗng khi chưa tạo được hóa đơn.</param>
 /// <param name="PaidAt">Thời điểm thanh toán, rỗng khi chưa thanh toán.</param>
+/// <param name="PaymentState">Tình trạng thanh toán của đơn.</param>
 /// <param name="Delivery">Thông tin nhận máy.</param>
+/// <param name="RefundAccount">Tài khoản nhận hoàn tiền người thuê khai lúc đặt hàng; rỗng với đơn cũ chưa lưu tài khoản.</param>
 /// <param name="TotalRentalAmount">Tổng tiền thuê.</param>
 /// <param name="TotalDepositAmount">Tổng tiền cọc.</param>
 /// <param name="TotalAmount">Tổng tiền phải trả.</param>
@@ -120,7 +122,9 @@ public sealed record RenterOrderDetailResponse(
     DateTimeOffset PaymentDeadline,
     string? InvoiceRef,
     DateTimeOffset? PaidAt,
+    OrderPaymentState PaymentState,
     OrderDeliveryResponse Delivery,
+    RenterRefundAccountResponse? RefundAccount,
     decimal TotalRentalAmount,
     decimal TotalDepositAmount,
     decimal TotalAmount,
@@ -180,4 +184,4 @@ public sealed record SupplierSubOrderDetailResponse(
     decimal TotalRentalAmount,
     decimal TotalDepositAmount,
     decimal TotalAmount,
-    IReadOnlyList<OrderItemResponse> Items);
+    IReadOnlyList<SupplierOrderItemResponse> Items);

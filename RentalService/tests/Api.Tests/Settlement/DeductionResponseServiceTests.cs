@@ -38,7 +38,8 @@ public sealed class DeductionResponseServiceTests
         Assert.Single(order.OperationReceipts, r => r.Action == "RenterRespondDeduction");
         var foreign = await service.RespondAsync(item.Id, Caller(Guid.NewGuid()), request, "foreign-key");
         Assert.True(foreign.IsFailure);
-        Assert.Equal(Dprental.RentalService.Common.ErrorType.Forbidden, foreign.Error.Type);
+        // DPR-199: đơn của renter khác trả như không tồn tại để không lộ dữ liệu.
+        Assert.Equal(Dprental.RentalService.Common.ErrorType.NotFound, foreign.Error.Type);
     }
 
     [Fact]

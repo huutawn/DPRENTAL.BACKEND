@@ -1,8 +1,10 @@
 using System.Text.Json;
 using Dprental.RentalService.Application.DTOs.Supplier;
+using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Domain.Errors;
 
 namespace Dprental.RentalService.Application.Services.Operations;
 
@@ -12,9 +14,6 @@ namespace Dprental.RentalService.Application.Services.Operations;
 /// </summary>
 public sealed partial class RentalOperationExecutor
 {
-    private static readonly Error SubOrderNotFound =
-        Error.NotFound("SUB_ORDER_NOT_FOUND", "Không tìm thấy đơn con.");
-
     public async Task<Result<IReadOnlyList<SupplierDecisionResponse>>> ExecuteSubOrderAcceptAsync(
         Guid orderId,
         Guid subOrderId,
@@ -32,7 +31,7 @@ public sealed partial class RentalOperationExecutor
             List<RentalItem> items = order is null ? [] : SubOrderItems(order, subOrderId, supplierId);
             if (order is null || items.Count == 0)
             {
-                return SubOrderNotFound;
+                return RentalErrors.SubOrderNotFound;
             }
 
             DateTimeOffset utcNow = _timeProvider.GetUtcNow();
@@ -112,7 +111,7 @@ public sealed partial class RentalOperationExecutor
         List<RentalItem> items = order is null ? [] : SubOrderItems(order, subOrderId, supplierId);
         if (order is null || items.Count == 0)
         {
-            return SubOrderNotFound;
+            return RentalErrors.SubOrderNotFound;
         }
 
         var decisions = items
@@ -159,7 +158,9 @@ public sealed partial class RentalOperationExecutor
             .ToList();
 
         // Đơn con của supplier khác trả như không tồn tại để không lộ dữ liệu.
-        return items.Count > 0 && items.All(i => i.SupplierId == supplierId) ? items : [];
+        return items.Count > 0 && items.All(i => RentalAuthorizationPolicy.AuthorizeSupplierItem(supplierId, i).IsSuccess)
+            ? items
+            : [];
     }
 
     private static string SubOrderItemKey(string action, Guid subOrderId, string idempotencyKey, Guid itemId) =>

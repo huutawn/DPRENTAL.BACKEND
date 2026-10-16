@@ -73,8 +73,9 @@ public static class RentalErrors
     public static readonly Error InvalidItemStatus =
         Error.Conflict("RentalItem.InvalidStatus", "Trạng thái khoản thuê không hợp lệ cho thao tác này.");
 
-    public static readonly Error SupplierMismatch =
-        Error.Forbidden("RentalItem.SupplierMismatch", "Supplier không sở hữu khoản thuê này.");
+    // Đơn con của supplier khác trả như không tồn tại để không lộ dữ liệu (IDOR).
+    public static readonly Error SubOrderNotFound =
+        Error.NotFound("SUB_ORDER_NOT_FOUND", "Không tìm thấy đơn con.");
 
     public static readonly Error SupplierDeadlineExpired =
         Error.Expired("RentalItem.SupplierDeadlineExpired", "Đã hết thời hạn xác nhận của supplier.");
@@ -248,7 +249,8 @@ public static class RentalErrors
     public static readonly Error SnapshotContainsInternalData =
         Error.Validation("Snapshot.ContainsInternalData", "Snapshot thương mại không được chứa mã tài sản nội bộ hoặc số serial.");
 
-    public static readonly Error UnauthorizedSupplier = Error.Forbidden("Return.Unauthorized", "Sai nhà cung cấp.");
+    // Khoản thuê của supplier khác trả như không tồn tại để không lộ dữ liệu (IDOR).
+    public static readonly Error UnauthorizedSupplier = ItemNotFound;
     public static readonly Error InvalidItemStatusForReturn = Error.Validation("Return.InvalidStatus", "Chỉ được trả thiết bị khi đơn đang trong trạng thái IN_RENTAL.");
     public static readonly Error FutureReturnTimeNotAllowed = Error.Validation("Return.FutureTime", "Thời gian trả không được nằm trong tương lai.");
     public static readonly Error InvalidMediaEvidence = Error.Validation("Return.InvalidMedia", "Bằng chứng hình ảnh không hợp lệ.");

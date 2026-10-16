@@ -519,6 +519,8 @@ namespace RentalService.Domain.Migrations
 
                     b.HasIndex("DeductionDeadline");
 
+                    b.HasIndex("EquipmentListingId");
+
                     b.HasIndex("RentalOrderId");
 
                     b.HasIndex("RentalSubOrderId");
@@ -1014,6 +1016,8 @@ namespace RentalService.Domain.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AssetId");
 
                     b.HasIndex("DeductionProposalId");
 

@@ -33,26 +33,33 @@ public sealed class SupplierSubOrdersController(
     /// <remarks>
     /// - Chỉ gồm đơn con của người gọi thuộc đơn đã thanh toán đúng hạn, sắp xếp mới nhất trước.
     /// - Tiền và số dòng chỉ tính phần thiết bị của người gọi; trạng thái đơn con tính từ các dòng.
+    /// - Lọc theo hàng đợi công việc bằng <c>status</c> của dòng, ví dụ <c>PENDING_SUPPLIER_CONFIRMATION</c>,
+    ///   <c>AWAITING_HANDOVER</c>, <c>IN_RENTAL</c>, <c>PENDING_SETTLEMENT</c>, <c>COMPLETED</c>: lấy đơn con có ít nhất
+    ///   một dòng ở trạng thái đó. Bỏ trống là mọi trạng thái.
     /// - page nhỏ hơn 1 được đổi thành 1; pageSize được giới hạn trong 1–100. Không có đơn con vẫn trả 200 với items rỗng.
     /// </remarks>
     /// <param name="page">Số thứ tự trang (mặc định 1).</param>
     /// <param name="pageSize">Số đơn con mỗi trang (mặc định 20, tối đa 100).</param>
+    /// <param name="status">Trạng thái dòng cần lọc, tùy chọn.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <response code="200">Lấy danh sách đơn con thành công.</response>
+    /// <response code="400">Trạng thái lọc không hợp lệ (Order.InvalidStatus).</response>
     /// <response code="401">Người dùng chưa được xác thực.</response>
     /// <response code="403">Người gọi không phải tài khoản cá nhân (ví dụ service token).</response>
     /// <returns>Một trang đơn con của nhà cung cấp.</returns>
     [HttpGet]
     [ProducesResponseType(typeof(PagedResponse<SupplierSubOrderSummaryResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetMySubOrders(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
+        [FromQuery] string? status = null,
         CancellationToken cancellationToken = default)
     {
         Result<PagedResponse<SupplierSubOrderSummaryResponse>> result =
-            await subOrders.GetMySubOrdersAsync(page, pageSize, callerContext, cancellationToken);
+            await subOrders.GetMySubOrdersAsync(page, pageSize, status, callerContext, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : this.ToProblem(result.Error);
     }
 
@@ -61,6 +68,9 @@ public sealed class SupplierSubOrdersController(
     /// </summary>
     /// <remarks>
     /// - Chỉ gồm thiết bị của người gọi, kèm mã đơn cha và thông tin nhận máy của người thuê để giao máy.
+    /// - Mỗi dòng có rentalItemId, trạng thái, giá đã chụp, hạn xác nhận, biên bản bàn giao, các lần trả máy,
+    ///   quyết toán tiền cọc và các máy đã gán (<c>units</c>: assignmentId dùng khi ghi nhận trả máy, assetId dùng khi
+    ///   đề xuất khấu trừ).
     /// - Không có thiết bị của nhà cung cấp khác, tổng tiền cả đơn hay tài khoản nhận hoàn tiền của người thuê.
     /// - Ngày thuê trả ra gồm ngày đầu và ngày dùng cuối (có tính).
     /// - Đơn con không tồn tại, của nhà cung cấp khác hoặc thuộc đơn chưa thanh toán đều trả 404 <c>SubOrder.NotFound</c>.

@@ -9,9 +9,11 @@ namespace Dprental.RentalService.Application.IServices.Orders;
 /// </summary>
 public interface IRenterOrderQueryService
 {
+    /// <summary>Một trang đơn của người gọi; <paramref name="status"/> rỗng là mọi trạng thái.</summary>
     Task<Result<PagedResponse<RenterOrderSummaryResponse>>> GetMyOrdersAsync(
         int page,
         int pageSize,
+        string? status,
         IRentalCallerContext caller,
         CancellationToken cancellationToken = default);
 

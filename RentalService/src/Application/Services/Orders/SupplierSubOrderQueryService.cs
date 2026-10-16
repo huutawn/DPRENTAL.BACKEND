@@ -4,6 +4,7 @@ using Dprental.RentalService.Application.IServices.Orders;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
+using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 
@@ -17,6 +18,7 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
     public async Task<Result<PagedResponse<SupplierSubOrderSummaryResponse>>> GetMySubOrdersAsync(
         int page,
         int pageSize,
+        string? status,
         IRentalCallerContext caller,
         CancellationToken cancellationToken = default)
     {
@@ -26,9 +28,16 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
             return supplier.Error;
         }
 
+        Result<RentalItemStatus?> statusFilter = OrderQueryMapper.ParseStatusFilter<RentalItemStatus>(status);
+        if (statusFilter.IsFailure)
+        {
+            return statusFilter.Error;
+        }
+
         (int normalizedPage, int normalizedPageSize) = OrderQueryMapper.NormalizePaging(page, pageSize);
         RecordPage<SupplierSubOrderSummaryRecord> records = await orders.GetPaidSubOrderPageForSupplierAsync(
             supplier.Value,
+            statusFilter.Value,
             (normalizedPage - 1) * normalizedPageSize,
             normalizedPageSize,
             cancellationToken);
@@ -68,7 +77,11 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
             return OrderQueryErrors.SubOrderNotFound;
         }
 
-        List<OrderItemResponse> items = OrderQueryMapper.ToItems(subOrder.Items);
+        List<SupplierOrderItemResponse> items = subOrder.Items
+            .OrderBy(i => i.ExpectedStartDate)
+            .ThenBy(i => i.Id)
+            .Select(ToItem)
+            .ToList();
         decimal rental = subOrder.Items.Sum(i => i.RentalAmount);
         decimal deposit = subOrder.Items.Sum(i => i.DepositAmount);
 
@@ -85,5 +98,33 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
             deposit,
             rental + deposit,
             items);
+    }
+
+    private static SupplierOrderItemResponse ToItem(RentalItem item)
+    {
+        OrderItemResponse basics = OrderQueryMapper.ToItem(item);
+
+        return new SupplierOrderItemResponse(
+            basics.Name,
+            basics.Quantity,
+            basics.StartDate,
+            basics.EndDate,
+            item.Id,
+            item.EquipmentListingId,
+            item.Status,
+            item.RentalDays,
+            item.DailyRateSnapshot,
+            item.DepositPerUnitSnapshot,
+            item.RentalAmount,
+            item.DepositAmount,
+            item.SupplierConfirmationDeadline,
+            item.SupplierDecisionAt,
+            OrderQueryMapper.ToHandover(item),
+            OrderQueryMapper.ToReturns(item),
+            OrderQueryMapper.ToSettlement(item),
+            item.UnitAssignments
+                .OrderBy(u => u.Id)
+                .Select(u => new SupplierUnitResponse(u.Id, u.AssetId, u.Status, u.ReturnCondition))
+                .ToList());
     }
 }

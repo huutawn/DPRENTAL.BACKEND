@@ -98,6 +98,22 @@ Dịch vụ triển khai mô hình nghiệp vụ canonical theo AGENTS.md và th
 - `page` nhỏ hơn 1 được đổi thành 1; `pageSize` được giới hạn trong 1–100. Service token nhận `403`.
 - Supplier nhận hoặc từ chối cả đơn con qua `POST /api/v1/rental/supplier/sub-orders/{subOrderId}/accept|reject` (xem mục Supplier Decision API).
 
+## Phân quyền và chống IDOR (DPR-199)
+
+Mọi quyết định "ai được làm gì" nằm trong `RentalAuthorizationPolicy` (Application/Security); controller và service không tự so sánh `RenterId`/`SupplierId`.
+
+| Vai trò | Phạm vi | Hàm policy |
+| --- | --- | --- |
+| Renter | Chỉ đơn của mình | `AuthorizeOrderRead`, `AuthorizeRenterAction` |
+| Supplier | Chỉ đơn con và dòng của mình | `AuthorizeSupplierSubOrder`, `AuthorizeSupplierItem` (sau `AuthorizeSupplierCaller`) |
+| Admin | Mọi đơn qua API admin | `AuthorizeAdminOrderRead`, `AuthorizeAdminStatisticsRead`, `AuthorizeDisputeResolution` |
+| Participant | Xem tác vụ của một đơn: renter, supplier có dòng trong đơn hoặc Admin | `AuthorizeOperationRead` |
+
+- **Quy tắc IDOR:** tài nguyên của người khác trả đúng phản hồi như tài nguyên không tồn tại (`404`, cùng `title` và `detail`), nên không dò được mã nào có thật. Đơn → `Order.NotFound`; dòng → `RentalItem.NotFound`; đơn con → `SUB_ORDER_NOT_FOUND`; bằng chứng → `Media.EvidenceNotFound`.
+- **403 chỉ dành cho sai vai trò**, không phụ thuộc mã tài nguyên: người không phải Admin gọi API admin, hoặc service token gọi API của người dùng (`Auth.ServiceTokenNotAllowed`).
+- **Thay đổi so với trước:** bàn giao, trả máy và đề xuất khấu trừ trên dòng của supplier khác không còn trả `403 Return.Unauthorized` / `403 SUPPLIER_MISMATCH` mà trả `404 RentalItem.NotFound`; mã `ITEM_NOT_FOUND` của API bàn giao đổi thành `RentalItem.NotFound`; tác vụ của đơn người khác trả `404 Order.NotFound` thay cho `403 FORBIDDEN` / `404 ORDER_NOT_FOUND`.
+- Admin xem đơn qua `GET /api/v1/rental/admin/orders` và `GET /api/v1/rental/admin/orders/{orderId}`; số tài khoản hoàn tiền chỉ hiện 4 số cuối và mỗi lần xem chi tiết được ghi log kèm mã Admin.
+
 ## API Lịch thuê cá nhân (Renter Calendar)
 
 - Endpoint: `GET /api/v1/rental/me/calendar?month=YYYY-MM&page=1&pageSize=50`
@@ -143,7 +159,7 @@ Dịch vụ triển khai mô hình nghiệp vụ canonical theo AGENTS.md và th
 - Cấu hình: `Rental:Terms:CurrentVersion`, `Rental:Terms:DocumentRef`, `Rental:Terms:ContentHash` (bắt buộc; thiếu thì checkout trả 500).
 - Checkout đọc Listing và lịch trống qua hợp đồng Inventory dùng chung (`IInventoryRentalClient`): **một** lần lấy thông tin mọi Listing của các dòng đã chọn (`{ ids }` → `{ items: [{ id, ownerUserId, name, thumbnailMediaId, dailyRate, currency, status }], missingIds }`, dạng response theo Inventory ngày 15/10/2026), rồi hỏi lịch **từng dòng** bằng API có sẵn của Inventory `POST /equipment-listings/{listingId}/availability/check` (`{ startDate, endDate, requestedQuantity }`, `endDate` là ngày dùng máy cuối có tính), các dòng gọi song song. Giỏ hàng dùng cùng API hỏi lịch. Inventory trả Listing lạ, trùng, bỏ sót Listing, hoặc trả lịch của Listing/khoảng ngày khác thì checkout trả `503 Checkout.DependencyUnavailable`; Listing biến mất giữa hai lần gọi (404) thì báo dòng `ListingUnavailable`.
 - Inventory trả thiếu `ownerUserId`, `name`, `status` hoặc `currency` thì checkout trả `503 Checkout.DependencyUnavailable`, không báo khách là thiết bị ngừng cho thuê. Listing không `Active`, giá thuê ≤ 0 hoặc không phải VND thì báo dòng `ListingUnavailable`.
-- Đơn chỉ lưu tên máy, giá và ảnh lấy từ Inventory. Nơi nhận, loại, hãng, model và thông số trên `rental_items` được để trống cho đơn mới (migration `MakeRentalItemListingDetailsOptional`); đơn cũ giữ nguyên. Chi tiết đơn chỉ trả `name`, `quantity`, `startDate`, `endDate` cho mỗi dòng máy.
+- Đơn chỉ lưu tên máy, giá và ảnh lấy từ Inventory. Nơi nhận, loại, hãng, model và thông số trên `rental_items` được để trống cho đơn mới (migration `MakeRentalItemListingDetailsOptional`); đơn cũ giữ nguyên. Với đơn tạo qua checkout, snapshot loại/hãng/model/thông số/nơi nhận trong chi tiết đơn của người thuê là `null` cho tới khi Inventory trả thêm các trường đó.
 - Giới hạn hiện tại:
   - Inventory chưa có tiền cọc: Rental tạm tính cọc = 0 (`CheckoutRules.DepositPerUnit`), cả ở giỏ hàng và checkout. Phiên bản giá trong giỏ tạm lấy chính giá thuê/ngày.
   - Lấy nhiều Listing dùng `POST /equipment-listings/batch` của Inventory (`{ equipmentListingIds }`, tối đa 100 mã mỗi lần).

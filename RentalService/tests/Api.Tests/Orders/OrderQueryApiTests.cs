@@ -28,7 +28,6 @@ namespace Dprental.RentalService.Api.Tests.Orders;
 /// <summary>Gọi các API xem đơn qua HTTP với toàn bộ DI thật, chỉ thay database và cách xác thực.</summary>
 public sealed class OrderQueryApiTests
 {
-    private const string SubjectHeader = "X-Test-Sub";
 
     [Fact]
     public async Task GetOrders_WithoutToken_Returns401()
@@ -59,12 +58,119 @@ public sealed class OrderQueryApiTests
         Assert.Equal(2, body.GetProperty("subOrders").GetArrayLength());
         JsonElement firstItem = body.GetProperty("subOrders")[0].GetProperty("items")[0];
         Assert.Equal("2026-10-14", firstItem.GetProperty("endDate").GetString());
-        // Dòng máy chỉ có tên, số lượng và ngày; trạng thái nằm ở đơn con.
-        Assert.Equal(["name", "quantity", "startDate", "endDate"], firstItem.EnumerateObject().Select(p => p.Name));
+        Assert.Equal("PENDING_SUPPLIER_CONFIRMATION", firstItem.GetProperty("status").GetString());
+        Assert.Equal(3_000_000m, firstItem.GetProperty("dailyRate").GetDecimal());
+        Assert.Equal("NONE", firstItem.GetProperty("refund").GetProperty("state").GetString());
+        Assert.Equal(55, firstItem.GetProperty("listing").GetProperty("specValues").GetProperty("cong_suat_kw").GetInt32());
         Assert.Equal("PENDING_SUPPLIER_CONFIRMATION", body.GetProperty("subOrders")[0].GetProperty("status").GetString());
+        Assert.Equal("PAID", body.GetProperty("paymentState").GetString());
+        Assert.Equal("0123456789", body.GetProperty("refundAccount").GetProperty("accountNumber").GetString());
+        Assert.DoesNotContain("assetId", body.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("allocation", body.GetRawText(), StringComparison.OrdinalIgnoreCase);
 
         Assert.Equal(HttpStatusCode.NotFound, other.StatusCode);
         Assert.Equal("Order.NotFound", (await ReadAsync(other)).GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task Renter_FiltersOrdersByStatus_AndUnknownStatusIs400()
+    {
+        using OrderApiFactory factory = new();
+        RentalOrder order = factory.SeedPaidMixedOrder();
+        using HttpClient renter = factory.CreateClientFor(factory.RenterId);
+
+        using HttpResponseMessage paid = await renter.GetAsync("/api/v1/rental/orders?status=PAID");
+        using HttpResponseMessage pending = await renter.GetAsync("/api/v1/rental/orders?status=PENDING_PAYMENT");
+        using HttpResponseMessage unknown = await renter.GetAsync("/api/v1/rental/orders?status=SHIPPED");
+
+        Assert.Equal(HttpStatusCode.OK, paid.StatusCode);
+        JsonElement paidPage = await ReadAsync(paid);
+        Assert.Equal(1, paidPage.GetProperty("totalCount").GetInt32());
+        Assert.Equal(order.OrderCode, paidPage.GetProperty("items")[0].GetProperty("orderCode").GetString());
+        Assert.Equal(0, (await ReadAsync(pending)).GetProperty("totalCount").GetInt32());
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+        Assert.Equal("Order.InvalidStatus", (await ReadAsync(unknown)).GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task Admin_SearchesAndOpensAnyOrder_OthersAreRefused()
+    {
+        using OrderApiFactory factory = new();
+        RentalOrder order = factory.SeedPaidMixedOrder();
+        RentalItem mixers = order.Items.Single(i => i.SupplierId == factory.SupplierCuong);
+        using HttpClient admin = factory.CreateClientFor(Guid.NewGuid(), roles: "admin");
+        using HttpClient renter = factory.CreateClientFor(factory.RenterId);
+
+        using HttpResponseMessage byAsset =
+            await admin.GetAsync($"/api/v1/rental/admin/orders?assetId={mixers.UnitAssignments.First().AssetId}&itemStatus=PENDING_SUPPLIER_CONFIRMATION");
+        using HttpResponseMessage noMatch = await admin.GetAsync($"/api/v1/rental/admin/orders?renterId={Guid.NewGuid()}");
+        using HttpResponseMessage badGuid = await admin.GetAsync("/api/v1/rental/admin/orders?listingId=abc");
+        using HttpResponseMessage badDate = await admin.GetAsync("/api/v1/rental/admin/orders?createdFrom=2026-10-01");
+        using HttpResponseMessage detail = await admin.GetAsync($"/api/v1/rental/admin/orders/{order.Id}");
+        using HttpResponseMessage renterSearch = await renter.GetAsync("/api/v1/rental/admin/orders");
+        using HttpResponseMessage renterDetail = await renter.GetAsync($"/api/v1/rental/admin/orders/{order.Id}");
+        using HttpResponseMessage anonymous = await factory.CreateClient().GetAsync("/api/v1/rental/admin/orders");
+
+        Assert.Equal(HttpStatusCode.OK, byAsset.StatusCode);
+        JsonElement found = await ReadAsync(byAsset);
+        Assert.Equal(1, found.GetProperty("totalCount").GetInt32());
+        Assert.Equal(order.RenterId, found.GetProperty("items")[0].GetProperty("renterId").GetGuid());
+        Assert.Equal(0, (await ReadAsync(noMatch)).GetProperty("totalCount").GetInt32());
+        Assert.Equal(HttpStatusCode.BadRequest, badGuid.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, badDate.StatusCode);
+        Assert.Equal("Order.InvalidDateRange", (await ReadAsync(badDate)).GetProperty("title").GetString());
+
+        Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
+        JsonElement body = await ReadAsync(detail);
+        Assert.Equal($"INV-{order.OrderCode}", body.GetProperty("invoiceRef").GetString());
+        Assert.Equal("PAID", body.GetProperty("paymentState").GetString());
+        Assert.Equal("******6789", body.GetProperty("refundAccount").GetProperty("maskedAccountNumber").GetString());
+        Assert.False(body.GetProperty("refundAccount").TryGetProperty("accountNumber", out _));
+        JsonElement mixerLine = body.GetProperty("subOrders").EnumerateArray()
+            .SelectMany(s => s.GetProperty("items").EnumerateArray())
+            .Single(i => i.GetProperty("rentalItemId").GetGuid() == mixers.Id);
+        Assert.Equal(mixers.AllocationGroupId, mixerLine.GetProperty("allocationGroupId").GetString());
+        Assert.Equal(2, mixerLine.GetProperty("units").GetArrayLength());
+        Assert.True(body.GetProperty("history").GetArrayLength() > 0);
+
+        Assert.Equal(HttpStatusCode.Forbidden, renterSearch.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, renterDetail.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+    }
+
+    [Fact]
+    public async Task Supplier_FiltersWorkQueueByItemStatus_AndSeesOwnUnits()
+    {
+        using OrderApiFactory factory = new();
+        RentalOrder order = factory.SeedPaidMixedOrder();
+        RentalSubOrder cuongsSubOrder = order.SubOrders.Single(s => s.SupplierId == factory.SupplierCuong);
+        RentalItem mixers = cuongsSubOrder.Items.Single();
+        using HttpClient cuong = factory.CreateClientFor(factory.SupplierCuong);
+
+        using HttpResponseMessage waiting =
+            await cuong.GetAsync("/api/v1/rental/supplier/sub-orders?status=PENDING_SUPPLIER_CONFIRMATION");
+        using HttpResponseMessage inRental = await cuong.GetAsync("/api/v1/rental/supplier/sub-orders?status=IN_RENTAL");
+        using HttpResponseMessage unknown = await cuong.GetAsync("/api/v1/rental/supplier/sub-orders?status=SHIPPED");
+        using HttpResponseMessage detail = await cuong.GetAsync($"/api/v1/rental/supplier/sub-orders/{cuongsSubOrder.Id}");
+
+        Assert.Equal(cuongsSubOrder.SubOrderCode,
+            (await ReadAsync(waiting)).GetProperty("items")[0].GetProperty("subOrderCode").GetString());
+        Assert.Equal(0, (await ReadAsync(inRental)).GetProperty("totalCount").GetInt32());
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+        Assert.Equal("Order.InvalidStatus", (await ReadAsync(unknown)).GetProperty("title").GetString());
+
+        Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
+        JsonElement line = (await ReadAsync(detail)).GetProperty("items")[0];
+        Assert.Equal(mixers.Id, line.GetProperty("rentalItemId").GetGuid());
+        Assert.Equal("PENDING_SUPPLIER_CONFIRMATION", line.GetProperty("status").GetString());
+        Assert.Equal(400_000m, line.GetProperty("dailyRate").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, line.GetProperty("handover").ValueKind);
+        Assert.Equal(
+            mixers.UnitAssignments.Select(u => u.AssetId).Order(),
+            line.GetProperty("units").EnumerateArray().Select(u => u.GetProperty("assetId").GetGuid()).Order());
+        Assert.All(line.GetProperty("units").EnumerateArray(),
+            u => Assert.Equal("ASSIGNED", u.GetProperty("status").GetString()));
+        Assert.False(line.TryGetProperty("refund", out _));
     }
 
     [Fact]
@@ -120,86 +226,4 @@ public sealed class OrderQueryApiTests
     private static async Task<JsonElement> ReadAsync(HttpResponseMessage response) =>
         JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
 
-    private sealed class OrderApiFactory : WebApplicationFactory<Program>
-    {
-        private readonly string _dbName = Guid.NewGuid().ToString("N");
-
-        public Guid RenterId { get; } = Guid.NewGuid();
-
-        public Guid SupplierBinh { get; } = Guid.NewGuid();
-
-        public Guid SupplierCuong { get; } = Guid.NewGuid();
-
-        public HttpClient CreateClientFor(Guid userId)
-        {
-            HttpClient client = CreateClient();
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
-            client.DefaultRequestHeaders.Add(SubjectHeader, userId.ToString("D"));
-            return client;
-        }
-
-        /// <summary>Đơn của người thuê gồm máy xúc của Bình và máy trộn của Cường, đã thanh toán.</summary>
-        public RentalOrder SeedPaidMixedOrder()
-        {
-            RentalOrder order = OrderTestData.Paid(
-                OrderTestData.Order(
-                    RenterId,
-                    "DH-2026-000010",
-                    OrderTestData.Now,
-                    OrderTestData.Line(SupplierBinh, "Máy xúc CAT 320", "Máy xúc", "Caterpillar", 1, 3_000_000m, 20_000_000m),
-                    OrderTestData.Line(SupplierCuong, "Máy trộn bê tông 350L", "Máy trộn", "Hòa Phát", 2, 400_000m, 3_000_000m)),
-                OrderTestData.Now.AddMinutes(5));
-
-            using IServiceScope scope = Services.CreateScope();
-            RentalServiceDbContext context = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
-            context.RentalOrders.Add(order);
-            context.SaveChanges();
-            return order;
-        }
-
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
-        {
-            builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
-
-            builder.ConfigureTestServices(services =>
-            {
-                services.RemoveAll<IHostedService>();
-                services.RemoveAll<DbContextOptions<RentalServiceDbContext>>();
-                services.RemoveAll<IDbContextOptionsConfiguration<RentalServiceDbContext>>();
-                services.AddDbContext<RentalServiceDbContext>(options => options.UseInMemoryDatabase(_dbName));
-                services.RemoveAll<IOrderLockManager>();
-                services.AddSingleton<IOrderLockManager, FakeOrderLockManager>();
-                services.RemoveAll<TimeProvider>();
-                services.AddSingleton<TimeProvider>(new FixedTimeProvider(OrderTestData.Now.AddMinutes(10)));
-
-                services.AddAuthentication("TestScheme")
-                    .AddScheme<AuthenticationSchemeOptions, HeaderAuthHandler>("TestScheme", _ => { });
-            });
-        }
-    }
-
-    /// <summary>Dựng danh tính người gọi từ header của request.</summary>
-    private sealed class HeaderAuthHandler(
-        IOptionsMonitor<AuthenticationSchemeOptions> options,
-        ILoggerFactory logger,
-        UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
-    {
-        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
-        {
-            string? subject = Request.Headers[SubjectHeader];
-            if (string.IsNullOrWhiteSpace(subject))
-            {
-                return Task.FromResult(AuthenticateResult.NoResult());
-            }
-
-            Claim[] claims =
-            [
-                new(RentalAuthClaims.Subject, subject),
-                new(RentalAuthClaims.ProfileCompleted, "true")
-            ];
-
-            ClaimsPrincipal principal = new(new ClaimsIdentity(claims, "TestScheme"));
-            return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, "TestScheme")));
-        }
-    }
 }
