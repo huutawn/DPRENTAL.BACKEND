@@ -128,6 +128,11 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 if (_dbContext.Entry(record).State == EntityState.Detached)
                     _dbContext.Entry(record).State = EntityState.Added;
             }
+            foreach (var handover in order.Items.Select(i => i.HandoverRecord).Where(h => h is not null))
+            {
+                if (_dbContext.Entry(handover!).State == EntityState.Detached)
+                    _dbContext.Entry(handover!).State = EntityState.Added;
+            }
             foreach (var proposal in order.Items.Select(i => i.DeductionProposal).Where(p => p is not null))
             {
                 if (_dbContext.Entry(proposal!).State == EntityState.Detached)

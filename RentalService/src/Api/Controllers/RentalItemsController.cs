@@ -37,8 +37,11 @@ public sealed class RentalItemsController : ControllerBase
     /// Supplier bàn giao thiết bị cho mục thuê (RentalItem).
     /// </summary>
     /// <remarks>
-    /// Mục thuê phải đang chờ bàn giao (<c>AWAITING_HANDOVER</c>) và thuộc Supplier đang gọi. Rental ghi nhận bàn giao
-    /// rồi gửi lệnh <c>MarkAssetsHandedOver</c> sang Inventory qua Kafka; 202 nghĩa là đã nhận yêu cầu.
+    /// Mục thuê phải đang chờ bàn giao (<c>AWAITING_HANDOVER</c>) và thuộc Supplier đang gọi. Request phải có
+    /// <c>confirmed = true</c> và mỗi máy có ít nhất một ảnh bằng chứng (Private, Ready, do chính Supplier tải lên).
+    /// Rental gửi lệnh <c>MarkAssetsHandedOver</c> sang Inventory qua Kafka; 202 nghĩa là đã nhận yêu cầu.
+    /// Bản ghi bàn giao (bất biến) chỉ được tạo khi Inventory xác nhận; nếu Inventory từ chối thì Supplier gửi lại với
+    /// Idempotency-Key mới. Khi một yêu cầu còn đang chờ Inventory, yêu cầu mới trả 409 <c>HANDOVER_IN_PROGRESS</c>.
     /// Gửi lại cùng Idempotency-Key và nội dung trả lại kết quả đã lưu.
     /// </remarks>
     /// <param name="itemId">Mã định danh mục thuê.</param>
@@ -52,6 +55,7 @@ public sealed class RentalItemsController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> HandoverItem(
         [FromRoute] Guid itemId,
         [FromBody] HandoverItemRequest request,

@@ -317,9 +317,14 @@ public partial class RentalItem
 
     internal void ApplyHandover(DateTimeOffset utcNow, string operationKey)
     {
+        // Kết quả trùng từ Inventory hoặc dòng đã đi tiếp thì không ghi đè trạng thái, không ghi thêm lịch sử.
+        if (Status != RentalItemStatus.AwaitingHandover)
+        {
+            return;
+        }
+
         string from = Status.ToString();
         Status = RentalItemStatus.InRental;
-
 
         RentalOrder?.AddStateTransition(new RentalStateTransition(
             Guid.NewGuid(),

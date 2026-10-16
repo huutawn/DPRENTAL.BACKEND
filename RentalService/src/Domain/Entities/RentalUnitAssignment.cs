@@ -103,22 +103,6 @@ public class RentalUnitAssignment
         Status = RentalUnitAssignmentStatus.HandedOver;
     }
 
-    internal void RecordHandoverEvidence(
-        Guid handoverRecordId,
-        UnitCondition condition,
-        string? note,
-        IEnumerable<Guid>? mediaIds)
-    {
-        HandoverRecordId = handoverRecordId;
-        HandoverCondition = condition;
-        HandoverNote = note;
-        _handoverMediaIds.Clear();
-        if (mediaIds is not null)
-        {
-            _handoverMediaIds.AddRange(mediaIds);
-        }
-    }
-
     internal void ConfirmHandoverCompleted()
     {
         Status = RentalUnitAssignmentStatus.HandedOver;
