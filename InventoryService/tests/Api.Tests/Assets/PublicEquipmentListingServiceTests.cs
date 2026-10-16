@@ -33,6 +33,13 @@ public sealed class PublicEquipmentListingServiceTests
 
         public Task<EquipmentListing?> GetPublicByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.TryGetValue(id, out var l) && l.Status == EquipmentListingStatus.Active ? l : null);
+        public Task<IReadOnlyList<Guid>> GetListingIdsByOwnerKeysetAsync(Guid ownerUserId, Guid? afterListingId, int limit, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<Guid>>(Store.Values
+                .Where(l => l.OwnerUserId == ownerUserId && (!afterListingId.HasValue || l.Id > afterListingId.Value))
+                .OrderBy(l => l.Id)
+                .Take(limit)
+                .Select(l => l.Id)
+                .ToList());
         public Task<IReadOnlyList<EquipmentListingBatchItem>> GetBatchByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken = default)
         {
             var list = Store.Values
@@ -132,15 +139,21 @@ public sealed class PublicEquipmentListingServiceTests
         public Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success());
 
-        public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(equipmentTypeId, 1, [])));
+        public Task<Result<Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(new CatalogBatchSchemasResponse(equipmentTypeId, 1, []), DateTimeOffset.UtcNow.AddMinutes(5))));
 
         public Func<Guid, Task<Result<IReadOnlyList<Guid>>>>? GetByCategoryHandler { get; set; }
 
-        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
-            GetByCategoryHandler != null
-                ? GetByCategoryHandler(categoryId)
-                : Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
+        public async Task<Result<Dprental.InventoryService.Application.Caching.CachedRead<IReadOnlyList<Guid>>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default)
+        {
+            if (GetByCategoryHandler != null)
+            {
+                var r = await GetByCategoryHandler(categoryId);
+                if (r.IsFailure) return r.Error;
+                return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<IReadOnlyList<Guid>>(r.Value, DateTimeOffset.UtcNow.AddMinutes(5)));
+            }
+            return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<IReadOnlyList<Guid>>(Array.Empty<Guid>(), DateTimeOffset.UtcNow.AddMinutes(5)));
+        }
     }
 
     private readonly FakePublicListingRepository _repo = new();

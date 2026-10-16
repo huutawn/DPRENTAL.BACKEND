@@ -118,6 +118,32 @@ public sealed class InventoryWriteContext : IInventoryWriteContext
         _context.OutboxMessages.Add(message);
     }
 
+    /// <inheritdoc />
+    public void StageCacheInvalidation(IEnumerable<string> scopes)
+    {
+        ArgumentNullException.ThrowIfNull(scopes);
+        var scopeList = scopes.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.Ordinal).ToList();
+        if (scopeList.Count == 0)
+        {
+            return;
+        }
+
+        var job = CacheInvalidationJob.Create(Guid.NewGuid(), scopeList, DateTimeOffset.UtcNow);
+        _context.CacheInvalidationJobs.Add(job);
+    }
+
+    /// <inheritdoc />
+    public void StageWarehouseFanoutInvalidation(Guid ownerUserId, IEnumerable<string>? initialScopes = null)
+    {
+        if (ownerUserId == Guid.Empty)
+        {
+            return;
+        }
+
+        var job = CacheInvalidationJob.CreateFanout(Guid.NewGuid(), ownerUserId, initialScopes, DateTimeOffset.UtcNow);
+        _context.CacheInvalidationJobs.Add(job);
+    }
+
     public Guid? SearchBackfillRunId { get; private set; }
 
     public async Task<long> GetNextSearchRevisionAsync(CancellationToken cancellationToken = default)

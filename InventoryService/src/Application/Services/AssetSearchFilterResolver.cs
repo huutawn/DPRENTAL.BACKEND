@@ -7,11 +7,17 @@ using Dprental.InventoryService.Domain.IRepositories;
 namespace Dprental.InventoryService.Application.Services;
 
 /// <summary>
-/// Kết quả phân giải bộ lọc động JSONB bao gồm các điều kiện lọc và các schema version tương thích.
+/// Kết quả phân giải bộ lọc động JSONB bao gồm các điều kiện lọc, các schema version tương thích và deadline của Catalog schema cache.
 /// </summary>
 public sealed record ResolvedAssetFilters(
     IReadOnlyList<AssetDynamicFilterCriterion>? Criteria,
-    IReadOnlyList<int>? CompatibleSchemaVersions);
+    IReadOnlyList<int>? CompatibleSchemaVersions,
+    DateTimeOffset? ExpiresAtUtc = null);
+
+public sealed record RawDynamicFilter(
+    string Field,
+    string Operator,
+    JsonElement Value);
 
 /// <summary>
 /// Thành phần phân giải, kiểm tra tính hợp lệ và xác định tính tương thích lịch sử của bộ lọc động JSONB theo Catalog schema.
@@ -38,116 +44,22 @@ public sealed class AssetSearchFilterResolver
     {
         ArgumentNullException.ThrowIfNull(getCandidateVersionsAsync);
 
-        if (string.IsNullOrWhiteSpace(rawFiltersJson))
+        var structCheck = ValidateStructure(rawFiltersJson, equipmentTypeId, isFieldForbidden);
+        if (structCheck.IsFailure)
+        {
+            return structCheck.Error;
+        }
+
+        var rawFilters = structCheck.Value;
+        if (rawFilters == null || rawFilters.Count == 0)
         {
             return Result.Success(new ResolvedAssetFilters(null, null));
-        }
-
-        string trimmedFilters = rawFiltersJson.Trim();
-        if (string.Equals(trimmedFilters, "null", StringComparison.OrdinalIgnoreCase))
-        {
-            return Error.Validation("INVALID_QUERY_PARAMETER", "Filters không được là chuỗi 'null'.");
-        }
-
-        JsonDocument filterDoc;
-        try
-        {
-            filterDoc = JsonDocument.Parse(trimmedFilters);
-        }
-        catch (JsonException)
-        {
-            return Error.Validation("INVALID_QUERY_PARAMETER", "JSON của filters không đúng định dạng.");
-        }
-
-        List<RawDynamicFilter> rawFilters;
-        using (filterDoc)
-        {
-            if (filterDoc.RootElement.ValueKind != JsonValueKind.Array)
-            {
-                return Error.Validation("INVALID_QUERY_PARAMETER", "Filters phải là một JSON array.");
-            }
-
-            int filterCount = filterDoc.RootElement.GetArrayLength();
-            if (filterCount > 20)
-            {
-                return Error.Validation("INVALID_QUERY_PARAMETER", "Dynamic filters tối đa 20 điều kiện.");
-            }
-
-            if (filterCount == 0)
-            {
-                return Result.Success(new ResolvedAssetFilters(null, null));
-            }
-
-            if (!equipmentTypeId.HasValue || equipmentTypeId.Value == Guid.Empty)
-            {
-                return Error.Validation("INVALID_QUERY_PARAMETER", "Dynamic filters bắt buộc phải có equipmentTypeId.");
-            }
-
-            rawFilters = new List<RawDynamicFilter>(filterCount);
-
-            foreach (var elem in filterDoc.RootElement.EnumerateArray())
-            {
-                if (elem.ValueKind != JsonValueKind.Object)
-                {
-                    return Error.Validation("INVALID_QUERY_PARAMETER", "Mỗi phần tử filter phải là một JSON object.");
-                }
-
-                int propCount = 0;
-                string? fieldName = null;
-                string? opName = null;
-                JsonElement? valElem = null;
-
-                foreach (var prop in elem.EnumerateObject())
-                {
-                    propCount++;
-                    if (string.Equals(prop.Name, "field", StringComparison.Ordinal))
-                    {
-                        if (prop.Value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(prop.Value.GetString()))
-                        {
-                            return Error.Validation("INVALID_QUERY_PARAMETER", "Thuộc tính 'field' phải là chuỗi không rỗng.");
-                        }
-                        fieldName = prop.Value.GetString();
-                    }
-                    else if (string.Equals(prop.Name, "operator", StringComparison.Ordinal))
-                    {
-                        if (prop.Value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(prop.Value.GetString()))
-                        {
-                            return Error.Validation("INVALID_QUERY_PARAMETER", "Thuộc tính 'operator' phải là chuỗi không rỗng.");
-                        }
-                        opName = prop.Value.GetString();
-                    }
-                    else if (string.Equals(prop.Name, "value", StringComparison.Ordinal))
-                    {
-                        if (prop.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined or JsonValueKind.Array or JsonValueKind.Object)
-                        {
-                            return Error.Validation("INVALID_QUERY_PARAMETER", "Thuộc tính 'value' không hợp lệ.");
-                        }
-                        valElem = prop.Value.Clone();
-                    }
-                    else
-                    {
-                        return Error.Validation("INVALID_QUERY_PARAMETER", $"Thuộc tính không được hỗ trợ trong filter: '{prop.Name}'. Chỉ chấp nhận field, operator, value.");
-                    }
-                }
-
-                if (propCount != 3 || fieldName is null || opName is null || valElem is null)
-                {
-                    return Error.Validation("INVALID_QUERY_PARAMETER", "Mỗi filter object phải có đủ 3 thuộc tính: field, operator, value.");
-                }
-
-                if (isFieldForbidden != null && isFieldForbidden(fieldName))
-                {
-                    return Error.Validation("INVALID_QUERY_PARAMETER", $"Thuộc tính '{fieldName}' không được phép sử dụng trong bộ lọc tìm kiếm.");
-                }
-
-                rawFilters.Add(new RawDynamicFilter(fieldName, opName, valElem.Value));
-            }
         }
 
         var distinctVersions = await getCandidateVersionsAsync(cancellationToken);
 
         var catalogResult = await _catalogClient.GetEquipmentTypeSchemasBatchAsync(
-            equipmentTypeId.Value,
+            equipmentTypeId!.Value,
             distinctVersions,
             cancellationToken);
 
@@ -156,7 +68,10 @@ public sealed class AssetSearchFilterResolver
             return catalogResult.Error;
         }
 
-        var catalogResponse = catalogResult.Value;
+        var catalogCachedRead = catalogResult.Value;
+        var catalogResponse = catalogCachedRead.Value;
+        var schemaDeadline = catalogCachedRead.ExpiresAtUtc;
+
         var currentSchema = catalogResponse.Schemas.FirstOrDefault(s => s.Version == catalogResponse.CurrentSchemaVersion);
         if (currentSchema is null)
         {
@@ -301,11 +216,122 @@ public sealed class AssetSearchFilterResolver
             }
         }
 
-        return Result.Success(new ResolvedAssetFilters(parsedDynamicFilters, compatibleVersions));
+        return Result.Success(new ResolvedAssetFilters(parsedDynamicFilters, compatibleVersions, schemaDeadline));
     }
 
-    private sealed record RawDynamicFilter(
-        string Field,
-        string Operator,
-        JsonElement Value);
+    /// <summary>
+    /// Thẩm tra cấu trúc cú pháp của raw JSON filters độc lập trước khi thực hiện tra cứu cache.
+    /// </summary>
+    public static Result<IReadOnlyList<RawDynamicFilter>?> ValidateStructure(
+        string? rawFiltersJson,
+        Guid? equipmentTypeId,
+        Func<string, bool>? isFieldForbidden = null)
+    {
+        if (string.IsNullOrWhiteSpace(rawFiltersJson))
+        {
+            return Result.Success<IReadOnlyList<RawDynamicFilter>?>(null);
+        }
+
+        string trimmedFilters = rawFiltersJson.Trim();
+        if (string.Equals(trimmedFilters, "null", StringComparison.OrdinalIgnoreCase))
+        {
+            return Error.Validation("INVALID_QUERY_PARAMETER", "Filters không được là chuỗi 'null'.");
+        }
+
+        JsonDocument filterDoc;
+        try
+        {
+            filterDoc = JsonDocument.Parse(trimmedFilters);
+        }
+        catch (JsonException)
+        {
+            return Error.Validation("INVALID_QUERY_PARAMETER", "JSON của filters không đúng định dạng.");
+        }
+
+        using (filterDoc)
+        {
+            if (filterDoc.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return Error.Validation("INVALID_QUERY_PARAMETER", "Filters phải là một JSON array.");
+            }
+
+            int filterCount = filterDoc.RootElement.GetArrayLength();
+            if (filterCount > 20)
+            {
+                return Error.Validation("INVALID_QUERY_PARAMETER", "Dynamic filters tối đa 20 điều kiện.");
+            }
+
+            if (filterCount == 0)
+            {
+                return Result.Success<IReadOnlyList<RawDynamicFilter>?>(null);
+            }
+
+            if (!equipmentTypeId.HasValue || equipmentTypeId.Value == Guid.Empty)
+            {
+                return Error.Validation("INVALID_QUERY_PARAMETER", "Dynamic filters bắt buộc phải có equipmentTypeId.");
+            }
+
+            var rawFilters = new List<RawDynamicFilter>(filterCount);
+
+            foreach (var elem in filterDoc.RootElement.EnumerateArray())
+            {
+                if (elem.ValueKind != JsonValueKind.Object)
+                {
+                    return Error.Validation("INVALID_QUERY_PARAMETER", "Mỗi phần tử filter phải là một JSON object.");
+                }
+
+                int propCount = 0;
+                string? fieldName = null;
+                string? opName = null;
+                JsonElement? valElem = null;
+
+                foreach (var prop in elem.EnumerateObject())
+                {
+                    propCount++;
+                    if (string.Equals(prop.Name, "field", StringComparison.Ordinal))
+                    {
+                        if (prop.Value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(prop.Value.GetString()))
+                        {
+                            return Error.Validation("INVALID_QUERY_PARAMETER", "Thuộc tính 'field' phải là chuỗi không rỗng.");
+                        }
+                        fieldName = prop.Value.GetString();
+                    }
+                    else if (string.Equals(prop.Name, "operator", StringComparison.Ordinal))
+                    {
+                        if (prop.Value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(prop.Value.GetString()))
+                        {
+                            return Error.Validation("INVALID_QUERY_PARAMETER", "Thuộc tính 'operator' phải là chuỗi không rỗng.");
+                        }
+                        opName = prop.Value.GetString();
+                    }
+                    else if (string.Equals(prop.Name, "value", StringComparison.Ordinal))
+                    {
+                        if (prop.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined or JsonValueKind.Array or JsonValueKind.Object)
+                        {
+                            return Error.Validation("INVALID_QUERY_PARAMETER", "Thuộc tính 'value' không hợp lệ.");
+                        }
+                        valElem = prop.Value.Clone();
+                    }
+                    else
+                    {
+                        return Error.Validation("INVALID_QUERY_PARAMETER", $"Thuộc tính không được hỗ trợ trong filter: '{prop.Name}'. Chỉ chấp nhận field, operator, value.");
+                    }
+                }
+
+                if (propCount != 3 || fieldName is null || opName is null || valElem is null)
+                {
+                    return Error.Validation("INVALID_QUERY_PARAMETER", "Mỗi filter object phải có đủ 3 thuộc tính: field, operator, value.");
+                }
+
+                if (isFieldForbidden != null && isFieldForbidden(fieldName))
+                {
+                    return Error.Validation("INVALID_QUERY_PARAMETER", $"Thuộc tính '{fieldName}' không được phép sử dụng trong bộ lọc tìm kiếm.");
+                }
+
+                rawFilters.Add(new RawDynamicFilter(fieldName, opName, valElem.Value));
+            }
+
+            return Result.Success<IReadOnlyList<RawDynamicFilter>?>(rawFilters);
+        }
+    }
 }

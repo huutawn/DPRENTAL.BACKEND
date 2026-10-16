@@ -36,7 +36,7 @@ public sealed partial class CatalogServiceClientTests
         var result = await client.GetEquipmentTypeIdsByCategoryAsync(categoryId);
 
         Assert.True(result.IsSuccess);
-        Assert.Empty(result.Value);
+        Assert.Empty(result.Value.Value);
     }
 
     [Fact]
@@ -65,8 +65,8 @@ public sealed partial class CatalogServiceClientTests
         var result = await client.GetEquipmentTypeIdsByCategoryAsync(categoryId);
 
         Assert.True(result.IsSuccess);
-        Assert.Single(result.Value);
-        Assert.Equal(typeId, result.Value[0]);
+        Assert.Single(result.Value.Value);
+        Assert.Equal(typeId, result.Value.Value[0]);
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public sealed partial class CatalogServiceClientTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, callCount);
-        Assert.Equal(100, result.Value.Count);
+        Assert.Equal(100, result.Value.Value.Count);
     }
 
     [Fact]
@@ -150,8 +150,8 @@ public sealed partial class CatalogServiceClientTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal([1, 2], requestedPages);
-        Assert.Equal(101, result.Value.Count);
-        Assert.Contains(page2Id, result.Value);
+        Assert.Equal(101, result.Value.Value.Count);
+        Assert.Contains(page2Id, result.Value.Value);
     }
 
     [Fact]

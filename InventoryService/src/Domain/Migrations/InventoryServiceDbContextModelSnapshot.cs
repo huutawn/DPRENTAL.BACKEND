@@ -299,6 +299,68 @@ namespace InventoryService.Domain.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.CacheInvalidationJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("FanoutAfterListingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("fanout_after_listing_id");
+
+                    b.Property<Guid?>("FanoutOwnerUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("fanout_owner_user_id");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("text")
+                        .HasColumnName("last_error");
+
+                    b.Property<DateTimeOffset?>("LockLeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lock_lease_expires_at");
+
+                    b.Property<Guid?>("LockLeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lock_lease_token");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at");
+
+                    b.Property<DateTimeOffset?>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("retry_count");
+
+                    b.PrimitiveCollection<string[]>("Scopes")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("scopes");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status", "NextAttemptAt", "LockLeaseExpiresAt")
+                        .HasDatabaseName("ix_cache_invalidation_jobs_claim");
+
+                    b.ToTable("cache_invalidation_jobs", "inventory");
+                });
+
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.CalendarBlock", b =>
                 {
                     b.Property<Guid>("Id")

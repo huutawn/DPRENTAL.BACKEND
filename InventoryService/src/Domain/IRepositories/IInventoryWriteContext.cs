@@ -60,6 +60,15 @@ public interface IInventoryWriteContext
     void StageOutbox(OutboxMessage message);
 
     /// <summary>
+    /// Đưa công việc xóa cache theo danh sách scope vào hàng đợi lưu trữ trong cùng transaction nghiệp vụ.
+    /// </summary>
+    void StageCacheInvalidation(IEnumerable<string> scopes);
+
+    /// <summary>
+    /// Đưa công việc xóa cache dạng fanout theo owner vào hàng đợi lưu trữ trong cùng transaction nghiệp vụ.
+    /// </summary>
+    void StageWarehouseFanoutInvalidation(Guid ownerUserId, IEnumerable<string>? initialScopes = null);
+    /// <summary>
     /// Lấy giá trị revision tuần tự tiếp theo từ sequence search_projection_revision_seq trong transaction hiện tại.
     /// </summary>
     Guid? SearchBackfillRunId { get; }

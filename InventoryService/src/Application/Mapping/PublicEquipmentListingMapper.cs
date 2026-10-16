@@ -58,5 +58,5 @@ public static class PublicEquipmentListingMapper
             totalQuantity,
             availableQuantity,
             warehouseArea);
-}
+    }
 }

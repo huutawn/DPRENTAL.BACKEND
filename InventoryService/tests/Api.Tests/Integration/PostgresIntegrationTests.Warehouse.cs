@@ -185,10 +185,6 @@ public sealed class PostgresWarehouseIntegrationTests
             Task.FromResult(Result.Success(new CatalogBrandResponse(id, "SONY", "Sony", true)));
         public Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken ct = default) =>
             Task.FromResult(Result.Success());
-        public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken ct = default) =>
-            Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(equipmentTypeId, 1, [])));
-        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken ct = default) =>
-            Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
     }
 
     private sealed class StubMediaClient : IMediaServiceClient

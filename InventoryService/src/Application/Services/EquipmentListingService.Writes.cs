@@ -215,6 +215,7 @@ public sealed partial class EquipmentListingService
             var revAsset = await ctx.GetNextSearchRevisionAsync(ct);
             ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", revListing, false, now, ctx.SearchBackfillRunId));
             ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(asset.Id, "Upsert", revAsset, now, ctx.SearchBackfillRunId));
+            ctx.StageCacheInvalidation([$"listing:{listing.Id:D}", $"asset:{asset.Id:D}", $"owner:{listing.OwnerUserId:D}", "public-discovery"]);
             return Result.Success(listing);
         }, cancellationToken);
 
@@ -488,6 +489,7 @@ public sealed partial class EquipmentListingService
             bool needsFanout = request.IsBrandIdSpecified || request.IsModelSpecified || request.IsManufactureYearSpecified;
             ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", revision, needsFanout, now, ctx.SearchBackfillRunId));
 
+            ctx.StageCacheInvalidation([$"listing:{listing.Id:D}", $"owner:{listing.OwnerUserId:D}", "public-discovery"]);
             return Result.Success(listing);
         }, cancellationToken);
 
@@ -569,6 +571,7 @@ public sealed partial class EquipmentListingService
                 return updateRes.Error;
             }
 
+            ctx.StageCacheInvalidation([$"listing:{listing.Id:D}", $"owner:{listing.OwnerUserId:D}", "public-discovery"]);
             return Result.Success(listing);
         }, cancellationToken);
 
@@ -674,6 +677,7 @@ public sealed partial class EquipmentListingService
             var revListing = await ctx.GetNextSearchRevisionAsync(ct);
             ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(newAsset.Id, "Upsert", revAsset, now, ctx.SearchBackfillRunId));
             ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", revListing, false, now, ctx.SearchBackfillRunId));
+            ctx.StageCacheInvalidation([$"listing:{listing.Id:D}", $"asset:{newAsset.Id:D}", $"owner:{listing.OwnerUserId:D}", "public-discovery"]);
             return Result.Success(newAsset);
         }, cancellationToken);
 

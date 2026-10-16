@@ -187,33 +187,65 @@ Hệ thống áp dụng cơ chế: **PostgreSQL `READ COMMITTED` transaction + a
   6. Không kiểm tra `AcceptingBookings`. Key mới trên expired/Allocated/Released/Cancelled trả 409 Conflict (Application service trực tiếp chuyển lỗi `HOLD_EXPIRED` và `INVALID_STATUS_TRANSITION` thành `Error.Conflict`, giữ nguyên mã lỗi; controller chuyển trực tiếp qua `ToProblem(result.Error)`). Không phát sự kiện Outbox.
 
 
-## Truy vấn tính khả dụng và Valkey Read Cache (DPR-150: Asset Availability Queries)
+## Truy vấn tính khả dụng và Valkey Read Cache cho toàn InventoryService
 
-### APIs
+### APIs & Chính sách Cache
 
-| Method | Endpoint | Yêu cầu quyền | Mô tả |
-|---|---|---|---|
-| `POST` | `/api/v1/inventory/availability/check` | `AvailabilityRead` (Human authenticated hoặc Service `s=inventory.availability.read`) | Kiểm tra tính khả dụng hàng loạt tài sản. Luôn đọc trực tiếp từ PostgreSQL trong transaction `RepeatableRead` (tối đa 3 SELECTs). Giới hạn tối đa 500 ID trước khi gộp trùng. |
-| `GET` | `/api/v1/inventory/assets/{assetId}/busy-ranges?from=&to=` | `AvailabilityRead` (Human authenticated hoặc Service `s=inventory.availability.read`) | Đọc danh sách các khoảng bận đã làm sạch của tài sản. Luôn kiểm tra existence và `AcceptingBookings` từ PostgreSQL. Dùng Valkey month cache với TTL động. |
+| Nhóm chức năng | Thiết kế & TTL | Mô tả |
+|---|---|---|
+| Public discovery và public detail | Cache response đã làm sạch, Dynamic TTL 15s | Cache kết quả tìm kiếm công khai và chi tiết listing công khai. Không chứa dữ liệu nhạy cảm (serial, asset ID, địa chỉ chi tiết, tọa độ kho). |
+| Busy-ranges, calendar asset/listing | Cache kết quả đọc, TTL tối đa 15s | Giới hạn bởi min(15s, nearest active hold expiry, chuyển ngày VN hoặc chuyển sang overdue). |
+| Availability/check asset batch và listing | Cache kết quả đọc, TTL tối đa 15s | Batch check cache theo từng asset và date window; chỉ query PostgreSQL cho các asset miss. |
+| Owner listing/asset detail và danh sách units | Cache DTO đọc, Metadata TTL 120s | Resource authorization evaluator chạy trên mọi request; không cache quyết định cấp quyền. |
+| Owner listing/asset search | Cache cả page, count và backend info, TTL 120s | Giữ nguyên header X-Search-Backend khi hit cache. |
+| Public/owner statistics | Cache theo phạm vi và bộ lọc, TTL 120s | Thống kê số lượng listing theo loại và thương hiệu. |
+| Warehouse của owner | Cache DTO đọc, TTL 120s | Thông tin kho hàng của chủ sở hữu. |
+| Catalog phục vụ discovery | Cache category → type IDs và batch schemas, TTL 120s | Chỉ cache category khi đã tải và kiểm tra đủ mọi trang; batch schemas cache theo tập version chuẩn hóa. |
+| Listing batch phục vụ Rental | **Không cache (Đọc PostgreSQL trực tiếp)** | Bắt buộc đọc PostgreSQL để revalidate giá, trạng thái và warehouse cho RentalOrder. |
+| Hold, allocate, extend, release, handover, return | **Không cache (PostgreSQL transaction)** | Đọc và ghi trong transaction PostgreSQL có khóa advisory lock; không dùng cache để quyết định. |
+| Catalog validation và Media khi ghi | **Không cache (Nguồn thật)** | Luôn gọi trực tiếp service nguồn; không cache quyền sở hữu, trạng thái Ready hay kết quả publish. |
 
-### Kiến trúc Valkey Read Cache & Invalidation
+### Kiến trúc Valkey Read Cache & Invalidation độc lập Kafka
 
 1. **Cấu hình & Adapter**:
-   - Pin `StackExchange.Redis 3.3.1` trong `Directory.Packages.props`. Adapter đặt tại `Api/Caching`, thực thi interface `IInventoryAvailabilityCache` do Application sở hữu. Domain không phụ thuộc Redis.
-   - Tái sử dụng `ConnectionStrings:Redis`, cấu hình cache tắt mặc định (`InventoryCache:Enabled = false`), TTL 60s, timeout 500ms.
+   - Pin `StackExchange.Redis 3.3.1` trong `Directory.Packages.props`. Adapter `ValkeyReadCache` đặt tại `Api/Caching`, thực thi interface `IInventoryReadCache` do Application sở hữu. Application và Domain không phụ thuộc Redis.
+   - Tái sử dụng `ConnectionStrings:Redis`, cấu hình cache tắt mặc định (`InventoryCache:Enabled = false`), `DynamicTtlSeconds = 15`, `MetadataTtlSeconds = 120`, `CatalogTtlSeconds = 120`, `TimeoutMs = 100`.
    - `AbortOnConnectFail = false`: Mất kết nối Redis không chặn khởi động hay readiness của ứng dụng; tự động fallback đọc PostgreSQL.
-2. **Key Schema & Payload**:
-   - Month keys: `inventory:asset:{assetId}:busy:{yyyyMM}`.
-   - Metadata index: `inventory:asset:{assetId}:months` (Sorted Set lưu score = expiry timestamp).
-   - Payload chỉ chứa sanitized ranges (`BusyRangeDto`) và mốc hết hạn nội bộ; không serialize private fields.
-3. **TTL động & Fill Race**:
-   - TTL tính từ snapshot: `min(normal TTL deadline, nearest active Hold expiry) - current time`.
-   - Tự động bỏ ghi cache nếu deadline đã qua.
-4. **Outbox Invalidation**:
-   - Mở rộng `OutboxPublisherWorker`: khi claim được sự kiện `InventoryAssetAvailabilityChanged` đã commit trong DB, thực hiện invalidate toàn bộ month keys của tài sản qua script Lua atomic trước khi publish Kafka, ngoài database transaction.
-   - Lỗi invalidation chỉ log cảnh báo, không chặn publication hay rollback mutation.
+   - Giới hạn payload 1 MiB (`MaxPayloadBytes = 1048576`). Payload vượt ngưỡng bỏ ghi cache và ghi log cảnh báo.
+   - Chống thundering herd: Giới hạn tối đa 32 source fills đồng thời trong mỗi process qua SemaphoreSlim và in-flight task coalescing.
+2. **Key Schema & Generation Tokens (read:v2)**:
+   - Namespace: `inventory:<environment>:read:v2`.
+   - Hash tag theo slot: Mọi key trong cùng scope dùng chung hash tag `{inventory:<env>:read:v2:scope:<scope>}`.
+   - Generation key: `{inventory:<env>:read:v2:scope:<scope>}:gen`.
+   - Data key: `{inventory:<env>:read:v2:scope:<scope>}:d:{queryType}:{inputHash}`.
+   - Đổi generation token ngẫu nhiên khi invalidation ($O(1)$) với TTL dẫn xuất = `max(TTLs) + 60s` (mặc định 180s); không dùng KEYS, SCAN, FLUSHDB hay Sorted Sets.
+   - Ghi có điều kiện qua Lua: Dùng `SET ... PXAT <unix-ms>` đối chiếu server time của Valkey, chỉ ghi nếu generation token hiện tại của scope vẫn khớp với token lúc đọc nguồn.
+3. **Hàng đợi Invalidation bền vững (`inventory.cache_invalidation_jobs`)**:
+   - Tách biệt hoàn toàn khỏi Kafka publishing.
+   - Mutation nghiệp vụ stage invalidation job vào bảng `inventory.cache_invalidation_jobs` trong cùng transaction PostgreSQL.
+   - Warehouse mutation stage fanout descriptor (`fanout_owner_user_id`), không đọc vòng lặp listings trong database transaction.
+   - `CacheInvalidationWorker` claim tối đa 100 job bằng `FOR UPDATE SKIP LOCKED`, xử lý tối đa 4 job đồng thời với DI scope riêng và tối đa 32 Valkey invalidations đồng thời.
+   - Fanout listings được keyset theo trang (100 IDs/trang), checkpoint cursor `fanout_after_listing_id` bằng lease token; chỉ Completed khi hoàn tất trang cuối.
+   - Dọn dẹp định kỳ các job Completed quá 7 ngày theo lô 500 records.
+   - Lỗi kết nối Valkey: Retry với exponential backoff 1s–60s, tối đa 10 lần. Sau 10 lần, job chuyển sang trạng thái `Failed` để vận hành kiểm tra và requeue.
 
+### Runbook Vận hành & Phục hồi Invalidation Queue
 
+```sql
+-- 1. Xem danh sách các invalidation jobs bị Failed:
+SELECT id, scopes, fanout_owner_user_id, fanout_after_listing_id, retry_count, last_error, created_at
+FROM inventory.cache_invalidation_jobs
+WHERE status = 'Failed'
+ORDER BY created_at ASC;
+
+-- 2. Requeue các job Failed về Pending để worker tiếp tục xử lý (giữ nguyên checkpoint fanout đã hoàn tất):
+UPDATE inventory.cache_invalidation_jobs
+SET status = 'Pending',
+    retry_count = 0,
+    next_attempt_at = NOW(),
+    last_error = NULL
+WHERE status = 'Failed';
+```
 ---
 
 ## Ranh giới sở hữu giá thuê niêm yết (EquipmentListing Rental Rates)

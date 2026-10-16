@@ -77,6 +77,11 @@ public sealed class InventoryServiceDbContext : DbContext
     /// </summary>
     public DbSet<SearchBackfillRun> SearchBackfillRuns => Set<SearchBackfillRun>();
 
+
+    /// <summary>
+    /// Bảng quản lý hàng đợi công việc xóa cache (Cache Invalidation Jobs).
+    /// </summary>
+    public DbSet<CacheInvalidationJob> CacheInvalidationJobs => Set<CacheInvalidationJob>();
     public InventoryServiceDbContext(DbContextOptions<InventoryServiceDbContext> options) : base(options)
     {
     }
@@ -438,5 +443,21 @@ public sealed class InventoryServiceDbContext : DbContext
             b.HasIndex(r => r.Status).HasDatabaseName("ix_search_backfill_runs_status");
         });
 
+
+        // 10. Cấu hình thực thể CacheInvalidationJob
+        modelBuilder.Entity<CacheInvalidationJob>(b =>
+        {
+            b.ToTable("cache_invalidation_jobs", SchemaName);
+            b.HasKey(j => j.Id);
+            b.Property(j => j.Scopes)
+                .HasColumnName("scopes")
+                .HasColumnType("text[]");
+            b.Property(j => j.FanoutOwnerUserId)
+                .HasColumnName("fanout_owner_user_id");
+            b.Property(j => j.FanoutAfterListingId)
+                .HasColumnName("fanout_after_listing_id");
+            b.HasIndex(j => new { j.Status, j.NextAttemptAt, j.LockLeaseExpiresAt })
+                .HasDatabaseName("ix_cache_invalidation_jobs_claim");
+        });
     }
 }

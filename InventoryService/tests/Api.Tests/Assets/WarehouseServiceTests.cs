@@ -54,6 +54,8 @@ public sealed class WarehouseServiceTests
         public Task AcquireAssetLocksAsync(IEnumerable<Guid> assetIds, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public void StageOutbox(OutboxMessage message) { }
         public Task<long> GetNextSearchRevisionAsync(CancellationToken cancellationToken = default) => Task.FromResult(1L);
+        public void StageCacheInvalidation(IEnumerable<string> scopes) { }
+        public void StageWarehouseFanoutInvalidation(Guid ownerUserId, IEnumerable<string>? initialScopes = null) { }
     }
 
     private sealed class FakeWriteTransaction : IInventoryWriteTransaction

@@ -4,6 +4,7 @@ using Dprental.InventoryService.Api.Controllers;
 using System.IO;
 using Dprental.InventoryService.Api.Exceptions;
 using Dprental.InventoryService.Api.Routing;
+using Dprental.InventoryService.Api.Caching;
 using Dprental.InventoryService.Api.Security;
 using Dprental.InventoryService.Application.DependencyInjection;
 using Dprental.InventoryService.Application.Caching;
@@ -25,7 +26,7 @@ builder.Services.AddInventoryAuthorization();
 // Clean Architecture: Application services (IInventoryAssetService, ICalendarService, IInventoryMediaService, IInventoryAvailabilityService)
 builder.Services.AddInventoryApplication();
 // DPR-150: Valkey Read Cache
-builder.Services.AddInventoryValkeyCache(builder.Configuration);
+builder.Services.AddInventoryValkeyCache(builder.Configuration, builder.Environment);
 // Domain clients (MediaService & CatalogService): Options validation and typed HTTP clients
 builder.Services.AddInventoryClients(builder.Configuration);
 

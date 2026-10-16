@@ -10,7 +10,7 @@ public sealed class AssetSearchFilterResolverTests
 {
     private sealed class StubCatalogClient : ICatalogServiceClient
     {
-        public Func<Guid, IReadOnlyList<int>, Task<Result<CatalogBatchSchemasResponse>>>? BatchHandler { get; set; }
+        public Func<Guid, IReadOnlyList<int>, Task<Result<Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>>>>? BatchHandler { get; set; }
         public int BatchCalls { get; private set; }
 
         public Task<Result<CatalogEquipmentTypeResponse>> GetPublishedEquipmentTypeAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default) =>
@@ -22,16 +22,20 @@ public sealed class AssetSearchFilterResolverTests
         public Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
 
-        public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default)
+        public async Task<Result<Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default)
         {
             BatchCalls++;
-            return BatchHandler != null
-                ? BatchHandler(equipmentTypeId, versions)
-                : Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(equipmentTypeId, 1, [new CatalogBatchSchemaItemResponse(1, [])])));
+            if (BatchHandler != null)
+            {
+                return await BatchHandler(equipmentTypeId, versions);
+            }
+            return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(
+                new CatalogBatchSchemasResponse(equipmentTypeId, 1, [new CatalogBatchSchemaItemResponse(1, [])]),
+                DateTimeOffset.UtcNow.AddMinutes(5)));
         }
 
-        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
+        public Task<Result<Dprental.InventoryService.Application.Caching.CachedRead<IReadOnlyList<Guid>>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<IReadOnlyList<Guid>>(Array.Empty<Guid>(), DateTimeOffset.UtcNow.AddMinutes(5))));
     }
 
     private readonly StubCatalogClient _catalogClient = new();
@@ -137,7 +141,7 @@ public sealed class AssetSearchFilterResolverTests
     public async Task ResolveAsync_ValidNumberFilter_ParsesAndDeterminesCompatibleVersions()
     {
         var eqId = Guid.NewGuid();
-        _catalogClient.BatchHandler = (id, versions) => Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+        _catalogClient.BatchHandler = (id, versions) => Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(new CatalogBatchSchemasResponse(
             id,
             2,
             [
@@ -147,7 +151,7 @@ public sealed class AssetSearchFilterResolverTests
                 new CatalogBatchSchemaItemResponse(2, [
                     new CatalogBatchFieldResponse("weightKg", "Weight", "number", true, true, false, 0, 0, 10000, null, "kg", null)
                 ])
-            ])));
+            ]), DateTimeOffset.UtcNow.AddMinutes(5))));
 
         var json = "[{\"field\":\"weightKg\",\"operator\":\"gte\",\"value\":2500}]";
         var result = await _resolver.ResolveAsync(
@@ -172,7 +176,7 @@ public sealed class AssetSearchFilterResolverTests
     public async Task ResolveAsync_IncompatibleHistoricalSchemaUnit_ExcludesIncompatibleVersion()
     {
         var eqId = Guid.NewGuid();
-        _catalogClient.BatchHandler = (id, versions) => Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+        _catalogClient.BatchHandler = (id, versions) => Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(new CatalogBatchSchemasResponse(
             id,
             2,
             [
@@ -182,7 +186,7 @@ public sealed class AssetSearchFilterResolverTests
                 new CatalogBatchSchemaItemResponse(2, [
                     new CatalogBatchFieldResponse("weight", "Weight", "number", true, true, false, 0, 0, 10000, null, "kg", null)
                 ])
-            ])));
+            ]), DateTimeOffset.UtcNow.AddMinutes(5))));
 
         var json = "[{\"field\":\"weight\",\"operator\":\"eq\",\"value\":1000}]";
         var result = await _resolver.ResolveAsync(

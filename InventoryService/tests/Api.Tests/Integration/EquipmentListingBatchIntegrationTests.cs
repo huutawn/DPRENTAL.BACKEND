@@ -57,17 +57,6 @@ public sealed class EquipmentListingBatchIntegrationTests : IClassFixture<Postgr
             return Task.FromResult(Result.Success());
         }
 
-        public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default)
-        {
-            TotalCalls++;
-            return Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(equipmentTypeId, 1, [new CatalogBatchSchemaItemResponse(1, [])])));
-        }
-
-        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default)
-        {
-            TotalCalls++;
-            return Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
-        }
     }
 
     private sealed class TrackingMediaClient : IMediaServiceClient

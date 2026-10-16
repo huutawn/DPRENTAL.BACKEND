@@ -66,19 +66,25 @@ public sealed partial class AssetHttpIntegrationTests : IClassFixture<PostgresFi
                 : Task.FromResult(Result.Success());
         }
 
-        public Task<Result<CatalogBatchSchemasResponse>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default)
+        public async Task<Result<Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default)
         {
             BatchCalls++;
-            return BatchSchemasHandler is not null
-                ? BatchSchemasHandler(equipmentTypeId, versions)
-                : Task.FromResult(Result.Success(new CatalogBatchSchemasResponse(
+            if (BatchSchemasHandler is not null)
+            {
+                var r = await BatchSchemasHandler(equipmentTypeId, versions);
+                if (r.IsFailure) return r.Error;
+                return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(r.Value, DateTimeOffset.UtcNow.AddMinutes(5)));
+            }
+            return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(
+                new CatalogBatchSchemasResponse(
                     equipmentTypeId,
                     1,
-                    [new CatalogBatchSchemaItemResponse(1, [])])));
+                    [new CatalogBatchSchemaItemResponse(1, [
+                        new CatalogBatchFieldResponse("power", "Power", "number", true, true, false, 0, 0, 1000, null, "W", null)
+                    ])]),
+                DateTimeOffset.UtcNow.AddMinutes(5)));
         }
 
-        public Task<Result<IReadOnlyList<Guid>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success<IReadOnlyList<Guid>>(Array.Empty<Guid>()));
     }
 
     private sealed class StubMediaClient : IMediaServiceClient

@@ -23,14 +23,14 @@ public sealed class InventoryAvailabilityService : IInventoryAvailabilityService
 {
     private readonly IInventoryAssetRepository _assetRepository;
     private readonly IEquipmentListingRepository _listingRepository;
-    private readonly IInventoryAvailabilityCache _cache;
+    private readonly IInventoryReadCache _cache;
     private readonly InventoryCacheOptions _cacheOptions;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<InventoryAvailabilityService>? _logger;
     public InventoryAvailabilityService(
         IInventoryAssetRepository assetRepository,
         IEquipmentListingRepository listingRepository,
-        IInventoryAvailabilityCache cache,
+        IInventoryReadCache cache,
         TimeProvider timeProvider)
         : this(assetRepository, listingRepository, cache, null, timeProvider, null)
     {
@@ -39,7 +39,7 @@ public sealed class InventoryAvailabilityService : IInventoryAvailabilityService
     public InventoryAvailabilityService(
         IInventoryAssetRepository assetRepository,
         IEquipmentListingRepository listingRepository,
-        IInventoryAvailabilityCache cache,
+        IInventoryReadCache cache,
         IOptions<InventoryCacheOptions>? cacheOptions = null,
         TimeProvider? timeProvider = null,
         ILogger<InventoryAvailabilityService>? logger = null)
@@ -94,39 +94,93 @@ public sealed class InventoryAvailabilityService : IInventoryAvailabilityService
             return periodResult.Error;
         }
 
-        // Batch luôn đọc trực tiếp PostgreSQL
-        var snapshots = await _assetRepository.GetAvailabilitySnapshotsAsync(
-            deduplicatedIds,
-            validStart,
-            validEnd,
+        string dateHash = Dprental.InventoryService.Application.Caching.CacheKeyHelper.ComputeWindowHash(validStart, validEnd);
+        var targets = deduplicatedIds
+            .Select(id => new Dprental.InventoryService.Application.Caching.CacheTarget($"asset:{id:D}", "check-avail", dateHash))
+            .ToList();
+
+        var bulkResult = await _cache.GetOrCreateBulkAsync<AssetAvailabilityCheckCachedDto>(
+            targets,
+            async (stillMissing, ct) =>
+            {
+                var missingIds = stillMissing
+                    .Select(t => Guid.Parse(t.Scope["asset:".Length..]))
+                    .Distinct()
+                    .ToList();
+
+                var snapshots = await _assetRepository.GetAvailabilitySnapshotsAsync(
+                    missingIds,
+                    validStart,
+                    validEnd,
+                    ct);
+
+                var evaluationNowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+                var assetsById = snapshots.ToDictionary(a => a.Id);
+                var produced = new Dictionary<Dprental.InventoryService.Application.Caching.CacheTarget, Dprental.InventoryService.Application.Caching.CachedRead<AssetAvailabilityCheckCachedDto>>();
+
+                foreach (var target in stillMissing)
+                {
+                    var id = Guid.Parse(target.Scope["asset:".Length..]);
+                    if (!assetsById.TryGetValue(id, out var asset))
+                    {
+                        produced[target] = new Dprental.InventoryService.Application.Caching.CachedRead<AssetAvailabilityCheckCachedDto>(
+                            new AssetAvailabilityCheckCachedDto(false, true),
+                            null);
+                        continue;
+                    }
+
+                    var checkResult = AssetAvailabilityPolicy.CheckAvailability(
+                        asset,
+                        periodResult.Value,
+                        evaluationNowUtc,
+                        asset.Allocations,
+                        asset.CalendarBlocks);
+
+                    bool isAvail = checkResult.IsSuccess;
+                    var baseTtl = TimeSpan.FromSeconds(_cacheOptions.DynamicTtlSeconds > 0 ? _cacheOptions.DynamicTtlSeconds : 15);
+                    DateTimeOffset? nearestHold = asset.Allocations
+                        .Where(a => a.Status == AllocationStatus.Held && a.HoldExpiresAt.HasValue && a.HoldExpiresAt.Value > evaluationNowUtc)
+                        .Select(a => a.HoldExpiresAt)
+                        .OrderBy(t => t!.Value)
+                        .FirstOrDefault();
+
+                    var deadline = Dprental.InventoryService.Application.Caching.CacheKeyHelper.CalculateOccupancyDeadline(
+                        evaluationNowUtc.Add(baseTtl),
+                        nearestHold,
+                        asset.Allocations,
+                        evaluationNowUtc);
+
+                    DateTimeOffset? finalDeadline = deadline > evaluationNowUtc ? deadline : null;
+                    produced[target] = new Dprental.InventoryService.Application.Caching.CachedRead<AssetAvailabilityCheckCachedDto>(
+                        new AssetAvailabilityCheckCachedDto(isAvail, false),
+                        finalDeadline);
+                }
+
+                return Result.Success<IReadOnlyDictionary<Dprental.InventoryService.Application.Caching.CacheTarget, Dprental.InventoryService.Application.Caching.CachedRead<AssetAvailabilityCheckCachedDto>>>(produced);
+            },
             cancellationToken);
 
-        // Lấy clock sau khi đọc DB xong để đánh giá occupancy chính xác
-        var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
-
-        var assetsById = snapshots.ToDictionary(a => a.Id);
+        if (bulkResult.IsFailure)
+        {
+            return bulkResult.Error;
+        }
 
         var unavailableAssetIds = new List<Guid>();
         var notFoundAssetIds = new List<Guid>();
 
         foreach (var id in deduplicatedIds)
         {
-            if (!assetsById.TryGetValue(id, out var asset))
+            var target = new Dprental.InventoryService.Application.Caching.CacheTarget($"asset:{id:D}", "check-avail", dateHash);
+            if (bulkResult.Value.TryGetValue(target, out var dto))
             {
-                notFoundAssetIds.Add(id);
-                continue;
-            }
-
-            var checkResult = AssetAvailabilityPolicy.CheckAvailability(
-                asset,
-                periodResult.Value,
-                nowUtc,
-                asset.Allocations,
-                asset.CalendarBlocks);
-
-            if (!checkResult.IsSuccess)
-            {
-                unavailableAssetIds.Add(id);
+                if (dto.IsNotFound)
+                {
+                    notFoundAssetIds.Add(id);
+                }
+                else if (!dto.IsAvailable)
+                {
+                    unavailableAssetIds.Add(id);
+                }
             }
         }
 
@@ -164,43 +218,74 @@ public sealed class InventoryAvailabilityService : IInventoryAvailabilityService
             return dateValResult.Error;
         }
 
-        var snapshot = await _listingRepository.GetCalendarSnapshotAsync(listingId, validStart, validEnd, cancellationToken);
-        if (snapshot is null)
-        {
-            return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
-        }
+        string listingScope = $"listing:{listingId:D}";
+        string listingQueryType = "check-avail";
+        string listingInputHash = Dprental.InventoryService.Application.Caching.CacheKeyHelper.ComputeWindowHash(validStart, validEnd, request.RequestedQuantity);
 
-        if (snapshot.Status != EquipmentListingStatus.Active)
-        {
-            return Result.Success(new CheckListingAvailabilityResponse(
-                listingId,
-                validStart,
-                validEnd,
-                request.RequestedQuantity,
-                AvailableQuantity: 0,
-                IsAvailable: false));
-        }
+        return await _cache.GetOrCreateAsync<CheckListingAvailabilityResponse>(
+            listingScope,
+            listingQueryType,
+            listingInputHash,
+            async (genToken, ct) =>
+            {
+                var snapshot = await _listingRepository.GetCalendarSnapshotAsync(listingId, validStart, validEnd, ct);
+                if (snapshot is null)
+                {
+                    return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+                }
 
-        var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+                var evaluationNowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
 
-        int availableQuantity = snapshot.Assets.Count(a =>
-            a.AcceptingBookings &&
-            !a.CalendarBlocks.Any(cb => cb.StartDate <= validEnd && cb.EndDate >= validStart) &&
-            !a.Allocations.Any(al =>
-                (al.Status == AllocationStatus.Allocated ||
-                 (al.Status == AllocationStatus.Held && al.HoldExpiresAt > nowUtc)) &&
-                al.RentalPeriod.StartDate <= validEnd &&
-                al.RentalPeriod.EndDate >= validStart));
+                if (snapshot.Status != EquipmentListingStatus.Active)
+                {
+                    var inactiveResponse = new CheckListingAvailabilityResponse(
+                        listingId,
+                        validStart,
+                        validEnd,
+                        request.RequestedQuantity,
+                        AvailableQuantity: 0,
+                        IsAvailable: false);
+                    var ttlInactive = evaluationNowUtc.AddSeconds(_cacheOptions.DynamicTtlSeconds > 0 ? _cacheOptions.DynamicTtlSeconds : 15);
+                    return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CheckListingAvailabilityResponse>(inactiveResponse, ttlInactive));
+                }
 
-        bool isAvailable = availableQuantity >= request.RequestedQuantity;
+                int availableQuantity = snapshot.Assets.Count(a =>
+                    a.AcceptingBookings &&
+                    !a.CalendarBlocks.Any(cb => cb.StartDate <= validEnd && cb.EndDate >= validStart) &&
+                    !a.Allocations.Any(al =>
+                        (al.Status == AllocationStatus.Allocated ||
+                         (al.Status == AllocationStatus.Held && al.HoldExpiresAt > evaluationNowUtc)) &&
+                        al.RentalPeriod.StartDate <= validEnd &&
+                        al.RentalPeriod.EndDate >= validStart));
 
-        return Result.Success(new CheckListingAvailabilityResponse(
-            listingId,
-            validStart,
-            validEnd,
-            request.RequestedQuantity,
-            availableQuantity,
-            isAvailable));
+                bool isAvailable = availableQuantity >= request.RequestedQuantity;
+
+                var response = new CheckListingAvailabilityResponse(
+                    listingId,
+                    validStart,
+                    validEnd,
+                    request.RequestedQuantity,
+                    availableQuantity,
+                    isAvailable);
+
+                var baseTtl = TimeSpan.FromSeconds(_cacheOptions.DynamicTtlSeconds > 0 ? _cacheOptions.DynamicTtlSeconds : 15);
+                var allAllocations = snapshot.Assets.SelectMany(a => a.Allocations);
+                DateTimeOffset? nearestHold = allAllocations
+                    .Where(al => al.Status == AllocationStatus.Held && al.HoldExpiresAt.HasValue && al.HoldExpiresAt.Value > evaluationNowUtc)
+                    .Select(al => al.HoldExpiresAt)
+                    .OrderBy(t => t!.Value)
+                    .FirstOrDefault();
+
+                var deadline = Dprental.InventoryService.Application.Caching.CacheKeyHelper.CalculateOccupancyDeadline(
+                    evaluationNowUtc.Add(baseTtl),
+                    nearestHold,
+                    allAllocations,
+                    evaluationNowUtc);
+
+                DateTimeOffset? finalDeadline = deadline > evaluationNowUtc ? deadline : null;
+                return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CheckListingAvailabilityResponse>(response, finalDeadline));
+            },
+            cancellationToken);
     }
 
     /// <inheritdoc />
@@ -234,112 +319,60 @@ public sealed class InventoryAvailabilityService : IInventoryAvailabilityService
         }
 
         var acceptingBookings = asset.AcceptingBookings;
-        var normalTtl = TimeSpan.FromSeconds(_cacheOptions.TtlSeconds > 0 ? _cacheOptions.TtlSeconds : 60);
 
-        // Xác định danh sách các tháng nằm trong khoảng [validFrom, validTo]
         var months = BuildMonthList(validFrom, validTo);
+        var targets = months
+            .Select(m => new Dprental.InventoryService.Application.Caching.CacheTarget($"asset:{assetId:D}", "busy", m.Key))
+            .ToList();
 
-        IReadOnlyDictionary<string, CachedMonthRanges?>? cachedMonths = null;
-        if (_cache.IsEnabled)
-        {
-            try
+        var bulkResult = await _cache.GetOrCreateBulkAsync<CachedMonthRanges>(
+            targets,
+            async (stillMissing, ct) =>
             {
-                var monthKeyList = months.Select(m => m.Key).ToList();
-                var preReadNow = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
-                cachedMonths = await _cache.GetMonthRangesBulkAsync(assetId, monthKeyList, preReadNow, cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Lỗi đọc cache busy ranges cho tài sản {AssetId}. Fallback đọc PostgreSQL.", assetId);
-                cachedMonths = null;
-            }
-        }
+                var missingMonthKeys = stillMissing.Select(t => t.InputHash).ToHashSet(StringComparer.Ordinal);
+                var missingMonthBounds = months.Where(m => missingMonthKeys.Contains(m.Key)).ToList();
 
-        // Kiểm tra hit bằng clock mới sau cache read
-        var postCacheReadNow = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
-        var monthRanges = new Dictionary<string, (IReadOnlyList<BusyRangeDto> Ranges, DateTimeOffset ExpiresAtUtc)>();
-        var missingMonths = new List<(string Key, DateOnly MonthStart, DateOnly MonthEnd)>();
+                var minMissingDate = missingMonthBounds.Min(m => m.MonthStart);
+                var maxMissingDate = missingMonthBounds.Max(m => m.MonthEnd);
 
-        foreach (var m in months)
-        {
-            if (cachedMonths != null &&
-                cachedMonths.TryGetValue(m.Key, out var cached) &&
-                cached != null &&
-                cached.ExpiresAtUtc > postCacheReadNow)
-            {
-                monthRanges[m.Key] = (cached.Ranges, cached.ExpiresAtUtc);
-            }
-            else
-            {
-                missingMonths.Add(m);
-            }
-        }
+                var snapshots = await _assetRepository.GetAvailabilitySnapshotsAsync(
+                    new[] { assetId },
+                    minMissingDate,
+                    maxMissingDate,
+                    ct);
 
-        if (missingMonths.Count > 0)
-        {
-            var minMissingDate = missingMonths.Min(m => m.MonthStart);
-            var maxMissingDate = missingMonths.Max(m => m.MonthEnd);
+                var postSnapshotNow = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+                var snapshotAsset = snapshots.FirstOrDefault(a => a.Id == assetId);
 
-            // Neo deadline normal TTL vào thời điểm bắt đầu đọc snapshot
-            var snapshotStartedAt = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+                var produced = new Dictionary<Dprental.InventoryService.Application.Caching.CacheTarget, Dprental.InventoryService.Application.Caching.CachedRead<CachedMonthRanges>>();
+                var baseTtlSec = _cacheOptions.DynamicTtlSeconds > 0 ? _cacheOptions.DynamicTtlSeconds : 15;
 
-            var snapshots = await _assetRepository.GetAvailabilitySnapshotsAsync(
-                new[] { assetId },
-                minMissingDate,
-                maxMissingDate,
-                cancellationToken);
-
-            // Clock mới sau khi snapshot I/O hoàn tất để tính occupancy chính xác
-            var postSnapshotNow = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
-            var snapshotAsset = snapshots.FirstOrDefault(a => a.Id == assetId);
-
-            foreach (var m in missingMonths)
-            {
-                var (rangesForMonth, nearestHoldExpiry) = CalculateMonthOccupants(snapshotAsset, m.MonthStart, m.MonthEnd, postSnapshotNow);
-
-                // Tính toán deadline: min(normal TTL deadline neo từ snapshot bắt đầu, nearest active Hold expiry)
-                DateTimeOffset deadline;
-                var normalDeadline = snapshotStartedAt.Add(normalTtl);
-                if (nearestHoldExpiry.HasValue)
+                foreach (var target in stillMissing)
                 {
-                    deadline = nearestHoldExpiry.Value < normalDeadline ? nearestHoldExpiry.Value : normalDeadline;
-                }
-                else
-                {
-                    deadline = normalDeadline;
+                    var m = missingMonthBounds.First(mb => mb.Key == target.InputHash);
+                    var (rangesForMonth, nearestHoldExpiry) = CalculateMonthOccupants(snapshotAsset, m.MonthStart, m.MonthEnd, postSnapshotNow);
+
+                    var deadline = Dprental.InventoryService.Application.Caching.CacheKeyHelper.CalculateOccupancyDeadline(
+                        postSnapshotNow.AddSeconds(baseTtlSec),
+                        nearestHoldExpiry,
+                        snapshotAsset?.Allocations,
+                        postSnapshotNow);
+
+                    DateTimeOffset? finalDeadline = deadline > postSnapshotNow ? deadline : null;
+                    var cachedData = new CachedMonthRanges(rangesForMonth, deadline);
+                    produced[target] = new Dprental.InventoryService.Application.Caching.CachedRead<CachedMonthRanges>(cachedData, finalDeadline);
                 }
 
-                monthRanges[m.Key] = (rangesForMonth, deadline);
+                return Result.Success<IReadOnlyDictionary<Dprental.InventoryService.Application.Caching.CacheTarget, Dprental.InventoryService.Application.Caching.CachedRead<CachedMonthRanges>>>(produced);
+            },
+            cancellationToken);
 
-                // Tính lại remaining TTL trước khi ghi; bỏ ghi nếu deadline đã qua
-                var preWriteNow = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
-                if (deadline > preWriteNow && _cache.IsEnabled)
-                {
-                    try
-                    {
-                        await _cache.SetMonthRangesAsync(
-                            assetId,
-                            m.Key,
-                            rangesForMonth,
-                            deadline,
-                            cancellationToken);
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger?.LogWarning(ex, "Lỗi ghi cache cho tài sản {AssetId}, tháng {MonthKey}.", assetId, m.Key);
-                    }
-                }
-            }
+        if (bulkResult.IsFailure)
+        {
+            return bulkResult.Error;
         }
 
+        var monthRanges = bulkResult.Value.ToDictionary(kv => kv.Key.InputHash, kv => (kv.Value.Ranges, kv.Value.ExpiresAtUtc));
         // Kiểm tra lại deadline trước khi trả response
         var preReturnNow = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
         bool anyHitExpiredDuringProcessing = monthRanges.Values.Any(v => v.ExpiresAtUtc <= preReturnNow);

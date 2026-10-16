@@ -65,7 +65,8 @@ public sealed record PublicEquipmentListingItem(
 /// </summary>
 public sealed record PublicEquipmentListingSearchResult(
     IReadOnlyList<PublicEquipmentListingItem> Items,
-    int TotalCount);
+    int TotalCount,
+    DateTimeOffset? NextAvailabilityChangeAtUtc = null);
 
 /// <summary>
 /// Tiêu chí tìm kiếm và phân trang EquipmentListing của người sở hữu (Owner Listings).
