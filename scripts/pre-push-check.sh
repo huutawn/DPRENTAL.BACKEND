@@ -48,7 +48,17 @@ printf 'Đang build %s (Release)...\n' "$SOLUTION_FILE"
 dotnet build "$SOLUTION_FILE" --configuration Release --nologo || fail "build thất bại; push đã bị chặn."
 
 printf 'Đang kiểm tra pending EF model changes...\n'
-dotnet dotnet-ef migrations has-pending-model-changes --project PaymentService/src/Domain/PaymentService.Domain.csproj --startup-project PaymentService/src/Api/PaymentService.Api.csproj --configuration Release --no-build || fail "phát hiện model changes chưa được tạo migration; push đã bị chặn."
+if dotnet dotnet-ef --version >/dev/null 2>&1; then
+  ef_command=(dotnet dotnet-ef)
+elif command -v dotnet-ef >/dev/null 2>&1; then
+  ef_command=(dotnet-ef)
+elif [ -x "${HOME}/.dotnet/tools/dotnet-ef.exe" ]; then
+  ef_command=("${HOME}/.dotnet/tools/dotnet-ef.exe")
+else
+  fail "không tìm thấy dotnet-ef; hãy chạy 'dotnet tool restore' trước khi push."
+fi
+
+"${ef_command[@]}" migrations has-pending-model-changes --project PaymentService/src/Domain/PaymentService.Domain.csproj --startup-project PaymentService/src/Api/PaymentService.Api.csproj --configuration Release --no-build || fail "kiểm tra EF model thất bại hoặc còn model changes chưa được tạo migration; push đã bị chặn."
 
 printf 'Đang chạy test %s (Release)...\n' "$SOLUTION_FILE"
 DOTNET_USE_POLLING_FILE_WATCHER=1 dotnet test "$SOLUTION_FILE" --configuration Release --no-build --nologo || fail "test thất bại; push đã bị chặn."
