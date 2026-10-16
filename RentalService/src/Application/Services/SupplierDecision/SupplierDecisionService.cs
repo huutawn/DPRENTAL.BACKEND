@@ -7,6 +7,7 @@ using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Logging;
 
@@ -64,17 +65,16 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         var keyValidation = ValidateIdempotencyKey(idempotencyKey);
         if (keyValidation.IsFailure) return keyValidation.Error;
 
-        var callerValidation = ValidateSupplierCaller(caller);
-        if (callerValidation.IsFailure) return callerValidation.Error;
+        Result<Guid> supplier = RentalAuthorizationPolicy.AuthorizeSupplierCaller(caller);
+        if (supplier.IsFailure) return supplier.Error;
 
-        Guid supplierId = caller.UserId!.Value;
+        Guid supplierId = supplier.Value;
 
         // Lookup only the sub-order before lock using AsNoTracking
-        RentalSubOrder? subOrder = await _orderRepository.GetSubOrderByIdAsync(subOrderId, cancellationToken);
-        if (subOrder is null || subOrder.SupplierId != supplierId)
-        {
-            return SubOrderNotFound(subOrderId);
-        }
+        Result<RentalSubOrder> owned = RentalAuthorizationPolicy.AuthorizeSupplierSubOrder(
+            supplierId, await _orderRepository.GetSubOrderByIdAsync(subOrderId, cancellationToken));
+        if (owned.IsFailure) return owned.Error;
+        RentalSubOrder subOrder = owned.Value;
 
         var result = await _operationExecutor.ExecuteSubOrderAcceptAsync(
             subOrder.RentalOrderId,
@@ -96,8 +96,8 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         var keyValidation = ValidateIdempotencyKey(idempotencyKey);
         if (keyValidation.IsFailure) return keyValidation.Error;
 
-        var callerValidation = ValidateSupplierCaller(caller);
-        if (callerValidation.IsFailure) return callerValidation.Error;
+        Result<Guid> supplier = RentalAuthorizationPolicy.AuthorizeSupplierCaller(caller);
+        if (supplier.IsFailure) return supplier.Error;
 
         if (request == null || string.IsNullOrWhiteSpace(request.RejectReason) || request.RejectReason.Trim().Length > 500)
         {
@@ -109,14 +109,13 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             return Error.Validation("INVALID_OPTIONAL_NOTE", "Ghi chú không được vượt quá 2000 ký tự.");
         }
 
-        Guid supplierId = caller.UserId!.Value;
+        Guid supplierId = supplier.Value;
 
         // Lookup only the sub-order before lock using AsNoTracking
-        RentalSubOrder? subOrder = await _orderRepository.GetSubOrderByIdAsync(subOrderId, cancellationToken);
-        if (subOrder is null || subOrder.SupplierId != supplierId)
-        {
-            return SubOrderNotFound(subOrderId);
-        }
+        Result<RentalSubOrder> owned = RentalAuthorizationPolicy.AuthorizeSupplierSubOrder(
+            supplierId, await _orderRepository.GetSubOrderByIdAsync(subOrderId, cancellationToken));
+        if (owned.IsFailure) return owned.Error;
+        RentalSubOrder subOrder = owned.Value;
 
         var result = await _operationExecutor.ExecuteSubOrderRejectAsync(
             subOrder.RentalOrderId,
@@ -129,10 +128,6 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
 
         return result.IsSuccess ? ToResponse(subOrder, result.Value) : result.Error;
     }
-
-    // Đơn con của supplier khác trả như không tồn tại để không lộ dữ liệu.
-    private static Error SubOrderNotFound(Guid subOrderId) =>
-        Error.NotFound("SUB_ORDER_NOT_FOUND", $"Không tìm thấy đơn con '{subOrderId}'.");
 
     private static SubOrderDecisionResponse ToResponse(RentalSubOrder subOrder, IReadOnlyList<SupplierDecisionResponse> items)
     {
@@ -151,8 +146,8 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         var keyValidation = ValidateIdempotencyKey(idempotencyKey);
         if (keyValidation.IsFailure) return keyValidation.Error;
 
-        var callerValidation = ValidateSupplierCaller(caller);
-        if (callerValidation.IsFailure) return callerValidation.Error;
+        Result<Guid> supplier = RentalAuthorizationPolicy.AuthorizeSupplierCaller(caller);
+        if (supplier.IsFailure) return supplier.Error;
 
         if (request == null || request.Units == null || request.Units.Count == 0)
         {
@@ -164,22 +159,19 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             return Error.Validation("INVALID_HANDOVER_TIME", "Thời gian bàn giao thực tế không hợp lệ.");
         }
 
-        Guid supplierId = caller.UserId!.Value;
+        Guid supplierId = supplier.Value;
         var orderId = await _orderRepository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
-        if (!orderId.HasValue) return Error.NotFound("ITEM_NOT_FOUND", $"Không tìm thấy mục thuê '{itemId}'.");
+        if (!orderId.HasValue) return RentalErrors.ItemNotFound;
 
         await using var orderLock = await _lockManager.AcquireOrderLockAsync(orderId.Value, TimeSpan.FromSeconds(5), cancellationToken);
 
         var order = await _orderRepository.GetByIdWithDetailsAsync(orderId.Value, cancellationToken);
-        if (order == null) return Error.NotFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng.");
+        if (order == null) return RentalErrors.ItemNotFound;
 
-        var item = order.Items.FirstOrDefault(i => i.Id == itemId);
-        if (item == null) return Error.NotFound("ITEM_NOT_FOUND", "Không tìm thấy mục thuê.");
-
-        if (item.SupplierId != supplierId)
-        {
-            return Error.Forbidden("SUPPLIER_MISMATCH", "Chỉ chủ thiết bị mới có quyền bàn giao.");
-        }
+        Result<RentalItem> owned = RentalAuthorizationPolicy.AuthorizeSupplierItem(
+            supplierId, order.Items.FirstOrDefault(i => i.Id == itemId));
+        if (owned.IsFailure) return owned.Error;
+        RentalItem item = owned.Value;
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         if (request.ActualHandoverAt > utcNow.AddMinutes(5))
@@ -285,15 +277,6 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Trim().Length > 64)
         {
             return Error.Validation("INVALID_IDEMPOTENCY_KEY", "Idempotency-Key là bắt buộc và không được vượt quá 64 ký tự.");
-        }
-        return Result.Success();
-    }
-
-    private static Result ValidateSupplierCaller(IRentalCallerContext caller)
-    {
-        if (!caller.IsAuthenticated || caller.IsService || !caller.UserId.HasValue || caller.UserId.Value == Guid.Empty)
-        {
-            return Error.Unauthorized("AUTH_REQUIRED", "Yêu cầu đăng nhập tài khoản cá nhân của supplier.");
         }
         return Result.Success();
     }

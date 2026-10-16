@@ -4,6 +4,7 @@ using Dprental.RentalService.Application.DTOs.Operations;
 using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
+using Dprental.RentalService.Domain.Errors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -147,22 +148,12 @@ public sealed class RentalInternalOperationsController : ControllerBase
         [FromRoute] string operationId,
         CancellationToken cancellationToken = default)
     {
-        if (!_callerContext.IsAuthenticated)
-        {
-            return this.ToProblem(Error.Unauthorized("AUTH_REQUIRED", "Yêu cầu đăng nhập."));
-        }
-
+        // Đơn không tồn tại và đơn của người khác trả cùng một lỗi Order.NotFound; quyền do policy quyết định.
         var order = await _orderRepository.GetByIdWithDetailsAsync(orderId, cancellationToken);
-        if (order is null)
+        Result access = RentalAuthorizationPolicy.AuthorizeOperationRead(_callerContext, order);
+        if (access.IsFailure || order is null)
         {
-            return this.ToProblem(Error.NotFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng."));
-        }
-
-        bool isRenter = order.RenterId == _callerContext.UserId;
-        bool isSupplier = order.Items.Any(i => i.SupplierId == _callerContext.UserId);
-        if (!_callerContext.IsAdmin() && !isRenter && !isSupplier)
-        {
-            return this.ToProblem(Error.Forbidden("FORBIDDEN", "Không có quyền xem tác vụ của đơn hàng này."));
+            return this.ToProblem(access.IsFailure ? access.Error : RentalErrors.OrderNotFound);
         }
 
         var receipt = order.OperationReceipts.FirstOrDefault(r => string.Equals(r.OperationId, operationId.Trim(), StringComparison.OrdinalIgnoreCase));

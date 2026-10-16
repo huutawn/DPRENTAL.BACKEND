@@ -1,3 +1,4 @@
+using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Kafka.Configuration;
@@ -122,7 +123,8 @@ public sealed class ReturnTests : IAsyncLifetime
         client.DefaultRequestHeaders.Add("X-Test-Renter-Id", Guid.NewGuid().ToString());
         client.DefaultRequestHeaders.Add("Idempotency-Key", "api-key");
         using var foreign = await client.PostAsJsonAsync(route, request);
-        Assert.Equal(HttpStatusCode.Forbidden, foreign.StatusCode);
+        // Supplier khác nhận 404 như khi khoản thuê không tồn tại (IDOR).
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
         client.DefaultRequestHeaders.Remove("X-Test-Renter-Id");
         client.DefaultRequestHeaders.Add("X-Test-Renter-Id", item.SupplierId.ToString());
         using var result = await client.PostAsJsonAsync(route, request);
@@ -218,7 +220,7 @@ public sealed class ReturnTests : IAsyncLifetime
         var conflict = await Service(db).RecordReturnAsync(item.Id, Caller(item.SupplierId), request with { Note = "changed" }, "key");
         Assert.Equal("IDEMPOTENCY_CONFLICT", conflict.Error.Code);
         var unauthorized = await Service(db).RecordReturnAsync(item.Id, Caller(Guid.NewGuid()), request, "key");
-        Assert.Equal(ErrorType.Forbidden, unauthorized.Error.Type);
+        Assert.Equal(RentalErrors.ItemNotFound, unauthorized.Error);
     }
 
     [Fact]

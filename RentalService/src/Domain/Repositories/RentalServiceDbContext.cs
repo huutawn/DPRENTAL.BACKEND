@@ -162,6 +162,9 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
 
             b.HasIndex(i => i.SupplierDecisionBy);
 
+            // Admin tìm đơn theo thiết bị.
+            b.HasIndex(i => i.EquipmentListingId);
+
             b.Property(i => i.SupplierDecisionNote)
                 .HasMaxLength(2000);
 
@@ -194,6 +197,9 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
 
             b.HasIndex(u => new { u.RentalItemId, u.AllocationId })
                 .IsUnique();
+
+            // Admin tìm đơn theo máy cụ thể; index (RentalItemId, AssetId) không dùng được khi chỉ lọc AssetId.
+            b.HasIndex(u => u.AssetId);
 
             b.Property(u => u.ProposedDeductionAmount)
                 .HasPrecision(18, 2);

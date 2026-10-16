@@ -1,4 +1,5 @@
 using Dprental.RentalService.Application.Security;
+using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 
 namespace Dprental.RentalService.Api.Tests.Orders;
@@ -15,7 +16,9 @@ internal static class OrderTestData
     public static readonly DateOnly Start = new(2026, 10, 12);
     public static readonly DateOnly ReturnDate = new(2026, 10, 15);
 
-    public const string RefundAccount = "VCB|0123456789|NGUYEN VAN A";
+    // Cùng dạng checkout ghi vào RefundDestinationRef.
+    public const string RefundAccount =
+        """{"bankCode":"VCB","accountNumber":"0123456789","accountHolderName":"NGUYỄN VĂN AN"}""";
 
     public static InitialRentalItemDto Line(
         Guid supplierId,
@@ -80,6 +83,47 @@ internal static class OrderTestData
 
         return order;
     }
+
+    /// <summary>Đưa dòng sang đang thuê như sau khi nhà cung cấp giao đủ máy (luồng bàn giao chưa có API).</summary>
+    public static HandoverRecord HandOver(RentalItem item, DateTimeOffset handedOverAt, string? note = null)
+    {
+        typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(item, RentalItemStatus.InRental);
+        HandoverRecord handover = new(Guid.NewGuid(), item.Id, handedOverAt, note, item.SupplierId, handedOverAt, handedOverAt);
+        item.SetHandoverRecord(handover);
+        foreach (RentalUnitAssignment unit in item.UnitAssignments)
+        {
+            unit.RecordHandover(handover.Id, UnitCondition.Normal, null, []);
+            handover.AddAssignment(unit);
+        }
+
+        return handover;
+    }
+
+    /// <summary>
+    /// Nối dòng với đơn như EF làm khi load từ database, để quyết định của nhà cung cấp ghi được lịch sử trạng thái.
+    /// </summary>
+    public static void LinkItemsToOrder(RentalOrder order)
+    {
+        foreach (RentalItem item in order.Items)
+        {
+            typeof(RentalItem).GetProperty(nameof(RentalItem.RentalOrder))!.SetValue(item, order);
+        }
+    }
+
+    /// <summary>Receipt RequestRefund mà luồng từ chối/hết hạn tạo khi yêu cầu PaymentService hoàn tiền dòng này.</summary>
+    public static void RequestRefund(RentalOrder order, RentalItem item, DateTimeOffset requestedAt) =>
+        order.AddOperationReceipt(new RentalOperationReceipt(
+            Guid.NewGuid(),
+            order.Id,
+            $"refund-{item.Id:N}",
+            "RequestRefund",
+            "fingerprint",
+            isSuccess: false,
+            errorCode: null,
+            errorMessage: null,
+            createdAt: requestedAt,
+            status: RentalOperationReceipt.StatusPending,
+            targetItemId: item.Id));
 
     public static RentalCallerContext User(Guid userId) => RentalCallerContext.ForUser(userId);
 

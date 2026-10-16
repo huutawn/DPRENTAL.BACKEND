@@ -1,3 +1,4 @@
+using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 
 namespace Dprental.RentalService.Domain.IRepositories;
@@ -65,32 +66,53 @@ public interface IRentalOrderRepository
     /// <summary>Đơn con theo mã, không kèm dòng; không theo dõi thay đổi.</summary>
     Task<RentalSubOrder?> GetSubOrderByIdAsync(Guid subOrderId, CancellationToken cancellationToken = default);
 
-    /// <summary>Một trang đơn của người thuê, mới nhất trước.</summary>
+    /// <summary>Một trang đơn của người thuê, mới nhất trước; <paramref name="status"/> rỗng là mọi trạng thái.</summary>
     Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(
         Guid renterId,
-        int skip,
-        int take,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>Đơn kèm các đơn con và dòng, chỉ khi đơn thuộc người thuê này; không theo dõi thay đổi.</summary>
-    Task<RentalOrder?> GetRenterOrderWithSubOrdersAsync(
-        Guid orderId,
-        Guid renterId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>Một trang đơn con của nhà cung cấp, chỉ gồm đơn đã thanh toán đúng hạn, mới nhất trước.</summary>
-    Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(
-        Guid supplierId,
+        RentalOrderStatus? status,
         int skip,
         int take,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Đơn con kèm dòng và đơn cha, chỉ khi đơn con thuộc nhà cung cấp này và đơn đã thanh toán đúng hạn;
+    /// Đơn kèm các đơn con, dòng, bàn giao, trả máy, đề xuất khấu trừ và các yêu cầu hoàn tiền, chỉ khi đơn thuộc
+    /// người thuê này; không theo dõi thay đổi.
+    /// </summary>
+    Task<RentalOrder?> GetRenterOrderWithSubOrdersAsync(
+        Guid orderId,
+        Guid renterId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Một trang đơn con của nhà cung cấp, chỉ gồm đơn đã thanh toán đúng hạn, mới nhất trước;
+    /// <paramref name="itemStatus"/> có giá trị thì chỉ lấy đơn con có ít nhất một dòng ở trạng thái đó.
+    /// </summary>
+    Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(
+        Guid supplierId,
+        RentalItemStatus? itemStatus,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Đơn con kèm đơn cha, dòng, máy đã gán, bàn giao, trả máy và đề xuất khấu trừ, chỉ khi đơn con thuộc nhà cung cấp này và đơn đã thanh toán đúng hạn;
     /// không theo dõi thay đổi.
     /// </summary>
     Task<RentalSubOrder?> GetPaidSubOrderForSupplierAsync(
         Guid subOrderId,
         Guid supplierId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Một trang đơn khớp điều kiện tìm của Admin, mới nhất trước.</summary>
+    Task<RecordPage<AdminOrderSummaryRecord>> SearchOrdersForAdminAsync(
+        AdminOrderSearchCriteria criteria,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Đơn kèm đơn con, dòng, máy đã gán, bàn giao, trả máy, đề xuất khấu trừ, lịch sử trạng thái và các yêu cầu hoàn
+    /// tiền; không lọc theo người sở hữu, chỉ dùng cho Admin. Không theo dõi thay đổi.
+    /// </summary>
+    Task<RentalOrder?> GetOrderForAdminAsync(Guid orderId, CancellationToken cancellationToken = default);
 }

@@ -6,6 +6,7 @@ using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.DTOs.Supplier;
+using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
@@ -27,13 +28,10 @@ public sealed partial class RentalOperationExecutor
         var order = await _orderRepository.GetByIdWithDetailsAsync(orderId, cancellationToken);
         if (order == null) return Error.NotFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng.");
 
-        var item = order.Items.FirstOrDefault(i => i.Id == itemId);
-        if (item == null) return Error.NotFound("ITEM_NOT_FOUND", "Không tìm thấy mục thuê.");
-
-        if (item.SupplierId != supplierId)
-        {
-            return Error.Forbidden("SUPPLIER_MISMATCH", "Chỉ chủ thiết bị mới có quyền đưa ra quyết định.");
-        }
+        Result<RentalItem> owned = RentalAuthorizationPolicy.AuthorizeSupplierItem(
+            supplierId, order.Items.FirstOrDefault(i => i.Id == itemId));
+        if (owned.IsFailure) return owned.Error;
+        RentalItem item = owned.Value;
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         string normalizedKey = idempotencyKey.Trim();
@@ -178,13 +176,10 @@ public sealed partial class RentalOperationExecutor
         var order = await _orderRepository.GetByIdWithDetailsAsync(orderId, cancellationToken);
         if (order == null) return Error.NotFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng.");
 
-        var item = order.Items.FirstOrDefault(i => i.Id == itemId);
-        if (item == null) return Error.NotFound("ITEM_NOT_FOUND", "Không tìm thấy mục thuê.");
-
-        if (item.SupplierId != supplierId)
-        {
-            return Error.Forbidden("SUPPLIER_MISMATCH", "Chỉ chủ thiết bị mới có quyền đưa ra quyết định.");
-        }
+        Result<RentalItem> owned = RentalAuthorizationPolicy.AuthorizeSupplierItem(
+            supplierId, order.Items.FirstOrDefault(i => i.Id == itemId));
+        if (owned.IsFailure) return owned.Error;
+        RentalItem item = owned.Value;
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         string normalizedKey = idempotencyKey.Trim();
