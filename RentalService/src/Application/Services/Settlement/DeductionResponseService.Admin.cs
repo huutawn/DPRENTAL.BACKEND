@@ -4,6 +4,7 @@ using System.Text.Json;
 using Dprental.RentalService.Application.DTOs.Settlement;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Validation;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
@@ -27,9 +28,14 @@ public sealed partial class DeductionResponseService
         var item = order?.Items.FirstOrDefault(i => i.Id == itemId);
         if (order is null || item is null) return RentalErrors.ItemNotFound;
         var mediaIds = (request.ResolutionMediaIds ?? []).ToArray();
-        string payload = JsonSerializer.Serialize(new { ItemId = itemId, AdminId = caller.UserId,
-            request.FinalDeductionAmount, Note = request.DecisionNote?.Trim(),
-            MediaIds = mediaIds.OrderBy(id => id) });
+        string payload = JsonSerializer.Serialize(new
+        {
+            ItemId = itemId,
+            AdminId = caller.UserId,
+            request.FinalDeductionAmount,
+            Note = request.DecisionNote?.Trim(),
+            MediaIds = mediaIds.OrderBy(id => id)
+        });
         string fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
         string key = idempotencyKey.Trim();
         var existing = order.OperationReceipts.FirstOrDefault(r => r.OperationId == key);
@@ -68,7 +74,8 @@ public sealed partial class DeductionResponseService
         order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id, key,
             "AdminResolveDispute", fingerprint, true, null, null, now, targetItemId: itemId,
             payloadJson: payload, apiResponseJson: JsonSerializer.Serialize(response)));
-        order.IncrementVersion();
+        RentalOrderStatusPolicy.Apply(order, now, key);
+        order.RecordReadModelUpdate(now);
         await orders.UpdateAsync(order, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return response;

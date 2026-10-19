@@ -406,13 +406,18 @@ public partial class RentalItem
             operationId));
     }
 
-    internal void MarkAssignmentsReleased(DateTimeOffset? releasedAt = null)
+    internal bool MarkAssignmentsReleased(DateTimeOffset releasedAt)
     {
-        DateTimeOffset now = releasedAt ?? DateTimeOffset.UtcNow;
+        bool changed = false;
         foreach (var unit in _unitAssignments)
         {
-            unit.Release(now);
+            if (unit.Status != RentalUnitAssignmentStatus.Released)
+            {
+                unit.Release(releasedAt);
+                changed = true;
+            }
         }
+        return changed;
     }
 
     internal void RecordRefund(string refundRef)

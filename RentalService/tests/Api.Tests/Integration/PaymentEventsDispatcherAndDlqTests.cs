@@ -53,14 +53,14 @@ public sealed class PaymentEventsDispatcherAndDlqTests
     private sealed class StubPaymentWorkflowService : IPaymentWorkflowService
     {
         public bool ProcessCalled { get; set; }
-        public Task<Result> ApplyInvoicePaidStagedAsync(
+        public Task<Result<bool>> ApplyInvoicePaidStagedAsync(
             RentalOrder order,
             KafkaMessageEnvelope<InvoicePaidPayload> envelope,
             RentalInboxMessage inboxMessage,
             CancellationToken cancellationToken = default)
         {
             ProcessCalled = true;
-            return Task.FromResult(Result.Success());
+            return Task.FromResult(Result.Success(true));
         }
 
         public Task<Result> ProcessInvoicePaidAsync(KafkaMessageEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default)
@@ -73,14 +73,14 @@ public sealed class PaymentEventsDispatcherAndDlqTests
     private sealed class StubRefundConsumer : IRefundCompletedConsumer
     {
         public bool ProcessCalled { get; set; }
-        public Task<Result> ApplyRefundCompletedStagedAsync(
+        public Task<Result<bool>> ApplyRefundCompletedStagedAsync(
             RentalOrder order,
             KafkaMessageEnvelope<RefundCompletedPayload> envelope,
             RentalInboxMessage inboxMessage,
             CancellationToken cancellationToken = default)
         {
             ProcessCalled = true;
-            return Task.FromResult(Result.Success());
+            return Task.FromResult(Result.Success(true));
         }
 
         public Task<Result> ProcessRefundCompletedAsync(KafkaMessageEnvelope<RefundCompletedPayload> envelope, CancellationToken cancellationToken = default)

@@ -266,6 +266,7 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             JsonSerializer.Serialize(handoverCmd));
 
         order.AddOperationReceipt(receipt);
+        order.RecordReadModelUpdate(utcNow);
         await _orderRepository.UpdateAsync(order, cancellationToken);
         await _unitOfWork.CommitAsync(cancellationToken);
 

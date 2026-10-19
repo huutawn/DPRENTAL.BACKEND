@@ -329,6 +329,7 @@ public sealed partial class RentalOperationExecutor
         // 3. Mark Expired ONLY after valid cancel and all releases succeeded
         utcNow = _timeProvider.GetUtcNow();
         order.MarkPaymentExpired(utcNow, operationKey);
+        order.RecordReadModelUpdate(utcNow);
 
         var outboxEnvelope = new KafkaMessageEnvelope<RentalOrderExpiredPayload>(
             Guid.NewGuid(),

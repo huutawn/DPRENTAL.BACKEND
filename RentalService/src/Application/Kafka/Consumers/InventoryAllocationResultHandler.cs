@@ -16,6 +16,7 @@ using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Application.Services.Operations;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
@@ -110,7 +111,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             if (string.Equals(commandType, KafkaContractSpec.CommandTypes.ReleaseAllocation, StringComparison.OrdinalIgnoreCase) &&
                 _checkoutOperationRepo != null &&
                 await _checkoutOperationRepo.GetByExpectedOrderIdAsync(orderId, cancellationToken) is
-                    { Status: CheckoutOperationStatus.Failed or CheckoutOperationStatus.TimedOut })
+                { Status: CheckoutOperationStatus.Failed or CheckoutOperationStatus.TimedOut })
             {
                 _logger.LogInformation("Release reply {OperationKey} for unfinished checkout order {OrderId} acknowledged", operationKey, orderId);
                 return Result.Success();
@@ -393,7 +394,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 if (item.Status == RentalItemStatus.PendingSupplierConfirmation)
                 {
                     item.ApplySupplierAccept(item.SupplierId, utcNow, operationKey, operationKey);
-                    order.EvaluateOrderStatusRollup(utcNow, operationKey);
+                    RentalOrderStatusPolicy.Apply(order, utcNow, operationKey);
+                    order.RecordReadModelUpdate(utcNow);
                     apiResponseJson = RentalOperationExecutor.SerializeSupplierResponse(order, item);
                     var outboxPayload = new RentalItemConfirmedPayload(
                         order.Id,
@@ -498,7 +500,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             if (item != null)
             {
                 item.ApplySupplierTimeout(utcNow, operationKey);
-                order.EvaluateOrderStatusRollup(utcNow, operationKey);
+                RentalOrderStatusPolicy.Apply(order, utcNow, operationKey);
+                order.RecordReadModelUpdate(utcNow);
 
                 string refundKey = RentalOperationExecutor.ComputeOperationKey("RequestRefund", $"{order.Id}:{rentalItemId}");
                 var refundReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundKey);
@@ -550,8 +553,13 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         {
             receipt.MarkSucceeded(utcNow, null, payloadElement.GetRawText());
             var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
-            item?.MarkAssignmentsReleased();
+            bool assignmentsChanged = item?.MarkAssignmentsReleased(utcNow) ?? false;
+            bool rollupChanged = RentalOrderStatusPolicy.Apply(order, utcNow, receipt.OperationId);
 
+            if (assignmentsChanged || rollupChanged)
+            {
+                order.RecordReadModelUpdate(utcNow);
+            }
             string refundOpKey = RentalOperationExecutor.ComputeOperationKey("RequestRefund", $"{order.Id}:{rentalItemId}");
             var pendingRefund = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundOpKey && r.Status == RentalOperationReceipt.StatusPending);
             if (pendingRefund != null && _operationExecutor != null && item != null)
@@ -593,7 +601,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 }
 
                 item.ApplyHandover(utcNow, operationKey);
-                order.EvaluateOrderStatusRollup(utcNow, operationKey);
+                RentalOrderStatusPolicy.Apply(order, utcNow, operationKey);
+                order.RecordReadModelUpdate(utcNow);
 
             }
         }
