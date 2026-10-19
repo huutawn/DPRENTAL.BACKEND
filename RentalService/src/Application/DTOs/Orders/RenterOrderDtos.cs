@@ -57,6 +57,9 @@ public sealed record RenterRefundAccountResponse(
 /// <param name="Model">Model.</param>
 /// <param name="SpecValues">Thông số kỹ thuật dạng object JSON.</param>
 /// <param name="PickupLocation">Nơi nhận máy của nhà cung cấp.</param>
+/// <param name="EquipmentTypeId">Mã loại thiết bị tại thời điểm đặt; đơn cũ có thể không có.</param>
+/// <param name="BrandId">Mã thương hiệu tại thời điểm đặt; đơn cũ có thể không có.</param>
+/// <param name="SpecSchemaVersion">Phiên bản schema thông số tại thời điểm đặt; đơn cũ có thể không có.</param>
 public sealed record OrderListingSnapshotResponse(
     string? Description,
     Guid? ThumbnailMediaId,
@@ -64,7 +67,10 @@ public sealed record OrderListingSnapshotResponse(
     string? BrandName,
     string? Model,
     JsonElement? SpecValues,
-    string? PickupLocation);
+    string? PickupLocation,
+    Guid? EquipmentTypeId = null,
+    Guid? BrandId = null,
+    int? SpecSchemaVersion = null);
 
 /// <summary>
 /// Tình trạng hoàn tiền của một dòng.

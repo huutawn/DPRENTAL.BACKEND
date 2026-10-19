@@ -23,7 +23,7 @@ public sealed class CheckoutServiceTests
     private static readonly DateTimeOffset Now = CheckoutTestHarness.Now;
     private const string Key = "checkout-key-1";
     private const string OtherKey = "checkout-key-2";
-    // Inventory chưa có tiền cọc nên cọc = 0.
+    // Fixture này dùng cọc = 0.
     // Máy ảnh: 2 máy x 500.000 x 3 ngày = 3.000.000. Ống kính: 1 cái x 200.000 x 3 ngày = 600.000.
     private const decimal CameraAndLensTotal = 3_600_000m;
     // Chân máy: 1 cái x 100.000 x 3 ngày = 300.000.

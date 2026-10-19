@@ -8,6 +8,7 @@ using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Validation;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
+using Dprental.RentalService.Common.Utils;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
@@ -298,12 +299,20 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             orderStartDate,
             orderEndDate,
             listing.Name.Trim(),
-            RentalItemListingSnapshotDto.ThumbnailOnly(listing.ThumbnailMediaId),
+            new RentalItemListingSnapshotDto(
+                listing.EquipmentTypeId,
+                listing.EquipmentTypeName,
+                listing.BrandId,
+                listing.BrandName,
+                listing.Model,
+                listing.SpecSchemaVersion,
+                listing.SpecValues?.GetRawText(),
+                listing.ThumbnailMediaId),
             dailyRate,
-            CheckoutRules.DepositPerUnit,
+            listing.DepositPerUnit!.Value,
             rentalDays,
             RentalPricingPolicy.CalculateRentalAmount(dailyRate, item.Quantity, rentalDays),
-            RentalPricingPolicy.CalculateDepositAmount(CheckoutRules.DepositPerUnit, item.Quantity),
+            RentalPricingPolicy.CalculateDepositAmount(listing.DepositPerUnit.Value, item.Quantity),
             pickupLocationSnapshot);
     }
 
@@ -317,11 +326,19 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         listing.OwnerUserId != Guid.Empty &&
         !string.IsNullOrWhiteSpace(listing.Name) &&
         !string.IsNullOrWhiteSpace(listing.Status) &&
-        !string.IsNullOrWhiteSpace(listing.Currency);
+        !string.IsNullOrWhiteSpace(listing.Currency) &&
+        listing.EquipmentTypeId is { } equipmentTypeId && equipmentTypeId != Guid.Empty &&
+        listing.BrandId is { } brandId && brandId != Guid.Empty &&
+        !string.IsNullOrWhiteSpace(listing.Model) &&
+        listing.DepositPerUnit is >= 0 &&
+        VndAmountValidator.ValidateVndAmount(listing.DepositPerUnit.Value).IsSuccess &&
+        listing.SpecSchemaVersion is >= 1 &&
+        listing.SpecValues is { ValueKind: System.Text.Json.JsonValueKind.Object };
 
     private static bool IsRentable(ListingRentalSnapshotDto listing) =>
         string.Equals(listing.Status, ActiveStatus, StringComparison.OrdinalIgnoreCase) &&
         listing.DailyRate > 0 &&
+        VndAmountValidator.ValidateVndAmount(listing.DailyRate).IsSuccess &&
         string.Equals(listing.Currency, CheckoutRules.Currency, StringComparison.OrdinalIgnoreCase);
 
     private static CheckoutDeliveryDto Normalize(CheckoutDeliveryDto delivery) =>

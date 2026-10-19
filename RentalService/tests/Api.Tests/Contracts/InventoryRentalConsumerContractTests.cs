@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Xunit;
@@ -94,7 +95,13 @@ public sealed class InventoryRentalConsumerContractTests
             Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
             500_000m,
             "VND",
-            "Active");
+            "Active",
+            EquipmentTypeId: Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+            BrandId: Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+            Model: "FX3",
+            DepositPerUnit: 2_000_000m,
+            SpecSchemaVersion: 1,
+            SpecValues: JsonSerializer.Deserialize<JsonElement>("{\"sensor\":\"full-frame\"}"));
 
         _stub.GetSnapshotHandler = id => Task.FromResult(Result.Success(fixture));
 
@@ -104,17 +111,25 @@ public sealed class InventoryRentalConsumerContractTests
         Assert.Equal(500_000m, result.Value.DailyRate);
         Assert.Equal("VND", result.Value.Currency);
 
-        // Đúng dạng Inventory đưa ngày 15/10/2026, không thêm ô nào khác.
         string json = JsonSerializer.Serialize(result.Value, JsonOptions);
-        Assert.Equal(
-            """{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","ownerUserId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","name":"Sony FX3","thumbnailMediaId":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","dailyRate":500000,"currency":"VND","status":"Active"}""",
-            json);
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+        Assert.Equal(2_000_000m, root.GetProperty("depositPerUnit").GetDecimal());
+        Assert.Equal(fixture.EquipmentTypeId, root.GetProperty("equipmentTypeId").GetGuid());
+        Assert.Equal(fixture.BrandId, root.GetProperty("brandId").GetGuid());
+        Assert.Equal("FX3", root.GetProperty("model").GetString());
+        Assert.Equal(1, root.GetProperty("specSchemaVersion").GetInt32());
+        Assert.Equal("full-frame", root.GetProperty("specValues").GetProperty("sensor").GetString());
         Assert.DoesNotContain("serialNumber", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("assetCode", json, StringComparison.OrdinalIgnoreCase);
 
         ListingRentalSnapshotDto? deserialized = JsonSerializer.Deserialize<ListingRentalSnapshotDto>(json, JsonOptions);
         Assert.NotNull(deserialized);
-        Assert.Equal(fixture, deserialized);
+        Assert.Equal(fixture.Id, deserialized.Id);
+        Assert.Equal(fixture.DepositPerUnit, deserialized.DepositPerUnit);
+        Assert.Equal(fixture.EquipmentTypeId, deserialized.EquipmentTypeId);
+        Assert.Equal(fixture.BrandId, deserialized.BrandId);
+        Assert.Equal(fixture.SpecValues?.GetRawText(), deserialized.SpecValues?.GetRawText());
     }
 
     [Fact]
@@ -127,6 +142,25 @@ public sealed class InventoryRentalConsumerContractTests
 
         Assert.True(result.IsFailure);
         Assert.Equal(InventoryContractSpec.ErrorCodes.ListingNotFound, result.Error.Code);
+    }
+
+    [Fact]
+    public async Task CartReader_UsesInventoryDepositAndChangesPriceVersionWhenDepositChanges()
+    {
+        Guid listingId = Guid.NewGuid();
+        decimal deposit = 1_000_000m;
+        _stub.GetSnapshotHandler = _ => Task.FromResult(Result.Success(new ListingRentalSnapshotDto(
+            listingId, Guid.NewGuid(), "Camera", null, 500_000m, "VND", "Active",
+            DepositPerUnit: deposit)));
+        InventoryRentalCartReader reader = new(_stub);
+
+        var before = await reader.GetListingAsync(listingId);
+        deposit = 2_000_000m;
+        var after = await reader.GetListingAsync(listingId);
+
+        Assert.Equal(1_000_000m, before!.Deposit);
+        Assert.Equal(2_000_000m, after!.Deposit);
+        Assert.NotEqual(before.PriceVersion, after.PriceVersion);
     }
 
     // 3. Availability Check Fixture & Serialization

@@ -38,7 +38,7 @@ public sealed class RentalCheckoutApiTests
     private const string ProfileCompletedHeader = "X-Test-Pc";
 
     // 2 máy x 500.000 x 3 ngày (12, 13, 14/10) + cọc 2 x 2.000.000.
-    // 2 máy x 500.000 x 3 ngày; Inventory chưa có tiền cọc nên cọc = 0.
+    // Fixture này dùng cọc = 0 để kiểm tra riêng luồng API checkout.
     private const decimal Total = 3_000_000m;
 
     [Fact]
