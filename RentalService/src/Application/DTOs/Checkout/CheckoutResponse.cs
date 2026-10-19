@@ -95,4 +95,5 @@ public sealed record CheckoutOperationStatusResponse(
     CheckoutResponse? Order = null,
     string? ErrorCode = null,
     string? ErrorMessage = null,
-    string? InvoiceStatus = null);
+    string? InvoiceStatus = null,
+    bool ReadyForPayment = false);

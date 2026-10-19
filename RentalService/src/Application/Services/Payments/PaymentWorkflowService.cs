@@ -142,10 +142,9 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         }
 
         // Lifecycle branching
-        // Lifecycle branching: late if terminal, bank transfer paidAt >= deadline, or payment processing occurredAt >= deadline
+        // PaidAt is the business timestamp. Kafka OccurredAt only describes publication time.
         bool isLatePayment = order.Status is RentalOrderStatus.Expired or RentalOrderStatus.Cancelled ||
-                             payload.PaidAt >= order.PaymentDeadline ||
-                             envelope.OccurredAt >= order.PaymentDeadline;
+                             payload.PaidAt >= order.PaymentDeadline;
 
         if (isLatePayment)
         {

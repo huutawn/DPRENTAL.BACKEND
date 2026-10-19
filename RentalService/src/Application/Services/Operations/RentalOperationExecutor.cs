@@ -125,7 +125,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         CancellationToken cancellationToken = default)
     {
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-        if (descriptor.RetryCount >= 10)
+        if (descriptor.RetryCount >= 10 && descriptor.Action != "CreateInvoice")
         {
             return Result.Success();
         }

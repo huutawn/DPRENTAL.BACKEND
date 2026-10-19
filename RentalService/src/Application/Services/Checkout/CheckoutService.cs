@@ -209,13 +209,18 @@ public sealed class CheckoutService : ICheckoutService
         {
             var order = await _orders.GetByIdWithDetailsAsync(op.ExpectedRentalOrderId, cancellationToken);
             var orderDto = order != null ? CheckoutResponse.From(order, false) : null;
+            bool readyForPayment = order is not null &&
+                order.Status == RentalOrderStatus.PendingPayment &&
+                !string.IsNullOrWhiteSpace(order.InvoiceRef) &&
+                order.PaymentDeadline > _timeProvider.GetUtcNow();
             return new CheckoutOperationStatusResponse(
                 OperationId: op.OperationId,
                 Status: op.Status.ToString(),
                 OrderId: order?.Id,
                 OrderCode: order?.OrderCode,
                 Order: orderDto,
-                InvoiceStatus: op.InvoiceStatus);
+                InvoiceStatus: readyForPayment ? "Ready" : op.InvoiceStatus,
+                ReadyForPayment: readyForPayment);
         }
 
         if (op.Status == CheckoutOperationStatus.Failed)

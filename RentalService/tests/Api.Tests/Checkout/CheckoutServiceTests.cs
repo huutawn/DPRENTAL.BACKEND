@@ -197,6 +197,88 @@ public sealed class CheckoutServiceTests
         var statusResult = await service.GetOperationStatusAsync(submitResult.Value.OperationId, _renterId);
         Assert.True(statusResult.IsSuccess);
         Assert.Equal("Processing", statusResult.Value.Status);
+        Assert.False(statusResult.Value.ReadyForPayment);
+    }
+
+    [Fact]
+    public async Task GetOperationStatusAsync_OnlyReadyAfterInvoiceIsAttached()
+    {
+        string operationId;
+        Guid orderId;
+        await using (var context = _harness.NewContext())
+        {
+            var submitted = await CreateService(context).SubmitAsync(
+                new CheckoutRenterContext(_renterId, true), Request(), Key);
+            Assert.True(submitted.IsSuccess);
+            operationId = submitted.Value.OperationId;
+            orderId = (await new RentalCheckoutOperationRepository(context)
+                .GetByOperationIdAsync(operationId))!.ExpectedRentalOrderId;
+        }
+
+        await _harness.Completion.RunInventoryAsync(orderId);
+        await using (var context = _harness.NewContext())
+        {
+            var pending = await CreateService(context).GetOperationStatusAsync(operationId, _renterId);
+            Assert.True(pending.IsSuccess);
+            Assert.Equal("Succeeded", pending.Value.Status);
+            Assert.Equal("Pending", pending.Value.InvoiceStatus);
+            Assert.False(pending.Value.ReadyForPayment);
+        }
+
+        Assert.True((await _harness.Completion.RunPendingInvoiceAsync(orderId)).IsSuccess);
+        await using (var context = _harness.NewContext())
+        {
+            var ready = await CreateService(context).GetOperationStatusAsync(operationId, _renterId);
+            Assert.True(ready.IsSuccess);
+            Assert.Equal("Ready", ready.Value.InvoiceStatus);
+            Assert.True(ready.Value.ReadyForPayment);
+        }
+
+        _harness.Clock.UtcNow = Now.AddMinutes(30);
+        await using (var context = _harness.NewContext())
+        {
+            var expiredWindow = await CreateService(context).GetOperationStatusAsync(operationId, _renterId);
+            Assert.True(expiredWindow.IsSuccess);
+            Assert.False(expiredWindow.Value.ReadyForPayment);
+        }
+    }
+
+    [Fact]
+    public async Task CreateInvoice_KeepsRetryingPastGenericBudgetUntilPaymentDeadline()
+    {
+        Guid orderId;
+        await using (var context = _harness.NewContext())
+        {
+            var submitted = await CreateService(context).SubmitAsync(
+                new CheckoutRenterContext(_renterId, true), Request(), Key);
+            Assert.True(submitted.IsSuccess);
+            orderId = (await new RentalCheckoutOperationRepository(context)
+                .GetByOperationIdAsync(submitted.Value.OperationId))!.ExpectedRentalOrderId;
+        }
+
+        await _harness.Completion.RunInventoryAsync(orderId);
+        _harness.Payment.AlwaysFailWith = FakePaymentRentalClient.Down;
+        for (int attempt = 0; attempt < 11; attempt++)
+        {
+            Assert.True((await _harness.Completion.RunPendingInvoiceAsync(orderId)).IsFailure);
+            _harness.Clock.UtcNow = _harness.Clock.UtcNow.AddMinutes(1).AddSeconds(1);
+        }
+
+        await using (var context = _harness.NewContext())
+        {
+            var receipt = await context.RentalOperationReceipts.SingleAsync(r =>
+                r.RentalOrderId == orderId && r.Action == "CreateInvoice");
+            Assert.True(receipt.RetryCount > 10);
+            Assert.NotEqual(RentalOperationReceipt.StatusFailed, receipt.Status);
+        }
+
+        _harness.Payment.AlwaysFailWith = null;
+        Assert.True((await _harness.Completion.RunPendingInvoiceAsync(orderId)).IsSuccess);
+        await using (var context = _harness.NewContext())
+        {
+            var order = await context.RentalOrders.SingleAsync(o => o.Id == orderId);
+            Assert.False(string.IsNullOrWhiteSpace(order.InvoiceRef));
+        }
     }
 
     [Fact]

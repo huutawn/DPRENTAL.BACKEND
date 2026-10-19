@@ -31,7 +31,7 @@ public sealed class OperationReceiptRepository : IOperationReceiptRepository
         return await _dbContext.RentalOperationReceipts
             .AsNoTracking()
             .Where(r => (r.Status == RentalOperationReceipt.StatusPending || r.Status == RentalOperationReceipt.StatusProcessing) &&
-                        r.RetryCount < 10 &&
+                        (r.RetryCount < 10 || r.Action == "CreateInvoice") &&
                         (r.NextRetryAt == null || r.NextRetryAt <= utcNow) &&
                         !excluded.Contains(r.Action))
             .OrderBy(r => r.CreatedAt)

@@ -76,6 +76,8 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
         if (response.IsFailure && IsTemporary(response.Error))
         {
             await Task.Delay(RetryDelay, cancellationToken);
+            if (_timeProvider.GetUtcNow() >= order.PaymentDeadline)
+                return CheckoutErrors.OrderExpired;
             response = await _payment.CreateInvoiceAsync(request, cancellationToken);
         }
 
