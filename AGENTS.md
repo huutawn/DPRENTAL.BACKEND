@@ -505,7 +505,7 @@ IN_RENTAL
 
 Không được set `Status` trực tiếp tùy ý.
 
-Mọi state transition phải kiểm tra current state, actor, preconditions, idempotency và side effects.
+Mọi state transition phải do Application Service thực thi, kiểm tra current state, actor, preconditions, idempotency và side effects; không để Domain Entity hay Repository tự chuyển trạng thái.
 
 ---
 
@@ -755,7 +755,7 @@ Sở hữu routing và gateway-level concerns. Business authorization vẫn ph�
 
 ## Notification / Reporting
 
-Nên consume domain/integration events, không nhét logic gửi notification/report vào domain aggregate.
+Nên consume domain/integration events, không nhét logic gửi notification/report vào entities hay application service cốt lõi.
 
 ---
 
@@ -857,52 +857,97 @@ Không assume exactly-once delivery.
 
 # 20. Coding Architecture
 
-Các service .NET theo structure hiện tại:
+Kiến trúc mã nguồn của **RentalService** tuân thủ cấu trúc phân tầng và tổ chức thư mục sau:
 
 ```text
-<Service>/
+RentalService/
   src/
-    Common/
-    Domain/
-    Application/
-    Api/
+    Common/                     // Enums, Result/Error scaffold, primitives dùng chung
+    Domain/                     // Dữ liệu thuần túy, entities, DbContext, repositories
+      Entities/                 // Data models, relationships, navigation properties, EF mapping
+      IRepositories/            // Contracts cho repositories và query records
+      Repositories/             // DbContext, EF Core repository implementations
+      Migrations/               // EF Core database migrations
+    Application/                // Trung tâm toàn bộ nghiệp vụ của service
+      Services/<Feature>/       // Use case services thực thi toàn bộ logic nghiệp vụ
+      IServices/<Feature>/      // Consumer-focused interfaces cho services (tuân thủ ISP)
+      DTOs/<Feature>/           // Request/Response contracts, internal DTOs
+      Policies/                 // Business policies, transition rules, timing rules
+      Validation/               // Business validators
+      Security/                 // Authorization policies, ownership checks
+      Clients/                  // Abstractions và implementations gọi service ngoài (HTTP)
+      Kafka/                    // Event consumers, producers, workers, event specs
+      Background/               // Periodic workers (deadline, recovery)
+      DependencyInjection/      // DI wiring cho application layer
+    Api/                        // Web API entrypoint, transport concerns
+      Controllers/              // Mỏng, tiếp nhận HTTP request và dispatch sang Application
   tests/
+    Api.Tests/                  // Unit tests (Application) và Integration tests (Database/Api)
 ```
 
-## Domain
+> **Lưu ý kiến trúc đặc thù của RentalService**:
+> DbContext và các EF Core repository implementations được đặt trực tiếp trong `RentalService.Domain/Repositories` (tương đồng với AuthService), **không tạo thêm project Infrastructure riêng**. Các ValueObjects được inline trực tiếp thành các thuộc tính/fields trên entities sở hữu kèm DataAnnotations hoặc EF Core Fluent mapping.
 
-Chứa Entities/Aggregates, ValueObjects, Policies, domain state transitions và repository contracts khi phù hợp.
+## 20.1. Domain và Entities (Dữ liệu thuần túy & Persistence Mapping)
 
-Domain không phụ thuộc HTTP, controller, Kafka client, Redis hoặc external service SDK.
+Tầng Domain và các Entities có trách nhiệm:
+- Lưu trữ trạng thái dữ liệu, định nghĩa cấu trúc bảng và quan hệ giữa các bảng (1-N, N-N, foreign keys, navigation properties).
+- Cung cấp EF Core mapping qua DataAnnotations hoặc Fluent API trong `RentalServiceDbContext`.
+- Thực hiện các thao tác dữ liệu đơn giản nội bộ (như gán giá trị thuộc tính qua setter/internal method, thêm bản ghi con vào internal collection/list).
 
-*Ngoại lệ kiến trúc riêng của RentalService*: DbContext và EF Core repositories đặt trực tiếp trong `RentalService.Domain/Repositories` tương đồng AuthService, không tách riêng project Infrastructure. ValueObjects được inline trực tiếp thành các fields trên entities sở hữu kèm DataAnnotations/Fluent mapping.
+**Quy tắc nghiêm ngặt**:
+- **KHÔNG triển khai nghiệp vụ tại Domain**: Tuyệt đối không đặt workflow, công thức tính toán nghiệp vụ, quyết định quyền/ownership, tính hạn/deadline, hoặc logic chuyển trạng thái (state transitions) bên trong Entities hay Domain.
+- **Nghiêm cấm lách luật**: Không chuyển logic nghiệp vụ sang entity constructor, computed property, extension method hay tạo "Domain Policy" để né quy tắc này. Toàn bộ logic nghiệp vụ phải nằm tại Application Service.
 
-## Application
+## 20.2. Application (Trung tâm sở hữu mọi quyết định nghiệp vụ)
 
-Chứa use cases/services, DTOs, validation, orchestration, external client abstractions và authorization/application policies.
+Application Service là nơi duy nhất **sở hữu và điều phối toàn bộ quyết định nghiệp vụ** của RentalService.
 
-Không nhét tất cả nghiệp vụ vào một `RentalService.cs` khổng lồ.
+Mỗi Application Service chịu trách nhiệm:
+- **Kiểm tra quyền và sở hữu**: Xác thực quyền hạn của actor (Renter, Supplier, Admin, System) và quyền sở hữu đơn hàng (chống IDOR).
+- **Thực thi và bảo toàn Business Invariants**: Kiểm tra toàn bộ điều kiện tiên quyết (preconditions), trạng thái hợp lệ trước khi cho phép hành động.
+- **Tính toán tiền và tài chính**: Tính tiền thuê (`RentalAmount`), tiền cọc (`DepositAmount`), đề xuất khấu trừ (`TotalProposedAmount`), tiền chốt bồi thường (`FinalDeductionAmount`).
+- **Quản lý chuyển trạng thái (State Machine Transitions) & Workflows**: Quyết định khi nào chuyển trạng thái đơn hàng/mục thuê (ví dụ: `PendingPayment` → `PendingSupplierConfirmation` → `AwaitingHandover` → `InRental` → `Completed` / `PendingSettlement`), ghi nhận `RentalStateTransition` với đầy đủ audit trail (Action, ActorRole, ActorId, OccurredAt, OperationId).
+- **Tính toán thời hạn (Deadlines)**: Tính hạn thanh toán (payment deadline), hạn nhà cung cấp xác nhận (supplier confirmation deadline), hạn giữ thiết bị (hold expiry), hạn renter phản hồi khấu trừ (renter response deadline).
+- **Xử lý Idempotency**: Đảm bảo an toàn khi retry các tác vụ nhạy cảm (Checkout, Payment, Accept, Reject, Handover, Return, Deduction) bằng idempotency key / operation receipt.
+- **Điều phối Transaction và Tương tác ngoại vi**: Điều phối persistence qua `IRepositories`, phát command/event qua Kafka, gọi external HTTP clients (Inventory, Payment).
 
-Ưu tiên:
+**Chính sách và Validator nghiệp vụ**:
+Mọi Policy hoặc Validator hỗ trợ nghiệp vụ (như `CheckoutRules`, `SubOrderStatusPolicy`, `RentalAuthorizationPolicy`, quy tắc thời gian đặt trước) phải nằm tại `Application/Policies` hoặc `Application/Validation` và được Application Service trực tiếp sử dụng.
 
-```text
-Application/
-  Cart/
-  Checkout/
-  Orders/
-  SupplierDecision/
-  Handover/
-  Returns/
-  Settlement/
-  Queries/
-```
+## 20.3. Repository (Truy vấn, Persistence & Data Access)
 
-## API
+Repository chỉ phục vụ việc truy vấn, lưu trữ dữ liệu, projection, pagination, transaction/locking và concurrency ở mức persistence.
+- **Trách nhiệm của Repository**: Thực hiện các thao tác CRUD, đẩy các câu truy vấn lọc (filtering), sắp xếp (sorting), tổng hợp (aggregation) và phân trang (pagination) xuống database bằng LINQ/EF Core. Quản lý transaction, optimistic concurrency và database locks.
+- **Trách nhiệm của Application**: Application Service quyết định các tiêu chí nghiệp vụ (truyền tham số/bộ lọc vào Repository), nhận dữ liệu về và kiểm tra lại toàn bộ điều kiện nghiệp vụ trước khi ghi dữ liệu.
+- **Ranh giới rõ ràng**: Repository tuyệt đối không tự ý đưa ra quyết định nghiệp vụ hay tự ý chuyển trạng thái entity ngoài chỉ định của Application Service.
 
-Chứa controllers/endpoints, authentication wiring, ProblemDetails mapping, dependency registration và hosted/background workers theo pattern project.
+## 20.4. API và Background Entrypoints (Giao tiếp & Dispatch)
 
-Controller phải mỏng.
+Các entrypoint giao tiếp (API Controllers, Background Workers, Kafka Consumer Workers):
+- Chỉ chịu trách nhiệm tiếp nhận yêu cầu từ bên ngoài, giải mã (deserialize), trích xuất context giao tiếp (JWT claims, correlation ID), gọi Application Service tương ứng, và map kết quả (`Result<T>`) sang phản hồi phù hợp (`ProblemDetails`, HTTP status codes, Kafka ACK).
+- **Không chứa quyết định nghiệp vụ**: Controller và Worker không tự quyết định trạng thái hay nghiệp vụ; mọi logic phải được ủy quyền cho Application Service.
+- **Không truy cập DbContext trực tiếp**: Tuyệt đối không để Controller hay Application Service truy cập `DbContext` trực tiếp nhằm né Repository. Mọi thao tác persistence bắt buộc đi qua abstraction `IRepositories`.
 
+## 20.5. Nguyên lý SOLID và Tính Nhất Quán
+
+Thiết kế code trong RentalService phải tuân thủ nghiêm ngặt các nguyên lý SOLID:
+
+- **SRP (Single Responsibility Principle - Đơn trách nhiệm)**:
+  - Chia nhỏ Application Service theo từng use case / luồng nghiệp vụ cụ thể (ví dụ: `CheckoutService`, `ReturnService`, `DeductionService`, `SupplierDecisionService`, `RenterOrderQueryService`, `AdminOrderQueryService`).
+  - Tránh tuyệt đối "God Service" hoặc "God Repository" ôm đồm quá nhiều trách nhiệm không liên quan.
+- **OCP (Open/Closed Principle - Đóng mở)**:
+  - Tận dụng tối đa các component và abstractions hiện có. Chỉ thêm điểm mở rộng khi có nhu cầu nghiệp vụ thực tế từ Jira Task; không suy đoán tương lai hay tạo abstraction phỏng đoán (MVP Principle: không over-engineer).
+- **LSP (Liskov Substitution Principle - Thay thế Liskov)**:
+  - Mọi implementation của interface phải tuân thủ đúng contract đã định nghĩa, bao gồm kiểu dữ liệu trả về, mã lỗi (`Result`/`ErrorType`) và hành vi biên.
+  - Tuyệt đối không được "giả vờ thành công" (fake success) hoặc âm thầm trả về tập dữ liệu rỗng đối với các tính năng chưa được hỗ trợ.
+- **ISP (Interface Segregation Principle - Phân tách giao diện)**:
+  - Thiết kế interface nhỏ gọn, tập trung chính xác vào nhu cầu của client/consumer (ví dụ tách biệt: `IRenterOrderQueryService`, `ISupplierSubOrderQueryService`, `IAdminOrderQueryService`, `IRentalOrderRepository`, `IOrderLockManager`).
+  - Không tạo interface máy móc kiểu 1-class-1-interface nếu không có nhiều consumer hoặc không phục vụ mục đích kiểm thử/decoupling thực tế.
+- **DIP (Dependency Inversion Principle - Đảo ngược phụ thuộc)**:
+  - Application Service phụ thuộc vào abstractions thông qua Dependency Injection (`IRentalOrderRepository`, `IOrderLockManager`, `IInventoryRentalClient`, `TimeProvider`).
+  - Domain hoàn toàn độc lập, không tham chiếu ngược lại Application hay API.
+  - Giữ nguyên vị trí repository contracts hiện có trong `RentalService.Domain/IRepositories`.
 ---
 
 # 21. Result and Error Convention
@@ -926,13 +971,42 @@ Không trả raw exception message/stack trace/payload ra ngoài.
 
 # 22. Repository and Persistence Rules
 
-- Repository contract phải phục vụ aggregate/use case thật.
-- Không tự tạo generic EF repository nếu codebase không cần.
-- Query dữ liệu lớn phải pagination.
-- Write quan trọng phải atomic.
-- Dùng optimistic concurrency/lock theo pattern hiện tại của service.
-- Không giữ DB transaction mở khi gọi HTTP service khác nếu có thể tránh.
+## 22.1. Trách nhiệm Repository
+- Repository contract phải phục vụ use case / aggregate thật của hệ thống, không tự tạo generic EF repository nếu codebase không cần.
+- Write quan trọng phải atomic. Đảm bảo toàn vẹn dữ liệu qua transaction hoặc savepoint khi cần.
+- Dùng optimistic concurrency / lock theo pattern hiện tại của service.
+- Không giữ database transaction mở khi thực hiện các cuộc gọi HTTP/Kafka ra bên ngoài service nếu có thể tránh.
 - Migration phải được review cùng invariant và rollout impact.
+
+## 22.2. Quy chuẩn LINQ và EF Core (Ưu tiên hàng đầu)
+Mọi truy vấn dữ liệu thông qua EF Core phải được tối ưu hóa để thực thi hiệu quả tại Database:
+- **Thực thi tại Database (Server-side Evaluation)**: Toàn bộ điều kiện lọc (`Where`), sắp xếp (`OrderBy`), gom nhóm (`GroupBy`), đếm (`CountAsync`) phải được biên dịch và chạy trên PostgreSQL.
+- **Chiếu dữ liệu (Projection)**: Sử dụng `.Select()` để chỉ tải về các trường dữ liệu cần thiết cho DTO / Query Record, giảm tải bộ nhớ và băng thông mạng.
+- **Không theo dõi cho truy vấn đọc (AsNoTracking)**: Bắt buộc sử dụng `.AsNoTracking()` cho toàn bộ các truy vấn chỉ đọc (read-only queries).
+- **Thực thi bất đồng bộ đầy đủ**: Luôn dùng các phương thức async (`ToListAsync`, `FirstOrDefaultAsync`, `CountAsync`, `AnyAsync`) kèm theo việc propagate `CancellationToken`.
+- **Tránh triệt để N+1 Queries**: Khi cần tải aggregate để cập nhật, sử dụng `.Include()` / `.ThenInclude()` một cách chính xác và vừa đủ; đối với truy vấn báo cáo/hiển thị, ưu tiên projection phẳng thay vì include nhiều cấp.
+- **Tuyệt đối cấm tải toàn bộ dữ liệu vào bộ nhớ để lọc (No In-Memory Filtering)**: Nghiêm cấm việc gọi `.ToList()` hoặc `.AsEnumerable()` trên bảng dữ liệu rồi mới dùng LINQ to Objects để `Where`, `OrderBy`, hoặc tính toán.
+- **Không expose `IQueryable` ra ngoài Repository**: Repository interface tuyệt đối không trả về `IQueryable<T>`. Phải trả về kiểu dữ liệu cụ thể (`Task<T?>`, `Task<IReadOnlyList<T>>`, `Task<PagedResult<T>>`), tránh làm rò rỉ EF Core query execution sang tầng Application hoặc Controller.
+- **Không gọi `DbContext` trực tiếp từ Application**: Mọi thao tác đọc/ghi dữ liệu của Application Service bắt buộc phải đi qua Repository interface (`Domain/IRepositories`).
+
+## 22.3. Quy chuẩn Native SQL (Ngoại lệ hẹp)
+Native SQL chỉ được chấp nhận như một **ngoại lệ hẹp** khi LINQ / EF Core không thể đáp ứng yêu cầu hiệu năng hoặc cần sử dụng tính năng đặc thù của hệ quản trị cơ sở dữ liệu PostgreSQL.
+
+**Các trường hợp ngoại lệ hợp lệ trong RentalService**:
+1. **PostgreSQL Session Advisory Lock**:
+   - Sử dụng `pg_try_advisory_lock` và `pg_advisory_unlock` để khóa đơn hàng hoặc người thuê chống race condition đồng thời (triển khai trong `PostgresOrderLockManager`).
+2. **PostgreSQL Sequence**:
+   - Lấy số nhảy sequence cho mã đơn hàng hoặc outbox message (`SELECT nextval('rental.order_code_seq')`, `nextval('rental.rental_outbox_sequence')` trong `PostgresOrderCodeGenerator`, `OutboxRepository`).
+3. **Transaction Savepoint**:
+   - Sử dụng `SAVEPOINT` và `ROLLBACK TO SAVEPOINT` cho các thao tác lưu trữ có khả năng phục hồi cục bộ (triển khai trong `InventoryAllocationResultHandler`).
+4. **Truy vấn tổng hợp phức tạp (Complex CTE Aggregation)**:
+   - Các truy vấn thống kê nhiều CTE phức tạp mà LINQ không dịch tối ưu được (ví dụ: `GetSupplierConfirmationStatisticsAsync` dùng `Database.SqlQuery<T>`).
+
+**Điều kiện bắt buộc khi sử dụng Native SQL**:
+- **Ghi rõ lý do**: Phải có chú thích (comment) giải thích rõ ràng tại sao LINQ / EF Core không đáp ứng được yêu cầu.
+- **Parameterize 100% dữ liệu đầu vào**: Tuyệt đối không cộng chuỗi SQL thô (string concatenation). Phải sử dụng interpolated string của EF Core (`Database.SqlQuery<T>($"...")`, `ExecuteSqlInterpolatedAsync`) hoặc `NpgsqlParameter` để triệt tiêu nguy cơ SQL Injection.
+- **Không chứa quyết định nghiệp vụ trong SQL**: SQL chỉ thực hiện thao tác dữ liệu kỹ thuật, lấy dữ liệu hoặc khóa; toàn bộ quyết định nghiệp vụ và validation phải được thực hiện tại Application Service.
+- **Kiểm thử tích hợp bắt buộc**: Mọi đoạn Native SQL phải có integration test chạy thực tế với PostgreSQL để xác minh tính đúng đắn.
 
 ---
 
@@ -978,12 +1052,21 @@ Public DTO không expose SerialNumber, internal AssetCode, suspension/internal n
 # 25. Testing Baseline
 
 ## Unit tests
-
-Cover domain invariants, state transitions, money calculations, date calculations, validation và idempotency decision logic.
+Trọng tâm kiểm thử đặt tại tầng **Application**:
+- **Nghiệp vụ cốt lõi**: Cover các business invariants, quy tắc đặt trước (booking lead days), state transitions và workflows do Application Services điều phối.
+- **Tính toán tài chính & thời hạn**: Kiểm thử chính xác tiền thuê, tiền cọc, đề xuất khấu trừ, hạn thanh toán, hạn xác nhận của supplier, hạn giữ thiết bị (hold expiry), hạn phản hồi khấu trừ của renter.
+- **Validation & Policies**: Kiểm thử các validator và policy nghiệp vụ (`CheckoutRules`, `SubOrderStatusPolicy`, `RentalAuthorizationPolicy`).
+- **Idempotency & Quyết định**: Kiểm thử hành vi retry idempotency (không tạo duplicate order/transition khi retry cùng operation), quyền hạn actor (Renter/Supplier/Admin) và chống IDOR.
+- **Độc lập và nhanh chóng**: Chạy isolated với unit test doubles (mocks/fakes) cho repository interfaces (`IRentalOrderRepository`, `IOrderLockManager`) và external clients (`IInventoryRentalClient`).
 
 ## Integration tests
-
-Cover database constraints, repository query, concurrency, HTTP endpoint auth, transaction rollback và Inbox/Outbox khi liên quan.
+Trọng tâm kiểm thử đặt tại **Persistence, Concurrency, LINQ, Native SQL và Web API**:
+- **Cơ sở dữ liệu & EF Core**: Cover database constraints, khóa ngoại, migrations, JSONB snapshot mapping.
+- **LINQ Queries & Projections**: Xác minh các câu truy vấn phức tạp, projection DTO `.Select()`, phân trang, sorting và filtering chạy đúng cú pháp SQL trên PostgreSQL thật.
+- **Native SQL & Database Features**: Kiểm thử hoạt động của PostgreSQL advisory locks (`PostgresOrderLockManager`), sequences (`PostgresOrderCodeGenerator`), outbox sequence, savepoints và complex CTE queries (`GetSupplierConfirmationStatisticsAsync`).
+- **Concurrency & Locking**: Kiểm thử kịch bản hai request đồng thời tranh chấp tài nguyên (ví dụ checkout cùng thiết bị, đồng thời phản hồi khấu trừ).
+- **Transaction Rollback & Outbox/Inbox**: Đảm bảo rollback sạch khi có lỗi hạ tầng; kiểm thử luồng ghi/đọc Outbox và deduplication Inbox.
+- **API Endpoints**: Kiểm thử routing, model validation, authentication/claims mapping, ProblemDetails response, IDOR prevention.
 
 ## Critical Rental scenarios
 
@@ -1073,7 +1156,9 @@ Agent không được dựa vào source cũ để kết luận rằng public mar
 
 ---
 
-# 28. Current Known Refactor: Rental SRS
+# 28. Current Known Refactor: Rental SRS & Architecture
+
+## 28.1. Rental SRS v1.2 vs Target MVP
 
 Rental SRS v1.2 còn assumption cũ.
 
@@ -1133,6 +1218,19 @@ Nếu overdue và chưa actual return:
 physical asset must remain unavailable
 ```
 
+## 28.2. Hiện trạng mã nguồn RentalService: Chuyển dịch nghiệp vụ từ Domain về Application
+
+Trong codebase hiện tại của RentalService, do lịch sử phát triển, vẫn còn một số logic nghiệp vụ nằm rải rác bên trong các Domain Entities và Domain Policies:
+- **`Domain/Entities/RentalItem.cs`**: Đang chứa các phương thức tính toán hạn như `CalculateSupplierConfirmationDeadline`, `CalculateConfirmationHoldExpiry`, và các thao tác chuyển trạng thái như `RecordPaid`, `ApplySupplierAccept`, `ApplySupplierReject`, v.v.
+- **`Domain/Entities/RentalItem.Settlement.cs`**: Đang chứa logic kiểm tra quyền phản hồi của renter (`ValidateRenterResponse`), các transition giải quyết khấu trừ (`AcceptDeductionByRenter`, `DisputeDeductionByRenter`), và kiểm tra cửa sổ thời gian (`IsRenterResponseOpen`, `NeedsRenterResponseTimeout`).
+- **`Domain/Policies/RentalBookingPolicy.cs`**: Đang chứa quy tắc tính toán ngày đặt trước tối thiểu (`MinimumLeadDays`, `EarliestStartDate`, `IsStartDateTooSoon`).
+
+**Quy tắc chuyển dịch bắt buộc cho Agent**:
+1. **Không mở rộng refactor ngoài phạm vi**: Agent tuyệt đối **không tự ý mở một cuộc refactor toàn hệ thống** để dọn dẹp các file trên nếu Jira Subtask hiện tại không liên quan đến chúng.
+2. **Chuyển dịch khi có task liên quan**: Khi nhận một Jira Subtask có phạm vi chỉnh sửa, mở rộng hoặc thay thế các tính năng liên quan đến các phương thức trên:
+   - Phải chuyển toàn bộ các quyết định nghiệp vụ, công thức tính toán và chuyển trạng thái này về **Application Service** (hoặc **Application Policies**).
+   - Cập nhật toàn bộ các caller và unit tests tương ứng để kiểm thử thông qua Application Service.
+   - Xóa bỏ (delete) implementation cũ trong Domain Entity / Domain Policy trong cùng phạm vi subtask đó để đảm bảo nguyên tắc: **Mỗi hành vi nghiệp vụ chỉ có duy nhất một implementation chính thức**.
 ---
 
 # 29. How an Agent Must Execute a Jira Subtask
@@ -1154,14 +1252,14 @@ Xác định:
 Goal
 In scope
 Out of scope
-Affected domain invariant
-Affected entities
+Affected business rules & invariants (Application Services/Policies)
+Affected entities (Domain)
 Affected APIs/contracts
-Affected persistence
+Affected persistence (Repositories, LINQ, Migrations)
 Affected events
 Security impact
 Concurrency/idempotency impact
-Tests required
+Tests required (Unit at Application, Integration at DB/API)
 ```
 
 Nếu task yêu cầu plan trước thì liệt kê:
@@ -1252,6 +1350,14 @@ Một subtask chỉ được coi là hoàn tất khi các điều phù hợp đ�
 
 - Requirement và acceptance criteria được đáp ứng.
 - Không phá domain invariant của tài liệu này.
+- Toàn bộ quyết định nghiệp vụ, tính tiền, deadline, quyền hạn và chuyển trạng thái nằm tại Application Service; không đặt trong Domain Entity hay Repository.
+- Policy/validator hỗ trợ nghiệp vụ nằm tại Application.
+- Repository chỉ làm persistence, sử dụng LINQ tối ưu thực thi tại database (projection `.Select`, `AsNoTracking`, `CancellationToken`, không N+1, không in-memory filtering).
+- Không expose `IQueryable` ra ngoài Repository.
+- Không truy cập `DbContext` trực tiếp từ Application Service hay Controller.
+- Nếu có Native SQL: có lý do giải thích rõ ràng, parameterize tham số chống SQL injection, không chứa logic nghiệp vụ, và có integration test PostgreSQL.
+- Tuân thủ các nguyên lý SOLID (SRP cho Services, ISP cho consumer interfaces, LSP cho contract, DIP cho DI).
+- Khi chạm vào legacy code có nghiệp vụ ở Domain, đã chuyển về Application và xóa bỏ implementation cũ trong phạm vi task.
 - Không scope creep.
 - API/contract đúng schema đã thống nhất.
 - Authorization/ownership được kiểm tra.
@@ -1259,7 +1365,7 @@ Một subtask chỉ được coi là hoàn tất khi các điều phù hợp đ�
 - Idempotency/concurrency được xử lý nếu có side effect.
 - Persistence atomic nếu cần.
 - Error mapping đúng.
-- Tests mới được thêm.
+- Tests mới được thêm (Unit test cho Application; Integration test cho Persistence/LINQ/Native SQL/API).
 - Existing tests không bị phá.
 - Build thành công.
 - Không leak secret/sensitive data.
@@ -1310,10 +1416,15 @@ SECURITY:
 - ...
 
 EXPECTED FILE AREAS:
-- Domain/
-- Application/<Feature>/
-- Api/
-- tests/
+- Domain/Entities/ (chỉ data, relations, mapping)
+- Domain/IRepositories/ (repository interfaces, query records, không leak IQueryable)
+- Domain/Repositories/ (DbContext, EF Core repos, LINQ, DB operations)
+- Application/Services/<Feature>/ (sở hữu toàn bộ nghiệp vụ, workflows, transitions, calculations)
+- Application/IServices/<Feature>/ (interfaces nhỏ gọn theo ISP)
+- Application/Policies/ (quy tắc và validation hỗ trợ nghiệp vụ)
+- Application/DTOs/ (data transfer objects)
+- Api/Controllers/ (mỏng, chỉ dispatch sang Application Service)
+- tests/Api.Tests/ (Unit tests cho Application; Integration tests cho Database/LINQ/SQL/Concurrency)
 
 ACCEPTANCE CRITERIA:
 1. ...
@@ -1357,6 +1468,15 @@ After coding:
 ❌ hard-code dependency behavior khi contract chưa tồn tại
 ❌ swallow dependency failure và coi như success
 ❌ sửa nhiều module không liên quan chỉ để refactor đẹp hơn
+❌ đặt workflow, tính toán nghiệp vụ, chuyển trạng thái vào Domain Entity, constructor, computed property, hoặc extension method
+❌ tạo "Domain Policy" để lách luật đặt nghiệp vụ ở Domain thay vì đưa vào Application
+❌ cho Application Service hoặc Controller truy cập trực tiếp DbContext để né Repository
+❌ expose IQueryable ra ngoài Repository interface
+❌ tải toàn bộ bảng dữ liệu về bộ nhớ rồi mới lọc hoặc đếm (In-memory filtering gây tràn RAM và N+1)
+❌ viết Native SQL chứa logic/quyết định nghiệp vụ hoặc không parameterize tham số đầu vào
+❌ vi phạm SRP: tạo God Service hoặc God Repository ôm đồm nhiều nghiệp vụ không liên quan
+❌ vi phạm LSP: implementation giả lập thành công hoặc âm thầm trả về tập rỗng thay vì xử lý đúng contract và lỗi
+❌ vi phạm ISP: tạo interface máy móc không xuất phát từ nhu cầu thực tế của consumer
 ```
 
 ---
