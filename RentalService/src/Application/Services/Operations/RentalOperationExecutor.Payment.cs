@@ -430,7 +430,20 @@ public sealed partial class RentalOperationExecutor
             return Result.Success();
         }
 
-        RecordExecutionFailure(receipt, invoiceResult.Error, utcNow);
+        if (invoiceResult.Error.Code == "Checkout.InvoiceTemporarilyUnavailable" && utcNow < order.PaymentDeadline)
+        {
+            // Invoice creation must keep retrying for the entire hold window, even after the
+            // generic operation retry budget is exhausted. The next pass at the deadline
+            // marks the receipt failed; the payment-expiry workflow releases the holds.
+            DateTimeOffset nextRetry = utcNow.AddSeconds(60);
+            if (nextRetry > order.PaymentDeadline) nextRetry = order.PaymentDeadline;
+            receipt.RecordAttemptFailure(invoiceResult.Error.Code, invoiceResult.Error.Message,
+                utcNow, nextRetry, isUncertain: true, isExhausted: false);
+        }
+        else
+        {
+            RecordExecutionFailure(receipt, invoiceResult.Error, utcNow);
+        }
         await CommitLocalChangesAsync(order, cancellationToken);
 
         if (receipt.Status == RentalOperationReceipt.StatusFailed && _checkoutOperationRepo != null)
