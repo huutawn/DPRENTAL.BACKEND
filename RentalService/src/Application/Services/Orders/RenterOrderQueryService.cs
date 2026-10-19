@@ -149,7 +149,7 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
                 item.BrandNameSnapshot,
                 item.ModelSnapshot,
                 ToSpecValues(item.SpecValuesSnapshot),
-                item.PickupLocationSnapshot),
+                basics.PickupLocation),
             item.RentalDays,
             item.DailyRateSnapshot,
             item.DepositPerUnitSnapshot,
@@ -161,7 +161,8 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             OrderQueryMapper.ToRefund(item, refundRequested),
             OrderQueryMapper.ToHandover(item),
             OrderQueryMapper.ToReturns(item),
-            OrderQueryMapper.ToSettlement(item));
+            OrderQueryMapper.ToSettlement(item),
+            basics.PickupLocation);
     }
 
     /// <summary>Thông số được lưu dạng chuỗi JSON; trả ra dạng object. Chuỗi hỏng thì bỏ qua thay vì làm lỗi cả đơn.</summary>

@@ -102,7 +102,7 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
 
     private static SupplierOrderItemResponse ToItem(RentalItem item)
     {
-        OrderItemResponse basics = OrderQueryMapper.ToItem(item);
+        OrderItemResponse basics = OrderQueryMapper.ToItem(item, isSupplier: true);
 
         return new SupplierOrderItemResponse(
             basics.Name,
@@ -125,6 +125,7 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
             item.UnitAssignments
                 .OrderBy(u => u.Id)
                 .Select(u => new SupplierUnitResponse(u.Id, u.AssetId, u.Status, u.ReturnCondition))
-                .ToList());
+                .ToList(),
+            basics.PickupLocation);
     }
 }

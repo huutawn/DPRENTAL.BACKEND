@@ -119,7 +119,7 @@ public sealed class OrderQueryServiceTests
         Assert.Equal(excavatorItem.SupplierConfirmationDeadline, excavator.SupplierConfirmationDeadline);
         Assert.Equal("Máy xúc", excavator.Listing.EquipmentTypeName);
         Assert.Equal("Caterpillar", excavator.Listing.BrandName);
-        Assert.Equal("Kho Thủ Đức, TP.HCM", excavator.Listing.PickupLocation);
+        Assert.Null(excavator.Listing.PickupLocation);
         Assert.Equal(excavatorItem.ThumbnailMediaIdSnapshot, excavator.Listing.ThumbnailMediaId);
         Assert.Equal(55, excavator.Listing.SpecValues!.Value.GetProperty("cong_suat_kw").GetInt32());
         Assert.Equal(new OrderItemRefundResponse(OrderRefundState.None, null), excavator.Refund);
