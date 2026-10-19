@@ -141,11 +141,9 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             return Error.Conflict("PAYMENT_REF_CONFLICT", "Đơn hàng đã được thanh toán với mã tham chiếu thanh toán khác.");
         }
 
-        // Lifecycle branching
-        // Lifecycle branching: late if terminal, bank transfer paidAt >= deadline, or payment processing occurredAt >= deadline
+        // Lifecycle branching: late if terminal or bank transfer paidAt >= deadline
         bool isLatePayment = order.Status is RentalOrderStatus.Expired or RentalOrderStatus.Cancelled ||
-                             payload.PaidAt >= order.PaymentDeadline ||
-                             envelope.OccurredAt >= order.PaymentDeadline;
+                             payload.PaidAt >= order.PaymentDeadline;
 
         if (isLatePayment)
         {
@@ -396,6 +394,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         if (string.IsNullOrWhiteSpace(envelope.Payload.PaymentRef)) return Error.Validation("INVALID_PAYMENT_REF", "PaymentRef không được để trống.");
         if (!string.Equals(envelope.Payload.Currency, "VND", StringComparison.OrdinalIgnoreCase)) return Error.Validation("INVALID_CURRENCY", $"Tiền tệ không hợp lệ: {envelope.Payload.Currency}.");
         if (envelope.Payload.PaidAmount < 0) return Error.Validation("INVALID_PAID_AMOUNT", "Số tiền thanh toán không được âm.");
+        if (envelope.Payload.PaidAt == default) return Error.Validation("INVALID_PAID_AT", "Thời gian thanh toán không hợp lệ.");
 
         return Result.Success();
     }

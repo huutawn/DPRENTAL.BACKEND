@@ -151,6 +151,9 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
 
     public Task<RentalOrder?> GetByIdWithDetailsAsync(Guid id, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+    public Task<RentalOrder?> GetForCheckoutPollingAsync(Guid id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(PendingPaymentOrder?.Id == id ? PendingPaymentOrder : null);
+
 
     public Task<RentalOrder?> GetByItemIdWithDetailsAsync(Guid itemId, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();

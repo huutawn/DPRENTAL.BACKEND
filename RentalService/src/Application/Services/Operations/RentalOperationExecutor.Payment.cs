@@ -284,7 +284,6 @@ public sealed partial class RentalOperationExecutor
             }
         }
 
-
         // 2. Release all allocation groups
         var releaseKeys = new List<(RentalItem item, string releaseKey)>();
         foreach (var item in order.Items)
@@ -371,24 +370,10 @@ public sealed partial class RentalOperationExecutor
     {
         if (!string.IsNullOrWhiteSpace(order.InvoiceRef))
         {
-            var now = _timeProvider.GetUtcNow();
-            if (!receipt.IsSuccess)
+            if (_invoiceIssuer != null)
             {
-                receipt.MarkSucceeded(now);
-                await CommitLocalChangesAsync(order, cancellationToken);
+                return await _invoiceIssuer.EnsureInvoiceAsync(order, cancellationToken);
             }
-
-            if (_checkoutOperationRepo != null)
-            {
-                var op = await _checkoutOperationRepo.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
-                if (op != null && op.InvoiceStatus != "Ready")
-                {
-                    op.SetInvoiceStatus("Ready", now);
-                    await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
-                }
-            }
-
             return Result.Success();
         }
 
@@ -398,6 +383,13 @@ public sealed partial class RentalOperationExecutor
             receipt.MarkFailed("ORDER_EXPIRED", "Payment deadline has passed; halting invoice creation.", utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
             await CommitLocalChangesAsync(order, cancellationToken);
             return Error.Conflict("ORDER_EXPIRED", "Payment deadline has passed; halting invoice creation.");
+        }
+
+        if (order.Status != RentalOrderStatus.PendingPayment)
+        {
+            receipt.MarkFailed("ORDER_NOT_PENDING", "Order is no longer pending payment; halting invoice creation.", utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+            await CommitLocalChangesAsync(order, cancellationToken);
+            return Result.Success();
         }
 
         receipt.BeginProviderAttempt(utcNow);
@@ -413,24 +405,11 @@ public sealed partial class RentalOperationExecutor
 
         if (invoiceResult.IsSuccess)
         {
-            receipt.MarkSucceeded(utcNow);
-            await CommitLocalChangesAsync(order, cancellationToken);
-
-            if (_checkoutOperationRepo != null)
-            {
-                var op = await _checkoutOperationRepo.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
-                if (op != null)
-                {
-                    op.SetInvoiceStatus("Ready", utcNow);
-                    await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
-                    await _unitOfWork.CommitAsync(cancellationToken);
-                }
-            }
-
+            // Issuer already validated, attached invoice, marked receipt Succeeded, updated operation to Ready, and committed in one SaveChangesAsync.
             return Result.Success();
         }
 
-        RecordExecutionFailure(receipt, invoiceResult.Error, utcNow);
+        RecordExecutionFailure(receipt, invoiceResult.Error, utcNow, forceUncertain: false, deadline: order.PaymentDeadline);
         await CommitLocalChangesAsync(order, cancellationToken);
 
         if (receipt.Status == RentalOperationReceipt.StatusFailed && _checkoutOperationRepo != null)
@@ -440,7 +419,7 @@ public sealed partial class RentalOperationExecutor
             {
                 op.SetInvoiceStatus("Failed", utcNow);
                 await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
-                await _unitOfWork.CommitAsync(cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
             }
         }
 

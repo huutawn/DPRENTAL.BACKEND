@@ -125,7 +125,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         CancellationToken cancellationToken = default)
     {
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-        if (descriptor.RetryCount >= 10)
+        if (descriptor.RetryCount >= 10 && descriptor.Action != "CreateInvoice")
         {
             return Result.Success();
         }
@@ -144,10 +144,39 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         if (receipt == null) return Error.NotFound("RECEIPT_NOT_FOUND", "Không tìm thấy operation receipt.");
 
         if (receipt.IsSuccess && receipt.Status == RentalOperationReceipt.StatusSucceeded) return Result.Success();
-        if (receipt.Status == RentalOperationReceipt.StatusFailed &&
-            receipt.ErrorClassification is RentalOperationReceipt.ClassificationBusiness or RentalOperationReceipt.ClassificationUncertainExhausted or RentalOperationReceipt.ClassificationTransientExhausted)
+        if (receipt.Status == RentalOperationReceipt.StatusFailed)
         {
-            return Result.Success();
+            if (receipt.Action == "CreateInvoice" &&
+                receipt.ErrorClassification is RentalOperationReceipt.ClassificationTransientExhausted or RentalOperationReceipt.ClassificationUncertainExhausted)
+            {
+                if (order.Status != RentalOrderStatus.PendingPayment || order.PaymentDeadline <= utcNow)
+                {
+                    return Result.Success();
+                }
+
+                if (!string.IsNullOrWhiteSpace(order.InvoiceRef))
+                {
+                    receipt.MarkSucceeded(utcNow);
+                    if (_checkoutOperationRepo != null)
+                    {
+                        var op = await _checkoutOperationRepo.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
+                        if (op != null && op.InvoiceStatus != "Ready")
+                        {
+                            op.SetInvoiceStatus("Ready", utcNow);
+                            await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
+                        }
+                    }
+                    await CommitLocalChangesAsync(order, cancellationToken);
+                    return Result.Success();
+                }
+
+                receipt.ResumeRetry(utcNow);
+                await CommitLocalChangesAsync(order, cancellationToken);
+            }
+            else
+            {
+                return Result.Success();
+            }
         }
 
         if (receipt.NextRetryAt.HasValue && receipt.NextRetryAt.Value > utcNow)
@@ -380,7 +409,12 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
 
         return await ExecuteScheduledOperationAsync(desc!, cancellationToken);
     }
-    private static void RecordExecutionFailure(RentalOperationReceipt receipt, Error error, DateTimeOffset utcNow, bool forceUncertain = false)
+    private static void RecordExecutionFailure(
+        RentalOperationReceipt receipt,
+        Error error,
+        DateTimeOffset utcNow,
+        bool forceUncertain = false,
+        DateTimeOffset? deadline = null)
     {
         bool isUncertain = forceUncertain ||
                            receipt.IsOutcomeUncertain ||
@@ -388,11 +422,21 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
                            error.Code.Contains("Timeout", StringComparison.OrdinalIgnoreCase) ||
                            error.Code.Contains("Unavailable", StringComparison.OrdinalIgnoreCase);
 
-        bool isExhausted = receipt.RetryCount >= 10;
+        bool isCreateInvoice = receipt.Action == "CreateInvoice";
+        bool isExhausted = !isCreateInvoice && receipt.RetryCount >= 10;
 
         double baseDelay = Math.Min(60, Math.Pow(2, receipt.RetryCount));
         int jitterMs = Random.Shared.Next(0, 1000);
-        DateTimeOffset? nextRetry = isExhausted ? null : utcNow.AddSeconds(baseDelay).AddMilliseconds(jitterMs);
+        DateTimeOffset? nextRetry = null;
+        if (!isExhausted)
+        {
+            var scheduled = utcNow.AddSeconds(baseDelay).AddMilliseconds(jitterMs);
+            if (isCreateInvoice && deadline.HasValue && scheduled > deadline.Value)
+            {
+                scheduled = deadline.Value;
+            }
+            nextRetry = scheduled;
+        }
 
         if (isUncertain)
         {

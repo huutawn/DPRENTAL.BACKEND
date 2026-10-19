@@ -185,8 +185,8 @@ public sealed class ReturnTests : IAsyncLifetime
                 .ToList();
             Assert.Equal(["DAMAGED", "NORMAL"], conditions);
             var pending = await new OperationReceiptRepository(db)
-                .GetPendingOperationDescriptorsExcludingActionsAsync(_clock.GetUtcNow(), 50,
-                    [RentalItem.ApplyReturnedUnitsAction]);
+                .GetPendingOperationDescriptorsAsync(_clock.GetUtcNow(), 50,
+                    excludedActions: [RentalItem.ApplyReturnedUnitsAction]);
             Assert.DoesNotContain(pending, r => r.Action == RentalItem.ApplyReturnedUnitsAction);
             Assert.All(await db.RentalUnitAssignments.ToListAsync(), u => Assert.Null(u.AllocationClosedAt));
         }

@@ -45,7 +45,8 @@ public sealed class CheckoutInvoiceIssuerTests
         new RentalOrderRepository(context),
         unitOfWork ?? context,
         _clock,
-        NullLogger<CheckoutInvoiceIssuer>.Instance);
+        NullLogger<CheckoutInvoiceIssuer>.Instance,
+        new RentalCheckoutOperationRepository(context));
 
     private static async Task<RentalOrder> LoadAsync(RentalServiceDbContext context) =>
         (await new RentalOrderRepository(context).GetByCheckoutOperationIdAsync(OperationId))!;
@@ -173,6 +174,78 @@ public sealed class CheckoutInvoiceIssuerTests
 
         Assert.Equal(CheckoutErrors.InvoiceRejected, result.Error);
         Assert.Null((await ReloadAsync()).InvoiceRef);
+    }
+    [Fact]
+    public async Task EnsureInvoice_AcceptsResponse_WhenPaymentDeadlineHasDifferentOffsetButSameInstant()
+    {
+        // +07:00 representation of the same instant
+        _payment.Tamper = invoice => invoice with { PaymentDeadline = invoice.PaymentDeadline.ToOffset(TimeSpan.FromHours(7)) };
+
+        Result result = await EnsureInvoiceAsync();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("INV-1", (await ReloadAsync()).InvoiceRef);
+    }
+
+    [Fact]
+    public async Task EnsureInvoice_RejectsResponse_WhenPaymentDeadlineDiffersByInstant()
+    {
+        _payment.Tamper = invoice => invoice with { PaymentDeadline = invoice.PaymentDeadline.AddSeconds(1) };
+
+        Result result = await EnsureInvoiceAsync();
+
+        Assert.Equal(CheckoutErrors.InvoiceRejected, result.Error);
+        Assert.Null((await ReloadAsync()).InvoiceRef);
+    }
+
+    [Fact]
+    public async Task EnsureInvoice_DoesNotSendSecondRequest_WhenDeadlineReachedDuringRetryDelay()
+    {
+        _payment.Failures.Enqueue(FakePaymentRentalClient.Down);
+        _payment.OnCreateInvoice = _ =>
+        {
+            _clock.UtcNow = Now.AddMinutes(30).AddSeconds(1);
+        };
+
+        Result result = await EnsureInvoiceAsync();
+
+        Assert.Equal(CheckoutErrors.OrderExpired, result.Error);
+        Assert.Single(_payment.InvoiceRequests);
+        Assert.Null((await ReloadAsync()).InvoiceRef);
+    }
+
+    [Fact]
+    public async Task EnsureInvoice_SyncsReceiptAndCheckoutOperationToReady()
+    {
+        await using (var context = NewContext())
+        {
+            var op = new RentalCheckoutOperation(
+                OperationId, _renterId, "fingerprint", _orderId, Now.AddMinutes(30), "{}", "[]", Now);
+            context.RentalCheckoutOperations.Add(op);
+
+            var order = await LoadAsync(context);
+            string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", _orderId.ToString());
+            var receipt = RentalOperationReceipt.CreatePending(
+                Guid.NewGuid(), _orderId, opKey, "CreateInvoice", "fp", Now);
+            order.AddOperationReceipt(receipt);
+            await context.SaveChangesAsync();
+        }
+
+        Result result = await EnsureInvoiceAsync();
+        Assert.True(result.IsSuccess);
+
+        await using (var context = NewContext())
+        {
+            var order = await LoadAsync(context);
+            Assert.Equal("INV-1", order.InvoiceRef);
+            string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", _orderId.ToString());
+            var receipt = order.OperationReceipts.Single(r => r.OperationId == opKey);
+            Assert.True(receipt.IsSuccess);
+            Assert.Equal(RentalOperationReceipt.StatusSucceeded, receipt.Status);
+
+            var op = await new RentalCheckoutOperationRepository(context).GetByOperationIdAsync(OperationId);
+            Assert.Equal("Ready", op!.InvoiceStatus);
+        }
     }
 
     [Fact]

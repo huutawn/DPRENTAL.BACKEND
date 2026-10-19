@@ -19,10 +19,11 @@ public interface IOperationReceiptRepository
 {
     Task<RentalOperationReceipt?> GetByOperationIdAsync(Guid orderId, string operationId, CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<OperationReceiptDescriptor>> GetPendingOperationDescriptorsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default);
-
-    Task<IReadOnlyList<OperationReceiptDescriptor>> GetPendingOperationDescriptorsExcludingActionsAsync(
-        DateTimeOffset utcNow, int batchSize, IReadOnlyCollection<string> excludedActions,
+    Task<IReadOnlyList<OperationReceiptDescriptor>> GetPendingOperationDescriptorsAsync(
+        DateTimeOffset utcNow,
+        int batchSize,
+        IReadOnlyCollection<string>? excludedActions = null,
+        IReadOnlyCollection<string>? unlimitedAttemptActions = null,
         CancellationToken cancellationToken = default);
 
     Task AddAsync(RentalOperationReceipt receipt, CancellationToken cancellationToken = default);

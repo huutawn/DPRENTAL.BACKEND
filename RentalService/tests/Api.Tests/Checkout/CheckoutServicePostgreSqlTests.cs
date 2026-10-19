@@ -96,16 +96,106 @@ public sealed class CheckoutServicePostgreSqlTests
             Assert.Equal(0, await context.RentalCartItems.CountAsync());
 
             // Cùng Idempotency-Key chỉ ghi một lệnh giữ lịch và Inventory chỉ giữ máy một lần.
-            Assert.Equal(1, await context.RentalOutboxMessages.CountAsync(m => m.MessageType == KafkaContractSpec.CommandTypes.CreateHold));
+            var holdMsg = await context.RentalOutboxMessages.SingleAsync(m => m.MessageType == KafkaContractSpec.CommandTypes.CreateHold);
+            using (var doc = System.Text.Json.JsonDocument.Parse(holdMsg.Payload))
+            {
+                var holdDeadline = doc.RootElement.GetProperty("payload").GetProperty("holdExpiresAt").GetDateTimeOffset();
+                Assert.Equal(order.PaymentDeadline, holdDeadline);
+            }
             Assert.Single(_inventory.HoldRequests);
             Assert.Empty(_inventory.Releases);
-            Assert.Single(_payment.InvoiceRequests);
+            var invReq = Assert.Single(_payment.InvoiceRequests);
+            Assert.Equal(order.PaymentDeadline, invReq.PaymentDeadline);
         }
         finally
         {
             await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
         }
     }
+    [Fact]
+    public async Task RecoveryQuery_OnPostgreSql_ReturnsCreateInvoiceOver10AttemptsAndExhaustedReceipts()
+    {
+        if (!await PostgresTestDatabaseHelper.IsPostgreSqlAvailableAsync())
+        {
+            throw new InvalidOperationException("PostgreSQL integration environment is not available at test connection string.");
+        }
+
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            DbContextOptions<RentalServiceDbContext> options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            await using (var initCtx = new RentalServiceDbContext(options))
+            {
+                await initCtx.Database.MigrateAsync();
+
+                Guid orderId = Guid.NewGuid();
+                var items = new[]
+                {
+                    new InitialRentalItemDto(
+                        Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1,
+                        new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18),
+                        "Camera Sony", null, "Pickup", 200_000m, 0m, "grp-01",
+                        [new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
+                        Dprental.RentalService.Api.Tests.Domain.TestListingSnapshots.Default)
+                };
+                var order = RentalOrder.Create(
+                    orderId, "ORD-PG-001", _renterId, "VND", "Delivery",
+                    "Nguyen Van A", "0901234567", "Address", null, null,
+                    "v1.0", "terms.pdf", "hash", "op-seed", Now, items).Value;
+                initCtx.RentalOrders.Add(order);
+
+                // Receipt 1: CreateInvoice, RetryCount = 10, Status = Pending
+                var r1 = new RentalOperationReceipt(
+                    Guid.NewGuid(), orderId, "op-inv-1", "CreateInvoice", "fp-1",
+                    isSuccess: false, errorCode: "Payment.Timeout", errorMessage: "Timeout",
+                    createdAt: Now.AddMinutes(-10), status: RentalOperationReceipt.StatusPending,
+                    retryCount: 10, nextRetryAt: Now.AddSeconds(-10), isTransient: true);
+
+                // Receipt 2: CreateInvoice, RetryCount = 12, Status = Failed, TransientExhausted
+                var r2 = new RentalOperationReceipt(
+                    Guid.NewGuid(), orderId, "op-inv-2", "CreateInvoice", "fp-2",
+                    isSuccess: false, errorCode: "Payment.Timeout", errorMessage: "Timeout",
+                    createdAt: Now.AddMinutes(-20), status: RentalOperationReceipt.StatusFailed,
+                    retryCount: 12, nextRetryAt: Now.AddSeconds(-10),
+                    errorClassification: RentalOperationReceipt.ClassificationTransientExhausted, isTransient: false);
+
+                // Receipt 3: CreateInvoice, Status = Failed, Business
+                var r3 = new RentalOperationReceipt(
+                    Guid.NewGuid(), orderId, "op-inv-3", "CreateInvoice", "fp-3",
+                    isSuccess: false, errorCode: "Checkout.InvoiceRejected", errorMessage: "Rejected",
+                    createdAt: Now.AddMinutes(-10), status: RentalOperationReceipt.StatusFailed,
+                    retryCount: 1, nextRetryAt: null,
+                    errorClassification: RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+
+                // Receipt 4: ReleaseAllocation, RetryCount = 10, Status = Pending
+                var r4 = new RentalOperationReceipt(
+                    Guid.NewGuid(), orderId, "op-rel-4", "ReleaseAllocation", "fp-4",
+                    isSuccess: false, errorCode: "Inventory.Down", errorMessage: "Down",
+                    createdAt: Now.AddMinutes(-10), status: RentalOperationReceipt.StatusPending,
+                    retryCount: 10, nextRetryAt: Now.AddSeconds(-10), isTransient: true);
+
+                initCtx.RentalOperationReceipts.AddRange(r1, r2, r3, r4);
+                await initCtx.SaveChangesAsync();
+            }
+
+            await using (var queryCtx = new RentalServiceDbContext(options))
+            {
+                var repo = new OperationReceiptRepository(queryCtx);
+                var results = await repo.GetPendingOperationDescriptorsAsync(
+                    Now, 50, unlimitedAttemptActions: ["CreateInvoice"]);
+
+                Assert.Contains(results, r => r.OperationId == "op-inv-1");
+                Assert.Contains(results, r => r.OperationId == "op-inv-2");
+                Assert.DoesNotContain(results, r => r.OperationId == "op-inv-3");
+                Assert.DoesNotContain(results, r => r.OperationId == "op-rel-4");
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
 
     private async Task<Guid> SeedAsync(DbContextOptions<RentalServiceDbContext> options)
     {

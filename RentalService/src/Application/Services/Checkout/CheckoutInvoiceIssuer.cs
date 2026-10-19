@@ -20,6 +20,7 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
 
     private readonly IPaymentRentalClient _payment;
     private readonly IRentalOrderRepository _orders;
+    private readonly IRentalCheckoutOperationRepository? _checkoutOperations;
     private readonly IUnitOfWork _unitOfWork;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<CheckoutInvoiceIssuer> _logger;
@@ -29,13 +30,15 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
         IRentalOrderRepository orders,
         IUnitOfWork unitOfWork,
         TimeProvider timeProvider,
-        ILogger<CheckoutInvoiceIssuer> logger)
+        ILogger<CheckoutInvoiceIssuer> logger,
+        IRentalCheckoutOperationRepository? checkoutOperations = null)
     {
         _payment = payment ?? throw new ArgumentNullException(nameof(payment));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _checkoutOperations = checkoutOperations;
     }
 
     public async Task<Result> EnsureInvoiceAsync(RentalOrder order, CancellationToken cancellationToken = default)
@@ -44,6 +47,33 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
 
         if (!string.IsNullOrWhiteSpace(order.InvoiceRef))
         {
+            var now = _timeProvider.GetUtcNow();
+            bool changed = false;
+            string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
+            var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
+            if (receipt != null && !receipt.IsSuccess)
+            {
+                receipt.MarkSucceeded(now);
+                changed = true;
+            }
+
+            if (_checkoutOperations != null)
+            {
+                var op = await _checkoutOperations.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
+                if (op != null && op.InvoiceStatus != "Ready")
+                {
+                    op.SetInvoiceStatus("Ready", now);
+                    await _checkoutOperations.UpdateAsync(op, cancellationToken);
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                await _orders.UpdateAsync(order, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+
             return Result.Success();
         }
 
@@ -76,6 +106,10 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
         if (response.IsFailure && IsTemporary(response.Error))
         {
             await Task.Delay(RetryDelay, cancellationToken);
+            if (_timeProvider.GetUtcNow() >= order.PaymentDeadline)
+            {
+                return CheckoutErrors.OrderExpired;
+            }
             response = await _payment.CreateInvoiceAsync(request, cancellationToken);
         }
 
@@ -93,15 +127,19 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
         }
 
         CreateInvoiceResponse invoice = response.Value;
-        if (invoice.TotalAmount != order.TotalPayableAmount ||
-            !string.Equals(invoice.Currency, order.Currency, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(invoice.InvoiceRef) ||
+            invoice.TotalAmount != order.TotalPayableAmount ||
+            !string.Equals(invoice.Currency, order.Currency, StringComparison.OrdinalIgnoreCase) ||
+            invoice.PaymentDeadline != order.PaymentDeadline)
         {
             _logger.LogError(
-                "Hóa đơn Payment trả về cho đơn {OrderCode} lệch tổng tiền hoặc loại tiền so với đơn.", order.OrderCode);
+                "Hóa đơn Payment trả về cho đơn {OrderId} ({OrderCode}) không hợp lệ hoặc lệch số tiền/loại tiền/deadline. OperationKey: {OperationKey}, Error: {ErrorCode}.",
+                order.Id, order.OrderCode, request.OperationKey, CheckoutErrors.InvoiceRejected.Code);
             return CheckoutErrors.InvoiceRejected;
         }
 
-        Result attached = order.AttachInvoice(invoice.InvoiceRef, _timeProvider.GetUtcNow());
+        DateTimeOffset completedAt = _timeProvider.GetUtcNow();
+        Result attached = order.AttachInvoice(invoice.InvoiceRef, completedAt);
         if (attached.IsFailure)
         {
             _logger.LogError("Không gắn được hóa đơn vào đơn {OrderCode}: {ErrorCode}.", order.OrderCode, attached.Error.Code);
@@ -110,7 +148,17 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
 
         string invoiceOpKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
         var invReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == invoiceOpKey);
-        invReceipt?.MarkSucceeded(_timeProvider.GetUtcNow(), JsonSerializer.Serialize(invoice));
+        invReceipt?.MarkSucceeded(completedAt, JsonSerializer.Serialize(invoice));
+
+        if (_checkoutOperations != null)
+        {
+            var op = await _checkoutOperations.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
+            if (op != null)
+            {
+                op.SetInvoiceStatus("Ready", completedAt);
+                await _checkoutOperations.UpdateAsync(op, cancellationToken);
+            }
+        }
 
         await _orders.UpdateAsync(order, cancellationToken);
         try

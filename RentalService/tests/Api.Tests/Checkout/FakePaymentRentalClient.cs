@@ -26,12 +26,15 @@ internal sealed class FakePaymentRentalClient : IPaymentRentalClient
 
     /// <summary>Khác null thì lời gọi dừng ở đây cho đến khi task hoàn tất, để dựng hai request chồng nhau.</summary>
     public Task? Gate { get; set; }
+    public Action<CreateInvoiceRequest>? OnCreateInvoice { get; set; }
+
 
     public int CreatedInvoiceCount => _invoicesByOperationKey.Count;
 
     public async Task<Result<CreateInvoiceResponse>> CreateInvoiceAsync(CreateInvoiceRequest request, CancellationToken ct = default)
     {
         InvoiceRequests.Add(request);
+        OnCreateInvoice?.Invoke(request);
 
         if (Gate is not null)
         {

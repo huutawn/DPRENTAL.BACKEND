@@ -16,6 +16,8 @@ public sealed class OperationRecoveryWorker : BackgroundService
     private readonly TimeSpan _pollingInterval;
     private readonly string[] _excludedActions;
 
+    private static readonly string[] UnlimitedAttemptActions = ["CreateInvoice"];
+
     public OperationRecoveryWorker(
         IServiceScopeFactory scopeFactory,
         IConfiguration configuration,
@@ -90,10 +92,12 @@ public sealed class OperationRecoveryWorker : BackgroundService
         using (var scope = _scopeFactory.CreateScope())
         {
             var receiptRepository = scope.ServiceProvider.GetRequiredService<IOperationReceiptRepository>();
-            descriptors = _excludedActions.Length == 0
-                ? await receiptRepository.GetPendingOperationDescriptorsAsync(utcNow, 50, cancellationToken)
-                : await receiptRepository.GetPendingOperationDescriptorsExcludingActionsAsync(
-                    utcNow, 50, _excludedActions, cancellationToken);
+            descriptors = await receiptRepository.GetPendingOperationDescriptorsAsync(
+                utcNow,
+                50,
+                _excludedActions,
+                UnlimitedAttemptActions,
+                cancellationToken);
         }
 
         if (descriptors.Count == 0)

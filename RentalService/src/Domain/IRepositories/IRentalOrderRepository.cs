@@ -25,6 +25,7 @@ public interface IRentalOrderRepository
     Task<bool> UpdateAsync(RentalOrder order, CancellationToken cancellationToken = default);
 
     Task<RentalOrder?> GetByIdWithDetailsAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<RentalOrder?> GetForCheckoutPollingAsync(Guid id, CancellationToken cancellationToken = default);
 
     Task<RentalOrder?> GetByItemIdWithDetailsAsync(Guid itemId, CancellationToken cancellationToken = default);
 

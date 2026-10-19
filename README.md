@@ -203,11 +203,14 @@ Mọi quyết định "ai được làm gì" nằm trong `RentalAuthorizationPol
   - Key được gắn với người thuê (`CheckoutRules.DeriveOperationId`), nên hai người thuê trùng key không đụng nhau.
   - Cùng key nhưng khác danh sách dòng giỏ: `409 Checkout.IdempotencyKeyReused`.
   - Mỗi người thuê chỉ có một checkout chạy tại một thời điểm (PostgreSQL advisory lock theo `RenterId`). Request đến sau chờ tối đa 10 giây, quá hạn nhận `409 Checkout.InProgress`.
-- Khi không tạo được hóa đơn, đơn và lịch đã giữ được giữ nguyên; lỗi trả kèm `orderCode`, `paymentDeadline` và `retryable`:
-  - `503 Checkout.InvoiceTemporarilyUnavailable`: Payment không phản hồi (server đã tự gọi lại một lần). Gửi lại cùng key chỉ tạo nốt hóa đơn. Nếu người thuê quay lại bằng key mới, hóa đơn của đơn đang chờ cũng được tạo nốt trước khi trả `409 Checkout.PendingOrderExists`.
-  - `409 Checkout.InvoiceRejected`: Payment từ chối hoặc trả hóa đơn lệch tổng tiền; gửi lại không có kết quả khác.
-  - `410 Checkout.OrderExpired`: đã quá hạn thanh toán.
-  - Đơn không có hóa đơn hết hạn như mọi đơn chờ thanh toán khác: Expiry worker nhả lịch và chuyển đơn sang `Expired`. Vì không có hóa đơn để hủy nên không gọi Payment và không tạo receipt `CancelInvoice`.
+- Polling trạng thái checkout: `GET /rental/checkout/operations/{operationId}`
+  - `status = Succeeded`: đã tạo thành công Order.
+  - `readyForPayment`: boolean duy nhất quyết định FE có được chuyển sang màn thanh toán hay không. FE không chuyển màn dựa riêng vào `status === "Succeeded"` hay sự xuất hiện của `orderId`.
+  - `readyForPayment = true` chỉ khi: `status == Succeeded` AND Order tồn tại AND `Order.Status == PendingPayment` AND `Order.InvoiceRef` hợp lệ đã được gắn AND `now < Order.PaymentDeadline`.
+  - `invoiceStatus`: `Pending` khi đơn đã tạo nhưng hóa đơn đang chờ/retry; `Ready` khi hóa đơn đã sẵn sàng; `Failed` khi bị từ chối nghiệp vụ hoặc quá hạn.
+  - Deadline thanh toán (`PaymentDeadline` = thời điểm checkout accepted + 30 phút, `CheckoutRules.PaymentWindow`) là cố định xuyên suốt giữa Rental, Inventory hold và Payment invoice, không được reset khi tạo order hay xuất hiện invoice muộn.
+  - Lỗi tạo invoice tạm thời tiếp tục được retry qua `OperationRecoveryWorker` trong suốt cửa sổ thanh toán (kể cả sau attempt thứ 10), lỗi nghiệp vụ xác định dừng retry.
+  - Đến deadline mà chưa có thanh toán thành công, Order chưa có invoice vẫn được expiry và release hold tự động. Vì không có hóa đơn để hủy nên không gọi Payment và không tạo receipt `CancelInvoice`.
 - Bù trừ khi checkout hỏng giữa chừng (không tạo đơn thì không được để lại hold):
   - Một dòng không giữ được lịch: nhả các dòng đã giữ theo thứ tự ngược, trả `409 Checkout.HoldFailed` kèm `conflicts`.
   - Lưu đơn thất bại, kể cả exception ngoài dự kiến như database lỗi hoặc renter ngắt kết nối: nhả toàn bộ hold bằng `CancellationToken.None` rồi mới trả lỗi.
@@ -232,7 +235,8 @@ Mọi quyết định "ai được làm gì" nằm trong `RentalAuthorizationPol
 - Deadline xác nhận từng item: `min(PaidAt + 24h, 00:00 ngày thuê tại Asia/Ho_Chi_Minh − 1 giây)`, lưu UTC và cố định khi retry.
 - Sau commit local: gọi Inventory `ExtendHold`. Thành công phát Outbox event `RentalSupplierConfirmationRequested` trên topic `rental.events.v1`.
 - Hold hết hạn hoặc deadline đã qua: chuyển item sang `Expired`, lên lịch giải phóng hold và hoàn tiền 100% cho riêng item mà không ảnh hưởng item khác.
-- Late payment: thanh toán đến sau hạn hoặc trên Order `Expired/Cancelled` giữ trạng thái kết thúc, ghi nhận payment reference, cờ `LatePaymentRefundRequired = true` và yêu cầu hoàn tiền toàn bộ.
+- Timestamp nghiệp vụ xét thanh toán đúng hạn: `InvoicePaid.PaidAt` (thanh toán đúng hạn khi `PaidAt < PaymentDeadline`). Thời điểm publish hay consume Kafka (`OccurredAt`) là metadata và không tham gia xét deadline.
+- Late payment: thanh toán đến sau hạn (`PaidAt >= PaymentDeadline`) hoặc trên Order đã kết thúc (`Expired/Cancelled`) giữ trạng thái kết thúc, ghi nhận payment reference, cờ `LatePaymentRefundRequired = true` và yêu cầu hoàn tiền toàn bộ, kể cả khi sự kiện mang timestamp thanh toán trước deadline. Thanh toán trên invoice không đồng nghĩa khôi phục được allocation đã hết hạn; giữ cleanup/refund hiện có nếu Inventory từ chối extend hold.
 
 ### 2. Supplier Decision API
 - `POST /api/v1/rental/supplier/sub-orders/{subOrderId}/accept`
