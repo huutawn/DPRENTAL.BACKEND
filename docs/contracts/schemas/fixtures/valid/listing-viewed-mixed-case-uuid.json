@@ -1,0 +1,13 @@
+{
+  "messageId": "A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D",
+  "messageType": "ListingViewed",
+  "version": 1,
+  "producer": "InventoryService",
+  "occurredAt": "2026-10-19T10:00:00Z",
+  "correlationId": "corr-view-mixed",
+  "payload": {
+    "userId": "11111111-2222-4333-8444-555555555555",
+    "equipmentListingId": "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE",
+    "equipmentTypeId": "FFFFFFFF-0000-4111-8222-333333333333"
+  }
+}

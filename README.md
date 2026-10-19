@@ -51,6 +51,26 @@ dotnet build RecommendationService.sln
 dotnet test RecommendationService.sln
 ```
 
+
+## Hợp đồng tích hợp (Integration Contracts)
+
+RecommendationService định nghĩa hợp đồng tích hợp chính thức cho Phase 1 tại thư mục `docs/contracts/`:
+
+- **Đặc tả kiến trúc & contract**: [`docs/contracts/recommendation-v1.md`](docs/contracts/recommendation-v1.md)
+- **JSON Schemas Draft 2020-12 & Fixtures**: [`docs/contracts/schemas/`](docs/contracts/schemas/)
+- **DDL tham chiếu PostgreSQL**: [`docs/contracts/recommendation-v1.sql`](docs/contracts/recommendation-v1.sql)
+
+Chạy kiểm tra schemas và fixtures bằng Python jsonschema:
+
+```bash
+python3 scripts/tests/validate_contracts.py
+```
+
+Kiểm tra DDL tham chiếu và atomic upsert trên PostgreSQL tạm (yêu cầu Docker):
+
+```bash
+python3 scripts/tests/verify_ddl_postgres.py
+```
 ## Git hook
 
 Sau khi khởi tạo Git trong thư mục service, chạy `./scripts/setup-git-hooks.sh` (hoặc bản `.ps1` trên PowerShell). Hook kiểm tra branch nền `origin/recommendation/develop`, rồi build và test trước khi push.

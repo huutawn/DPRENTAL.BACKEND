@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dprental.com/contracts/schemas/user-equipment-types-cache.schema.json",
+  "title": "UserEquipmentTypesCacheSnapshot",
+  "description": "Cache snapshot payload stored under key rec:v1:user:{userId}:equipment-types containing top user interests. Note: Uniqueness of equipmentTypeId (case-insensitive) and ranking ordering (score DESC, tie-break normalized UUID ASC) are enforced as supplementary semantic validation beyond JSON Schema Draft 2020-12.",
+  "type": "object",
+  "required": [
+    "version",
+    "generatedAt",
+    "items"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "generatedAt": {
+      "$ref": "#/$defs/utcIso8601Timestamp"
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": [
+          "equipmentTypeId",
+          "score"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "equipmentTypeId": {
+            "$ref": "#/$defs/nonNilUuid"
+          },
+          "score": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nonNilUuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^(?!00000000-0000-0000-0000-000000000000)[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "utcIso8601Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    }
+  }
+}

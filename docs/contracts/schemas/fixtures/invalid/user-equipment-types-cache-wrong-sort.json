@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "generatedAt": "2026-10-19T11:00:00Z",
+  "items": [
+    {
+      "equipmentTypeId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "score": 10
+    },
+    {
+      "equipmentTypeId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "score": 40
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "messageId": "11111111-1111-4111-8111-111111111123",
+  "messageType": "SearchPerformed",
+  "version": 1,
+  "producer": "InventoryService",
+  "occurredAt": "2026-10-19T10:05:00Z",
+  "correlationId": null,
+  "payload": {
+    "userId": null,
+    "equipmentTypeId": "44444444-4444-4444-8444-444444444444"
+  }
+}

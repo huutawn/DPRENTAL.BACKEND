@@ -35,3 +35,38 @@ Domain sở hữu repository contracts, EF Core DbContext, repository implementa
    ```
 
    Development lắng nghe tại `https://localhost:54336` và `http://localhost:44336`.
+
+## Tài liệu nghiệp vụ & Luồng xử lý
+
+- [`docs/RecommendationService_Business_Workflow.md`](RecommendationService_Business_Workflow.md): Đặc tả chi tiết mục tiêu nghiệp vụ, luồng xử lý không dùng ML/DL, bài toán người dùng đã đăng nhập vs chưa đăng nhập, và phạm vi Phase 1.
+
+## Hợp đồng tích hợp (Integration Contracts)
+
+Phase 1 định nghĩa bộ contract chuẩn và schema để `InventoryService`, `RentalService` và `RecommendationService` tích hợp độc lập:
+
+- **Tài liệu đặc tả hợp đồng**: [`docs/contracts/recommendation-v1.md`](contracts/recommendation-v1.md)
+  - Ranh giới trách nhiệm và ownership của từng service
+  - Envelope v1 và đặc tả ngữ nghĩa của 5 sự kiện hành vi
+  - Kafka topology, partition keys, delivery guarantees và DLQ routing
+  - Bảng trọng số tính điểm, quy tắc cộng dồn độc lập và cập nhật projection
+  - Định dạng snapshot cache Valkey và cơ chế fallback 3 tầng của InventoryService
+  - Checklist trách nhiệm riêng cho từng service và ma trận kịch bản kiểm thử
+- **JSON Schemas Draft 2020-12 & Fixtures**: [`docs/contracts/schemas/`](contracts/schemas/)
+  - Schemas cho 5 event: `ListingViewed`, `SearchPerformed`, `CartItemAdded`, `RentalItemPaid`, `RentalItemCompleted`
+  - Schemas cho 2 cache snapshot: `user-equipment-types-cache`, `global-popular-listings-cache`
+  - Fixtures hợp lệ (`valid/`) và không hợp lệ (`invalid/`)
+- **DDL tham chiếu PostgreSQL**: [`docs/contracts/recommendation-v1.sql`](contracts/recommendation-v1.sql)
+  - 3 bảng trong schema `recommendation`: `interaction_events`, `user_equipment_type_interest`, `listing_popularity`
+  - Ràng buộc toàn vẹn dữ liệu, CHECK constraints theo từng event và trọng số điểm
+  - Indexes cho lịch sử, ranking (score DESC, tie-break UUID ASC) và change tracking
+  - Thủ tục mẫu xử lý atomic ingestion, deduplication và rebuild projections
+
+### Kiểm chứng hợp đồng (Contract Validation)
+
+```bash
+# Kiểm tra toàn bộ JSON Schemas và valid/invalid fixtures bằng Draft 2020-12
+python3 scripts/tests/validate_contracts.py
+
+# Kiểm tra DDL, constraints, atomic upsert và rebuild trên PostgreSQL tạm (yêu cầu Docker)
+python3 scripts/tests/verify_ddl_postgres.py
+```

@@ -1,0 +1,15 @@
+{
+  "messageId": "11111111-1111-4111-8111-111111111132",
+  "messageType": "CartItemAdded",
+  "version": 1,
+  "producer": "RentalService",
+  "occurredAt": "2026-10-19T10:11:00Z",
+  "correlationId": "corr-cart-002",
+  "payload": {
+    "userId": "22222222-2222-4222-8222-222222222222",
+    "equipmentListingId": "33333333-3333-4333-8333-333333333333",
+    "equipmentTypeId": null,
+    "cartId": "55555555-5555-4555-8555-555555555555",
+    "cartItemId": "66666666-6666-4666-8666-666666666667"
+  }
+}
