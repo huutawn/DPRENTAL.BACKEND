@@ -187,6 +187,119 @@ public sealed class HandoverEvidenceTests
         Assert.Equal(RentalItemStatus.InRental, (await check.RentalItems.SingleAsync()).Status);
     }
 
+    [Fact]
+    public async Task HandoverSuccess_DoesNotReleaseAllocation_EquipmentRemainsAllocated()
+    {
+        // Thiết bị công trường sau khi giao cho người thuê phải tiếp tục được giữ chỗ, không phát lệnh ReleaseAllocation
+        await SeedAsync();
+        HandoverItemRequest request = Request();
+        Assert.True((await Service().HandoverItemAsync(_item.Id, request, "handover-alloc-1", OrderTestData.User(_binh))).IsSuccess);
+
+        InventoryCommand command = (await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver)).Single();
+        Assert.True((await _replies.SucceedAsync(command)).IsSuccess);
+
+        // Sau khi hoàn tất bàn giao: không được có bất kỳ lệnh ReleaseAllocation nào
+        IReadOnlyList<InventoryCommand> releaseCommands = await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ReleaseAllocation);
+        Assert.Empty(releaseCommands);
+
+        await using RentalServiceDbContext context = NewContext();
+        RentalItem item = await context.RentalItems.SingleAsync(i => i.Id == _item.Id);
+        Assert.Equal(RentalItemStatus.InRental, item.Status);
+    }
+
+    [Fact]
+    public async Task MultiItemOrder_RollsUpToInRental_OnlyWhenAllActiveItemsAreHandedOver()
+    {
+        // Đơn hàng thiết bị công trường gồm 2 mục thuê của cùng supplier Bình: Máy đầm cóc và Máy lu rung
+        RentalOrder order = OrderTestData.Paid(
+            OrderTestData.Order(
+                Guid.NewGuid(),
+                "DH-2026-MULTI-01",
+                OrderTestData.Now,
+                OrderTestData.Line(_binh, "Máy đầm cóc Mikasa", "Máy đầm", "Mikasa", 1, 300_000m, 2_000_000m),
+                OrderTestData.Line(_binh, "Máy lu rung Sakai", "Máy lu", "Sakai", 1, 1_500_000m, 10_000_000m)),
+            OrderTestData.Now.AddMinutes(5));
+
+        RentalItem item1 = order.Items.First();
+        RentalItem item2 = order.Items.Last();
+        typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(item1, RentalItemStatus.AwaitingHandover);
+        typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(item2, RentalItemStatus.AwaitingHandover);
+
+        await using (RentalServiceDbContext setup = NewContext())
+        {
+            setup.RentalOrders.Add(order);
+            await setup.SaveChangesAsync();
+        }
+
+        // Bàn giao mục thứ nhất: Máy đầm cóc
+        HandoverItemRequest req1 = new(
+            OrderTestData.Now.AddDays(1).AddHours(-2),
+            "Bàn giao máy đầm tại công trường",
+            item1.UnitAssignments.Select(a => new HandoverUnitObservationRequest(a.Id, UnitCondition.Normal, "Hoạt động tốt", [Guid.NewGuid()])).ToList(),
+            true);
+        Assert.True((await Service().HandoverItemAsync(item1.Id, req1, "handover-multi-item1", OrderTestData.User(_binh))).IsSuccess);
+        InventoryCommand cmd1 = (await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver))
+            .Single(c => c.RentalItemId == item1.Id);
+        Assert.True((await _replies.SucceedAsync(cmd1)).IsSuccess);
+
+        // Sau khi giao Máy đầm: item1 sang InRental nhưng toàn đơn vẫn là AwaitingHandover vì Máy lu chưa giao
+        await using (RentalServiceDbContext checkStep1 = NewContext())
+        {
+            RentalOrder loadedOrder = await checkStep1.RentalOrders.Include(o => o.Items).SingleAsync(o => o.Id == order.Id);
+            Assert.Equal(RentalOrderStatus.AwaitingHandover, loadedOrder.Status);
+            Assert.Equal(RentalItemStatus.InRental, loadedOrder.Items.Single(i => i.Id == item1.Id).Status);
+            Assert.Equal(RentalItemStatus.AwaitingHandover, loadedOrder.Items.Single(i => i.Id == item2.Id).Status);
+        }
+
+        // Bàn giao mục thứ hai: Máy lu rung
+        HandoverItemRequest req2 = new(
+            OrderTestData.Now.AddDays(1).AddHours(-1),
+            "Bàn giao máy lu tại công trường",
+            item2.UnitAssignments.Select(a => new HandoverUnitObservationRequest(a.Id, UnitCondition.Normal, "Máy mới hoạt động êm", [Guid.NewGuid()])).ToList(),
+            true);
+        Assert.True((await Service().HandoverItemAsync(item2.Id, req2, "handover-multi-item2", OrderTestData.User(_binh))).IsSuccess);
+        InventoryCommand cmd2 = (await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver))
+            .Single(c => c.RentalItemId == item2.Id);
+        Assert.True((await _replies.SucceedAsync(cmd2)).IsSuccess);
+
+        // Khi cả 2 thiết bị công trường đều đã bàn giao xong: đơn hàng chính thức chuyển sang InRental
+        await using (RentalServiceDbContext checkStep2 = NewContext())
+        {
+            RentalOrder loadedOrder = await checkStep2.RentalOrders.Include(o => o.Items).SingleAsync(o => o.Id == order.Id);
+            Assert.Equal(RentalOrderStatus.InRental, loadedOrder.Status);
+            Assert.All(loadedOrder.Items, i => Assert.Equal(RentalItemStatus.InRental, i.Status));
+        }
+    }
+
+    [Fact]
+    public async Task InventoryConfirms_WhenItemIsAlreadyInTerminalState_DoesNotOverrideStatus()
+    {
+        // Trường hợp mục thuê bị Expired hoặc Rejected trước khi tin nhắn Inventory tới
+        await SeedAsync();
+        HandoverItemRequest request = Request();
+        Assert.True((await Service().HandoverItemAsync(_item.Id, request, "handover-term-1", OrderTestData.User(_binh))).IsSuccess);
+        InventoryCommand command = (await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver)).Single();
+
+        // Giả lập trạng thái mục thuê bị chuyển sang Expired (ví dụ do sự cố hết hạn / hủy)
+        await using (RentalServiceDbContext context = NewContext())
+        {
+            RentalItem item = await context.RentalItems.SingleAsync(i => i.Id == _item.Id);
+            typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(item, RentalItemStatus.Expired);
+            await context.SaveChangesAsync();
+        }
+
+        // Kết quả từ Inventory trả về sau đó không được ghi đè trạng thái Expired thành InRental
+        Result replyResult = await _replies.SucceedAsync(command);
+        Assert.True(replyResult.IsSuccess);
+
+        await using (RentalServiceDbContext check = NewContext())
+        {
+            RentalItem item = await check.RentalItems.SingleAsync(i => i.Id == _item.Id);
+            Assert.Equal(RentalItemStatus.Expired, item.Status);
+            Assert.Null(item.HandoverRecord);
+        }
+    }
+
     private HandoverItemRequest Request(bool confirmed = true) => new(
         OrderTestData.Now.AddDays(1).AddHours(-2),
         "Giao tại công trường, máy chạy tốt",

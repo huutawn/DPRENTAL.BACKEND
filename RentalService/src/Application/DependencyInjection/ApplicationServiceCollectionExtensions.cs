@@ -31,6 +31,8 @@ using Dprental.RentalService.Application.Services.SupplierStatistics;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net.Http;
 using Dprental.RentalService.Application.Services.Overdue;
+using Dprental.RentalService.Application.IServices.Handover;
+using Dprental.RentalService.Application.Services.Handover;
 using Dprental.RentalService.Application.IServices.Settlement;
 using Dprental.RentalService.Application.Services.Settlement;
 
@@ -87,6 +89,9 @@ public static class ApplicationServiceCollectionExtensions
         // Supplier Decision & Statistics
         services.AddScoped<ISupplierDecisionService, SupplierDecisionService>();
         services.AddScoped<ISupplierStatisticsService, SupplierStatisticsService>();
+
+        // Handover Acknowledgement
+        services.AddScoped<IHandoverAcknowledgementService, HandoverAcknowledgementService>();
 
         // Expiry
         services.AddScoped<IExpiryWorkflowService, ExpiryWorkflowService>();
