@@ -212,7 +212,7 @@ public sealed class TransactionJournalEntryConfiguration : IEntityTypeConfigurat
         builder.Property(j => j.InvoiceRef).HasMaxLength(64);
         builder.Property(j => j.OutboxDigest).HasMaxLength(128);
         builder.Property(j => j.OutboxMessageId);
-        builder.Property(j => j.CanonicalPayload).IsRequired().HasColumnType("text");
+        builder.Property(j => j.EnvelopeDigest).IsRequired().HasMaxLength(128);
         builder.Property(j => j.PreviousHash).IsRequired().HasMaxLength(128);
         builder.Property(j => j.PayloadHash).IsRequired().HasMaxLength(128);
         builder.Property(j => j.EntryHash).IsRequired().HasMaxLength(128);

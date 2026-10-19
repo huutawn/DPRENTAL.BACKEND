@@ -41,6 +41,13 @@ public static class IntegrityHostProgram
         builder.Services.AddPaymentInfrastructure(paymentConn);
 
         // 3. Cryptographic key manager & workers
+        builder.Services.AddOptions<Dprental.PaymentService.Application.Options.PaymentEncryptionOptions>()
+            .BindConfiguration(Dprental.PaymentService.Application.Options.PaymentEncryptionOptions.SectionName);
+        builder.Services.AddSingleton<Dprental.PaymentService.Common.Cryptography.IPaymentDataEncryptor>(sp =>
+        {
+            var opt = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Dprental.PaymentService.Application.Options.PaymentEncryptionOptions>>().Value;
+            return new Dprental.PaymentService.Common.Cryptography.PaymentDataEncryptor(opt.GetKeyBytes(), opt.ActiveKeyId);
+        });
         builder.Services.AddSingleton<IntegrityKeyManager>();
         builder.Services.AddScoped<IntegrityVerificationEngine>();
         builder.Services.AddHostedService<IntegrityConfirmationWorker>();

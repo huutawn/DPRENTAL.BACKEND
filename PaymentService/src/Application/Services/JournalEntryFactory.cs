@@ -84,7 +84,7 @@ public static class JournalEntryFactory
             confirmationSource: confirmationSource,
             actor: actor,
             timestampUtc: timestampUtc,
-            canonicalPayload: string.Empty, // Plaintext not stored; only encrypted payload stored
+            envelopeDigest: envelopeDigest,
             previousHash: previousHash,
             payloadHash: payloadHash,
             entryHash: entryHash,

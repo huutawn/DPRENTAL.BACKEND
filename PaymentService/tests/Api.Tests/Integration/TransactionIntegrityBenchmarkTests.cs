@@ -73,7 +73,7 @@ public sealed class TransactionIntegrityBenchmarkTests
                         "Id", "StreamId", "StreamType", "Version", "EventId", "EventType",
                         "Amount", "Currency", "Status", "ConfirmationSource", "Actor", "TimestampUtc",
                         "PaymentRef", "InvoiceRef", "RentalOrderId", "RentalItemId", "OutboxDigest",
-                        "PreviousHash", "PayloadHash", "EntryHash", "Fingerprint", "EncryptedPayload",
+                        "EnvelopeDigest", "PreviousHash", "PayloadHash", "EntryHash", "Fingerprint", "EncryptedPayload",
                         "PayloadNonce", "PayloadTag", "EncryptionKeyId", "IsConfirmed", "ConfirmedAt",
                         "ProofSignature", "SigningKeyId"
                     )
@@ -94,6 +94,7 @@ public sealed class TransactionIntegrityBenchmarkTests
                         'INV-BENCH-' || s,
                         gen_random_uuid(),
                         gen_random_uuid(),
+                        '',
                         '',
                         '{CanonicalJournalHasher.GenesisHash}',
                         '{basePayloadHash}',
@@ -124,53 +125,54 @@ public sealed class TransactionIntegrityBenchmarkTests
                 sampleStreamIds.Add($"BENCH:{i}");
             }
 
-            // Update EntryHash and ProofSignature for sample streams so they have valid cryptographic signatures
+            var benchEncryptor = new PaymentDataEncryptor(new byte[32], "bench-enc-key");
+
             await using (var ctx = new PaymentServiceDbContext(paymentOptions))
             {
                 var sampleEntries = await ctx.TransactionJournals
                     .Where(j => sampleStreamIds.Contains(j.StreamId))
                     .ToListAsync();
 
+                await using var iCtx = new IntegrityDbContext(iOptions);
                 foreach (var entry in sampleEntries)
                 {
-                    string envelopeDigest = CanonicalJournalCodec.ComputeEnvelopeDigest(
-                        entry.EncryptedPayload, entry.PayloadNonce, entry.PayloadTag, entry.EncryptionKeyId);
-                    string entryHash = CanonicalJournalCodec.ComputeEntryHash(
-                        entry.StreamId, entry.Version, entry.EventId, entry.PreviousHash, entry.PayloadHash, envelopeDigest);
+                    var doc = new CanonicalJournalDocument(
+                        SchemaVersion: CanonicalJournalCodec.CurrentSchemaVersion,
+                        Environment: "production",
+                        OperationId: entry.OperationId,
+                        EventId: entry.EventId,
+                        StreamType: entry.StreamType,
+                        StreamId: entry.StreamId,
+                        Version: entry.Version,
+                        EventType: entry.EventType,
+                        Amount: entry.Amount,
+                        Currency: entry.Currency,
+                        Status: entry.Status,
+                        ConfirmationSource: entry.ConfirmationSource,
+                        Actor: entry.Actor,
+                        RecordedAtUtc: entry.TimestampUtc,
+                        PreviousHash: entry.PreviousHash);
 
-                    string attestationMsg = EcdsaAttestation.BuildAttestationMessage(
-                        keyId, entry.StreamId, entry.Version, entry.EventId, entryHash, entry.ConfirmedAt!.Value);
-
+                    string canonicalJson = CanonicalJournalCodec.SerializeToCanonicalJson(doc);
+                    string payloadHash = CanonicalJournalCodec.ComputePayloadHash(canonicalJson);
+                    byte[] aad = System.Text.Encoding.UTF8.GetBytes($"{entry.StreamId}:{entry.Version}:{entry.EventId:D}");
+                    var enc = benchEncryptor.Encrypt(System.Text.Encoding.UTF8.GetBytes(canonicalJson), aad);
+                    string envelopeDigest = CanonicalJournalCodec.ComputeEnvelopeDigest(enc.CiphertextBase64, enc.NonceBase64, enc.TagBase64, enc.KeyId);
+                    string entryHash = CanonicalJournalCodec.ComputeEntryHash(entry.StreamId, entry.Version, entry.EventId, entry.PreviousHash, payloadHash, envelopeDigest);
+                    string attestationMsg = EcdsaAttestation.BuildAttestationMessage(keyId, entry.StreamId, entry.Version, entry.EventId, entryHash, entry.ConfirmedAt!.Value);
                     string signature = EcdsaAttestation.Sign(ecdsa, attestationMsg);
 
-                    // Update in-memory entry fields
                     await ctx.Database.ExecuteSqlRawAsync(
-                        "UPDATE transaction_journal SET \"EntryHash\" = {0}, \"ProofSignature\" = {1} WHERE \"Id\" = {2}",
-                        entryHash, signature, entry.Id);
+                        "UPDATE transaction_journal SET \"PayloadHash\" = {0}, \"EncryptedPayload\" = {1}, \"PayloadNonce\" = {2}, \"PayloadTag\" = {3}, \"EncryptionKeyId\" = {4}, \"EnvelopeDigest\" = {5}, \"EntryHash\" = {6}, \"ProofSignature\" = {7} WHERE \"Id\" = {8}",
+                        payloadHash, enc.CiphertextBase64, enc.NonceBase64, enc.TagBase64, enc.KeyId, envelopeDigest, entryHash, signature, entry.Id);
+
+                    var manifest = StreamManifest.Create(entry.StreamId, 1, entryHash, entry.EventId, entry.ConfirmedAt!.Value);
+                    iCtx.Manifests.Add(manifest);
+                    var attestation = AttestationRecord.Create(
+                        entry.StreamId, 1, entry.EventId, entryHash, payloadHash, entry.PreviousHash, signature, keyId, entry.ConfirmedAt!.Value);
+                    iCtx.Attestations.Add(attestation);
                 }
-                // Also seed manifest and attestations in Integrity DB for sample streams
-                await using (var iCtx = new IntegrityDbContext(iOptions))
-                {
-                    foreach (var entry in sampleEntries)
-                    {
-                        string envelopeDigest = CanonicalJournalCodec.ComputeEnvelopeDigest(
-                            entry.EncryptedPayload, entry.PayloadNonce, entry.PayloadTag, entry.EncryptionKeyId);
-                        string entryHash = CanonicalJournalCodec.ComputeEntryHash(
-                            entry.StreamId, entry.Version, entry.EventId, entry.PreviousHash, entry.PayloadHash, envelopeDigest);
-
-                        string attestationMsg = EcdsaAttestation.BuildAttestationMessage(
-                            keyId, entry.StreamId, entry.Version, entry.EventId, entryHash, entry.ConfirmedAt!.Value);
-
-                        string signature = EcdsaAttestation.Sign(ecdsa, attestationMsg);
-
-                        var manifest = StreamManifest.Create(entry.StreamId, 1, entryHash, entry.EventId, entry.ConfirmedAt!.Value);
-                        iCtx.Manifests.Add(manifest);
-                        var attestation = AttestationRecord.Create(
-                            entry.StreamId, 1, entry.EventId, entryHash, entry.PayloadHash, entry.PreviousHash, signature, keyId, entry.ConfirmedAt!.Value);
-                        iCtx.Attestations.Add(attestation);
-                    }
-                    await iCtx.SaveChangesAsync();
-                }
+                await iCtx.SaveChangesAsync();
             }
             await using (var ctx = new PaymentServiceDbContext(paymentOptions))
             {
@@ -263,7 +265,7 @@ public sealed class TransactionIntegrityBenchmarkTests
 
                     await using var checkCtx = new PaymentServiceDbContext(paymentOptions);
                     await using var iCheckCtx = new IntegrityDbContext(iOptions);
-                    var checker = new IntegrityVerificationEngine(iCheckCtx, checkCtx, keyManager, verifyOptions);
+                    var checker = new IntegrityVerificationEngine(iCheckCtx, checkCtx, keyManager, benchEncryptor, verifyOptions);
 
                     var req = new TransactionVerificationRequest(
                         PaymentRef: streamId,

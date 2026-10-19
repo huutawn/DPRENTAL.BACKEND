@@ -136,6 +136,7 @@ public sealed class IntegrityRegressionFlawTests
             var worker = new IntegrityConfirmationWorker(
                 sp.GetRequiredService<IServiceScopeFactory>(),
                 keyManager,
+                TestEncryptor,
                 new TestOptionsMonitor<IntegrityHostOptions>(new IntegrityHostOptions { SigningKeyId = keyId }),
                 NullLogger<IntegrityConfirmationWorker>.Instance);
 
@@ -162,7 +163,7 @@ public sealed class IntegrityRegressionFlawTests
             await using (var pCtx = new PaymentServiceDbContext(paymentOptions))
             {
                 var engine = new IntegrityVerificationEngine(
-                    iCtx, pCtx, keyManager,
+                    iCtx, pCtx, keyManager, TestEncryptor,
                     new TestOptionsMonitor<IntegrityVerificationOptions>(new IntegrityVerificationOptions { ActiveKeyId = keyId }));
 
                 var verifyRes = await engine.VerifyAsync(new TransactionVerificationRequest(

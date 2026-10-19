@@ -29,7 +29,7 @@ public sealed record CanonicalJournalDocument(
 
 public static class CanonicalJournalCodec
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     public static string NormalizeTimestamp(DateTimeOffset timestamp)
     {
@@ -50,7 +50,14 @@ public static class CanonicalJournalCodec
 
     public static string FormatFeeRate(decimal feeRate)
     {
-        return feeRate.ToString("0.0000", CultureInfo.InvariantCulture);
+        int scaled = (int)Math.Round(feeRate * 10000m, MidpointRounding.AwayFromZero);
+        return scaled.ToString(CultureInfo.InvariantCulture);
+    }
+
+    public static decimal ParseFeeRate(string feeRateStr)
+    {
+        int scaled = int.Parse(feeRateStr, CultureInfo.InvariantCulture);
+        return scaled / 10000m;
     }
 
     public static string SerializeToCanonicalJson(CanonicalJournalDocument doc)
@@ -198,5 +205,97 @@ public static class CanonicalJournalCodec
         string raw = $"{streamId.Trim()}|{version}|{eventId:D}|{previousHash.Trim().ToLowerInvariant()}|{payloadHash.Trim().ToLowerInvariant()}|{envelopeDigest?.Trim().ToLowerInvariant() ?? string.Empty}";
         byte[] bytes = Encoding.UTF8.GetBytes(raw);
         return Convert.ToHexStringLower(SHA256.HashData(bytes));
+    }
+
+    public static CanonicalJournalDocument DeserializeFromCanonicalJson(string canonicalJson)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(canonicalJson);
+
+        using var jsonDoc = JsonDocument.Parse(canonicalJson);
+        var root = jsonDoc.RootElement;
+
+        int schemaVersion = root.GetProperty("schemaVersion").GetInt32();
+        string environment = root.GetProperty("environment").GetString() ?? string.Empty;
+        Guid operationId = Guid.Parse(root.GetProperty("operationId").GetString()!);
+        Guid eventId = Guid.Parse(root.GetProperty("eventId").GetString()!);
+        string streamType = root.GetProperty("streamType").GetString() ?? string.Empty;
+        string streamId = root.GetProperty("streamId").GetString() ?? string.Empty;
+        long version = root.GetProperty("version").GetInt64();
+        string eventType = root.GetProperty("eventType").GetString() ?? string.Empty;
+        decimal amount = decimal.Parse(root.GetProperty("amount").GetString()!, CultureInfo.InvariantCulture);
+        string currency = root.GetProperty("currency").GetString() ?? string.Empty;
+        string status = root.GetProperty("status").GetString() ?? string.Empty;
+        string confirmationSource = root.GetProperty("confirmationSource").GetString() ?? string.Empty;
+        string actor = root.GetProperty("actor").GetString() ?? string.Empty;
+        DateTimeOffset recordedAtUtc = DateTimeOffset.Parse(root.GetProperty("recordedAtUtc").GetString()!, CultureInfo.InvariantCulture);
+        string previousHash = root.GetProperty("previousHash").GetString() ?? string.Empty;
+
+        DateTimeOffset? bankTimeUtc = null;
+        if (root.TryGetProperty("bankTimeUtc", out var btProp) && btProp.ValueKind != JsonValueKind.Null && !string.IsNullOrWhiteSpace(btProp.GetString()))
+        {
+            bankTimeUtc = DateTimeOffset.Parse(btProp.GetString()!, CultureInfo.InvariantCulture);
+        }
+
+        string? outboxDigest = null;
+        if (root.TryGetProperty("outboxDigest", out var odProp) && odProp.ValueKind != JsonValueKind.Null)
+        {
+            outboxDigest = odProp.GetString();
+        }
+
+        Guid? outboxMessageId = null;
+        if (root.TryGetProperty("outboxMessageId", out var omProp) && omProp.ValueKind != JsonValueKind.Null && !string.IsNullOrWhiteSpace(omProp.GetString()))
+        {
+            outboxMessageId = Guid.Parse(omProp.GetString()!);
+        }
+
+        Dictionary<string, string?>? relatedEntities = null;
+        if (root.TryGetProperty("relatedEntities", out var reProp) && reProp.ValueKind == JsonValueKind.Object)
+        {
+            relatedEntities = new Dictionary<string, string?>(StringComparer.Ordinal);
+            foreach (var prop in reProp.EnumerateObject())
+            {
+                relatedEntities[prop.Name] = prop.Value.ValueKind == JsonValueKind.Null ? null : prop.Value.GetString();
+            }
+        }
+
+        Dictionary<string, object?>? snapshot = null;
+        if (root.TryGetProperty("snapshot", out var snProp) && snProp.ValueKind == JsonValueKind.Object)
+        {
+            snapshot = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var prop in snProp.EnumerateObject())
+            {
+                snapshot[prop.Name] = prop.Value.ValueKind switch
+                {
+                    JsonValueKind.Null => null,
+                    JsonValueKind.String => prop.Value.GetString(),
+                    JsonValueKind.Number => prop.Value.GetDecimal(),
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    _ => prop.Value.GetRawText()
+                };
+            }
+        }
+
+        return new CanonicalJournalDocument(
+            SchemaVersion: schemaVersion,
+            Environment: environment,
+            OperationId: operationId,
+            EventId: eventId,
+            StreamType: streamType,
+            StreamId: streamId,
+            Version: version,
+            EventType: eventType,
+            Amount: amount,
+            Currency: currency,
+            Status: status,
+            ConfirmationSource: confirmationSource,
+            Actor: actor,
+            RecordedAtUtc: recordedAtUtc,
+            PreviousHash: previousHash,
+            BankTimeUtc: bankTimeUtc,
+            OutboxDigest: outboxDigest,
+            OutboxMessageId: outboxMessageId,
+            RelatedEntities: relatedEntities,
+            Snapshot: snapshot);
     }
 }

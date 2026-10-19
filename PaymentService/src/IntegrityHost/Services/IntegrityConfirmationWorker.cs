@@ -18,17 +18,20 @@ public sealed class IntegrityConfirmationWorker : BackgroundService
     private readonly IntegrityKeyManager _keyManager;
     private readonly IOptionsMonitor<IntegrityHostOptions> _options;
     private readonly ILogger<IntegrityConfirmationWorker> _logger;
+    private readonly IPaymentDataEncryptor _encryptor;
     private readonly TimeProvider _timeProvider;
 
     public IntegrityConfirmationWorker(
         IServiceScopeFactory scopeFactory,
         IntegrityKeyManager keyManager,
+        IPaymentDataEncryptor encryptor,
         IOptionsMonitor<IntegrityHostOptions> options,
         ILogger<IntegrityConfirmationWorker> logger,
         TimeProvider? timeProvider = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _keyManager = keyManager ?? throw new ArgumentNullException(nameof(keyManager));
+        _encryptor = encryptor ?? throw new ArgumentNullException(nameof(encryptor));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -183,44 +186,25 @@ public sealed class IntegrityConfirmationWorker : BackgroundService
                 }
             }
 
-            // 2. Verify CanonicalPayload and EntryHash computation
-            if (!string.IsNullOrWhiteSpace(entry.CanonicalPayload))
+            // 2. Use unified JournalContentVerifier
+            var verifyResult = Dprental.PaymentService.Domain.Services.JournalContentVerifier.Verify(entry, _encryptor);
+            if (!verifyResult.IsValid)
             {
-                string expectedPayloadHash = CanonicalJournalCodec.ComputePayloadHash(entry.CanonicalPayload);
-                if (!string.Equals(entry.PayloadHash, expectedPayloadHash, StringComparison.OrdinalIgnoreCase))
+                string incidentReason = verifyResult.FailureReason switch
                 {
-                    await RecordIncidentAndBlockAsync(
-                        integrityDb,
-                        entry.StreamId,
-                        "PAYLOAD_HASH_TAMPERED",
-                        entry.Version,
-                        entry.EventId,
-                        $"PayloadHash {entry.PayloadHash} does not match computed hash from canonical payload {expectedPayloadHash}.",
-                        now,
-                        cancellationToken);
-                    continue;
-                }
-            }
+                    "ENTRY_HASH_MISMATCH" => "HASH_TAMPERED",
+                    "ENVELOPE_DIGEST_MISMATCH" => "ENVELOPE_TAMPERED",
+                    "DECRYPTION_FAILED" => "CIPHERTEXT_TAMPERED",
+                    _ => (verifyResult.FailureReason ?? "PAYLOAD_HASH_TAMPERED")
+                };
 
-            string envelopeDigest = CanonicalJournalCodec.ComputeEnvelopeDigest(
-                entry.EncryptedPayload, entry.PayloadNonce, entry.PayloadTag, entry.EncryptionKeyId);
-
-            string expectedEntryHash = CanonicalJournalCodec.ComputeEntryHash(
-                entry.StreamId,
-                entry.Version,
-                entry.EventId,
-                entry.PreviousHash,
-                entry.PayloadHash,
-                envelopeDigest);
-            if (!string.Equals(entry.EntryHash, expectedEntryHash, StringComparison.OrdinalIgnoreCase))
-            {
                 await RecordIncidentAndBlockAsync(
                     integrityDb,
                     entry.StreamId,
-                    "HASH_TAMPERED",
+                    incidentReason,
                     entry.Version,
                     entry.EventId,
-                    $"EntryHash {entry.EntryHash} does not match expected {expectedEntryHash}.",
+                    $"Journal verification failed: {verifyResult.FailureReason}.",
                     now,
                     cancellationToken);
                 continue;
@@ -261,16 +245,20 @@ public sealed class IntegrityConfirmationWorker : BackgroundService
             }
 
             // Update EntityHead in Integrity evidence store
+            string snapshotDigest = verifyResult.Document?.Snapshot != null
+                ? Dprental.PaymentService.Domain.Services.OperationalSnapshotEngine.ComputeSnapshotDigest(verifyResult.Document.Snapshot)
+                : entry.PayloadHash;
+
             var head = await integrityDb.EntityHeads
                 .FirstOrDefaultAsync(h => h.EntityType == entry.StreamType && h.EntityId == entry.StreamId, cancellationToken);
             if (head is null)
             {
                 integrityDb.EntityHeads.Add(EntityHeadRecord.Create(
-                    entry.StreamType, entry.StreamId, attestation.Id, entry.Version, entry.EntryHash, entry.PayloadHash, now));
+                    entry.StreamType, entry.StreamId, attestation.Id, entry.Version, entry.EntryHash, snapshotDigest, now));
             }
             else
             {
-                head.Update(attestation.Id, entry.Version, entry.EntryHash, entry.PayloadHash, now);
+                head.Update(attestation.Id, entry.Version, entry.EntryHash, snapshotDigest, now);
             }
 
             await integrityDb.SaveChangesAsync(cancellationToken);

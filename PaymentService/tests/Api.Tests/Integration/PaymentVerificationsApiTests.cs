@@ -120,7 +120,7 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
                         {
                             var iCtx = new IntegrityDbContext(new DbContextOptionsBuilder<IntegrityDbContext>().UseNpgsql(_integrityConn).Options);
                             var pCtx = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connString));
-                            var engine = new IntegrityVerificationEngine(iCtx, pCtx, keyManager, verifyOptions);
+                            var engine = new IntegrityVerificationEngine(iCtx, pCtx, keyManager, TestEncryptor, verifyOptions);
                             return new MockIntegrityHandler(engine);
                         });
                 });

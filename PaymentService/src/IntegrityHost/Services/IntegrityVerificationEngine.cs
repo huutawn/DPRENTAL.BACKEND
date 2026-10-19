@@ -18,17 +18,20 @@ public sealed class IntegrityVerificationEngine
     private readonly IntegrityKeyManager _keyManager;
     private readonly TimeProvider _timeProvider;
     private readonly IOptionsMonitor<IntegrityVerificationOptions> _options;
+    private readonly IPaymentDataEncryptor _encryptor;
 
     public IntegrityVerificationEngine(
         IntegrityDbContext integrityDb,
         PaymentServiceDbContext paymentDb,
         IntegrityKeyManager keyManager,
+        IPaymentDataEncryptor encryptor,
         IOptionsMonitor<IntegrityVerificationOptions> options,
         TimeProvider? timeProvider = null)
     {
         _integrityDb = integrityDb ?? throw new ArgumentNullException(nameof(integrityDb));
         _paymentDb = paymentDb ?? throw new ArgumentNullException(nameof(paymentDb));
         _keyManager = keyManager ?? throw new ArgumentNullException(nameof(keyManager));
+        _encryptor = encryptor ?? throw new ArgumentNullException(nameof(encryptor));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
@@ -167,20 +170,25 @@ public sealed class IntegrityVerificationEngine
             }
 
             // 5. Verify Hash computation
-            string envelopeDigest = CanonicalJournalCodec.ComputeEnvelopeDigest(
-                entry.EncryptedPayload, entry.PayloadNonce, entry.PayloadTag, entry.EncryptionKeyId);
-
-            string expectedEntryHash = CanonicalJournalCodec.ComputeEntryHash(
-                entry.StreamId, entry.Version, entry.EventId, entry.PreviousHash, entry.PayloadHash, envelopeDigest);
-            if (!string.Equals(entry.EntryHash, expectedEntryHash, StringComparison.OrdinalIgnoreCase))
+            // 5. Verify using unified JournalContentVerifier
+            var verifyResult = Dprental.PaymentService.Domain.Services.JournalContentVerifier.Verify(entry, _encryptor);
+            if (!verifyResult.IsValid)
             {
+                string failureReason = verifyResult.FailureReason switch
+                {
+                    "ENTRY_HASH_MISMATCH" => "HASH_TAMPERED",
+                    "ENVELOPE_DIGEST_MISMATCH" => "ENVELOPE_TAMPERED",
+                    "DECRYPTION_FAILED" => "CIPHERTEXT_TAMPERED",
+                    _ => (verifyResult.FailureReason ?? "PAYLOAD_HASH_TAMPERED")
+                };
+
                 return CreateResponse(
                     request,
                     IntegrityStatuses.Tampered,
                     entry.Version,
                     entry.ConfirmationSource,
                     isUsable: false,
-                    reason: "HASH_TAMPERED",
+                    reason: failureReason,
                     actualAmount: entry.Amount,
                     actualCurrency: entry.Currency,
                     actualStatus: entry.Status,

@@ -88,6 +88,7 @@ public sealed class IntegrityHostIntegrationTests
         var confirmationWorker = new IntegrityConfirmationWorker(
             scopeFactory,
             keyManager,
+            TestEncryptor,
             new TestOptionsMonitor<IntegrityHostOptions>(integrityHostOptions.Value),
             NullLogger<IntegrityConfirmationWorker>.Instance);
 
@@ -147,7 +148,7 @@ public sealed class IntegrityHostIntegrationTests
                 PublicKeys = new Dictionary<string, string> { [keyId] = publicKeyBase64 }
             });
             await using var iCtxVerify = new IntegrityDbContext(integrityOptions);
-            var checker = new IntegrityVerificationEngine(iCtxVerify, payCtx, keyManager, verifyOptions);
+            var checker = new IntegrityVerificationEngine(iCtxVerify, payCtx, keyManager, TestEncryptor, verifyOptions);
 
             var verifyRes = await checker.VerifyAsync(new TransactionVerificationRequest(
                 PaymentRef: invoiceRef,
@@ -201,6 +202,7 @@ public sealed class IntegrityHostIntegrationTests
         var confirmationWorker = new IntegrityConfirmationWorker(
             serviceProvider.GetRequiredService<IServiceScopeFactory>(),
             keyManager,
+            TestEncryptor,
             new TestOptionsMonitor<IntegrityHostOptions>(integrityHostOptions.Value),
             NullLogger<IntegrityConfirmationWorker>.Instance);
 
@@ -236,7 +238,7 @@ public sealed class IntegrityHostIntegrationTests
                 PublicKeys = new Dictionary<string, string> { [keyId] = publicKeyBase64 }
             });
             await using var iCtxTamper = new IntegrityDbContext(integrityOptions);
-            var checker = new IntegrityVerificationEngine(iCtxTamper, payCtx, keyManager, verifyOptions);
+            var checker = new IntegrityVerificationEngine(iCtxTamper, payCtx, keyManager, TestEncryptor, verifyOptions);
 
             var verifyRes = await checker.VerifyAsync(new TransactionVerificationRequest(
                 PaymentRef: invoiceRef,
@@ -272,7 +274,7 @@ public sealed class IntegrityHostIntegrationTests
                 PublicKeys = new Dictionary<string, string> { [keyId] = publicKeyBase64 }
             });
             await using var iCtxSig = new IntegrityDbContext(integrityOptions);
-            var checker = new IntegrityVerificationEngine(iCtxSig, payCtx, keyManager, verifyOptions);
+            var checker = new IntegrityVerificationEngine(iCtxSig, payCtx, keyManager, TestEncryptor, verifyOptions);
 
             var verifyRes = await checker.VerifyAsync(new TransactionVerificationRequest(
                 PaymentRef: invoiceRef,
@@ -320,6 +322,7 @@ public sealed class IntegrityHostIntegrationTests
         var confirmationWorker = new IntegrityConfirmationWorker(
             scopeFactory,
             keyManager,
+            TestEncryptor,
             new TestOptionsMonitor<IntegrityHostOptions>(integrityHostOptions.Value),
             NullLogger<IntegrityConfirmationWorker>.Instance);
 

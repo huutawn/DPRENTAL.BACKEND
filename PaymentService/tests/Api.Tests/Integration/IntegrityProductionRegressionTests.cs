@@ -90,6 +90,7 @@ public sealed class IntegrityProductionRegressionTests
             var confirmationWorker = new IntegrityConfirmationWorker(
                 sp.GetRequiredService<IServiceScopeFactory>(),
                 keyManager,
+                TestEncryptor,
                 new TestOptionsMonitor<IntegrityHostOptions>(new IntegrityHostOptions { SigningKeyId = keyId }),
                 NullLogger<IntegrityConfirmationWorker>.Instance);
 
@@ -160,7 +161,7 @@ public sealed class IntegrityProductionRegressionTests
             await using (var pCtx = new PaymentServiceDbContext(pOptions))
             {
                 var engine = new IntegrityVerificationEngine(
-                    iCtx, pCtx, keyManager,
+                    iCtx, pCtx, keyManager, TestEncryptor,
                     new TestOptionsMonitor<IntegrityVerificationOptions>(new IntegrityVerificationOptions
                     {
                         ActiveKeyId = keyId,
@@ -192,7 +193,7 @@ public sealed class IntegrityProductionRegressionTests
                 var repo = new EfInvoiceRepository(pCtx);
                 var ledger = new EfSettlementLedger(pCtx, TimeProvider.System, new PaymentDataEncryptor(RandomNumberGenerator.GetBytes(32)));
                 var engine = new IntegrityVerificationEngine(
-                    iCtx, pCtx, keyManager,
+                    iCtx, pCtx, keyManager, TestEncryptor,
                     new TestOptionsMonitor<IntegrityVerificationOptions>(new IntegrityVerificationOptions
                     {
                         ActiveKeyId = keyId,
@@ -266,7 +267,7 @@ public sealed class IntegrityProductionRegressionTests
             await using (var pCtx = new PaymentServiceDbContext(pOptions))
             {
                 var engine = new IntegrityVerificationEngine(
-                    iCtx, pCtx, keyManager,
+                    iCtx, pCtx, keyManager, TestEncryptor,
                     new TestOptionsMonitor<IntegrityVerificationOptions>(new IntegrityVerificationOptions
                     {
                         ActiveKeyId = keyId,

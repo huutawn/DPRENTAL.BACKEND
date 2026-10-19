@@ -21,7 +21,7 @@ public sealed class TransactionJournalEntry
     public Guid? RentalItemId { get; private set; }
     public string? OutboxDigest { get; private set; }
     public Guid? OutboxMessageId { get; private set; }
-    public string CanonicalPayload { get; private set; } = string.Empty;
+    public string EnvelopeDigest { get; private set; } = string.Empty;
     public string PreviousHash { get; private set; } = string.Empty;
     public string PayloadHash { get; private set; } = string.Empty;
     public string EntryHash { get; private set; } = string.Empty;
@@ -52,7 +52,7 @@ public sealed class TransactionJournalEntry
         string confirmationSource,
         string actor,
         DateTimeOffset timestampUtc,
-        string canonicalPayload,
+        string envelopeDigest,
         string previousHash,
         string payloadHash,
         string entryHash,
@@ -105,7 +105,7 @@ public sealed class TransactionJournalEntry
             RentalItemId = rentalItemId,
             OutboxDigest = outboxDigest?.Trim(),
             OutboxMessageId = outboxMessageId,
-            CanonicalPayload = canonicalPayload,
+            EnvelopeDigest = envelopeDigest?.Trim().ToLowerInvariant() ?? string.Empty,
             PreviousHash = previousHash.Trim().ToLowerInvariant(),
             PayloadHash = payloadHash.Trim().ToLowerInvariant(),
             EntryHash = entryHash.Trim().ToLowerInvariant(),
