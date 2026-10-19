@@ -8,7 +8,7 @@ using Dprental.PaymentService.Domain.IRepository;
 using Dprental.PaymentService.Domain.Persistence;
 using Microsoft.EntityFrameworkCore;
 
-namespace Dprental.PaymentService.Domain.Repository;
+namespace Dprental.PaymentService.Infrastructure.Repositories;
 
 public sealed class EfOutboxRepository : IOutboxRepository
 {

@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Dprental.PaymentService.Domain.Entities;
 
-namespace Dprental.PaymentService.Domain.Repository;
+namespace Dprental.PaymentService.Infrastructure.Repositories;
 
 internal static class SettlementOutboxFactory
 {

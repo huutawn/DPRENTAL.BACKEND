@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Dprental.PaymentService.Domain.Persistence;
 
-namespace Dprental.PaymentService.Domain.Repository;
+namespace Dprental.PaymentService.Infrastructure.Repositories;
 
 public sealed class EfInvoiceRepository : IInvoiceRepository
 {
@@ -63,6 +63,19 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
         return await _dbContext.Invoices
             .AsNoTracking()
             .AnyAsync(i => i.PaymentRef == paymentRef && i.InvoiceRef != currentInvoiceRef, cancellationToken);
+    }
+
+    public async Task<TransactionJournalEntry?> GetLatestJournalEntryAsync(string streamId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(streamId))
+        {
+            return null;
+        }
+
+        return await _dbContext.TransactionJournals
+            .Where(j => j.StreamId == streamId)
+            .OrderByDescending(j => j.Version)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     public async Task<Invoice?> FindInvoiceWithRowLockAsync(string invoiceRef, CancellationToken cancellationToken = default)
@@ -160,11 +173,14 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
 
     public async Task SavePaymentTransactionAsync(
         PaymentTransaction transaction,
-        Invoice? invoice = null,
-        OutboxMessage? outboxMessage = null,
+        Invoice? invoice,
+        OutboxMessage? outboxMessage,
+        TransactionJournalEntry journalEntry,
+        TransactionJournalEntry? invoiceJournalEntry,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
+        ArgumentNullException.ThrowIfNull(journalEntry);
 
         if (_dbContext.Entry(transaction).State == EntityState.Detached)
         {
@@ -182,6 +198,13 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
         if (outboxMessage is not null)
         {
             await _dbContext.OutboxMessages.AddAsync(outboxMessage, cancellationToken);
+        }
+
+        await _dbContext.TransactionJournals.AddAsync(journalEntry, cancellationToken);
+
+        if (invoiceJournalEntry is not null)
+        {
+            await _dbContext.TransactionJournals.AddAsync(invoiceJournalEntry, cancellationToken);
         }
 
         try
@@ -232,11 +255,13 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
     public async Task SaveNewInvoiceAsync(
         Invoice invoice,
         OperationReceipt receipt,
-        OutboxMessage? outboxMessage = null,
+        OutboxMessage? outboxMessage,
+        TransactionJournalEntry journalEntry,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(invoice);
         ArgumentNullException.ThrowIfNull(receipt);
+        ArgumentNullException.ThrowIfNull(journalEntry);
 
         try
         {
@@ -246,6 +271,7 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
             {
                 _dbContext.OutboxMessages.Add(outboxMessage);
             }
+            _dbContext.TransactionJournals.Add(journalEntry);
 
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
@@ -262,11 +288,13 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
 
     public async Task SaveInvoiceChangesAsync(
         Invoice invoice,
-        OperationReceipt? receipt = null,
-        OutboxMessage? outboxMessage = null,
+        OperationReceipt? receipt,
+        OutboxMessage? outboxMessage,
+        TransactionJournalEntry journalEntry,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(invoice);
+        ArgumentNullException.ThrowIfNull(journalEntry);
 
         try
         {
@@ -279,6 +307,8 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
             {
                 _dbContext.OutboxMessages.Add(outboxMessage);
             }
+
+            _dbContext.TransactionJournals.Add(journalEntry);
 
             await _dbContext.SaveChangesAsync(cancellationToken);
         }

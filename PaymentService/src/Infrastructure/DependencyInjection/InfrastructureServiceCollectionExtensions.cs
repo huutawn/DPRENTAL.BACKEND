@@ -1,17 +1,18 @@
 using Dprental.PaymentService.Domain.IRepository;
 using Dprental.PaymentService.Domain.Persistence;
+using Dprental.PaymentService.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace Dprental.PaymentService.Domain.Repository;
+namespace Dprental.PaymentService.Infrastructure.DependencyInjection;
 
 /// <summary>
-/// Đăng ký PostgreSQL persistence và Domain repositories cho PaymentService.
+/// Đăng ký PostgreSQL persistence và Infrastructure repositories cho PaymentService.
 /// </summary>
-public static class DomainRepositoriesServiceCollectionExtensions
+public static class InfrastructureServiceCollectionExtensions
 {
-    public static IServiceCollection AddPaymentDomainRepositories(
+    public static IServiceCollection AddPaymentInfrastructure(
         this IServiceCollection services,
         string? connectionString)
     {
@@ -28,6 +29,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
         services.AddScoped<ISettlementLedger, EfSettlementLedger>();
         services.AddScoped<IManualRefundRepository, EfManualRefundRepository>();
         services.AddScoped<IOutboxRepository, EfOutboxRepository>();
+        services.AddScoped<ITransactionJournalRepository, EfTransactionJournalRepository>();
 
         return services;
     }

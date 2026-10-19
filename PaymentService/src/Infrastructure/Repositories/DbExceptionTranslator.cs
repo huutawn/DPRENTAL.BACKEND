@@ -1,7 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Dprental.PaymentService.Domain.Repository;
 
-namespace Dprental.PaymentService.Domain.Repository;
+namespace Dprental.PaymentService.Infrastructure.Repositories;
 
 internal static class DbExceptionTranslator
 {

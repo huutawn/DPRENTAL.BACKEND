@@ -8,8 +8,10 @@ using Dprental.PaymentService.Domain.IRepository;
 using Dprental.PaymentService.Domain.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Dprental.PaymentService.Common.Cryptography;
+using Dprental.PaymentService.Application.Services;
 
-namespace Dprental.PaymentService.Domain.Repository;
+namespace Dprental.PaymentService.Infrastructure.Repositories;
 
 public sealed class EfSettlementLedger : ISettlementLedger
 {
@@ -26,11 +28,13 @@ public sealed class EfSettlementLedger : ISettlementLedger
 
     private readonly PaymentServiceDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly IPaymentDataEncryptor _encryptor;
 
-    public EfSettlementLedger(PaymentServiceDbContext db, TimeProvider clock)
+    public EfSettlementLedger(PaymentServiceDbContext db, TimeProvider clock, IPaymentDataEncryptor? encryptor = null)
     {
         _db = db;
         _clock = clock;
+        _encryptor = encryptor ?? new PaymentDataEncryptor(new byte[32]);
     }
 
     public async Task<Result<SettlementWriteResult>> RecordSettlementAsync(
@@ -77,12 +81,94 @@ public sealed class EfSettlementLedger : ISettlementLedger
             _db.RentalItemSettlements.Add(record);            // kéo theo Entries và RefundRequirement
             _db.OperationReceipts.Add(receipt);
 
+            Guid operationId = Guid.NewGuid();
+            Guid settlementEventId = Guid.NewGuid();
+
+            OutboxMessage? outbox = null;
             if (record.Status == SettlementState.Completed)   // không còn gì để hoàn: đóng tài chính ngay
             {
-                _db.OutboxMessages.Add(SettlementOutboxFactory.CreateRentalSettled(
-                    record, item.Invoice, refundRef: null, completedAt: now));
+                outbox = SettlementOutboxFactory.CreateRentalSettled(
+                    record, item.Invoice, refundRef: null, completedAt: now);
+                outbox.LinkAttestation(settlementEventId, operationId);
+                _db.OutboxMessages.Add(outbox);
             }
 
+            var settlementJournal = JournalEntryFactory.CreateEntry(
+                operationId: operationId,
+                streamId: record.SettlementRef,
+                streamType: JournalStreamTypes.RentalSettlement,
+                version: 1,
+                eventId: settlementEventId,
+                eventType: JournalEventTypes.RentalSettled,
+                amount: record.FinalDeductionAmount + record.DepositRefundDue,
+                currency: item.Invoice.Currency,
+                status: record.Status == SettlementState.Completed ? "COMPLETED" : "MANUAL_REFUND_REQUIRED",
+                confirmationSource: JournalConfirmationSources.System,
+                actor: "SYSTEM",
+                timestampUtc: now,
+                previousHash: CanonicalJournalHasher.GenesisHash,
+                relatedEntities: new Dictionary<string, string?>
+                {
+                    ["settlementRef"] = record.SettlementRef,
+                    ["invoiceRef"] = item.Invoice.InvoiceRef,
+                    ["paymentRef"] = item.Invoice.PaymentRef,
+                    ["rentalItemId"] = settlement.RentalItemId.ToString("D"),
+                    ["rentalOrderId"] = item.Invoice.RentalOrderId.ToString("D"),
+                    ["supplierId"] = settlement.SupplierId.ToString("D")
+                },
+                snapshot: new Dictionary<string, object?>
+                {
+                    ["rentalAmount"] = record.RentalAmount,
+                    ["depositAmount"] = record.DepositAmount,
+                    ["finalDeductionAmount"] = record.FinalDeductionAmount,
+                    ["depositRefundDue"] = record.DepositRefundDue,
+                    ["platformFeeAmount"] = record.PlatformFeeAmount,
+                    ["supplierPayable"] = record.SupplierPayable,
+                    ["status"] = (int)record.Status
+                },
+                outboxDigest: CanonicalJournalHasher.ComputeOutboxDigest(outbox?.Payload),
+                outboxMessageId: outbox?.MessageId,
+                paymentRef: item.Invoice.PaymentRef,
+                invoiceRef: item.Invoice.InvoiceRef,
+                rentalOrderId: item.Invoice.RentalOrderId,
+                rentalItemId: settlement.RentalItemId,
+                encryptor: _encryptor);
+            _db.TransactionJournals.Add(settlementJournal);
+
+            if (record.RefundRequirement is not null)
+            {
+                var refundJournal = JournalEntryFactory.CreateEntry(
+                    operationId: operationId,
+                    streamId: record.RefundRequirement.RequirementRef,
+                    streamType: JournalStreamTypes.ManualRefund,
+                    version: 1,
+                    eventId: Guid.NewGuid(),
+                    eventType: JournalEventTypes.RefundRequired,
+                    amount: record.RefundRequirement.Amount,
+                    currency: item.Invoice.Currency,
+                    status: "PENDING_CONFIRMATION",
+                    confirmationSource: JournalConfirmationSources.System,
+                    actor: "SYSTEM",
+                    timestampUtc: now,
+                    previousHash: CanonicalJournalHasher.GenesisHash,
+                    relatedEntities: new Dictionary<string, string?>
+                    {
+                        ["requirementRef"] = record.RefundRequirement.RequirementRef,
+                        ["settlementRef"] = record.SettlementRef,
+                        ["rentalItemId"] = settlement.RentalItemId.ToString("D")
+                    },
+                    snapshot: new Dictionary<string, object?>
+                    {
+                        ["amount"] = record.RefundRequirement.Amount,
+                        ["status"] = (int)record.RefundRequirement.Status
+                    },
+                    paymentRef: item.Invoice.PaymentRef,
+                    invoiceRef: item.Invoice.InvoiceRef,
+                    rentalOrderId: item.Invoice.RentalOrderId,
+                    rentalItemId: settlement.RentalItemId,
+                    encryptor: _encryptor);
+                _db.TransactionJournals.Add(refundJournal);
+            }
             await _db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
 

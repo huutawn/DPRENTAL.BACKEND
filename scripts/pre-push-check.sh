@@ -58,7 +58,8 @@ else
   fail "không tìm thấy dotnet-ef; hãy chạy 'dotnet tool restore' trước khi push."
 fi
 
-"${ef_command[@]}" migrations has-pending-model-changes --project PaymentService/src/Domain/PaymentService.Domain.csproj --startup-project PaymentService/src/Api/PaymentService.Api.csproj --configuration Release --no-build || fail "kiểm tra EF model thất bại hoặc còn model changes chưa được tạo migration; push đã bị chặn."
+"${ef_command[@]}" migrations has-pending-model-changes --project PaymentService/src/Infrastructure/PaymentService.Infrastructure.csproj --startup-project PaymentService/src/Api/PaymentService.Api.csproj --configuration Release --no-build || fail "kiểm tra EF model thất bại hoặc còn model changes chưa được tạo migration; push đã bị chặn."
+"${ef_command[@]}" migrations has-pending-model-changes --project PaymentService/src/IntegrityHost/PaymentService.IntegrityHost.csproj --startup-project PaymentService/src/IntegrityHost/PaymentService.IntegrityHost.csproj --context IntegrityDbContext --configuration Release --no-build || fail "kiểm tra EF model IntegrityHost thất bại hoặc còn model changes chưa được tạo migration; push đã bị chặn."
 
 printf 'Đang chạy test %s (Release)...\n' "$SOLUTION_FILE"
 DOTNET_USE_POLLING_FILE_WATCHER=1 dotnet test "$SOLUTION_FILE" --configuration Release --no-build --nologo || fail "test thất bại; push đã bị chặn."
