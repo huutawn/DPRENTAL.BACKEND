@@ -27,6 +27,9 @@ public static class DomainRepositoriesServiceCollectionExtensions
         services.AddScoped<IInvoiceRepository, EfInvoiceRepository>();
         services.AddScoped<ISettlementLedger, EfSettlementLedger>();
         services.AddScoped<IManualRefundRepository, EfManualRefundRepository>();
+        services.AddScoped<IFinancialReadRepository, EfFinancialReadRepository>();
+        services.AddScoped<ITransactionResolutionRepository, EfTransactionResolutionRepository>();
+        services.AddScoped<ISupplierPayoutRepository, EfSupplierPayoutRepository>();
         services.AddScoped<IOutboxRepository, EfOutboxRepository>();
 
         return services;

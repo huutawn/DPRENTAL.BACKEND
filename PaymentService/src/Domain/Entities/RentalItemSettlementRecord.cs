@@ -46,6 +46,8 @@ public sealed class RentalItemSettlementRecord
 
     private RentalItemSettlementRecord() { }
 
+    public SupplierPayout? Payout { get; private set; }
+
     public static RentalItemSettlementRecord From(RentalItemSettlement s, Invoice invoice, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(invoice);
@@ -78,6 +80,14 @@ public sealed class RentalItemSettlementRecord
         record.Entries.Add(SettlementLedgerEntry.Create(id, SettlementEntryType.SupplierPayable, s.SupplierPayable, now));
         record.Entries.Add(SettlementLedgerEntry.Create(id, SettlementEntryType.PlatformFee, s.PlatformFeeAmount, now));
         record.Entries.Add(SettlementLedgerEntry.Create(id, SettlementEntryType.DepositRefundDue, s.DepositRefundDue, now));
+
+        if (s.SupplierPayable > 0)
+        {
+            record.Payout = SupplierPayout.CreatePending(
+                id, s.RentalItemId, s.SupplierId,
+                s.SupplierPayable, invoice.Currency,
+                destinationRef: null, now);
+        }
 
         if (s.DepositRefundDue > 0)
         {

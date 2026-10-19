@@ -121,11 +121,12 @@ public sealed class SettlementLedgerPersistenceTests
             }
 
             var adminId = Guid.NewGuid();
-            async Task<Dprental.PaymentService.Common.Result<Dprental.PaymentService.Domain.IRepository.ManualRefundCompletion>> ConfirmAsync(string reference)
+            async Task<Dprental.PaymentService.Common.Result<Dprental.PaymentService.Domain.IRepository.ManualRefundCompletion>> ConfirmAsync(string reference, string operationKey = "refund-ledger-operation-001")
             {
                 await using var db = new PaymentServiceDbContext(options);
                 return await new EfManualRefundRepository(db, TimeProvider.System)
-                    .CompleteAsync(requirementId, reference, adminId, CancellationToken.None);
+                    .CompleteAsync(new Dprental.PaymentService.Domain.IRepository.CompleteManualRefundCommand(
+                        requirementId, adminId, operationKey, reference, "Đã đối chiếu chứng từ chuyển khoản."), CancellationToken.None);
             }
 
             var results = await Task.WhenAll(ConfirmAsync("BANK-123"), ConfirmAsync("BANK-123"));
@@ -133,7 +134,11 @@ public sealed class SettlementLedgerPersistenceTests
             Assert.Single(results, result => !result.Value.IsReplay);
             Assert.Single(results, result => result.Value.IsReplay);
 
-            var conflicting = await ConfirmAsync("BANK-OTHER");
+            var reusedKeyWithDifferentPayload = await ConfirmAsync("BANK-OTHER");
+            Assert.True(reusedKeyWithDifferentPayload.IsFailure);
+            Assert.Equal("Payment.ManualRefundPayloadConflict", reusedKeyWithDifferentPayload.Error.Code);
+
+            var conflicting = await ConfirmAsync("BANK-OTHER", "refund-ledger-operation-002");
             Assert.True(conflicting.IsFailure);
             Assert.Equal("Payment.RefundAlreadyCompleted", conflicting.Error.Code);
 
@@ -143,6 +148,11 @@ public sealed class SettlementLedgerPersistenceTests
             Assert.Equal(ManualRefundStatus.Completed, refund.Status);
             Assert.Equal(SettlementState.Completed, record.Status);
             Assert.Equal(adminId, refund.CompletedBy);
+            var audit = await verify.ManualRefundOperationAudits.SingleAsync();
+            Assert.Equal("refund-ledger-operation-001", audit.OperationKey);
+            Assert.Equal(adminId, audit.ActorId);
+            Assert.Equal("BANK-123", audit.ExternalTransferReference);
+            Assert.Equal("Đã đối chiếu chứng từ chuyển khoản.", audit.Reason);
             var message = await verify.OutboxMessages.SingleAsync();
             using var json = System.Text.Json.JsonDocument.Parse(message.Payload);
             Assert.Equal("BANK-123", json.RootElement.GetProperty("payload").GetProperty("refundRef").GetString());

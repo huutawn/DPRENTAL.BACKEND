@@ -1,5 +1,3 @@
-using System.IO;
-using System.Net;
 using Dprental.PaymentService.Api.Exceptions;
 using Dprental.PaymentService.Api.Security;
 using Dprental.PaymentService.Application.DependencyInjection;
@@ -8,6 +6,9 @@ using Dprental.PaymentService.Domain.Repository;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using System.IO;
+using System.Net;
+using System.Runtime.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -39,8 +40,9 @@ builder.Services.AddAuthorization(options =>
     {
         policy.RequireAuthenticatedUser();
         policy.RequireAssertion(ctx =>
+            !ctx.User.IsServiceToken() &&
             ctx.User.HasClientAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ClientAudience") ?? "dprental-clients") &&
-            ctx.User.TryGetSubjectUserId(out _));
+            ctx.User.TryGetSubjectUserId(out var id) && id != Guid.Empty);
     });
 
     options.AddPolicy("ManualRefundAdminPolicy", policy =>
@@ -49,6 +51,33 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAssertion(ctx =>
             ctx.User.HasClientAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ClientAudience") ?? "dprental-clients") &&
             ctx.User.IsPlatformAdmin() && ctx.User.TryGetSubjectUserId(out _));
+    });
+
+    options.AddPolicy(PayoutPolicies.Admin, policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+            ctx.User.HasClientAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ClientAudience") ?? "dprental-clients") &&
+            ctx.User.IsPlatformAdmin() && ctx.User.TryGetSubjectUserId(out _));
+    });
+
+    options.AddPolicy("FinancialReadClientPolicy", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+            !ctx.User.IsServiceToken() &&
+            ctx.User.HasClientAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ClientAudience") ?? "dprental-clients") &&
+            ctx.User.TryGetSubjectUserId(out var id) && id != Guid.Empty);
+    });
+
+    options.AddPolicy("FinancialReadAdminPolicy", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+            !ctx.User.IsServiceToken() &&
+            ctx.User.HasClientAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ClientAudience") ?? "dprental-clients") &&
+            ctx.User.IsPlatformAdmin() &&
+            ctx.User.TryGetSubjectUserId(out var id) && id != Guid.Empty);
     });
 });
 

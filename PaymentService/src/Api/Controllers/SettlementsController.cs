@@ -1,6 +1,7 @@
 ﻿using Dprental.PaymentService.Api.Filters;
 using Dprental.PaymentService.Application.DTOs.Settlement;
 using Dprental.PaymentService.Application.IServices;
+using Dprental.PaymentService.Api.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,8 +12,13 @@ namespace Dprental.PaymentService.Api.Controllers;
 public sealed class SettlementsController : ControllerBase
 {
     private readonly ISettlementService _settlements;
+    private readonly IFinancialReadService _financialRead;
 
-    public SettlementsController(ISettlementService settlements) => _settlements = settlements;
+    public SettlementsController(ISettlementService settlements, IFinancialReadService financialRead)
+    {
+        _settlements = settlements;
+        _financialRead = financialRead;
+    }
 
     [HttpPost]
     [Authorize(Policy = "SettlementServicePolicy")]
@@ -30,5 +36,16 @@ public sealed class SettlementsController : ControllerBase
         return result.Value.IsReplay
             ? Ok(result.Value)
             : StatusCode(StatusCodes.Status201Created, result.Value);
+    }
+
+    /// <summary>Đọc quyết toán của đơn thuê mà renter hoặc supplier sở hữu.</summary>
+    [HttpGet("{id:guid}")]
+    [Authorize(Policy = "FinancialReadClientPolicy")]
+    [ProducesResponseType(typeof(SettlementDetailResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Get(Guid id, CancellationToken ct)
+    {
+        if (!CallerIdentity.TryGetCaller(User, out var caller)) return Forbid();
+        var result = await _financialRead.GetSettlementAsync(id, caller, ct);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 }

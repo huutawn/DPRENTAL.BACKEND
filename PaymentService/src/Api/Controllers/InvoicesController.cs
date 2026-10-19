@@ -16,13 +16,16 @@ public sealed class InvoicesController : ControllerBase
     private const string InvoiceWriteScope = "payment.invoice.write";
 
     private readonly IInvoiceService _invoiceService;
+    private readonly IFinancialReadService _financialReadService;
     private readonly PaymentJwtOptions _jwtOptions;
 
     public InvoicesController(
         IInvoiceService invoiceService,
+        IFinancialReadService financialReadService,
         IOptions<PaymentJwtOptions> jwtOptions)
     {
         _invoiceService = invoiceService ?? throw new ArgumentNullException(nameof(invoiceService));
+        _financialReadService = financialReadService ?? throw new ArgumentNullException(nameof(financialReadService));
         _jwtOptions = jwtOptions?.Value ?? throw new ArgumentNullException(nameof(jwtOptions));
     }
 
@@ -120,5 +123,15 @@ public sealed class InvoicesController : ControllerBase
         }
 
         return Ok(result.Value);
+    }
+
+    [HttpGet("{invoiceRef}/status")]
+    [Authorize(Policy = "InvoiceRenterPolicy")]
+    [ProducesResponseType(typeof(InvoiceStatusResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetStatus(string invoiceRef, CancellationToken ct)
+    {
+        if (!User.TryGetSubjectUserId(out var userId) || userId == Guid.Empty) return Forbid();
+        var result = await _financialReadService.GetInvoiceStatusAsync(invoiceRef, userId, ct);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 }
