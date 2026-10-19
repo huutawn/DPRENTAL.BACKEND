@@ -287,7 +287,7 @@ public sealed class ItemCancellationTests
             OrderTestData.User(strangerId));
 
         Assert.True(result.IsFailure);
-        Assert.Equal(RentalErrors.OrderNotFound.Code, result.Error.Code);
+        Assert.Equal(RentalErrors.ItemNotFound.Code, result.Error.Code);
     }
 
     [Fact]

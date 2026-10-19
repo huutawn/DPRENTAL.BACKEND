@@ -91,7 +91,7 @@ public sealed class ItemCancellationService : IItemCancellationService
         var auth = RentalAuthorizationPolicy.AuthorizeRenterAction(caller, order);
         if (auth.IsFailure)
         {
-            return auth.Error;
+            return auth.Error.Type == ErrorType.NotFound ? RentalErrors.ItemNotFound : auth.Error;
         }
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();

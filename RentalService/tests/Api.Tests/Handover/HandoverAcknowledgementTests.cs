@@ -156,7 +156,7 @@ public sealed class HandoverAcknowledgementTests
         Result<AcknowledgeReceiptResponse> result = await service.AcknowledgeAsync(
             _item.Id, request, OrderTestData.User(strangerId));
 
-        Assert.Equal("Order.NotFound", result.Error.Code);
+        Assert.Equal("RentalItem.NotFound", result.Error.Code);
 
         await using RentalServiceDbContext verifyContext = NewContext();
         RentalItem itemInDb = await verifyContext.RentalItems
@@ -178,7 +178,7 @@ public sealed class HandoverAcknowledgementTests
             _item.Id, request, OrderTestData.User(_supplierId));
 
         // Supplier không phải là renter của đơn -> nhận NotFound để không phân biệt được với mã không tồn tại
-        Assert.Equal("Order.NotFound", result.Error.Code);
+        Assert.Equal("RentalItem.NotFound", result.Error.Code);
     }
 
     [Fact]

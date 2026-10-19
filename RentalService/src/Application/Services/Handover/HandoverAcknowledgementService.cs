@@ -53,7 +53,7 @@ public sealed class HandoverAcknowledgementService(
         var auth = RentalAuthorizationPolicy.AuthorizeRenterAction(caller, order);
         if (auth.IsFailure)
         {
-            return auth.Error;
+            return auth.Error.Type == ErrorType.NotFound ? RentalErrors.ItemNotFound : auth.Error;
         }
 
         if (item.HandoverRecord is null)
