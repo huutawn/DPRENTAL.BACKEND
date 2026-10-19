@@ -1,81 +1,35 @@
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
+using Dprental.PaymentService.Domain.Events;
 
 namespace Dprental.PaymentService.Domain.Entities;
 
-[Table("payment_transactions")]
 public sealed class PaymentTransaction
 {
-    [Key]
+    private readonly List<IFinancialDomainEvent> _domainEvents = [];
+
     public Guid Id { get; private set; }
-
-    [Required]
-    [MaxLength(32)]
     public string Provider { get; private set; } = string.Empty;
-
-    [Required]
-    [MaxLength(64)]
     public string ProviderTransactionId { get; private set; } = string.Empty;
-
-    [Required]
-    [MaxLength(64)]
     public string PaymentRef { get; private set; } = string.Empty;
-
-    [Required]
-    [MaxLength(64)]
     public string Gateway { get; private set; } = string.Empty;
-
-    [Required]
-    [MaxLength(64)]
     public string AccountNumber { get; private set; } = string.Empty;
-
-    [MaxLength(64)]
     public string? SubAccount { get; private set; }
-
-    [Required]
-    [MaxLength(16)]
     public string TransferType { get; private set; } = string.Empty;
-
-    [Required]
-    [Column(TypeName = "numeric(18,0)")]
     public decimal TransferAmount { get; private set; }
-
-    [Column(TypeName = "numeric(18,0)")]
     public decimal? Accumulated { get; private set; }
-
-    [Required]
     public DateTimeOffset TransactionDate { get; private set; }
-
-    [MaxLength(128)]
     public string? ReferenceCode { get; private set; }
-
-    [MaxLength(1000)]
     public string? Description { get; private set; }
-
-    [MaxLength(1000)]
     public string? Content { get; private set; }
-
-    [Column(TypeName = "text")]
     public string? ProviderCode { get; private set; }
-
-    [MaxLength(32)]
     public string? PaymentCode { get; private set; }
-
     public Guid? InvoiceId { get; private set; }
-
-    [MaxLength(64)]
     public string? InvoiceRef { get; private set; }
-
-    [Required]
-    [MaxLength(32)]
     public string Status { get; private set; } = string.Empty;
-
-    [Required]
-    [MaxLength(64)]
     public string ReasonCode { get; private set; } = string.Empty;
-
-    [Required]
     public DateTimeOffset CreatedAt { get; private set; }
+
+    public IReadOnlyList<IFinancialDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
+    public void ClearDomainEvents() => _domainEvents.Clear();
 
     private PaymentTransaction()
     {
@@ -103,7 +57,7 @@ public sealed class PaymentTransaction
         string reasonCode,
         DateTimeOffset createdAt)
     {
-        return new PaymentTransaction
+        var pt = new PaymentTransaction
         {
             Id = Guid.NewGuid(),
             Provider = provider,
@@ -127,25 +81,49 @@ public sealed class PaymentTransaction
             ReasonCode = reasonCode,
             CreatedAt = createdAt.ToUniversalTime()
         };
+
+        pt._domainEvents.Add(new BankTransactionReceivedDomainEvent(
+            pt.Id,
+            pt.Provider,
+            pt.ProviderTransactionId,
+            pt.PaymentRef,
+            pt.TransferType,
+            pt.TransferAmount,
+            pt.Gateway,
+            pt.AccountNumber,
+            pt.PaymentCode,
+            pt.ReferenceCode,
+            pt.Status,
+            pt.ReasonCode,
+            pt.InvoiceId,
+            pt.InvoiceRef,
+            pt.TransactionDate,
+            pt.CreatedAt));
+
+        return pt;
     }
 
     public bool MatchesBusinessData(
         string gateway,
         string accountNumber,
+        string? subAccount,
         string transferType,
         decimal transferAmount,
         DateTimeOffset transactionDate,
         string? referenceCode,
+        string? description,
         string? content,
         string? providerCode)
     {
-        return string.Equals(Gateway, gateway, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(AccountNumber, accountNumber, StringComparison.Ordinal)
-            && string.Equals(TransferType, transferType, StringComparison.OrdinalIgnoreCase)
-            && TransferAmount == transferAmount
-            && Math.Abs((TransactionDate - transactionDate.ToUniversalTime()).TotalMilliseconds) < 1
-            && string.Equals(ReferenceCode ?? string.Empty, referenceCode ?? string.Empty, StringComparison.Ordinal)
-            && string.Equals(Content ?? string.Empty, content ?? string.Empty, StringComparison.Ordinal)
-            && string.Equals(ProviderCode, providerCode, StringComparison.Ordinal);
+        return string.Equals(Gateway, gateway, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(AccountNumber, accountNumber, StringComparison.Ordinal) &&
+               string.Equals(SubAccount, subAccount, StringComparison.Ordinal) &&
+               string.Equals(TransferType, transferType, StringComparison.OrdinalIgnoreCase) &&
+               TransferAmount == transferAmount &&
+               TransactionDate == transactionDate.ToUniversalTime() &&
+               string.Equals(ReferenceCode, referenceCode, StringComparison.Ordinal) &&
+               string.Equals(Description, description, StringComparison.Ordinal) &&
+               string.Equals(Content, content, StringComparison.Ordinal) &&
+               string.Equals(ProviderCode, providerCode, StringComparison.Ordinal);
     }
 }

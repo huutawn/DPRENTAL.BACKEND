@@ -1,48 +1,36 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
 using Dprental.PaymentService.Common;
+using Dprental.PaymentService.Domain.Events;
 
 namespace Dprental.PaymentService.Domain.Entities;
 
-[Table("rental_item_settlements")]
 public sealed class RentalItemSettlementRecord
 {
-    [Key]
+    private readonly List<IFinancialDomainEvent> _domainEvents = [];
+
     public Guid Id { get; private set; }
-
-    [Required, MaxLength(64)]
     public string SettlementRef { get; private set; } = default!;
-
-    [Required, MaxLength(64)]
     public string OperationKey { get; private set; } = default!;
-
-    [Required] public Guid InvoiceId { get; private set; }
-    [Required] public Guid InvoiceItemId { get; private set; }
-    [Required] public Guid RentalItemId { get; private set; }
-    [Required] public Guid SupplierId { get; private set; }
-
-    [Required, MaxLength(256)]
+    public Guid InvoiceId { get; private set; }
+    public Guid InvoiceItemId { get; private set; }
+    public Guid RentalItemId { get; private set; }
+    public Guid SupplierId { get; private set; }
     public string DecisionRef { get; private set; } = default!;
-
-    [Column(TypeName = "numeric(18,0)")] public decimal RentalAmount { get; private set; }
-    [Column(TypeName = "numeric(18,0)")] public decimal DepositAmount { get; private set; }
-    [Column(TypeName = "numeric(18,0)")] public decimal FinalDeductionAmount { get; private set; }
-    [Column(TypeName = "numeric(18,0)")] public decimal DepositRefundDue { get; private set; }
-    [Column(TypeName = "numeric(5,4)")] public decimal PlatformFeeRate { get; private set; }
-    [Column(TypeName = "numeric(18,0)")] public decimal PlatformFeeAmount { get; private set; }
-    [Column(TypeName = "numeric(18,0)")] public decimal SupplierPayable { get; private set; }
-
-    [Required]
+    public decimal RentalAmount { get; private set; }
+    public decimal DepositAmount { get; private set; }
+    public decimal FinalDeductionAmount { get; private set; }
+    public decimal DepositRefundDue { get; private set; }
+    public decimal PlatformFeeRate { get; private set; }
+    public decimal PlatformFeeAmount { get; private set; }
+    public decimal SupplierPayable { get; private set; }
     public SettlementState Status { get; private set; }
-
-    [Required]
     public DateTimeOffset CreatedAt { get; private set; }
-
     public DateTimeOffset? CompletedAt { get; private set; }
 
-    public List<SettlementLedgerEntry> Entries { get; private set; } = new();
-
+    public List<SettlementLedgerEntry> Entries { get; private set; } = [];
     public ManualRefundRequirement? RefundRequirement { get; private set; }
+
+    public IReadOnlyList<IFinancialDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
+    public void ClearDomainEvents() => _domainEvents.Clear();
 
     private RentalItemSettlementRecord() { }
 
@@ -70,18 +58,15 @@ public sealed class RentalItemSettlementRecord
             PlatformFeeRate = s.PlatformFeeRate,
             PlatformFeeAmount = s.PlatformFeeAmount,
             SupplierPayable = s.SupplierPayable,
-            CreatedAt = now
+            CreatedAt = now.ToUniversalTime()
         };
 
-        // Luôn đủ 3 bút toán. FinalDeductionAmount KHÔNG phải khoản thứ tư:
-        // nó đã nằm trong SupplierPayable và đã làm giảm DepositRefundDue.
         record.Entries.Add(SettlementLedgerEntry.Create(id, SettlementEntryType.SupplierPayable, s.SupplierPayable, now));
         record.Entries.Add(SettlementLedgerEntry.Create(id, SettlementEntryType.PlatformFee, s.PlatformFeeAmount, now));
         record.Entries.Add(SettlementLedgerEntry.Create(id, SettlementEntryType.DepositRefundDue, s.DepositRefundDue, now));
 
         if (s.DepositRefundDue > 0)
         {
-            // Còn tiền cọc phải hoàn: chưa đóng tài chính, tạo đúng một yêu cầu hoàn thủ công.
             record.Status = SettlementState.PendingManualRefund;
             record.RefundRequirement = ManualRefundRequirement.CreatePending(
                 id, s.InvoiceId, s.RentalItemId, invoice.RenterId,
@@ -90,8 +75,25 @@ public sealed class RentalItemSettlementRecord
         else
         {
             record.Status = SettlementState.Completed;
-            record.CompletedAt = now;
+            record.CompletedAt = now.ToUniversalTime();
         }
+
+        record._domainEvents.Add(new RentalItemSettledDomainEvent(
+            record.Id,
+            record.SettlementRef,
+            record.OperationKey,
+            record.InvoiceId,
+            record.InvoiceItemId,
+            record.RentalItemId,
+            record.SupplierId,
+            record.RentalAmount,
+            record.DepositAmount,
+            record.FinalDeductionAmount,
+            record.DepositRefundDue,
+            record.PlatformFeeAmount,
+            record.SupplierPayable,
+            (int)record.Status,
+            record.CreatedAt));
 
         return record;
     }
@@ -106,6 +108,24 @@ public sealed class RentalItemSettlementRecord
 
         Status = SettlementState.Completed;
         CompletedAt = now.ToUniversalTime();
+
+        _domainEvents.Add(new RentalItemSettledDomainEvent(
+            Id,
+            SettlementRef,
+            OperationKey,
+            InvoiceId,
+            InvoiceItemId,
+            RentalItemId,
+            SupplierId,
+            RentalAmount,
+            DepositAmount,
+            FinalDeductionAmount,
+            DepositRefundDue,
+            PlatformFeeAmount,
+            SupplierPayable,
+            (int)Status,
+            CompletedAt.Value));
+
         return Result.Success();
     }
 }

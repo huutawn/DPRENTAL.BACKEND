@@ -1,6 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
 using Dprental.PaymentService.Common;
+using Dprental.PaymentService.Domain.Events;
 
 namespace Dprental.PaymentService.Domain.Entities;
 
@@ -10,45 +9,29 @@ public enum ManualRefundStatus
     Completed = 2
 }
 
-[Table("manual_refund_requirements")]
 public sealed class ManualRefundRequirement
 {
-    [Key]
+    private readonly List<IFinancialDomainEvent> _domainEvents = [];
+
     public Guid Id { get; private set; }
-
-    [Required, MaxLength(64)]
     public string RequirementRef { get; private set; } = default!;
-
-    [Required] public Guid SettlementId { get; private set; }
-    [Required] public Guid InvoiceId { get; private set; }
-    [Required] public Guid RentalItemId { get; private set; }
-    [Required] public Guid RenterId { get; private set; }
-
-    [Required, MaxLength(64)]
+    public Guid SettlementId { get; private set; }
+    public Guid InvoiceId { get; private set; }
+    public Guid RentalItemId { get; private set; }
+    public Guid RenterId { get; private set; }
     public string PaymentRef { get; private set; } = default!;
-
-    [Required, MaxLength(256)]
     public string Reason { get; private set; } = default!;
-
-    [Required]
-    [Column(TypeName = "numeric(18,0)")]
     public decimal Amount { get; private set; }
-
-    [Required]
     public ManualRefundStatus Status { get; private set; }
-
-    [Required]
     public DateTimeOffset CreatedAt { get; private set; }
-
     public DateTimeOffset? CompletedAt { get; private set; }
-
-    [MaxLength(256)]
     public string? ExternalTransferReference { get; private set; }
-
     public Guid? CompletedBy { get; private set; }
 
-    [ForeignKey(nameof(SettlementId))]
     public RentalItemSettlementRecord? Settlement { get; private set; }
+
+    public IReadOnlyList<IFinancialDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
+    public void ClearDomainEvents() => _domainEvents.Clear();
 
     private ManualRefundRequirement() { }
 
@@ -57,7 +40,7 @@ public sealed class ManualRefundRequirement
         string paymentRef, decimal amount, DateTimeOffset now)
     {
         var id = Guid.NewGuid();
-        return new ManualRefundRequirement
+        var req = new ManualRefundRequirement
         {
             Id = id,
             RequirementRef = $"MRF-{id:N}",
@@ -69,8 +52,13 @@ public sealed class ManualRefundRequirement
             Reason = "RENTAL_DEPOSIT_REFUND",
             Amount = amount,
             Status = ManualRefundStatus.PendingManualRefund,
-            CreatedAt = now
+            CreatedAt = now.ToUniversalTime()
         };
+
+        req._domainEvents.Add(new ManualRefundRequiredDomainEvent(
+            req.Id, req.RequirementRef, req.SettlementId, req.RentalItemId, req.Amount, req.CreatedAt));
+
+        return req;
     }
 
     public Result<bool> Complete(string externalTransferReference, Guid completedBy, DateTimeOffset now)
@@ -87,10 +75,15 @@ public sealed class ManualRefundRequirement
                 : Error.Conflict("Payment.RefundAlreadyCompleted", "Yêu cầu hoàn cọc đã được xác nhận bằng mã chuyển khoản khác.");
         }
 
+        DateTimeOffset utcNow = now.ToUniversalTime();
         Status = ManualRefundStatus.Completed;
         ExternalTransferReference = reference;
         CompletedBy = completedBy;
-        CompletedAt = now.ToUniversalTime();
+        CompletedAt = utcNow;
+
+        _domainEvents.Add(new ManualRefundConfirmedDomainEvent(
+            Id, RequirementRef, SettlementId, RentalItemId, Amount, reference, completedBy, utcNow));
+
         return Result.Success(true);
     }
 }

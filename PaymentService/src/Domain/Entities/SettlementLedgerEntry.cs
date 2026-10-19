@@ -1,6 +1,3 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
-
 namespace Dprental.PaymentService.Domain.Entities;
 
 public enum SettlementEntryType
@@ -10,37 +7,31 @@ public enum SettlementEntryType
     DepositRefundDue = 3
 }
 
-[Table("settlement_ledger_entries")]
 public sealed class SettlementLedgerEntry
 {
-    [Key]
     public Guid Id { get; private set; }
-
-    [Required]
     public Guid SettlementId { get; private set; }
-
-    [Required]
     public SettlementEntryType EntryType { get; private set; }
-
-    [Required]
-    [Column(TypeName = "numeric(18,0)")]
     public decimal Amount { get; private set; }
-
-    [Required]
     public DateTimeOffset CreatedAt { get; private set; }
 
-    [ForeignKey(nameof(SettlementId))]
-    public RentalItemSettlementRecord? Settlement { get; private set; }
+    public RentalItemSettlementRecord Settlement { get; private set; } = null!;
 
     private SettlementLedgerEntry() { }
 
-    internal static SettlementLedgerEntry Create(
-        Guid settlementId, SettlementEntryType type, decimal amount, DateTimeOffset now) => new()
+    public static SettlementLedgerEntry Create(
+        Guid settlementId,
+        SettlementEntryType entryType,
+        decimal amount,
+        DateTimeOffset createdAt)
+    {
+        return new SettlementLedgerEntry
         {
             Id = Guid.NewGuid(),
             SettlementId = settlementId,
-            EntryType = type,
+            EntryType = entryType,
             Amount = amount,
-            CreatedAt = now
+            CreatedAt = createdAt.ToUniversalTime()
         };
+    }
 }

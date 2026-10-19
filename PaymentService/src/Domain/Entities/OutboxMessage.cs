@@ -1,48 +1,23 @@
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
-
 namespace Dprental.PaymentService.Domain.Entities;
 
-[Table("outbox_messages")]
 public sealed class OutboxMessage
 {
-    [Key]
     public Guid Id { get; private set; }
-
-    [Required]
     public Guid MessageId { get; private set; }
-
-    [Required]
-    [MaxLength(64)]
     public string MessageType { get; private set; } = string.Empty;
-
-    [Required]
-    [MaxLength(64)]
     public string AggregateType { get; private set; } = string.Empty;
-
-    [Required]
-    [MaxLength(64)]
     public string AggregateId { get; private set; } = string.Empty;
-
-    [Required]
     public string Payload { get; private set; } = string.Empty;
-
-    [Required]
     public DateTimeOffset CreatedAt { get; private set; }
-
     public DateTimeOffset? PublishedAt { get; private set; }
-
-    [MaxLength(128)]
     public string? LockedBy { get; private set; }
-
     public DateTimeOffset? LockedUntilUtc { get; private set; }
-
     public int RetryCount { get; private set; }
-
     public DateTimeOffset? NextRetryAt { get; private set; }
-
-    [MaxLength(2000)]
     public string? LastErrorMessage { get; private set; }
+    public Guid? EventId { get; private set; }
+    public Guid? OperationId { get; private set; }
+
     private OutboxMessage()
     {
     }
@@ -53,19 +28,42 @@ public sealed class OutboxMessage
         string aggregateType,
         string aggregateId,
         string payload,
-        DateTimeOffset createdAt)
+        DateTimeOffset createdAt,
+        Guid? eventId = null,
+        Guid? operationId = null)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(messageType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(aggregateType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(aggregateId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(payload);
+
         return new OutboxMessage
         {
             Id = Guid.NewGuid(),
             MessageId = messageId,
-            MessageType = messageType,
-            AggregateType = aggregateType,
-            AggregateId = aggregateId,
+            MessageType = messageType.Trim(),
+            AggregateType = aggregateType.Trim(),
+            AggregateId = aggregateId.Trim(),
             Payload = payload,
             CreatedAt = createdAt.ToUniversalTime(),
-            PublishedAt = null
+            PublishedAt = null,
+            LockedBy = null,
+            LockedUntilUtc = null,
+            RetryCount = 0,
+            NextRetryAt = null,
+            LastErrorMessage = null,
+            EventId = eventId,
+            OperationId = operationId
         };
+    }
+
+    public void LinkAttestation(Guid eventId, Guid? operationId = null)
+    {
+        EventId = eventId;
+        if (operationId.HasValue)
+        {
+            OperationId = operationId;
+        }
     }
 
     public void Claim(string workerId, DateTimeOffset lockedUntilUtc)
@@ -76,12 +74,17 @@ public sealed class OutboxMessage
         RetryCount++;
     }
 
+    public void ReleaseClaim()
+    {
+        LockedBy = null;
+        LockedUntilUtc = null;
+    }
+
     public void MarkPublished(DateTimeOffset publishedAt)
     {
         PublishedAt = publishedAt.ToUniversalTime();
         LockedBy = null;
         LockedUntilUtc = null;
-        LastErrorMessage = null;
     }
 
     public void RecordAttemptFailure(string errorMessage, DateTimeOffset attemptedAt, DateTimeOffset nextRetryAt)
@@ -95,7 +98,6 @@ public sealed class OutboxMessage
     public void RecordExhausted(string errorMessage, DateTimeOffset attemptedAt)
     {
         LastErrorMessage = errorMessage;
-        NextRetryAt = null;
         LockedBy = null;
         LockedUntilUtc = null;
     }
