@@ -383,4 +383,221 @@ public sealed class InteractionIngestionServiceTests
         Assert.NotNull(result.ErrorReason);
         _eventRepoMock.Verify(r => r.IngestAsync(It.IsAny<InteractionEvent>(), It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    [Fact]
+    public async Task ProcessEvent_SearchPerformed_WithExpandedAnalyticsAndType_AppliesWeight1ToUserOnly_AndPreservesRawEnvelope()
+    {
+        var msgId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var brandId = Guid.NewGuid();
+
+        string json = $$"""
+        {
+            "messageId": "{{msgId}}",
+            "messageType": "SearchPerformed",
+            "version": 1,
+            "producer": "InventoryService",
+            "occurredAt": "2026-10-19T10:01:00.0000000Z",
+            "correlationId": "corr-expanded-001",
+            "aggregateId": "{{msgId}}",
+            "payload": {
+                "userId": "{{userId}}",
+                "equipmentTypeId": "{{typeId}}",
+                "query": "máy khoan bê tông",
+                "categoryId": "{{categoryId}}",
+                "filterContext": {
+                    "brandId": "{{brandId}}",
+                    "provinceCode": "79",
+                    "wardCode": "790101",
+                    "sort": "price_asc",
+                    "filters": "{\"price\": {\"gte\": 1000000 } }",
+                    "from": "2026-11-01",
+                    "to": "2026-11-10",
+                    "requestedQuantity": 2,
+                    "page": 1,
+                    "pageSize": 20
+                },
+                "resultCount": 15
+            }
+        }
+        """;
+
+        _eventRepoMock
+            .Setup(r => r.IngestAsync(It.IsAny<InteractionEvent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InteractionIngestResult(InteractionIngestStatus.Inserted));
+
+        var result = await _service.ProcessEventAsync(json, InteractionEventSource.Inventory, CancellationToken.None);
+
+        Assert.Equal(EventProcessOutcome.Processed, result.Outcome);
+
+        _eventRepoMock.Verify(r => r.IngestAsync(
+            It.Is<InteractionEvent>(e =>
+                e.ScoreWeight == 1 &&
+                e.MessageId == msgId &&
+                e.UserId == userId &&
+                e.EquipmentTypeId == typeId &&
+                e.EquipmentListingId == null &&
+                e.Envelope.Contains("máy khoan bê tông") &&
+                e.Envelope.Contains("790101") &&
+                e.Envelope.Contains("\"resultCount\": 15")),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        _userInterestRepoMock.Verify(r => r.UpsertAsync(userId, typeId, 1, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Once);
+        _listingPopularityRepoMock.Verify(r => r.UpsertAsync(It.IsAny<Guid>(), It.IsAny<short>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessEvent_SearchPerformed_WithExpandedAnalyticsKeywordOnly_DoesNotUpdateAnyProjection()
+    {
+        var msgId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+
+        string json = $$"""
+        {
+            "messageId": "{{msgId}}",
+            "messageType": "SearchPerformed",
+            "version": 1,
+            "producer": "InventoryService",
+            "occurredAt": "2026-10-19T10:01:00.0000000Z",
+            "correlationId": "corr-expanded-002",
+            "aggregateId": "{{msgId}}",
+            "payload": {
+                "userId": "{{userId}}",
+                "equipmentTypeId": null,
+                "query": "máy khoan",
+                "categoryId": null,
+                "filterContext": {
+                    "brandId": null,
+                    "provinceCode": null,
+                    "wardCode": null,
+                    "sort": null,
+                    "filters": null,
+                    "from": null,
+                    "to": null,
+                    "requestedQuantity": null,
+                    "page": 1,
+                    "pageSize": 20
+                },
+                "resultCount": 37
+            }
+        }
+        """;
+
+        _eventRepoMock
+            .Setup(r => r.IngestAsync(It.IsAny<InteractionEvent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InteractionIngestResult(InteractionIngestStatus.Inserted));
+
+        var result = await _service.ProcessEventAsync(json, InteractionEventSource.Inventory, CancellationToken.None);
+
+        Assert.Equal(EventProcessOutcome.Processed, result.Outcome);
+
+        _eventRepoMock.Verify(r => r.IngestAsync(
+            It.Is<InteractionEvent>(e =>
+                e.ScoreWeight == 1 &&
+                e.MessageId == msgId &&
+                e.UserId == userId &&
+                e.EquipmentTypeId == null &&
+                e.EquipmentListingId == null &&
+                e.Envelope.Contains("máy khoan")),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        _userInterestRepoMock.Verify(r => r.UpsertAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<short>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+        _listingPopularityRepoMock.Verify(r => r.UpsertAsync(It.IsAny<Guid>(), It.IsAny<short>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessEvent_SearchPerformed_ZeroResult_ProcessedSuccessfully()
+    {
+        var msgId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+
+        string json = $$"""
+        {
+            "messageId": "{{msgId}}",
+            "messageType": "SearchPerformed",
+            "version": 1,
+            "producer": "InventoryService",
+            "occurredAt": "2026-10-19T10:04:00.0000000Z",
+            "payload": {
+                "userId": "{{userId}}",
+                "equipmentTypeId": null,
+                "query": "thiết bị không tồn tại",
+                "categoryId": null,
+                "filterContext": {
+                    "brandId": null,
+                    "provinceCode": null,
+                    "wardCode": null,
+                    "sort": null,
+                    "filters": null,
+                    "from": null,
+                    "to": null,
+                    "requestedQuantity": null,
+                    "page": 1,
+                    "pageSize": 20
+                },
+                "resultCount": 0
+            }
+        }
+        """;
+
+        _eventRepoMock
+            .Setup(r => r.IngestAsync(It.IsAny<InteractionEvent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InteractionIngestResult(InteractionIngestStatus.Inserted));
+
+        var result = await _service.ProcessEventAsync(json, InteractionEventSource.Inventory, CancellationToken.None);
+
+        Assert.Equal(EventProcessOutcome.Processed, result.Outcome);
+        _eventRepoMock.Verify(r => r.IngestAsync(
+            It.Is<InteractionEvent>(e => e.ScoreWeight == 1 && e.MessageId == msgId),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessEvent_SearchPerformed_DuplicateExpandedEvent_IgnoredWithoutUpdatingScores()
+    {
+        var msgId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+
+        string json = $$"""
+        {
+            "messageId": "{{msgId}}",
+            "messageType": "SearchPerformed",
+            "version": 1,
+            "producer": "InventoryService",
+            "occurredAt": "2026-10-19T10:01:00.0000000Z",
+            "payload": {
+                "userId": "{{userId}}",
+                "equipmentTypeId": "{{typeId}}",
+                "query": "máy khoan bê tông",
+                "categoryId": null,
+                "filterContext": {
+                    "brandId": null,
+                    "provinceCode": null,
+                    "wardCode": null,
+                    "sort": null,
+                    "filters": null,
+                    "from": null,
+                    "to": null,
+                    "requestedQuantity": null,
+                    "page": 1,
+                    "pageSize": 20
+                },
+                "resultCount": 15
+            }
+        }
+        """;
+
+        _eventRepoMock
+            .Setup(r => r.IngestAsync(It.IsAny<InteractionEvent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InteractionIngestResult(InteractionIngestStatus.DuplicateIgnored));
+
+        var result = await _service.ProcessEventAsync(json, InteractionEventSource.Inventory, CancellationToken.None);
+
+        Assert.Equal(EventProcessOutcome.DuplicateIgnored, result.Outcome);
+        _userInterestRepoMock.Verify(r => r.UpsertAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<short>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+        _listingPopularityRepoMock.Verify(r => r.UpsertAsync(It.IsAny<Guid>(), It.IsAny<short>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
 }

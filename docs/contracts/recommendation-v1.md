@@ -72,7 +72,7 @@ Tài liệu này xác lập bộ contract tích hợp và kiến trúc chuẩn h
 
 1. **Không Enrich Đồng Bộ Trước Khi Phát**: Producer trích xuất dữ liệu từ entity state, snapshot hoặc dữ liệu nghiệp vụ sẵn có trong transaction hiện tại. Tuyệt đối không thực hiện thêm lời gọi mạng đồng bộ (HTTP/gRPC/Kafka request-reply) để thu thập thêm thông tin chỉ nhằm mục đích phát event.
 2. **Không Gọi Ngược Khi Consume**: RecommendationService khi nhận event chỉ bóc tách payload nhận được; tuyệt đối không gọi ngược lại API của InventoryService hay RentalService để truy vấn dữ liệu bổ sung.
-3. **Bảo Vệ Tính Riêng Tư**: Không đưa từ khóa tự do (`search query text`), thông tin thẻ/tài khoản ngân hàng, địa chỉ giao hàng hoặc thông tin cá nhân (PII) vào contract sự kiện hành vi.
+3. **Bảo Vệ Tính Riêng Tư & Dữ Liệu Phân Tích**: Ngoại lệ thống nhất cho `SearchPerformed` v1: cho phép truyền trường `query` (từ khóa tìm kiếm thô) và `filterContext` phục vụ raw analytics; tuyệt đối không đưa thông tin thẻ/tài khoản ngân hàng, địa chỉ giao hàng hoặc thông tin cá nhân (PII) vào contract sự kiện hành vi.
 
 ---
 
@@ -93,7 +93,7 @@ Mọi thông điệp Kafka truyền tải dạng UTF-8 JSON. Tên trường thu�
 | `payload` | Object | Có | Đối tượng JSON chứa các trường nghiệp vụ cụ thể theo từng loại sự kiện, tuân thủ JSON Schema tương ứng. |
 
 **Quy tắc tương thích mở rộng & Tính đóng kín của Payload v1**:
-- **Payload v1 là đóng kín (`additionalProperties: false`)**: Mọi trường trong payload Phase 1 tuân thủ nghiêm ngặt schema đã công bố; không thêm bất kỳ trường tùy ý nào (như query text, giá tiền, PII). Việc thêm trường mới vào payload hoặc thay đổi ngữ nghĩa bắt buộc phải tăng `version` lên `2`.
+- **Payload v1 là đóng kín (`additionalProperties: false`)**: Mọi trường trong payload Phase 1 tuân thủ nghiêm ngặt schema đã công bố. Ngoại lệ mở rộng tương thích ngược cho `SearchPerformed` v1: cho phép bổ sung các trường analytics (`query`, `categoryId`, `filterContext`, `resultCount`) với `additionalProperties: false` cho cả payload và `filterContext`. Consumer coi các trường mới này là tùy chọn để tiếp tục tương thích với event v1 tối giản trước đó.
 - **Envelope chấp nhận metadata mở rộng**: Envelope của producer có thể chứa các trường metadata bổ sung đã có sẵn như `aggregateId`, `causationId`, `organizationId`. RecommendationService chấp nhận các trường này nhưng **không dùng chúng để phân vùng nghiệp vụ hay tính điểm**, và consumer bỏ qua mọi trường mở rộng chưa biết ở mức envelope.
 
 ---
@@ -105,7 +105,7 @@ Mọi trường định danh nghiệp vụ (`Id`) đều là UUID chuẩn khác 
 | Producer / Event | Payload Structure | Quy tắc phát sinh nghiệp vụ |
 |---|---|---|
 | **InventoryService**<br>`ListingViewed` | - `userId`: UUID? (nullable)<br>- `equipmentListingId`: UUID<br>- `equipmentTypeId`: UUID | Phát khi người dùng xem trang chi tiết listing công khai thành công (HTTP 200). Bao gồm cả trường hợp cache hit tại tầng Gateway/API của Inventory. |
-| **InventoryService**<br>`SearchPerformed` | - `userId`: UUID? (nullable)<br>- `equipmentTypeId`: UUID? (nullable) | Phát khi thao tác tìm kiếm thành công ở trang đầu tiên (`page = 1`) có chỉ định bộ lọc hoặc từ khóa. Chỉ lấy `equipmentTypeId` nếu client chỉ định rõ trong filter. |
+| **InventoryService**<br>`SearchPerformed` | - `userId`: UUID? (nullable)<br>- `equipmentTypeId`: UUID? (nullable)<br>- `query`: string? (nullable, từ khóa tìm kiếm thô)<br>- `categoryId`: UUID? (nullable)<br>- `filterContext`: object? (chứa context: brandId, provinceCode, wardCode, sort, filters, from, to, requestedQuantity, page=1, pageSize)<br>- `resultCount`: integer? (tổng số kết quả phù hợp từ `TotalCount`, không âm) | Phát khi thao tác tìm kiếm thành công ở trang đầu tiên (`page = 1`) có chỉ định bộ lọc hoặc từ khóa. Chỉ lấy `equipmentTypeId` nếu client chỉ định rõ trong filter. Không suy diễn `equipmentTypeId` từ `query` hay `categoryId`. |
 | **RentalService**<br>`CartItemAdded` | - `userId`: UUID (bắt buộc)<br>- `equipmentListingId`: UUID<br>- `equipmentTypeId`: UUID? (nullable)<br>- `cartId`: UUID<br>- `cartItemId`: UUID | Phát cho mỗi thao tác thêm thiết bị vào giỏ hàng đã commit thành công vào database, kể cả trường hợp sản phẩm đã có và hệ thống gộp số lượng. |
 | **RentalService**<br>`RentalItemPaid` | - `userId`: UUID (bắt buộc)<br>- `equipmentListingId`: UUID<br>- `equipmentTypeId`: UUID? (nullable)<br>- `rentalOrderId`: UUID<br>- `rentalItemId`: UUID | Phát đúng một event cho mỗi item khi RentalService nhận xác nhận thanh toán hợp lệ và chuyển trạng thái ghi nhận mục thuê đã thanh toán. |
 | **RentalService**<br>`RentalItemCompleted` | - `userId`: UUID (bắt buộc)<br>- `equipmentListingId`: UUID<br>- `equipmentTypeId`: UUID? (nullable)<br>- `rentalOrderId`: UUID<br>- `rentalItemId`: UUID | Phát đúng một event khi item hoàn tất toàn bộ chu trình thuê và chuyển sang trạng thái `Completed`. |
@@ -151,7 +151,7 @@ Mọi trường định danh nghiệp vụ (`Id`) đều là UUID chuẩn khác 
 1. **Cam kết At-Least-Once**: Hệ thống chấp nhận thông điệp có thể bị gửi lặp do network retry hoặc crash trong quá trình xử lý. Logic xử lý tại RecommendationService không được phụ thuộc vào thứ tự tuyệt đối giữa các topic khác nhau.
 2. **Outbox Pattern tại Producer**:
    - `RentalService` bắt buộc ghi nhận event vào bảng Transactional Outbox trong cùng transaction cơ sở dữ liệu với thao tác cập nhật đơn/giỏ hàng. ID của `RentalItemPaid` và `RentalItemCompleted` phải được tạo tất định (`deterministic ID generation`) dựa trên producer, event type và rental item id để chống tạo trùng event khi retry.
-   - `InventoryService` sử dụng hàng đợi tín hiệu có giới hạn bộ nhớ (`bounded signal queue`) và bảng outbox. Việc thu thập tín hiệu hành vi không được làm chậm hoặc gây lỗi cho thao tác đọc của khách hàng (nếu outbox/queue quá tải, chấp nhận bỏ qua tín hiệu và ghi nhận metric thất thoát tín hiệu; tuy nhiên khi đã commit vào outbox thành công thì phải retry bền vững với cùng envelope và `messageId`).
+   - `InventoryService` sử dụng hàng đợi tín hiệu trong bộ nhớ có giới hạn dung lượng (`bounded signal queue` best-effort, mặc định 1.024 sự kiện) cho tín hiệu duyệt/tìm kiếm (`ListingViewed`, `SearchPerformed`), không thêm outbox hay migration database riêng. Việc thu thập tín hiệu hành vi không được làm chậm hoặc gây lỗi cho thao tác đọc công khai (nếu hàng đợi đầy, publish lỗi hoặc host dừng thì chấp nhận drop signal và ghi nhận metric thất thoát). Đối với `RentalService`, vẫn bắt buộc ghi nhận event vào Transactional Outbox trong cùng transaction cơ sở dữ liệu.
 3. **Offset Commit & Transaction Boundary**:
    - Consumer chỉ commit Kafka offset sau khi transaction lưu trữ và cập nhật projection trong PostgreSQL hoàn tất thành công.
    - Lỗi kết nối tạm thời (`transient network/DB errors`) được retry với thuật toán exponential backoff có giới hạn (jittered backoff); tuyệt đối không commit offset của record chưa được xử lý thành công.
@@ -372,7 +372,41 @@ Tất cả các thành phần triển khai phải thỏa mãn 4 nhóm kịch b�
 }
 ```
 
-#### 2. `SearchPerformed` (InventoryService phát)
+#### 2. `SearchPerformed` (InventoryService phát - Định dạng mở rộng và tối giản tương thích)
+
+Định dạng mở rộng chứa đầy đủ thông tin tìm kiếm analytics:
+```json
+{
+  "messageId": "55555555-5555-4555-8555-555555555555",
+  "messageType": "SearchPerformed",
+  "version": 1,
+  "producer": "InventoryService",
+  "occurredAt": "2026-10-19T10:01:00.0000000Z",
+  "correlationId": "55555555-5555-4555-8555-555555555555",
+  "aggregateId": "55555555-5555-4555-8555-555555555555",
+  "payload": {
+    "userId": "22222222-2222-4222-8222-222222222222",
+    "equipmentTypeId": null,
+    "query": "máy khoan",
+    "categoryId": null,
+    "filterContext": {
+      "brandId": null,
+      "provinceCode": null,
+      "wardCode": null,
+      "sort": null,
+      "filters": null,
+      "from": null,
+      "to": null,
+      "requestedQuantity": null,
+      "page": 1,
+      "pageSize": 20
+    },
+    "resultCount": 37
+  }
+}
+```
+
+Định dạng v1 tối giản (vẫn được Recommendation consumer chấp nhận hợp lệ):
 ```json
 {
   "messageId": "11111111-1111-4111-8111-111111111121",
@@ -519,7 +553,7 @@ Giả định User `U1`, Listing `L1` (thuộc Type `T1`):
 - [ ] Tạo topic Kafka `inventory.behavior.events.v1` với retention tối thiểu 7 ngày.
 - [ ] Triển khai producer phát `ListingViewed` khi trả về chi tiết listing công khai thành công (kể cả cache hit).
 - [ ] Triển khai producer phát `SearchPerformed` cho lượt tìm kiếm tại `page = 1` có từ khóa hoặc bộ lọc; chỉ trích xuất `equipmentTypeId` khi có trong filter rõ ràng.
-- [ ] Thiết lập boundary an toàn cho việc phát event: không làm hỏng response người dùng nếu hàng đợi tín hiệu bị nghẽn; tái sử dụng transactional outbox hiện có để retry khi đã commit outbox.
+- [ ] Thiết lập boundary an toàn cho việc phát event: sử dụng bounded memory queue best-effort, không làm hỏng hoặc làm chậm response người dùng nếu hàng đợi bị đầy hoặc Kafka broker tạm ngưng.
 - [ ] Xây dựng client đọc Valkey cho hai cache key: `rec:v1:user:{userId}:equipment-types` và `rec:v1:global:popular-listings`.
 - [ ] Thiết lập timeout nghiêm ngặt **100 ms** cho toàn bộ thao tác đọc cache đề xuất, không retry đồng bộ.
 - [ ] Triển khai cơ chế Fallback 3 tầng (Personalized -> Global -> Inventory Default).

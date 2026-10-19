@@ -1,0 +1,28 @@
+{
+  "messageId": "55555555-5555-4555-8555-555555555553",
+  "messageType": "SearchPerformed",
+  "version": 1,
+  "producer": "InventoryService",
+  "occurredAt": "2026-10-19T10:03:00.0000000Z",
+  "correlationId": "55555555-5555-4555-8555-555555555553",
+  "aggregateId": "55555555-5555-4555-8555-555555555553",
+  "payload": {
+    "userId": "22222222-2222-4222-8222-222222222222",
+    "equipmentTypeId": "44444444-4444-4444-8444-444444444444",
+    "query": "máy xúc đào",
+    "categoryId": "33333333-3333-4333-8333-333333333333",
+    "filterContext": {
+      "brandId": "66666666-6666-4666-8666-666666666666",
+      "provinceCode": "79",
+      "wardCode": "790101",
+      "sort": "price_asc",
+      "filters": "{\"price\":{\"gte\":1000000,\"lte\":5000000}}",
+      "from": "2026-11-01",
+      "to": "2026-11-10",
+      "requestedQuantity": 2,
+      "page": 1,
+      "pageSize": 20
+    },
+    "resultCount": 4
+  }
+}
