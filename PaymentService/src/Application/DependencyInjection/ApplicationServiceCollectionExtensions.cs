@@ -49,7 +49,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddSingleton<IPaymentDataEncryptor>(sp =>
         {
             var opt = sp.GetRequiredService<IOptions<PaymentEncryptionOptions>>().Value;
-            return new Dprental.PaymentService.Common.Cryptography.PaymentDataEncryptor(opt.GetKeyBytes(), opt.ActiveKeyId);
+            return new Dprental.PaymentService.Common.Cryptography.PaymentDataEncryptor(opt.GetKeyBytes(), opt.ActiveKeyId, opt.GetOldKeyBytes());
         });
         services.AddSingleton(TimeProvider.System);
 

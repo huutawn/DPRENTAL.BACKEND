@@ -17,6 +17,9 @@ public sealed class OutboxMessage
     public string? LastErrorMessage { get; private set; }
     public Guid? EventId { get; private set; }
     public Guid? OperationId { get; private set; }
+    public long Revision { get; private set; } = 1;
+    public DateTimeOffset? QuarantinedAt { get; private set; }
+    public string? QuarantineReason { get; private set; }
 
     private OutboxMessage()
     {
@@ -71,7 +74,32 @@ public sealed class OutboxMessage
         ArgumentException.ThrowIfNullOrWhiteSpace(workerId);
         LockedBy = workerId;
         LockedUntilUtc = lockedUntilUtc.ToUniversalTime();
+        // Claim only acquires lease, does not increment retry count
+    }
+
+    public void RecordAttempt()
+    {
         RetryCount++;
+    }
+
+    public void DeferLease(DateTimeOffset nextRetryAt, string? reason = null)
+    {
+        LockedBy = null;
+        LockedUntilUtc = null;
+        NextRetryAt = nextRetryAt.ToUniversalTime();
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            LastErrorMessage = reason;
+        }
+    }
+
+    public void Quarantine(string reason, DateTimeOffset quarantinedAt)
+    {
+        QuarantinedAt = quarantinedAt.ToUniversalTime();
+        QuarantineReason = reason;
+        LockedBy = null;
+        LockedUntilUtc = null;
+        LastErrorMessage = $"QUARANTINED: {reason}";
     }
 
     public void ReleaseClaim()

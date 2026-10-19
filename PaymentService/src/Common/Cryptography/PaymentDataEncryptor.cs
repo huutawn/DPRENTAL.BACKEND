@@ -47,6 +47,10 @@ public sealed class PaymentDataEncryptor : IPaymentDataEncryptor
                 {
                     throw new InvalidOperationException($"Khóa cũ '{kId}' phải có đúng 32 bytes (256-bit).");
                 }
+                if (string.Equals(kId, _activeKeyId, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException($"Khóa cũ '{kId}' không được trùng hoặc ghi đè ActiveKeyId.");
+                }
                 _keyRing[kId] = kBytes.ToArray();
             }
         }

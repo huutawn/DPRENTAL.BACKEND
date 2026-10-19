@@ -8,7 +8,7 @@ using Dprental.PaymentService.Api.Tests.TestHelpers;
 using Dprental.PaymentService.Application.DTOs.SePay;
 using Dprental.PaymentService.Application.IServices;
 using Dprental.PaymentService.Common;
-using Dprental.PaymentService.Domain.Persistence;
+using Dprental.PaymentService.Domain.Repositories;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;

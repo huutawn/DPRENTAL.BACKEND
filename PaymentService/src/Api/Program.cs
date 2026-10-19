@@ -1,12 +1,12 @@
 using System.IO;
-using Dprental.PaymentService.Infrastructure.DependencyInjection;
+using Dprental.PaymentService.Domain.DependencyInjection;
 using Dprental.PaymentService.Application.IServices;
-using Dprental.PaymentService.Infrastructure.Clients;
+using Dprental.PaymentService.Application.Clients;
 using System.Net;
 using Dprental.PaymentService.Api.Exceptions;
 using Dprental.PaymentService.Api.Security;
 using Dprental.PaymentService.Application.DependencyInjection;
-using Dprental.PaymentService.Domain.Persistence;
+using Dprental.PaymentService.Domain.Repositories;
 
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -14,7 +14,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddPaymentInfrastructure(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddPaymentDomainPersistence(builder.Configuration.GetConnectionString("Postgres")!);
 builder.Services.AddPaymentApplication(builder.Configuration);
 builder.Services.AddHttpClient<ITransactionIntegrityChecker, IntegrityHostClient>(client =>
 {

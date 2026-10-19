@@ -10,8 +10,8 @@ using Dprental.PaymentService.Api.Tests.TestHelpers;
 using Dprental.PaymentService.Application.DTOs.Invoice;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Domain.Repository;
-using Dprental.PaymentService.Domain.Persistence;
+using Dprental.PaymentService.Domain.Repositories;
+using Dprental.PaymentService.Domain.Repositories;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
@@ -351,7 +351,6 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
             "op-create-for-cancel"));
         var createBody = await createResp.Content.ReadFromJsonAsync<CreateInvoiceResponse>();
         invoiceRef = createBody!.InvoiceRef;
-
         // 2. Mismatched route vs body -> 400
         var mismatchReq = new CancelInvoiceRequest(orderId, "INV-DIFFERENT", "Reason", "op-cancel-1");
         using var mismatchResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/cancel", mismatchReq);

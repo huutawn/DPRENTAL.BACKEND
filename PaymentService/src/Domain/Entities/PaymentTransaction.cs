@@ -27,9 +27,33 @@ public sealed class PaymentTransaction
     public string Status { get; private set; } = string.Empty;
     public string ReasonCode { get; private set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; private set; }
+    public long Revision { get; private set; } = 1;
 
     public IReadOnlyList<IFinancialDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
     public void ClearDomainEvents() => _domainEvents.Clear();
+
+    internal void SetDecryptedSensitiveFields(string accountNumber, string? subAccount, string? content)
+    {
+        AccountNumber = accountNumber;
+        SubAccount = subAccount;
+        Content = content;
+    }
+
+    public void EnsureDecrypted(Dprental.PaymentService.Common.Cryptography.IPaymentDataEncryptor encryptor)
+    {
+        ArgumentNullException.ThrowIfNull(encryptor);
+        if (Dprental.PaymentService.Common.Cryptography.SensitiveFieldEncryptor.IsEncrypted(AccountNumber))
+        {
+            string idStr = Id.ToString("D");
+            string decAccount = Dprental.PaymentService.Common.Cryptography.SensitiveFieldEncryptor.Decrypt(
+                encryptor, "PaymentTransaction", idStr, "AccountNumber", AccountNumber) ?? string.Empty;
+            string? decSub = Dprental.PaymentService.Common.Cryptography.SensitiveFieldEncryptor.Decrypt(
+                encryptor, "PaymentTransaction", idStr, "SubAccount", SubAccount);
+            string? decContent = Dprental.PaymentService.Common.Cryptography.SensitiveFieldEncryptor.Decrypt(
+                encryptor, "PaymentTransaction", idStr, "Content", Content);
+            SetDecryptedSensitiveFields(decAccount, decSub, decContent);
+        }
+    }
 
     private PaymentTransaction()
     {

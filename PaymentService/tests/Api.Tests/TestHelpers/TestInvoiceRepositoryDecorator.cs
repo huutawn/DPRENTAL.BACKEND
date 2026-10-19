@@ -1,5 +1,5 @@
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Domain.IRepository;
+using Dprental.PaymentService.Domain.IRepositories;
 
 namespace Dprental.PaymentService.Api.Tests.TestHelpers;
 

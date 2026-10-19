@@ -4,7 +4,7 @@ using Dprental.PaymentService.Common;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Application.Services;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Domain.IRepository;
+using Dprental.PaymentService.Domain.IRepositories;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;

@@ -14,6 +14,7 @@ public sealed class SettlementLedgerEntry
     public SettlementEntryType EntryType { get; private set; }
     public decimal Amount { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
+    public long Revision { get; private set; } = 1;
 
     public RentalItemSettlementRecord Settlement { get; private set; } = null!;
 

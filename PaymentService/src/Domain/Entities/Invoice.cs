@@ -29,6 +29,7 @@ public sealed class Invoice
     public DateTimeOffset? ExpiredAt { get; private set; }
     public string? CancelReason { get; private set; }
     public string? PaymentRef { get; private set; }
+    public long Revision { get; private set; } = 1;
 
     public IReadOnlyList<InvoiceItem> Items => _items.AsReadOnly();
     public IReadOnlyList<IFinancialDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
@@ -130,7 +131,11 @@ public sealed class Invoice
             CreatedAt = utcCreated
         };
 
-        invoice._items.AddRange(items);
+        foreach (var item in items)
+        {
+            item.AttachToInvoice(invoice.Id);
+            invoice._items.Add(item);
+        }
 
         if (totalAmount == 0m)
         {
@@ -211,10 +216,10 @@ public sealed class Invoice
         {
             return Error.Conflict("INVOICE_EXPIRED", "Thời điểm thanh toán đã quá hạn thanh toán của hóa đơn.");
         }
-
         Status = InvoiceStatus.Paid;
         PaymentRef = normalizedPaymentRef;
         PaidAt = utcPaidAt;
+        Revision++;
 
         AddDomainEvent(new InvoicePaidDomainEvent(
             Id, InvoiceRef, RentalOrderId, normalizedPaymentRef, TotalAmount, Currency, utcPaidAt, utcPaidAt));
@@ -242,11 +247,13 @@ public sealed class Invoice
         {
             Status = InvoiceStatus.Expired;
             ExpiredAt = utcProcessedAt;
+            Revision++;
             AddDomainEvent(new InvoiceExpiredDomainEvent(Id, InvoiceRef, RentalOrderId, utcProcessedAt));
         }
 
         PaymentRef = normalizedPaymentRef;
         PaidAt = utcPaidAt;
+        Revision++;
 
         return Result.Success();
     }
@@ -273,6 +280,7 @@ public sealed class Invoice
         Status = InvoiceStatus.Cancelled;
         CancelledAt = utcCancelledAt;
         CancelReason = reason;
+        Revision++;
 
         AddDomainEvent(new InvoiceCancelledDomainEvent(Id, InvoiceRef, RentalOrderId, reason, utcCancelledAt));
 
@@ -294,6 +302,7 @@ public sealed class Invoice
         DateTimeOffset utcExpiredAt = expiredAt.ToUniversalTime();
         Status = InvoiceStatus.Expired;
         ExpiredAt = utcExpiredAt;
+        Revision++;
 
         AddDomainEvent(new InvoiceExpiredDomainEvent(Id, InvoiceRef, RentalOrderId, utcExpiredAt));
 

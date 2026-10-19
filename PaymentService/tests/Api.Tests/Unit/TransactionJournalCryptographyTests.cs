@@ -5,7 +5,7 @@ using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Application.Services;
 using Dprental.PaymentService.Common.Cryptography;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Domain.IRepository;
+using Dprental.PaymentService.Domain.IRepositories;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -205,19 +205,42 @@ public sealed class TransactionJournalCryptographyTests
             CallerNonce: "nonce-123",
             ExpectedAmount: 500_000m,
             ExpectedCurrency: "VND");
-
         string requestHash = CanonicalJournalHasher.ComputeRequestHash(
-            req.PaymentRef, req.Purpose, req.CallerNonce, req.ExpectedAmount, req.ExpectedCurrency);
+            req.PaymentRef, req.Purpose, req.CallerNonce, expectedAmount: req.ExpectedAmount, expectedCurrency: req.ExpectedCurrency);
 
-        string receiptMsg = EcdsaAttestation.BuildVerificationReceiptMessage(
-            keyId, requestHash, req.CallerNonce, IntegrityStatuses.Valid, true, "OK", now, expiresAt);
+        var body = new VerificationReceiptBody(
+            Schema: 2,
+            Issuer: "dprental-integrity-host",
+            Audience: "payment-api",
+            Environment: "production",
+            ReceiptId: Guid.NewGuid(),
+            KeyId: keyId,
+            RequestHash: requestHash,
+            CallerIdentity: "",
+            CallerNonce: req.CallerNonce,
+            Purpose: req.Purpose,
+            IntegrityStatus: IntegrityStatuses.Valid,
+            IsUsable: true,
+            Reason: "OK",
+            ActualAmount: 500_000m,
+            ActualCurrency: "VND",
+            ActualStatus: "PAID",
+            EntityClaims: [],
+            IssuedAt: now,
+            ExpiresAt: expiresAt);
+
+        string claimsDigest = EcdsaAttestation.ComputeClaimsDigest([]);
+        string receiptMsg = EcdsaAttestation.BuildVerificationReceiptMessageV2(
+            body.Schema, body.Issuer, body.Audience, body.Environment, body.ReceiptId, body.KeyId,
+            body.RequestHash, body.CallerIdentity, body.CallerNonce, body.Purpose, body.IntegrityStatus,
+            body.IsUsable, body.Reason, body.ActualAmount, body.ActualCurrency, body.ActualStatus,
+            claimsDigest, body.IssuedAt, body.ExpiresAt);
         string sig = EcdsaAttestation.Sign(signingKey, receiptMsg);
 
         var expectedResponse = new TransactionVerificationResponse(
             new TransactionIntegrityResult(IntegrityStatuses.Valid, 1, "WEBHOOK", now, keyId, sig, "proof", req.CallerNonce),
             new TransactionUsabilityResult(true, "OK", 500_000m, "VND", "PAID"),
-            new VerificationReceipt(Guid.NewGuid(), keyId, requestHash, req.CallerNonce, IntegrityStatuses.Valid, true, "OK", now, expiresAt, sig));
-
+            new VerificationReceipt(body, sig));
         var handler = new FakeHttpHandler(expectedResponse);
         using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://integrity-host:8081") };
 
@@ -255,15 +278,39 @@ public sealed class TransactionJournalCryptographyTests
         string requestHash = CanonicalJournalHasher.ComputeRequestHash(
             req.PaymentRef, req.Purpose, req.CallerNonce);
 
-        string receiptMsg = EcdsaAttestation.BuildVerificationReceiptMessage(
-            keyId, requestHash, req.CallerNonce, IntegrityStatuses.Valid, true, "OK", past, expiredAt);
+        var body = new VerificationReceiptBody(
+            Schema: 2,
+            Issuer: "dprental-integrity-host",
+            Audience: "payment-api",
+            Environment: "production",
+            ReceiptId: Guid.NewGuid(),
+            KeyId: keyId,
+            RequestHash: requestHash,
+            CallerIdentity: "",
+            CallerNonce: req.CallerNonce,
+            Purpose: req.Purpose,
+            IntegrityStatus: IntegrityStatuses.Valid,
+            IsUsable: true,
+            Reason: "OK",
+            ActualAmount: 300_000m,
+            ActualCurrency: "VND",
+            ActualStatus: "PAID",
+            EntityClaims: [],
+            IssuedAt: past,
+            ExpiresAt: expiredAt);
+
+        string claimsDigest = EcdsaAttestation.ComputeClaimsDigest([]);
+        string receiptMsg = EcdsaAttestation.BuildVerificationReceiptMessageV2(
+            body.Schema, body.Issuer, body.Audience, body.Environment, body.ReceiptId, body.KeyId,
+            body.RequestHash, body.CallerIdentity, body.CallerNonce, body.Purpose, body.IntegrityStatus,
+            body.IsUsable, body.Reason, body.ActualAmount, body.ActualCurrency, body.ActualStatus,
+            claimsDigest, body.IssuedAt, body.ExpiresAt);
         string sig = EcdsaAttestation.Sign(signingKey, receiptMsg);
 
         var expiredResponse = new TransactionVerificationResponse(
             new TransactionIntegrityResult(IntegrityStatuses.Valid, 1, "WEBHOOK", past, keyId, sig, "proof", req.CallerNonce),
             new TransactionUsabilityResult(true, "OK", 300_000m, "VND", "PAID"),
-            new VerificationReceipt(Guid.NewGuid(), keyId, requestHash, req.CallerNonce, IntegrityStatuses.Valid, true, "OK", past, expiredAt, sig));
-
+            new VerificationReceipt(body, sig));
         var handler = new FakeHttpHandler(expiredResponse);
         using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://integrity-host:8081") };
 

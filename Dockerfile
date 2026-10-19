@@ -4,7 +4,6 @@ WORKDIR /src
 COPY Directory.Build.props Directory.Packages.props ./
 COPY PaymentService/src/Common/PaymentService.Common.csproj PaymentService/src/Common/
 COPY PaymentService/src/Domain/PaymentService.Domain.csproj PaymentService/src/Domain/
-COPY PaymentService/src/Infrastructure/PaymentService.Infrastructure.csproj PaymentService/src/Infrastructure/
 COPY PaymentService/src/Application/PaymentService.Application.csproj PaymentService/src/Application/
 COPY PaymentService/src/IntegrityHost/PaymentService.IntegrityHost.csproj PaymentService/src/IntegrityHost/
 COPY PaymentService/src/Api/PaymentService.Api.csproj PaymentService/src/Api/
@@ -26,13 +25,13 @@ RUN dotnet publish PaymentService/src/IntegrityHost/PaymentService.IntegrityHost
 
 FROM build AS migrator
 RUN dotnet tool install --tool-path /tools dotnet-ef --version 10.0.12
-RUN /tools/dotnet-ef migrations has-pending-model-changes --project PaymentService/src/Infrastructure/PaymentService.Infrastructure.csproj --startup-project PaymentService/src/Api/PaymentService.Api.csproj --configuration Release
-ENTRYPOINT ["/tools/dotnet-ef", "database", "update", "--project", "PaymentService/src/Infrastructure/PaymentService.Infrastructure.csproj", "--startup-project", "PaymentService/src/Api/PaymentService.Api.csproj", "--configuration", "Release", "--no-build"]
+RUN /tools/dotnet-ef migrations has-pending-model-changes --project PaymentService/src/Domain/PaymentService.Domain.csproj --startup-project PaymentService/src/Api/PaymentService.Api.csproj --context PaymentServiceDbContext --configuration Release
+ENTRYPOINT ["/tools/dotnet-ef", "database", "update", "--project", "PaymentService/src/Domain/PaymentService.Domain.csproj", "--startup-project", "PaymentService/src/Api/PaymentService.Api.csproj", "--context", "PaymentServiceDbContext", "--configuration", "Release", "--no-build"]
 
 FROM build AS migrator-integrity
 RUN dotnet tool install --tool-path /tools dotnet-ef --version 10.0.12
-RUN /tools/dotnet-ef migrations has-pending-model-changes --project PaymentService/src/IntegrityHost/PaymentService.IntegrityHost.csproj --startup-project PaymentService/src/IntegrityHost/PaymentService.IntegrityHost.csproj --context IntegrityDbContext --configuration Release
-ENTRYPOINT ["/tools/dotnet-ef", "database", "update", "--project", "PaymentService/src/IntegrityHost/PaymentService.IntegrityHost.csproj", "--startup-project", "PaymentService/src/IntegrityHost/PaymentService.IntegrityHost.csproj", "--context", "IntegrityDbContext", "--configuration", "Release", "--no-build"]
+RUN /tools/dotnet-ef migrations has-pending-model-changes --project PaymentService/src/Domain/PaymentService.Domain.csproj --startup-project PaymentService/src/IntegrityHost/PaymentService.IntegrityHost.csproj --context IntegrityDbContext --configuration Release
+ENTRYPOINT ["/tools/dotnet-ef", "database", "update", "--project", "PaymentService/src/Domain/PaymentService.Domain.csproj", "--startup-project", "PaymentService/src/IntegrityHost/PaymentService.IntegrityHost.csproj", "--context", "IntegrityDbContext", "--configuration", "Release", "--no-build"]
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app

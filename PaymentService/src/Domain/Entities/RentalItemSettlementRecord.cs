@@ -25,6 +25,7 @@ public sealed class RentalItemSettlementRecord
     public SettlementState Status { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
+    public long Revision { get; private set; } = 1;
 
     public List<SettlementLedgerEntry> Entries { get; private set; } = [];
     public ManualRefundRequirement? RefundRequirement { get; private set; }
@@ -108,6 +109,7 @@ public sealed class RentalItemSettlementRecord
 
         Status = SettlementState.Completed;
         CompletedAt = now.ToUniversalTime();
+        Revision++;
 
         _domainEvents.Add(new RentalItemSettledDomainEvent(
             Id,

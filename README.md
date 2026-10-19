@@ -7,13 +7,13 @@ Dịch vụ PaymentService cho hệ sinh thái DPRENTAL, được xây dựng b�
 ```text
 PaymentService/
   src/
-    Common/          # Kiểu dùng chung, Result/Error, Utils, Cryptography (AesGcm, CanonicalJournalHasher, EcdsaAttestation)
-    Domain/          # Pure Domain rules, Entities (Invoice, PaymentTransaction, TransactionJournalEntry, etc.), IRepository
-    Infrastructure/  # EF Core DbContext, PostgreSQL mappings, Migrations, Repositories implementations
-    Application/     # Use cases, DTOs, Services (Creation, Lifecycle, Processor, Settlement, Refund, TransactionIntegrityChecker), Background workers
-    IntegrityHost/   # Tiến trình ký độc lập, kho bằng chứng riêng, IntegrityConfirmationWorker, PeriodicScanner, Internal API
-    Api/             # Controllers, Filters, JWT Auth, Public HTTP APIs
+    Common/          # Kiểu dùng chung, Result/Error, Utils, Cryptography (AesGcm, CanonicalJournalHasher, EcdsaAttestation, SensitiveFieldEncryptor)
+    Domain/          # Pure Data Entities, IRepositories contracts, DbContexts (PaymentServiceDbContext, IntegrityDbContext), EF Configurations, Migrations (Payment, Integrity)
+    Application/     # Use cases, DTOs, Services theo nghiệp vụ (Invoices, Payments, Publishing, Refunds, Settlement, Integrity), Background workers, Clients
+    IntegrityHost/   # Tiến trình độc lập, composition root, endpoints nội bộ, adapter quản lý khóa ký (IIntegritySigningAdapter, IntegrityKeyManager)
+    Api/             # Routing, Controllers, Filters, JWT Auth, Public HTTP APIs
   tests/             # Kiểm thử đơn vị, tích hợp (PostgreSQL 17), tamper detection, load & benchmark (1M bản ghi)
+```
 Directory.Build.props
 Directory.Packages.props
 Dockerfile

@@ -3,7 +3,7 @@ using System.Text;
 using Dprental.PaymentService.Api.Filters;
 using Dprental.PaymentService.Application.DTOs.Verification;
 using Dprental.PaymentService.Application.IServices;
-using Dprental.PaymentService.Domain.IRepository;
+using Dprental.PaymentService.Domain.IRepositories;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -40,15 +40,31 @@ public sealed class PaymentVerificationsController : ControllerBase
         [FromBody] TransactionVerificationRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await _integrityChecker.VerifyAsync(request, cancellationToken);
+        string? callerIdentity = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("sub")?.Value
+            ?? User.FindFirst("client_id")?.Value
+            ?? User.Identity?.Name;
+
+        if (string.IsNullOrWhiteSpace(callerIdentity))
+        {
+            return Unauthorized(new ProblemDetails
+            {
+                Status = StatusCodes.Status401Unauthorized,
+                Title = "Payment.Verification.UnauthorizedCaller",
+                Detail = "Yêu cầu kiểm chứng thiếu danh tính caller được xác thực (sub hoặc client_id)."
+            });
+        }
+        var boundRequest = request with { CallerIdentity = callerIdentity };
+
+        var result = await _integrityChecker.VerifyAsync(boundRequest, cancellationToken);
         if (result.IsFailure)
         {
-            if (result.Error.Code == "Payment.Verification.Timeout")
+            if (result.Error.Code == "Payment.Verification.Timeout" || result.Error.Code.StartsWith("IntegrityHost.Unavailable", StringComparison.OrdinalIgnoreCase))
             {
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, new ProblemDetails
                 {
                     Status = StatusCodes.Status503ServiceUnavailable,
-                    Title = "Payment.Verification.Timeout",
+                    Title = "Payment.Verification.Unavailable",
                     Detail = result.Error.Message
                 });
             }
@@ -65,6 +81,11 @@ public sealed class PaymentVerificationsController : ControllerBase
         if (response.Integrity.Status == IntegrityStatuses.Tampered)
         {
             return StatusCode(StatusCodes.Status409Conflict, response);
+        }
+
+        if (response.Integrity.Status == IntegrityStatuses.NotFound)
+        {
+            return StatusCode(StatusCodes.Status404NotFound, response);
         }
 
         return Ok(response);

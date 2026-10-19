@@ -12,12 +12,14 @@ public sealed class InvoiceItem
     public decimal RentalAmount { get; private set; }
     public decimal DepositAmount { get; private set; }
     public decimal TotalAmount { get; private set; }
-
+    public long Revision { get; private set; } = 1;
     public Invoice? Invoice { get; private set; }
-
-    private InvoiceItem()
+    internal void AttachToInvoice(Guid invoiceId)
     {
+        InvoiceId = invoiceId;
     }
+
+    private InvoiceItem() { }
 
     public static Result<InvoiceItem> Create(
         Guid rentalItemId,

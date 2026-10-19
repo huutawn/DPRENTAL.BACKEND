@@ -102,18 +102,38 @@ public static class CanonicalJournalHasher
         string paymentRef,
         string purpose,
         string callerNonce,
+        string? callerIdentity = null,
         decimal? expectedAmount = null,
         string? expectedCurrency = null,
-        string? expectedStatus = null,
         string? invoiceRef = null,
         Guid? expectedOrderId = null,
         Guid? expectedRenterId = null,
         Guid? rentalItemId = null,
         Guid? supplierId = null,
-        string? requirementRef = null)
+        string? requirementRef = null,
+        string? expectedOutboxDigest = null,
+        string? topic = null,
+        string? messageKey = null,
+        string? expectedStatus = null)
     {
-        string raw = $"amount={expectedAmount?.ToString(CultureInfo.InvariantCulture)};currency={expectedCurrency?.Trim().ToUpperInvariant()};invoiceRef={invoiceRef?.Trim()};nonce={callerNonce.Trim()};orderId={expectedOrderId};paymentRef={paymentRef.Trim()};purpose={purpose.Trim().ToUpperInvariant()};renterId={expectedRenterId};rentalItemId={rentalItemId};requirementRef={requirementRef?.Trim()};status={expectedStatus?.Trim().ToUpperInvariant()};supplierId={supplierId}";
-        byte[] bytes = Encoding.UTF8.GetBytes(raw);
+        var sb = new StringBuilder(256);
+        sb.Append("amount=").Append(expectedAmount.HasValue ? Dprental.PaymentService.Common.Utils.VndAmountValidator.FormatVndAmount(expectedAmount.Value) : string.Empty).Append(';');
+        sb.Append("callerIdentity=").Append(callerIdentity?.Trim() ?? string.Empty).Append(';');
+        sb.Append("currency=").Append(expectedCurrency?.Trim().ToUpperInvariant() ?? string.Empty).Append(';');
+        sb.Append("expectedOutboxDigest=").Append(expectedOutboxDigest?.Trim().ToLowerInvariant() ?? string.Empty).Append(';');
+        sb.Append("invoiceRef=").Append(invoiceRef?.Trim() ?? string.Empty).Append(';');
+        sb.Append("messageKey=").Append(messageKey?.Trim() ?? string.Empty).Append(';');
+        sb.Append("nonce=").Append(callerNonce.Trim()).Append(';');
+        sb.Append("orderId=").Append(expectedOrderId.HasValue ? expectedOrderId.Value.ToString("D") : string.Empty).Append(';');
+        sb.Append("paymentRef=").Append(paymentRef.Trim()).Append(';');
+        sb.Append("purpose=").Append(purpose.Trim().ToUpperInvariant()).Append(';');
+        sb.Append("renterId=").Append(expectedRenterId.HasValue ? expectedRenterId.Value.ToString("D") : string.Empty).Append(';');
+        sb.Append("rentalItemId=").Append(rentalItemId.HasValue ? rentalItemId.Value.ToString("D") : string.Empty).Append(';');
+        sb.Append("requirementRef=").Append(requirementRef?.Trim() ?? string.Empty).Append(';');
+        sb.Append("supplierId=").Append(supplierId.HasValue ? supplierId.Value.ToString("D") : string.Empty).Append(';');
+        sb.Append("topic=").Append(topic?.Trim() ?? string.Empty);
+
+        byte[] bytes = Encoding.UTF8.GetBytes(sb.ToString());
         return Convert.ToHexStringLower(SHA256.HashData(bytes));
     }
 }

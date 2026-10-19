@@ -1,10 +1,10 @@
 #pragma warning disable CA1848
+using Dprental.PaymentService.Application.IServices;
+using Dprental.PaymentService.Application.Services.Integrity;
 using Dprental.PaymentService.Common.Cryptography;
-using Dprental.PaymentService.Domain.IRepository;
-using Dprental.PaymentService.IntegrityHost.Entities;
+using Dprental.PaymentService.Domain.IRepositories;
+using Dprental.PaymentService.Domain.Repositories;
 using Dprental.PaymentService.IntegrityHost.Options;
-using Dprental.PaymentService.IntegrityHost.Persistence;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -15,11 +15,23 @@ namespace Dprental.PaymentService.IntegrityHost.Services;
 public sealed class IntegrityConfirmationWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IntegrityKeyManager _keyManager;
     private readonly IOptionsMonitor<IntegrityHostOptions> _options;
     private readonly ILogger<IntegrityConfirmationWorker> _logger;
-    private readonly IPaymentDataEncryptor _encryptor;
     private readonly TimeProvider _timeProvider;
+    private readonly IntegrityKeyManager? _fallbackKeyManager;
+    private readonly IPaymentDataEncryptor? _fallbackEncryptor;
+
+    public IntegrityConfirmationWorker(
+        IServiceScopeFactory scopeFactory,
+        IOptionsMonitor<IntegrityHostOptions> options,
+        ILogger<IntegrityConfirmationWorker> logger,
+        TimeProvider? timeProvider = null)
+    {
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _timeProvider = timeProvider ?? TimeProvider.System;
+    }
 
     public IntegrityConfirmationWorker(
         IServiceScopeFactory scopeFactory,
@@ -28,13 +40,10 @@ public sealed class IntegrityConfirmationWorker : BackgroundService
         IOptionsMonitor<IntegrityHostOptions> options,
         ILogger<IntegrityConfirmationWorker> logger,
         TimeProvider? timeProvider = null)
+        : this(scopeFactory, options, logger, timeProvider)
     {
-        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
-        _keyManager = keyManager ?? throw new ArgumentNullException(nameof(keyManager));
-        _encryptor = encryptor ?? throw new ArgumentNullException(nameof(encryptor));
-        _options = options ?? throw new ArgumentNullException(nameof(options));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _fallbackKeyManager = keyManager;
+        _fallbackEncryptor = encryptor;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -71,237 +80,21 @@ public sealed class IntegrityConfirmationWorker : BackgroundService
     public async Task<int> ProcessConfirmationBatchAsync(CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
-        var integrityDb = scope.ServiceProvider.GetRequiredService<IntegrityDbContext>();
+        var service = scope.ServiceProvider.GetService<IIntegrityConfirmationService>();
+        if (service is not null)
+        {
+            return await service.ProcessConfirmationBatchAsync(cancellationToken);
+        }
+
+        var evidenceRepo = scope.ServiceProvider.GetService<IIntegrityEvidenceRepository>()
+            ?? new Dprental.PaymentService.Domain.Repositories.Integrity.EfIntegrityEvidenceRepository(scope.ServiceProvider.GetRequiredService<IntegrityDbContext>());
         var paymentRepo = scope.ServiceProvider.GetRequiredService<ITransactionJournalRepository>();
-
+        var keyManager = (IIntegritySigningAdapter?)scope.ServiceProvider.GetService<IntegrityKeyManager>() ?? _fallbackKeyManager!;
+        var encryptor = scope.ServiceProvider.GetService<IPaymentDataEncryptor>() ?? _fallbackEncryptor!;
         int batchSize = _options.CurrentValue.BatchSize > 0 ? _options.CurrentValue.BatchSize : 100;
-        var pendingEntries = await paymentRepo.GetPendingConfirmationEntriesAsync(batchSize, cancellationToken);
 
-        if (pendingEntries.Count == 0)
-        {
-            return 0;
-        }
-
-        int confirmedCount = 0;
-        var now = _timeProvider.GetUtcNow();
-
-        foreach (var entry in pendingEntries)
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-
-            var manifest = await integrityDb.Manifests
-                .FirstOrDefaultAsync(m => m.StreamId == entry.StreamId, cancellationToken);
-
-            if (manifest?.IsBlocked == true)
-            {
-                _logger.LogWarning("Skipping entry {EntryId} because stream {StreamId} is blocked: {Reason}",
-                    entry.Id, entry.StreamId, manifest.BlockedReason);
-                continue;
-            }
-
-            // 1. Verify sequence order
-            if (manifest is null)
-            {
-                if (entry.Version != 1 || !string.Equals(entry.PreviousHash, CanonicalJournalHasher.GenesisHash, StringComparison.OrdinalIgnoreCase))
-                {
-                    await RecordIncidentAndBlockAsync(
-                        integrityDb,
-                        entry.StreamId,
-                        "CHAIN_BROKEN",
-                        entry.Version,
-                        entry.EventId,
-                        $"Stream {entry.StreamId} started at version {entry.Version} with non-genesis hash {entry.PreviousHash}.",
-                        now,
-                        cancellationToken);
-                    continue;
-                }
-            }
-            else
-            {
-                if (entry.Version == manifest.LatestVersion)
-                {
-                    // Check for idempotent retry
-                    var existingAttestation = await integrityDb.Attestations
-                        .FirstOrDefaultAsync(a => a.StreamId == entry.StreamId && a.Version == entry.Version, cancellationToken);
-
-                    if (existingAttestation is not null)
-                    {
-                        if (string.Equals(existingAttestation.EntryHash, entry.EntryHash, StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Replay existing attestation
-                            await paymentRepo.UpdateConfirmationAsync(
-                                entry.Id,
-                                existingAttestation.Signature,
-                                existingAttestation.KeyId,
-                                existingAttestation.ConfirmedAt,
-                                cancellationToken);
-                            confirmedCount++;
-                            continue;
-                        }
-                        else
-                        {
-                            await RecordIncidentAndBlockAsync(
-                                integrityDb,
-                                entry.StreamId,
-                                "HASH_MISMATCH",
-                                entry.Version,
-                                entry.EventId,
-                                $"Conflicting entry hash for existing version {entry.Version}.",
-                                now,
-                                cancellationToken);
-                            continue;
-                        }
-                    }
-                }
-
-                if (entry.Version != manifest.LatestVersion + 1)
-                {
-                    await RecordIncidentAndBlockAsync(
-                        integrityDb,
-                        entry.StreamId,
-                        "VERSION_GAP",
-                        entry.Version,
-                        entry.EventId,
-                        $"Version sequence gap: expected {manifest.LatestVersion + 1}, received {entry.Version}.",
-                        now,
-                        cancellationToken);
-                    continue;
-                }
-
-                if (!string.Equals(entry.PreviousHash, manifest.LatestEntryHash, StringComparison.OrdinalIgnoreCase))
-                {
-                    await RecordIncidentAndBlockAsync(
-                        integrityDb,
-                        entry.StreamId,
-                        "CHAIN_BROKEN",
-                        entry.Version,
-                        entry.EventId,
-                        $"PreviousHash {entry.PreviousHash} does not match latest manifest hash {manifest.LatestEntryHash}.",
-                        now,
-                        cancellationToken);
-                    continue;
-                }
-            }
-
-            // 2. Use unified JournalContentVerifier
-            var verifyResult = Dprental.PaymentService.Domain.Services.JournalContentVerifier.Verify(entry, _encryptor);
-            if (!verifyResult.IsValid)
-            {
-                string incidentReason = verifyResult.FailureReason switch
-                {
-                    "ENTRY_HASH_MISMATCH" => "HASH_TAMPERED",
-                    "ENVELOPE_DIGEST_MISMATCH" => "ENVELOPE_TAMPERED",
-                    "DECRYPTION_FAILED" => "CIPHERTEXT_TAMPERED",
-                    _ => (verifyResult.FailureReason ?? "PAYLOAD_HASH_TAMPERED")
-                };
-
-                await RecordIncidentAndBlockAsync(
-                    integrityDb,
-                    entry.StreamId,
-                    incidentReason,
-                    entry.Version,
-                    entry.EventId,
-                    $"Journal verification failed: {verifyResult.FailureReason}.",
-                    now,
-                    cancellationToken);
-                continue;
-            }
-
-            // 3. Sign attestation and update manifest
-            string attestationMessage = EcdsaAttestation.BuildAttestationMessage(
-                _keyManager.KeyId,
-                entry.StreamId,
-                entry.Version,
-                entry.EventId,
-                entry.EntryHash,
-                now);
-
-            string signature = _keyManager.Sign(attestationMessage);
-
-            var attestation = AttestationRecord.Create(
-                entry.StreamId,
-                entry.Version,
-                entry.EventId,
-                entry.EntryHash,
-                entry.PayloadHash,
-                entry.PreviousHash,
-                signature,
-                _keyManager.KeyId,
-                now);
-
-            integrityDb.Attestations.Add(attestation);
-
-            if (manifest is null)
-            {
-                manifest = StreamManifest.Create(entry.StreamId, entry.Version, entry.EntryHash, entry.EventId, now);
-                integrityDb.Manifests.Add(manifest);
-            }
-            else
-            {
-                manifest.Advance(entry.Version, entry.EntryHash, entry.EventId, now);
-            }
-
-            // Update EntityHead in Integrity evidence store
-            string snapshotDigest = verifyResult.Document?.Snapshot != null
-                ? Dprental.PaymentService.Domain.Services.OperationalSnapshotEngine.ComputeSnapshotDigest(verifyResult.Document.Snapshot)
-                : entry.PayloadHash;
-
-            var head = await integrityDb.EntityHeads
-                .FirstOrDefaultAsync(h => h.EntityType == entry.StreamType && h.EntityId == entry.StreamId, cancellationToken);
-            if (head is null)
-            {
-                integrityDb.EntityHeads.Add(EntityHeadRecord.Create(
-                    entry.StreamType, entry.StreamId, attestation.Id, entry.Version, entry.EntryHash, snapshotDigest, now));
-            }
-            else
-            {
-                head.Update(attestation.Id, entry.Version, entry.EntryHash, snapshotDigest, now);
-            }
-
-            await integrityDb.SaveChangesAsync(cancellationToken);
-
-            // Update confirmation in Payment DB
-            await paymentRepo.UpdateConfirmationAsync(
-                entry.Id,
-                signature,
-                _keyManager.KeyId,
-                now,
-                cancellationToken);
-
-            confirmedCount++;
-        }
-
-        return confirmedCount;
-    }
-
-    private static async Task RecordIncidentAndBlockAsync(
-        IntegrityDbContext db,
-        string streamId,
-        string incidentType,
-        long? version,
-        Guid? eventId,
-        string details,
-        DateTimeOffset now,
-        CancellationToken cancellationToken)
-    {
-        var manifest = await db.Manifests.FindAsync([streamId], cancellationToken);
-        if (manifest is not null)
-        {
-            manifest.Block(details, now);
-        }
-        else
-        {
-            manifest = StreamManifest.Create(streamId, version ?? 1, "BLOCKED", eventId ?? Guid.Empty, now);
-            manifest.Block(details, now);
-            db.Manifests.Add(manifest);
-        }
-
-        var incident = IntegrityIncident.Create(incidentType, streamId, version, eventId, details, now);
-        db.Incidents.Add(incident);
-
-        await db.SaveChangesAsync(cancellationToken);
+        var confirmationService = new IntegrityConfirmationService(
+            evidenceRepo, paymentRepo, keyManager, encryptor, _timeProvider, null, batchSize);
+        return await confirmationService.ProcessConfirmationBatchAsync(cancellationToken);
     }
 }

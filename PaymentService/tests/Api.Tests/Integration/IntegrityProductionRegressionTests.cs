@@ -13,12 +13,11 @@ using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Application.Services;
 using Dprental.PaymentService.Common.Cryptography;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Domain.IRepository;
-using Dprental.PaymentService.Domain.Persistence;
-using Dprental.PaymentService.Infrastructure.Repositories;
-using Dprental.PaymentService.IntegrityHost.Entities;
+using Dprental.PaymentService.Domain.IRepositories;
+using Dprental.PaymentService.Domain.Repositories;
+using Dprental.PaymentService.Domain.Repositories;
+using Dprental.PaymentService.Domain.Entities.Integrity;
 using Dprental.PaymentService.IntegrityHost.Options;
-using Dprental.PaymentService.IntegrityHost.Persistence;
 using Dprental.PaymentService.IntegrityHost.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -180,7 +179,8 @@ public sealed class IntegrityProductionRegressionTests
                     SupplierId: supplierId));
 
                 Assert.True(verifyRes.IsSuccess);
-                Assert.Equal(IntegrityStatuses.Valid, verifyRes.Value.Integrity.Status);
+                Assert.True(verifyRes.Value.Integrity.Status == IntegrityStatuses.Valid,
+                    $"Status was: {verifyRes.Value.Integrity.Status}, Reason: {verifyRes.Value.Usability.Reason}");
                 Assert.True(verifyRes.Value.Usability.IsUsable);
                 Assert.Equal("OK", verifyRes.Value.Usability.Reason);
                 Assert.NotNull(verifyRes.Value.Receipt);
@@ -191,7 +191,7 @@ public sealed class IntegrityProductionRegressionTests
             await using (var iCtx = new IntegrityDbContext(iOptions))
             {
                 var repo = new EfInvoiceRepository(pCtx);
-                var ledger = new EfSettlementLedger(pCtx, TimeProvider.System, new PaymentDataEncryptor(RandomNumberGenerator.GetBytes(32)));
+                var ledger = new EfSettlementLedger(pCtx, TimeProvider.System);
                 var engine = new IntegrityVerificationEngine(
                     iCtx, pCtx, keyManager, TestEncryptor,
                     new TestOptionsMonitor<IntegrityVerificationOptions>(new IntegrityVerificationOptions

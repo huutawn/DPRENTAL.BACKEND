@@ -1,5 +1,5 @@
-using Dprental.PaymentService.Domain.Repository;
-using Dprental.PaymentService.Domain.Persistence;
+using Dprental.PaymentService.Domain.Repositories;
+using Dprental.PaymentService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 

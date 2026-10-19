@@ -25,6 +25,7 @@ public sealed class ManualRefundRequirement
     public ManualRefundStatus Status { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
+    public long Revision { get; private set; } = 1;
     public string? ExternalTransferReference { get; private set; }
     public Guid? CompletedBy { get; private set; }
 
@@ -80,6 +81,7 @@ public sealed class ManualRefundRequirement
         ExternalTransferReference = reference;
         CompletedBy = completedBy;
         CompletedAt = utcNow;
+        Revision++;
 
         _domainEvents.Add(new ManualRefundConfirmedDomainEvent(
             Id, RequirementRef, SettlementId, RentalItemId, Amount, reference, completedBy, utcNow));

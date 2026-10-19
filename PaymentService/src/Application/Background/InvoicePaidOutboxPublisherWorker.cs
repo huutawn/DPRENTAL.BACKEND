@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Dprental.PaymentService.Application.Kafka;
 using Dprental.PaymentService.Application.Options;
-using Dprental.PaymentService.Domain.IRepository;
+using Dprental.PaymentService.Domain.IRepositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -178,6 +178,8 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
                 ["x-dprental-stream-version"] = journalEntry.Version.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["x-dprental-event-id"] = journalEntry.EventId.ToString("D")
             };
+            message.RecordAttempt();
+            int attempt = message.RetryCount;
 
             try
             {
@@ -201,11 +203,9 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
             catch (Exception ex)
             {
                 DateTimeOffset failNow = _timeProvider.GetUtcNow();
-                int attempt = message.RetryCount;
                 int baseDelay = Math.Min(config.MaxBackoffSeconds, (int)Math.Pow(2, Math.Min(attempt, 6)));
                 int jitter = Random.Shared.Next(0, Math.Max(1, baseDelay / 4));
                 var nextRetryAt = failNow.AddSeconds(baseDelay + jitter);
-
                 bool isExhausted = attempt >= config.MaxRetries;
                 if (isExhausted)
                 {

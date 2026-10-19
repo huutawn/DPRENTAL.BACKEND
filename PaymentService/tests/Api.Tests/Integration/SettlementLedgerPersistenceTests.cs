@@ -1,8 +1,8 @@
 using Dprental.PaymentService.Api.Tests.TestHelpers;
 using System.Security.Cryptography;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Domain.Persistence;
-using Dprental.PaymentService.Domain.Repository;
+using Dprental.PaymentService.Domain.Repositories;
+using Dprental.PaymentService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -14,10 +14,10 @@ public sealed class SettlementLedgerPersistenceTests
         new PaymentDataEncryptor(RandomNumberGenerator.GetBytes(32), "test-enc-key");
 
     private static EfSettlementLedger CreateLedger(PaymentServiceDbContext ctx) =>
-        new(ctx, TimeProvider.System, TestEncryptor);
+        new(ctx, TimeProvider.System);
 
-    private static EfManualRefundRepository CreateRefundRepo(PaymentServiceDbContext ctx) =>
-        new(ctx, TimeProvider.System, TestEncryptor);
+    private static ManualRefundRepository CreateRefundRepo(PaymentServiceDbContext ctx) =>
+        new(ctx, TimeProvider.System);
 
     [Fact]
     public async Task Paid_invoice_creates_three_entries_and_replays_without_duplicates()
@@ -35,7 +35,7 @@ public sealed class SettlementLedgerPersistenceTests
                 var result = await CreateLedger(context)
                     .RecordSettlementAsync(settlementResult.Value, CancellationToken.None);
                 Assert.True(result.IsSuccess);
-                Assert.Equal(Dprental.PaymentService.Domain.IRepository.SettlementWriteOutcome.Created, result.Value.Outcome);
+                Assert.Equal(Dprental.PaymentService.Domain.IRepositories.SettlementWriteOutcome.Created, result.Value.Outcome);
             }
 
             await using (var context = new PaymentServiceDbContext(options))
@@ -43,7 +43,7 @@ public sealed class SettlementLedgerPersistenceTests
                 var replay = await CreateLedger(context)
                     .RecordSettlementAsync(settlementResult.Value, CancellationToken.None);
                 Assert.True(replay.IsSuccess);
-                Assert.Equal(Dprental.PaymentService.Domain.IRepository.SettlementWriteOutcome.Replayed, replay.Value.Outcome);
+                Assert.Equal(Dprental.PaymentService.Domain.IRepositories.SettlementWriteOutcome.Replayed, replay.Value.Outcome);
 
                 var record = await context.RentalItemSettlements
                     .Include(x => x.Entries)
@@ -131,7 +131,7 @@ public sealed class SettlementLedgerPersistenceTests
             }
 
             var adminId = Guid.NewGuid();
-            async Task<Dprental.PaymentService.Common.Result<Dprental.PaymentService.Domain.IRepository.ManualRefundCompletion>> ConfirmAsync(string reference)
+            async Task<Dprental.PaymentService.Common.Result<Dprental.PaymentService.Domain.IRepositories.ManualRefundCompletion>> ConfirmAsync(string reference)
             {
                 await using var db = new PaymentServiceDbContext(options);
                 return await CreateRefundRepo(db)
@@ -233,7 +233,7 @@ public sealed class SettlementLedgerPersistenceTests
             InvoiceItem item = await SeedInvoiceAsync(options, paid: true);
             var settlement = RentalItemSettlement.Create(item, 20_000m, "DEC-001", "settle-op-001").Value;
 
-            async Task<Dprental.PaymentService.Common.Result<Dprental.PaymentService.Domain.IRepository.SettlementWriteResult>> WriteAsync()
+            async Task<Dprental.PaymentService.Common.Result<Dprental.PaymentService.Domain.IRepositories.SettlementWriteResult>> WriteAsync()
             {
                 await using var context = new PaymentServiceDbContext(options);
                 return await CreateLedger(context)

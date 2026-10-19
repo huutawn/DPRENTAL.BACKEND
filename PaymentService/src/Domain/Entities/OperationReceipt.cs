@@ -10,6 +10,7 @@ public sealed class OperationReceipt
     public string InvoiceRef { get; private set; } = string.Empty;
     public Guid RentalOrderId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
+    public long Revision { get; private set; } = 1;
 
     private OperationReceipt()
     {
