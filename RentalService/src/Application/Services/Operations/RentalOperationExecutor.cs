@@ -11,6 +11,7 @@ using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.DTOs.Supplier;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.DTOs.Operations;
@@ -325,6 +326,8 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
             utcNow,
             normalizedIdempotencyKey));
 
+        order.RecordReadModelUpdate(utcNow);
+
         // Reset retry budget to 0, status to Pending, NextRetryAt to now, KEEP IsOutcomeUncertain!
         receipt.ReopenForManualReplay(utcNow);
 
@@ -409,7 +412,6 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
 
     private async Task CommitLocalChangesAsync(RentalOrder order, CancellationToken cancellationToken)
     {
-        order.IncrementVersion();
         await _orderRepository.UpdateAsync(order, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }

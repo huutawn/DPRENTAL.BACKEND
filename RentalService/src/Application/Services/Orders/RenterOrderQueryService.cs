@@ -106,7 +106,8 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             totalRental,
             totalDeposit,
             totalRental + totalDeposit,
-            subOrders);
+            subOrders,
+            order.Version);
     }
 
     private static RenterSubOrderResponse ToSubOrder(RentalSubOrder subOrder, HashSet<Guid> refundRequestedItemIds)
@@ -149,7 +150,7 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
                 item.BrandNameSnapshot,
                 item.ModelSnapshot,
                 ToSpecValues(item.SpecValuesSnapshot),
-                item.PickupLocationSnapshot),
+                basics.PickupLocation),
             item.RentalDays,
             item.DailyRateSnapshot,
             item.DepositPerUnitSnapshot,

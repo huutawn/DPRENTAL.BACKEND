@@ -6,7 +6,7 @@ namespace Dprental.RentalService.Application.IServices.Payments;
 
 public interface IPaymentWorkflowService
 {
-    Task<Result> ApplyInvoicePaidStagedAsync(
+    Task<Result<bool>> ApplyInvoicePaidStagedAsync(
         Dprental.RentalService.Domain.Entities.RentalOrder order,
         KafkaMessageEnvelope<InvoicePaidPayload> envelope,
         Dprental.RentalService.Domain.Entities.RentalInboxMessage inboxMessage,

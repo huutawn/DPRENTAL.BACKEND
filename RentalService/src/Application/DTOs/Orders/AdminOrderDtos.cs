@@ -231,6 +231,7 @@ public sealed record AdminStateTransitionResponse(
 /// <param name="TotalAmount">Tiền thuê + tiền cọc.</param>
 /// <param name="SubOrders">Các đơn con.</param>
 /// <param name="History">Lịch sử trạng thái của đơn và các dòng, cũ nhất trước.</param>
+/// <param name="Version">Phiên bản dữ liệu của đơn hàng, tăng khi có thay đổi nghiệp vụ.</param>
 public sealed record AdminOrderDetailResponse(
     Guid OrderId,
     string OrderCode,
@@ -249,4 +250,5 @@ public sealed record AdminOrderDetailResponse(
     decimal TotalDepositAmount,
     decimal TotalAmount,
     IReadOnlyList<AdminSubOrderResponse> SubOrders,
-    IReadOnlyList<AdminStateTransitionResponse> History);
+    IReadOnlyList<AdminStateTransitionResponse> History,
+    long Version);

@@ -8,6 +8,7 @@ using Dprental.RentalService.Application.IServices.Settlement;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Validation;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
@@ -45,7 +46,9 @@ public sealed class DeductionService(
         string key = idempotencyKey.Trim();
         string payload = JsonSerializer.Serialize(new
         {
-            ItemId = itemId, SupplierId = supplierId, request.DeductionAmount,
+            ItemId = itemId,
+            SupplierId = supplierId,
+            request.DeductionAmount,
             DamageDescription = request.DamageDescription?.Trim(),
             EvidenceMediaIds = request.EvidenceMediaIds.OrderBy(x => x),
             AffectedAssetIds = request.AffectedAssetIds.OrderBy(x => x)
@@ -85,7 +88,8 @@ public sealed class DeductionService(
         order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id, key,
             "SubmitDeduction", fingerprint, true, null, null, now, targetItemId: item.Id,
             payloadJson: payload, apiResponseJson: JsonSerializer.Serialize(response)));
-        order.IncrementVersion();
+        RentalOrderStatusPolicy.Apply(order, now, key);
+        order.RecordReadModelUpdate(now);
         await orders.UpdateAsync(order, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return response;
@@ -115,7 +119,8 @@ public sealed class DeductionService(
         if (!item.TryFinalizeZeroDeduction(now, operationId)) return Result.Success();
         order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id,
             operationId, "DeductionTimeout", operationId, true, null, null, now, targetItemId: itemId));
-        order.IncrementVersion();
+        RentalOrderStatusPolicy.Apply(order, now, operationId);
+        order.RecordReadModelUpdate(now);
         await orders.UpdateAsync(order, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return Result.Success();
@@ -158,7 +163,6 @@ public sealed class DeductionService(
         order.AddOperationReceipt(RentalOperationReceipt.CreatePending(Guid.NewGuid(), order.Id,
             operationKey, RentalItem.SettleRentalAction, RentalOperationExecutor.ComputeFingerprint(request),
             clock.GetUtcNow(), targetItemId: item.Id, payloadJson: payload));
-        order.IncrementVersion();
         await orders.UpdateAsync(order, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return Result.Success();

@@ -99,7 +99,7 @@ public sealed class OverdueProtectionService(
 
         if (created.Count == 0) return [];
 
-        order.IncrementVersion();
+        order.RecordReadModelUpdate(now);
         await orders.UpdateAsync(order, ct);
         await unitOfWork.SaveChangesAsync(ct);
         return created;

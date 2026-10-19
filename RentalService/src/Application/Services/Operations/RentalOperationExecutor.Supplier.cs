@@ -10,6 +10,7 @@ using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Application.Policies;
 using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Operations;
@@ -237,7 +238,8 @@ public sealed partial class RentalOperationExecutor
             return Error.Expired("SUPPLIER_DEADLINE_EXPIRED", "Đã quá thời hạn xác nhận của supplier.");
         }
 
-        var response = await ApplySupplierRejectAsync(order, item, supplierId, reason, note, normalizedKey, fingerprint, utcNow, cancellationToken);
+        var response = await ApplySupplierRejectAsync(order, item, supplierId, reason, note, normalizedKey, fingerprint, utcNow, cancellationToken, rollup: true);
+        order.RecordReadModelUpdate(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
 
         return response;
@@ -255,10 +257,14 @@ public sealed partial class RentalOperationExecutor
         string normalizedKey,
         string fingerprint,
         DateTimeOffset utcNow,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool rollup = true)
     {
         item.ApplySupplierReject(supplierId, utcNow, reason, note, normalizedKey);
-        order.EvaluateOrderStatusRollup(utcNow, normalizedKey);
+        if (rollup)
+        {
+            RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
+        }
 
         var response = BuildSupplierResponse(order, item);
         string apiResponseJson = JsonSerializer.Serialize(response, JsonOptions);

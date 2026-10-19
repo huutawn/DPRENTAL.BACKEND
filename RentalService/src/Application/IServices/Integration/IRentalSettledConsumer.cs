@@ -7,7 +7,7 @@ namespace Dprental.RentalService.Application.IServices.Integration;
 
 public interface IRentalSettledConsumer
 {
-    Task<Result> ApplyRentalSettledStagedAsync(
+    Task<Result<bool>> ApplyRentalSettledStagedAsync(
         RentalOrder order, KafkaMessageEnvelope<RentalSettledPayload> envelope,
         RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default);
 }
