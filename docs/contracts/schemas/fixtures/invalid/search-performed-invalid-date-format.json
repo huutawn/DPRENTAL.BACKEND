@@ -1,0 +1,14 @@
+{
+  "messageId": "55555555-5555-4555-8555-555555555563",
+  "messageType": "SearchPerformed",
+  "version": 1,
+  "producer": "InventoryService",
+  "occurredAt": "2026-10-19T10:01:00.0000000Z",
+  "payload": {
+    "userId": "22222222-2222-4222-8222-222222222222",
+    "equipmentTypeId": null,
+    "filterContext": {
+      "from": "not-a-valid-date"
+    }
+  }
+}

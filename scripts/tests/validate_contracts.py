@@ -78,6 +78,18 @@ FIXTURE_MANIFEST = {
         "schema": "search-performed",
         "expected": "VALID"
     },
+    "search-performed-category-only.json": {
+        "schema": "search-performed",
+        "expected": "VALID"
+    },
+    "search-performed-full-filters.json": {
+        "schema": "search-performed",
+        "expected": "VALID"
+    },
+    "search-performed-keyword-only.json": {
+        "schema": "search-performed",
+        "expected": "VALID"
+    },
     "search-performed-no-correlation.json": {
         "schema": "search-performed",
         "expected": "VALID"
@@ -86,7 +98,15 @@ FIXTURE_MANIFEST = {
         "schema": "search-performed",
         "expected": "VALID"
     },
+    "search-performed-with-type-expanded.json": {
+        "schema": "search-performed",
+        "expected": "VALID"
+    },
     "search-performed-without-type.json": {
+        "schema": "search-performed",
+        "expected": "VALID"
+    },
+    "search-performed-zero-result.json": {
         "schema": "search-performed",
         "expected": "VALID"
     },
@@ -165,6 +185,22 @@ FIXTURE_MANIFEST = {
         "expected": "SCHEMA_ERROR"
     },
     "search-performed-extra-search-text.json": {
+        "schema": "search-performed",
+        "expected": "SCHEMA_ERROR"
+    },
+    "search-performed-filter-context-extra-field.json": {
+        "schema": "search-performed",
+        "expected": "SCHEMA_ERROR"
+    },
+    "search-performed-invalid-date-format.json": {
+        "schema": "search-performed",
+        "expected": "SCHEMA_ERROR"
+    },
+    "search-performed-invalid-page.json": {
+        "schema": "search-performed",
+        "expected": "SCHEMA_ERROR"
+    },
+    "search-performed-negative-result-count.json": {
         "schema": "search-performed",
         "expected": "SCHEMA_ERROR"
     },

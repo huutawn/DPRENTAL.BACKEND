@@ -1,0 +1,28 @@
+{
+  "messageId": "55555555-5555-4555-8555-555555555552",
+  "messageType": "SearchPerformed",
+  "version": 1,
+  "producer": "InventoryService",
+  "occurredAt": "2026-10-19T10:02:00.0000000Z",
+  "correlationId": "55555555-5555-4555-8555-555555555552",
+  "aggregateId": "55555555-5555-4555-8555-555555555552",
+  "payload": {
+    "userId": "22222222-2222-4222-8222-222222222222",
+    "equipmentTypeId": null,
+    "query": null,
+    "categoryId": "33333333-3333-4333-8333-333333333333",
+    "filterContext": {
+      "brandId": null,
+      "provinceCode": null,
+      "wardCode": null,
+      "sort": null,
+      "filters": null,
+      "from": null,
+      "to": null,
+      "requestedQuantity": null,
+      "page": 1,
+      "pageSize": 20
+    },
+    "resultCount": 12
+  }
+}
