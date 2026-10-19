@@ -52,7 +52,7 @@
           "$ref": "#/$defs/nonNilUuid"
         },
         "equipmentTypeId": {
-          "$ref": "#/$defs/nullableNonNilUuid"
+          "$ref": "#/$defs/nonNilUuid"
         },
         "cartId": {
           "$ref": "#/$defs/nonNilUuid"
@@ -66,11 +66,6 @@
   "$defs": {
     "nonNilUuid": {
       "type": "string",
-      "format": "uuid",
-      "pattern": "^(?!00000000-0000-0000-0000-000000000000)[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-    },
-    "nullableNonNilUuid": {
-      "type": ["string", "null"],
       "format": "uuid",
       "pattern": "^(?!00000000-0000-0000-0000-000000000000)[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
     },

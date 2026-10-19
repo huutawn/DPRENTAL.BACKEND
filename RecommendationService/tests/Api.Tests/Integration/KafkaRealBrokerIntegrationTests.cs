@@ -48,7 +48,7 @@ public sealed class KafkaRealBrokerIntegrationTests : IClassFixture<PostgreSqlTe
     {
         if (!await IsKafkaAvailableAsync())
         {
-            return;
+            Assert.Fail($"Required Kafka broker is not available at '{BootstrapServers}'. Acceptance integration tests must fail clearly when required infrastructure is absent, rather than returning early.");
         }
 
         string dlqTopic = $"test.dlq.{Guid.NewGuid():N}";
@@ -104,7 +104,7 @@ public sealed class KafkaRealBrokerIntegrationTests : IClassFixture<PostgreSqlTe
     {
         if (!await IsKafkaAvailableAsync())
         {
-            return;
+            Assert.Fail($"Required Kafka broker is not available at '{BootstrapServers}'. Acceptance integration tests must fail clearly when required infrastructure is absent, rather than returning early.");
         }
 
         var db = _postgresFixture.CreateDbContext();
@@ -184,11 +184,12 @@ public sealed class KafkaRealBrokerIntegrationTests : IClassFixture<PostgreSqlTe
             await producer.ProduceAsync(testTopic, new Message<string?, string> { Key = listingId.ToString("D"), Value = viewJson });
 
             // Wait for worker to consume and persist
+            await using var queryDb = _postgresFixture.CreateDbContext();
             var sw = System.Diagnostics.Stopwatch.StartNew();
             while (sw.Elapsed < TimeSpan.FromSeconds(8))
             {
-                db.ChangeTracker.Clear();
-                var pop = await db.ListingPopularities.FindAsync(listingId);
+                queryDb.ChangeTracker.Clear();
+                var pop = await queryDb.ListingPopularities.FindAsync(listingId);
                 if (pop != null && pop.Score == 2)
                 {
                     break;
@@ -196,8 +197,8 @@ public sealed class KafkaRealBrokerIntegrationTests : IClassFixture<PostgreSqlTe
                 await Task.Delay(100);
             }
 
-            db.ChangeTracker.Clear();
-            var finalPop1 = await db.ListingPopularities.FindAsync(listingId);
+            queryDb.ChangeTracker.Clear();
+            var finalPop1 = await queryDb.ListingPopularities.FindAsync(listingId);
             Assert.NotNull(finalPop1);
             Assert.Equal(2, finalPop1.Score);
 
@@ -208,14 +209,13 @@ public sealed class KafkaRealBrokerIntegrationTests : IClassFixture<PostgreSqlTe
             await Task.Delay(1500);
 
             // Verify score is NOT incremented twice and only 1 raw row exists
-            db.ChangeTracker.Clear();
-            var finalPop2 = await db.ListingPopularities.FindAsync(listingId);
+            queryDb.ChangeTracker.Clear();
+            var finalPop2 = await queryDb.ListingPopularities.FindAsync(listingId);
             Assert.NotNull(finalPop2);
             Assert.Equal(2, finalPop2.Score);
 
-            int rawCount = await db.InteractionEvents.CountAsync(e => e.MessageId == msgId);
+            int rawCount = await queryDb.InteractionEvents.CountAsync(e => e.MessageId == msgId);
             Assert.Equal(1, rawCount);
-
             await cts.CancelAsync();
             try { await workerTask; } catch (OperationCanceledException) { }
         }

@@ -92,7 +92,7 @@ public sealed class ValkeySnapshotWorkerTests
         using var mux = await TryGetValkeyAsync();
         if (mux == null)
         {
-            return;
+            Assert.Fail("Required Valkey instance is not available on 127.0.0.1:56379 or 127.0.0.1:6379. Acceptance integration tests must fail clearly when required infrastructure is absent, rather than returning early.");
         }
 
         var provider = new TestValkeyConnectionProvider(mux);

@@ -26,10 +26,6 @@ FIXTURE_MANIFEST = {
         "schema": "cart-item-added",
         "expected": "VALID"
     },
-    "cart-item-added-without-type.json": {
-        "schema": "cart-item-added",
-        "expected": "VALID"
-    },
     "global-popular-listings-cache.json": {
         "schema": "global-popular-listings-cache",
         "expected": "VALID"
@@ -58,19 +54,11 @@ FIXTURE_MANIFEST = {
         "schema": "rental-item-completed",
         "expected": "VALID"
     },
-    "rental-item-completed-without-type.json": {
-        "schema": "rental-item-completed",
-        "expected": "VALID"
-    },
     "rental-item-paid-deterministic-uuid.json": {
         "schema": "rental-item-paid",
         "expected": "VALID"
     },
     "rental-item-paid-standard.json": {
-        "schema": "rental-item-paid",
-        "expected": "VALID"
-    },
-    "rental-item-paid-without-type.json": {
         "schema": "rental-item-paid",
         "expected": "VALID"
     },
@@ -120,6 +108,18 @@ FIXTURE_MANIFEST = {
     },
 
     # 2. Invalid / Negative Fixtures
+    "cart-item-added-without-type.json": {
+        "schema": "cart-item-added",
+        "expected": "SCHEMA_ERROR"
+    },
+    "rental-item-completed-without-type.json": {
+        "schema": "rental-item-completed",
+        "expected": "SCHEMA_ERROR"
+    },
+    "rental-item-paid-without-type.json": {
+        "schema": "rental-item-paid",
+        "expected": "SCHEMA_ERROR"
+    },
     "cart-item-added-null-user-id.json": {
         "schema": "cart-item-added",
         "expected": "SCHEMA_ERROR"

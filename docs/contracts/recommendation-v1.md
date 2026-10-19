@@ -106,16 +106,16 @@ Mọi trường định danh nghiệp vụ (`Id`) đều là UUID chuẩn khác 
 |---|---|---|
 | **InventoryService**<br>`ListingViewed` | - `userId`: UUID? (nullable)<br>- `equipmentListingId`: UUID<br>- `equipmentTypeId`: UUID | Phát khi người dùng xem trang chi tiết listing công khai thành công (HTTP 200). Bao gồm cả trường hợp cache hit tại tầng Gateway/API của Inventory. |
 | **InventoryService**<br>`SearchPerformed` | - `userId`: UUID? (nullable)<br>- `equipmentTypeId`: UUID? (nullable)<br>- `query`: string? (nullable, từ khóa tìm kiếm thô)<br>- `categoryId`: UUID? (nullable)<br>- `filterContext`: object? (chứa context: brandId, provinceCode, wardCode, sort, filters, from, to, requestedQuantity, page=1, pageSize)<br>- `resultCount`: integer? (tổng số kết quả phù hợp từ `TotalCount`, không âm) | Phát khi thao tác tìm kiếm thành công ở trang đầu tiên (`page = 1`) có chỉ định bộ lọc hoặc từ khóa. Chỉ lấy `equipmentTypeId` nếu client chỉ định rõ trong filter. Không suy diễn `equipmentTypeId` từ `query` hay `categoryId`. |
-| **RentalService**<br>`CartItemAdded` | - `userId`: UUID (bắt buộc)<br>- `equipmentListingId`: UUID<br>- `equipmentTypeId`: UUID? (nullable)<br>- `cartId`: UUID<br>- `cartItemId`: UUID | Phát cho mỗi thao tác thêm thiết bị vào giỏ hàng đã commit thành công vào database, kể cả trường hợp sản phẩm đã có và hệ thống gộp số lượng. |
-| **RentalService**<br>`RentalItemPaid` | - `userId`: UUID (bắt buộc)<br>- `equipmentListingId`: UUID<br>- `equipmentTypeId`: UUID? (nullable)<br>- `rentalOrderId`: UUID<br>- `rentalItemId`: UUID | Phát đúng một event cho mỗi item khi RentalService nhận xác nhận thanh toán hợp lệ và chuyển trạng thái ghi nhận mục thuê đã thanh toán. |
-| **RentalService**<br>`RentalItemCompleted` | - `userId`: UUID (bắt buộc)<br>- `equipmentListingId`: UUID<br>- `equipmentTypeId`: UUID? (nullable)<br>- `rentalOrderId`: UUID<br>- `rentalItemId`: UUID | Phát đúng một event khi item hoàn tất toàn bộ chu trình thuê và chuyển sang trạng thái `Completed`. |
+| **RentalService**<br>`CartItemAdded` | - `userId`: UUID (bắt buộc)<br>- `equipmentListingId`: UUID (bắt buộc)<br>- `equipmentTypeId`: UUID (bắt buộc)<br>- `cartId`: UUID (bắt buộc)<br>- `cartItemId`: UUID (bắt buộc) | Phát cho mỗi thao tác thêm thiết bị vào giỏ hàng đã commit thành công vào database, kể cả trường hợp sản phẩm đã có và hệ thống gộp số lượng. |
+| **RentalService**<br>`RentalItemPaid` | - `userId`: UUID (bắt buộc)<br>- `equipmentListingId`: UUID (bắt buộc)<br>- `equipmentTypeId`: UUID (bắt buộc)<br>- `rentalOrderId`: UUID (bắt buộc)<br>- `rentalItemId`: UUID (bắt buộc) | Phát đúng một event cho mỗi item khi RentalService nhận xác nhận thanh toán hợp lệ và chuyển trạng thái ghi nhận mục thuê đã thanh toán. |
+| **RentalService**<br>`RentalItemCompleted` | - `userId`: UUID (bắt buộc)<br>- `equipmentListingId`: UUID (bắt buộc)<br>- `equipmentTypeId`: UUID (bắt buộc)<br>- `rentalOrderId`: UUID (bắt buộc)<br>- `rentalItemId`: UUID (bắt buộc) | Phát đúng một event khi item hoàn tất toàn bộ chu trình thuê và chuyển sang trạng thái `Completed`. |
 
 **Các quy tắc nghiệp vụ ràng buộc**:
 1. **Search Signals**: Chỉ ghi nhận `equipmentTypeId` khi tham số truy vấn tìm kiếm có chọn trực tiếp loại thiết bị (`EquipmentTypeId`). Category đơn thuần **không được suy diễn** thành `equipmentTypeId`. Không cố gắng parse hay suy diễn `equipmentTypeId` từ chuỗi từ khóa tự do (`free text`) hoặc từ danh sách kết quả trả về. Nếu tìm kiếm chỉ có raw keyword hoặc category chung chung thì `equipmentTypeId = null`. Việc duyệt danh sách mặc định không bộ lọc (`empty browse`), chỉ đổi tiêu chí sắp xếp (`sort change`), hoặc chuyển trang (`pagination page > 1`) **không được phát** `SearchPerformed`.
 2. **Anonymous Users**: Người dùng chưa đăng nhập có `userId = null`. Phase 1 không ghép profile ẩn danh qua cookie, device fingerprint hay session ID; khi người dùng đăng nhập sau đó, các tương tác cũ không được hồi tố gán vào tài khoản.
 3. **Cart Modifications**: Thao tác cập nhật số lượng (`PATCH quantity`) hoặc cập nhật khoảng thời gian thuê (`dates change`) không phát lại `CartItemAdded`. Trọng số điểm không nhân với số lượng thuê hay giá trị tiền.
 4. **Payment & Refund Constraints**: `RentalItemPaid` không phát cho các giao dịch thanh toán muộn nhưng sau đó bị từ chối hoặc hoàn tiền ngay trong luồng xác thực thanh toán. `RentalItemCompleted` chỉ phát sau khi đã nhận đủ xác nhận hoàn trả thiết bị từ Inventory và tất toán từ Payment theo state machine hiện hữu.
-5. **Rental Missing Type**: Trong trường hợp dữ liệu lịch sử hoặc snapshot đơn hàng của RentalService chưa kịp nạp `equipmentTypeId`, sự kiện vẫn được phát với `equipmentTypeId = null`. Tín hiệu này vẫn đóng góp trọn vẹn vào `listing_popularity`, nhưng bỏ qua `user_equipment_type_interest`. Nếu RentalService có sẵn type từ order item snapshot thì bắt buộc phải đưa vào event.
+5. **Rental Mandatory EquipmentTypeId**: Đối với ba sự kiện từ RentalService (`CartItemAdded`, `RentalItemPaid`, `RentalItemCompleted`), `equipmentTypeId` là trường bắt buộc (UUID chuẩn, khác null và khác `00000000-0000-0000-0000-000000000000`). Giá trị này được RentalService snapshot trực tiếp từ InventoryService tại giỏ hàng / checkout và được backfill cho các đơn hàng/giỏ hàng đang hoạt động trước khi cutover. Bất kỳ sự kiện nào thiếu `equipmentTypeId` hoặc có giá trị null / empty UUID đều vi phạm schema contract, bị từ chối tại tầng validation và chuyển vào DLQ.
 
 ---
 
@@ -171,9 +171,9 @@ Mọi trường định danh nghiệp vụ (`Id`) đều là UUID chuẩn khác 
 |---|:---:|:---:|:---:|
 | `SearchPerformed` | **+1** | Có (nếu có đủ `userId` và `equipmentTypeId`) | **Không** |
 | `ListingViewed` | **+2** | Có (nếu có đủ `userId` và `equipmentTypeId`) | **Có** (mọi view) |
-| `CartItemAdded` | **+5** | Có (nếu có `equipmentTypeId`) | **Có** |
-| `RentalItemPaid` | **+8** | Có (nếu có `equipmentTypeId`) | **Có** |
-| `RentalItemCompleted` | **+10** | Có (nếu có `equipmentTypeId`) | **Có** |
+| `CartItemAdded` | **+5** | Có | **Có** |
+| `RentalItemPaid` | **+8** | Có | **Có** |
+| `RentalItemCompleted` | **+10** | Có | **Có** |
 
 **Nguyên tắc tính toán**:
 - **Cộng dồn độc lập**: Điểm được cộng dồn lũy tiến cho mỗi sự kiện hợp lệ đúng một lần. Phase 1 chưa áp dụng hệ số suy giảm thời gian (`time decay`) hay cửa sổ trượt (`sliding window`).
@@ -326,7 +326,7 @@ Tất cả các thành phần triển khai phải thỏa mãn 4 nhóm kịch b�
 - **Search có type**: Người dùng lọc theo danh mục -> Phát `SearchPerformed` mang `equipmentTypeId`. User Interest tăng 1 điểm cho type đó; Popularity không đổi.
 - **Search không có type**: Người dùng tìm từ khóa chung không lọc danh mục -> Phát `SearchPerformed` với `equipmentTypeId = null`. Sự kiện được lưu lại nhưng cả hai projection đều không tăng điểm.
 - **Xem ẩn danh**: Người xem chưa đăng nhập -> Phát `ListingViewed` với `userId = null`. Listing Popularity tăng 2 điểm; User Interest không đổi.
-- **Thêm giỏ hàng gộp dòng**: Người dùng thêm món hàng đã có sẵn trong giỏ -> Vẫn phát `CartItemAdded` mới cho thao tác commit đó. Cả User Interest (nếu có type) và Popularity đều tăng 5 điểm độc lập với số lượng sản phẩm.
+- **Thêm giỏ hàng gộp dòng**: Người dùng thêm món hàng đã có sẵn trong giỏ -> Vẫn phát `CartItemAdded` mới cho thao tác commit đó. Cả User Interest và Popularity đều tăng 5 điểm độc lập với số lượng sản phẩm.
 - **Thanh toán & Hoàn tất thuê**: Khi đơn hàng được xác nhận thanh toán -> Phát `RentalItemPaid` (+8 điểm). Khi khách trả thiết bị và đơn hoàn tất -> Phát `RentalItemCompleted` (+10 điểm). Tổng điểm đóng góp cho chu trình là +18 điểm.
 
 ### Kịch bản 2: Khả năng chịu lỗi, lặp tin & phục hồi dữ liệu

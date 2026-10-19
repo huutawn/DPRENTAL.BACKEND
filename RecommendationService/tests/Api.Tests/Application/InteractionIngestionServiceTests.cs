@@ -600,4 +600,82 @@ public sealed class InteractionIngestionServiceTests
         _userInterestRepoMock.Verify(r => r.UpsertAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<short>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
         _listingPopularityRepoMock.Verify(r => r.UpsertAsync(It.IsAny<Guid>(), It.IsAny<short>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    [Theory]
+    [InlineData("CartItemAdded", "cartId", "cartItemId", "null")]
+    [InlineData("CartItemAdded", "cartId", "cartItemId", "\"00000000-0000-0000-0000-000000000000\"")]
+    [InlineData("RentalItemPaid", "rentalOrderId", "rentalItemId", "null")]
+    [InlineData("RentalItemPaid", "rentalOrderId", "rentalItemId", "\"00000000-0000-0000-0000-000000000000\"")]
+    [InlineData("RentalItemCompleted", "rentalOrderId", "rentalItemId", "null")]
+    [InlineData("RentalItemCompleted", "rentalOrderId", "rentalItemId", "\"00000000-0000-0000-0000-000000000000\"")]
+    public async Task ProcessEvent_RentalEvent_WithInvalidEquipmentTypeId_ReturnsSchemaValidationError_AndDoesNotIngest(
+        string messageType, string idKey1, string idKey2, string typeValueJson)
+    {
+        var msgId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var listingId = Guid.NewGuid();
+
+        string json = $$"""
+        {
+            "messageId": "{{msgId}}",
+            "messageType": "{{messageType}}",
+            "version": 1,
+            "producer": "RentalService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "userId": "{{userId}}",
+                "equipmentListingId": "{{listingId}}",
+                "equipmentTypeId": {{typeValueJson}},
+                "{{idKey1}}": "{{Guid.NewGuid()}}",
+                "{{idKey2}}": "{{Guid.NewGuid()}}"
+            }
+        }
+        """;
+
+        var result = await _service.ProcessEventAsync(json, InteractionEventSource.Rental, CancellationToken.None);
+
+        Assert.Equal(EventProcessOutcome.SchemaValidationError, result.Outcome);
+        Assert.NotNull(result.ErrorReason);
+
+        _eventRepoMock.Verify(r => r.IngestAsync(It.IsAny<InteractionEvent>(), It.IsAny<CancellationToken>()), Times.Never);
+        _userInterestRepoMock.Verify(r => r.UpsertAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<short>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+        _listingPopularityRepoMock.Verify(r => r.UpsertAsync(It.IsAny<Guid>(), It.IsAny<short>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("CartItemAdded", "cartId", "cartItemId")]
+    [InlineData("RentalItemPaid", "rentalOrderId", "rentalItemId")]
+    [InlineData("RentalItemCompleted", "rentalOrderId", "rentalItemId")]
+    public async Task ProcessEvent_RentalEvent_MissingEquipmentTypeIdProperty_ReturnsSchemaValidationError_AndDoesNotIngest(
+        string messageType, string idKey1, string idKey2)
+    {
+        var msgId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var listingId = Guid.NewGuid();
+
+        string json = $$"""
+        {
+            "messageId": "{{msgId}}",
+            "messageType": "{{messageType}}",
+            "version": 1,
+            "producer": "RentalService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "userId": "{{userId}}",
+                "equipmentListingId": "{{listingId}}",
+                "{{idKey1}}": "{{Guid.NewGuid()}}",
+                "{{idKey2}}": "{{Guid.NewGuid()}}"
+            }
+        }
+        """;
+
+        var result = await _service.ProcessEventAsync(json, InteractionEventSource.Rental, CancellationToken.None);
+
+        Assert.Equal(EventProcessOutcome.SchemaValidationError, result.Outcome);
+        Assert.NotNull(result.ErrorReason);
+
+        _eventRepoMock.Verify(r => r.IngestAsync(It.IsAny<InteractionEvent>(), It.IsAny<CancellationToken>()), Times.Never);
+        _userInterestRepoMock.Verify(r => r.UpsertAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<short>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+        _listingPopularityRepoMock.Verify(r => r.UpsertAsync(It.IsAny<Guid>(), It.IsAny<short>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
 }
