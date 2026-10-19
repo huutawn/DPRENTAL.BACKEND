@@ -679,6 +679,7 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
         public Task<Result> ExecuteScheduledOperationAsync(OperationReceiptDescriptor descriptor, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result> ReplayStoredOperationAsync(Guid orderId, string operationId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result<AdminReplayResponse>> ExecuteAdminReplayAsync(Guid orderId, string operationId, Guid adminActorId, string reason, string idempotencyKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task ScheduleReleaseAndRefundAsync(RentalOrder order, RentalItem item, Guid actorId, string reason, DateTimeOffset utcNow, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class DummyOrderRepo : IRentalOrderRepository

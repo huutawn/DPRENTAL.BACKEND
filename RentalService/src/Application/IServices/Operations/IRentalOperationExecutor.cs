@@ -97,4 +97,12 @@ public interface IRentalOperationExecutor
         string reason,
         string idempotencyKey,
         CancellationToken cancellationToken = default);
+
+    Task ScheduleReleaseAndRefundAsync(
+        RentalOrder order,
+        RentalItem item,
+        Guid actorId,
+        string reason,
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken = default);
 }

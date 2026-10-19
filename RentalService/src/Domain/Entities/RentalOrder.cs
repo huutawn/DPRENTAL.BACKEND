@@ -709,6 +709,31 @@ public class RentalOrder
             }
             return;
         }
+
+        // 4. All items ended in terminal states (Rejected/Expired/Cancelled) and at least one is Cancelled -> Order moves to Cancelled
+        if (_items.All(i => i.Status is RentalItemStatus.Rejected or RentalItemStatus.Expired or RentalItemStatus.Cancelled) &&
+            _items.Any(i => i.Status == RentalItemStatus.Cancelled))
+        {
+            if (Status != RentalOrderStatus.Cancelled)
+            {
+                string from = Status.ToString();
+                Status = RentalOrderStatus.Cancelled;
+                UpdatedAt = utcNow;
+                AddStateTransition(new RentalStateTransition(
+                    Guid.NewGuid(),
+                    Id,
+                    null,
+                    from,
+                    RentalOrderStatus.Cancelled.ToString(),
+                    "OrderRollup",
+                    null,
+                    ActorRole.System,
+                    "All items ended in terminal states with cancellations; order cancelled",
+                    utcNow,
+                    operationId));
+            }
+            return;
+        }
     }
 
     internal void MarkPaymentExpired(DateTimeOffset utcNow, string operationId)

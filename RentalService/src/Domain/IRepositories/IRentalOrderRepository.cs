@@ -37,6 +37,10 @@ public interface IRentalOrderRepository
         DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
 
+    Task<IReadOnlyList<Guid>> GetHandoverOverdueOrderIdsAsync(
+        DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
+
     Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(
         DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());

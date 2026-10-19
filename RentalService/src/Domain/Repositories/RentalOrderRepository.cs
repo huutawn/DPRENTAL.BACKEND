@@ -579,6 +579,26 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             .Take(batchSize)
             .ToListAsync(cancellationToken);
     }
+
+    public async Task<IReadOnlyList<Guid>> GetHandoverOverdueOrderIdsAsync(
+        DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
+    {
+        DateOnly todayVn = RentalItem.TodayInVietnam(utcNow);
+
+        return await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.AwaitingHandover
+                     && i.ExpectedStartDate < todayVn
+                     && (i.ExpectedEndDate < todayVn ||
+                         !i.RentalOrder!.OperationReceipts.Any(r =>
+                             r.Action == "HandoverOverdueNotice" && r.TargetItemId == i.Id)))
+            .GroupBy(i => i.RentalOrderId)
+            .OrderBy(g => g.Min(i => i.ExpectedStartDate))
+            .Select(g => g.Key)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(
     DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
     {

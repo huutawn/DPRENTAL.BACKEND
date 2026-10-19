@@ -1,4 +1,4 @@
-﻿using Dprental.RentalService.Common.Enums;
+using Dprental.RentalService.Common.Enums;
 
 namespace Dprental.RentalService.Domain.Entities;
 
@@ -17,6 +17,16 @@ public partial class RentalItem
 
     public static DateOnly TodayInVietnam(DateTimeOffset now) =>
         DateOnly.FromDateTime(now.ToOffset(VietnamOffset).DateTime);
+
+    /// 00:00 giờ VN của ngày sau ngày bắt đầu dự kiến (mốc quá hạn giao máy).
+    public static DateTimeOffset CalculateHandoverOverdueAt(DateOnly expectedStartDate) =>
+        CalculateOverdueAt(expectedStartDate);
+
+    public bool IsHandoverOverdue(DateTimeOffset now) =>
+        Status == RentalItemStatus.AwaitingHandover && now >= CalculateHandoverOverdueAt(ExpectedStartDate);
+
+    public bool IsHandoverAutoCancellable(DateTimeOffset now) =>
+        Status == RentalItemStatus.AwaitingHandover && now >= CalculateOverdueAt(ExpectedEndDate);
 
     public bool IsOverdue(DateTimeOffset now) =>
         Status == RentalItemStatus.InRental && now >= CalculateOverdueAt(ExpectedEndDate);
