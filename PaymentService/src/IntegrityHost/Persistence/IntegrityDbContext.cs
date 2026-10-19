@@ -13,6 +13,7 @@ public sealed class IntegrityDbContext : DbContext
     public DbSet<StreamManifest> Manifests => Set<StreamManifest>();
     public DbSet<IntegrityIncident> Incidents => Set<IntegrityIncident>();
     public DbSet<EntityHeadRecord> EntityHeads => Set<EntityHeadRecord>();
+    public DbSet<ScannerCheckpoint> Checkpoints => Set<ScannerCheckpoint>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

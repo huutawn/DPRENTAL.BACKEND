@@ -65,12 +65,46 @@ public sealed class IntegrityPeriodicScannerWorker : BackgroundService
         var integrityDb = scope.ServiceProvider.GetRequiredService<IntegrityDbContext>();
         var paymentRepo = scope.ServiceProvider.GetRequiredService<ITransactionJournalRepository>();
 
-        var manifests = await integrityDb.Manifests
-            .Where(m => !m.IsBlocked)
+        const string scannerName = "MainPeriodicScanner";
+        var now = _timeProvider.GetUtcNow();
+
+        var checkpoint = await integrityDb.Checkpoints
+            .FirstOrDefaultAsync(c => c.ScannerName == scannerName, cancellationToken);
+        if (checkpoint is null)
+        {
+            checkpoint = ScannerCheckpoint.Create(scannerName, now);
+            integrityDb.Checkpoints.Add(checkpoint);
+            await integrityDb.SaveChangesAsync(cancellationToken);
+        }
+
+        const int batchSize = 500;
+        string lastStreamId = checkpoint.LastProcessedStreamId ?? string.Empty;
+#pragma warning disable CA1309
+        var query = integrityDb.Manifests.Where(m => !m.IsBlocked);
+        if (!string.IsNullOrEmpty(lastStreamId))
+        {
+            query = query.Where(m => string.Compare(m.StreamId, lastStreamId) > 0);
+        }
+        var manifests = await query
+            .OrderBy(m => m.StreamId)
+            .Take(batchSize)
             .ToListAsync(cancellationToken);
+#pragma warning restore CA1309
+
+        if (manifests.Count == 0)
+        {
+            if (!string.IsNullOrEmpty(lastStreamId))
+            {
+                checkpoint.CompleteCycle(now);
+                await integrityDb.SaveChangesAsync(cancellationToken);
+            }
+            return 0;
+        }
 
         int checkedStreams = 0;
-        var now = _timeProvider.GetUtcNow();
+        int verifiedEntries = 0;
+        string latestProcessedStreamId = lastStreamId;
+        long latestProcessedVersion = checkpoint.LastProcessedVersion;
 
         foreach (var manifest in manifests)
         {
@@ -127,6 +161,7 @@ public sealed class IntegrityPeriodicScannerWorker : BackgroundService
                     await integrityDb.SaveChangesAsync(cancellationToken);
                     continue;
                 }
+                verifiedEntries++;
             }
             else if (paymentLatest.Version > manifest.LatestVersion)
             {
@@ -145,10 +180,16 @@ public sealed class IntegrityPeriodicScannerWorker : BackgroundService
                     await integrityDb.SaveChangesAsync(cancellationToken);
                     continue;
                 }
+                verifiedEntries++;
             }
 
             checkedStreams++;
+            latestProcessedStreamId = manifest.StreamId;
+            latestProcessedVersion = manifest.LatestVersion;
         }
+
+        checkpoint.UpdateProgress(latestProcessedStreamId, latestProcessedVersion, checkedStreams, verifiedEntries, now);
+        await integrityDb.SaveChangesAsync(cancellationToken);
 
         return checkedStreams;
     }

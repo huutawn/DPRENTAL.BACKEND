@@ -6,6 +6,6 @@ public interface IInvoicePaidKafkaProducer
         string topic,
         string key,
         string payload,
-        IReadOnlyDictionary<string, string>? headers,
+        IReadOnlyDictionary<string, string> headers,
         CancellationToken cancellationToken);
 }

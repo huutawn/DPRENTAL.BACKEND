@@ -54,14 +54,19 @@ public sealed class InvoicePaidKafkaProducer : IInvoicePaidKafkaProducer, IDispo
         string topic,
         string key,
         string payload,
-        IReadOnlyDictionary<string, string>? headers,
+        IReadOnlyDictionary<string, string> headers,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(headers);
+        if (headers.Count == 0)
+        {
+            throw new ArgumentException("Kafka message must include integrity proof headers.", nameof(headers));
+        }
+
         if (!_enabled || _producer == null)
         {
             throw new InvalidOperationException("Kafka producer is disabled or not configured.");
         }
-
         var message = new Message<string, string>
         {
             Key = key,

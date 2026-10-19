@@ -31,7 +31,7 @@ public class InvoicePaidOutboxPublisherTests
         public ConcurrentBag<(string Topic, string Key, string Payload)> ProducedMessages { get; } = new();
         public Func<string, string, string, Task>? OnProduce { get; set; }
 
-        public async Task ProduceAsync(string topic, string key, string payload, IReadOnlyDictionary<string, string>? headers, CancellationToken cancellationToken)
+        public async Task ProduceAsync(string topic, string key, string payload, IReadOnlyDictionary<string, string> headers, CancellationToken cancellationToken)
         {
             if (OnProduce != null)
             {
@@ -77,7 +77,7 @@ public class InvoicePaidOutboxPublisherTests
     {
         var journal = JournalEntryFactory.CreateEntry(
             operationId: Guid.NewGuid(),
-            streamId: $"STREAM-{outbox.AggregateId}",
+            streamId: $"STREAM-{outbox.MessageId}",
             streamType: JournalStreamTypes.Invoice,
             version: 1,
             eventId: Guid.NewGuid(),
@@ -117,10 +117,14 @@ public class InvoicePaidOutboxPublisherTests
             await using (var db = new PaymentServiceDbContext(options))
             {
                 await db.Database.MigrateAsync();
-                db.OutboxMessages.Add(OutboxMessage.Create(Guid.NewGuid(), "InvoicePaid", "RentalOrder",
-                    orderId.ToString("D"), "{\"messageType\":\"InvoicePaid\"}", now.AddMinutes(-1)));
-                db.OutboxMessages.Add(OutboxMessage.Create(Guid.NewGuid(), "RentalSettled", "RentalOrder",
-                    orderId.ToString("D"), "{\"messageType\":\"RentalSettled\"}", now));
+                var outbox1 = OutboxMessage.Create(Guid.NewGuid(), "InvoicePaid", "RentalOrder",
+                    orderId.ToString("D"), "{\"messageType\":\"InvoicePaid\"}", now.AddMinutes(-1));
+                var outbox2 = OutboxMessage.Create(Guid.NewGuid(), "RentalSettled", "RentalOrder",
+                    orderId.ToString("D"), "{\"messageType\":\"RentalSettled\"}", now);
+                db.OutboxMessages.Add(outbox1);
+                db.OutboxMessages.Add(outbox2);
+                AddConfirmedJournal(db, outbox1);
+                AddConfirmedJournal(db, outbox2);
                 await db.SaveChangesAsync();
             }
 

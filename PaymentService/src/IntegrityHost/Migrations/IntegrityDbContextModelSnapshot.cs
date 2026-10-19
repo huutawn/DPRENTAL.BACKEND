@@ -160,6 +160,39 @@ namespace PaymentService.IntegrityHost.Migrations
                     b.ToTable("integrity_incidents");
                 });
 
+            modelBuilder.Entity("Dprental.PaymentService.IntegrityHost.Entities.ScannerCheckpoint", b =>
+                {
+                    b.Property<string>("ScannerName")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("LastProcessedStreamId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<long>("LastProcessedVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("LastRunAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<long>("TotalEntriesVerified")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("TotalStreamsChecked")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("ScannerName");
+
+                    b.ToTable("integrity_scanner_checkpoints");
+                });
+
             modelBuilder.Entity("Dprental.PaymentService.IntegrityHost.Entities.StreamManifest", b =>
                 {
                     b.Property<string>("StreamId")

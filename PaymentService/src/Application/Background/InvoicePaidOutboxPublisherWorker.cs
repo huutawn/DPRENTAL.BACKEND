@@ -140,40 +140,44 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
                 }
             }
 
-            Dictionary<string, string>? headers = null;
-            if (journalEntry is not null)
+            if (journalEntry is null)
             {
-                if (!journalEntry.IsConfirmed || string.IsNullOrWhiteSpace(journalEntry.ProofSignature))
-                {
-                    _logger.LogInformation("Outbox message {MessageId} awaiting integrity confirmation before publish; releasing lease.", message.MessageId);
-                    message.ReleaseClaim();
-                    continue;
-                }
-
-                string versionedProof = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    v = 1,
-                    msgId = message.MessageId,
-                    evtId = journalEntry.EventId,
-                    opId = journalEntry.OperationId,
-                    stream = journalEntry.StreamId,
-                    ver = journalEntry.Version,
-                    digest = digest,
-                    keyId = journalEntry.SigningKeyId,
-                    sig = journalEntry.ProofSignature,
-                    confirmedAt = journalEntry.ConfirmedAt
-                });
-
-                headers = new Dictionary<string, string>
-                {
-                    ["x-dprental-signature"] = journalEntry.ProofSignature,
-                    ["x-dprental-key-id"] = journalEntry.SigningKeyId ?? string.Empty,
-                    ["x-dprental-proof"] = versionedProof,
-                    ["x-dprental-stream-id"] = journalEntry.StreamId,
-                    ["x-dprental-stream-version"] = journalEntry.Version.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["x-dprental-event-id"] = journalEntry.EventId.ToString("D")
-                };
+                _logger.LogWarning("Outbox message {MessageId} has no corresponding journal entry; cannot publish without evidence proof.", message.MessageId);
+                message.RecordAttemptFailure("AWAITING_JOURNAL_ENTRY", utcNow, utcNow.AddSeconds(5));
+                continue;
             }
+
+            if (!journalEntry.IsConfirmed || string.IsNullOrWhiteSpace(journalEntry.ProofSignature))
+            {
+                _logger.LogInformation("Outbox message {MessageId} awaiting integrity confirmation before publish; releasing lease.", message.MessageId);
+                message.ReleaseClaim();
+                continue;
+            }
+
+            string versionedProof = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                v = 2,
+                msgId = message.MessageId,
+                evtId = journalEntry.EventId,
+                opId = journalEntry.OperationId,
+                stream = journalEntry.StreamId,
+                ver = journalEntry.Version,
+                entryHash = journalEntry.EntryHash,
+                digest = digest,
+                keyId = journalEntry.SigningKeyId,
+                sig = journalEntry.ProofSignature,
+                confirmedAt = journalEntry.ConfirmedAt
+            });
+
+            var headers = new Dictionary<string, string>
+            {
+                ["x-dprental-signature"] = journalEntry.ProofSignature,
+                ["x-dprental-key-id"] = journalEntry.SigningKeyId ?? string.Empty,
+                ["x-dprental-proof"] = versionedProof,
+                ["x-dprental-stream-id"] = journalEntry.StreamId,
+                ["x-dprental-stream-version"] = journalEntry.Version.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["x-dprental-event-id"] = journalEntry.EventId.ToString("D")
+            };
 
             try
             {
