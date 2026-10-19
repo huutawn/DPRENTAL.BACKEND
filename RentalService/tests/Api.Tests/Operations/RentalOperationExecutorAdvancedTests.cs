@@ -5,6 +5,7 @@ using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.DTOs.Supplier;
 using Dprental.RentalService.Application.Services.Operations;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;
@@ -254,7 +255,7 @@ public sealed class RentalOperationExecutorAdvancedTests
 
         // Item was already rejected
         item.ApplySupplierReject(supplierId, FixedNow, "Rejected before", null, "op-rej-prev");
-        order.EvaluateOrderStatusRollup(FixedNow, "op-rej-prev");
+        RentalOrderStatusPolicy.Apply(order, FixedNow, "op-rej-prev");
 
         string inFlightKey = "op-in-flight-key";
         var inFlightReceipt = new RentalOperationReceipt(

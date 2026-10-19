@@ -6,7 +6,7 @@ namespace Dprental.RentalService.Application.IServices.Integration;
 
 public interface IRefundCompletedConsumer
 {
-    Task<Result> ApplyRefundCompletedStagedAsync(
+    Task<Result<bool>> ApplyRefundCompletedStagedAsync(
         Dprental.RentalService.Domain.Entities.RentalOrder order,
         KafkaMessageEnvelope<RefundCompletedPayload> envelope,
         Dprental.RentalService.Domain.Entities.RentalInboxMessage inboxMessage,

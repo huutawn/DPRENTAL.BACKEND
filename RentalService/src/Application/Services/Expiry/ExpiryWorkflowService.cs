@@ -8,6 +8,7 @@ using Dprental.RentalService.Application.IServices.Expiry;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Common;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
@@ -134,7 +135,7 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
             {
                 string timeoutOpKey = RentalOperationExecutor.ComputeOperationKey("SupplierTimeout", $"{order.Id}:{item.Id}");
                 item.ApplySupplierTimeout(utcNow, timeoutOpKey);
-                order.EvaluateOrderStatusRollup(utcNow, timeoutOpKey);
+                RentalOrderStatusPolicy.Apply(order, utcNow, timeoutOpKey);
 
                 string releaseOpKey = RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
                 var releaseReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == releaseOpKey);
@@ -219,7 +220,7 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
                     utcNow);
 
                 await _outboxRepository.AddAsync(outbox, cancellationToken);
-                order.IncrementVersion();
+                order.RecordReadModelUpdate(utcNow);
                 await _orderRepository.UpdateAsync(order, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
             }

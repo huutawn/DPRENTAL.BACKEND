@@ -87,3 +87,20 @@ public sealed record DeadLetterPayload(
     string OriginalPayload,
     string Reason,
     DateTimeOffset FailedAt);
+
+public sealed record RentalItemCancelledPayload(
+    Guid RentalOrderId,
+    Guid RentalItemId,
+    Guid ActorId,
+    string Role,
+    DateTimeOffset CancelledAt,
+    string Reason,
+    decimal RefundAmount);
+
+public sealed record RentalHandoverOverduePayload(
+    Guid RentalOrderId,
+    Guid RentalItemId,
+    Guid SupplierId,
+    Guid RenterId,
+    DateOnly ExpectedStartDate,
+    DateTimeOffset OverdueAt);

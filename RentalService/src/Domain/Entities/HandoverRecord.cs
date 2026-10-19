@@ -59,11 +59,17 @@ public class HandoverRecord
         SupplierConfirmedAt = supplierConfirmedAt;
     }
 
-    internal void Acknowledge(Guid renterId, DateTimeOffset acknowledgedAt, string? note)
+    internal bool Acknowledge(Guid renterId, DateTimeOffset acknowledgedAt, string? note)
     {
+        if (RenterAcknowledgedAt.HasValue)
+        {
+            return false;
+        }
+
         RenterAcknowledgedById = renterId;
         RenterAcknowledgedAt = acknowledgedAt;
         RenterAcknowledgementNote = note;
+        return true;
     }
 
     internal void AddAssignment(RentalUnitAssignment assignment)

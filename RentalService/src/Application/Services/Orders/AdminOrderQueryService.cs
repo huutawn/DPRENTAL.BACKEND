@@ -133,7 +133,8 @@ public sealed partial class AdminOrderQueryService(
             totalDeposit,
             totalRental + totalDeposit,
             subOrders,
-            history);
+            history,
+            order.Version);
     }
 
     private static Result<AdminOrderSearchCriteria> ToCriteria(AdminOrderSearchRequest request)

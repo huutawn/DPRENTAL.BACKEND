@@ -4,6 +4,7 @@ using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Utils;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
+using Dprental.RentalService.Application.Policies;
 
 namespace Dprental.RentalService.Application.Kafka.Consumers;
 
@@ -110,7 +111,8 @@ public sealed class InventoryReturnResultHandler(
         }
 
         receipt.MarkSucceeded(utcNow, null, JsonSerializer.Serialize(result, JsonOptions));
-        order.IncrementVersion();
+        RentalOrderStatusPolicy.Apply(order, utcNow, result.ReceiptRef ?? item.Id.ToString("D"));
+        order.RecordReadModelUpdate(utcNow);
         await orders.UpdateAsync(order, ct);
         await unitOfWork.SaveChangesAsync(ct);
 
@@ -158,7 +160,6 @@ public sealed class InventoryReturnResultHandler(
 
         var utcNow = clock.GetUtcNow();
         receipt.MarkFailed(result.ErrorCode, result.ErrorMessage, utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
-        order.IncrementVersion();
         await orders.UpdateAsync(order, ct);
         await unitOfWork.SaveChangesAsync(ct);
 

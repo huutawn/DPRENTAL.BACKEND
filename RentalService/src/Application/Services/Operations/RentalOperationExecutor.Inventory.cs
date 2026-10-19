@@ -7,6 +7,7 @@ using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Application.Policies;
 using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Operations;
@@ -235,7 +236,8 @@ public sealed partial class RentalOperationExecutor
             order.AddOperationReceipt(refundReceipt);
         }
 
-        order.EvaluateOrderStatusRollup(utcNow, receipt.OperationId);
+        RentalOrderStatusPolicy.Apply(order, utcNow, receipt.OperationId);
+        order.RecordReadModelUpdate(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
 
         // Await release under the current lock!

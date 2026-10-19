@@ -116,6 +116,7 @@ public sealed record RenterSubOrderResponse(
 /// <param name="TotalDepositAmount">Tổng tiền cọc.</param>
 /// <param name="TotalAmount">Tổng tiền phải trả.</param>
 /// <param name="SubOrders">Các đơn con, mỗi nhà cung cấp một đơn.</param>
+/// <param name="Version">Phiên bản dữ liệu của đơn hàng cha, tăng khi có thay đổi nghiệp vụ.</param>
 public sealed record RenterOrderDetailResponse(
     Guid OrderId,
     string OrderCode,
@@ -131,7 +132,8 @@ public sealed record RenterOrderDetailResponse(
     decimal TotalRentalAmount,
     decimal TotalDepositAmount,
     decimal TotalAmount,
-    IReadOnlyList<RenterSubOrderResponse> SubOrders);
+    IReadOnlyList<RenterSubOrderResponse> SubOrders,
+    long Version);
 
 /// <summary>
 /// Một đơn con trong danh sách của nhà cung cấp.
@@ -175,6 +177,7 @@ public sealed record SupplierSubOrderSummaryResponse(
 /// <param name="TotalDepositAmount">Tiền cọc phần của nhà cung cấp.</param>
 /// <param name="TotalAmount">Tiền thuê + tiền cọc phần của nhà cung cấp.</param>
 /// <param name="Items">Các dòng thiết bị của nhà cung cấp trong đơn.</param>
+/// <param name="OrderVersion">Phiên bản dữ liệu của đơn hàng cha, tăng khi có thay đổi nghiệp vụ.</param>
 public sealed record SupplierSubOrderDetailResponse(
     Guid SubOrderId,
     string SubOrderCode,
@@ -187,4 +190,5 @@ public sealed record SupplierSubOrderDetailResponse(
     decimal TotalRentalAmount,
     decimal TotalDepositAmount,
     decimal TotalAmount,
-    IReadOnlyList<SupplierOrderItemResponse> Items);
+    IReadOnlyList<SupplierOrderItemResponse> Items,
+    long OrderVersion);

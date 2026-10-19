@@ -527,7 +527,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             return allocResult;
         }
 
-        Result result;
+        Result<bool> result;
         if (string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.InvoicePaid, StringComparison.OrdinalIgnoreCase))
         {
             KafkaMessageEnvelope<InvoicePaidPayload>? envelope;
@@ -677,13 +677,16 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                 msg.MarkProcessed(utcNow);
                 _inboxRepository.Update(msg);
 
-                order!.IncrementVersion();
-                await _orderRepository.UpdateAsync(order, cancellationToken);
+                if (result.Value)
+                {
+                    order!.RecordReadModelUpdate(utcNow);
+                    await _orderRepository.UpdateAsync(order, cancellationToken);
+                }
 
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await tx.CommitAsync(cancellationToken);
                 _logger.LogInformation("Successfully processed inbox message {Id} ({Type}) for Order {OrderId}",
-                    msg.Id, msg.MessageType, order.Id);
+                    msg.Id, msg.MessageType, order!.Id);
                 return Result.Success();
             }
             catch (Exception ex)
