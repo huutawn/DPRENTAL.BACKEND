@@ -1,3 +1,4 @@
+using Dprental.PaymentService.Common.Cryptography;
 using System.Globalization;
 using Dprental.PaymentService.Application.DTOs.SePay;
 using Dprental.PaymentService.Application.IServices;
@@ -15,20 +16,35 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
     private const string ProviderName = "SEPAY";
 
     private readonly IInvoiceRepository _repository;
+    private readonly ITransactionJournalRepository? _journalRepository;
     private readonly IOptionsMonitor<PaymentMerchantOptions> _merchantOptions;
     private readonly IOptionsMonitor<SePayOptions> _sePayOptions;
+    private readonly IPaymentDataEncryptor _encryptor;
     private readonly TimeProvider _timeProvider;
 
     public InvoicePaymentProcessor(
         IInvoiceRepository repository,
         IOptionsMonitor<PaymentMerchantOptions> merchantOptions,
         IOptionsMonitor<SePayOptions> sePayOptions,
+        ITransactionJournalRepository? journalRepository,
+        IPaymentDataEncryptor encryptor,
         TimeProvider? timeProvider = null)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+        _journalRepository = journalRepository;
+        _encryptor = encryptor ?? throw new ArgumentNullException(nameof(encryptor));
         _merchantOptions = merchantOptions ?? throw new ArgumentNullException(nameof(merchantOptions));
         _sePayOptions = sePayOptions ?? throw new ArgumentNullException(nameof(sePayOptions));
         _timeProvider = timeProvider ?? TimeProvider.System;
+    }
+
+    public InvoicePaymentProcessor(
+        IInvoiceRepository repository,
+        IOptionsMonitor<PaymentMerchantOptions> merchantOptions,
+        IOptionsMonitor<SePayOptions> sePayOptions,
+        TimeProvider? timeProvider = null)
+        : this(repository, merchantOptions, sePayOptions, null, new PaymentDataEncryptor(new byte[32]), timeProvider)
+    {
     }
 
     public async Task<Result> ProcessAsync(SePayWebhookPayload? payload, CancellationToken cancellationToken = default)
@@ -110,8 +126,102 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
                 reasonCode: classification.ReasonCode,
                 createdAt: processingTimeUtc);
 
-            // 7. Persist atomically and commit
-            await _repository.SavePaymentTransactionAsync(pt, invoiceToPersist, outbox, cancellationToken);
+            Guid operationId = Guid.NewGuid();
+            Guid bankEventId = Guid.NewGuid();
+            Guid? invoiceEventId = invoiceToPersist is not null ? Guid.NewGuid() : null;
+
+            if (outbox is not null)
+            {
+                outbox.LinkAttestation(invoiceEventId ?? bankEventId, operationId);
+            }
+
+            string outboxDigest = CanonicalJournalHasher.ComputeOutboxDigest(outbox?.Payload);
+            var prevBank = await _repository.GetLatestJournalEntryAsync(paymentRef, cancellationToken);
+            long nextBankVersion = (prevBank?.Version ?? 0) + 1;
+            string prevBankHash = prevBank?.EntryHash ?? CanonicalJournalHasher.GenesisHash;
+
+            var bankJournal = JournalEntryFactory.CreateEntry(
+                operationId: operationId,
+                streamId: paymentRef,
+                streamType: JournalStreamTypes.PaymentTransaction,
+                version: nextBankVersion,
+                eventId: bankEventId,
+                eventType: string.Equals(transaction.TransferType, "out", StringComparison.OrdinalIgnoreCase)
+                    ? JournalEventTypes.BankOutgoing
+                    : JournalEventTypes.BankIncoming,
+                amount: transaction.TransferAmount,
+                currency: "VND",
+                status: classification.Status,
+                confirmationSource: JournalConfirmationSources.Webhook,
+                actor: "WEBHOOK:SEPAY",
+                timestampUtc: bankTimeUtc,
+                previousHash: prevBankHash,
+                bankTimeUtc: bankTimeUtc,
+                relatedEntities: new Dictionary<string, string?>
+                {
+                    ["paymentRef"] = paymentRef,
+                    ["invoiceRef"] = invoice?.InvoiceRef,
+                    ["rentalOrderId"] = invoice?.RentalOrderId.ToString("D"),
+                    ["gateway"] = transaction.Gateway,
+                    ["paymentCode"] = extraction.Code,
+                    ["referenceCode"] = transaction.ReferenceCode
+                },
+                snapshot: new Dictionary<string, object?>
+                {
+                    ["transferAmount"] = transaction.TransferAmount,
+                    ["status"] = classification.Status,
+                    ["reasonCode"] = classification.ReasonCode
+                },
+                outboxDigest: outboxDigest,
+                outboxMessageId: outbox?.MessageId,
+                paymentRef: paymentRef,
+                invoiceRef: invoice?.InvoiceRef,
+                rentalOrderId: invoice?.RentalOrderId,
+                encryptor: _encryptor);
+
+            TransactionJournalEntry? invoiceJournal = null;
+            if (invoiceToPersist is not null)
+            {
+                var prevInv = await _repository.GetLatestJournalEntryAsync(invoiceToPersist.InvoiceRef, cancellationToken);
+                long nextInvVersion = (prevInv?.Version ?? 0) + 1;
+                string prevInvHash = prevInv?.EntryHash ?? CanonicalJournalHasher.GenesisHash;
+
+                invoiceJournal = JournalEntryFactory.CreateEntry(
+                    operationId: operationId,
+                    streamId: invoiceToPersist.InvoiceRef,
+                    streamType: JournalStreamTypes.Invoice,
+                    version: nextInvVersion,
+                    eventId: invoiceEventId!.Value,
+                    eventType: classification.Status == PaymentTransactionStatus.Matched
+                        ? JournalEventTypes.PaymentMatched
+                        : JournalEventTypes.PaymentUnmatched,
+                    amount: invoiceToPersist.TotalAmount,
+                    currency: invoiceToPersist.Currency,
+                    status: invoiceToPersist.Status,
+                    confirmationSource: JournalConfirmationSources.Webhook,
+                    actor: "WEBHOOK:SEPAY",
+                    timestampUtc: processingTimeUtc,
+                    previousHash: prevInvHash,
+                    relatedEntities: new Dictionary<string, string?>
+                    {
+                        ["paymentRef"] = paymentRef,
+                        ["invoiceRef"] = invoiceToPersist.InvoiceRef,
+                        ["rentalOrderId"] = invoiceToPersist.RentalOrderId.ToString("D")
+                    },
+                    snapshot: new Dictionary<string, object?>
+                    {
+                        ["status"] = invoiceToPersist.Status,
+                        ["paymentRef"] = invoiceToPersist.PaymentRef
+                    },
+                    outboxDigest: outboxDigest,
+                    outboxMessageId: outbox?.MessageId,
+                    paymentRef: paymentRef,
+                    invoiceRef: invoiceToPersist.InvoiceRef,
+                    rentalOrderId: invoiceToPersist.RentalOrderId,
+                    encryptor: _encryptor);
+            }
+            // 8. Persist atomically and commit
+            await _repository.SavePaymentTransactionAsync(pt, invoiceToPersist, outbox, bankJournal, invoiceJournal, cancellationToken);
             await tx.CommitAsync(cancellationToken);
             return Result.Success();
         }
@@ -153,10 +263,12 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
         bool matches = existingTx.MatchesBusinessData(
             transaction.Gateway,
             transaction.AccountNumber,
+            transaction.SubAccount,
             transaction.TransferType,
             transaction.TransferAmount,
             transaction.TransactionDate,
             transaction.ReferenceCode,
+            transaction.Description,
             transaction.Content,
             transaction.Code);
 

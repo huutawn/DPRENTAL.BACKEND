@@ -1,3 +1,4 @@
+using Dprental.PaymentService.Common.Cryptography;
 using System.Text.Json;
 using Dprental.PaymentService.Application.DTOs.Invoice;
 using Dprental.PaymentService.Application.IServices;
@@ -12,14 +13,34 @@ namespace Dprental.PaymentService.Application.Services;
 public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
 {
     private readonly IInvoiceRepository _repository;
+    private readonly ITransactionJournalRepository? _journalRepository;
+    private readonly IPaymentDataEncryptor _encryptor;
     private readonly TimeProvider _timeProvider;
 
     public InvoiceLifecycleService(
         IInvoiceRepository repository,
+        ITransactionJournalRepository? journalRepository,
+        IPaymentDataEncryptor encryptor,
         TimeProvider? timeProvider = null)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+        _journalRepository = journalRepository;
+        _encryptor = encryptor ?? throw new ArgumentNullException(nameof(encryptor));
         _timeProvider = timeProvider ?? TimeProvider.System;
+    }
+
+    public InvoiceLifecycleService(
+        IInvoiceRepository repository,
+        ITransactionJournalRepository journalRepository)
+        : this(repository, journalRepository, new PaymentDataEncryptor(new byte[32]), null)
+    {
+    }
+
+    public InvoiceLifecycleService(
+        IInvoiceRepository repository,
+        TimeProvider? timeProvider = null)
+        : this(repository, null, new PaymentDataEncryptor(new byte[32]), timeProvider)
+    {
     }
 
     public async Task<Result<CancelInvoiceResponse>> CancelInvoiceAsync(
@@ -133,7 +154,40 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
                 invoice.RentalOrderId,
                 utcNow);
 
-            await _repository.SaveInvoiceChangesAsync(invoice, receipt, null, ct);
+            var prev = await _repository.GetLatestJournalEntryAsync(invoice.InvoiceRef, ct);
+            long nextVersion = (prev?.Version ?? 0) + 1;
+            string prevHash = prev?.EntryHash ?? CanonicalJournalHasher.GenesisHash;
+
+            var cancelJournal = JournalEntryFactory.CreateEntry(
+                operationId: Guid.NewGuid(),
+                streamId: invoice.InvoiceRef,
+                streamType: JournalStreamTypes.Invoice,
+                version: nextVersion,
+                eventId: Guid.NewGuid(),
+                eventType: JournalEventTypes.InvoiceCancelled,
+                amount: invoice.TotalAmount,
+                currency: invoice.Currency,
+                status: invoice.Status,
+                confirmationSource: JournalConfirmationSources.System,
+                actor: $"RENTER:{invoice.RenterId:D}",
+                timestampUtc: utcNow,
+                previousHash: prevHash,
+                relatedEntities: new Dictionary<string, string?>
+                {
+                    ["invoiceRef"] = invoice.InvoiceRef,
+                    ["reason"] = request.Reason ?? string.Empty
+                },
+                snapshot: new Dictionary<string, object?>
+                {
+                    ["status"] = invoice.Status,
+                    ["cancelReason"] = request.Reason
+                },
+                paymentRef: invoice.PaymentRef,
+                invoiceRef: invoice.InvoiceRef,
+                rentalOrderId: invoice.RentalOrderId,
+                encryptor: _encryptor);
+
+            await _repository.SaveInvoiceChangesAsync(invoice, receipt, null, cancelJournal, ct);
             await tx.CommitAsync(ct);
 
             return Result.Success(response);
@@ -196,7 +250,39 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
                 if (locked.Status == InvoiceStatus.Pending && utcNow >= locked.PaymentDeadline)
                 {
                     locked.Expire(utcNow);
-                    await _repository.SaveInvoiceChangesAsync(locked, null, null, ct);
+                    var prev = await _repository.GetLatestJournalEntryAsync(locked.InvoiceRef, ct);
+                    long nextVersion = (prev?.Version ?? 0) + 1;
+                    string prevHash = prev?.EntryHash ?? CanonicalJournalHasher.GenesisHash;
+
+                    var expireJournal = JournalEntryFactory.CreateEntry(
+                        operationId: Guid.NewGuid(),
+                        streamId: locked.InvoiceRef,
+                        streamType: JournalStreamTypes.Invoice,
+                        version: nextVersion,
+                        eventId: Guid.NewGuid(),
+                        eventType: JournalEventTypes.InvoiceExpired,
+                        amount: locked.TotalAmount,
+                        currency: locked.Currency,
+                        status: InvoiceStatus.Expired,
+                        confirmationSource: JournalConfirmationSources.System,
+                        actor: "SYSTEM",
+                        timestampUtc: utcNow,
+                        previousHash: prevHash,
+                        relatedEntities: new Dictionary<string, string?>
+                        {
+                            ["invoiceRef"] = locked.InvoiceRef,
+                            ["paymentDeadline"] = CanonicalJournalCodec.NormalizeTimestamp(locked.PaymentDeadline)
+                        },
+                        snapshot: new Dictionary<string, object?>
+                        {
+                            ["status"] = locked.Status
+                        },
+                        paymentRef: locked.PaymentRef,
+                        invoiceRef: locked.InvoiceRef,
+                        rentalOrderId: locked.RentalOrderId,
+                        encryptor: _encryptor);
+
+                    await _repository.SaveInvoiceChangesAsync(locked, null, null, expireJournal, ct);
                     await tx.CommitAsync(ct);
                 }
                 else
@@ -260,9 +346,42 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
                 {
                     locked.Expire(utcNow);
                     expiredCount++;
+
+                    var prev = await _repository.GetLatestJournalEntryAsync(locked.InvoiceRef, ct);
+                    long nextVersion = (prev?.Version ?? 0) + 1;
+                    string prevHash = prev?.EntryHash ?? CanonicalJournalHasher.GenesisHash;
+
+                    var expireJournal = JournalEntryFactory.CreateEntry(
+                        operationId: Guid.NewGuid(),
+                        streamId: locked.InvoiceRef,
+                        streamType: JournalStreamTypes.Invoice,
+                        version: nextVersion,
+                        eventId: Guid.NewGuid(),
+                        eventType: JournalEventTypes.InvoiceExpired,
+                        amount: locked.TotalAmount,
+                        currency: locked.Currency,
+                        status: InvoiceStatus.Expired,
+                        confirmationSource: JournalConfirmationSources.System,
+                        actor: "SYSTEM",
+                        timestampUtc: utcNow,
+                        previousHash: prevHash,
+                        relatedEntities: new Dictionary<string, string?>
+                        {
+                            ["invoiceRef"] = locked.InvoiceRef,
+                            ["paymentDeadline"] = CanonicalJournalCodec.NormalizeTimestamp(locked.PaymentDeadline)
+                        },
+                        snapshot: new Dictionary<string, object?>
+                        {
+                            ["status"] = locked.Status
+                        },
+                        paymentRef: locked.PaymentRef,
+                        invoiceRef: locked.InvoiceRef,
+                        rentalOrderId: locked.RentalOrderId,
+                        encryptor: _encryptor);
+
+                    await _repository.SaveInvoiceChangesAsync(locked, null, null, expireJournal, ct);
                 }
             }
-
             await _repository.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
 
@@ -286,7 +405,39 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
             if (locked is not null && locked.Status == InvoiceStatus.Pending && utcNow >= locked.PaymentDeadline)
             {
                 locked.Expire(utcNow);
-                await _repository.SaveInvoiceChangesAsync(locked, null, null, ct);
+                var prev = await _repository.GetLatestJournalEntryAsync(locked.InvoiceRef, ct);
+                long nextVersion = (prev?.Version ?? 0) + 1;
+                string prevHash = prev?.EntryHash ?? CanonicalJournalHasher.GenesisHash;
+
+                var expireJournal = JournalEntryFactory.CreateEntry(
+                    operationId: Guid.NewGuid(),
+                    streamId: locked.InvoiceRef,
+                    streamType: JournalStreamTypes.Invoice,
+                    version: nextVersion,
+                    eventId: Guid.NewGuid(),
+                    eventType: JournalEventTypes.InvoiceExpired,
+                    amount: locked.TotalAmount,
+                    currency: locked.Currency,
+                    status: InvoiceStatus.Expired,
+                    confirmationSource: JournalConfirmationSources.System,
+                    actor: "SYSTEM",
+                    timestampUtc: utcNow,
+                    previousHash: prevHash,
+                    relatedEntities: new Dictionary<string, string?>
+                    {
+                        ["invoiceRef"] = locked.InvoiceRef,
+                        ["paymentDeadline"] = CanonicalJournalCodec.NormalizeTimestamp(locked.PaymentDeadline)
+                    },
+                    snapshot: new Dictionary<string, object?>
+                    {
+                        ["status"] = locked.Status
+                    },
+                    paymentRef: locked.PaymentRef,
+                    invoiceRef: locked.InvoiceRef,
+                    rentalOrderId: locked.RentalOrderId,
+                    encryptor: _encryptor);
+
+                await _repository.SaveInvoiceChangesAsync(locked, null, null, expireJournal, ct);
                 await tx.CommitAsync(ct);
             }
             else

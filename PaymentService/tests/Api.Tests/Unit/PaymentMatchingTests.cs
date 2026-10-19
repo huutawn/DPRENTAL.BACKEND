@@ -609,6 +609,9 @@ public sealed class PaymentMatchingTests
 
         public Task<bool> IsPaymentRefDuplicateAsync(string paymentRef, string currentInvoiceRef, CancellationToken cancellationToken = default) =>
             Task.FromResult(false);
+        public Task<TransactionJournalEntry?> GetLatestJournalEntryAsync(string streamId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<TransactionJournalEntry?>(null);
+
 
         public Task<Invoice?> FindInvoiceWithRowLockAsync(string invoiceRef, CancellationToken cancellationToken = default) =>
             Task.FromResult(_invoice);
@@ -619,7 +622,13 @@ public sealed class PaymentMatchingTests
         public Task<Invoice?> FindInvoiceByPaymentCodeWithRowLockAsync(string paymentCode, CancellationToken cancellationToken = default) =>
             Task.FromResult(_invoice is not null && string.Equals(_invoice.PaymentCode, paymentCode, StringComparison.Ordinal) ? _invoice : null);
 
-        public Task SavePaymentTransactionAsync(PaymentTransaction transaction, Invoice? invoice = null, OutboxMessage? outboxMessage = null, CancellationToken cancellationToken = default)
+        public Task SavePaymentTransactionAsync(
+            PaymentTransaction transaction,
+            Invoice? invoice,
+            OutboxMessage? outboxMessage,
+            TransactionJournalEntry journalEntry,
+            TransactionJournalEntry? invoiceJournalEntry,
+            CancellationToken cancellationToken = default)
         {
             SavedTransaction = transaction;
             SavedOutbox = outboxMessage;
@@ -632,12 +641,21 @@ public sealed class PaymentMatchingTests
         public Task<Invoice?> FindInvoiceByIdWithRowLockSkipLockedAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult<Invoice?>(null);
 
-        public Task SaveNewInvoiceAsync(Invoice invoice, OperationReceipt receipt, OutboxMessage? outboxMessage = null, CancellationToken cancellationToken = default) =>
+        public Task SaveNewInvoiceAsync(
+            Invoice invoice,
+            OperationReceipt receipt,
+            OutboxMessage? outboxMessage,
+            TransactionJournalEntry journalEntry,
+            CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
-        public Task SaveInvoiceChangesAsync(Invoice invoice, OperationReceipt? receipt = null, OutboxMessage? outboxMessage = null, CancellationToken cancellationToken = default) =>
+        public Task SaveInvoiceChangesAsync(
+            Invoice invoice,
+            OperationReceipt? receipt,
+            OutboxMessage? outboxMessage,
+            TransactionJournalEntry journalEntry,
+            CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
-
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 

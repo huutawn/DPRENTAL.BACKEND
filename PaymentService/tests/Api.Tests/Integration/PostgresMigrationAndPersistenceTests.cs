@@ -47,6 +47,7 @@ public sealed class PostgresMigrationAndPersistenceTests
             Assert.Contains("outbox_messages", tables);
             Assert.Contains("rental_item_settlements", tables);
             Assert.Contains("settlement_ledger_entries", tables);
+            Assert.Contains("transaction_journal", tables);
 
             // Verify numeric(18,0) column data type
             await using var cmdNumeric = conn.CreateCommand();

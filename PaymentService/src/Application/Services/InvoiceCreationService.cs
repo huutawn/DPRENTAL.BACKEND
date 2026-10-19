@@ -1,3 +1,4 @@
+using Dprental.PaymentService.Common.Cryptography;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Dprental.PaymentService.Application.DTOs.Invoice;
@@ -19,6 +20,7 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
     private readonly IInvoiceRepository _repository;
     private readonly IOptions<PaymentMerchantOptions> _merchantOptions;
     private readonly IInvoiceLifecycleService _lifecycleService;
+    private readonly IPaymentDataEncryptor _encryptor;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<InvoiceCreationService>? _logger;
 
@@ -26,14 +28,25 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
         IInvoiceRepository repository,
         IOptions<PaymentMerchantOptions> merchantOptions,
         IInvoiceLifecycleService lifecycleService,
+        IPaymentDataEncryptor encryptor,
         TimeProvider? timeProvider = null,
         ILogger<InvoiceCreationService>? logger = null)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _merchantOptions = merchantOptions ?? throw new ArgumentNullException(nameof(merchantOptions));
         _lifecycleService = lifecycleService ?? throw new ArgumentNullException(nameof(lifecycleService));
+        _encryptor = encryptor ?? throw new ArgumentNullException(nameof(encryptor));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
+    }
+
+    public InvoiceCreationService(
+        IInvoiceRepository repository,
+        IOptions<PaymentMerchantOptions> merchantOptions,
+        IInvoiceLifecycleService lifecycleService,
+        TimeProvider? timeProvider = null)
+        : this(repository, merchantOptions, lifecycleService, new PaymentDataEncryptor(new byte[32]), timeProvider, null)
+    {
     }
 
     public async Task<Result<CreateInvoiceResponse>> CreateInvoiceAsync(
@@ -183,10 +196,53 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
                 invoice.RentalOrderId,
                 utcNow);
 
+            Guid operationId = Guid.NewGuid();
+            Guid eventId = Guid.NewGuid();
+            if (outbox is not null)
+            {
+                outbox.LinkAttestation(eventId, operationId);
+            }
+
+            var journalEntry = JournalEntryFactory.CreateEntry(
+                operationId: operationId,
+                streamId: invoice.InvoiceRef,
+                streamType: JournalStreamTypes.Invoice,
+                version: 1,
+                eventId: eventId,
+                eventType: JournalEventTypes.InvoiceCreated,
+                amount: invoice.TotalAmount,
+                currency: invoice.Currency,
+                status: invoice.Status,
+                confirmationSource: JournalConfirmationSources.System,
+                actor: $"RENTER:{invoice.RenterId:D}",
+                timestampUtc: utcNow,
+                previousHash: CanonicalJournalHasher.GenesisHash,
+                relatedEntities: new Dictionary<string, string?>
+                {
+                    ["invoiceRef"] = invoice.InvoiceRef,
+                    ["orderCode"] = invoice.OrderCode,
+                    ["rentalOrderId"] = invoice.RentalOrderId.ToString("D"),
+                    ["paymentCode"] = invoice.PaymentCode,
+                    ["paymentDeadline"] = CanonicalJournalCodec.NormalizeTimestamp(invoice.PaymentDeadline)
+                },
+                snapshot: new Dictionary<string, object?>
+                {
+                    ["totalRentalAmount"] = invoice.TotalRentalAmount,
+                    ["totalDepositAmount"] = invoice.TotalDepositAmount,
+                    ["totalAmount"] = invoice.TotalAmount,
+                    ["status"] = invoice.Status
+                },
+                outboxDigest: CanonicalJournalHasher.ComputeOutboxDigest(outbox?.Payload),
+                outboxMessageId: outbox?.MessageId,
+                paymentRef: invoice.PaymentRef,
+                invoiceRef: invoice.InvoiceRef,
+                rentalOrderId: invoice.RentalOrderId,
+                encryptor: _encryptor);
+
             await using var tx = await _repository.BeginTransactionAsync(ct);
             try
             {
-                await _repository.SaveNewInvoiceAsync(invoice, receipt, outbox, ct);
+                await _repository.SaveNewInvoiceAsync(invoice, receipt, outbox, journalEntry, ct);
                 await tx.CommitAsync(ct);
 
                 return Result.Success(response);

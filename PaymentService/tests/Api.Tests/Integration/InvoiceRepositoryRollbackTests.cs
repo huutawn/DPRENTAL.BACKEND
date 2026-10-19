@@ -60,6 +60,20 @@ public sealed class InvoiceRepositoryRollbackTests
                 orderId.ToString("D"),
                 "{}",
                 now);
+            var journalEntry = JournalEntryFactory.CreateEntry(
+                operationId: Guid.NewGuid(),
+                streamId: invoice.InvoiceRef,
+                streamType: JournalStreamTypes.Invoice,
+                version: 1,
+                eventId: Guid.NewGuid(),
+                eventType: JournalEventTypes.InvoiceCreated,
+                amount: invoice.TotalAmount,
+                currency: invoice.Currency,
+                status: invoice.Status,
+                confirmationSource: JournalConfirmationSources.System,
+                actor: "SYSTEM",
+                timestampUtc: now,
+                previousHash: CanonicalJournalHasher.GenesisHash);
 
             // 1. Begin transaction, save invoice + receipt + outbox, but explicitly ROLLBACK
             await using (var ctx = new PaymentServiceDbContext(options))
@@ -67,7 +81,7 @@ public sealed class InvoiceRepositoryRollbackTests
                 var repo = new EfInvoiceRepository(ctx);
                 await using var tx = await repo.BeginTransactionAsync();
 
-                await repo.SaveNewInvoiceAsync(invoice, receipt, outbox);
+                await repo.SaveNewInvoiceAsync(invoice, receipt, outbox, journalEntry);
 
                 // Explicit rollback
                 await tx.RollbackAsync();
@@ -80,6 +94,7 @@ public sealed class InvoiceRepositoryRollbackTests
                 Assert.Empty(await verifyCtx.InvoiceItems.ToListAsync());
                 Assert.Empty(await verifyCtx.OperationReceipts.ToListAsync());
                 Assert.Empty(await verifyCtx.OutboxMessages.ToListAsync());
+                Assert.Empty(await verifyCtx.TransactionJournals.ToListAsync());
             }
 
             // 3. Begin transaction, save, but dispose WITHOUT commit (simulating crash/unhandled exception)
@@ -88,7 +103,7 @@ public sealed class InvoiceRepositoryRollbackTests
                 var repo = new EfInvoiceRepository(ctx);
                 await using (var tx = await repo.BeginTransactionAsync())
                 {
-                    await repo.SaveNewInvoiceAsync(invoice, receipt, outbox);
+                    await repo.SaveNewInvoiceAsync(invoice, receipt, outbox, journalEntry);
                     // Dispose without commit
                 }
             }
@@ -100,6 +115,7 @@ public sealed class InvoiceRepositoryRollbackTests
                 Assert.Empty(await verifyCtx.InvoiceItems.ToListAsync());
                 Assert.Empty(await verifyCtx.OperationReceipts.ToListAsync());
                 Assert.Empty(await verifyCtx.OutboxMessages.ToListAsync());
+                Assert.Empty(await verifyCtx.TransactionJournals.ToListAsync());
             }
         }
         finally
