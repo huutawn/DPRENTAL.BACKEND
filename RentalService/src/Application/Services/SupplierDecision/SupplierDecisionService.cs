@@ -1,5 +1,7 @@
 #pragma warning disable CA1848, CA1873
+using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Supplier;
+using Dprental.RentalService.Application.Validation;
 using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.IServices.SupplierDecision;
 using Dprental.RentalService.Application.Policies;
@@ -27,6 +29,7 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
     private readonly IOrderLockManager _lockManager;
     private readonly IInventoryCommandProducer _inventoryCommands;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IRentalMediaClient? _mediaClient;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SupplierDecisionService> _logger;
 
@@ -37,13 +40,15 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         IInventoryCommandProducer inventoryCommands,
         IUnitOfWork unitOfWork,
         TimeProvider? timeProvider = null,
-        ILogger<SupplierDecisionService>? logger = null)
+        ILogger<SupplierDecisionService>? logger = null,
+        IRentalMediaClient? mediaClient = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _operationExecutor = operationExecutor ?? throw new ArgumentNullException(nameof(operationExecutor));
         _lockManager = lockManager ?? new NoOpOrderLockManager();
         _inventoryCommands = inventoryCommands!;
         _unitOfWork = unitOfWork!;
+        _mediaClient = mediaClient;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SupplierDecisionService>.Instance;
     }
@@ -186,6 +191,11 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             return Error.Validation("INVALID_UNITS", "Danh sách thiết bị bàn giao phải bao gồm đầy đủ và duy nhất các máy thuộc mục thuê.");
         }
 
+        if (!request.Confirmed)
+        {
+            return Error.Validation("HANDOVER_NOT_CONFIRMED", "Supplier phải xác nhận đã bàn giao thiết bị cho người thuê.");
+        }
+
         if (request.Units.Any(u => u.MediaIds == null || u.MediaIds.Count == 0))
         {
             return Error.Validation("MISSING_MEDIA", "Mỗi thiết bị bàn giao phải kèm bằng chứng hình ảnh.");
@@ -197,6 +207,8 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             Action = "MarkAssetsHandedOver",
             ItemId = item.Id,
             ActualHandoverAt = request.ActualHandoverAt,
+            request.Note,
+            request.Confirmed,
             Units = request.Units.OrderBy(u => u.AssignmentId).Select(u => new
             {
                 u.AssignmentId,
@@ -216,8 +228,7 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
                 return Error.Conflict("IDEMPOTENCY_CONFLICT", "Khóa idempotency đã được dùng với payload khác.");
             }
 
-            var existingRecord = item.HandoverRecord;
-            return new HandoverItemResponse(existingRecord?.Id ?? Guid.Empty, request.ActualHandoverAt, existingReceipt.Status);
+            return new HandoverItemResponse(item.HandoverRecord?.Id, request.ActualHandoverAt, existingReceipt.Status);
         }
 
         if (item.Status != RentalItemStatus.AwaitingHandover)
@@ -225,22 +236,34 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             return Error.Conflict("INVALID_STATUS", $"Mục thuê không ở trạng thái AwaitingHandover. Trạng thái hiện tại: {item.Status}.");
         }
 
-        var handoverRecord = new HandoverRecord(
-            Guid.NewGuid(),
-            item.Id,
-            request.ActualHandoverAt,
-            request.Note,
+        // Một lệnh bàn giao đang chờ Inventory trả lời thì không gửi lệnh thứ hai song song.
+        if (order.OperationReceipts.Any(r =>
+                r.Action == "MarkAssetsHandedOver" &&
+                r.TargetItemId == item.Id &&
+                (r.Status == RentalOperationReceipt.StatusPending || r.Status == RentalOperationReceipt.StatusProcessing)))
+        {
+            return Error.Conflict("HANDOVER_IN_PROGRESS", "Yêu cầu bàn giao trước đó đang chờ Inventory xử lý.");
+        }
+
+        if (_mediaClient is null)
+        {
+            return Error.Failure("MEDIA_VERIFICATION_UNAVAILABLE", "Chưa xác minh được bằng chứng bàn giao.");
+        }
+
+        foreach (HandoverUnitObservationRequest unit in request.Units)
+        {
+            var evidence = await RentalEvidenceValidator.ValidateAndVerifyEvidenceAsync(
+                unit.MediaIds, supplierId, _mediaClient, isRequired: true, cancellationToken);
+            if (evidence.IsFailure) return evidence.Error;
+        }
+
+        // Chưa tạo HandoverRecord: bằng chứng nằm trong receipt cho tới khi Inventory xác nhận (xem handler kết quả).
+        var snapshot = new HandoverEvidenceSnapshot(
             supplierId,
             utcNow,
-            utcNow);
-
-        item.SetHandoverRecord(handoverRecord);
-
-        foreach (var u in request.Units)
-        {
-            var assignment = item.UnitAssignments.First(a => a.Id == u.AssignmentId);
-            assignment.RecordHandoverEvidence(handoverRecord.Id, u.Condition, u.Note, u.MediaIds);
-        }
+            request.ActualHandoverAt,
+            request.Note,
+            request.Units.Select(u => new HandoverUnitSnapshot(u.AssignmentId, u.Condition, u.Note, u.MediaIds)).ToList());
 
         var handoverCmd = new MarkAssetsHandedOverCommandPayload(
             order.Id,
@@ -263,14 +286,14 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             fingerprint,
             utcNow,
             item.Id,
-            JsonSerializer.Serialize(handoverCmd));
+            snapshot.ToJson());
 
         order.AddOperationReceipt(receipt);
         order.RecordReadModelUpdate(utcNow);
         await _orderRepository.UpdateAsync(order, cancellationToken);
         await _unitOfWork.CommitAsync(cancellationToken);
 
-        return new HandoverItemResponse(handoverRecord.Id, request.ActualHandoverAt, "Processing");
+        return new HandoverItemResponse(null, request.ActualHandoverAt, "Processing");
     }
 
     private static Result ValidateIdempotencyKey(string? idempotencyKey)

@@ -285,76 +285,8 @@ public sealed partial class RentalOperationExecutor
             apiResponseJson: apiResponseJson);
         order.AddOperationReceipt(rejectReceipt);
 
-        // Schedule ReleaseAllocation and single logical RequestRefund with RentalOperationCommand
-        string releaseOpKey = ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
-        var releaseReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == releaseOpKey);
-        if (releaseReceipt == null)
-        {
-            var releaseReq = new ReleaseAllocationRequest(releaseOpKey, reason);
-            var relCmd = new RentalOperationCommand(
-                1,
-                "ReleaseAllocation",
-                order.Id,
-                item.Id,
-                releaseOpKey,
-                item.AllocationGroupId,
-                supplierId,
-                JsonSerializer.Serialize(releaseReq, JsonOptions));
+        await ScheduleReleaseAndRefundAsync(order, item, supplierId, reason, utcNow, cancellationToken);
 
-            releaseReceipt = new RentalOperationReceipt(
-                Guid.NewGuid(),
-                order.Id,
-                releaseOpKey,
-                "ReleaseAllocation",
-                ComputeFingerprint($"ReleaseAllocation:{item.AllocationGroupId}"),
-                isSuccess: false,
-                errorCode: null,
-                errorMessage: null,
-                createdAt: utcNow,
-                status: RentalOperationReceipt.StatusPending,
-                targetItemId: item.Id,
-                payloadJson: JsonSerializer.Serialize(relCmd, JsonOptions));
-            order.AddOperationReceipt(releaseReceipt);
-        }
-
-        if (_inventoryCommands != null)
-        {
-            var releaseCmdPayload = new ReleaseAllocationCommandPayload(order.Id, item.Id, releaseOpKey, reason);
-            await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmdPayload, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
-        }
-
-        string refundOpKey = ComputeOperationKey("RequestRefund", $"{order.Id}:{item.Id}");
-        var refundReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundOpKey);
-        if (refundReceipt == null)
-        {
-            var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
-            var refundReq = new RequestRefundRequest(order.Id, order.InvoiceRef!, order.PaymentRef!, refundItems, reason, refundOpKey);
-            var refundCmd = new RentalOperationCommand(
-                1,
-                "RequestRefund",
-                order.Id,
-                item.Id,
-                refundOpKey,
-                null,
-                supplierId,
-                JsonSerializer.Serialize(refundReq, JsonOptions));
-
-            refundReceipt = new RentalOperationReceipt(
-                Guid.NewGuid(),
-                order.Id,
-                refundOpKey,
-                "RequestRefund",
-                ComputeFingerprint($"RequestRefund:{order.Id}:{item.RentalAmount + item.DepositAmount}"),
-                isSuccess: false,
-                errorCode: null,
-                errorMessage: null,
-                createdAt: utcNow,
-                status: RentalOperationReceipt.StatusPending,
-                targetItemId: item.Id,
-                prerequisiteOperationId: releaseOpKey,
-                payloadJson: JsonSerializer.Serialize(refundCmd, JsonOptions));
-            order.AddOperationReceipt(refundReceipt);
-        }
         var notifyEnvelope = new KafkaMessageEnvelope<RentalItemRejectedPayload>(
             Guid.NewGuid(),
             KafkaContractSpec.EventTypes.RentalItemRejected,
@@ -494,5 +426,84 @@ public sealed partial class RentalOperationExecutor
             item.SupplierDecisionBy,
             item.SupplierDecisionReason,
             item.SupplierDecisionNote);
+    }
+
+    public async Task ScheduleReleaseAndRefundAsync(
+        RentalOrder order,
+        RentalItem item,
+        Guid actorId,
+        string reason,
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken = default)
+    {
+        string releaseOpKey = ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
+        var releaseReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == releaseOpKey);
+        if (releaseReceipt == null)
+        {
+            var releaseReq = new ReleaseAllocationRequest(releaseOpKey, reason);
+            var relCmd = new RentalOperationCommand(
+                1,
+                "ReleaseAllocation",
+                order.Id,
+                item.Id,
+                releaseOpKey,
+                item.AllocationGroupId,
+                actorId,
+                JsonSerializer.Serialize(releaseReq, JsonOptions));
+
+            releaseReceipt = new RentalOperationReceipt(
+                Guid.NewGuid(),
+                order.Id,
+                releaseOpKey,
+                "ReleaseAllocation",
+                ComputeFingerprint($"ReleaseAllocation:{item.AllocationGroupId}"),
+                isSuccess: false,
+                errorCode: null,
+                errorMessage: null,
+                createdAt: utcNow,
+                status: RentalOperationReceipt.StatusPending,
+                targetItemId: item.Id,
+                payloadJson: JsonSerializer.Serialize(relCmd, JsonOptions));
+            order.AddOperationReceipt(releaseReceipt);
+        }
+
+        if (_inventoryCommands != null)
+        {
+            var releaseCmdPayload = new ReleaseAllocationCommandPayload(order.Id, item.Id, releaseOpKey, reason);
+            await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmdPayload, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
+        }
+
+        string refundOpKey = ComputeOperationKey("RequestRefund", $"{order.Id}:{item.Id}");
+        var refundReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundOpKey);
+        if (refundReceipt == null)
+        {
+            var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
+            var refundReq = new RequestRefundRequest(order.Id, order.InvoiceRef!, order.PaymentRef!, refundItems, reason, refundOpKey);
+            var refundCmd = new RentalOperationCommand(
+                1,
+                "RequestRefund",
+                order.Id,
+                item.Id,
+                refundOpKey,
+                null,
+                actorId,
+                JsonSerializer.Serialize(refundReq, JsonOptions));
+
+            refundReceipt = new RentalOperationReceipt(
+                Guid.NewGuid(),
+                order.Id,
+                refundOpKey,
+                "RequestRefund",
+                ComputeFingerprint($"RequestRefund:{order.Id}:{item.RentalAmount + item.DepositAmount}"),
+                isSuccess: false,
+                errorCode: null,
+                errorMessage: null,
+                createdAt: utcNow,
+                status: RentalOperationReceipt.StatusPending,
+                targetItemId: item.Id,
+                prerequisiteOperationId: releaseOpKey,
+                payloadJson: JsonSerializer.Serialize(refundCmd, JsonOptions));
+            order.AddOperationReceipt(refundReceipt);
+        }
     }
 }

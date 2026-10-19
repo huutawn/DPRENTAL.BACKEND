@@ -106,7 +106,12 @@ internal static class OrderQueryMapper
         .ToList();
 
     public static OrderHandoverResponse? ToHandover(RentalItem item) => item.HandoverRecord is { } handover
-        ? new OrderHandoverResponse(handover.ActualHandoverAt, handover.Note, handover.RenterAcknowledgedAt)
+        ? new OrderHandoverResponse(
+            handover.ActualHandoverAt,
+            handover.Note,
+            handover.RenterAcknowledgedAt,
+            handover.RenterAcknowledgedById,
+            handover.RenterAcknowledgementNote)
         : null;
 
     /// <summary>Mỗi lần trả kèm số máy bình thường và hư hỏng.</summary>

@@ -16,6 +16,7 @@ using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Application.Services.Operations;
+using Dprental.RentalService.Application.Services.SupplierDecision;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
@@ -589,22 +590,62 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         DateTimeOffset utcNow,
         CancellationToken cancellationToken)
     {
+        // Kết quả trùng lặp cho một lệnh đã xử lý xong thì bỏ qua.
+        if (receipt.Status == RentalOperationReceipt.StatusSucceeded)
+        {
+            return Result.Success();
+        }
+
         if (isSuccess)
         {
-            receipt.MarkSucceeded(utcNow, null, payloadElement.GetRawText());
             var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
             if (item != null)
             {
-                foreach (var assignment in item.UnitAssignments)
+                if (item.HandoverRecord is not null)
                 {
-                    assignment.ConfirmHandoverCompleted();
+                    // Receipt tạo trước khi bằng chứng được hoãn tới lúc Inventory xác nhận: bản ghi đã có sẵn.
+                    foreach (var assignment in item.UnitAssignments)
+                    {
+                        assignment.ConfirmHandoverCompleted();
+                    }
+
+                    item.ApplyHandover(utcNow, operationKey);
+                }
+                else
+                {
+                    var snapshot = HandoverEvidenceSnapshot.TryParse(receipt.PayloadJson);
+                    if (snapshot is null)
+                    {
+                        _logger.LogError("Handover receipt {OperationKey} of item {ItemId} has no evidence payload", operationKey, rentalItemId);
+                        receipt.MarkManualReconciliationRequired(utcNow, "Inventory đã xác nhận bàn giao nhưng receipt không có bằng chứng để ghi nhận.");
+                        await _orderRepository.UpdateAsync(order, cancellationToken);
+                        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                        return Result.Success();
+                    }
+
+                    var completed = item.CompleteHandover(
+                        snapshot.SubmittedById,
+                        snapshot.SubmittedAt,
+                        snapshot.ActualHandoverAt,
+                        snapshot.Note,
+                        snapshot.ToUnitData(),
+                        utcNow,
+                        operationKey);
+                    if (completed.IsFailure)
+                    {
+                        _logger.LogWarning("Handover result {OperationKey} not applied to item {ItemId}: {Code}", operationKey, rentalItemId, completed.Error.Code);
+                        receipt.MarkManualReconciliationRequired(utcNow, $"Không ghi nhận được bàn giao: {completed.Error.Code}.");
+                        await _orderRepository.UpdateAsync(order, cancellationToken);
+                        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                        return Result.Success();
+                    }
                 }
 
-                item.ApplyHandover(utcNow, operationKey);
                 RentalOrderStatusPolicy.Apply(order, utcNow, operationKey);
                 order.RecordReadModelUpdate(utcNow);
-
             }
+
+            receipt.MarkSucceeded(utcNow, null, payloadElement.GetRawText());
         }
         else
         {

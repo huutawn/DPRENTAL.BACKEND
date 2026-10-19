@@ -128,6 +128,11 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 if (_dbContext.Entry(record).State == EntityState.Detached)
                     _dbContext.Entry(record).State = EntityState.Added;
             }
+            foreach (var handover in order.Items.Select(i => i.HandoverRecord).Where(h => h is not null))
+            {
+                if (_dbContext.Entry(handover!).State == EntityState.Detached)
+                    _dbContext.Entry(handover!).State = EntityState.Added;
+            }
             foreach (var proposal in order.Items.Select(i => i.DeductionProposal).Where(p => p is not null))
             {
                 if (_dbContext.Entry(proposal!).State == EntityState.Detached)
@@ -574,6 +579,26 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             .Take(batchSize)
             .ToListAsync(cancellationToken);
     }
+
+    public async Task<IReadOnlyList<Guid>> GetHandoverOverdueOrderIdsAsync(
+        DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
+    {
+        DateOnly todayVn = RentalItem.TodayInVietnam(utcNow);
+
+        return await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.AwaitingHandover
+                     && i.ExpectedStartDate < todayVn
+                     && (i.ExpectedEndDate < todayVn ||
+                         !i.RentalOrder!.OperationReceipts.Any(r =>
+                             r.Action == "HandoverOverdueNotice" && r.TargetItemId == i.Id)))
+            .GroupBy(i => i.RentalOrderId)
+            .OrderBy(g => g.Min(i => i.ExpectedStartDate))
+            .Select(g => g.Key)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(
     DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
     {

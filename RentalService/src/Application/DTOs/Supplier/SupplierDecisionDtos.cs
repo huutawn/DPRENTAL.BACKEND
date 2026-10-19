@@ -60,10 +60,11 @@ public sealed record HandoverUnitObservationRequest(
 public sealed record HandoverItemRequest(
     [Required] DateTimeOffset ActualHandoverAt,
     [MaxLength(2000)] string? Note = null,
-    [Required] IReadOnlyList<HandoverUnitObservationRequest> Units = null!);
+    [Required] IReadOnlyList<HandoverUnitObservationRequest> Units = null!,
+    bool Confirmed = false);
 
 public sealed record HandoverItemResponse(
-    Guid HandoverRecordId,
+    Guid? HandoverRecordId,
     DateTimeOffset HandoverAt,
     string Status);
 

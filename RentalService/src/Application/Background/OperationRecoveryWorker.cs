@@ -34,7 +34,9 @@ public sealed class OperationRecoveryWorker : BackgroundService
             "MarkAssetsHandedOver",
             "ConfirmAllocation",
             "ExtendHold",
-            "ReleaseAllocation"
+            "ReleaseAllocation",
+            RentalItem.CancelNotDeliveredAction,
+            "HandoverOverdueNotice"
         };
         if (!configuration.GetValue("Rental:OverdueProtection:Enabled", true))
             excluded.Add(RentalItem.OverdueProtectionAction);
