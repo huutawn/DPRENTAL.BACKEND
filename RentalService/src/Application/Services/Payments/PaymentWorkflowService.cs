@@ -39,7 +39,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
     private readonly ILogger<PaymentWorkflowService> _logger;
     private readonly string _rentalEventsTopic;
     private readonly IInventoryCommandProducer _inventoryCommands;
-
+    private readonly IRentalEventProducer? _rentalEventProducer;
     public PaymentWorkflowService(
         IRentalOrderRepository orderRepository,
         IInboxRepository inboxRepository,
@@ -51,7 +51,8 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         IInventoryCommandProducer inventoryCommands,
         IConfiguration configuration,
         ILogger<PaymentWorkflowService> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IRentalEventProducer? rentalEventProducer = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _inboxRepository = inboxRepository ?? throw new ArgumentNullException(nameof(inboxRepository));
@@ -64,6 +65,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _rentalEventsTopic = configuration["Kafka:RentalEventsTopic"] ?? "rental.events.v1";
+        _rentalEventProducer = rentalEventProducer ?? new RentalEventProducer(new KafkaOutboxWriter(_outboxRepository), Microsoft.Extensions.Options.Options.Create(new KafkaOptions { RentalEventsTopic = _rentalEventsTopic }), _timeProvider);
     }
 
     public PaymentWorkflowService(
@@ -76,7 +78,8 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         IUnitOfWork unitOfWork,
         IConfiguration configuration,
         ILogger<PaymentWorkflowService> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IRentalEventProducer? rentalEventProducer = null)
         : this(
             orderRepository,
             inboxRepository,
@@ -88,7 +91,8 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             new InventoryCommandProducer(outboxRepository, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), timeProvider),
             configuration,
             logger,
-            timeProvider)
+            timeProvider,
+            rentalEventProducer)
     {
     }
 
@@ -258,9 +262,32 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         {
             var markResult = order.MarkAsPaid(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
             if (markResult.IsFailure) return markResult.Error;
-
             foreach (var item in order.Items)
             {
+                if (!item.EquipmentTypeId.HasValue || item.EquipmentTypeId.Value == Guid.Empty)
+                {
+                    return Error.Validation("INVALID_EQUIPMENT_TYPE_ID", $"EquipmentTypeId của rental item {item.Id} không hợp lệ.");
+                }
+
+                if (_rentalEventProducer != null)
+                {
+                    var enqueueResult = await _rentalEventProducer.EnqueueRentalItemPaidAsync(
+                        new RentalItemPaidPayload(
+                            order.RenterId,
+                            item.EquipmentListingId,
+                            item.EquipmentTypeId.Value,
+                            order.Id,
+                            item.Id),
+                        correlationId: envelope.CorrelationId,
+                        causationId: envelope.MessageId,
+                        cancellationToken: cancellationToken);
+
+                    if (enqueueResult.IsFailure)
+                    {
+                        return enqueueResult.Error;
+                    }
+                }
+
                 string opKey = RentalOperationExecutor.ComputeOperationKey("ExtendHold", $"{order.Id}:{item.Id}");
                 var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
                 if (existingReceipt == null)
@@ -353,25 +380,38 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                 await _inboxRepository.AddAsync(inboxMessage, cancellationToken);
             }
 
-            var result = await ApplyInvoicePaidStagedAsync(order, envelope, inboxMessage, cancellationToken);
-            if (result.IsFailure)
+            await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+            try
             {
-                return result;
-            }
+                var result = await ApplyInvoicePaidStagedAsync(order, envelope, inboxMessage, cancellationToken);
+                if (result.IsFailure)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    _unitOfWork.DiscardChanges();
+                    return result;
+                }
 
-            inboxMessage.MarkProcessed(utcNow);
-            if (existingInbox != null)
+                inboxMessage.MarkProcessed(utcNow);
+                if (existingInbox != null)
+                {
+                    _inboxRepository.Update(inboxMessage);
+                }
+
+                if (result.Value)
+                {
+                    order.RecordReadModelUpdate(utcNow);
+                    await _orderRepository.UpdateAsync(order, cancellationToken);
+                }
+
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+            }
+            catch (Exception)
             {
-                _inboxRepository.Update(inboxMessage);
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                throw;
             }
-
-            if (result.Value)
-            {
-                order.RecordReadModelUpdate(utcNow);
-                await _orderRepository.UpdateAsync(order, cancellationToken);
-            }
-
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
         // Direct invocation/tests outside lock executes hold/cleanup

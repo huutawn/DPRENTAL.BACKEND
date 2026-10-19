@@ -194,10 +194,9 @@ Mọi quyết định "ai được làm gì" nằm trong `RentalAuthorizationPol
 - Header bắt buộc: `Idempotency-Key` (tối đa 64 ký tự). Client sinh một key mới cho mỗi lần bấm "Đặt hàng" và dùng lại đúng key đó khi gửi lại.
 - Body: `cartItemIds`, `delivery`, `refundAccount`, `termsVersion`, `termsAccepted`, `expectedTotalAmount`.
 - Đặt trước tối thiểu 3 ngày (giờ Việt Nam, `RentalBookingPolicy.MinimumLeadDays`; SRS cũ ghi "từ ngày mai"): hôm nay 14/10 thì ngày bắt đầu thuê sớm nhất là 17/10. Quy tắc áp ở ba chỗ: thêm/sửa dòng giỏ (`400 Cart.StartDateInvalid`), xem giỏ (dòng `DatePassed`) và checkout (dòng `StartDateNotInFuture`). Mã lỗi giữ nguyên, chỉ đổi câu thông báo. Ngoài ra ngày bắt đầu trong vòng 6 tháng, tối đa 30 ngày thuê.
-- Luồng xử lý: khóa theo người thuê → tìm đơn theo key → chuẩn bị (đọc lại Listing, giá, lịch) → Inventory giữ lịch tất cả các dòng → lưu đơn và dọn giỏ trong một transaction → tạo hóa đơn bên Payment (`Σ RentalAmount + Σ DepositAmount`) và gắn `InvoiceRef`.
+- Luồng xử lý: khóa theo người thuê → kiểm tra idempotency theo key → kiểm tra đơn chờ thanh toán hiện có → chuẩn bị (đọc lại Listing, giá, lịch) → gửi lệnh giữ lịch cho mọi dòng qua Outbox và lưu RentalCheckoutOperation trong cùng một transaction.
 - Kết quả:
-  - `201`: đơn mới ở trạng thái `PENDING_PAYMENT`, `paymentDeadline` = thời điểm gửi + 30 phút, đã có `invoiceRef`.
-  - `200` + `isReplay: true`: key này đã tạo đơn từ lần gửi trước; trả lại đúng đơn đó, không giữ thêm lịch và không tạo thêm hóa đơn.
+  - `202 Accepted` cho cả lần gửi mới lẫn replay cùng Idempotency-Key. Response trả về `operationId` và `statusUrl` (`/api/v1/rental/checkout/operations/{operationId}`).
   - Response không chứa `AssetId`, `AllocationId` hay `AllocationGroupId`.
 - Idempotency:
   - Key được gắn với người thuê (`CheckoutRules.DeriveOperationId`), nên hai người thuê trùng key không đụng nhau.
@@ -209,7 +208,8 @@ Mọi quyết định "ai được làm gì" nằm trong `RentalAuthorizationPol
   - `readyForPayment = true` chỉ khi: `status == Succeeded` AND Order tồn tại AND `Order.Status == PendingPayment` AND `Order.InvoiceRef` hợp lệ đã được gắn AND `now < Order.PaymentDeadline`.
   - `invoiceStatus`: `Pending` khi đơn đã tạo nhưng hóa đơn đang chờ/retry; `Ready` khi hóa đơn đã sẵn sàng; `Failed` khi bị từ chối nghiệp vụ hoặc quá hạn.
   - Deadline thanh toán (`PaymentDeadline` = thời điểm checkout accepted + 30 phút, `CheckoutRules.PaymentWindow`) là cố định xuyên suốt giữa Rental, Inventory hold và Payment invoice, không được reset khi tạo order hay xuất hiện invoice muộn.
-  - Lỗi tạo invoice tạm thời tiếp tục được retry qua `OperationRecoveryWorker` trong suốt cửa sổ thanh toán (kể cả sau attempt thứ 10), lỗi nghiệp vụ xác định dừng retry.
+  - Lỗi tạo invoice tạm thời tiếp tục được retry qua `OperationRecoveryWorker` trong suốt cửa sổ thanh toán (kể cả sau attempt thứ 10); lỗi nghiệp vụ xác định dừng retry ngay lập tức dù trước đó có attempt timeout.
+  - Receipt exhausted từ phiên bản cũ thuộc Order expired/terminal được đóng tự động với `ClassificationBusiness` để không chiếm batch recovery; nếu Order còn hợp lệ sẽ được phục hồi retry trên receipt cũ mà không reset budget.
   - Đến deadline mà chưa có thanh toán thành công, Order chưa có invoice vẫn được expiry và release hold tự động. Vì không có hóa đơn để hủy nên không gọi Payment và không tạo receipt `CancelInvoice`.
 - Bù trừ khi checkout hỏng giữa chừng (không tạo đơn thì không được để lại hold):
   - Một dòng không giữ được lịch: nhả các dòng đã giữ theo thứ tự ngược, trả `409 Checkout.HoldFailed` kèm `conflicts`.

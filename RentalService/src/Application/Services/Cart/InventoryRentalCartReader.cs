@@ -10,28 +10,13 @@ namespace Dprental.RentalService.Application.Services.Cart;
 
 /// <summary>Adapts the frozen Inventory contract to Cart's read and ownership ports.</summary>
 public sealed class InventoryRentalCartReader(IInventoryRentalClient inventory) :
-    IRentalListingOwnerProvider,
     IRentalListingReader,
     IRentalAvailabilityReader
 {
-    public async Task<Guid?> GetOwnerIdAsync(Guid equipmentListingId, CancellationToken cancellationToken = default)
-    {
-        Result<ListingRentalSnapshotDto> result = await inventory.GetListingRentalSnapshotAsync(
-            equipmentListingId, cancellationToken);
-
-        if (result.IsFailure)
-        {
-            if (result.Error.Type == ErrorType.NotFound) return null;
-            throw DependencyFailure(result.Error);
-        }
-
-        return result.Value.OwnerUserId == Guid.Empty ? null : result.Value.OwnerUserId;
-    }
-
     public async Task<RentalListingSnapshot?> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default)
     {
-        Result<ListingRentalSnapshotDto> result = await inventory.GetListingRentalSnapshotAsync(
-            listingId, cancellationToken);
+        Result<ListingRentalSnapshotsResponse> result = await inventory.GetListingRentalSnapshotsAsync(
+            new ListingRentalSnapshotsRequest([listingId]), cancellationToken);
 
         if (result.IsFailure)
         {
@@ -39,15 +24,18 @@ public sealed class InventoryRentalCartReader(IInventoryRentalClient inventory) 
             throw DependencyFailure(result.Error);
         }
 
-        ListingRentalSnapshotDto snapshot = result.Value;
+        var snapshot = result.Value.Items.FirstOrDefault(x => x.Id == listingId);
+        if (snapshot is null) return null;
+
         bool active = string.Equals(snapshot.Status, "Active", StringComparison.OrdinalIgnoreCase);
 
         // Inventory không có phiên bản giá: lấy chính giá thuê làm phiên bản, giá đổi thì phiên bản đổi.
         return new RentalListingSnapshot(
             snapshot.Id,
             snapshot.OwnerUserId,
-            IsPublished: active,
-            AcceptsBookings: active,
+            snapshot.EquipmentTypeId,
+            active,
+            active,
             snapshot.DailyRate,
             CheckoutRules.DepositPerUnit,
             snapshot.DailyRate.ToString(CultureInfo.InvariantCulture));

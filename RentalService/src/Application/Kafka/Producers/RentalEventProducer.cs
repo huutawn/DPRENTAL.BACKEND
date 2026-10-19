@@ -105,4 +105,129 @@ public sealed class RentalEventProducer : IRentalEventProducer
 
         return await _outboxWriter.EnqueueAsync(topic, partitionKey, envelope, cancellationToken);
     }
+    public async Task<Result<ProducerEnqueueResult>> EnqueueCartItemAddedAsync(
+        CartItemAddedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload == null)
+            return Error.Validation("INVALID_PAYLOAD", "CartItemAddedPayload cannot be null.");
+        if (payload.UserId == Guid.Empty)
+            return Error.Validation("INVALID_USER_ID", "UserId cannot be empty.");
+        if (payload.EquipmentListingId == Guid.Empty)
+            return Error.Validation("INVALID_LISTING_ID", "EquipmentListingId cannot be empty.");
+        if (payload.EquipmentTypeId == Guid.Empty)
+            return Error.Validation("INVALID_TYPE_ID", "EquipmentTypeId cannot be empty.");
+        if (payload.CartId == Guid.Empty)
+            return Error.Validation("INVALID_CART_ID", "CartId cannot be empty.");
+        if (payload.CartItemId == Guid.Empty)
+            return Error.Validation("INVALID_CART_ITEM_ID", "CartItemId cannot be empty.");
+
+        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.CartItemAdded,
+            payload.CartItemId.ToString("D"));
+
+        string topic = _kafkaOptions.RentalEventsTopic;
+        string partitionKey = payload.CartId.ToString("D");
+
+        var envelope = new KafkaMessageEnvelope<CartItemAddedPayload>(
+            messageId,
+            KafkaContractSpec.EventTypes.CartItemAdded,
+            KafkaContractSpec.CurrentEnvelopeVersion,
+            KafkaContractSpec.Producers.RentalService,
+            partitionKey,
+            utcNow,
+            correlationId,
+            causationId,
+            payload);
+
+        return await _outboxWriter.EnqueueAsync(topic, partitionKey, envelope, cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueRentalItemPaidAsync(
+        RentalItemPaidPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload == null)
+            return Error.Validation("INVALID_PAYLOAD", "RentalItemPaidPayload cannot be null.");
+        if (payload.UserId == Guid.Empty)
+            return Error.Validation("INVALID_USER_ID", "UserId cannot be empty.");
+        if (payload.EquipmentListingId == Guid.Empty)
+            return Error.Validation("INVALID_LISTING_ID", "EquipmentListingId cannot be empty.");
+        if (payload.EquipmentTypeId == Guid.Empty)
+            return Error.Validation("INVALID_TYPE_ID", "EquipmentTypeId cannot be empty.");
+        if (payload.RentalOrderId == Guid.Empty)
+            return Error.Validation("INVALID_ORDER_ID", "RentalOrderId cannot be empty.");
+        if (payload.RentalItemId == Guid.Empty)
+            return Error.Validation("INVALID_ITEM_ID", "RentalItemId cannot be empty.");
+
+        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalItemPaid,
+            payload.RentalItemId.ToString("D"));
+
+        string topic = _kafkaOptions.RentalEventsTopic;
+        string partitionKey = payload.RentalOrderId.ToString("D");
+
+        var envelope = new KafkaMessageEnvelope<RentalItemPaidPayload>(
+            messageId,
+            KafkaContractSpec.EventTypes.RentalItemPaid,
+            KafkaContractSpec.CurrentEnvelopeVersion,
+            KafkaContractSpec.Producers.RentalService,
+            partitionKey,
+            utcNow,
+            correlationId,
+            causationId,
+            payload);
+
+        return await _outboxWriter.EnqueueAsync(topic, partitionKey, envelope, cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueRentalItemCompletedAsync(
+        RentalItemCompletedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload == null)
+            return Error.Validation("INVALID_PAYLOAD", "RentalItemCompletedPayload cannot be null.");
+        if (payload.UserId == Guid.Empty)
+            return Error.Validation("INVALID_USER_ID", "UserId cannot be empty.");
+        if (payload.EquipmentListingId == Guid.Empty)
+            return Error.Validation("INVALID_LISTING_ID", "EquipmentListingId cannot be empty.");
+        if (payload.EquipmentTypeId == Guid.Empty)
+            return Error.Validation("INVALID_TYPE_ID", "EquipmentTypeId cannot be empty.");
+        if (payload.RentalOrderId == Guid.Empty)
+            return Error.Validation("INVALID_ORDER_ID", "RentalOrderId cannot be empty.");
+        if (payload.RentalItemId == Guid.Empty)
+            return Error.Validation("INVALID_ITEM_ID", "RentalItemId cannot be empty.");
+
+        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalItemCompleted,
+            payload.RentalItemId.ToString("D"));
+
+        string topic = _kafkaOptions.RentalEventsTopic;
+        string partitionKey = payload.RentalOrderId.ToString("D");
+
+        var envelope = new KafkaMessageEnvelope<RentalItemCompletedPayload>(
+            messageId,
+            KafkaContractSpec.EventTypes.RentalItemCompleted,
+            KafkaContractSpec.CurrentEnvelopeVersion,
+            KafkaContractSpec.Producers.RentalService,
+            partitionKey,
+            utcNow,
+            correlationId,
+            causationId,
+            payload);
+
+        return await _outboxWriter.EnqueueAsync(topic, partitionKey, envelope, cancellationToken);
+    }
 }

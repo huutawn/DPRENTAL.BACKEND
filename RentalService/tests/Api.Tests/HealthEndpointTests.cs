@@ -70,19 +70,15 @@ public sealed class HealthEndpointTests
                 builder.ConfigureTestServices(services =>
                 {
                     var listingDependencies = new TestListingDependencies();
-                    services.AddSingleton<IRentalListingOwnerProvider>(listingDependencies);
                     services.AddSingleton<IRentalListingReader>(listingDependencies);
                     services.AddSingleton<IRentalAvailabilityReader>(listingDependencies);
                 });
             });
 
     private sealed class TestListingDependencies :
-        IRentalListingOwnerProvider,
         IRentalListingReader,
         IRentalAvailabilityReader
     {
-        public Task<Guid?> GetOwnerIdAsync(Guid equipmentListingId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<Guid?>(null);
 
         public Task<RentalListingSnapshot?> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default) =>
             Task.FromResult<RentalListingSnapshot?>(null);

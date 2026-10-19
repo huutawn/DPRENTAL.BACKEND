@@ -440,7 +440,7 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
 
         public Task AddAsync(RentalOutboxMessage message, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<bool> MarkPublishedAsync(Guid id, string claimToken, DateTimeOffset publishedAt, CancellationToken cancellationToken = default) => Task.FromResult(true);
-        public Task<bool> RecordFailureAsync(Guid id, string claimToken, string errorMessage, DateTimeOffset attemptedAt, DateTimeOffset? nextScheduledAt = null, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> RecordFailureAsync(Guid id, string claimToken, string errorMessage, DateTimeOffset attemptedAt, DateTimeOffset? nextScheduledAt = null, string? targetStatus = null, CancellationToken cancellationToken = default) => Task.FromResult(true);
     }
 
     private sealed class StubPaymentWorkflow : IPaymentWorkflowService

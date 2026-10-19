@@ -15,6 +15,8 @@ public class RentalCartItem
 
     public Guid EquipmentListingId { get; private set; }
 
+    public Guid? EquipmentTypeId { get; private set; }
+
     public int Quantity { get; private set; }
 
     public DateOnly ExpectedStartDate { get; private set; }
@@ -37,6 +39,7 @@ public class RentalCartItem
         Guid id,
         Guid rentalCartId,
         Guid equipmentListingId,
+        Guid? equipmentTypeId,
         int quantity,
         DateOnly expectedStartDate,
         DateOnly expectedEndDate,
@@ -45,6 +48,7 @@ public class RentalCartItem
         Id = id;
         RentalCartId = rentalCartId;
         EquipmentListingId = equipmentListingId;
+        EquipmentTypeId = equipmentTypeId;
         Quantity = quantity;
         ExpectedStartDate = expectedStartDate;
         ExpectedEndDate = expectedEndDate;
@@ -69,5 +73,11 @@ public class RentalCartItem
     {
         Quantity += delta;
         UpdatedAt = utcNow;
+    }
+
+    public void SetEquipmentTypeId(Guid equipmentTypeId)
+    {
+        if (equipmentTypeId == Guid.Empty) throw new ArgumentException("EquipmentTypeId cannot be empty.", nameof(equipmentTypeId));
+        EquipmentTypeId = equipmentTypeId;
     }
 }

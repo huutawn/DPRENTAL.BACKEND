@@ -12,6 +12,7 @@ using Dprental.RentalService.Application.DTOs.Supplier;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.DTOs.Operations;
@@ -136,6 +137,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         }
 
         await using var orderLock = await _lockManager.AcquireOrderLockAsync(descriptor.RentalOrderId, TimeSpan.FromSeconds(5), cancellationToken);
+        utcNow = _timeProvider.GetUtcNow();
 
         var order = await _orderRepository.GetByIdWithDetailsAsync(descriptor.RentalOrderId, cancellationToken);
         if (order == null) return Error.NotFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng.");
@@ -144,25 +146,35 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         if (receipt == null) return Error.NotFound("RECEIPT_NOT_FOUND", "Không tìm thấy operation receipt.");
 
         if (receipt.IsSuccess && receipt.Status == RentalOperationReceipt.StatusSucceeded) return Result.Success();
+
+
         if (receipt.Status == RentalOperationReceipt.StatusFailed)
         {
             if (receipt.Action == "CreateInvoice" &&
                 receipt.ErrorClassification is RentalOperationReceipt.ClassificationTransientExhausted or RentalOperationReceipt.ClassificationUncertainExhausted)
             {
-                if (order.Status != RentalOrderStatus.PendingPayment || order.PaymentDeadline <= utcNow)
-                {
-                    return Result.Success();
-                }
-
                 if (!string.IsNullOrWhiteSpace(order.InvoiceRef))
                 {
-                    receipt.MarkSucceeded(utcNow);
+                    if (_invoiceIssuer == null)
+                    {
+                        return Error.Failure("INVOICE_ISSUER_UNAVAILABLE", "Invoice issuer is not configured.");
+                    }
+                    return await _invoiceIssuer.EnsureInvoiceAsync(order, cancellationToken);
+                }
+
+                if (utcNow >= order.PaymentDeadline || order.Status != RentalOrderStatus.PendingPayment)
+                {
+                    string closeCode = utcNow >= order.PaymentDeadline ? "ORDER_EXPIRED" : "ORDER_NOT_PENDING";
+                    string closeMsg = utcNow >= order.PaymentDeadline
+                        ? "Payment deadline has passed; halting invoice creation."
+                        : "Order is no longer pending payment; halting invoice creation.";
+                    receipt.MarkFailed(closeCode, closeMsg, utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
                     if (_checkoutOperationRepo != null)
                     {
                         var op = await _checkoutOperationRepo.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
-                        if (op != null && op.InvoiceStatus != "Ready")
+                        if (op != null && op.InvoiceStatus != "Failed")
                         {
-                            op.SetInvoiceStatus("Ready", utcNow);
+                            op.SetInvoiceStatus("Failed", utcNow);
                             await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
                         }
                     }
@@ -416,13 +428,19 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         bool forceUncertain = false,
         DateTimeOffset? deadline = null)
     {
+        bool isCreateInvoice = receipt.Action == "CreateInvoice";
+
+        if (isCreateInvoice && IsDeterministicInvoiceRejection(error))
+        {
+            receipt.MarkFailed(error.Code, error.Message, utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+            return;
+        }
         bool isUncertain = forceUncertain ||
                            receipt.IsOutcomeUncertain ||
                            error.Type == ErrorType.ServiceUnavailable ||
                            error.Code.Contains("Timeout", StringComparison.OrdinalIgnoreCase) ||
                            error.Code.Contains("Unavailable", StringComparison.OrdinalIgnoreCase);
 
-        bool isCreateInvoice = receipt.Action == "CreateInvoice";
         bool isExhausted = !isCreateInvoice && receipt.RetryCount >= 10;
 
         double baseDelay = Math.Min(60, Math.Pow(2, receipt.RetryCount));
@@ -453,6 +471,13 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         // Deterministic Business/Validation errors without prior uncertainty do not retry
         receipt.MarkFailed(error.Code, error.Message, utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
     }
+    private static bool IsDeterministicInvoiceRejection(Error error) =>
+        string.Equals(error.Code, CheckoutErrors.InvoiceRejected.Code, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(error.Code, CheckoutErrors.OrderExpired.Code, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(error.Code, "ORDER_NOT_PENDING", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(error.Code, "ORDER_EXPIRED", StringComparison.OrdinalIgnoreCase) ||
+        error.Type is ErrorType.Validation or ErrorType.Conflict;
+
 
     private async Task CommitLocalChangesAsync(RentalOrder order, CancellationToken cancellationToken)
     {

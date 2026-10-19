@@ -45,6 +45,7 @@ public sealed class OperationReceiptRepository : IOperationReceiptRepository
                      (r.NextRetryAt == null || r.NextRetryAt <= utcNow))
                 ))
             .OrderBy(r => r.CreatedAt)
+            .ThenBy(r => r.Id)
             .Take(batchSize)
             .Select(r => new OperationReceiptDescriptor(
                 r.Id,

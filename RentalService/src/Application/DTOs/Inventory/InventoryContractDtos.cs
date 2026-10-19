@@ -18,12 +18,12 @@ public sealed record ListingWarehouseDto(
 public sealed record ListingRentalSnapshotDto(
     Guid Id,
     Guid OwnerUserId,
+    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
     string Name,
     Guid? ThumbnailMediaId,
     decimal DailyRate,
     string Currency,
     string Status,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     ListingWarehouseDto? Warehouse = null);
 
 // 2. CheckListingAvailability: POST /equipment-listings/{listingId}/availability/check, đúng dạng Inventory.

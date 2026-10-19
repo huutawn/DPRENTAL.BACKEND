@@ -153,6 +153,8 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
         throw new NotSupportedException();
     public Task<RentalOrder?> GetForCheckoutPollingAsync(Guid id, CancellationToken cancellationToken = default) =>
         Task.FromResult(PendingPaymentOrder?.Id == id ? PendingPaymentOrder : null);
+    public Task<Guid?> GetRenterIdByOrderIdAsync(Guid orderId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(PendingPaymentOrder?.Id == orderId ? (Guid?)PendingPaymentOrder.RenterId : null);
 
 
     public Task<RentalOrder?> GetByItemIdWithDetailsAsync(Guid itemId, CancellationToken cancellationToken = default) =>
@@ -311,9 +313,11 @@ internal static class TestListings
         decimal dailyRate,
         bool isActive = true,
         Guid? thumbnailMediaId = null,
-        string currency = "VND") => new(
+        string currency = "VND",
+        Guid? equipmentTypeId = null) => new(
         listingId,
         supplierId,
+        equipmentTypeId ?? Guid.NewGuid(),
         name,
         thumbnailMediaId,
         dailyRate,

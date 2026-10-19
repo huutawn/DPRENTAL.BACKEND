@@ -1,6 +1,9 @@
 using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.Services.Cart;
+using Dprental.RentalService.Application.Kafka.Events;
+using Dprental.RentalService.Application.Kafka.Producers;
+using Dprental.RentalService.Common;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,13 +20,17 @@ namespace Dprental.RentalService.Application.Tests.Cart; // Sửa lại namespac
 public sealed class RentalCartUseCasesTests
 {
     private readonly Mock<IRentalCartRepository> _cartRepoMock = new();
-    private readonly Mock<IRentalListingOwnerProvider> _ownerProviderMock = new();
+    private readonly Mock<IRentalListingReader> _listingReaderMock = new();
+    private readonly Mock<IOrderLockManager> _lockManagerMock = new();
+    private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
+    private readonly Mock<IRentalEventProducer> _eventProducerMock = new();
     private readonly FakeTimeProvider _timeProvider = new();
     private readonly RentalCartUseCases _sut;
 
     private readonly Guid _renterId = Guid.NewGuid();
     private readonly Guid _listingId = Guid.NewGuid();
     private readonly Guid _ownerId = Guid.NewGuid();
+    private readonly Guid _equipmentTypeId = Guid.NewGuid();
 
     private readonly DateOnly _validStartDate;
     private readonly DateOnly _validEndDate;
@@ -31,22 +38,41 @@ public sealed class RentalCartUseCasesTests
     public RentalCartUseCasesTests()
     {
         var nowUtc = DateTimeOffset.UtcNow;
-
         _timeProvider.SetUtcNow(nowUtc);
 
-        _sut = new RentalCartUseCases(_cartRepoMock.Object, _ownerProviderMock.Object, _timeProvider);
+        _lockManagerMock
+            .Setup(x => x.AcquireRenterLockAsync(It.IsAny<Guid>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Mock<IAsyncDisposable>().Object);
+
+        var txMock = new Mock<IUnitOfWorkTransaction>();
+        _unitOfWorkMock
+            .Setup(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(txMock.Object);
+        _eventProducerMock
+            .Setup(x => x.EnqueueCartItemAddedAsync(It.IsAny<CartItemAddedPayload>(), It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "CartItemAdded", "topic", "key")));
+
+
+        _sut = new RentalCartUseCases(
+            _cartRepoMock.Object,
+            _listingReaderMock.Object,
+            _lockManagerMock.Object,
+            _unitOfWorkMock.Object,
+            _eventProducerMock.Object,
+            _timeProvider);
 
         var todayVn = DateOnly.FromDateTime(nowUtc.AddHours(7).DateTime);
-
-        _validStartDate = RentalBookingPolicy.EarliestStartDate(todayVn); // Sớm nhất: hôm nay + 3 ngày
+        _validStartDate = RentalBookingPolicy.EarliestStartDate(todayVn);
         _validEndDate = todayVn.AddDays(5);
+
+        _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RentalListingSnapshot(_listingId, _ownerId, _equipmentTypeId, true, true, 100m, 50m, "v1"));
     }
 
     [Fact]
     public async Task AddCartItem_StartDateLessThanThreeDaysAhead_ReturnsStartDateInvalid()
     {
-        _ownerProviderMock.Setup(x => x.GetOwnerIdAsync(_listingId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(_ownerId);
+
 
         var result = await _sut.AddCartItemAsync(_renterId, _listingId, 1, _validStartDate.AddDays(-1), _validEndDate);
 
@@ -58,8 +84,7 @@ public sealed class RentalCartUseCasesTests
     [Fact]
     public async Task AddCartItem_NoActiveCart_CreatesCartAndAddsItem()
     {
-        _ownerProviderMock.Setup(x => x.GetOwnerIdAsync(_listingId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(_ownerId);
+
 
         _cartRepoMock.Setup(x => x.GetActiveByRenterIdAsync(_renterId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((RentalCart?)null);
@@ -75,8 +100,8 @@ public sealed class RentalCartUseCasesTests
     public async Task AddCartItem_RenterIsOwner_ReturnsCannotRentOwnListing()
     {
         // Setup Provider trả về OwnerId trùng với RenterId
-        _ownerProviderMock.Setup(x => x.GetOwnerIdAsync(_listingId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(_renterId);
+        _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RentalListingSnapshot(_listingId, _renterId, _equipmentTypeId, true, true, 100m, 50m, "v1"));
 
         var result = await _sut.AddCartItemAsync(_renterId, _listingId, 1, _validStartDate, _validEndDate);
 
@@ -156,8 +181,7 @@ public sealed class RentalCartUseCasesTests
 
         _cartRepoMock.Setup(x => x.GetActiveByRenterIdAsync(_renterId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(cart);
-        _ownerProviderMock.Setup(x => x.GetOwnerIdAsync(_listingId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(_ownerId);
+
         _cartRepoMock.Setup(x => x.UpdateAsync(cart, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
@@ -177,8 +201,7 @@ public sealed class RentalCartUseCasesTests
 
         _cartRepoMock.Setup(x => x.GetActiveByRenterIdAsync(_renterId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(cart);
-        _ownerProviderMock.Setup(x => x.GetOwnerIdAsync(_listingId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(_ownerId);
+
         _cartRepoMock.Setup(x => x.UpdateAsync(cart, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
@@ -191,5 +214,58 @@ public sealed class RentalCartUseCasesTests
         var updated = cart.Items.First(i => i.Id == cartItemId);
         Assert.Equal(newStart, updated.ExpectedStartDate);
         Assert.Equal(newEnd, updated.ExpectedEndDate);
+    }
+
+    [Fact]
+    public async Task AddCartItem_WhenNewItem_EnqueuesCartItemAdded_AndCommits()
+    {
+        _cartRepoMock.Setup(x => x.GetActiveByRenterIdAsync(_renterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RentalCart?)null);
+
+        var result = await _sut.AddCartItemAsync(_renterId, _listingId, 1, _validStartDate, _validEndDate);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        _eventProducerMock.Verify(x => x.EnqueueCartItemAddedAsync(
+            It.Is<CartItemAddedPayload>(p =>
+                p.UserId == _renterId &&
+                p.EquipmentListingId == _listingId &&
+                p.EquipmentTypeId == _equipmentTypeId &&
+                p.CartItemId == result.Value.Id),
+            null, null, It.IsAny<CancellationToken>()), Times.Once);
+        _unitOfWorkMock.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AddCartItem_WhenExistingItem_IncreasesQuantity_DoesNotEnqueueEvent()
+    {
+        var cart = RentalCart.Create(Guid.NewGuid(), _renterId, _timeProvider.GetUtcNow()).Value;
+        cart.AddItem(Guid.NewGuid(), _listingId, _ownerId, _equipmentTypeId, 2, _validStartDate, _validEndDate, _timeProvider.GetUtcNow());
+
+        _cartRepoMock.Setup(x => x.GetActiveByRenterIdAsync(_renterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cart);
+        _cartRepoMock.Setup(x => x.UpdateAsync(cart, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var result = await _sut.AddCartItemAsync(_renterId, _listingId, 3, _validStartDate, _validEndDate);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal(5, result.Value.Quantity);
+        _eventProducerMock.Verify(x => x.EnqueueCartItemAddedAsync(
+            It.IsAny<CartItemAddedPayload>(), null, null, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AddCartItem_WhenMissingEquipmentTypeId_ReturnsError_DoesNotPersist()
+    {
+        _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RentalListingSnapshot(_listingId, _ownerId, Guid.Empty, true, true, 100m, 50m, "v1"));
+
+        var result = await _sut.AddCartItemAsync(_renterId, _listingId, 1, _validStartDate, _validEndDate);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_EQUIPMENT_TYPE_ID", result.Error.Code);
+        _cartRepoMock.Verify(x => x.CreateAsync(It.IsAny<RentalCart>(), It.IsAny<CancellationToken>()), Times.Never);
+        _eventProducerMock.Verify(x => x.EnqueueCartItemAddedAsync(
+            It.IsAny<CartItemAddedPayload>(), null, null, It.IsAny<CancellationToken>()), Times.Never);
     }
 }

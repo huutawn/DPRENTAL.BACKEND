@@ -25,6 +25,7 @@ using System.Security.Claims;
 using System.Text.Encodings.Web;
 using System.Threading;
 using System.Threading.Tasks;
+using Dprental.RentalService.Application.Kafka.Producers;
 
 namespace Dprental.RentalService.Api.Tests.Cart;
 
@@ -59,9 +60,11 @@ public class RentalApiFixture : WebApplicationFactory<Program>
 
             // 4. Mock Inventory Providers (Trả về dữ liệu dummy)
             var fakeDeps = new FakeDependencies();
-            services.AddSingleton<IRentalListingOwnerProvider>(fakeDeps);
             services.AddSingleton<IRentalListingReader>(fakeDeps);
             services.AddSingleton<IRentalAvailabilityReader>(fakeDeps);
+            services.AddSingleton<IOrderLockManager, FakeOrderLockManager>();
+            services.AddSingleton<IUnitOfWork, FakeUnitOfWork>();
+            services.AddSingleton<IRentalEventProducer, FakeRentalEventProducer>();
             services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
 
             services.AddSingleton<TimeProvider>(TimeProvider.System);
@@ -153,14 +156,11 @@ public class RentalApiFixture : WebApplicationFactory<Program>
         }
     }
 
-    private sealed class FakeDependencies : IRentalListingOwnerProvider, IRentalListingReader, IRentalAvailabilityReader
+    private sealed class FakeDependencies : IRentalListingReader, IRentalAvailabilityReader
     {
-        public Task<Guid?> GetOwnerIdAsync(Guid listingId, CancellationToken token = default)
-            => Task.FromResult<Guid?>(Guid.NewGuid()); // Owner ID fake luôn khác RenterId
-
         public Task<RentalListingSnapshot?> GetListingAsync(Guid listingId, CancellationToken token = default)
             => Task.FromResult<RentalListingSnapshot?>(new RentalListingSnapshot(
-                listingId, Guid.NewGuid(), true, true, 100m, 50m, "v1"));
+                listingId, Guid.NewGuid(), Guid.NewGuid(), true, true, 100m, 50m, "v1"));
 
         public Task<int?> GetAvailableQuantityAsync(Guid listingId, DateOnly start, DateOnly end, CancellationToken token = default)
             => Task.FromResult<int?>(999); // Luôn dồi dào số lượng

@@ -113,6 +113,8 @@ public sealed class ReturnTests : IAsyncLifetime
             services.AddScoped(_ => NewDb());
             services.RemoveAll<IOrderLockManager>();
             services.AddSingleton<IOrderLockManager>(new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance));
+            services.RemoveAll<IUnitOfWork>();
+            services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<RentalServiceDbContext>());
             services.AddSingleton<TimeProvider>(_clock);
         }));
         using var client = factory.CreateClient();

@@ -8,6 +8,7 @@ using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Application.Errors;
 using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Operations;
@@ -370,17 +371,26 @@ public sealed partial class RentalOperationExecutor
     {
         if (!string.IsNullOrWhiteSpace(order.InvoiceRef))
         {
-            if (_invoiceIssuer != null)
+            if (_invoiceIssuer == null)
             {
-                return await _invoiceIssuer.EnsureInvoiceAsync(order, cancellationToken);
+                return Error.Failure("INVOICE_ISSUER_UNAVAILABLE", "Invoice issuer is not configured.");
             }
-            return Result.Success();
+            return await _invoiceIssuer.EnsureInvoiceAsync(order, cancellationToken);
         }
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         if (order.PaymentDeadline <= utcNow)
         {
             receipt.MarkFailed("ORDER_EXPIRED", "Payment deadline has passed; halting invoice creation.", utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+            if (_checkoutOperationRepo != null)
+            {
+                var op = await _checkoutOperationRepo.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
+                if (op != null && op.InvoiceStatus != "Failed")
+                {
+                    op.SetInvoiceStatus("Failed", utcNow);
+                    await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
+                }
+            }
             await CommitLocalChangesAsync(order, cancellationToken);
             return Error.Conflict("ORDER_EXPIRED", "Payment deadline has passed; halting invoice creation.");
         }
@@ -388,6 +398,15 @@ public sealed partial class RentalOperationExecutor
         if (order.Status != RentalOrderStatus.PendingPayment)
         {
             receipt.MarkFailed("ORDER_NOT_PENDING", "Order is no longer pending payment; halting invoice creation.", utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+            if (_checkoutOperationRepo != null)
+            {
+                var op = await _checkoutOperationRepo.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
+                if (op != null && op.InvoiceStatus != "Failed")
+                {
+                    op.SetInvoiceStatus("Failed", utcNow);
+                    await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
+                }
+            }
             await CommitLocalChangesAsync(order, cancellationToken);
             return Result.Success();
         }
@@ -405,8 +424,62 @@ public sealed partial class RentalOperationExecutor
 
         if (invoiceResult.IsSuccess)
         {
-            // Issuer already validated, attached invoice, marked receipt Succeeded, updated operation to Ready, and committed in one SaveChangesAsync.
             return Result.Success();
+        }
+
+        if (string.Equals(invoiceResult.Error.Code, CheckoutErrors.InvoicePersistenceConflict.Code, StringComparison.OrdinalIgnoreCase))
+        {
+            _unitOfWork.DiscardChanges();
+
+            var reloadedOrder = await _orderRepository.GetByIdWithDetailsAsync(order.Id, cancellationToken);
+            if (reloadedOrder == null)
+            {
+                return Error.NotFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng sau khi nạp lại.");
+            }
+
+            var reloadedReceipt = reloadedOrder.OperationReceipts.FirstOrDefault(r => r.OperationId == receipt.OperationId);
+            if (reloadedReceipt == null)
+            {
+                return Error.NotFound("RECEIPT_NOT_FOUND", "Không tìm thấy operation receipt sau khi nạp lại.");
+            }
+
+            DateTimeOffset reloadNow = _timeProvider.GetUtcNow();
+
+            if (reloadedReceipt.IsSuccess && reloadedReceipt.Status == RentalOperationReceipt.StatusSucceeded)
+            {
+                return Result.Success();
+            }
+
+            if (!string.IsNullOrWhiteSpace(reloadedOrder.InvoiceRef))
+            {
+                return await _invoiceIssuer.EnsureInvoiceAsync(reloadedOrder, cancellationToken);
+            }
+
+            if (reloadedOrder.Status != RentalOrderStatus.PendingPayment || reloadNow >= reloadedOrder.PaymentDeadline)
+            {
+                string closeCode = reloadNow >= reloadedOrder.PaymentDeadline ? "ORDER_EXPIRED" : "ORDER_NOT_PENDING";
+                string closeMsg = reloadNow >= reloadedOrder.PaymentDeadline
+                    ? "Payment deadline has passed; halting invoice creation."
+                    : "Order is no longer pending payment; halting invoice creation.";
+                reloadedReceipt.MarkFailed(closeCode, closeMsg, reloadNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+
+                if (_checkoutOperationRepo != null)
+                {
+                    var op = await _checkoutOperationRepo.GetByExpectedOrderIdAsync(reloadedOrder.Id, cancellationToken);
+                    if (op != null && op.InvoiceStatus != "Failed")
+                    {
+                        op.SetInvoiceStatus("Failed", reloadNow);
+                        await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
+                    }
+                }
+                await CommitLocalChangesAsync(reloadedOrder, cancellationToken);
+                return Result.Success();
+            }
+
+            var transientErr = Error.ServiceUnavailable(CheckoutErrors.InvoicePersistenceConflict.Code, "Xung đột đồng thời khi lưu thông tin hóa đơn; đã lên lịch thử lại.");
+            RecordExecutionFailure(reloadedReceipt, transientErr, reloadNow, forceUncertain: false, deadline: reloadedOrder.PaymentDeadline);
+            await CommitLocalChangesAsync(reloadedOrder, cancellationToken);
+            return transientErr;
         }
 
         RecordExecutionFailure(receipt, invoiceResult.Error, utcNow, forceUncertain: false, deadline: order.PaymentDeadline);

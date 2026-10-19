@@ -47,7 +47,6 @@ public static class ApplicationServiceCollectionExtensions
         // Cart Policy & Adapter
         services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
         services.AddScoped<InventoryRentalCartReader>();
-        services.AddScoped<IRentalListingOwnerProvider>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
         services.AddScoped<IRentalListingReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
         services.AddScoped<IRentalAvailabilityReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
 

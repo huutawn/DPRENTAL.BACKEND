@@ -175,7 +175,7 @@ internal sealed class CheckoutCompletion
             context,
             new ConfigurationBuilder().Build(),
             NullLogger<RentalOperationExecutor>.Instance,
-            new CheckoutInvoiceIssuer(_payment, orders, context, _clock, NullLogger<CheckoutInvoiceIssuer>.Instance, new RentalCheckoutOperationRepository(context)),
+            new CheckoutInvoiceIssuer(_payment, orders, new RentalCheckoutOperationRepository(context), context, _clock, NullLogger<CheckoutInvoiceIssuer>.Instance),
             new RentalCheckoutOperationRepository(context),
             _clock);
 

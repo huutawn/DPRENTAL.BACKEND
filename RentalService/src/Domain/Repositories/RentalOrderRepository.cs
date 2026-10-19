@@ -168,6 +168,15 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             .Include(o => o.OperationReceipts)
             .FirstOrDefaultAsync(o => o.Id == id, cancellationToken);
     }
+    public async Task<Guid?> GetRenterIdByOrderIdAsync(Guid orderId, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalOrders
+            .AsNoTracking()
+            .Where(o => o.Id == orderId)
+            .Select(o => (Guid?)o.RenterId)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
 
 
     public async Task<Guid?> GetOrderIdByItemIdAsync(Guid itemId, CancellationToken cancellationToken = default)

@@ -593,16 +593,26 @@ public sealed class RentalOperationExecutorAdvancedTests
             receipt.Id, order.Id, opKey, "CreateInvoice", null,
             RentalOperationReceipt.StatusFailed, 10, null, receipt.CreatedAt, null, false);
 
-        bool called = false;
-        var fakeIssuer = new FakeInvoiceIssuer { Handler = _ => { called = true; return Task.FromResult(Result.Success()); } };
-        var executor = CreateExecutor(db, new StubInventoryClient(), new StubPaymentClient(), invoiceIssuer: fakeIssuer);
+        bool issuerCalled = false;
+        var fakePayment = new StubPaymentClient();
+        var fakeIssuer = new FakeInvoiceIssuer
+        {
+            Handler = o =>
+            {
+                issuerCalled = true;
+                o.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey)?.MarkSucceeded(FixedNow);
+                return Task.FromResult(Result.Success());
+            }
+        };
+        var executor = CreateExecutor(db, new StubInventoryClient(), fakePayment, invoiceIssuer: fakeIssuer);
         var res = await executor.ExecuteScheduledOperationAsync(desc);
 
         Assert.True(res.IsSuccess);
-        Assert.False(called);
+        Assert.True(issuerCalled);
         Assert.Equal(10, receipt.RetryCount);
-        Assert.True(receipt.IsSuccess);
-        Assert.Equal(RentalOperationReceipt.StatusSucceeded, receipt.Status);
+        var reloaded = await db.RentalOperationReceipts.FirstAsync(r => r.Id == receipt.Id);
+        Assert.True(reloaded.IsSuccess);
+        Assert.Equal(RentalOperationReceipt.StatusSucceeded, reloaded.Status);
     }
 
     [Fact]

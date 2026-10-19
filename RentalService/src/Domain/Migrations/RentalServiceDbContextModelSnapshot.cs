@@ -212,6 +212,9 @@ namespace RentalService.Domain.Migrations
                     b.Property<Guid>("EquipmentListingId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("EquipmentTypeId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateOnly>("ExpectedEndDate")
                         .HasColumnType("date");
 

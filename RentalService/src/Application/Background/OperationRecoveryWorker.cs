@@ -86,11 +86,13 @@ public sealed class OperationRecoveryWorker : BackgroundService
 
     public async Task<int> ProcessBatchAsync(CancellationToken cancellationToken)
     {
-        DateTimeOffset utcNow = DateTimeOffset.UtcNow;
+        DateTimeOffset utcNow;
         IReadOnlyList<OperationReceiptDescriptor> descriptors;
 
         using (var scope = _scopeFactory.CreateScope())
         {
+            var timeProvider = scope.ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
+            utcNow = timeProvider.GetUtcNow();
             var receiptRepository = scope.ServiceProvider.GetRequiredService<IOperationReceiptRepository>();
             descriptors = await receiptRepository.GetPendingOperationDescriptorsAsync(
                 utcNow,

@@ -1,5 +1,7 @@
 using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.Kafka.Events;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
@@ -12,7 +14,10 @@ namespace Dprental.RentalService.Application.Services.Cart;
 
 public sealed class RentalCartUseCases(
     IRentalCartRepository carts,
-    IRentalListingOwnerProvider listingOwners,
+    IRentalListingReader listingReader,
+    IOrderLockManager lockManager,
+    IUnitOfWork unitOfWork,
+    IRentalEventProducer eventProducer,
     TimeProvider timeProvider)
 {
     public async Task<Result<RentalCartItem>> AddCartItemAsync(
@@ -23,21 +28,29 @@ public sealed class RentalCartUseCases(
         DateOnly endDate,
         CancellationToken cancellationToken = default)
     {
-        Result dateCheck = ValidateRentalDates(startDate, endDate); if (dateCheck.IsFailure) return dateCheck.Error;
+        Result dateCheck = ValidateRentalDates(startDate, endDate);
+        if (dateCheck.IsFailure) return dateCheck.Error;
         if (renterId == Guid.Empty)
             return RentalErrors.CartNotFound;
 
-        Guid? ownerId = await listingOwners.GetOwnerIdAsync(
+        RentalListingSnapshot? listing = await listingReader.GetListingAsync(
             equipmentListingId,
             cancellationToken);
 
-        if (ownerId is null)
+        if (listing is null)
             return RentalErrors.OwnerIdRequired;
+
+        if (listing.EquipmentTypeId == Guid.Empty)
+            return Error.Validation("INVALID_EQUIPMENT_TYPE_ID", "EquipmentTypeId của listing không được để trống hoặc rỗng.");
+
+        await using var renterLock = await lockManager.AcquireRenterLockAsync(
+            renterId,
+            TimeSpan.FromSeconds(5),
+            cancellationToken);
 
         RentalCart? cart = await carts.GetActiveByRenterIdAsync(renterId, cancellationToken);
         bool isNewCart = false;
 
-        // Check trực tiếp ở đây để C# Analyzer hiểu được null-state
         if (cart is null || cart.Status != RentalCartStatus.Active)
         {
             Result<RentalCart> newCart = RentalCart.Create(
@@ -52,11 +65,16 @@ public sealed class RentalCartUseCases(
             isNewCart = true;
         }
 
-        // Lúc này C# Compiler đã chắc chắn 100% cart không thể null
+        bool isNewItem = !cart.Items.Any(i =>
+            i.EquipmentListingId == equipmentListingId &&
+            i.ExpectedStartDate == startDate &&
+            i.ExpectedEndDate == endDate);
+
         Result<RentalCartItem> added = cart.AddItem(
             Guid.NewGuid(),
             equipmentListingId,
-            ownerId.Value,
+            listing.OwnerId,
+            listing.EquipmentTypeId,
             quantity,
             startDate,
             endDate,
@@ -65,16 +83,53 @@ public sealed class RentalCartUseCases(
         if (added.IsFailure)
             return added.Error;
 
-        if (isNewCart)
+        await using var tx = await unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
         {
-            await carts.CreateAsync(cart, cancellationToken);
-        }
-        else if (!await carts.UpdateAsync(cart, cancellationToken))
-        {
-            return RentalErrors.CartNotFound;
-        }
+            if (isNewCart)
+            {
+                await carts.CreateAsync(cart, cancellationToken);
+            }
+            else
+            {
+                bool updated = await carts.UpdateAsync(cart, cancellationToken);
+                if (!updated)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    unitOfWork.DiscardChanges();
+                    return Error.Conflict("CONCURRENCY_CONFLICT", "Giỏ hàng đã bị thay đổi đồng thời.");
+                }
+            }
 
-        return added.Value;
+            if (isNewItem)
+            {
+                var enqueueResult = await eventProducer.EnqueueCartItemAddedAsync(
+                    new CartItemAddedPayload(
+                        renterId,
+                        equipmentListingId,
+                        listing.EquipmentTypeId,
+                        cart.Id,
+                        added.Value.Id),
+                    cancellationToken: cancellationToken);
+
+                if (enqueueResult.IsFailure)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    unitOfWork.DiscardChanges();
+                    return enqueueResult.Error;
+                }
+            }
+
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+            return added.Value;
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            unitOfWork.DiscardChanges();
+            throw;
+        }
     }
     public async Task<Result> UpdateCartItemAsync(
         Guid renterId,
@@ -118,16 +173,18 @@ public sealed class RentalCartUseCases(
         if (item is null)
             return RentalErrors.CartItemNotFound;
 
-        Guid? ownerId = await listingOwners.GetOwnerIdAsync(
+        RentalListingSnapshot? listing = await listingReader.GetListingAsync(
             item.EquipmentListingId,
             cancellationToken);
 
-        if (ownerId is null)
+        if (listing is null)
             return RentalErrors.OwnerIdRequired;
+
+        Guid ownerId = listing.OwnerId;
 
         Result updated = cart.UpdateItemQuantity(
             cartItemId,
-            ownerId.Value, // Pass retrieved ownerId to domain
+            ownerId, // Pass retrieved ownerId to domain
             quantity,
             timeProvider.GetUtcNow());
 
@@ -155,16 +212,18 @@ public sealed class RentalCartUseCases(
         if (item is null)
             return RentalErrors.CartItemNotFound;
 
-        Guid? ownerId = await listingOwners.GetOwnerIdAsync(
+        RentalListingSnapshot? listing = await listingReader.GetListingAsync(
             item.EquipmentListingId,
             cancellationToken);
 
-        if (ownerId is null)
+        if (listing is null)
             return RentalErrors.OwnerIdRequired;
+
+        Guid ownerId = listing.OwnerId;
 
         Result updated = cart.UpdateItemDates(
             cartItemId,
-            ownerId.Value,
+            ownerId,
             startDate,
             endDate,
             timeProvider.GetUtcNow());

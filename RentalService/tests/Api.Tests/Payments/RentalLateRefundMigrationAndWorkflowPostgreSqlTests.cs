@@ -769,6 +769,7 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
         public Task<bool> UpdateAsync(RentalOrder order, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<RentalOrder?> GetByIdWithDetailsAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<RentalOrder?> GetForCheckoutPollingAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Guid?> GetRenterIdByOrderIdAsync(Guid orderId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<RentalOrder?> GetByItemIdWithDetailsAsync(Guid itemId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Guid?> GetOrderIdByItemIdAsync(Guid itemId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Guid>> GetPendingPaymentExpiredOrderIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) => throw new NotImplementedException();

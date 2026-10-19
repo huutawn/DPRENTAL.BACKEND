@@ -1,4 +1,5 @@
 using Dprental.RentalService.Api.Tests.TestHelpers;
+using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.Errors;
@@ -8,6 +9,8 @@ using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Options;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Services.Checkout;
+using Dprental.RentalService.Application.Services.Operations;
+using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Entities;
@@ -195,6 +198,515 @@ public sealed class CheckoutServicePostgreSqlTests
             await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
         }
     }
+    [Fact]
+    public async Task RecoveryQuery_BatchStarvation_ClosesOldReceiptsAndAdvancesToNewOperations()
+    {
+        if (!await PostgresTestDatabaseHelper.IsPostgreSqlAvailableAsync())
+        {
+            throw new InvalidOperationException("PostgreSQL integration environment is not available at test connection string.");
+        }
+
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            DbContextOptions<RentalServiceDbContext> options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            PostgresOrderLockManager locks = new(
+                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:Postgres"] = connectionString }).Build(),
+                NullLogger<PostgresOrderLockManager>.Instance);
+
+            Guid newOrderId = Guid.NewGuid();
+            string newOpKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", newOrderId.ToString());
+
+            await using (var initCtx = new RentalServiceDbContext(options))
+            {
+                await initCtx.Database.MigrateAsync();
+
+                // 50 expired orders with exhausted receipts
+                for (int i = 0; i < 50; i++)
+                {
+                    Guid expOrderId = Guid.NewGuid();
+                    var items = new[]
+                    {
+                        new InitialRentalItemDto(
+                            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1,
+                            new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18),
+                            "Item", null, "Pickup", 200_000m, 0m, $"grp-{i}",
+                            [new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
+                            Dprental.RentalService.Api.Tests.Domain.TestListingSnapshots.Default)
+                    };
+                    var expOrder = RentalOrder.Create(
+                        expOrderId, $"DH-EXP-{i:D4}", _renterId, "VND", "Delivery",
+                        "Recipient", "0900000000", "Addr", null, null,
+                        "v1.0", "terms.pdf", "hash", $"op-exp-{i}", Now.AddMinutes(-40), items,
+                        paymentDeadline: Now.AddMinutes(-10)).Value;
+                    expOrder.MarkPaymentExpired(Now.AddMinutes(-10), $"exp-op-{i}");
+
+                    string expKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", expOrderId.ToString());
+                    var r = new RentalOperationReceipt(
+                        Guid.NewGuid(), expOrderId, expKey, "CreateInvoice", $"fp-{i}",
+                        isSuccess: false, errorCode: "Payment.Timeout", errorMessage: "Timeout",
+                        createdAt: Now.AddMinutes(-30).AddSeconds(i), status: RentalOperationReceipt.StatusFailed,
+                        retryCount: 10, nextRetryAt: Now.AddMinutes(-5),
+                        errorClassification: RentalOperationReceipt.ClassificationTransientExhausted, isTransient: false);
+
+                    initCtx.RentalOrders.Add(expOrder);
+                    initCtx.RentalOperationReceipts.Add(r);
+                }
+
+                // 1 newer active pending order with pending receipt
+                var activeItems = new[]
+                {
+                    new InitialRentalItemDto(
+                        Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1,
+                        new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18),
+                        "Camera", null, "Pickup", 500_000m, 0m, "grp-active",
+                        [new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
+                        Dprental.RentalService.Api.Tests.Domain.TestListingSnapshots.Default)
+                };
+                var activeOrder = RentalOrder.Create(
+                    newOrderId, "DH-ACTIVE-001", _renterId, "VND", "Delivery",
+                    "Recipient", "0900000000", "Addr", null, null,
+                    "v1.0", "terms.pdf", "hash", "op-active", Now, activeItems,
+                    paymentDeadline: Now.AddMinutes(30)).Value;
+
+                var activeReceipt = RentalOperationReceipt.CreatePending(
+                    Guid.NewGuid(), newOrderId, newOpKey, "CreateInvoice", "fp-active", Now);
+
+                initCtx.RentalOrders.Add(activeOrder);
+                initCtx.RentalOperationReceipts.Add(activeReceipt);
+                await initCtx.SaveChangesAsync();
+            }
+
+            // Query batch 1: gets the 50 exhausted receipts
+            await using (var batch1Ctx = new RentalServiceDbContext(options))
+            {
+                var repo = new OperationReceiptRepository(batch1Ctx);
+                var batch1 = await repo.GetPendingOperationDescriptorsAsync(Now, 50, unlimitedAttemptActions: ["CreateInvoice"]);
+                Assert.Equal(50, batch1.Count);
+                Assert.DoesNotContain(batch1, r => r.OperationId == newOpKey);
+
+                // Process batch 1
+                var executor = CreatePostgresExecutor(batch1Ctx, locks);
+                foreach (var desc in batch1)
+                {
+                    var res = await executor.ExecuteScheduledOperationAsync(desc);
+                    Assert.True(res.IsSuccess);
+                }
+            }
+
+            // Query batch 2: all 50 are now closed, batch 2 returns the active receipt!
+            await using (var batch2Ctx = new RentalServiceDbContext(options))
+            {
+                var repo = new OperationReceiptRepository(batch2Ctx);
+                var batch2 = await repo.GetPendingOperationDescriptorsAsync(Now, 50, unlimitedAttemptActions: ["CreateInvoice"]);
+                var activeDesc = Assert.Single(batch2);
+                Assert.Equal(newOpKey, activeDesc.OperationId);
+
+                // Process active receipt with real issuer
+                var executor = CreatePostgresExecutor(batch2Ctx, locks);
+                var res = await executor.ExecuteScheduledOperationAsync(activeDesc);
+                Assert.True(res.IsSuccess);
+            }
+
+            // Query batch 3: nothing pending
+            await using (var verifyCtx = new RentalServiceDbContext(options))
+            {
+                var repo = new OperationReceiptRepository(verifyCtx);
+                var batch3 = await repo.GetPendingOperationDescriptorsAsync(Now, 50, unlimitedAttemptActions: ["CreateInvoice"]);
+                Assert.Empty(batch3);
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task RealIssuer_RecoveryOver10Attempts_PersistsToPostgreSql()
+    {
+        if (!await PostgresTestDatabaseHelper.IsPostgreSqlAvailableAsync())
+        {
+            throw new InvalidOperationException("PostgreSQL integration environment is not available at test connection string.");
+        }
+
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            DbContextOptions<RentalServiceDbContext> options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            PostgresOrderLockManager locks = new(
+                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:Postgres"] = connectionString }).Build(),
+                NullLogger<PostgresOrderLockManager>.Instance);
+
+            Guid orderId = Guid.NewGuid();
+            string opId = "checkout-op-pg-10";
+            string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", orderId.ToString());
+
+            await using (var initCtx = new RentalServiceDbContext(options))
+            {
+                await initCtx.Database.MigrateAsync();
+
+                var items = new[]
+                {
+                    new InitialRentalItemDto(
+                        Guid.NewGuid(), _supplierId, _listingId, 2,
+                        new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18),
+                        "Camera Sony", null, "Delivery", 500_000m, 0m, "grp-1",
+                        [
+                            new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()),
+                            new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())
+                        ],
+                        Dprental.RentalService.Api.Tests.Domain.TestListingSnapshots.Default)
+                };
+                var order = RentalOrder.Create(
+                    orderId, "DH-2026-000010", _renterId, "VND", "Delivery",
+                    "Nguyen Van A", "0901234567", "Hanoi", null, null,
+                    "v1.0", "terms.pdf", "hash", opId, Now, items,
+                    paymentDeadline: Now.AddMinutes(30)).Value;
+
+                var receipt = new RentalOperationReceipt(
+                    Guid.NewGuid(), orderId, opKey, "CreateInvoice", "fp-10",
+                    isSuccess: false, errorCode: "Payment.Timeout", errorMessage: "Timeout",
+                    createdAt: Now.AddMinutes(-5), status: RentalOperationReceipt.StatusPending,
+                    retryCount: 10, nextRetryAt: Now.AddSeconds(-10), isTransient: true);
+
+                var checkoutOp = new RentalCheckoutOperation(
+                    opId, _renterId, "fp", orderId, Now.AddMinutes(30), "{}", "[]", Now);
+                checkoutOp.MarkSucceeded(Now, invoiceStatus: "Pending");
+
+                initCtx.RentalOrders.Add(order);
+                initCtx.RentalOperationReceipts.Add(receipt);
+                initCtx.RentalCheckoutOperations.Add(checkoutOp);
+                await initCtx.SaveChangesAsync();
+            }
+
+            // Execute recovery using real issuer and executor
+            await using (var execCtx = new RentalServiceDbContext(options))
+            {
+                var repo = new OperationReceiptRepository(execCtx);
+                var descriptors = await repo.GetPendingOperationDescriptorsAsync(Now, 50, unlimitedAttemptActions: ["CreateInvoice"]);
+                var desc = Assert.Single(descriptors);
+                Assert.Equal(10, desc.RetryCount);
+
+                var executor = CreatePostgresExecutor(execCtx, locks);
+                var res = await executor.ExecuteScheduledOperationAsync(desc);
+                Assert.True(res.IsSuccess);
+            }
+
+            // Verify in new DbContext
+            await using (var verifyCtx = new RentalServiceDbContext(options))
+            {
+                var order = await verifyCtx.RentalOrders.FirstAsync(o => o.Id == orderId);
+                Assert.Equal("INV-1", order.InvoiceRef);
+
+                var receipt = await verifyCtx.RentalOperationReceipts.FirstAsync(r => r.OperationId == opKey);
+                Assert.Equal(11, receipt.RetryCount);
+                Assert.True(receipt.IsSuccess);
+                Assert.Equal(RentalOperationReceipt.StatusSucceeded, receipt.Status);
+
+                var op = await verifyCtx.RentalCheckoutOperations.FirstAsync(o => o.OperationId == opId);
+                Assert.Equal("Ready", op.InvoiceStatus);
+
+                var repo = new OperationReceiptRepository(verifyCtx);
+                var pending = await repo.GetPendingOperationDescriptorsAsync(Now, 50, unlimitedAttemptActions: ["CreateInvoice"]);
+                Assert.Empty(pending);
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task TimeoutFollowedByBusinessRejection_StopsRetryingImmediately()
+    {
+        if (!await PostgresTestDatabaseHelper.IsPostgreSqlAvailableAsync())
+        {
+            throw new InvalidOperationException("PostgreSQL integration environment is not available at test connection string.");
+        }
+
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            DbContextOptions<RentalServiceDbContext> options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            PostgresOrderLockManager locks = new(
+                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:Postgres"] = connectionString }).Build(),
+                NullLogger<PostgresOrderLockManager>.Instance);
+
+            Guid orderId = Guid.NewGuid();
+            string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", orderId.ToString());
+            string opId = "op-timeout-reject";
+
+            await using (var initCtx = new RentalServiceDbContext(options))
+            {
+                await initCtx.Database.MigrateAsync();
+
+                var items = new[]
+                {
+                    new InitialRentalItemDto(
+                        Guid.NewGuid(), _supplierId, _listingId, 2,
+                        new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18),
+                        "Camera", null, "Delivery", 500_000m, 0m, "grp-1",
+                        [
+                            new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()),
+                            new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())
+                        ],
+                        Dprental.RentalService.Api.Tests.Domain.TestListingSnapshots.Default)
+                };
+                var order = RentalOrder.Create(
+                    orderId, "DH-2026-000099", _renterId, "VND", "Delivery",
+                    "Customer", "0900000000", "Addr", null, null,
+                    "v1.0", "terms.pdf", "hash", opId, Now, items,
+                    paymentDeadline: Now.AddMinutes(30)).Value;
+                var receipt = RentalOperationReceipt.CreatePending(
+                    Guid.NewGuid(), orderId, opKey, "CreateInvoice", "fp", Now);
+
+                initCtx.RentalOrders.Add(order);
+                initCtx.RentalOperationReceipts.Add(receipt);
+                await initCtx.SaveChangesAsync();
+            }
+
+            var fakePayment = new FakePaymentRentalClient();
+            fakePayment.AlwaysFailWith = FakePaymentRentalClient.Down; // Attempt 1: Timeout (uncertain)
+
+            // Attempt 1: timeout
+            await using (var ctx1 = new RentalServiceDbContext(options))
+            {
+                var executor1 = CreatePostgresExecutor(ctx1, locks, fakePayment);
+                var desc = Assert.Single(await new OperationReceiptRepository(ctx1).GetPendingOperationDescriptorsAsync(Now, 50, unlimitedAttemptActions: ["CreateInvoice"]));
+                var res1 = await executor1.ExecuteScheduledOperationAsync(desc);
+                Assert.True(res1.IsFailure);
+            }
+
+            // Check receipt after attempt 1
+            DateTimeOffset retryTime;
+            await using (var checkCtx = new RentalServiceDbContext(options))
+            {
+                var r = await checkCtx.RentalOperationReceipts.FirstAsync(rc => rc.OperationId == opKey);
+                Assert.True(r.IsOutcomeUncertain);
+                Assert.NotNull(r.NextRetryAt);
+                retryTime = r.NextRetryAt.Value;
+            }
+
+            // Attempt 2: Payment rejects with business failure
+            fakePayment.AlwaysFailWith = CheckoutErrors.InvoiceRejected;
+
+            await using (var ctx2 = new RentalServiceDbContext(options))
+            {
+                var clock = new FixedTimeProvider(retryTime.AddSeconds(1));
+                var executor2 = CreatePostgresExecutor(ctx2, locks, fakePayment, clock);
+                var desc = Assert.Single(await new OperationReceiptRepository(ctx2).GetPendingOperationDescriptorsAsync(retryTime.AddSeconds(1), 50, unlimitedAttemptActions: ["CreateInvoice"]));
+                var res2 = await executor2.ExecuteScheduledOperationAsync(desc);
+                Assert.True(res2.IsFailure);
+            }
+
+            // Verify in new context: receipt is Failed/Business, NextRetryAt is null, not returned in query
+            await using (var finalCtx = new RentalServiceDbContext(options))
+            {
+                var r = await finalCtx.RentalOperationReceipts.FirstAsync(rc => rc.OperationId == opKey);
+                Assert.Equal(RentalOperationReceipt.StatusFailed, r.Status);
+                Assert.Equal(RentalOperationReceipt.ClassificationBusiness, r.ErrorClassification);
+                Assert.Null(r.NextRetryAt);
+
+                var pending = await new OperationReceiptRepository(finalCtx).GetPendingOperationDescriptorsAsync(Now.AddMinutes(10), 50, unlimitedAttemptActions: ["CreateInvoice"]);
+                Assert.Empty(pending);
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrencyConflict_WithOtherWriter_HandledCorrectlyWithoutGraphCorruption()
+    {
+        if (!await PostgresTestDatabaseHelper.IsPostgreSqlAvailableAsync())
+        {
+            throw new InvalidOperationException("PostgreSQL integration environment is not available at test connection string.");
+        }
+
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            DbContextOptions<RentalServiceDbContext> options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            PostgresOrderLockManager locks = new(
+                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:Postgres"] = connectionString }).Build(),
+                NullLogger<PostgresOrderLockManager>.Instance);
+
+            Guid orderId = Guid.NewGuid();
+            string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", orderId.ToString());
+            string opId = "op-conflict-test";
+
+            await using (var initCtx = new RentalServiceDbContext(options))
+            {
+                await initCtx.Database.MigrateAsync();
+
+                var items = new[]
+                {
+                    new InitialRentalItemDto(
+                        Guid.NewGuid(), _supplierId, _listingId, 2,
+                        new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18),
+                        "Camera", null, "Delivery", 500_000m, 0m, "grp-1",
+                        [
+                            new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()),
+                            new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())
+                        ],
+                        Dprental.RentalService.Api.Tests.Domain.TestListingSnapshots.Default)
+                };
+                var order = RentalOrder.Create(
+                    orderId, "DH-2026-000077", _renterId, "VND", "Delivery",
+                    "Customer", "0900000000", "Addr", null, null,
+                    "v1.0", "terms.pdf", "hash", opId, Now, items,
+                    paymentDeadline: Now.AddMinutes(30)).Value;
+                var receipt = RentalOperationReceipt.CreatePending(
+                    Guid.NewGuid(), orderId, opKey, "CreateInvoice", "fp", Now);
+
+                initCtx.RentalOrders.Add(order);
+                initCtx.RentalOperationReceipts.Add(receipt);
+                await initCtx.SaveChangesAsync();
+            }
+
+            var fakePayment = new FakePaymentRentalClient();
+            fakePayment.OnCreateInvoice = _ =>
+            {
+                // Concurrent writer in another context updates the order before issuer commits
+                using var conflictCtx = new RentalServiceDbContext(options);
+                var conflictOrder = conflictCtx.RentalOrders.First(o => o.Id == orderId);
+                conflictOrder.MarkPaymentExpired(Now.AddMinutes(31), "expiry-conflict");
+                conflictOrder.RecordReadModelUpdate(Now.AddMinutes(31));
+                conflictCtx.SaveChanges();
+            };
+
+            await using (var execCtx = new RentalServiceDbContext(options))
+            {
+                var executor = CreatePostgresExecutor(execCtx, locks, fakePayment);
+                var desc = Assert.Single(await new OperationReceiptRepository(execCtx).GetPendingOperationDescriptorsAsync(Now, 50, unlimitedAttemptActions: ["CreateInvoice"]));
+                var res = await executor.ExecuteScheduledOperationAsync(desc);
+                Assert.True(res.IsSuccess);
+            }
+
+            // Verify in database: Order remains Expired, receipt was closed, no graph corruption
+            await using (var verifyCtx = new RentalServiceDbContext(options))
+            {
+                var order = await verifyCtx.RentalOrders.FirstAsync(o => o.Id == orderId);
+                Assert.Equal(RentalOrderStatus.Expired, order.Status);
+
+                var receipt = await verifyCtx.RentalOperationReceipts.FirstAsync(r => r.OperationId == opKey);
+                Assert.Equal(RentalOperationReceipt.StatusFailed, receipt.Status);
+                Assert.Equal(RentalOperationReceipt.ClassificationBusiness, receipt.ErrorClassification);
+                Assert.Equal("ORDER_NOT_PENDING", receipt.ErrorCode);
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+    [Fact]
+    public async Task AtomicPersistence_InvoiceReceiptAndOperation_AllOrNothingOnPostgreSql()
+    {
+        if (!await PostgresTestDatabaseHelper.IsPostgreSqlAvailableAsync())
+        {
+            throw new InvalidOperationException("PostgreSQL integration environment is not available at test connection string.");
+        }
+
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            DbContextOptions<RentalServiceDbContext> options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            Guid orderId = Guid.NewGuid();
+            string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", orderId.ToString());
+            string opId = "op-atomic-test";
+
+            await using (var initCtx = new RentalServiceDbContext(options))
+            {
+                await initCtx.Database.MigrateAsync();
+
+                var items = new[]
+                {
+                    new InitialRentalItemDto(
+                        Guid.NewGuid(), _supplierId, _listingId, 2,
+                        new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18),
+                        "Camera", null, "Delivery", 500_000m, 0m, "grp-1",
+                        [
+                            new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()),
+                            new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())
+                        ],
+                        Dprental.RentalService.Api.Tests.Domain.TestListingSnapshots.Default)
+                };
+                var order = RentalOrder.Create(
+                    orderId, "DH-2026-000088", _renterId, "VND", "Delivery",
+                    "Customer", "0900000000", "Addr", null, null,
+                    "v1.0", "terms.pdf", "hash", opId, Now, items,
+                    paymentDeadline: Now.AddMinutes(30)).Value;
+                var receipt = RentalOperationReceipt.CreatePending(
+                    Guid.NewGuid(), orderId, opKey, "CreateInvoice", "fp", Now);
+                var checkoutOp = new RentalCheckoutOperation(
+                    opId, _renterId, "fp", orderId, Now.AddMinutes(30), "{}", "[]", Now);
+                checkoutOp.MarkSucceeded(Now, invoiceStatus: "Pending");
+
+                initCtx.RentalOrders.Add(order);
+                initCtx.RentalOperationReceipts.Add(receipt);
+                initCtx.RentalCheckoutOperations.Add(checkoutOp);
+                await initCtx.SaveChangesAsync();
+            }
+
+            // 1. Success case: All 3 records committed atomically
+            await using (var execCtx = new RentalServiceDbContext(options))
+            {
+                var orders = new RentalOrderRepository(execCtx);
+                var operations = new RentalCheckoutOperationRepository(execCtx);
+                var issuer = new CheckoutInvoiceIssuer(_payment, orders, operations, execCtx, new FixedTimeProvider(Now), NullLogger<CheckoutInvoiceIssuer>.Instance);
+
+                var order = await orders.GetByIdWithDetailsAsync(orderId);
+                var res = await issuer.EnsureInvoiceAsync(order!);
+                Assert.True(res.IsSuccess);
+            }
+
+            await using (var verifyCtx = new RentalServiceDbContext(options))
+            {
+                var order = await verifyCtx.RentalOrders.FirstAsync(o => o.Id == orderId);
+                var receipt = await verifyCtx.RentalOperationReceipts.FirstAsync(r => r.OperationId == opKey);
+                var op = await verifyCtx.RentalCheckoutOperations.FirstAsync(o => o.OperationId == opId);
+
+                Assert.Equal("INV-1", order.InvoiceRef);
+                Assert.True(receipt.IsSuccess);
+                Assert.Equal(RentalOperationReceipt.StatusSucceeded, receipt.Status);
+                Assert.Equal("Ready", op.InvoiceStatus);
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+
+    private RentalOperationExecutor CreatePostgresExecutor(
+        RentalServiceDbContext context,
+        IOrderLockManager locks,
+        IPaymentRentalClient? paymentClient = null,
+        TimeProvider? timeProvider = null)
+    {
+        var clock = timeProvider ?? new FixedTimeProvider(Now);
+        var orders = new RentalOrderRepository(context);
+        var receipts = new OperationReceiptRepository(context);
+        var operations = new RentalCheckoutOperationRepository(context);
+        var outbox = new OutboxRepository(context);
+        var config = new ConfigurationBuilder().Build();
+        var pay = paymentClient ?? _payment;
+        var issuer = new CheckoutInvoiceIssuer(pay, orders, operations, context, clock, NullLogger<CheckoutInvoiceIssuer>.Instance);
+
+        return new RentalOperationExecutor(
+            orders, receipts, outbox, locks, _inventory, pay,
+            inventoryCommands: null!, unitOfWork: context, configuration: config,
+            logger: NullLogger<RentalOperationExecutor>.Instance,
+            invoiceIssuer: issuer, checkoutOperationRepo: operations,
+            timeProvider: clock);
+    }
+
 
 
     private async Task<Guid> SeedAsync(DbContextOptions<RentalServiceDbContext> options)

@@ -200,6 +200,116 @@ public sealed class RentalCheckoutApiTests
         Assert.True(problem.GetProperty("retryable").GetBoolean());
         Assert.Empty(factory.Inventory.HoldRequests);
     }
+    [Fact]
+    public async Task GetOperationStatus_HttpReadinessMatrix_ValidatesAllCasesThroughHttp()
+    {
+        using CheckoutApiFactory factory = new();
+        using HttpClient client = factory.CreateRenterClient("key-1");
+
+        // 1. Submit checkout to get accepted operation
+        using HttpResponseMessage submitResponse = await client.PostAsJsonAsync(Route, factory.Request());
+        Assert.Equal(HttpStatusCode.Accepted, submitResponse.StatusCode);
+        JsonElement submitJson = await ReadAsync(submitResponse);
+        string opId = submitJson.GetProperty("operationId").GetString()!;
+
+        string getRoute = $"/api/v1/rental/checkout/operations/{opId}";
+
+        // 2. Unauthenticated -> 401
+        using HttpClient unauthClient = factory.CreateClient();
+        using HttpResponseMessage unauthResp = await unauthClient.GetAsync(getRoute);
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthResp.StatusCode);
+
+        // 3. Different renter -> 404
+        using HttpClient otherClient = factory.CreateClient();
+        otherClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
+        otherClient.DefaultRequestHeaders.Add(SubjectHeader, Guid.NewGuid().ToString("D"));
+        otherClient.DefaultRequestHeaders.Add(ProfileCompletedHeader, "true");
+        using HttpResponseMessage otherResp = await otherClient.GetAsync(getRoute);
+        Assert.Equal(HttpStatusCode.NotFound, otherResp.StatusCode);
+
+        // 4. Processing status -> readyForPayment: false
+        using HttpResponseMessage procResp = await client.GetAsync(getRoute);
+        Assert.Equal(HttpStatusCode.OK, procResp.StatusCode);
+        JsonElement procJson = await ReadAsync(procResp);
+        Assert.Equal("Processing", procJson.GetProperty("status").GetString());
+        Assert.False(procJson.GetProperty("readyForPayment").GetBoolean());
+
+        // Record outbox and payment count before GET testing
+        int initialPaymentRequests = factory.Payment.InvoiceRequests.Count;
+
+        // Setup Succeeded operation in DB
+        Guid expectedOrderId;
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            var op = await context.RentalCheckoutOperations.FirstAsync(o => o.OperationId == opId);
+            expectedOrderId = op.ExpectedRentalOrderId;
+            op.MarkSucceeded(Now, invoiceStatus: "Pending");
+            await context.SaveChangesAsync();
+        }
+
+        // 5. Succeeded but missing order -> readyForPayment: false
+        using HttpResponseMessage missingOrderResp = await client.GetAsync(getRoute);
+        Assert.Equal(HttpStatusCode.OK, missingOrderResp.StatusCode);
+        JsonElement missingOrderJson = await ReadAsync(missingOrderResp);
+        Assert.Equal("Succeeded", missingOrderJson.GetProperty("status").GetString());
+        Assert.False(missingOrderJson.GetProperty("readyForPayment").GetBoolean());
+
+        // Seed order
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            var order = CheckoutTestOrders.CreatePending(factory.RenterId, opId, Now);
+            typeof(RentalOrder).GetProperty(nameof(RentalOrder.Id))!.SetValue(order, expectedOrderId);
+            context.RentalOrders.Add(order);
+            await context.SaveChangesAsync();
+        }
+
+        // 6. Succeeded, Order exists, invoice pending -> readyForPayment: false, invoiceStatus: Pending
+        using HttpResponseMessage pendingInvResp = await client.GetAsync(getRoute);
+        Assert.Equal(HttpStatusCode.OK, pendingInvResp.StatusCode);
+        JsonElement pendingInvJson = await ReadAsync(pendingInvResp);
+        Assert.Equal("Succeeded", pendingInvJson.GetProperty("status").GetString());
+        Assert.Equal("Pending", pendingInvJson.GetProperty("invoiceStatus").GetString());
+        Assert.False(pendingInvJson.GetProperty("readyForPayment").GetBoolean());
+
+        // Attach invoice
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            var order = await context.RentalOrders.FirstAsync(o => o.Id == expectedOrderId);
+            order.AttachInvoice("INV-HTTP-001", Now.AddMinutes(5));
+            await context.SaveChangesAsync();
+        }
+
+        // 7. Ready, before deadline -> readyForPayment: true, invoiceStatus: Ready
+        using HttpResponseMessage readyResp = await client.GetAsync(getRoute);
+        Assert.Equal(HttpStatusCode.OK, readyResp.StatusCode);
+        JsonElement readyJson = await ReadAsync(readyResp);
+        Assert.Equal("Succeeded", readyJson.GetProperty("status").GetString());
+        Assert.Equal("Ready", readyJson.GetProperty("invoiceStatus").GetString());
+        Assert.True(readyJson.GetProperty("readyForPayment").GetBoolean());
+        Assert.Equal("INV-HTTP-001", readyJson.GetProperty("order").GetProperty("invoiceRef").GetString());
+
+        // 8. Order marked Paid -> readyForPayment: false, invoiceStatus: Ready
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            var order = await context.RentalOrders.FirstAsync(o => o.Id == expectedOrderId);
+            order.MarkAsPaid("INV-HTTP-001", "PAY-001", Now.AddMinutes(10), Now.AddMinutes(10));
+            await context.SaveChangesAsync();
+        }
+
+        using HttpResponseMessage paidResp = await client.GetAsync(getRoute);
+        Assert.Equal(HttpStatusCode.OK, paidResp.StatusCode);
+        JsonElement paidJson = await ReadAsync(paidResp);
+        Assert.Equal("Ready", paidJson.GetProperty("invoiceStatus").GetString());
+        Assert.False(paidJson.GetProperty("readyForPayment").GetBoolean());
+
+        // Assert that GET operations never triggered payment requests
+        Assert.Equal(initialPaymentRequests, factory.Payment.InvoiceRequests.Count);
+    }
+
 
     private static async Task<JsonElement> ReadAsync(HttpResponseMessage response) =>
         JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;

@@ -20,7 +20,7 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
 
     private readonly IPaymentRentalClient _payment;
     private readonly IRentalOrderRepository _orders;
-    private readonly IRentalCheckoutOperationRepository? _checkoutOperations;
+    private readonly IRentalCheckoutOperationRepository _checkoutOperations;
     private readonly IUnitOfWork _unitOfWork;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<CheckoutInvoiceIssuer> _logger;
@@ -28,17 +28,17 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
     public CheckoutInvoiceIssuer(
         IPaymentRentalClient payment,
         IRentalOrderRepository orders,
+        IRentalCheckoutOperationRepository checkoutOperations,
         IUnitOfWork unitOfWork,
         TimeProvider timeProvider,
-        ILogger<CheckoutInvoiceIssuer> logger,
-        IRentalCheckoutOperationRepository? checkoutOperations = null)
+        ILogger<CheckoutInvoiceIssuer> logger)
     {
         _payment = payment ?? throw new ArgumentNullException(nameof(payment));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
+        _checkoutOperations = checkoutOperations ?? throw new ArgumentNullException(nameof(checkoutOperations));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _checkoutOperations = checkoutOperations;
     }
 
     public async Task<Result> EnsureInvoiceAsync(RentalOrder order, CancellationToken cancellationToken = default)
@@ -47,34 +47,7 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
 
         if (!string.IsNullOrWhiteSpace(order.InvoiceRef))
         {
-            var now = _timeProvider.GetUtcNow();
-            bool changed = false;
-            string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
-            var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
-            if (receipt != null && !receipt.IsSuccess)
-            {
-                receipt.MarkSucceeded(now);
-                changed = true;
-            }
-
-            if (_checkoutOperations != null)
-            {
-                var op = await _checkoutOperations.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
-                if (op != null && op.InvoiceStatus != "Ready")
-                {
-                    op.SetInvoiceStatus("Ready", now);
-                    await _checkoutOperations.UpdateAsync(op, cancellationToken);
-                    changed = true;
-                }
-            }
-
-            if (changed)
-            {
-                await _orders.UpdateAsync(order, cancellationToken);
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-            }
-
-            return Result.Success();
+            return await CompleteInvoiceLocalAsync(order, _timeProvider.GetUtcNow(), null, cancellationToken);
         }
 
         if (order.Status != RentalOrderStatus.PendingPayment || _timeProvider.GetUtcNow() >= order.PaymentDeadline)
@@ -137,7 +110,6 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
                 order.Id, order.OrderCode, request.OperationKey, CheckoutErrors.InvoiceRejected.Code);
             return CheckoutErrors.InvoiceRejected;
         }
-
         DateTimeOffset completedAt = _timeProvider.GetUtcNow();
         Result attached = order.AttachInvoice(invoice.InvoiceRef, completedAt);
         if (attached.IsFailure)
@@ -146,18 +118,38 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
             return CheckoutErrors.InvoiceRejected;
         }
 
-        string invoiceOpKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
-        var invReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == invoiceOpKey);
-        invReceipt?.MarkSucceeded(completedAt, JsonSerializer.Serialize(invoice));
+        return await CompleteInvoiceLocalAsync(order, completedAt, invoice, cancellationToken);
+    }
 
-        if (_checkoutOperations != null)
+    private async Task<Result> CompleteInvoiceLocalAsync(
+        RentalOrder order,
+        DateTimeOffset completedAt,
+        CreateInvoiceResponse? invoiceResponse,
+        CancellationToken cancellationToken)
+    {
+        bool changed = invoiceResponse != null;
+        string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
+        var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
+        if (receipt != null && (!receipt.IsSuccess || receipt.Status != RentalOperationReceipt.StatusSucceeded))
         {
-            var op = await _checkoutOperations.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
-            if (op != null)
-            {
-                op.SetInvoiceStatus("Ready", completedAt);
-                await _checkoutOperations.UpdateAsync(op, cancellationToken);
-            }
+            string? responseJson = invoiceResponse != null
+                ? JsonSerializer.Serialize(invoiceResponse)
+                : null;
+            receipt.MarkSucceeded(completedAt, responseJson);
+            changed = true;
+        }
+
+        var op = await _checkoutOperations.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
+        if (op != null && op.InvoiceStatus != "Ready")
+        {
+            op.SetInvoiceStatus("Ready", completedAt);
+            await _checkoutOperations.UpdateAsync(op, cancellationToken);
+            changed = true;
+        }
+
+        if (!changed)
+        {
+            return Result.Success();
         }
 
         await _orders.UpdateAsync(order, cancellationToken);
@@ -167,9 +159,8 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
         }
         catch (DbUpdateConcurrencyException)
         {
-            // Đơn vừa bị luồng khác sửa (ví dụ quét hết hạn); lần gửi lại sẽ đọc trạng thái mới của đơn.
             _unitOfWork.DiscardChanges();
-            return CheckoutErrors.InvoiceTemporarilyUnavailable;
+            return CheckoutErrors.InvoicePersistenceConflict;
         }
 
         return Result.Success();

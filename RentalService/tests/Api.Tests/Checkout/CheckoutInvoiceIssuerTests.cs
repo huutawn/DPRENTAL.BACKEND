@@ -43,10 +43,10 @@ public sealed class CheckoutInvoiceIssuerTests
     private CheckoutInvoiceIssuer CreateIssuer(RentalServiceDbContext context, IUnitOfWork? unitOfWork = null) => new(
         _payment,
         new RentalOrderRepository(context),
+        new RentalCheckoutOperationRepository(context),
         unitOfWork ?? context,
         _clock,
-        NullLogger<CheckoutInvoiceIssuer>.Instance,
-        new RentalCheckoutOperationRepository(context));
+        NullLogger<CheckoutInvoiceIssuer>.Instance);
 
     private static async Task<RentalOrder> LoadAsync(RentalServiceDbContext context) =>
         (await new RentalOrderRepository(context).GetByCheckoutOperationIdAsync(OperationId))!;
@@ -283,7 +283,7 @@ public sealed class CheckoutInvoiceIssuerTests
 
         Result result = await CreateIssuer(context, new ConflictingUnitOfWork(context)).EnsureInvoiceAsync(order);
 
-        Assert.Equal(CheckoutErrors.InvoiceTemporarilyUnavailable, result.Error);
+        Assert.Equal(CheckoutErrors.InvoicePersistenceConflict, result.Error);
         Assert.Empty(context.ChangeTracker.Entries());
         Assert.Null((await ReloadAsync()).InvoiceRef);
     }

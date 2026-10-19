@@ -62,6 +62,7 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
         public Task<bool> UpdateAsync(RentalOrder order, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RentalOrder?> GetByIdWithDetailsAsync(Guid id, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RentalOrder?> GetForCheckoutPollingAsync(Guid id, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<Guid?> GetRenterIdByOrderIdAsync(Guid orderId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RentalOrder?> GetByItemIdWithDetailsAsync(Guid itemId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Guid?> GetOrderIdByItemIdAsync(Guid itemId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RentalSubOrder?> GetSubOrderByIdAsync(Guid subOrderId, CancellationToken ct = default) => throw new NotImplementedException();

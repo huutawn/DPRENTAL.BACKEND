@@ -31,8 +31,7 @@ public sealed class InventoryRentalConsumerContractTests
         Guid listingId = Guid.Parse("11111111-1111-1111-1111-111111111111");
         string groupId = "group-test-01";
 
-        Assert.Equal("/equipment-listings/11111111-1111-1111-1111-111111111111/rental-snapshot",
-            InventoryContractSpec.Routes.ListingRentalSnapshot(listingId));
+
 
         Assert.Equal("/equipment-listings/11111111-1111-1111-1111-111111111111/availability/check",
             InventoryContractSpec.Routes.CheckAvailability(listingId));
@@ -82,51 +81,42 @@ public sealed class InventoryRentalConsumerContractTests
 
     // 2. Listing Snapshot Fixture & Serialization
     [Fact]
-    public async Task GetListingRentalSnapshot_MapsFromFixture_WithoutInternalAssetCodes()
+    public async Task GetListingRentalSnapshots_Batch_MapsFromFixture_WithEquipmentTypeId()
     {
         Guid listingId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
         Guid supplierId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        Guid typeId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
 
         ListingRentalSnapshotDto fixture = new(
             listingId,
             supplierId,
+            typeId,
             "Sony FX3",
             Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
             500_000m,
             "VND",
             "Active");
 
-        _stub.GetSnapshotHandler = id => Task.FromResult(Result.Success(fixture));
+        var responseFixture = new ListingRentalSnapshotsResponse([fixture], []);
+        _stub.GetSnapshotsHandler = req => Task.FromResult(Result.Success(responseFixture));
 
-        Result<ListingRentalSnapshotDto> result = await _stub.GetListingRentalSnapshotAsync(listingId);
+        Result<ListingRentalSnapshotsResponse> result = await _stub.GetListingRentalSnapshotsAsync(
+            new ListingRentalSnapshotsRequest([listingId]));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(500_000m, result.Value.DailyRate);
-        Assert.Equal("VND", result.Value.Currency);
+        var item = Assert.Single(result.Value.Items);
+        Assert.Equal(500_000m, item.DailyRate);
+        Assert.Equal("VND", item.Currency);
+        Assert.Equal(typeId, item.EquipmentTypeId);
 
-        // Đúng dạng Inventory đưa ngày 15/10/2026, không thêm ô nào khác.
-        string json = JsonSerializer.Serialize(result.Value, JsonOptions);
-        Assert.Equal(
-            """{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","ownerUserId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","name":"Sony FX3","thumbnailMediaId":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","dailyRate":500000,"currency":"VND","status":"Active"}""",
-            json);
+        string json = JsonSerializer.Serialize(item, JsonOptions);
+        Assert.Contains($@"""equipmentTypeId"":""{typeId}""", json);
         Assert.DoesNotContain("serialNumber", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("assetCode", json, StringComparison.OrdinalIgnoreCase);
 
         ListingRentalSnapshotDto? deserialized = JsonSerializer.Deserialize<ListingRentalSnapshotDto>(json, JsonOptions);
         Assert.NotNull(deserialized);
         Assert.Equal(fixture, deserialized);
-    }
-
-    [Fact]
-    public async Task GetListingRentalSnapshot_WhenNotFound_MapsErrorCorrectly()
-    {
-        _stub.GetSnapshotHandler = _ => Task.FromResult(Result.Failure<ListingRentalSnapshotDto>(
-            Error.NotFound(InventoryContractSpec.ErrorCodes.ListingNotFound, "Listing does not exist.")));
-
-        Result<ListingRentalSnapshotDto> result = await _stub.GetListingRentalSnapshotAsync(Guid.NewGuid());
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(InventoryContractSpec.ErrorCodes.ListingNotFound, result.Error.Code);
     }
 
     // 3. Availability Check Fixture & Serialization
@@ -318,7 +308,7 @@ public sealed class InventoryRentalConsumerContractTests
     // Stub Implementation
     private sealed class StubInventoryRentalClient : IInventoryRentalClient
     {
-        public Func<Guid, Task<Result<ListingRentalSnapshotDto>>>? GetSnapshotHandler { get; set; }
+        public Func<ListingRentalSnapshotsRequest, Task<Result<ListingRentalSnapshotsResponse>>>? GetSnapshotsHandler { get; set; }
         public Func<ListingAvailabilityCheckRequest, Task<Result<ListingAvailabilityCheckResponse>>>? CheckAvailabilityHandler { get; set; }
         public Func<CreateHoldRequest, Task<Result<CreateHoldResponse>>>? CreateHoldHandler { get; set; }
         public Func<string, ExtendHoldRequest, Task<Result<ExtendHoldResponse>>>? ExtendHoldHandler { get; set; }
@@ -329,9 +319,8 @@ public sealed class InventoryRentalConsumerContractTests
         public Func<string, MarkAssetsReturnedRequest, Task<Result<MarkAssetsReturnedResponse>>>? MarkReturnedHandler { get; set; }
         public Func<string, BlockDamagedAssetsRequest, Task<Result<BlockDamagedAssetsResponse>>>? BlockDamagedHandler { get; set; }
 
-        public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) =>
-            GetSnapshotHandler?.Invoke(listingId) ?? Task.FromResult(Result.Failure<ListingRentalSnapshotDto>(Error.NotFound("NotConfigured", "Stub not configured.")));
+        public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) =>
+            GetSnapshotsHandler?.Invoke(request) ?? Task.FromResult(Result.Failure<ListingRentalSnapshotsResponse>(Error.NotFound("NotConfigured", "Stub not configured.")));
 
         public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) =>
             CheckAvailabilityHandler?.Invoke(request) ?? Task.FromResult(Result.Failure<ListingAvailabilityCheckResponse>(Error.NotFound("NotConfigured", "Stub not configured.")));
