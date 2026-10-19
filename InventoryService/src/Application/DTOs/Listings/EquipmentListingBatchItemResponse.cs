@@ -9,6 +9,7 @@ namespace Dprental.InventoryService.Application.DTOs.Listings;
 public sealed record EquipmentListingBatchItemResponse(
     [property: JsonPropertyName("id")] Guid Id,
     [property: JsonPropertyName("ownerUserId")] Guid OwnerUserId,
+    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("thumbnailMediaId")] Guid? ThumbnailMediaId,
     [property: JsonPropertyName("dailyRate")] decimal DailyRate,

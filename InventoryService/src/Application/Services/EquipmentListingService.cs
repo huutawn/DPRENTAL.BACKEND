@@ -480,6 +480,7 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
                 items.Add(new EquipmentListingBatchItemResponse(
                     listing.Id,
                     listing.OwnerUserId,
+                    listing.EquipmentTypeId,
                     listing.Name,
                     listing.ThumbnailMediaId,
                     listing.DailyRate,

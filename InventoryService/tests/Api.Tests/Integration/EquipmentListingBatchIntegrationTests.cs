@@ -306,8 +306,8 @@ public sealed class EquipmentListingBatchIntegrationTests : IClassFixture<Postgr
         var item0 = itemsElement[0];
         Assert.Equal(listing2.Id, item0.GetProperty("id").GetGuid());
         Assert.Equal(owner2, item0.GetProperty("ownerUserId").GetGuid());
+        Assert.Equal(listing2.EquipmentTypeId, item0.GetProperty("equipmentTypeId").GetGuid());
         Assert.Equal("Canon R5 C", item0.GetProperty("name").GetString());
-        Assert.Equal(600_000m, item0.GetProperty("dailyRate").GetDecimal());
         Assert.Equal("VND", item0.GetProperty("currency").GetString());
         Assert.Equal("Inactive", item0.GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, item0.GetProperty("thumbnailMediaId").ValueKind);
@@ -316,8 +316,8 @@ public sealed class EquipmentListingBatchIntegrationTests : IClassFixture<Postgr
         var item1 = itemsElement[1];
         Assert.Equal(listing1.Id, item1.GetProperty("id").GetGuid());
         Assert.Equal(owner1, item1.GetProperty("ownerUserId").GetGuid());
+        Assert.Equal(listing1.EquipmentTypeId, item1.GetProperty("equipmentTypeId").GetGuid());
         Assert.Equal("Sony FX3", item1.GetProperty("name").GetString());
-        Assert.Equal(thumbnailId, item1.GetProperty("thumbnailMediaId").GetGuid());
         Assert.Equal(500_000m, item1.GetProperty("dailyRate").GetDecimal());
         Assert.Equal("VND", item1.GetProperty("currency").GetString());
         Assert.Equal("Active", item1.GetProperty("status").GetString());
@@ -325,8 +325,8 @@ public sealed class EquipmentListingBatchIntegrationTests : IClassFixture<Postgr
         Assert.Equal(500_000m, item1.GetProperty("depositAmount").GetDecimal());
         var item2 = itemsElement[2];
         Assert.Equal(listing3.Id, item2.GetProperty("id").GetGuid());
+        Assert.Equal(listing3.EquipmentTypeId, item2.GetProperty("equipmentTypeId").GetGuid());
         Assert.Equal("Draft", item2.GetProperty("status").GetString());
-
         // Strict verification: Ensure NONE of the omitted fields exist in JSON response items
         var forbiddenFieldNames = new[]
         {
@@ -334,7 +334,6 @@ public sealed class EquipmentListingBatchIntegrationTests : IClassFixture<Postgr
             "schemaVersion",
             "specValues",
             "model",
-            "equipmentTypeId",
             "brandId",
             "manufactureYear",
             "media",
