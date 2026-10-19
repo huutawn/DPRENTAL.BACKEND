@@ -31,7 +31,7 @@ public class InvoicePaidOutboxPublisherTests
         public ConcurrentBag<(string Topic, string Key, string Payload)> ProducedMessages { get; } = new();
         public Func<string, string, string, Task>? OnProduce { get; set; }
 
-        public async Task ProduceAsync(string topic, string key, string payload, CancellationToken cancellationToken)
+        public async Task ProduceAsync(string topic, string key, string payload, IReadOnlyDictionary<string, string>? headers, CancellationToken cancellationToken)
         {
             if (OnProduce != null)
             {
@@ -50,6 +50,7 @@ public class InvoicePaidOutboxPublisherTests
         var services = new ServiceCollection();
         services.AddDbContext<PaymentServiceDbContext>(options => options.UseNpgsql(connString));
         services.AddScoped<IOutboxRepository, EfOutboxRepository>();
+        services.AddScoped<ITransactionJournalRepository, EfTransactionJournalRepository>();
 
         var fakeProducer = producer ?? new FakeKafkaProducer();
         services.AddSingleton<IInvoicePaidKafkaProducer>(fakeProducer);
@@ -70,6 +71,29 @@ public class InvoicePaidOutboxPublisherTests
         services.AddSingleton<TimeProvider>(timeProvider);
 
         return (services.BuildServiceProvider(), fakeProducer, timeProvider);
+    }
+
+    private static void AddConfirmedJournal(PaymentServiceDbContext ctx, OutboxMessage outbox)
+    {
+        var journal = JournalEntryFactory.CreateEntry(
+            operationId: Guid.NewGuid(),
+            streamId: $"STREAM-{outbox.AggregateId}",
+            streamType: JournalStreamTypes.Invoice,
+            version: 1,
+            eventId: Guid.NewGuid(),
+            eventType: JournalEventTypes.InvoiceCreated,
+            amount: 1_000_000m,
+            currency: "VND",
+            status: "PAID",
+            confirmationSource: JournalConfirmationSources.System,
+            actor: "SYSTEM",
+            timestampUtc: FixedNow.AddMinutes(-5),
+            previousHash: CanonicalJournalHasher.GenesisHash,
+            outboxDigest: CanonicalJournalHasher.ComputeOutboxDigest(outbox.Payload),
+            outboxMessageId: outbox.MessageId);
+
+        journal.Confirm("sig-test", "key-test", FixedNow.AddMinutes(-4));
+        ctx.TransactionJournals.Add(journal);
     }
 
     private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T> where T : class
@@ -149,6 +173,7 @@ public class InvoicePaidOutboxPublisherTests
             await using (var ctx = new PaymentServiceDbContext(options))
             {
                 ctx.OutboxMessages.Add(outbox);
+                AddConfirmedJournal(ctx, outbox);
                 await ctx.SaveChangesAsync();
             }
 
@@ -208,6 +233,7 @@ public class InvoicePaidOutboxPublisherTests
                     "{\"orderIndex\":" + i + "}", FixedNow.AddMinutes(-10 + i));
                 await using var ctx = new PaymentServiceDbContext(options);
                 ctx.OutboxMessages.Add(msg);
+                AddConfirmedJournal(ctx, msg);
                 await ctx.SaveChangesAsync();
             }
 
@@ -273,6 +299,7 @@ public class InvoicePaidOutboxPublisherTests
             await using (var ctx = new PaymentServiceDbContext(options))
             {
                 ctx.OutboxMessages.Add(outbox);
+                AddConfirmedJournal(ctx, outbox);
                 await ctx.SaveChangesAsync();
             }
 

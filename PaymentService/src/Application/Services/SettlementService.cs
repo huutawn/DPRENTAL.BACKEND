@@ -10,11 +10,16 @@ public sealed class SettlementService : ISettlementService
 {
     private readonly IInvoiceRepository _invoices;
     private readonly ISettlementLedger _ledger;
+    private readonly ITransactionIntegrityChecker? _integrityChecker;
 
-    public SettlementService(IInvoiceRepository invoices, ISettlementLedger ledger)
+    public SettlementService(
+        IInvoiceRepository invoices,
+        ISettlementLedger ledger,
+        ITransactionIntegrityChecker? integrityChecker = null)
     {
-        _invoices = invoices;
-        _ledger = ledger;
+        _invoices = invoices ?? throw new ArgumentNullException(nameof(invoices));
+        _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
+        _integrityChecker = integrityChecker;
     }
 
     public async Task<Result<SettleRentalResponse>> SettleAsync(SettleRentalRequest request, CancellationToken ct)
@@ -45,6 +50,27 @@ public sealed class SettlementService : ISettlementService
         // PaymentRef có thể đã được gán cho hóa đơn EXPIRED (thanh toán trễ), nên phải kiểm tra Status.
         if (!string.Equals(invoice.Status, InvoiceStatus.Paid, StringComparison.Ordinal))
             return Error.Conflict("Payment.InvoiceNotPaid", "Hóa đơn chưa được thanh toán nên chưa thể settle.");
+
+        if (_integrityChecker is not null)
+        {
+            var verifyRes = await _integrityChecker.VerifyAsync(new Dprental.PaymentService.Application.DTOs.Verification.TransactionVerificationRequest(
+                PaymentRef: request.PaymentRef.Trim(),
+                Purpose: Dprental.PaymentService.Application.DTOs.Verification.VerificationPurposes.Settlement,
+                CallerNonce: Guid.NewGuid().ToString("N"),
+                ExpectedAmount: invoice.TotalAmount,
+                ExpectedCurrency: invoice.Currency,
+                ExpectedStatus: InvoiceStatus.Paid,
+                InvoiceRef: invoice.InvoiceRef,
+                ExpectedOrderId: invoice.RentalOrderId,
+                RentalItemId: request.RentalItemId,
+                SupplierId: request.SupplierId), ct);
+
+            if (verifyRes.IsFailure || !verifyRes.Value.Usability.IsUsable)
+            {
+                return Error.Conflict("Payment.SettlementIntegrityFailed",
+                    $"Giao dịch thanh toán chưa được xác minh toàn vẹn hoặc không đủ điều kiện settle: {verifyRes.Value?.Usability.Reason ?? verifyRes.Error.Message}");
+            }
+        }
 
         if (!string.Equals(invoice.PaymentRef, request.PaymentRef.Trim(), StringComparison.Ordinal))
             return Error.Conflict("Payment.PaymentRefMismatch", "PaymentRef không khớp hóa đơn.");

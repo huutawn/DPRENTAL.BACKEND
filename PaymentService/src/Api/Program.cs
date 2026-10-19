@@ -1,18 +1,27 @@
 using System.IO;
+using Dprental.PaymentService.Infrastructure.DependencyInjection;
+using Dprental.PaymentService.Application.IServices;
+using Dprental.PaymentService.Infrastructure.Clients;
 using System.Net;
 using Dprental.PaymentService.Api.Exceptions;
 using Dprental.PaymentService.Api.Security;
 using Dprental.PaymentService.Application.DependencyInjection;
 using Dprental.PaymentService.Domain.Persistence;
-using Dprental.PaymentService.Domain.Repository;
+
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddPaymentDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddPaymentInfrastructure(builder.Configuration.GetConnectionString("Postgres"));
 builder.Services.AddPaymentApplication(builder.Configuration);
+builder.Services.AddHttpClient<ITransactionIntegrityChecker, IntegrityHostClient>(client =>
+{
+    string hostUrl = builder.Configuration["IntegrityHost:BaseUrl"] ?? "http://127.0.0.1:8081";
+    client.BaseAddress = new Uri(hostUrl);
+    client.Timeout = TimeSpan.FromMilliseconds(900);
+});
 
 builder.Services.AddPaymentJwtAuthentication(builder.Configuration);
 builder.Services.AddAuthorization(options =>
@@ -49,6 +58,26 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAssertion(ctx =>
             ctx.User.HasClientAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ClientAudience") ?? "dprental-clients") &&
             ctx.User.IsPlatformAdmin() && ctx.User.TryGetSubjectUserId(out _));
+    });
+
+    options.AddPolicy("TransactionVerifyPolicy", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+            ctx.User.IsServiceToken() &&
+            ctx.User.HasServiceAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ServiceAudience") ?? "payment-api") &&
+            ctx.User.HasScope("payment.transaction.verify"));
+    });
+
+    options.AddPolicy("TransactionHistoryPolicy", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+            (ctx.User.IsServiceToken() &&
+             ctx.User.HasServiceAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ServiceAudience") ?? "payment-api") &&
+             ctx.User.HasScope("payment.transaction.history")) ||
+            (ctx.User.HasClientAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ClientAudience") ?? "dprental-clients") &&
+             ctx.User.IsPlatformAdmin()));
     });
 });
 

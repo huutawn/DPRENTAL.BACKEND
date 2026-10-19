@@ -9,6 +9,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Dprental.PaymentService.Domain.Entities;
+using Dprental.PaymentService.Common.Cryptography;
 
 namespace Dprental.PaymentService.Application.Background;
 
@@ -93,6 +95,7 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var outboxRepo = scope.ServiceProvider.GetRequiredService<IOutboxRepository>();
         var producer = scope.ServiceProvider.GetRequiredService<IInvoicePaidKafkaProducer>();
+        var journalRepo = scope.ServiceProvider.GetService<ITransactionJournalRepository>();
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         var leaseDuration = TimeSpan.FromSeconds(Math.Max(5, config.LeaseDurationSeconds));
@@ -122,12 +125,62 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
             // AggregateId holds the RentalOrderId
             string key = message.AggregateId;
 
+            TransactionJournalEntry? journalEntry = null;
+            string digest = CanonicalJournalHasher.ComputeOutboxDigest(message.Payload);
+
+            if (journalRepo is not null)
+            {
+                if (message.EventId.HasValue)
+                {
+                    journalEntry = await journalRepo.GetByEventIdAsync(message.EventId.Value, cancellationToken);
+                }
+                if (journalEntry is null)
+                {
+                    journalEntry = await journalRepo.GetByOutboxDigestAsync(digest, cancellationToken);
+                }
+            }
+
+            Dictionary<string, string>? headers = null;
+            if (journalEntry is not null)
+            {
+                if (!journalEntry.IsConfirmed || string.IsNullOrWhiteSpace(journalEntry.ProofSignature))
+                {
+                    _logger.LogInformation("Outbox message {MessageId} awaiting integrity confirmation before publish; releasing lease.", message.MessageId);
+                    message.ReleaseClaim();
+                    continue;
+                }
+
+                string versionedProof = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    v = 1,
+                    msgId = message.MessageId,
+                    evtId = journalEntry.EventId,
+                    opId = journalEntry.OperationId,
+                    stream = journalEntry.StreamId,
+                    ver = journalEntry.Version,
+                    digest = digest,
+                    keyId = journalEntry.SigningKeyId,
+                    sig = journalEntry.ProofSignature,
+                    confirmedAt = journalEntry.ConfirmedAt
+                });
+
+                headers = new Dictionary<string, string>
+                {
+                    ["x-dprental-signature"] = journalEntry.ProofSignature,
+                    ["x-dprental-key-id"] = journalEntry.SigningKeyId ?? string.Empty,
+                    ["x-dprental-proof"] = versionedProof,
+                    ["x-dprental-stream-id"] = journalEntry.StreamId,
+                    ["x-dprental-stream-version"] = journalEntry.Version.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["x-dprental-event-id"] = journalEntry.EventId.ToString("D")
+                };
+            }
+
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, config.DeliveryTimeoutSeconds)));
 
-                await producer.ProduceAsync(topic, key, message.Payload, cts.Token);
+                await producer.ProduceAsync(topic, key, message.Payload, headers, cts.Token);
 
                 DateTimeOffset ackNow = _timeProvider.GetUtcNow();
                 bool marked = await outboxRepo.MarkPublishedAsync(message.Id, _workerId, ackNow, cancellationToken);

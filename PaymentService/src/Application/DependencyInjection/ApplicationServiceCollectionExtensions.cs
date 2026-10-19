@@ -3,7 +3,9 @@ using Dprental.PaymentService.Application.IServices;
 using Dprental.PaymentService.Application.Kafka;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Application.Services;
+using Dprental.PaymentService.Common.Cryptography;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Dprental.PaymentService.Application.DependencyInjection;
@@ -40,12 +42,20 @@ public static class ApplicationServiceCollectionExtensions
                  o.DeliveryTimeoutSeconds > 0 && o.LeaseDurationSeconds > 0),
                 "Enabled Kafka requires broker, topic and positive worker settings.")
             .ValidateOnStart();
+        services.AddOptions<IntegrityVerificationOptions>()
+            .BindConfiguration(IntegrityVerificationOptions.SectionName);
+        services.AddOptions<PaymentEncryptionOptions>()
+            .BindConfiguration(PaymentEncryptionOptions.SectionName);
+        services.AddSingleton<IPaymentDataEncryptor>(sp =>
+        {
+            var opt = sp.GetRequiredService<IOptions<PaymentEncryptionOptions>>().Value;
+            return new Dprental.PaymentService.Common.Cryptography.PaymentDataEncryptor(opt.GetKeyBytes(), opt.ActiveKeyId);
+        });
         services.AddSingleton(TimeProvider.System);
 
         services.AddScoped<IInvoiceCreationService, InvoiceCreationService>();
         services.AddScoped<IInvoiceLifecycleService, InvoiceLifecycleService>();
         services.AddScoped<IInvoicePaymentProcessor, InvoicePaymentProcessor>();
-        services.AddScoped<IInvoiceService, InvoiceService>();
         services.AddScoped<ISettlementService, SettlementService>();
         services.AddScoped<IManualRefundService, ManualRefundService>();
         services.AddSingleton<IInvoicePaidKafkaProducer, InvoicePaidKafkaProducer>();

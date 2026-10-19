@@ -6,6 +6,9 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using Dprental.PaymentService.Api.Tests.TestHelpers;
 using Dprental.PaymentService.Application.DTOs.Settlement;
+using Dprental.PaymentService.Application.DTOs.Verification;
+using Dprental.PaymentService.Application.IServices;
+using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Domain.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -16,6 +19,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
@@ -29,17 +33,27 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
     private const string Audience = "payment-api";
     private const string KeyId = "settlement-test-key";
     private readonly RSA _rsa = RSA.Create(2048);
+    private readonly ECDsa _ecdsa = EcdsaAttestation.CreateEphemeralP256KeyPair();
+    private const string SigningKeyId = "dpr-ecdsa-2026-v1";
     private string _connectionString = string.Empty;
     private string _databaseName = string.Empty;
+    private string _integrityConn = string.Empty;
+    private string _integrityDbName = string.Empty;
     private WebApplicationFactory<Program> _factory = null!;
 
     public async Task InitializeAsync()
     {
         (_connectionString, _databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        (_integrityConn, _integrityDbName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
         await using (var db = new PaymentServiceDbContext(
             PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
         {
             await db.Database.MigrateAsync();
+        }
+        var iOptions = new DbContextOptionsBuilder<IntegrityDbContext>().UseNpgsql(_integrityConn).Options;
+        await using (var iCtx = new IntegrityDbContext(iOptions))
+        {
+            await iCtx.Database.MigrateAsync();
         }
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
@@ -51,6 +65,8 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
             builder.UseSetting("Authentication:Jwt:ServiceAudience", Audience);
             builder.UseSetting("Authentication:Jwt:ClientAudience", "dprental-clients");
             builder.UseSetting("Authentication:Jwt:JwksUri", "http://localhost/jwks");
+            builder.UseSetting("IntegrityVerification:ActiveKeyId", SigningKeyId);
+            builder.UseSetting($"IntegrityVerification:PublicKeys:{SigningKeyId}", EcdsaAttestation.ExportPublicKeyBase64(_ecdsa));
             builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.ConfigureTestServices(services =>
             {
@@ -60,6 +76,27 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
                     options.TokenValidationParameters.ValidAudiences = [Audience, "dprental-clients"];
                     options.ConfigurationManager = new TestJwksManager(_rsa);
                 });
+
+                var keyManager = new IntegrityKeyManager(Microsoft.Extensions.Options.Options.Create(new IntegrityHostOptions
+                {
+                    SigningKeyId = SigningKeyId,
+                    PrivateKeyBase64 = EcdsaAttestation.ExportPrivateKeyBase64(_ecdsa)
+                }));
+
+                var verifyOptions = new TestOptionsMonitor<IntegrityVerificationOptions>(new IntegrityVerificationOptions
+                {
+                    ActiveKeyId = SigningKeyId,
+                    PublicKeys = new Dictionary<string, string> { [SigningKeyId] = EcdsaAttestation.ExportPublicKeyBase64(_ecdsa) }
+                });
+
+                services.AddHttpClient<ITransactionIntegrityChecker, IntegrityHostClient>()
+                    .ConfigurePrimaryHttpMessageHandler(() =>
+                    {
+                        var iCtx = new IntegrityDbContext(new DbContextOptionsBuilder<IntegrityDbContext>().UseNpgsql(_integrityConn).Options);
+                        var pCtx = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
+                        var engine = new IntegrityVerificationEngine(iCtx, pCtx, keyManager, verifyOptions);
+                        return new MockIntegrityHandler(engine);
+                    });
             });
         });
     }
@@ -67,9 +104,12 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         _factory.Dispose();
+        _ecdsa.Dispose();
         _rsa.Dispose();
         if (_databaseName.Length > 0)
             await PostgresTestDatabaseHelper.DropTestDatabaseAsync(_databaseName);
+        if (_integrityDbName.Length > 0)
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(_integrityDbName);
     }
 
     [Fact]
@@ -85,7 +125,38 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
             PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
         {
             db.Invoices.Add(invoice);
+            var journal = JournalEntryFactory.CreateEntry(
+                operationId: Guid.NewGuid(),
+                streamId: invoice.PaymentRef!,
+                streamType: JournalStreamTypes.PaymentTransaction,
+                version: 1,
+                eventId: Guid.NewGuid(),
+                eventType: JournalEventTypes.PaymentMatched,
+                amount: invoice.TotalAmount,
+                currency: invoice.Currency,
+                status: "PAID",
+                confirmationSource: JournalConfirmationSources.Webhook,
+                actor: "WEBHOOK",
+                timestampUtc: now,
+                previousHash: CanonicalJournalHasher.GenesisHash,
+                paymentRef: invoice.PaymentRef,
+                invoiceRef: invoice.InvoiceRef,
+                rentalOrderId: invoice.RentalOrderId);
+            string attMsg = EcdsaAttestation.BuildAttestationMessage(SigningKeyId, journal.StreamId, journal.Version, journal.EventId, journal.EntryHash, now);
+            string attSig = EcdsaAttestation.Sign(_ecdsa, attMsg);
+            journal.Confirm(attSig, SigningKeyId, now);
+            db.TransactionJournals.Add(journal);
             await db.SaveChangesAsync();
+            var iOptions = new DbContextOptionsBuilder<IntegrityDbContext>().UseNpgsql(_integrityConn).Options;
+            await using (var iCtx = new IntegrityDbContext(iOptions))
+            {
+                var att = AttestationRecord.Create(
+                    journal.StreamId, journal.Version, journal.EventId, journal.EntryHash, journal.PayloadHash, journal.PreviousHash, attSig, SigningKeyId, now);
+                iCtx.Attestations.Add(att);
+                var manifest = StreamManifest.Create(journal.StreamId, journal.Version, journal.EntryHash, journal.EventId, now);
+                iCtx.Manifests.Add(manifest);
+                await iCtx.SaveChangesAsync();
+            }
         }
 
         var request = new SettleRentalRequest(invoice.RentalOrderId, item.RentalItemId,
@@ -129,12 +200,43 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
             PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
         {
             db.Invoices.Add(invoice);
+            var journal = JournalEntryFactory.CreateEntry(
+                operationId: Guid.NewGuid(),
+                streamId: invoice.PaymentRef!,
+                streamType: JournalStreamTypes.PaymentTransaction,
+                version: 1,
+                eventId: Guid.NewGuid(),
+                eventType: JournalEventTypes.PaymentMatched,
+                amount: invoice.TotalAmount,
+                currency: invoice.Currency,
+                status: "PAID",
+                confirmationSource: JournalConfirmationSources.Webhook,
+                actor: "WEBHOOK",
+                timestampUtc: now,
+                previousHash: CanonicalJournalHasher.GenesisHash,
+                paymentRef: invoice.PaymentRef,
+                invoiceRef: invoice.InvoiceRef,
+                rentalOrderId: invoice.RentalOrderId);
+            string attMsg2 = EcdsaAttestation.BuildAttestationMessage(SigningKeyId, journal.StreamId, journal.Version, journal.EventId, journal.EntryHash, now);
+            string attSig2 = EcdsaAttestation.Sign(_ecdsa, attMsg2);
+            journal.Confirm(attSig2, SigningKeyId, now);
+            db.TransactionJournals.Add(journal);
             await db.SaveChangesAsync();
             var settlement = RentalItemSettlement.Create(item, 20_000m, "DEC-REFUND-API", "settle-refund-api").Value;
-            var result = await new Dprental.PaymentService.Domain.Repository.EfSettlementLedger(db, TimeProvider.System)
+            var result = await new Dprental.PaymentService.Infrastructure.Repositories.EfSettlementLedger(db, TimeProvider.System)
                 .RecordSettlementAsync(settlement, CancellationToken.None);
             Assert.True(result.IsSuccess);
             requirementId = await db.ManualRefundRequirements.Select(x => x.Id).SingleAsync();
+            var iOptions2 = new DbContextOptionsBuilder<IntegrityDbContext>().UseNpgsql(_integrityConn).Options;
+            await using (var iCtx = new IntegrityDbContext(iOptions2))
+            {
+                var att = AttestationRecord.Create(
+                    journal.StreamId, journal.Version, journal.EventId, journal.EntryHash, journal.PayloadHash, journal.PreviousHash, attSig2, SigningKeyId, now);
+                iCtx.Attestations.Add(att);
+                var manifest = StreamManifest.Create(journal.StreamId, journal.Version, journal.EntryHash, journal.EventId, now);
+                iCtx.Manifests.Add(manifest);
+                await iCtx.SaveChangesAsync();
+            }
         }
 
         using var client = _factory.CreateClient();
@@ -199,5 +301,36 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         }
 
         public void RequestRefresh() { }
+    }
+
+    private sealed class MockIntegrityHandler(IntegrityVerificationEngine engine) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/internal/v1/integrity/verify", StringComparison.Ordinal) == true)
+            {
+                var reqDto = await request.Content!.ReadFromJsonAsync<TransactionVerificationRequest>(cancellationToken: cancellationToken);
+                var result = await engine.VerifyAsync(reqDto!, cancellationToken);
+                if (result.IsSuccess)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = JsonContent.Create(result.Value)
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                {
+                    Content = JsonContent.Create(result.Error)
+                };
+            }
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        }
+    }
+
+    private sealed class TestOptionsMonitor<T>(T value) : IOptionsMonitor<T>
+    {
+        public T CurrentValue => value;
+        public T Get(string? name) => value;
+        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }
