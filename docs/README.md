@@ -4,13 +4,12 @@
 
 | Lớp | Trách nhiệm | Không được chứa |
 | --- | --- | --- |
-| `Common` | Kiểu dữ liệu và concern dùng chung (`Result`, `Error`, enums, utility) | Nghiệp vụ đặc thù domain khác |
-| `Domain` | Entities, repository contracts, EF Core DbContext và repositories như AuthService | HTTP pipeline, controller |
-| `Application` | DTOs, Services, Mapping và điều phối domain | Controller, HTTP pipeline, DbContext |
-| `Api` | Controllers, middleware và DI/composition root | Business logic trực tiếp |
+| `Common` | Kiểu dữ liệu và concern dùng chung (`Result`, `Error`, assembly marker) | Nghiệp vụ đặc thù domain khác |
+| `Domain` | Entities, repository contracts, EF Core DbContext, repository implementations và DI theo RentalService | HTTP pipeline, controller, Application logic |
+| `Application` | DTOs, IServices, Services, Validation, Background, Kafka và điều phối domain | Controller, HTTP pipeline, DbContext trực tiếp |
+| `Api` | Controllers, Exceptions, Filters, Properties và DI/composition root | Business logic trực tiếp, DbContext trực tiếp |
 
-Domain sở hữu repository contracts, EF Core DbContext và repository implementations theo cấu trúc AuthService. API đăng ký persistence qua `AddRecommendationServiceDomainRepositories`.
-
+Domain sở hữu repository contracts, EF Core DbContext, repository implementations và DI theo cấu trúc tham chiếu RentalService. Cấu trúc persistence này là **ngoại lệ kiến trúc đã chọn** (không tách project Infrastructure riêng). Application và API handlers tuyệt đối không được thao tác persistence trực tiếp hay inject DbContext. API đăng ký persistence qua `AddRecommendationServiceDomainRepositories` tại namespace `Dprental.RecommendationService.Domain.DependencyInjection`.
 ## Cấu hình môi trường
 
 `Api/appsettings.Development.json` chỉ chứa giá trị không nhạy cảm. Docker Compose lấy credential local từ `.env`: sao chép `.env.example` thành `.env` và đặt `POSTGRES_PASSWORD` riêng. `.env` đã bị Git bỏ qua. API lấy connection string từ biến môi trường `ConnectionStrings__Postgres`.

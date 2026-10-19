@@ -1,3 +1,5 @@
+using Dprental.RecommendationService.Domain;
+
 namespace Dprental.RecommendationService.Application;
 
 /// <summary>
@@ -5,4 +7,5 @@ namespace Dprental.RecommendationService.Application;
 /// </summary>
 public static class ApplicationAssemblyMarker
 {
+    internal static readonly Type DomainMarkerType = typeof(DomainAssemblyMarker);
 }

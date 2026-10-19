@@ -1,3 +1,5 @@
+using Dprental.RecommendationService.Common;
+
 namespace Dprental.RecommendationService.Domain;
 
 /// <summary>
@@ -5,4 +7,5 @@ namespace Dprental.RecommendationService.Domain;
 /// </summary>
 public static class DomainAssemblyMarker
 {
+    internal static readonly Type CommonMarkerType = typeof(CommonAssemblyMarker);
 }

@@ -1,16 +1,16 @@
 # RecommendationService
 
-Dịch vụ RecommendationService cho hệ sinh thái DPRENTAL, được xây dựng bằng .NET 10 theo kiến trúc phân lớp sạch (Clean Architecture) tương đồng với AuthService.
+Dịch vụ RecommendationService cho hệ sinh thái DPRENTAL, được xây dựng bằng .NET 10 theo kiến trúc phân lớp sạch (Clean Architecture) chuẩn hóa theo RentalService.
 
 ## Cấu trúc
 
 ```text
 RecommendationService/
   src/
-    Common/          # Kiểu dùng chung, Result/Error và utility
-    Domain/          # Entities, repository contracts và EF Core persistence
-    Application/     # DTOs, services, mapping
-    Api/             # Controllers, Filters, HTTP composition root
+    Common/          # Kiểu dùng chung, Result/Error và assembly marker
+    Domain/          # Entities, IRepositories, Repositories, Migrations, DependencyInjection
+    Application/     # Background, DTOs, IServices, Kafka, Services, Validation
+    Api/             # Controllers, Exceptions, Filters, Properties, Program.cs
   tests/             # Kiểm thử
 Directory.Build.props
 Directory.Packages.props
@@ -55,21 +55,25 @@ dotnet test RecommendationService.sln
 
 Sau khi khởi tạo Git trong thư mục service, chạy `./scripts/setup-git-hooks.sh` (hoặc bản `.ps1` trên PowerShell). Hook kiểm tra branch nền `origin/recommendation/develop`, rồi build và test trước khi push.
 
-## Common và xử lý lỗi
+## Common, Kiến trúc và Xử lý lỗi
 
-Template có `Result`/`Result<T>` và `Error`/`ErrorType` (tham khảo AuthService).
+Service sử dụng `Result`/`Result<T>` và `Error`/`ErrorType` (theo chuẩn RentalService).
 Application trả `Result` cho lỗi dự kiến; controller dùng `this.ToProblem(result.Error)`
-để ánh xạ sang 400/401/403/404/409/410/422/500. Không gọi `ToProblem(Error.None)`.
-`GlobalExceptionHandler` đã đăng ký tại API, trả 500 ProblemDetails kèm `traceId`,
-không trả exception message hoặc payload; request bị hủy không chuyển thành lỗi nghiệp vụ.
+để ánh xạ sang HTTP status codes (400, 401, 403, 404, 409, 410, 422, 500). Không gọi `ToProblem(Error.None)`.
+`GlobalExceptionHandler` đã đăng ký tại API, bắt các ngoại lệ ngoài dự kiến và trả về RFC 7807 ProblemDetails
+kèm `traceId` an toàn ở HTTP 500; không làm lộ exception message, stack trace hay dữ liệu nhạy cảm.
 
-`Domain/IRepositories/IRepo<TEntity, TKey>` là contract CRUD có CancellationToken,
-không phụ thuộc EF/HTTP. Repository theo aggregate chỉ kế thừa khi cần đủ các thao tác;
-nếu không, định nghĩa contract nhỏ theo use case. Implementation persistence ở
-`Domain/Repositories` theo bố cục hiện tại của AuthService; không sinh generic EF
-repository hoặc entity nghiệp vụ giả. `GetAllAsync` chỉ dùng cho tập dữ liệu nhỏ;
-với dữ liệu lớn, contract chuyên biệt phải hỗ trợ phân trang.
+Repository contracts được định nghĩa nhỏ gọn theo từng use case hoặc aggregate tại `Domain/IRepositories`;
+không sử dụng generic CRUD (`IRepo<TEntity, TKey>`) để tránh phụ thuộc máy móc và vi phạm ISP.
+EF Core DbContext và repository implementations nằm tại `Domain/Repositories`, được đăng ký DI
+qua extension method `AddRecommendationServiceDomainRepositories` trong namespace
+`Dprental.RecommendationService.Domain.DependencyInjection`.
 
-Template test kiểm tra Result invariant, ánh xạ error và exception qua HTTP ở
-Production, gồm fallback khi client không nhận JSON. Không sao chép mã lỗi,
-constraint database hay dependency đặc thù nghiệp vụ AuthService.
+Các tác vụ chạy ngầm (`Application/Background`) và tích hợp sự kiện phân tán (`Application/Kafka`)
+tuân theo quy chuẩn của RentalService: đóng vai trò dispatch và transport, xử lý ACK/retry/deduplication,
+chuyển tiếp toàn bộ xử lý nghiệp vụ sang Application Service và không trực tiếp thao tác persistence.
+
+Cấu trúc persistence này là **ngoại lệ kiến trúc đã chọn** theo bố cục tham chiếu của RentalService
+(không tách project Infrastructure riêng). Tầng Application và API controllers tuyệt đối không được
+thao tác persistence trực tiếp hay inject `DbContext`. Mọi truy xuất dữ liệu từ Application phải
+thông qua repository abstraction được inject qua DI container.

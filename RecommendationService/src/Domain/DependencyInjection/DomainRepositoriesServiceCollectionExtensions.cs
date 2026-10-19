@@ -1,8 +1,8 @@
+using Dprental.RecommendationService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Dprental.RecommendationService.Domain.Repositories;
-
+namespace Dprental.RecommendationService.Domain.DependencyInjection;
 /// <summary>
 /// Đăng ký PostgreSQL persistence cho service.
 /// </summary>

@@ -1,5 +1,6 @@
 using System.IO;
 using Dprental.RecommendationService.Api.Exceptions;
+using Dprental.RecommendationService.Domain.DependencyInjection;
 using Dprental.RecommendationService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
