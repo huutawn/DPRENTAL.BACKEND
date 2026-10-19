@@ -471,6 +471,48 @@ public sealed class OrderQueryServiceTests
         Assert.Equal(ErrorType.Forbidden, service.Error.Type);
     }
 
+    [Fact]
+    public async Task Renter_SeesPickupLocation_OnlyAfterSupplierConfirmation()
+    {
+        await SeedAsync();
+
+        // 1. Trước khi chủ kho xác nhận (Status = PendingSupplierConfirmation): renter không thấy địa chỉ
+        Result<RenterOrderDetailResponse> beforeConfirm =
+            await RenterService().GetMyOrderAsync(_paidMixedOrder.Id, OrderTestData.User(_an));
+        Assert.True(beforeConfirm.IsSuccess);
+        Assert.Null(beforeConfirm.Value.SubOrders[0].Items[0].PickupLocation);
+
+        // 2. Chủ kho xác nhận: chuyển mục thuê sang AwaitingHandover
+        await using (RentalServiceDbContext context = NewContext())
+        {
+            var order = await context.RentalOrders.Include(o => o.Items).SingleAsync(o => o.Id == _paidMixedOrder.Id);
+            var item = order.Items.First(i => i.SupplierId == _binh);
+            // Set status to AwaitingHandover
+            typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(item, RentalItemStatus.AwaitingHandover);
+            await context.SaveChangesAsync();
+        }
+
+        // 3. Sau khi chủ xác nhận: renter nhìn thấy địa chỉ kho thật đã snapshot lúc checkout
+        Result<RenterOrderDetailResponse> afterConfirm =
+            await RenterService().GetMyOrderAsync(_paidMixedOrder.Id, OrderTestData.User(_an));
+        Assert.True(afterConfirm.IsSuccess);
+        Assert.Equal("Kho Thủ Đức, TP.HCM", afterConfirm.Value.SubOrders[0].Items[0].PickupLocation);
+    }
+
+    [Fact]
+    public async Task Supplier_SeesPickupLocation_Directly()
+    {
+        await SeedAsync();
+
+        var subOrder = _paidMixedOrder.SubOrders.First(s => s.SupplierId == _binh);
+
+        Result<SupplierSubOrderDetailResponse> result =
+            await SupplierService().GetMySubOrderAsync(subOrder.Id, OrderTestData.User(_binh));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Kho Thủ Đức, TP.HCM", result.Value.Items[0].PickupLocation);
+    }
+
     private RenterOrderQueryService RenterService() => new(new RentalOrderRepository(NewContext()));
 
     private SupplierSubOrderQueryService SupplierService() => new(new RentalOrderRepository(NewContext()));

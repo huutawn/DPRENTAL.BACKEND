@@ -223,6 +223,21 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Fact]
+    public async Task Prepare_WithWarehouseInListingSnapshot_FormatsPickupLocationWithCoordinates()
+    {
+        _inventory.Listings[_listingId] = _inventory.Listings[_listingId] with
+        {
+            Warehouse = new ListingWarehouseDto("123 Le Loi", "79", "Thành phố Hồ Chí Minh", "25747", "Phường Thủ Dầu Một", 10.7769, 106.7009)
+        };
+
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Plan);
+        Assert.Equal("123 Le Loi, Phường Thủ Dầu Một, Thành phố Hồ Chí Minh (10.776900, 106.700900)", result.Plan.Lines[0].PickupLocationSnapshot);
+    }
+
+    [Fact]
     public async Task Prepare_ReturnsFieldErrors_BeforeCallingInventory()
     {
         CheckoutRequest request = Request() with { TermsAccepted = false, RefundAccount = new("VCB", "12", "NGUYEN VAN A") };

@@ -230,7 +230,7 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         held.Line.ExpectedEndDate,
         held.Line.ListingName,
         null,
-        null,
+        held.Line.PickupLocationSnapshot,
         held.Line.DailyRate,
         held.Line.DepositPerUnit,
         held.AllocationGroupId,

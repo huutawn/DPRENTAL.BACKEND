@@ -76,11 +76,15 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
         ListingRentalSnapshotsRequest request,
         CancellationToken ct = default)
     {
+        string scope = request.IncludeWarehouse
+            ? $"{InventoryContractSpec.Scopes.ReadAvailability} {InventoryContractSpec.Scopes.ReadWarehouse}"
+            : InventoryContractSpec.Scopes.ReadAvailability;
+
         return await SendAsync<ListingRentalSnapshotsRequest, ListingRentalSnapshotsResponse>(
             HttpMethod.Post,
             InventoryContractSpec.Routes.ListingRentalSnapshots,
             request,
-            InventoryContractSpec.Scopes.ReadAvailability,
+            scope,
             ct);
     }
 

@@ -55,6 +55,64 @@ dotnet test RentalService.sln
 
 Sau khi khởi tạo Git trong thư mục service, chạy `./scripts/setup-git-hooks.sh` (hoặc bản `.ps1` trên PowerShell). Hook kiểm tra branch nền `origin/rental/develop`, rồi build và test trước khi push.
 
+## Docker artifact
+
+Dockerfile ở repository root có hai target cho deploy, đều dùng cùng source revision:
+
+```bash
+# Image runtime của RentalService
+docker build --target runtime -t ghcr.io/<org>/dprental-rental:<git-sha> .
+
+# Image chạy EF Core migration một lần trước khi khởi động API
+docker build --target migrator -t ghcr.io/<org>/dprental-rental-migrator:<git-sha> .
+```
+
+Runtime lắng nghe cổng `8080`, chạy non-root UID `1654` và cung cấp `/health/live` cùng `/health/ready`. Readiness kiểm tra kết nối PostgreSQL. Image migrator chứa EF Core migration bundle và các file `appsettings*.json`, không chứa SDK, source code hay `dotnet-ef`. Bundle nhận cấu hình môi trường và connection string từ Compose như migrator trước đó; không đưa secret vào image.
+
+## CI/CD RentalService cho dev
+
+Workflow [rentalservice-dev.yml](.github/workflows/rentalservice-dev.yml) chỉ chạy khi có push vào `rental/develop-ci-cd`; nó không chạy cho pull request và không kiểm tra branch nền hoặc chạy test. Job publish build và đẩy hai Docker image lên GHCR một lần, sau đó job deploy chạy trên VPS. Kiểm tra build và test .NET vẫn có trong [pre-push hook](scripts/pre-push-check.sh) ở máy lập trình viên, nhưng hook này có thể bị bỏ qua và không thay thế CI.
+
+Mỗi push sẽ publish hai image GHCR bất biến bằng full Git SHA:
+
+```text
+ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-rental:<git-sha>
+ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-rental-migrator:<git-sha>
+```
+
+Thiết lập GitHub Environment variable `GHCR_IMAGE_NAMESPACE` bằng namespace GHCR viết thường (ví dụ `huutawn`). Workflow gắn OCI source metadata để package mới tự liên kết repository. Với package đã từng được push thủ công, vào từng package GHCR và cấp repository workflow quyền **Write** trong phần Actions access trước lần CI đầu tiên. Tạo GitHub Environment tên `dev` với các secrets sau; không đặt PostgreSQL password hoặc nội dung `.env` vào GitHub:
+
+```text
+DEV_VPS_HOST              # IP hoặc hostname VPS
+DEV_VPS_USER              # user deploy thuộc group docker
+DEV_VPS_SSH_PRIVATE_KEY   # private key riêng của user deploy
+DEV_VPS_KNOWN_HOSTS       # dòng host key theo định dạng known_hosts
+DEV_VPS_PORT              # tùy chọn, mặc định 22
+```
+
+Workflow nạp deploy key vào `ssh-agent` qua stdin và kiểm tra host key đã lưu trong `DEV_VPS_KNOWN_HOSTS`. Nó truyền `GITHUB_TOKEN` cùng deploy script qua stdin của kết nối SSH, không đặt token trong câu lệnh SSH. Trên VPS, script đăng nhập GHCR bằng Docker config tạm rồi thực thi [deploy-rentalservice.sh](scripts/deploy-rentalservice.sh) từ commit đang phát hành. Docker credential tạm bị xóa ngay khi script kết thúc; user SSH của workflow cần quyền đọc `.env` và ghi `release.env`. `.env` vẫn chỉ tồn tại trên VPS. `release.env` phải đã có hai image RentalService với tag để script thay bằng SHA mới. Script pull hai image bằng một lệnh Compose, chạy migration một lần, chỉ recreate `rental-service`, chờ healthcheck, rồi gọi `/health/ready` qua `DEV_DOMAIN` và kiểm tra JWKS trực tiếp trong `auth-service` container. Gateway không public JWKS; Gateway tự tải JWKS qua Docker network nội bộ. Script không tự động rollback database hoặc image nếu migration hay healthcheck thất bại.
+
+Ví dụ cấp quyền ghi `release.env` cho user GitHub Actions trên VPS (thay `deploy` bằng user thực tế):
+
+```bash
+sudo chown deploy:deploy /opt/dprental/dev/release.env
+sudo chmod 600 /opt/dprental/dev/release.env
+```
+
+User `deploy` phải thuộc group `docker`; quyền Docker tương đương quyền quản trị VPS nên deploy key chỉ dùng cho automation này. Khóa host SSH có thể lấy từ máy tin cậy bằng `ssh-keyscan -H <vps-host>` rồi lưu nguyên kết quả vào `DEV_VPS_KNOWN_HOSTS`. Nếu chỉ muốn triển khai sau khi merge PR, cấu hình branch protection/ruleset cho `rental/develop-ci-cd` để yêu cầu PR và chặn push trực tiếp; event `push` tự nó không bảo đảm commit đến từ PR.
+
+### Điều kiện triển khai VPS (Prerequisites)
+
+Đường dẫn triển khai trên VPS giữ nguyên `/opt/dprental/dev` và toàn bộ danh sách secrets môi trường như AuthService. Trước khi kích hoạt CI/CD RentalService trên VPS, môi trường dev cần hoàn tất các điều kiện sau:
+
+1. **Cấu hình Compose (`compose.yaml`)**: Hiện tại Compose dev chung tại VPS chưa định nghĩa hai service `rental-service` và `rental-migrate`. Cần bổ sung định nghĩa cho `rental-service` (cùng network services, phụ thuộc postgres và valkey/kafka, trỏ image `${RENTAL_SERVICE_IMAGE}`) và `rental-migrate` (profile `migration`, trỏ image `${RENTAL_MIGRATOR_IMAGE}`).
+2. **Cấu hình môi trường (`.env`)**: Bổ sung đầy đủ các biến môi trường cho RentalService (ConnectionStrings__Postgres, Kafka, JWT validation options, v.v.).
+3. **Khai báo image trong `release.env`**: File `/opt/dprental/dev/release.env` phải có sẵn hai dòng cấu hình image ban đầu kèm tag hợp lệ (để script cập nhật SHA mới):
+   ```text
+   RENTAL_SERVICE_IMAGE=ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-rental:initial
+   RENTAL_MIGRATOR_IMAGE=ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-rental-migrator:initial
+   ```
+
 ## Common và xử lý lỗi
 
 Template có `Result`/`Result<T>` và `Error`/`ErrorType` (tham khảo AuthService).

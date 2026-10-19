@@ -38,9 +38,10 @@ public partial class RentalItem
     [MaxLength(2000)]
     public string? ListingDescriptionSnapshot { get; private set; }
 
-    // Nơi nhận, loại, hãng, model và thông số được để trống từ 15/10/2026: Inventory không còn trả các thông tin này.
-    // Đơn đặt trước đó vẫn giữ dữ liệu đã chụp.
-    [MaxLength(500)]
+    public const int MaxPickupLocationSnapshotLength = 1024;
+
+    // Snapshot địa chỉ kho nhận máy tại thời điểm đặt hàng (bao gồm địa chỉ chi tiết, tỉnh/phường và tọa độ).
+    [MaxLength(MaxPickupLocationSnapshotLength)]
     public string? PickupLocationSnapshot { get; private set; }
 
     public Guid? EquipmentTypeId { get; private set; }
