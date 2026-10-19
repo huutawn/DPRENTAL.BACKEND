@@ -1,5 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <PackageReference Include="Confluent.Kafka" />
+    <PackageReference Include="JsonSchema.Net" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../../../docs/contracts/schemas/*.schema.json" Link="Validation/Schemas/%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../Domain/RecommendationService.Domain.csproj" />
   </ItemGroup>
 </Project>

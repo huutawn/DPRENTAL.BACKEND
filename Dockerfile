@@ -9,6 +9,7 @@ COPY RecommendationService/src/Api/RecommendationService.Api.csproj Recommendati
 
 RUN dotnet restore RecommendationService/src/Api/RecommendationService.Api.csproj
 
+COPY docs/ docs/
 COPY RecommendationService/ RecommendationService/
 RUN dotnet publish RecommendationService/src/Api/RecommendationService.Api.csproj \
     --configuration Release \

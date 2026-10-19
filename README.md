@@ -16,7 +16,7 @@ Directory.Build.props
 Directory.Packages.props
 Dockerfile
 docker-compose.yml
-docs/                # Tài liệu kỹ thuật
+docs/                # Tài liệu kỹ thuật & contracts
 scripts/             # Scripts hỗ trợ và Git hooks
 ```
 
@@ -24,76 +24,87 @@ scripts/             # Scripts hỗ trợ và Git hooks
 
 ```bash
 cp .env.example .env
-# Đặt POSTGRES_PASSWORD riêng trong .env; đổi POSTGRES_PORT nếu cổng đã được dùng.
+# Đặt POSTGRES_PASSWORD riêng trong .env; đổi cổng nếu cần.
 docker compose up -d
 ```
 
-PostgreSQL lắng nghe ở cổng cấu hình trong `.env`. File `.env` không được commit.
+Để kích hoạt thêm Valkey cục bộ (thay vì kết nối shared Valkey):
+
+```bash
+docker compose --profile local up -d
+```
+
+Compose bao gồm:
+- PostgreSQL 17 (`recommendation-pg`)
+- Migration job (chạy `--migrate` và thoát sau khi PostgreSQL sẵn sàng)
+- API RecommendationService (chờ migration hoàn tất)
+- Kafka KRaft broker & service tự tạo topic (`kafka-init`)
+- Valkey local (profile `local`)
+
+## Chạy Database Migration
+
+API không tự động migration khi khởi động bình thường. Migration được thực hiện qua lệnh riêng:
+
+```bash
+dotnet run --project RecommendationService/src/Api/RecommendationService.Api.csproj -- --migrate
+```
+
+Hoặc qua Docker container:
+```bash
+docker compose run --rm migration
+```
+
+## Chạy Rebuild Projections
+
+Để tính toán và tái tạo lại toàn bộ điểm từ raw events trong transaction với SHARE lock:
+
+```bash
+dotnet run --project RecommendationService/src/Api/RecommendationService.Api.csproj -- --rebuild-projections
+```
 
 ## Chạy API cục bộ
 
-Nạp thông tin PostgreSQL từ `.env` vào môi trường của tiến trình API:
+Nạp biến môi trường từ `.env`:
 
 ```bash
 set -a
 . ./.env
 set +a
 export ConnectionStrings__Postgres="Host=127.0.0.1;Port=${POSTGRES_PORT};Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+export ConnectionStrings__Redis="127.0.0.1:${VALKEY_PORT}"
+export Kafka__BootstrapServers="127.0.0.1:${KAFKA_PORT}"
 dotnet run --project RecommendationService/src/Api/RecommendationService.Api.csproj
 ```
 
-API dùng cổng riêng trong `launchSettings.json`. Cấu hình kết nối trống sẽ làm API dừng ngay lúc khởi động.
+## Health Checks
+
+- `/health/live`: Trả về `HTTP 200` khi tiến trình hoạt động.
+- `/health/ready`: Trả về `HTTP 200` khi PostgreSQL kết nối thành công và toàn bộ EF Core migrations đã được áp dụng. Trả về `HTTP 503` nếu PostgreSQL mất kết nối hoặc còn migration chưa chạy. Kafka hoặc Valkey outage không làm `/health/ready` thất bại.
+
+## Kafka Ingestion, Retry và DLQ
+
+Service lắng nghe trên 2 topic và chuyển DLQ khi có lỗi không thể phục hồi:
+- Topic `inventory.behavior.events.v1` (Group `recommendation-inventory-behavior-v1`)
+  - DLQ: `inventory.behavior.events.v1.recommendation.dlq`
+- Topic `rental.events.v1` (Group `recommendation-rental-behavior-v1`)
+  - DLQ: `rental.events.v1.recommendation.dlq`
+
+Quy tắc:
+- Tắt auto-commit và auto-offset-store. Chỉ commit offset sau khi DB commit thành công, duplicate hợp lệ, event rental ngoài phạm vi bỏ qua, hoặc DLQ delivery acknowledgment.
+- Lỗi cú pháp JSON, sai version, sai producer, vi phạm schema hoặc xung đột payload được chuyển sang topic DLQ tương ứng với header `x-dlq-error-reason` cùng metadata nguồn.
+- Lỗi tạm thời (DB/Network) được retry bằng exponential backoff có jitter (1s đến 30s, tối đa 5 lần mỗi round, tiếp tục các round tiếp theo khi outage kéo dài; không chuyển DLQ do mất kết nối).
+- Trong thời gian retry wait, partition được pause và tiếp tục poll để duy trì heartbeat consumer group.
+
+## Valkey Snapshot Cache Worker
+
+- Chạy ngay khi khởi động rồi định kỳ mỗi 60 giây.
+- Đọc top 20 equipment types của user (theo trang) và top 100 listings toàn cầu (score DESC, UUID ASC).
+- Ghi snapshot JSON nguyên tử với TTL 300 giây. Lua script bảo đảm chỉ snapshot có `generatedAt >= existing generatedAt` mới được ghi đè.
+- Valkey outage không làm gián đoạn API readiness hay luồng ingest Kafka.
 
 ## Build và Test
 
 ```bash
-dotnet build RecommendationService.sln
-dotnet test RecommendationService.sln
+dotnet build RecommendationService.sln -c Release
+dotnet test RecommendationService.sln -c Release
 ```
-
-
-## Hợp đồng tích hợp (Integration Contracts)
-
-RecommendationService định nghĩa hợp đồng tích hợp chính thức cho Phase 1 tại thư mục `docs/contracts/`:
-
-- **Đặc tả kiến trúc & contract**: [`docs/contracts/recommendation-v1.md`](docs/contracts/recommendation-v1.md)
-- **JSON Schemas Draft 2020-12 & Fixtures**: [`docs/contracts/schemas/`](docs/contracts/schemas/)
-- **DDL tham chiếu PostgreSQL**: [`docs/contracts/recommendation-v1.sql`](docs/contracts/recommendation-v1.sql)
-
-Chạy kiểm tra schemas và fixtures bằng Python jsonschema:
-
-```bash
-python3 scripts/tests/validate_contracts.py
-```
-
-Kiểm tra DDL tham chiếu và atomic upsert trên PostgreSQL tạm (yêu cầu Docker):
-
-```bash
-python3 scripts/tests/verify_ddl_postgres.py
-```
-## Git hook
-
-Sau khi khởi tạo Git trong thư mục service, chạy `./scripts/setup-git-hooks.sh` (hoặc bản `.ps1` trên PowerShell). Hook kiểm tra branch nền `origin/recommendation/develop`, rồi build và test trước khi push.
-
-## Common, Kiến trúc và Xử lý lỗi
-
-Service sử dụng `Result`/`Result<T>` và `Error`/`ErrorType` (theo chuẩn RentalService).
-Application trả `Result` cho lỗi dự kiến; controller dùng `this.ToProblem(result.Error)`
-để ánh xạ sang HTTP status codes (400, 401, 403, 404, 409, 410, 422, 500). Không gọi `ToProblem(Error.None)`.
-`GlobalExceptionHandler` đã đăng ký tại API, bắt các ngoại lệ ngoài dự kiến và trả về RFC 7807 ProblemDetails
-kèm `traceId` an toàn ở HTTP 500; không làm lộ exception message, stack trace hay dữ liệu nhạy cảm.
-
-Repository contracts được định nghĩa nhỏ gọn theo từng use case hoặc aggregate tại `Domain/IRepositories`;
-không sử dụng generic CRUD (`IRepo<TEntity, TKey>`) để tránh phụ thuộc máy móc và vi phạm ISP.
-EF Core DbContext và repository implementations nằm tại `Domain/Repositories`, được đăng ký DI
-qua extension method `AddRecommendationServiceDomainRepositories` trong namespace
-`Dprental.RecommendationService.Domain.DependencyInjection`.
-
-Các tác vụ chạy ngầm (`Application/Background`) và tích hợp sự kiện phân tán (`Application/Kafka`)
-tuân theo quy chuẩn của RentalService: đóng vai trò dispatch và transport, xử lý ACK/retry/deduplication,
-chuyển tiếp toàn bộ xử lý nghiệp vụ sang Application Service và không trực tiếp thao tác persistence.
-
-Cấu trúc persistence này là **ngoại lệ kiến trúc đã chọn** theo bố cục tham chiếu của RentalService
-(không tách project Infrastructure riêng). Tầng Application và API controllers tuyệt đối không được
-thao tác persistence trực tiếp hay inject `DbContext`. Mọi truy xuất dữ liệu từ Application phải
-thông qua repository abstraction được inject qua DI container.

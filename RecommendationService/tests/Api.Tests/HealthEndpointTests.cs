@@ -127,9 +127,12 @@ public sealed class HealthEndpointTests
 
     private static WebApplicationFactory<Program> CreateFactory() =>
         new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder => builder.UseSetting(
-                "ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test"));
-
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("Kafka:Enabled", "false");
+                builder.UseSetting("Valkey:Enabled", "false");
+            });
     private sealed class FailingConnectionInterceptor : DbConnectionInterceptor
     {
         public override ValueTask<InterceptionResult> ConnectionOpeningAsync(
