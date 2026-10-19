@@ -226,7 +226,8 @@ public sealed class TransactionIntegrityBenchmarkTests
                             confirmationSource: JournalConfirmationSources.Webhook,
                             actor: "WEBHOOK",
                             timestampUtc: DateTimeOffset.UtcNow,
-                            previousHash: CanonicalJournalHasher.GenesisHash);
+                            previousHash: CanonicalJournalHasher.GenesisHash,
+                            encryptor: new PaymentDataEncryptor(new byte[32]));
                         await repo.AppendEntryAsync(newEntry, cts.Token);
                         counter++;
                         await Task.Delay(10, cts.Token);

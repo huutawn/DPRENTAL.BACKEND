@@ -141,7 +141,8 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
                 previousHash: CanonicalJournalHasher.GenesisHash,
                 paymentRef: invoice.PaymentRef,
                 invoiceRef: invoice.InvoiceRef,
-                rentalOrderId: invoice.RentalOrderId);
+                rentalOrderId: invoice.RentalOrderId,
+                encryptor: new PaymentDataEncryptor(new byte[32]));
             string attMsg = EcdsaAttestation.BuildAttestationMessage(SigningKeyId, journal.StreamId, journal.Version, journal.EventId, journal.EntryHash, now);
             string attSig = EcdsaAttestation.Sign(_ecdsa, attMsg);
             journal.Confirm(attSig, SigningKeyId, now);
@@ -216,14 +217,15 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
                 previousHash: CanonicalJournalHasher.GenesisHash,
                 paymentRef: invoice.PaymentRef,
                 invoiceRef: invoice.InvoiceRef,
-                rentalOrderId: invoice.RentalOrderId);
+                rentalOrderId: invoice.RentalOrderId,
+                encryptor: new PaymentDataEncryptor(new byte[32]));
             string attMsg2 = EcdsaAttestation.BuildAttestationMessage(SigningKeyId, journal.StreamId, journal.Version, journal.EventId, journal.EntryHash, now);
             string attSig2 = EcdsaAttestation.Sign(_ecdsa, attMsg2);
             journal.Confirm(attSig2, SigningKeyId, now);
             db.TransactionJournals.Add(journal);
             await db.SaveChangesAsync();
             var settlement = RentalItemSettlement.Create(item, 20_000m, "DEC-REFUND-API", "settle-refund-api").Value;
-            var result = await new Dprental.PaymentService.Infrastructure.Repositories.EfSettlementLedger(db, TimeProvider.System)
+            var result = await new Dprental.PaymentService.Infrastructure.Repositories.EfSettlementLedger(db, TimeProvider.System, new PaymentDataEncryptor(RandomNumberGenerator.GetBytes(32)))
                 .RecordSettlementAsync(settlement, CancellationToken.None);
             Assert.True(result.IsSuccess);
             requirementId = await db.ManualRefundRequirements.Select(x => x.Id).SingleAsync();

@@ -40,15 +40,6 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
         _logger = logger;
     }
 
-    public InvoiceCreationService(
-        IInvoiceRepository repository,
-        IOptions<PaymentMerchantOptions> merchantOptions,
-        IInvoiceLifecycleService lifecycleService,
-        TimeProvider? timeProvider = null)
-        : this(repository, merchantOptions, lifecycleService, new PaymentDataEncryptor(new byte[32]), timeProvider, null)
-    {
-    }
-
     public async Task<Result<CreateInvoiceResponse>> CreateInvoiceAsync(
         CreateInvoiceRequest request,
         CancellationToken ct = default)

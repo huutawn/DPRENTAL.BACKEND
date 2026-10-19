@@ -29,19 +29,6 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    public InvoiceLifecycleService(
-        IInvoiceRepository repository,
-        ITransactionJournalRepository journalRepository)
-        : this(repository, journalRepository, new PaymentDataEncryptor(new byte[32]), null)
-    {
-    }
-
-    public InvoiceLifecycleService(
-        IInvoiceRepository repository,
-        TimeProvider? timeProvider = null)
-        : this(repository, null, new PaymentDataEncryptor(new byte[32]), timeProvider)
-    {
-    }
 
     public async Task<Result<CancelInvoiceResponse>> CancelInvoiceAsync(
         string? routeInvoiceRef,

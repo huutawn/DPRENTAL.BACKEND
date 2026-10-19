@@ -1,4 +1,4 @@
-using System.Text;
+using System.Security.Cryptography;
 
 namespace Dprental.PaymentService.Common.Cryptography;
 
@@ -20,19 +20,36 @@ public interface IPaymentDataEncryptor
 
 public sealed class PaymentDataEncryptor : IPaymentDataEncryptor
 {
-    private readonly byte[] _key;
+    private readonly Dictionary<string, byte[]> _keyRing = new(StringComparer.Ordinal);
     private readonly string _activeKeyId;
 
-    public PaymentDataEncryptor(byte[] key, string activeKeyId = "dpr-enc-2026-v1")
+    public PaymentDataEncryptor(byte[] activeKey, string activeKeyId = "dpr-enc-2026-v1", IReadOnlyDictionary<string, byte[]>? oldKeys = null)
     {
-        ArgumentNullException.ThrowIfNull(key);
-        if (key.Length != 32)
+        ArgumentNullException.ThrowIfNull(activeKey);
+        if (activeKey.Length != 32)
         {
-            throw new InvalidOperationException($"Khóa mã hóa AES-256 phải có đúng 32 bytes (256-bit), hiện tại là {key.Length} bytes.");
+            throw new InvalidOperationException($"Khóa mã hóa AES-256 phải có đúng 32 bytes (256-bit), hiện tại là {activeKey.Length} bytes.");
         }
 
-        _key = key.ToArray();
-        _activeKeyId = !string.IsNullOrWhiteSpace(activeKeyId) ? activeKeyId : "dpr-enc-2026-v1";
+        if (string.IsNullOrWhiteSpace(activeKeyId))
+        {
+            throw new InvalidOperationException("KeyId của khóa mã hóa đang hoạt động không được để trống.");
+        }
+
+        _activeKeyId = activeKeyId.Trim();
+        _keyRing[_activeKeyId] = activeKey.ToArray();
+
+        if (oldKeys is not null)
+        {
+            foreach (var (kId, kBytes) in oldKeys)
+            {
+                if (kBytes.Length != 32)
+                {
+                    throw new InvalidOperationException($"Khóa cũ '{kId}' phải có đúng 32 bytes (256-bit).");
+                }
+                _keyRing[kId] = kBytes.ToArray();
+            }
+        }
     }
 
     public string ActiveKeyId => _activeKeyId;
@@ -41,7 +58,8 @@ public sealed class PaymentDataEncryptor : IPaymentDataEncryptor
         ReadOnlySpan<byte> plaintext,
         ReadOnlySpan<byte> associatedData)
     {
-        var (ciphertext, nonce, tag) = AesGcmEncryption.Encrypt(_key, plaintext, associatedData);
+        byte[] key = _keyRing[_activeKeyId];
+        var (ciphertext, nonce, tag) = AesGcmEncryption.Encrypt(key, plaintext, associatedData);
         return (
             Convert.ToBase64String(ciphertext),
             Convert.ToBase64String(nonce),
@@ -56,10 +74,15 @@ public sealed class PaymentDataEncryptor : IPaymentDataEncryptor
         string keyId,
         ReadOnlySpan<byte> associatedData)
     {
+        if (!_keyRing.TryGetValue(keyId, out var key))
+        {
+            throw new CryptographicException($"Không tìm thấy khóa mã hóa AES cho KeyId '{keyId}'.");
+        }
+
         byte[] ciphertext = Convert.FromBase64String(ciphertextBase64);
         byte[] nonce = Convert.FromBase64String(nonceBase64);
         byte[] tag = Convert.FromBase64String(tagBase64);
 
-        return AesGcmEncryption.Decrypt(_key, ciphertext, nonce, tag, associatedData);
+        return AesGcmEncryption.Decrypt(key, ciphertext, nonce, tag, associatedData);
     }
 }

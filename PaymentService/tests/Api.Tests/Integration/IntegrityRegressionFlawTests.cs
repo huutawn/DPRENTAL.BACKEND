@@ -31,6 +31,9 @@ public sealed class IntegrityRegressionFlawTests
             Account = "0383799632"
         });
 
+    private static readonly IPaymentDataEncryptor TestEncryptor =
+        new PaymentDataEncryptor(RandomNumberGenerator.GetBytes(32), "test-enc-key");
+
     private sealed class TestOptionsMonitor<T>(T value) : IOptionsMonitor<T>
     {
         public T CurrentValue => value;
@@ -67,8 +70,8 @@ public sealed class IntegrityRegressionFlawTests
             await using (var ctx = new PaymentServiceDbContext(options))
             {
                 var repo = new EfInvoiceRepository(ctx);
-                var lifecycle = new InvoiceLifecycleService(repo);
-                var creation = new InvoiceCreationService(repo, MerchantOptions, lifecycle);
+                var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor);
+                var creation = new InvoiceCreationService(repo, MerchantOptions, lifecycle, TestEncryptor);
 
                 var res = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
                     Guid.NewGuid(), "ORD-EXP-REG", Guid.NewGuid(), "VND", deadline,
@@ -82,7 +85,7 @@ public sealed class IntegrityRegressionFlawTests
             {
                 var repo = new EfInvoiceRepository(ctx);
                 var journalRepo = new EfTransactionJournalRepository(ctx);
-                var lifecycle = new InvoiceLifecycleService(repo, journalRepo);
+                var lifecycle = new InvoiceLifecycleService(repo, journalRepo, TestEncryptor);
 
                 await lifecycle.EnsureExpiredIfPastDeadlineAsync(invoiceRef, pastDeadline, CancellationToken.None);
 
@@ -141,8 +144,8 @@ public sealed class IntegrityRegressionFlawTests
             await using (var ctx = new PaymentServiceDbContext(paymentOptions))
             {
                 var repo = new EfInvoiceRepository(ctx);
-                var lifecycle = new InvoiceLifecycleService(repo);
-                var creation = new InvoiceCreationService(repo, MerchantOptions, lifecycle);
+                var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor);
+                var creation = new InvoiceCreationService(repo, MerchantOptions, lifecycle, TestEncryptor);
 
                 var res = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
                     orderId, "ORD-PEND-SETTLE", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),

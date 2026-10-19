@@ -1,4 +1,5 @@
 using Dprental.PaymentService.Api.Tests.TestHelpers;
+using System.Security.Cryptography;
 using System.Globalization;
 using Dprental.PaymentService.Application.DTOs.SePay;
 using Dprental.PaymentService.Application.DTOs.Invoice;
@@ -38,20 +39,23 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
                 ["MB"] = "MBBank"
             }
         });
+    private static readonly IPaymentDataEncryptor TestEncryptor =
+        new PaymentDataEncryptor(RandomNumberGenerator.GetBytes(32), "test-enc-key");
 
     private static InvoiceCreationService CreateCreationService(
         IInvoiceRepository repo,
         TimeProvider? timeProvider = null)
     {
         var tp = timeProvider ?? TimeProvider.System;
-        var lifecycle = new InvoiceLifecycleService(repo, tp);
-        return new InvoiceCreationService(repo, MerchantOptions, lifecycle, tp);
+        var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor, tp);
+        return new InvoiceCreationService(repo, MerchantOptions, lifecycle, TestEncryptor, tp);
     }
 
     private static InvoiceLifecycleService CreateLifecycleService(
         IInvoiceRepository repo,
         TimeProvider? timeProvider = null) =>
-        new(repo, timeProvider ?? TimeProvider.System);
+        new(repo, null, TestEncryptor, timeProvider ?? TimeProvider.System);
+
     private static InvoicePaymentProcessor CreateProcessor(
         IInvoiceRepository repo,
         TimeProvider? timeProvider = null)
@@ -59,9 +63,8 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
         var tp = timeProvider ?? TimeProvider.System;
         var mo = new TestOptionsMonitor<PaymentMerchantOptions>(MerchantOptions.Value);
         var so = new TestOptionsMonitor<SePayOptions>(SePayConfig.Value);
-        return new InvoicePaymentProcessor(repo, mo, so, tp);
+        return new InvoicePaymentProcessor(repo, mo, so, null, TestEncryptor, tp);
     }
-
     private static SePayWebhookPayload CreateBankTx(
         long id,
         string paymentCode,

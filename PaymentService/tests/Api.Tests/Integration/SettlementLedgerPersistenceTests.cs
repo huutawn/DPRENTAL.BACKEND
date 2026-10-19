@@ -1,4 +1,5 @@
 using Dprental.PaymentService.Api.Tests.TestHelpers;
+using System.Security.Cryptography;
 using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Domain.Persistence;
 using Dprental.PaymentService.Domain.Repository;
@@ -9,6 +10,15 @@ namespace Dprental.PaymentService.Api.Tests.Integration;
 
 public sealed class SettlementLedgerPersistenceTests
 {
+    private static readonly IPaymentDataEncryptor TestEncryptor =
+        new PaymentDataEncryptor(RandomNumberGenerator.GetBytes(32), "test-enc-key");
+
+    private static EfSettlementLedger CreateLedger(PaymentServiceDbContext ctx) =>
+        new(ctx, TimeProvider.System, TestEncryptor);
+
+    private static EfManualRefundRepository CreateRefundRepo(PaymentServiceDbContext ctx) =>
+        new(ctx, TimeProvider.System, TestEncryptor);
+
     [Fact]
     public async Task Paid_invoice_creates_three_entries_and_replays_without_duplicates()
     {
@@ -22,7 +32,7 @@ public sealed class SettlementLedgerPersistenceTests
 
             await using (var context = new PaymentServiceDbContext(options))
             {
-                var result = await new EfSettlementLedger(context, TimeProvider.System)
+                var result = await CreateLedger(context)
                     .RecordSettlementAsync(settlementResult.Value, CancellationToken.None);
                 Assert.True(result.IsSuccess);
                 Assert.Equal(Dprental.PaymentService.Domain.IRepository.SettlementWriteOutcome.Created, result.Value.Outcome);
@@ -30,7 +40,7 @@ public sealed class SettlementLedgerPersistenceTests
 
             await using (var context = new PaymentServiceDbContext(options))
             {
-                var replay = await new EfSettlementLedger(context, TimeProvider.System)
+                var replay = await CreateLedger(context)
                     .RecordSettlementAsync(settlementResult.Value, CancellationToken.None);
                 Assert.True(replay.IsSuccess);
                 Assert.Equal(Dprental.PaymentService.Domain.IRepository.SettlementWriteOutcome.Replayed, replay.Value.Outcome);
@@ -74,7 +84,7 @@ public sealed class SettlementLedgerPersistenceTests
 
             await using (var context = new PaymentServiceDbContext(options))
             {
-                var result = await new EfSettlementLedger(context, TimeProvider.System)
+                var result = await CreateLedger(context)
                     .RecordSettlementAsync(settlement, CancellationToken.None);
                 Assert.True(result.IsSuccess);
                 Assert.Equal(SettlementState.Completed, result.Value.State);
@@ -83,7 +93,7 @@ public sealed class SettlementLedgerPersistenceTests
 
             await using (var context = new PaymentServiceDbContext(options))
             {
-                var replay = await new EfSettlementLedger(context, TimeProvider.System)
+                var replay = await CreateLedger(context)
                     .RecordSettlementAsync(settlement, CancellationToken.None);
                 Assert.True(replay.IsSuccess);
                 Assert.Equal(SettlementState.Completed, replay.Value.State);
@@ -114,7 +124,7 @@ public sealed class SettlementLedgerPersistenceTests
             Guid requirementId;
             await using (var db = new PaymentServiceDbContext(options))
             {
-                var result = await new EfSettlementLedger(db, TimeProvider.System)
+                var result = await CreateLedger(db)
                     .RecordSettlementAsync(settlement, CancellationToken.None);
                 Assert.True(result.IsSuccess);
                 requirementId = await db.ManualRefundRequirements.Select(x => x.Id).SingleAsync();
@@ -124,7 +134,7 @@ public sealed class SettlementLedgerPersistenceTests
             async Task<Dprental.PaymentService.Common.Result<Dprental.PaymentService.Domain.IRepository.ManualRefundCompletion>> ConfirmAsync(string reference)
             {
                 await using var db = new PaymentServiceDbContext(options);
-                return await new EfManualRefundRepository(db, TimeProvider.System)
+                return await CreateRefundRepo(db)
                     .CompleteAsync(requirementId, reference, adminId, CancellationToken.None);
             }
 
@@ -168,14 +178,14 @@ public sealed class SettlementLedgerPersistenceTests
 
             await using (var context = new PaymentServiceDbContext(options))
             {
-                var created = await new EfSettlementLedger(context, TimeProvider.System)
+                var created = await CreateLedger(context)
                     .RecordSettlementAsync(first, CancellationToken.None);
                 Assert.True(created.IsSuccess);
             }
 
             await using (var context = new PaymentServiceDbContext(options))
             {
-                var ledger = new EfSettlementLedger(context, TimeProvider.System);
+                var ledger = CreateLedger(context);
                 var payloadConflict = await ledger.RecordSettlementAsync(changedAmount, CancellationToken.None);
                 var keyConflict = await ledger.RecordSettlementAsync(changedKey, CancellationToken.None);
                 Assert.True(payloadConflict.IsFailure);
@@ -201,7 +211,7 @@ public sealed class SettlementLedgerPersistenceTests
             var settlement = RentalItemSettlement.Create(item, 0m, "DEC-001", "settle-op-001").Value;
 
             await using var context = new PaymentServiceDbContext(options);
-            var result = await new EfSettlementLedger(context, TimeProvider.System)
+            var result = await CreateLedger(context)
                 .RecordSettlementAsync(settlement, CancellationToken.None);
             Assert.True(result.IsFailure);
             Assert.Equal("Payment.InvoiceNotPaid", result.Error.Code);
@@ -226,7 +236,7 @@ public sealed class SettlementLedgerPersistenceTests
             async Task<Dprental.PaymentService.Common.Result<Dprental.PaymentService.Domain.IRepository.SettlementWriteResult>> WriteAsync()
             {
                 await using var context = new PaymentServiceDbContext(options);
-                return await new EfSettlementLedger(context, TimeProvider.System)
+                return await CreateLedger(context)
                     .RecordSettlementAsync(settlement, CancellationToken.None);
             }
 

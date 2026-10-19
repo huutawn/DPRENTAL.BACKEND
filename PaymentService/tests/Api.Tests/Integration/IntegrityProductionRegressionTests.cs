@@ -49,6 +49,9 @@ public sealed class IntegrityProductionRegressionTests
             }
         });
 
+    private static readonly IPaymentDataEncryptor TestEncryptor =
+        new PaymentDataEncryptor(RandomNumberGenerator.GetBytes(32), "test-enc-key");
+
     private sealed class TestOptionsMonitor<T>(T value) : IOptionsMonitor<T>
     {
         public T CurrentValue => value;
@@ -101,8 +104,8 @@ public sealed class IntegrityProductionRegressionTests
             await using (var ctx = new PaymentServiceDbContext(pOptions))
             {
                 var repo = new EfInvoiceRepository(ctx);
-                var lifecycle = new InvoiceLifecycleService(repo);
-                var creation = new InvoiceCreationService(repo, MerchantOptions, lifecycle);
+                var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor);
+                var creation = new InvoiceCreationService(repo, MerchantOptions, lifecycle, TestEncryptor);
 
                 var createRes = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
                     orderId, "ORD-PROD-001", renterId, "VND", DateTimeOffset.UtcNow.AddMinutes(30),
@@ -126,7 +129,9 @@ public sealed class IntegrityProductionRegressionTests
                 var processor = new InvoicePaymentProcessor(
                     repo,
                     new TestOptionsMonitor<PaymentMerchantOptions>(MerchantOptions.Value),
-                    new TestOptionsMonitor<SePayOptions>(SePayConfig.Value));
+                    new TestOptionsMonitor<SePayOptions>(SePayConfig.Value),
+                    null,
+                    TestEncryptor);
 
                 var webhookPayload = new SePayWebhookPayload(
                     Id: providerTxId,
@@ -185,7 +190,7 @@ public sealed class IntegrityProductionRegressionTests
             await using (var iCtx = new IntegrityDbContext(iOptions))
             {
                 var repo = new EfInvoiceRepository(pCtx);
-                var ledger = new EfSettlementLedger(pCtx, TimeProvider.System);
+                var ledger = new EfSettlementLedger(pCtx, TimeProvider.System, new PaymentDataEncryptor(RandomNumberGenerator.GetBytes(32)));
                 var engine = new IntegrityVerificationEngine(
                     iCtx, pCtx, keyManager,
                     new TestOptionsMonitor<IntegrityVerificationOptions>(new IntegrityVerificationOptions

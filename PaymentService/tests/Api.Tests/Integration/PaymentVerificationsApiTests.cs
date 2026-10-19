@@ -58,6 +58,9 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
         public T Get(string? name) => value;
         public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
+    private static readonly IPaymentDataEncryptor TestEncryptor =
+        new PaymentDataEncryptor(RandomNumberGenerator.GetBytes(32), "test-enc-key");
+
     public async Task InitializeAsync()
     {
         _publicKeyBase64 = EcdsaAttestation.ExportPublicKeyBase64(_signingKey);
@@ -204,8 +207,8 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
         await using (var ctx = new PaymentServiceDbContext(options))
         {
             var repo = new EfInvoiceRepository(ctx);
-            var lifecycle = new InvoiceLifecycleService(repo);
-            var creation = new InvoiceCreationService(repo, Microsoft.Extensions.Options.Options.Create(new PaymentMerchantOptions { Bank = "MBBank", Account = "0383799632" }), lifecycle);
+            var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor);
+            var creation = new InvoiceCreationService(repo, Microsoft.Extensions.Options.Options.Create(new PaymentMerchantOptions { Bank = "MBBank", Account = "0383799632" }), lifecycle, TestEncryptor);
 
             var createRes = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
                 Guid.NewGuid(), "ORD-VERIFY-202", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
@@ -239,8 +242,8 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
         await using (var ctx = new PaymentServiceDbContext(options))
         {
             var repo = new EfInvoiceRepository(ctx);
-            var lifecycle = new InvoiceLifecycleService(repo);
-            var creation = new InvoiceCreationService(repo, Microsoft.Extensions.Options.Options.Create(new PaymentMerchantOptions { Bank = "MBBank", Account = "0383799632" }), lifecycle);
+            var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor);
+            var creation = new InvoiceCreationService(repo, Microsoft.Extensions.Options.Options.Create(new PaymentMerchantOptions { Bank = "MBBank", Account = "0383799632" }), lifecycle, TestEncryptor);
 
             var createRes = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
                 orderId, "ORD-VERIFY-200", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
@@ -297,8 +300,8 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
         await using (var ctx = new PaymentServiceDbContext(options))
         {
             var repo = new EfInvoiceRepository(ctx);
-            var lifecycle = new InvoiceLifecycleService(repo);
-            var creation = new InvoiceCreationService(repo, Microsoft.Extensions.Options.Options.Create(new PaymentMerchantOptions { Bank = "MBBank", Account = "0383799632" }), lifecycle);
+            var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor);
+            var creation = new InvoiceCreationService(repo, Microsoft.Extensions.Options.Options.Create(new PaymentMerchantOptions { Bank = "MBBank", Account = "0383799632" }), lifecycle, TestEncryptor);
 
             for (int i = 0; i < 5; i++)
             {

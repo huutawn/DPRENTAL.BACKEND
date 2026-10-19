@@ -47,7 +47,7 @@ public sealed class PaymentMatchingTests
         });
 
         var tp = new FakeTimeProvider(now ?? FixedNow);
-        var processor = new InvoicePaymentProcessor(repo, merchantOptions, sePayOptions, tp);
+        var processor = new InvoicePaymentProcessor(repo, merchantOptions, sePayOptions, null, new PaymentDataEncryptor(new byte[32]), tp);
         return (processor, repo);
     }
 

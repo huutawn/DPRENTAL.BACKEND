@@ -89,6 +89,7 @@ public class InvoicePaidOutboxPublisherTests
             actor: "SYSTEM",
             timestampUtc: FixedNow.AddMinutes(-5),
             previousHash: CanonicalJournalHasher.GenesisHash,
+            encryptor: new PaymentDataEncryptor(new byte[32]),
             outboxDigest: CanonicalJournalHasher.ComputeOutboxDigest(outbox.Payload),
             outboxMessageId: outbox.MessageId);
 

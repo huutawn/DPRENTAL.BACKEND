@@ -20,6 +20,7 @@ public static class JournalEntryFactory
         string actor,
         DateTimeOffset timestampUtc,
         string previousHash,
+        IPaymentDataEncryptor encryptor,
         DateTimeOffset? bankTimeUtc = null,
         IReadOnlyDictionary<string, string?>? relatedEntities = null,
         IReadOnlyDictionary<string, object?>? snapshot = null,
@@ -29,10 +30,9 @@ public static class JournalEntryFactory
         string? invoiceRef = null,
         Guid? rentalOrderId = null,
         Guid? rentalItemId = null,
-        IPaymentDataEncryptor? encryptor = null,
         string environment = "production")
     {
-        var activeEncryptor = encryptor ?? new PaymentDataEncryptor(new byte[32]);
+        ArgumentNullException.ThrowIfNull(encryptor);
 
         var doc = new CanonicalJournalDocument(
             SchemaVersion: CanonicalJournalCodec.CurrentSchemaVersion,
@@ -61,7 +61,7 @@ public static class JournalEntryFactory
 
         byte[] plaintextBytes = Encoding.UTF8.GetBytes(canonicalJson);
         byte[] aad = Encoding.UTF8.GetBytes($"{streamId}:{version}:{eventId:D}");
-        var encResult = activeEncryptor.Encrypt(plaintextBytes, aad);
+        var encResult = encryptor.Encrypt(plaintextBytes, aad);
 
         string envelopeDigest = CanonicalJournalCodec.ComputeEnvelopeDigest(
             encResult.CiphertextBase64, encResult.NonceBase64, encResult.TagBase64, encResult.KeyId);

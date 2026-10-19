@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using System.Globalization;
 using Dprental.PaymentService.Application.DTOs.SePay;
 using System.Text.Json.Nodes;
@@ -35,14 +36,17 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
         TimeProvider? timeProvider = null) =>
         CreateCreationService(new EfInvoiceRepository(ctx), merchantOptions, timeProvider);
 
+    private static readonly IPaymentDataEncryptor TestEncryptor =
+        new PaymentDataEncryptor(RandomNumberGenerator.GetBytes(32), "test-enc-key");
+
     private static InvoiceCreationService CreateCreationService(
         IInvoiceRepository repo,
         IOptions<PaymentMerchantOptions> merchantOptions,
         TimeProvider? timeProvider = null)
     {
         var tp = timeProvider ?? TimeProvider.System;
-        var lifecycle = new InvoiceLifecycleService(repo, tp);
-        return new InvoiceCreationService(repo, merchantOptions, lifecycle, tp);
+        var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor, tp);
+        return new InvoiceCreationService(repo, merchantOptions, lifecycle, TestEncryptor, tp);
     }
 
     private static InvoiceLifecycleService CreateLifecycleService(
@@ -53,7 +57,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
     private static InvoiceLifecycleService CreateLifecycleService(
         IInvoiceRepository repo,
         TimeProvider? timeProvider = null) =>
-        new(repo, timeProvider ?? TimeProvider.System);
+        new(repo, null, TestEncryptor, timeProvider ?? TimeProvider.System);
 
     private static InvoicePaymentProcessor CreatePaymentProcessor(
         IInvoiceRepository repo,
@@ -74,7 +78,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
                 ["MB"] = "MBBank"
             }
         });
-        return new InvoicePaymentProcessor(repo, mo, so, tp);
+        return new InvoicePaymentProcessor(repo, mo, so, null, TestEncryptor, tp);
     }
     private static SePayWebhookPayload CreatePayload(
         long id,

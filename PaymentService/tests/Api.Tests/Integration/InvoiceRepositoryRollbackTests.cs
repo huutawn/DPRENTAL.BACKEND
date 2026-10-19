@@ -73,7 +73,8 @@ public sealed class InvoiceRepositoryRollbackTests
                 confirmationSource: JournalConfirmationSources.System,
                 actor: "SYSTEM",
                 timestampUtc: now,
-                previousHash: CanonicalJournalHasher.GenesisHash);
+                previousHash: CanonicalJournalHasher.GenesisHash,
+                encryptor: new PaymentDataEncryptor(new byte[32]));
 
             // 1. Begin transaction, save invoice + receipt + outbox, but explicitly ROLLBACK
             await using (var ctx = new PaymentServiceDbContext(options))

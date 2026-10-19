@@ -38,14 +38,6 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    public InvoicePaymentProcessor(
-        IInvoiceRepository repository,
-        IOptionsMonitor<PaymentMerchantOptions> merchantOptions,
-        IOptionsMonitor<SePayOptions> sePayOptions,
-        TimeProvider? timeProvider = null)
-        : this(repository, merchantOptions, sePayOptions, null, new PaymentDataEncryptor(new byte[32]), timeProvider)
-    {
-    }
 
     public async Task<Result> ProcessAsync(SePayWebhookPayload? payload, CancellationToken cancellationToken = default)
     {

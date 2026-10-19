@@ -32,6 +32,9 @@ public sealed class IntegrityHostIntegrationTests
             Bank = "MBBank",
             Account = "0383799632"
         });
+    private static readonly IPaymentDataEncryptor TestEncryptor =
+        new PaymentDataEncryptor(RandomNumberGenerator.GetBytes(32), "test-enc-key");
+
 
     private sealed class TestOptionsMonitor<T>(T value) : IOptionsMonitor<T>
     {
@@ -95,8 +98,8 @@ public sealed class IntegrityHostIntegrationTests
         await using (var payCtx = new PaymentServiceDbContext(paymentOptions))
         {
             var invoiceRepo = new EfInvoiceRepository(payCtx);
-            var lifecycle = new InvoiceLifecycleService(invoiceRepo);
-            var creation = new InvoiceCreationService(invoiceRepo, MerchantOptions, lifecycle);
+            var lifecycle = new InvoiceLifecycleService(invoiceRepo, null, TestEncryptor);
+            var creation = new InvoiceCreationService(invoiceRepo, MerchantOptions, lifecycle, TestEncryptor);
 
             var createRes = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
                 orderId, "ORD-INT-001", renterId, "VND", DateTimeOffset.UtcNow.AddMinutes(30),
@@ -205,8 +208,8 @@ public sealed class IntegrityHostIntegrationTests
         await using (var payCtx = new PaymentServiceDbContext(paymentOptions))
         {
             var invoiceRepo = new EfInvoiceRepository(payCtx);
-            var lifecycle = new InvoiceLifecycleService(invoiceRepo);
-            var creation = new InvoiceCreationService(invoiceRepo, MerchantOptions, lifecycle);
+            var lifecycle = new InvoiceLifecycleService(invoiceRepo, null, TestEncryptor);
+            var creation = new InvoiceCreationService(invoiceRepo, MerchantOptions, lifecycle, TestEncryptor);
 
             var createRes = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
                 Guid.NewGuid(), "ORD-TAMPER", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
@@ -329,8 +332,8 @@ public sealed class IntegrityHostIntegrationTests
         await using (var payCtx = new PaymentServiceDbContext(paymentOptions))
         {
             var invoiceRepo = new EfInvoiceRepository(payCtx);
-            var lifecycle = new InvoiceLifecycleService(invoiceRepo);
-            var creation = new InvoiceCreationService(invoiceRepo, MerchantOptions, lifecycle);
+            var lifecycle = new InvoiceLifecycleService(invoiceRepo, null, TestEncryptor);
+            var creation = new InvoiceCreationService(invoiceRepo, MerchantOptions, lifecycle, TestEncryptor);
 
             var createRes = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
                 Guid.NewGuid(), "ORD-ROLLBACK", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),

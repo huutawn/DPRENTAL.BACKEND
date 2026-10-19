@@ -9,9 +9,9 @@ using Dprental.PaymentService.Application.Services;
 namespace Dprental.PaymentService.Infrastructure.Repositories;
 
 public sealed class EfManualRefundRepository(
-    PaymentServiceDbContext db, TimeProvider clock, IPaymentDataEncryptor? encryptor = null) : IManualRefundRepository
+    PaymentServiceDbContext db, TimeProvider clock, IPaymentDataEncryptor encryptor) : IManualRefundRepository
 {
-    private readonly IPaymentDataEncryptor _encryptor = encryptor ?? new PaymentDataEncryptor(new byte[32]);
+    private readonly IPaymentDataEncryptor _encryptor = encryptor ?? throw new ArgumentNullException(nameof(encryptor));
     public async Task<Result<ManualRefundCompletion>> CompleteAsync(
         Guid requirementId, string externalTransferReference, Guid adminId,
         CancellationToken cancellationToken)

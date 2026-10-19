@@ -30,11 +30,11 @@ public sealed class EfSettlementLedger : ISettlementLedger
     private readonly TimeProvider _clock;
     private readonly IPaymentDataEncryptor _encryptor;
 
-    public EfSettlementLedger(PaymentServiceDbContext db, TimeProvider clock, IPaymentDataEncryptor? encryptor = null)
+    public EfSettlementLedger(PaymentServiceDbContext db, TimeProvider clock, IPaymentDataEncryptor encryptor)
     {
         _db = db;
         _clock = clock;
-        _encryptor = encryptor ?? new PaymentDataEncryptor(new byte[32]);
+        _encryptor = encryptor ?? throw new ArgumentNullException(nameof(encryptor));
     }
 
     public async Task<Result<SettlementWriteResult>> RecordSettlementAsync(
