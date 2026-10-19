@@ -15,14 +15,17 @@ public sealed class InvoicesController : ControllerBase
 {
     private const string InvoiceWriteScope = "payment.invoice.write";
 
-    private readonly IInvoiceService _invoiceService;
+    private readonly IInvoiceCreationService _creationService;
+    private readonly IInvoiceLifecycleService _lifecycleService;
     private readonly PaymentJwtOptions _jwtOptions;
 
     public InvoicesController(
-        IInvoiceService invoiceService,
+        IInvoiceCreationService creationService,
+        IInvoiceLifecycleService lifecycleService,
         IOptions<PaymentJwtOptions> jwtOptions)
     {
-        _invoiceService = invoiceService ?? throw new ArgumentNullException(nameof(invoiceService));
+        _creationService = creationService ?? throw new ArgumentNullException(nameof(creationService));
+        _lifecycleService = lifecycleService ?? throw new ArgumentNullException(nameof(lifecycleService));
         _jwtOptions = jwtOptions?.Value ?? throw new ArgumentNullException(nameof(jwtOptions));
     }
 
@@ -48,7 +51,7 @@ public sealed class InvoicesController : ControllerBase
             return Forbid();
         }
 
-        var result = await _invoiceService.CreateInvoiceAsync(request, cancellationToken);
+        var result = await _creationService.CreateInvoiceAsync(request, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);
@@ -85,7 +88,7 @@ public sealed class InvoicesController : ControllerBase
             return Forbid();
         }
 
-        var result = await _invoiceService.CancelInvoiceAsync(invoiceRef, request, cancellationToken);
+        var result = await _lifecycleService.CancelInvoiceAsync(invoiceRef, request, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);
@@ -113,7 +116,7 @@ public sealed class InvoicesController : ControllerBase
             return Forbid();
         }
 
-        var result = await _invoiceService.GetInvoiceAsync(invoiceRef, renterId, cancellationToken);
+        var result = await _lifecycleService.GetInvoiceAsync(invoiceRef, renterId, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);

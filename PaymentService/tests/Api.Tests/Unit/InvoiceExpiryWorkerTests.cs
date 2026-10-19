@@ -15,10 +15,10 @@ public sealed class InvoiceExpiryWorkerTests
     [Fact]
     public async Task ProcessBatch_CallsInvoiceService_WithConfiguredBatchSize()
     {
-        var fakeService = new FakeInvoiceService();
+        var fakeService = new FakeInvoiceLifecycleService();
 
         var services = new ServiceCollection();
-        services.AddScoped<IInvoiceService>(_ => fakeService);
+        services.AddScoped<IInvoiceLifecycleService>(_ => fakeService);
         var serviceProvider = services.BuildServiceProvider();
         var scopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
 
@@ -47,10 +47,10 @@ public sealed class InvoiceExpiryWorkerTests
     [Fact]
     public async Task ExecuteAsync_RecoversFromException_AndContinuesNextTick()
     {
-        var fakeService = new FakeInvoiceService { ShouldThrowOnFirstCall = true };
+        var fakeService = new FakeInvoiceLifecycleService { ShouldThrowOnFirstCall = true };
 
         var services = new ServiceCollection();
-        services.AddScoped<IInvoiceService>(_ => fakeService);
+        services.AddScoped<IInvoiceLifecycleService>(_ => fakeService);
         var serviceProvider = services.BuildServiceProvider();
         var scopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
 
@@ -90,9 +90,9 @@ public sealed class InvoiceExpiryWorkerTests
     [Fact]
     public async Task ExecuteAsync_StopsCleanly_WhenCancelled()
     {
-        var fakeService = new FakeInvoiceService();
+        var fakeService = new FakeInvoiceLifecycleService();
         var services = new ServiceCollection();
-        services.AddScoped<IInvoiceService>(_ => fakeService);
+        services.AddScoped<IInvoiceLifecycleService>(_ => fakeService);
         var serviceProvider = services.BuildServiceProvider();
         var scopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
 
@@ -115,7 +115,7 @@ public sealed class InvoiceExpiryWorkerTests
         Assert.True(startTask.IsCompletedSuccessfully);
     }
 
-    private sealed class FakeInvoiceService : IInvoiceService
+    private sealed class FakeInvoiceLifecycleService : IInvoiceLifecycleService
     {
         public int ExpireBatchCallCount { get; private set; }
         public int LastBatchSize { get; private set; }
@@ -132,11 +132,11 @@ public sealed class InvoiceExpiryWorkerTests
             return Task.FromResult(2);
         }
 
-        public Task<Result<CreateInvoiceResponse>> CreateInvoiceAsync(CreateInvoiceRequest request, CancellationToken ct = default) =>
-            throw new NotImplementedException();
         public Task<Result<CancelInvoiceResponse>> CancelInvoiceAsync(string? routeInvoiceRef, CancelInvoiceRequest request, CancellationToken ct = default) =>
             throw new NotImplementedException();
         public Task<Result<GetInvoiceResponse>> GetInvoiceAsync(string invoiceRef, Guid callerRenterId, CancellationToken ct = default) =>
+            throw new NotImplementedException();
+        public Task EnsureExpiredIfPastDeadlineAsync(string invoiceRef, DateTimeOffset utcNow, CancellationToken ct = default) =>
             throw new NotImplementedException();
     }
 }
