@@ -65,6 +65,126 @@ public sealed class IntegrityBlockerRegressionTests
         Assert.True(result.IsFailure);
         Assert.Contains("Receipt", result.Error.Code, StringComparison.OrdinalIgnoreCase);
     }
+    [Fact]
+    public async Task IntegrityHostClient_TamperedOuterUsability_BindsToReceiptBody()
+    {
+        using var signingKey = EcdsaAttestation.CreateEphemeralP256KeyPair();
+        string pubKey = EcdsaAttestation.ExportPublicKeyBase64(signingKey);
+        string keyId = "test-k1";
+
+        var options = new TestOptionsMonitor<IntegrityVerificationOptions>(new IntegrityVerificationOptions
+        {
+            ActiveKeyId = keyId,
+            PublicKeys = new Dictionary<string, string> { [keyId] = pubKey }
+        });
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset expiresAt = now.AddSeconds(4);
+
+        var req = new TransactionVerificationRequest(
+            PaymentRef: "PAY-1",
+            Purpose: VerificationPurposes.PaymentConfirmation,
+            CallerNonce: "nonce-1");
+
+        string requestHash = CanonicalJournalHasher.ComputeRequestHash(req.PaymentRef, req.Purpose, req.CallerNonce);
+
+        // Inside signed receipt: IsUsable = false!
+        string receiptMsg = EcdsaAttestation.BuildVerificationReceiptMessage(
+            keyId, requestHash, req.CallerNonce, IntegrityStatuses.Valid, false, "INVOICE_NOT_PAID", now, expiresAt);
+        string sig = EcdsaAttestation.Sign(signingKey, receiptMsg);
+
+        // Attacker alters outer Usability to true
+        var tamperedResponse = new TransactionVerificationResponse(
+            new TransactionIntegrityResult("VALID", 1, "SYSTEM", now, keyId, sig, "proof", req.CallerNonce),
+            new TransactionUsabilityResult(true, "OK", 500_000m, "VND", "PAID"), // Outer tampered to true!
+            new VerificationReceipt(Guid.NewGuid(), keyId, requestHash, req.CallerNonce, IntegrityStatuses.Valid, false, "INVOICE_NOT_PAID", now, expiresAt, sig));
+
+        var httpResponse = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(tamperedResponse)
+        };
+
+        using var httpClient = new HttpClient(new MockHttpHandler(httpResponse)) { BaseAddress = new Uri("http://localhost:8081") };
+        var client = new IntegrityHostClient(httpClient, options, NullLogger<IntegrityHostClient>.Instance);
+
+        var result = await client.VerifyAsync(req);
+
+        // Client binds to verified receipt body, ignoring the tampered outer field
+        Assert.True(result.IsSuccess);
+        Assert.False(result.Value.Usability.IsUsable);
+        Assert.Equal("INVOICE_NOT_PAID", result.Value.Usability.Reason);
+    }
+
+    [Fact]
+    public async Task IntegrityHostClient_TamperedSignature_ReturnsConflict()
+    {
+        using var signingKey = EcdsaAttestation.CreateEphemeralP256KeyPair();
+        string pubKey = EcdsaAttestation.ExportPublicKeyBase64(signingKey);
+        string keyId = "test-k1";
+
+        var options = new TestOptionsMonitor<IntegrityVerificationOptions>(new IntegrityVerificationOptions
+        {
+            ActiveKeyId = keyId,
+            PublicKeys = new Dictionary<string, string> { [keyId] = pubKey }
+        });
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset expiresAt = now.AddSeconds(4);
+
+        var req = new TransactionVerificationRequest(PaymentRef: "PAY-1", Purpose: VerificationPurposes.PaymentConfirmation, CallerNonce: "nonce-1");
+        string requestHash = CanonicalJournalHasher.ComputeRequestHash(req.PaymentRef, req.Purpose, req.CallerNonce);
+
+        var response = new TransactionVerificationResponse(
+            new TransactionIntegrityResult("VALID", 1, "SYSTEM", now, keyId, "sig", "proof", req.CallerNonce),
+            new TransactionUsabilityResult(true, "OK", 500_000m, "VND", "PAID"),
+            new VerificationReceipt(Guid.NewGuid(), keyId, requestHash, req.CallerNonce, IntegrityStatuses.Valid, true, "OK", now, expiresAt, "tampered-signature"));
+
+        var httpResponse = new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(response) };
+        using var httpClient = new HttpClient(new MockHttpHandler(httpResponse)) { BaseAddress = new Uri("http://localhost:8081") };
+        var client = new IntegrityHostClient(httpClient, options, NullLogger<IntegrityHostClient>.Instance);
+
+        var result = await client.VerifyAsync(req);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("IntegrityHost.InvalidReceiptSignature", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task IntegrityHostClient_LifetimeExceeded_ReturnsConflict()
+    {
+        using var signingKey = EcdsaAttestation.CreateEphemeralP256KeyPair();
+        string pubKey = EcdsaAttestation.ExportPublicKeyBase64(signingKey);
+        string keyId = "test-k1";
+
+        var options = new TestOptionsMonitor<IntegrityVerificationOptions>(new IntegrityVerificationOptions
+        {
+            ActiveKeyId = keyId,
+            PublicKeys = new Dictionary<string, string> { [keyId] = pubKey }
+        });
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset expiresAt = now.AddSeconds(10); // Exceeds 5s TTL
+
+        var req = new TransactionVerificationRequest(PaymentRef: "PAY-1", Purpose: VerificationPurposes.PaymentConfirmation, CallerNonce: "nonce-1");
+        string requestHash = CanonicalJournalHasher.ComputeRequestHash(req.PaymentRef, req.Purpose, req.CallerNonce);
+        string receiptMsg = EcdsaAttestation.BuildVerificationReceiptMessage(
+            keyId, requestHash, req.CallerNonce, IntegrityStatuses.Valid, true, "OK", now, expiresAt);
+        string sig = EcdsaAttestation.Sign(signingKey, receiptMsg);
+
+        var response = new TransactionVerificationResponse(
+            new TransactionIntegrityResult("VALID", 1, "SYSTEM", now, keyId, sig, "proof", req.CallerNonce),
+            new TransactionUsabilityResult(true, "OK", 500_000m, "VND", "PAID"),
+            new VerificationReceipt(Guid.NewGuid(), keyId, requestHash, req.CallerNonce, IntegrityStatuses.Valid, true, "OK", now, expiresAt, sig));
+
+        var httpResponse = new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(response) };
+        using var httpClient = new HttpClient(new MockHttpHandler(httpResponse)) { BaseAddress = new Uri("http://localhost:8081") };
+        var client = new IntegrityHostClient(httpClient, options, NullLogger<IntegrityHostClient>.Instance);
+
+        var result = await client.VerifyAsync(req);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("IntegrityHost.LifetimeExceeded", result.Error.Code);
+    }
 
     [Fact]
     public void JournalEntryFactory_NullEncryptor_MustThrowArgumentNullException_NoDefaultFallback()

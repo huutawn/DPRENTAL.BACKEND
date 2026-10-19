@@ -53,25 +53,6 @@ public sealed class IntegrityHostClient : ITransactionIntegrityChecker
                 request,
                 cts.Token);
 
-            if (httpResponse.StatusCode == HttpStatusCode.NotFound)
-            {
-                return Result.Success(new TransactionVerificationResponse(
-                    new TransactionIntegrityResult(
-                        Status: IntegrityStatuses.NotFound,
-                        Version: 0,
-                        ConfirmationSource: null,
-                        ConfirmedAt: null,
-                        KeyId: null,
-                        Signature: null,
-                        Proof: null,
-                        CallerNonce: request.CallerNonce),
-                    new TransactionUsabilityResult(
-                        IsUsable: false,
-                        Reason: "NOT_FOUND",
-                        ActualAmount: 0m,
-                        ActualCurrency: request.ExpectedCurrency ?? "VND",
-                        ActualStatus: "NOT_FOUND")));
-            }
 
             if (!httpResponse.IsSuccessStatusCode)
             {
@@ -87,12 +68,31 @@ public sealed class IntegrityHostClient : ITransactionIntegrityChecker
 
             // Client-side verification of the signed VerificationReceipt
             var receipt = verificationResponse.Receipt;
-            if (receipt is not null)
+            if (receipt is null)
             {
-                if (now > receipt.ExpiresAt)
-                {
-                    return Error.Conflict("IntegrityHost.ReceiptExpired", "Verification receipt đã hết hạn hiệu lực (5s).");
-                }
+                return Error.Failure("IntegrityHost.MissingReceipt", "Phản hồi kiểm chứng từ IntegrityHost thiếu VerificationReceipt.");
+            }
+
+            var nowAfterResponse = _timeProvider.GetUtcNow();
+            if (nowAfterResponse > receipt.ExpiresAt)
+            {
+                return Error.Conflict("IntegrityHost.ReceiptExpired", "Verification receipt đã hết hạn hiệu lực.");
+            }
+
+            if (receipt.ExpiresAt <= receipt.IssuedAt)
+            {
+                return Error.Conflict("IntegrityHost.InvalidReceiptLifetime", "Thời điểm hết hạn của receipt phải sau thời điểm phát hành.");
+            }
+
+            if (receipt.IssuedAt > nowAfterResponse.AddSeconds(1))
+            {
+                return Error.Conflict("IntegrityHost.FutureReceipt", "Thời điểm phát hành của receipt không được ở tương lai.");
+            }
+
+            if ((receipt.ExpiresAt - receipt.IssuedAt) > TimeSpan.FromSeconds(5))
+            {
+                return Error.Conflict("IntegrityHost.LifetimeExceeded", "Hiệu lực của receipt không được vượt quá 5 giây.");
+            }
 
                 if (!string.Equals(receipt.CallerNonce, request.CallerNonce, StringComparison.Ordinal))
                 {
@@ -139,9 +139,27 @@ public sealed class IntegrityHostClient : ITransactionIntegrityChecker
                 {
                     return Error.Conflict("IntegrityHost.InvalidReceiptSignature", "Chữ ký verification receipt không hợp lệ.");
                 }
-            }
 
-            return Result.Success(verificationResponse);
+            // Return bound verified result from verified receipt body
+            var boundResponse = new TransactionVerificationResponse(
+                new TransactionIntegrityResult(
+                    Status: receipt.IntegrityStatus,
+                    Version: verificationResponse.Integrity.Version,
+                    ConfirmationSource: verificationResponse.Integrity.ConfirmationSource,
+                    ConfirmedAt: verificationResponse.Integrity.ConfirmedAt,
+                    KeyId: receipt.KeyId,
+                    Signature: verificationResponse.Integrity.Signature,
+                    Proof: verificationResponse.Integrity.Proof,
+                    CallerNonce: receipt.CallerNonce),
+                new TransactionUsabilityResult(
+                    IsUsable: receipt.IsUsable,
+                    Reason: receipt.Reason,
+                    ActualAmount: verificationResponse.Usability.ActualAmount,
+                    ActualCurrency: verificationResponse.Usability.ActualCurrency,
+                    ActualStatus: verificationResponse.Usability.ActualStatus),
+                Receipt: receipt);
+
+            return Result.Success(boundResponse);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
