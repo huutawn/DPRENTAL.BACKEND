@@ -14,9 +14,14 @@ public sealed class PaymentServiceDbContext : DbContext
     public DbSet<OperationReceipt> OperationReceipts => Set<OperationReceipt>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
+    public DbSet<PaymentTransactionResolution> PaymentTransactionResolutions => Set<PaymentTransactionResolution>();
     public DbSet<RentalItemSettlementRecord> RentalItemSettlements => Set<RentalItemSettlementRecord>();
     public DbSet<SettlementLedgerEntry> SettlementLedgerEntries => Set<SettlementLedgerEntry>();
     public DbSet<ManualRefundRequirement> ManualRefundRequirements => Set<ManualRefundRequirement>();
+    public DbSet<ManualRefundOperationAudit> ManualRefundOperationAudits => Set<ManualRefundOperationAudit>();
+    public DbSet<SupplierPayout> SupplierPayouts => Set<SupplierPayout>();
+    public DbSet<SupplierPayoutDestination> SupplierPayoutDestinations => Set<SupplierPayoutDestination>();
+    public DbSet<FinancialOperationAudit> FinancialOperationAudits => Set<FinancialOperationAudit>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -54,6 +59,16 @@ public sealed class PaymentServiceDbContext : DbContext
             b.HasIndex(t => t.InvoiceRef);
         });
 
+        modelBuilder.Entity<PaymentTransactionResolution>(b =>
+        {
+            b.HasIndex(x => x.TransactionId).IsUnique();
+            b.HasIndex(x => x.OperationKey).IsUnique();
+            b.HasOne<PaymentTransaction>().WithMany()
+                .HasForeignKey(x => x.TransactionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<Invoice>().WithMany()
+                .HasForeignKey(x => x.InvoiceId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<RentalItemSettlementRecord>(b =>
         {
             b.HasIndex(x => x.OperationKey).IsUnique();
@@ -69,7 +84,7 @@ public sealed class PaymentServiceDbContext : DbContext
 
             b.HasOne<InvoiceItem>().WithMany()
                 .HasForeignKey(x => x.InvoiceItemId).OnDelete(DeleteBehavior.Restrict);
-
+            b.HasIndex(x => new { x.Status, x.CreatedAt }).HasDatabaseName("IX_rental_item_settlements_Status_CreatedAt");
             b.ToTable(t =>
             {
                 t.HasCheckConstraint("ck_settlement_amounts_non_negative",
@@ -94,15 +109,68 @@ public sealed class PaymentServiceDbContext : DbContext
 
         modelBuilder.Entity<ManualRefundRequirement>(b =>
         {
-            b.HasIndex(x => x.SettlementId).IsUnique();      // đúng một requirement cho mỗi settlement
+            b.HasIndex(x => x.SettlementId).IsUnique();
             b.HasIndex(x => x.RentalItemId).IsUnique();
             b.HasIndex(x => x.RequirementRef).IsUnique();
+            b.HasIndex(x => x.ExternalTransferReference).IsUnique()
+                .HasDatabaseName("UX_manual_refund_requirements_ExternalTransferReference");
             b.Property(x => x.Status).HasConversion<int>();
+            b.HasIndex(x => new { x.Status, x.CreatedAt }).HasDatabaseName("IX_manual_refund_requirements_Status_CreatedAt");
             b.ToTable(t =>
             {
                 t.HasCheckConstraint("ck_manual_refund_amount_positive", "\"Amount\" > 0");
                 t.HasCheckConstraint("ck_manual_refund_status_valid", "\"Status\" IN (1, 2)");
             });
+        });
+
+        modelBuilder.Entity<ManualRefundOperationAudit>(b =>
+        {
+            b.HasIndex(x => x.OperationKey).IsUnique();
+            b.HasIndex(x => new { x.RefundRequirementId, x.OccurredAt });
+            b.HasOne<ManualRefundRequirement>().WithMany()
+                .HasForeignKey(x => x.RefundRequirementId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SupplierPayout>(e =>
+        {
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_supplier_payouts_amount_positive", "\"Amount\" > 0");
+                t.HasCheckConstraint("CK_supplier_payouts_status_valid", "\"Status\" IN ('PENDING_PAYOUT', 'COMPLETED')");
+                t.HasCheckConstraint("CK_supplier_payouts_completion_consistent",
+                    "(\"Status\" = 'PENDING_PAYOUT' AND \"CompletedAt\" IS NULL AND \"CompletedBy\" IS NULL AND \"ExternalTransferReference\" IS NULL) OR " +
+                    "(\"Status\" = 'COMPLETED' AND \"CompletedAt\" IS NOT NULL AND \"CompletedBy\" IS NOT NULL AND \"ExternalTransferReference\" IS NOT NULL AND \"DestinationRef\" IS NOT NULL)");
+            });
+
+            e.HasIndex(x => x.SettlementId).IsUnique().HasDatabaseName("UX_supplier_payouts_SettlementId");
+            e.HasIndex(x => x.PayoutRef).IsUnique().HasDatabaseName("UX_supplier_payouts_PayoutRef");
+            e.HasIndex(x => x.ExternalTransferReference).IsUnique()
+                .HasDatabaseName("UX_supplier_payouts_ExternalTransferReference");
+            e.HasIndex(x => new { x.RentalItemId, x.SupplierId }).IsUnique()
+                .HasDatabaseName("UX_supplier_payouts_RentalItemId_SupplierId");
+            e.HasIndex(x => new { x.Status, x.CreatedAt }).HasDatabaseName("IX_supplier_payouts_Status_CreatedAt");
+            e.HasIndex(x => new { x.SupplierId, x.CreatedAt }).HasDatabaseName("IX_supplier_payouts_SupplierId_CreatedAt");
+            e.HasOne(x => x.Settlement)
+                .WithOne(x => x.Payout)
+                .HasForeignKey<SupplierPayout>(x => x.SettlementId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Destination).WithMany()
+                .HasForeignKey(x => x.DestinationId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SupplierPayoutDestination>(e =>
+        {
+            e.HasIndex(x => new { x.DestinationRef, x.Version }).IsUnique();
+            e.HasIndex(x => x.OperationKey).IsUnique();
+            e.HasIndex(x => new { x.SupplierId, x.AccountFingerprint });
+        });
+
+        modelBuilder.Entity<FinancialOperationAudit>(e =>
+        {
+            e.HasIndex(x => x.OperationKey).IsUnique();
+            e.HasIndex(x => new { x.PayoutId, x.OccurredAt });
+            e.HasOne<SupplierPayout>().WithMany()
+                .HasForeignKey(x => x.PayoutId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

@@ -3,8 +3,10 @@ using Dprental.PaymentService.Application.IServices;
 using Dprental.PaymentService.Application.Kafka;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Application.Services;
+using Dprental.PaymentService.Domain.Repository;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Dprental.PaymentService.Domain.IRepository;
 
 namespace Dprental.PaymentService.Application.DependencyInjection;
 
@@ -48,11 +50,16 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IInvoiceService, InvoiceService>();
         services.AddScoped<ISettlementService, SettlementService>();
         services.AddScoped<IManualRefundService, ManualRefundService>();
+        services.AddScoped<IFinancialReadService, FinancialReadService>();
+        services.AddScoped<ITransactionResolutionService, TransactionResolutionService>();
         services.AddSingleton<IInvoicePaidKafkaProducer, InvoicePaidKafkaProducer>();
 
         services.AddHostedService<InvoiceExpiryWorker>();
         services.AddHostedService<InvoicePaidOutboxPublisherWorker>();
+        services.AddScoped<ISupplierPayoutService, SupplierPayoutService>();
 
+        services.AddScoped<ISupplierPayoutDestinationRepository, EfSupplierPayoutDestinationRepository>();
+        services.AddScoped<ISupplierPayoutDestinationService, SupplierPayoutDestinationService>();
         return services;
     }
 }

@@ -2,6 +2,10 @@ using Dprental.PaymentService.Common;
 
 namespace Dprental.PaymentService.Domain.IRepository;
 
+public sealed record CompleteManualRefundCommand(
+    Guid RequirementId, Guid AdminId, string OperationKey,
+    string ExternalTransferReference, string AuditReason);
+
 public sealed record ManualRefundCompletion(
     Guid RequirementId, string RequirementRef, Guid RentalItemId,
     string SettlementRef, decimal Amount, string ExternalTransferReference,
@@ -10,6 +14,5 @@ public sealed record ManualRefundCompletion(
 public interface IManualRefundRepository
 {
     Task<Result<ManualRefundCompletion>> CompleteAsync(
-        Guid requirementId, string externalTransferReference, Guid adminId,
-        CancellationToken cancellationToken);
+        CompleteManualRefundCommand command, CancellationToken cancellationToken);
 }

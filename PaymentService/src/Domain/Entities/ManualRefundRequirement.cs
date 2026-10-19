@@ -82,9 +82,7 @@ public sealed class ManualRefundRequirement
         var reference = externalTransferReference.Trim();
         if (Status == ManualRefundStatus.Completed)
         {
-            return string.Equals(ExternalTransferReference, reference, StringComparison.Ordinal)
-                ? Result.Success(false)
-                : Error.Conflict("Payment.RefundAlreadyCompleted", "Yêu cầu hoàn cọc đã được xác nhận bằng mã chuyển khoản khác.");
+            return Error.Conflict("Payment.RefundAlreadyCompleted", "Yêu cầu hoàn cọc đã được xác nhận hoàn tất.");
         }
 
         Status = ManualRefundStatus.Completed;

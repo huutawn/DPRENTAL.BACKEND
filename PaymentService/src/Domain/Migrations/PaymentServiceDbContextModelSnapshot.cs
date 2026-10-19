@@ -22,6 +22,80 @@ namespace Dprental.PaymentService.Domain.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.FinancialOperationAudit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<Guid?>("DestinationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DestinationRef")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("ExternalTransferReference")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OperationKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("OperationType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PayloadFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("PayoutId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PreviousDestinationRef")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("SettlementId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OperationKey")
+                        .IsUnique();
+
+                    b.HasIndex("PayoutId", "OccurredAt");
+
+                    b.ToTable("financial_operation_audits");
+                });
+
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.Invoice", b =>
                 {
                     b.Property<Guid>("Id")
@@ -150,6 +224,65 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.ToTable("invoice_items");
                 });
 
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.ManualRefundOperationAudit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<string>("ExternalTransferReference")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OperationKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("OperationType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("PayloadFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("RefundRequirementId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RentalItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SettlementId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OperationKey")
+                        .IsUnique();
+
+                    b.HasIndex("RefundRequirementId", "OccurredAt");
+
+                    b.ToTable("manual_refund_operation_audits");
+                });
+
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.ManualRefundRequirement", b =>
                 {
                     b.Property<Guid>("Id")
@@ -204,6 +337,10 @@ namespace Dprental.PaymentService.Domain.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ExternalTransferReference")
+                        .IsUnique()
+                        .HasDatabaseName("UX_manual_refund_requirements_ExternalTransferReference");
+
                     b.HasIndex("RentalItemId")
                         .IsUnique();
 
@@ -212,6 +349,9 @@ namespace Dprental.PaymentService.Domain.Migrations
 
                     b.HasIndex("SettlementId")
                         .IsUnique();
+
+                    b.HasIndex("Status", "CreatedAt")
+                        .HasDatabaseName("IX_manual_refund_requirements_Status_CreatedAt");
 
                     b.ToTable("manual_refund_requirements", t =>
                         {
@@ -427,6 +567,62 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.ToTable("payment_transactions");
                 });
 
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.PaymentTransactionResolution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AuditReason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ExternalReference")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid>("InvoiceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("InvoiceRef")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OperationKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PayloadFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InvoiceId");
+
+                    b.HasIndex("OperationKey")
+                        .IsUnique();
+
+                    b.HasIndex("TransactionId")
+                        .IsUnique();
+
+                    b.ToTable("payment_transaction_resolutions");
+                });
+
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.RentalItemSettlementRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -503,6 +699,9 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.HasIndex("SettlementRef")
                         .IsUnique();
 
+                    b.HasIndex("Status", "CreatedAt")
+                        .HasDatabaseName("IX_rental_item_settlements_Status_CreatedAt");
+
                     b.ToTable("rental_item_settlements", t =>
                         {
                             t.HasCheckConstraint("ck_settlement_amounts_non_negative", "\"RentalAmount\" >= 0 AND \"DepositAmount\" >= 0 AND \"FinalDeductionAmount\" >= 0 AND \"DepositRefundDue\" >= 0 AND \"PlatformFeeAmount\" >= 0 AND \"SupplierPayable\" >= 0");
@@ -546,6 +745,183 @@ namespace Dprental.PaymentService.Domain.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.SupplierPayout", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric(18, 0)");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CompletedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<Guid?>("DestinationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DestinationRef")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("ExternalTransferReference")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("PayoutRef")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("RentalItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SettlementId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DestinationId");
+
+                    b.HasIndex("ExternalTransferReference")
+                        .IsUnique()
+                        .HasDatabaseName("UX_supplier_payouts_ExternalTransferReference");
+
+                    b.HasIndex("PayoutRef")
+                        .IsUnique()
+                        .HasDatabaseName("UX_supplier_payouts_PayoutRef");
+
+                    b.HasIndex("SettlementId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_supplier_payouts_SettlementId");
+
+                    b.HasIndex("RentalItemId", "SupplierId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_supplier_payouts_RentalItemId_SupplierId");
+
+                    b.HasIndex("Status", "CreatedAt")
+                        .HasDatabaseName("IX_supplier_payouts_Status_CreatedAt");
+
+                    b.HasIndex("SupplierId", "CreatedAt")
+                        .HasDatabaseName("IX_supplier_payouts_SupplierId_CreatedAt");
+
+                    b.ToTable("supplier_payouts", t =>
+                        {
+                            t.HasCheckConstraint("CK_supplier_payouts_amount_positive", "\"Amount\" > 0");
+
+                            t.HasCheckConstraint("CK_supplier_payouts_completion_consistent", "(\"Status\" = 'PENDING_PAYOUT' AND \"CompletedAt\" IS NULL AND \"CompletedBy\" IS NULL AND \"ExternalTransferReference\" IS NULL) OR (\"Status\" = 'COMPLETED' AND \"CompletedAt\" IS NOT NULL AND \"CompletedBy\" IS NOT NULL AND \"ExternalTransferReference\" IS NOT NULL AND \"DestinationRef\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_supplier_payouts_status_valid", "\"Status\" IN ('PENDING_PAYOUT', 'COMPLETED')");
+                        });
+                });
+
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.SupplierPayoutDestination", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AccountFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("AccountHolderName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("AccountNumberLast4")
+                        .IsRequired()
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
+
+                    b.Property<string>("AuditReason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("BankCode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DestinationRef")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("OperationKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PayloadFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("VerificationRef")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset>("VerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("VerifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OperationKey")
+                        .IsUnique();
+
+                    b.HasIndex("DestinationRef", "Version")
+                        .IsUnique();
+
+                    b.HasIndex("SupplierId", "AccountFingerprint");
+
+                    b.ToTable("supplier_payout_destinations");
+                });
+
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.FinancialOperationAudit", b =>
+                {
+                    b.HasOne("Dprental.PaymentService.Domain.Entities.SupplierPayout", null)
+                        .WithMany()
+                        .HasForeignKey("PayoutId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.InvoiceItem", b =>
                 {
                     b.HasOne("Dprental.PaymentService.Domain.Entities.Invoice", "Invoice")
@@ -557,6 +933,15 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.Navigation("Invoice");
                 });
 
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.ManualRefundOperationAudit", b =>
+                {
+                    b.HasOne("Dprental.PaymentService.Domain.Entities.ManualRefundRequirement", null)
+                        .WithMany()
+                        .HasForeignKey("RefundRequirementId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.ManualRefundRequirement", b =>
                 {
                     b.HasOne("Dprental.PaymentService.Domain.Entities.RentalItemSettlementRecord", "Settlement")
@@ -566,6 +951,21 @@ namespace Dprental.PaymentService.Domain.Migrations
                         .IsRequired();
 
                     b.Navigation("Settlement");
+                });
+
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.PaymentTransactionResolution", b =>
+                {
+                    b.HasOne("Dprental.PaymentService.Domain.Entities.Invoice", null)
+                        .WithMany()
+                        .HasForeignKey("InvoiceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Dprental.PaymentService.Domain.Entities.PaymentTransaction", null)
+                        .WithMany()
+                        .HasForeignKey("TransactionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.RentalItemSettlementRecord", b =>
@@ -588,6 +988,24 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.Navigation("Settlement");
                 });
 
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.SupplierPayout", b =>
+                {
+                    b.HasOne("Dprental.PaymentService.Domain.Entities.SupplierPayoutDestination", "Destination")
+                        .WithMany()
+                        .HasForeignKey("DestinationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Dprental.PaymentService.Domain.Entities.RentalItemSettlementRecord", "Settlement")
+                        .WithOne("Payout")
+                        .HasForeignKey("Dprental.PaymentService.Domain.Entities.SupplierPayout", "SettlementId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Destination");
+
+                    b.Navigation("Settlement");
+                });
+
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.Invoice", b =>
                 {
                     b.Navigation("Items");
@@ -596,6 +1014,8 @@ namespace Dprental.PaymentService.Domain.Migrations
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.RentalItemSettlementRecord", b =>
                 {
                     b.Navigation("Entries");
+
+                    b.Navigation("Payout");
 
                     b.Navigation("RefundRequirement");
                 });
