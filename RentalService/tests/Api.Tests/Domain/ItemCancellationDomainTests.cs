@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
@@ -199,12 +200,12 @@ public sealed class ItemCancellationDomainTests
     }
 
     [Fact]
-    public void EvaluateOrderStatusRollup_WhenAllItemsCancelled_RollsUpToCancelled()
+    public void OrderStatusPolicy_WhenAllItemsCancelled_RollsUpToCancelled()
     {
         var order = CreateTwoItemOrder(RentalItemStatus.Cancelled, RentalItemStatus.Cancelled);
         typeof(RentalOrder).GetProperty(nameof(RentalOrder.Status))!.SetValue(order, RentalOrderStatus.AwaitingHandover);
 
-        order.EvaluateOrderStatusRollup(FixedNow, "op-rollup-cancelled");
+        RentalOrderStatusPolicy.Apply(order, FixedNow, "op-rollup-cancelled");
 
         Assert.Equal(RentalOrderStatus.Cancelled, order.Status);
         var transition = order.StateTransitions.Last();
@@ -213,34 +214,34 @@ public sealed class ItemCancellationDomainTests
     }
 
     [Fact]
-    public void EvaluateOrderStatusRollup_WhenOneInRentalAndOneCancelled_RollsUpToInRental()
+    public void OrderStatusPolicy_WhenOneInRentalAndOneCancelled_RollsUpToInRental()
     {
         var order = CreateTwoItemOrder(RentalItemStatus.InRental, RentalItemStatus.Cancelled);
         typeof(RentalOrder).GetProperty(nameof(RentalOrder.Status))!.SetValue(order, RentalOrderStatus.AwaitingHandover);
 
-        order.EvaluateOrderStatusRollup(FixedNow, "op-rollup-inrental");
+        RentalOrderStatusPolicy.Apply(order, FixedNow, "op-rollup-inrental");
 
         Assert.Equal(RentalOrderStatus.InRental, order.Status);
     }
 
     [Fact]
-    public void EvaluateOrderStatusRollup_WhenOneAwaitingHandoverAndOneCancelled_RemainsAwaitingHandover()
+    public void OrderStatusPolicy_WhenOneAwaitingHandoverAndOneCancelled_RemainsAwaitingHandover()
     {
         var order = CreateTwoItemOrder(RentalItemStatus.AwaitingHandover, RentalItemStatus.Cancelled);
         typeof(RentalOrder).GetProperty(nameof(RentalOrder.Status))!.SetValue(order, RentalOrderStatus.AwaitingHandover);
 
-        order.EvaluateOrderStatusRollup(FixedNow, "op-rollup-awaiting");
+        RentalOrderStatusPolicy.Apply(order, FixedNow, "op-rollup-awaiting");
 
         Assert.Equal(RentalOrderStatus.AwaitingHandover, order.Status);
     }
 
     [Fact]
-    public void EvaluateOrderStatusRollup_WhenOneRejectedAndOneCancelled_RollsUpToCancelled()
+    public void OrderStatusPolicy_WhenOneRejectedAndOneCancelled_RollsUpToCancelled()
     {
         var order = CreateTwoItemOrder(RentalItemStatus.Rejected, RentalItemStatus.Cancelled);
         typeof(RentalOrder).GetProperty(nameof(RentalOrder.Status))!.SetValue(order, RentalOrderStatus.AwaitingHandover);
 
-        order.EvaluateOrderStatusRollup(FixedNow, "op-rollup-mixed-terminal");
+        RentalOrderStatusPolicy.Apply(order, FixedNow, "op-rollup-mixed-terminal");
 
         Assert.Equal(RentalOrderStatus.Cancelled, order.Status);
     }

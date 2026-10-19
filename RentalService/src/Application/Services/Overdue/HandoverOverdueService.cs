@@ -139,7 +139,7 @@ public sealed class HandoverOverdueService(
 
                     await outboxRepository.AddAsync(outbox, cancellationToken);
 
-                    freshOrder.IncrementVersion();
+                    freshOrder.RecordReadModelUpdate(now);
                     await orders.UpdateAsync(freshOrder, cancellationToken);
                     await unitOfWork.SaveChangesAsync(cancellationToken);
 

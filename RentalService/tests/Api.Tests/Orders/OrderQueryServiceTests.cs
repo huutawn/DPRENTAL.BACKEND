@@ -480,7 +480,7 @@ public sealed class OrderQueryServiceTests
         Result<RenterOrderDetailResponse> beforeConfirm =
             await RenterService().GetMyOrderAsync(_paidMixedOrder.Id, OrderTestData.User(_an));
         Assert.True(beforeConfirm.IsSuccess);
-        Assert.Null(beforeConfirm.Value.SubOrders[0].Items[0].PickupLocation);
+        Assert.Null(beforeConfirm.Value.SubOrders[0].Items[0].Listing.PickupLocation);
 
         // 2. Chủ kho xác nhận: chuyển mục thuê sang AwaitingHandover
         await using (RentalServiceDbContext context = NewContext())
@@ -496,7 +496,7 @@ public sealed class OrderQueryServiceTests
         Result<RenterOrderDetailResponse> afterConfirm =
             await RenterService().GetMyOrderAsync(_paidMixedOrder.Id, OrderTestData.User(_an));
         Assert.True(afterConfirm.IsSuccess);
-        Assert.Equal("Kho Thủ Đức, TP.HCM", afterConfirm.Value.SubOrders[0].Items[0].PickupLocation);
+        Assert.Equal("Kho Thủ Đức, TP.HCM", afterConfirm.Value.SubOrders[0].Items[0].Listing.PickupLocation);
     }
 
     [Fact]

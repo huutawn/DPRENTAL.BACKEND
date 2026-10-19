@@ -92,14 +92,14 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
     {
     }
 
-    public async Task<Result> ApplyInvoicePaidStagedAsync(
+    public async Task<Result<bool>> ApplyInvoicePaidStagedAsync(
         RentalOrder order,
         KafkaMessageEnvelope<InvoicePaidPayload> envelope,
         RentalInboxMessage inboxMessage,
         CancellationToken cancellationToken = default)
     {
         var envValidation = ValidateEnvelope(envelope);
-        if (envValidation.IsFailure) return envValidation;
+        if (envValidation.IsFailure) return envValidation.Error;
 
         var payload = envelope.Payload;
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
@@ -136,7 +136,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         {
             if (string.Equals(order.PaymentRef, payload.PaymentRef, StringComparison.OrdinalIgnoreCase))
             {
-                return Result.Success();
+                return Result.Success(false);
             }
             return Error.Conflict("PAYMENT_REF_CONFLICT", "Đơn hàng đã được thanh toán với mã tham chiếu thanh toán khác.");
         }
@@ -307,7 +307,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             }
         }
 
-        return Result.Success();
+        return Result.Success(true);
     }
 
     public async Task<Result> ProcessInvoicePaidAsync(
@@ -367,8 +367,12 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                 _inboxRepository.Update(inboxMessage);
             }
 
-            order.IncrementVersion();
-            await _orderRepository.UpdateAsync(order, cancellationToken);
+            if (result.Value)
+            {
+                order.RecordReadModelUpdate(utcNow);
+                await _orderRepository.UpdateAsync(order, cancellationToken);
+            }
+
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 

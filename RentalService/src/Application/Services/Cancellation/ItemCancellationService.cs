@@ -5,6 +5,7 @@ using Dprental.RentalService.Application.IServices.Cancellation;
 using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Events;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Common;
@@ -168,7 +169,7 @@ public sealed class ItemCancellationService : IItemCancellationService
             return cancelResult.Error;
         }
 
-        order.EvaluateOrderStatusRollup(utcNow, normalizedKey);
+        RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
 
         // 11. Lên lịch nhả lịch và hoàn tiền 100%
         await _operationExecutor.ScheduleReleaseAndRefundAsync(order, item, actorId, cancelReason, utcNow, cancellationToken);
@@ -215,7 +216,7 @@ public sealed class ItemCancellationService : IItemCancellationService
 
         await _outboxRepository.AddAsync(outbox, cancellationToken);
 
-        order.IncrementVersion();
+        order.RecordReadModelUpdate(utcNow);
         await _orderRepository.UpdateAsync(order, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -315,7 +316,7 @@ public sealed class ItemCancellationService : IItemCancellationService
             return cancelResult.Error;
         }
 
-        order.EvaluateOrderStatusRollup(utcNow, normalizedKey);
+        RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
 
         await _operationExecutor.ScheduleReleaseAndRefundAsync(order, item, actorId, reason, utcNow, cancellationToken);
 
@@ -360,7 +361,7 @@ public sealed class ItemCancellationService : IItemCancellationService
 
         await _outboxRepository.AddAsync(outbox, cancellationToken);
 
-        order.IncrementVersion();
+        order.RecordReadModelUpdate(utcNow);
         await _orderRepository.UpdateAsync(order, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 

@@ -148,7 +148,6 @@ public sealed record OrderSettlementResponse(
 /// <param name="Handover">Biên bản bàn giao, rỗng khi chưa giao.</param>
 /// <param name="Returns">Các lần trả máy, cũ nhất trước.</param>
 /// <param name="Settlement">Quyết toán tiền cọc, rỗng khi chưa trả đủ máy.</param>
-/// <param name="PickupLocation">Địa chỉ kho nhận máy; rỗng cho tới khi nhà cung cấp xác nhận dòng.</param>
 public sealed record RenterOrderItemResponse(
     string Name,
     int Quantity,
@@ -169,5 +168,4 @@ public sealed record RenterOrderItemResponse(
     OrderItemRefundResponse Refund,
     OrderHandoverResponse? Handover,
     IReadOnlyList<OrderReturnResponse> Returns,
-    OrderSettlementResponse? Settlement,
-    string? PickupLocation);
+    OrderSettlementResponse? Settlement);

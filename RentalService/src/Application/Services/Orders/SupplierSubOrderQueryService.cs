@@ -97,7 +97,8 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
             rental,
             deposit,
             rental + deposit,
-            items);
+            items,
+            order.Version);
     }
 
     private static SupplierOrderItemResponse ToItem(RentalItem item)

@@ -37,7 +37,7 @@ public sealed record SupplierUnitResponse(
 /// <param name="Returns">Các lần trả máy, cũ nhất trước.</param>
 /// <param name="Settlement">Quyết toán tiền cọc, rỗng khi chưa trả đủ máy.</param>
 /// <param name="Units">Các máy cụ thể đã gán cho dòng.</param>
-/// <param name="PickupLocation">Địa chỉ kho nhận máy; rỗng cho tới khi nhà cung cấp xác nhận dòng.</param>
+/// <param name="PickupLocation">Địa chỉ kho nhận máy.</param>
 public sealed record SupplierOrderItemResponse(
     string Name,
     int Quantity,
@@ -57,4 +57,4 @@ public sealed record SupplierOrderItemResponse(
     IReadOnlyList<OrderReturnResponse> Returns,
     OrderSettlementResponse? Settlement,
     IReadOnlyList<SupplierUnitResponse> Units,
-    string? PickupLocation);
+    string? PickupLocation = null);

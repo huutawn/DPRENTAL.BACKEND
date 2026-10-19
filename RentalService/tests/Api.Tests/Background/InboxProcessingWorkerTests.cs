@@ -40,12 +40,19 @@ public sealed class InboxProcessingWorkerTests
     {
         public Func<KafkaMessageEnvelope<InvoicePaidPayload>, Task<Result>>? Handler { get; set; }
 
-        public Task<Result> ApplyInvoicePaidStagedAsync(
+        public async Task<Result<bool>> ApplyInvoicePaidStagedAsync(
             RentalOrder order,
             KafkaMessageEnvelope<InvoicePaidPayload> envelope,
             RentalInboxMessage inboxMessage,
-            CancellationToken cancellationToken = default) =>
-            Handler != null ? Handler(envelope) : Task.FromResult(Result.Success());
+            CancellationToken cancellationToken = default)
+        {
+            if (Handler != null)
+            {
+                var res = await Handler(envelope);
+                return res.IsFailure ? res.Error : Result.Success(true);
+            }
+            return Result.Success(true);
+        }
 
         public Task<Result> ProcessInvoicePaidAsync(KafkaMessageEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default) =>
             Handler != null ? Handler(envelope) : Task.FromResult(Result.Success());
@@ -53,12 +60,12 @@ public sealed class InboxProcessingWorkerTests
 
     private sealed class StubRefundConsumer : IRefundCompletedConsumer
     {
-        public Task<Result> ApplyRefundCompletedStagedAsync(
+        public Task<Result<bool>> ApplyRefundCompletedStagedAsync(
             RentalOrder order,
             KafkaMessageEnvelope<RefundCompletedPayload> envelope,
             RentalInboxMessage inboxMessage,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success());
+            Task.FromResult(Result.Success(true));
 
         public Task<Result> ProcessRefundCompletedAsync(KafkaMessageEnvelope<RefundCompletedPayload> envelope, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success());

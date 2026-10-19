@@ -8,6 +8,7 @@ using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Validation;
 using Dprental.RentalService.Common;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
@@ -101,6 +102,8 @@ public sealed class ReturnService(
             domainUnits,
             now, supplierId);
         if (recorded.IsFailure) return recorded.Error;
+        RentalOrderStatusPolicy.Apply(order, now, key);
+        order.RecordReadModelUpdate(now);
         var response = new RecordReturnResponse(recorded.Value.Id, now,
             item.UnitAssignments.Count(a => !a.ReturnRecordId.HasValue), item.Status, item.DeductionDeadline);
         order.AddStateTransition(new RentalStateTransition(Guid.NewGuid(), order.Id, item.Id,
@@ -120,7 +123,6 @@ public sealed class ReturnService(
                 unitOfWork.DiscardChanges();
                 return enqueueResult.Error;
             }
-            order.IncrementVersion();
 
             var envelope = new KafkaMessageEnvelope<RentalUnitsReturnedPayload>(Guid.NewGuid(), "RentalUnitsReturned",
                 1, "rental-service", order.Id.ToString("D"), now, key, null,
