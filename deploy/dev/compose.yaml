@@ -59,6 +59,7 @@ services:
       GlobalConfiguration__BaseUrl: https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
       Gateway__Security__Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:?Set CORS_ALLOWED_ORIGIN_0 in .env}
       Gateway__Security__ForwardedHeaders__KnownNetworks__0: ${EDGE_NETWORK_CIDR:-172.30.0.0/24}
+      InternalAuthentication__ApiKey: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
       Gateway__Security__RequestSize__MaxRequestBodySizeBytes: ${MAX_REQUEST_BODY_SIZE_BYTES:-10485760}
       Gateway__Security__RequestSize__MediaUploadMaxRequestBodySizeBytes: ${MEDIA_UPLOAD_MAX_REQUEST_BODY_SIZE_BYTES:-26214400}
       Gateway__Traffic__Resilience__DefaultTimeoutSeconds: ${DEFAULT_TIMEOUT_SECONDS:-10}
@@ -109,7 +110,8 @@ services:
       Auth__Jwt__Keys__0__PrivateKeyPem: /run/secrets/auth_jwt_private_key
       MediaService__InternalBaseUrl: http://media-service:8080
       MediaService__PublicGatewayUrl: https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
-      MediaService__ApiKey: ${AUTH_ADMIN_BOOTSTRAP_CREATION_KEY:?Set AUTH_ADMIN_BOOTSTRAP_CREATION_KEY in .env}
+      MediaService__ApiKey: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
+      InternalAuthentication__ApiKey: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
       Telemetry__Tracing__SamplingRatio: ${TRACING_SAMPLING_RATIO:-0.1}
       Telemetry__Otlp__TracesEndpoint: ${OTLP_TRACES_ENDPOINT:-}
     depends_on:
@@ -158,6 +160,7 @@ services:
       Auth__Jwt__Keys__0__KeyId: ${AUTH_JWT_ACTIVE_KEY_ID:?Set AUTH_JWT_ACTIVE_KEY_ID in .env}
       Auth__Jwt__Keys__0__PublicKeyPem: /run/secrets/auth_jwt_public_key
       Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:?Set CORS_ALLOWED_ORIGIN_0 in .env}
+      InternalAuthentication__ApiKey: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
       Telemetry__Tracing__SamplingRatio: ${TRACING_SAMPLING_RATIO:-0.1}
       Telemetry__Otlp__TracesEndpoint: ${OTLP_TRACES_ENDPOINT:-}
     depends_on:
@@ -194,7 +197,8 @@ services:
       Kafka__BootstrapServers: kafka:9092
       MediaService__InternalBaseUrl: http://media-service:8080
       MediaService__PublicGatewayUrl: https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
-      MediaService__ApiKey: ${AUTH_ADMIN_BOOTSTRAP_CREATION_KEY:?Set AUTH_ADMIN_BOOTSTRAP_CREATION_KEY in .env}
+      MediaService__ApiKey: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
+      InternalAuthentication__ApiKey: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
       MediaService__TimeoutSeconds: ${INVENTORY_MEDIA_TIMEOUT_SECONDS:-10}
     depends_on:
       postgres:
@@ -214,6 +218,46 @@ services:
     restart: "no"
     environment:
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:-authservice};Username=${POSTGRES_USER:-authservice};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - services
+
+  rental-service:
+    image: ${RENTAL_SERVICE_IMAGE:?Set RENTAL_SERVICE_IMAGE in release.env}
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Staging}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      Authentication__Jwt__Issuer: ${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER in .env}
+      Authentication__Jwt__Audience: ${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE in .env}
+      Authentication__Jwt__JwksUri: http://auth-service:8080/.well-known/jwks.json
+      Kafka__Enabled: "true"
+      Kafka__BootstrapServers: kafka:9092
+      InternalAuthentication__ApiKey: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
+      Services__Inventory__BaseUrl: http://inventory-service:8080
+      Services__Payment__BaseUrl: http://payment-service:8080
+      Services__Media__BaseUrl: http://media-service:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+    networks:
+      - services
+
+  rental-migrate:
+    image: ${RENTAL_MIGRATOR_IMAGE:?Set RENTAL_MIGRATOR_IMAGE in release.env}
+    profiles: [migration]
+    restart: "no"
+    environment:
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -263,7 +307,8 @@ services:
       - Jwt__Issuer=${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER in .env}
       - Jwt__Audience=${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE in .env}
       - Jwt__JwksUri=http://auth-service:8080/.well-known/jwks.json
-      - ApiKey=${AUTH_ADMIN_BOOTSTRAP_CREATION_KEY:?Set AUTH_ADMIN_BOOTSTRAP_CREATION_KEY in .env}
+      - ApiKey=${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
+      - InternalAuthentication__ApiKey=${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
     depends_on:
       auth-service:
         condition: service_healthy

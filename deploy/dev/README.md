@@ -30,7 +30,7 @@ Trước release đầu tiên, thay `your-org` trong `release.env` bằng đúng
 GitHub Environment `GHCR_IMAGE_NAMESPACE`; CI chỉ thay commit SHA, không sửa
 image repository.
 
-Trong `.env`, đặt `MEDIA_MINIO_ROOT_USER` và `MEDIA_MINIO_ROOT_PASSWORD`. MediaService không cần cấu hình GUID service principal: nó xác minh chữ ký JWT bằng JWKS của AuthService, claim `u=svc`, GUID trong `sub` và claim `grants`. AuthService quản lý cấp API key với các quyền theo service (`media: verify, read, publish` hoặc quyền toàn cục `*/*`) khi Business Service cần gọi API nội bộ. MediaService dùng cùng `POSTGRES_DB`, `POSTGRES_USER` và `POSTGRES_PASSWORD` với AuthService; hai schema và hai migration history tách biệt, nhưng dùng chung user nên chưa có cách ly bằng quyền PostgreSQL. Image `MEDIA_MINIO_IMAGE` được ghim bằng digest đã dùng trong kiểm thử local; kiểm tra image này có lệnh `mc` trước khi thay digest. Trong `release.env`, đặt `MEDIA_SERVICE_MIGRATOR_IMAGE` và `MEDIA_SERVICE_IMAGE` sau khi build image qua CI/CD.
+Trong `.env`, đặt `MEDIA_MINIO_ROOT_USER`, `MEDIA_MINIO_ROOT_PASSWORD` và một `INTERNAL_API_KEY` riêng có entropy cao. Gateway và backend dùng key này cho xác thực HTTP nội bộ; API key không thay JWT người dùng hoặc kiểm tra quyền sở hữu tài nguyên. AuthService tiếp tục phát JWT cho đăng nhập. Kafka có cơ chế xác thực riêng ở broker (SASL/TLS nếu được bật); HTTP API key không áp dụng cho Kafka. MediaService dùng chung PostgreSQL database với các backend nhưng schema và migration history tách biệt. Trong `release.env`, đặt image MediaService và RentalService sau khi build qua CI/CD.
 
 Tạo hai PEM file dưới `secrets/`; chúng không được commit. AuthService runtime chạy bằng UID `1654`, vì vậy file phải chỉ cho UID này đọc được:
 
