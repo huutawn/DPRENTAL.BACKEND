@@ -7,7 +7,7 @@ using Dprental.PaymentService.Api.Exceptions;
 using Dprental.PaymentService.Api.Security;
 using Dprental.PaymentService.Application.DependencyInjection;
 using Dprental.PaymentService.Domain.Repositories;
-
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -16,34 +16,23 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddPaymentDomainPersistence(builder.Configuration.GetConnectionString("Postgres")!);
 builder.Services.AddPaymentApplication(builder.Configuration);
-builder.Services.AddHttpClient<ITransactionIntegrityChecker, IntegrityHostClient>(client =>
+builder.Services.AddHttpClient<ITransactionIntegrityChecker, IntegrityHostClient>((sp, client) =>
 {
     string hostUrl = builder.Configuration["IntegrityHost:BaseUrl"] ?? "http://127.0.0.1:8081";
     client.BaseAddress = new Uri(hostUrl);
     client.Timeout = TimeSpan.FromMilliseconds(900);
+    string internalKey = builder.Configuration["InternalAuthentication:ApiKey"]
+        ?? builder.Configuration["INTERNAL_API_KEY"]
+        ?? string.Empty;
+    if (!string.IsNullOrWhiteSpace(internalKey))
+    {
+        client.DefaultRequestHeaders.Add("X-Api-Key", internalKey);
+    }
 });
 
 builder.Services.AddPaymentJwtAuthentication(builder.Configuration);
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy("InvoiceServicePolicy", policy =>
-    {
-        policy.RequireAuthenticatedUser();
-        policy.RequireAssertion(ctx =>
-            ctx.User.IsServiceToken() &&
-            ctx.User.HasServiceAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ServiceAudience") ?? "payment-api") &&
-            ctx.User.HasScope("payment.invoice.write"));
-    });
-
-    options.AddPolicy("SettlementServicePolicy", policy =>
-    {
-        policy.RequireAuthenticatedUser();
-        policy.RequireAssertion(ctx =>
-            ctx.User.IsServiceToken() &&
-            ctx.User.HasServiceAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ServiceAudience") ?? "payment-api") &&
-            ctx.User.HasScope("payment.settlement.write"));
-    });
-
     options.AddPolicy("InvoiceRenterPolicy", policy =>
     {
         policy.RequireAuthenticatedUser();
@@ -190,6 +179,7 @@ if (hasProxyConfig)
     app.UseForwardedHeaders();
 }
 
+app.UseMiddleware<InternalApiKeyMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 HealthCheckOptions livenessOptions = new()

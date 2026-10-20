@@ -114,7 +114,8 @@ public static class CanonicalJournalHasher
         string? expectedOutboxDigest = null,
         string? topic = null,
         string? messageKey = null,
-        string? expectedStatus = null)
+        string? expectedStatus = null,
+        Guid? outboxMessageId = null)
     {
         var sb = new StringBuilder(256);
         sb.Append("amount=").Append(expectedAmount.HasValue ? Dprental.PaymentService.Common.Utils.VndAmountValidator.FormatVndAmount(expectedAmount.Value) : string.Empty).Append(';');
@@ -131,7 +132,8 @@ public static class CanonicalJournalHasher
         sb.Append("rentalItemId=").Append(rentalItemId.HasValue ? rentalItemId.Value.ToString("D") : string.Empty).Append(';');
         sb.Append("requirementRef=").Append(requirementRef?.Trim() ?? string.Empty).Append(';');
         sb.Append("supplierId=").Append(supplierId.HasValue ? supplierId.Value.ToString("D") : string.Empty).Append(';');
-        sb.Append("topic=").Append(topic?.Trim() ?? string.Empty);
+        sb.Append("topic=").Append(topic?.Trim() ?? string.Empty).Append(';');
+        sb.Append("outboxMessageId=").Append(outboxMessageId.HasValue ? outboxMessageId.Value.ToString("D") : string.Empty);
 
         byte[] bytes = Encoding.UTF8.GetBytes(sb.ToString());
         return Convert.ToHexStringLower(SHA256.HashData(bytes));

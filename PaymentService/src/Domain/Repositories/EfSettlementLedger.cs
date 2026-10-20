@@ -149,17 +149,26 @@ public sealed class EfSettlementLedger : ISettlementLedger
                 existingRecord.Status,
                 existingRecord.RefundRequirement?.RequirementRef)));
         }
-
         var existingItemRecord = await _db.RentalItemSettlements.AsNoTracking()
+            .Include(x => x.RefundRequirement)
             .SingleOrDefaultAsync(x => x.RentalItemId == settlement.RentalItemId, ct);
 
         if (existingItemRecord is not null)
         {
+            if (string.Equals(existingItemRecord.OperationKey, settlement.OperationKey, StringComparison.Ordinal))
+            {
+                return new(Result.Success(new SettlementWriteResult(
+                    existingItemRecord.Id,
+                    existingItemRecord.SettlementRef,
+                    SettlementWriteOutcome.Replayed,
+                    existingItemRecord.Status,
+                    existingItemRecord.RefundRequirement?.RequirementRef)));
+            }
+
             return new(Error.Conflict(
                 "DUPLICATE_SETTLEMENT",
                 "RentalItem đã có quyết định settlement từ trước với OperationKey khác."));
         }
-
         return null;
     }
 

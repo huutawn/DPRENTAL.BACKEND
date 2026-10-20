@@ -15,7 +15,7 @@ public sealed class SettlementsController : ControllerBase
     public SettlementsController(ISettlementService settlements) => _settlements = settlements;
 
     [HttpPost]
-    [Authorize(Policy = "SettlementServicePolicy")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(SettleRentalResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(SettleRentalResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]

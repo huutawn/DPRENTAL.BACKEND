@@ -62,7 +62,7 @@ public sealed class PaymentWebhooksProxyHttpTests : IAsyncLifetime
                 builder.UseSetting("Payment:SePay:ApiKey", ApiKey);
                 builder.UseSetting("Payment:SePay:Gateway", "MBBank");
                 builder.UseSetting("Payment:SePay:AccountNumber", "0383799632");
-
+                builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
                 var proxies = knownProxies ?? [TrustedProxyIp];
                 for (int i = 0; i < proxies.Count; i++)
                 {
@@ -365,7 +365,7 @@ public sealed class PaymentWebhooksProxyHttpTests : IAsyncLifetime
                 builder.UseSetting("Security:ForwardedHeaders:KnownProxies:0", TrustedProxyIp);
                 builder.UseSetting("Authentication:Jwt:Issuer", issuer);
                 builder.UseSetting("Authentication:Jwt:ServiceAudience", serviceAudience);
-
+                builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
                 builder.ConfigureTestServices(services =>
                 {
                     services.PostConfigure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(
@@ -380,7 +380,7 @@ public sealed class PaymentWebhooksProxyHttpTests : IAsyncLifetime
             });
 
         using var client = factory.CreateClient();
-
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         var key = new Microsoft.IdentityModel.Tokens.RsaSecurityKey(rsa) { KeyId = keyId };
         var token = new System.IdentityModel.Tokens.Jwt.JwtSecurityToken(
             issuer: issuer,

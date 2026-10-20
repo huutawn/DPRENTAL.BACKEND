@@ -1,8 +1,11 @@
+using System.Security.Cryptography;
+using System.Text;
 using Dprental.PaymentService.Domain.DependencyInjection;
 using Dprental.PaymentService.Application.DTOs.Verification;
 using Dprental.PaymentService.IntegrityHost.Options;
 using Dprental.PaymentService.Domain.Repositories;
 using Dprental.PaymentService.IntegrityHost.Services;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -58,6 +61,57 @@ public static class IntegrityHostProgram
 
         var app = builder.Build();
 
+        app.Use(async (context, next) =>
+        {
+            if (context.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase))
+            {
+                await next();
+                return;
+            }
+
+            if (!context.Request.Headers.TryGetValue("X-Api-Key", out var headerValues) ||
+                headerValues.Count != 1 ||
+                string.IsNullOrWhiteSpace(headerValues[0]))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                context.Response.ContentType = "application/problem+json";
+                await context.Response.WriteAsJsonAsync(new ProblemDetails
+                {
+                    Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+                    Title = "Unauthorized",
+                    Status = StatusCodes.Status401Unauthorized,
+                    Detail = "Header 'X-Api-Key' is missing or has multiple values.",
+                    Instance = context.Request.Path
+                }, options: null, contentType: "application/problem+json");
+                return;
+            }
+
+            string configuredKey = app.Configuration["InternalAuthentication:ApiKey"]
+                ?? app.Configuration["INTERNAL_API_KEY"]
+                ?? "dev-internal-api-key-dprental-2026";
+
+            byte[] providedBytes = Encoding.UTF8.GetBytes(headerValues[0]!);
+            byte[] configuredBytes = Encoding.UTF8.GetBytes(configuredKey);
+
+            if (string.IsNullOrWhiteSpace(configuredKey) ||
+                providedBytes.Length != configuredBytes.Length ||
+                !CryptographicOperations.FixedTimeEquals(providedBytes, configuredBytes))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                context.Response.ContentType = "application/problem+json";
+                await context.Response.WriteAsJsonAsync(new ProblemDetails
+                {
+                    Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+                    Title = "Unauthorized",
+                    Status = StatusCodes.Status401Unauthorized,
+                    Detail = "Invalid 'X-Api-Key' header.",
+                    Instance = context.Request.Path
+                }, options: null, contentType: "application/problem+json");
+                return;
+            }
+
+            await next();
+        });
         // Internal API Endpoints
         app.MapGet("/health", () => Results.Ok(new { status = "Healthy", service = "PaymentService.IntegrityHost" }));
 

@@ -33,7 +33,7 @@ public sealed class InvoicesController : ControllerBase
     /// Tạo mới hoặc replay hóa đơn cho RentalOrder theo Payment Contract v1.
     /// </summary>
     [HttpPost]
-    [Authorize(Policy = "InvoiceServicePolicy")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(CreateInvoiceResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(CreateInvoiceResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
@@ -44,12 +44,6 @@ public sealed class InvoicesController : ControllerBase
         [FromBody] CreateInvoiceRequest request,
         CancellationToken cancellationToken)
     {
-        if (!User.IsServiceToken() ||
-            !User.HasServiceAudience(_jwtOptions.ServiceAudience) ||
-            !User.HasScope(InvoiceWriteScope))
-        {
-            return Forbid();
-        }
 
         var result = await _creationService.CreateInvoiceAsync(request, cancellationToken);
         if (result.IsFailure)
@@ -69,7 +63,7 @@ public sealed class InvoicesController : ControllerBase
     /// Hủy hóa đơn chưa thanh toán theo Payment Contract v1.
     /// </summary>
     [HttpPost("{invoiceRef}/cancel")]
-    [Authorize(Policy = "InvoiceServicePolicy")]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(CancelInvoiceResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
@@ -81,12 +75,6 @@ public sealed class InvoicesController : ControllerBase
         [FromBody] CancelInvoiceRequest request,
         CancellationToken cancellationToken)
     {
-        if (!User.IsServiceToken() ||
-            !User.HasServiceAudience(_jwtOptions.ServiceAudience) ||
-            !User.HasScope(InvoiceWriteScope))
-        {
-            return Forbid();
-        }
 
         var result = await _lifecycleService.CancelInvoiceAsync(invoiceRef, request, cancellationToken);
         if (result.IsFailure)

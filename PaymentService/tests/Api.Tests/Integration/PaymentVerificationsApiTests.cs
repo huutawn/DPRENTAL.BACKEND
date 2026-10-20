@@ -88,6 +88,7 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
                 builder.UseSetting("Authentication:Jwt:ServiceAudience", ServiceAudience);
                 builder.UseSetting("Authentication:Jwt:ClientAudience", ClientAudience);
                 builder.UseSetting("Authentication:Jwt:JwksUrl", "http://localhost/mock-jwks");
+                builder.UseSetting("InternalAuthentication:ApiKey", PaymentWebApplicationFactory.DefaultInternalApiKey);
                 builder.UseSetting("IntegrityVerification:ActiveKeyId", _ecdsaKeyId);
                 builder.UseSetting($"IntegrityVerification:PublicKeys:{_ecdsaKeyId}", _publicKeyBase64);
 
@@ -141,6 +142,12 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
         }
     }
 
+    private HttpClient CreateClientWithKey()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
+        return client;
+    }
     private string CreateToken(string[]? scopes = null, bool isService = true, bool isAdmin = false)
     {
         var claims = new List<Claim>();
@@ -187,17 +194,28 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Verify_MissingScope_Returns403Forbidden()
+    public async Task Verify_WithApiKey_SucceedsWithoutServiceToken()
     {
-        using var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateToken(["payment.invoice.write"])); // Wrong scope
+        var options = PostgresTestDatabaseHelper.CreateOptions(_connString);
+        string invoiceRef;
+        await using (var ctx = new PaymentServiceDbContext(options))
+        {
+            var repo = new EfInvoiceRepository(ctx);
+            var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor);
+            var creation = new InvoiceCreationService(repo, Microsoft.Extensions.Options.Options.Create(new PaymentMerchantOptions { Bank = "MBBank", Account = "0383799632" }), lifecycle, TestEncryptor);
 
-        var req = new TransactionVerificationRequest("INV-123", "SETTLEMENT", "nonce-1");
+            var createRes = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
+                Guid.NewGuid(), "ORD-VERIFY-KEY", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
+                [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
+                "op-verify-key"));
+            invoiceRef = createRes.Value.InvoiceRef;
+        }
+
+        using var client = CreateClientWithKey();
+        var req = new TransactionVerificationRequest(invoiceRef, "SETTLEMENT", "nonce-key");
         using var response = await client.PostAsJsonAsync("/api/v1/payment/verifications", req);
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
     }
-
     [Fact]
     public async Task Verify_UnconfirmedTransaction_Returns202Accepted()
     {
@@ -216,10 +234,8 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
             invoiceRef = createRes.Value.InvoiceRef;
         }
 
-        using var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateToken([VerifyScope]));
-
+        using var client = CreateClientWithKey();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken([VerifyScope]));
         var req = new TransactionVerificationRequest(invoiceRef, "SETTLEMENT", "nonce-202");
         using var response = await client.PostAsJsonAsync("/api/v1/payment/verifications", req);
 
@@ -269,10 +285,8 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
             }
         }
 
-        using var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateToken([VerifyScope]));
-
+        using var client = CreateClientWithKey();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken([VerifyScope]));
         var req = new TransactionVerificationRequest(
             PaymentRef: invoiceRef,
             Purpose: VerificationPurposes.PaymentConfirmation,
@@ -311,9 +325,9 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
             }
         }
 
-        using var client = _factory.CreateClient();
+        using var client = CreateClientWithKey();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateToken([HistoryScope]));
+            "Bearer", CreateToken(isService: false, isAdmin: true));
 
         // Page 1: limit 2
         using var page1Res = await client.GetAsync("/api/v1/payment/history?limit=2");

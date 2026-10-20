@@ -68,7 +68,8 @@ public sealed record TransactionVerificationRequest(
     string? CallerIdentity = null,
     string? ExpectedOutboxDigest = null,
     string? Topic = null,
-    string? MessageKey = null);
+    string? MessageKey = null,
+    Guid? OutboxMessageId = null);
 
 public sealed record TransactionIntegrityResult(
     string Status, // VALID, PENDING_CONFIRMATION, TAMPERED, NOT_FOUND

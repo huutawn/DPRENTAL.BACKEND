@@ -36,6 +36,7 @@ public sealed class EfOutboxRepository : IOutboxRepository
                 SELECT m.*
                 FROM outbox_messages m
                 WHERE m."PublishedAt" IS NULL
+                  AND m."QuarantinedAt" IS NULL
                   AND (m."LockedUntilUtc" IS NULL OR m."LockedUntilUtc" < {utcNow})
                   AND (m."NextRetryAt" IS NULL OR m."NextRetryAt" <= {utcNow})
                   AND m."RetryCount" < {maxRetries}
@@ -133,5 +134,54 @@ public sealed class EfOutboxRepository : IOutboxRepository
                 """,
                 cancellationToken);
         }
+    }
+
+    public async Task<bool> DeferMessageAsync(
+        Guid id,
+        string workerId,
+        DateTimeOffset nextRetryAt,
+        string? reason,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workerId);
+
+        int affected = await _dbContext.Database.ExecuteSqlAsync(
+            $"""
+            UPDATE outbox_messages
+            SET "LockedBy" = NULL,
+                "LockedUntilUtc" = NULL,
+                "NextRetryAt" = {nextRetryAt},
+                "LastErrorMessage" = {reason}
+            WHERE "Id" = {id}
+              AND "LockedBy" = {workerId}
+            """,
+            cancellationToken);
+
+        return affected > 0;
+    }
+
+    public async Task<bool> QuarantineMessageAsync(
+        Guid id,
+        string workerId,
+        string reason,
+        DateTimeOffset quarantinedAt,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workerId);
+
+        int affected = await _dbContext.Database.ExecuteSqlAsync(
+            $"""
+            UPDATE outbox_messages
+            SET "LockedBy" = NULL,
+                "LockedUntilUtc" = NULL,
+                "QuarantinedAt" = {quarantinedAt},
+                "QuarantineReason" = {reason},
+                "LastErrorMessage" = {"QUARANTINED: " + reason}
+            WHERE "Id" = {id}
+              AND "LockedBy" = {workerId}
+            """,
+            cancellationToken);
+
+        return affected > 0;
     }
 }

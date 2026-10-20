@@ -53,7 +53,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
             await ctx.Database.MigrateAsync();
         }
 
-        _factory = new WebApplicationFactory<Program>()
+        _factory = new PaymentWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", _connString);
@@ -63,7 +63,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
                 builder.UseSetting("Authentication:Jwt:ServiceAudience", ServiceAudience);
                 builder.UseSetting("Authentication:Jwt:ClientAudience", ClientAudience);
                 builder.UseSetting("Authentication:Jwt:JwksUri", "http://localhost/jwks");
-
+                builder.UseSetting("InternalAuthentication:ApiKey", PaymentWebApplicationFactory.DefaultInternalApiKey);
                 builder.ConfigureLogging(logging => logging.ClearProviders());
 
                 builder.ConfigureTestServices(services =>
@@ -311,27 +311,21 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
     {
         using var client = _factory.CreateClient();
 
-        // 1. Anonymous -> 401
+        // 1. Missing API key -> 401
+        client.DefaultRequestHeaders.Remove("X-Api-Key");
         using var anonResp = await client.PostAsJsonAsync("/api/v1/invoices", new { });
         Assert.Equal(HttpStatusCode.Unauthorized, anonResp.StatusCode);
 
-        // 2. Service endpoint with user token -> 403
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateUserToken(Guid.NewGuid()));
-        using var userOnSvc = await client.PostAsJsonAsync("/api/v1/invoices", new { });
-        Assert.Equal(HttpStatusCode.Forbidden, userOnSvc.StatusCode);
+        // 2. Key present, invalid JWT on user endpoint -> 401
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "invalid-token");
+        using var badJwtResp = await client.GetAsync("/api/v1/invoices/INV-TEST");
+        Assert.Equal(HttpStatusCode.Unauthorized, badJwtResp.StatusCode);
 
-        // 3. Service token missing scope -> 403
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateServiceToken(scope: "payment.refund.write"));
-        using var badScope = await client.PostAsJsonAsync("/api/v1/invoices", new { });
-        Assert.Equal(HttpStatusCode.Forbidden, badScope.StatusCode);
-
-        // 4. GET endpoint with service token -> 403
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateServiceToken());
-        using var svcOnUser = await client.GetAsync("/api/v1/invoices/INV-TEST");
-        Assert.Equal(HttpStatusCode.Forbidden, svcOnUser.StatusCode);
+        // 3. GET endpoint without user JWT -> 401
+        client.DefaultRequestHeaders.Authorization = null;
+        using var noUserJwtResp = await client.GetAsync("/api/v1/invoices/INV-TEST");
+        Assert.Equal(HttpStatusCode.Unauthorized, noUserJwtResp.StatusCode);
     }
 
     [Fact]

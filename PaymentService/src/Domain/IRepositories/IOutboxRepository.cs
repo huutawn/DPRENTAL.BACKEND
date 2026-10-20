@@ -26,4 +26,18 @@ public interface IOutboxRepository
         DateTimeOffset nextRetryAt,
         bool isExhausted,
         CancellationToken cancellationToken = default);
+
+    Task<bool> DeferMessageAsync(
+        Guid id,
+        string workerId,
+        DateTimeOffset nextRetryAt,
+        string? reason,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> QuarantineMessageAsync(
+        Guid id,
+        string workerId,
+        string reason,
+        DateTimeOffset quarantinedAt,
+        CancellationToken cancellationToken = default);
 }

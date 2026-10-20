@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using Dprental.PaymentService.Application.Kafka;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Domain.IRepositories;
+using Dprental.PaymentService.Application.DTOs.Verification;
+using Dprental.PaymentService.Application.IServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -143,15 +145,49 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
             if (journalEntry is null)
             {
                 _logger.LogWarning("Outbox message {MessageId} has no corresponding journal entry; cannot publish without evidence proof.", message.MessageId);
-                message.RecordAttemptFailure("AWAITING_JOURNAL_ENTRY", utcNow, utcNow.AddSeconds(5));
+                await outboxRepo.DeferMessageAsync(message.Id, _workerId, utcNow.AddSeconds(5), "AWAITING_JOURNAL_ENTRY", cancellationToken);
                 continue;
             }
 
             if (!journalEntry.IsConfirmed || string.IsNullOrWhiteSpace(journalEntry.ProofSignature))
             {
-                _logger.LogInformation("Outbox message {MessageId} awaiting integrity confirmation before publish; releasing lease.", message.MessageId);
-                message.ReleaseClaim();
+                _logger.LogInformation("Outbox message {MessageId} awaiting integrity confirmation before publish; deferring lease.", message.MessageId);
+                await outboxRepo.DeferMessageAsync(message.Id, _workerId, utcNow.AddSeconds(5), "AWAITING_CONFIRMATION", cancellationToken);
                 continue;
+            }
+
+            var checker = scope.ServiceProvider.GetService<ITransactionIntegrityChecker>();
+            if (checker is not null)
+            {
+                var pubVerifyReq = new TransactionVerificationRequest(
+                    PaymentRef: message.MessageId.ToString("D"),
+                    Purpose: VerificationPurposes.OutboxPublication,
+                    CallerNonce: Guid.NewGuid().ToString("N"),
+                    CallerIdentity: $"PUBLISHER:{_workerId}",
+                    ExpectedOutboxDigest: digest,
+                    Topic: topic,
+                    MessageKey: key,
+                    OutboxMessageId: message.MessageId);
+
+                var verifyRes = await checker.VerifyAsync(pubVerifyReq, cancellationToken);
+                if (verifyRes.IsFailure)
+                {
+                    if (verifyRes.Error.Code == "Payment.Verification.Timeout" || verifyRes.Error.Code.StartsWith("IntegrityHost.Unavailable", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await outboxRepo.DeferMessageAsync(message.Id, _workerId, utcNow.AddSeconds(5), verifyRes.Error.Message, cancellationToken);
+                        continue;
+                    }
+
+                    _logger.LogError("Outbox message {MessageId} failed integrity check: {Error}. Quarantining.", message.MessageId, verifyRes.Error.Message);
+                    await outboxRepo.QuarantineMessageAsync(message.Id, _workerId, verifyRes.Error.Message, utcNow, cancellationToken);
+                    continue;
+                }
+
+                if (verifyRes.Value.Integrity.Status == IntegrityStatuses.PendingConfirmation || !verifyRes.Value.Usability.IsUsable)
+                {
+                    await outboxRepo.DeferMessageAsync(message.Id, _workerId, utcNow.AddSeconds(5), verifyRes.Value.Usability.Reason, cancellationToken);
+                    continue;
+                }
             }
 
             string versionedProof = System.Text.Json.JsonSerializer.Serialize(new

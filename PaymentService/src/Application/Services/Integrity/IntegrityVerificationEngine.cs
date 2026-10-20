@@ -59,7 +59,7 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
         }
 
         string purpose = request.Purpose.Trim().ToUpperInvariant();
-        if (purpose is not (VerificationPurposes.PaymentConfirmation or VerificationPurposes.Settlement or VerificationPurposes.ManualRefundConfirmation))
+        if (purpose is not (VerificationPurposes.PaymentConfirmation or VerificationPurposes.Settlement or VerificationPurposes.ManualRefundConfirmation or VerificationPurposes.OutboxPublication))
         {
             return Error.Validation("Payment.Verification.UnsupportedPurpose", $"Purpose '{request.Purpose}' không được hỗ trợ.");
         }
@@ -76,8 +76,76 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
             // 1. Resolve exact StreamManifest & JournalEntry by Purpose (no loose OR queries)
             TransactionJournalEntry? entry = null;
             StreamManifest? manifest = null;
+            if (purpose == VerificationPurposes.OutboxPublication)
+            {
+                Guid msgId = request.OutboxMessageId ?? (Guid.TryParse(paymentRef, out var parsedGuid) ? parsedGuid : Guid.Empty);
+                var outboxMsg = await _paymentDb.OutboxMessages.AsNoTracking().FirstOrDefaultAsync(m => m.MessageId == msgId, cts.Token);
+                if (outboxMsg is null)
+                {
+                    return CreateResponse(
+                        request,
+                        IntegrityStatuses.NotFound,
+                        0,
+                        null,
+                        isUsable: false,
+                        reason: "OUTBOX_MESSAGE_NOT_FOUND",
+                        actualAmount: 0m,
+                        actualCurrency: request.ExpectedCurrency ?? "VND",
+                        actualStatus: "NOT_FOUND",
+                        now: now);
+                }
 
-            if (purpose == VerificationPurposes.ManualRefundConfirmation)
+                if (outboxMsg.QuarantinedAt.HasValue)
+                {
+                    return CreateResponse(
+                        request,
+                        IntegrityStatuses.Tampered,
+                        0,
+                        null,
+                        isUsable: false,
+                        reason: "MESSAGE_QUARANTINED",
+                        actualAmount: 0m,
+                        actualCurrency: request.ExpectedCurrency ?? "VND",
+                        actualStatus: "QUARANTINED",
+                        now: now);
+                }
+
+                string computedDigest = CanonicalJournalHasher.ComputeOutboxDigest(outboxMsg.Payload);
+                if (!string.IsNullOrWhiteSpace(request.ExpectedOutboxDigest) &&
+                    !string.Equals(computedDigest, request.ExpectedOutboxDigest, StringComparison.OrdinalIgnoreCase))
+                {
+                    return CreateResponse(
+                        request,
+                        IntegrityStatuses.Tampered,
+                        0,
+                        null,
+                        isUsable: false,
+                        reason: "PAYLOAD_DIGEST_MISMATCH",
+                        actualAmount: 0m,
+                        actualCurrency: request.ExpectedCurrency ?? "VND",
+                        actualStatus: "TAMPERED",
+                        now: now);
+                }
+
+                if (outboxMsg.EventId.HasValue)
+                {
+                    entry = await _paymentDb.TransactionJournals.AsNoTracking()
+                        .FirstOrDefaultAsync(j => j.EventId == outboxMsg.EventId.Value, cts.Token);
+                }
+
+                if (entry is null)
+                {
+                    entry = await _paymentDb.TransactionJournals.AsNoTracking()
+                        .FirstOrDefaultAsync(j => j.OutboxDigest == computedDigest || j.OutboxMessageId == outboxMsg.MessageId, cts.Token);
+                }
+
+                if (entry is not null)
+                {
+                    manifest = await _integrityDb.Manifests.AsNoTracking()
+                        .FirstOrDefaultAsync(m => m.StreamId == entry.StreamId, cts.Token);
+                }
+            }
+            else if (purpose == VerificationPurposes.ManualRefundConfirmation)
             {
                 string reqRef = !string.IsNullOrWhiteSpace(request.RequirementRef) ? request.RequirementRef.Trim() : paymentRef;
                 manifest = await _integrityDb.Manifests
@@ -607,7 +675,8 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
             expectedOutboxDigest: request.ExpectedOutboxDigest,
             topic: request.Topic,
             messageKey: request.MessageKey,
-            expectedStatus: request.ExpectedStatus);
+            expectedStatus: request.ExpectedStatus,
+            outboxMessageId: request.OutboxMessageId);
 
         DateTimeOffset issuedAt = now.ToUniversalTime();
         DateTimeOffset expiresAt = issuedAt.AddSeconds(5);

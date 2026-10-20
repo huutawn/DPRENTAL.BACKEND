@@ -61,6 +61,7 @@ public sealed class CommonBoundaryTests
                 builder.UseSetting("ConnectionStrings:Postgres",
                     "Host=localhost;Database=test;Username=test;Password=test");
                 builder.UseSetting("Security:ForwardedHeaders:KnownProxies:0", "127.0.0.1");
+                builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
                 builder.ConfigureLogging(logging => logging.ClearProviders());
                 builder.ConfigureTestServices(services =>
                 {
@@ -69,6 +70,7 @@ public sealed class CommonBoundaryTests
                 });
             });
         using HttpClient client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         client.DefaultRequestHeaders.Accept.ParseAdd(accept);
         using HttpResponseMessage response = await client.GetAsync("/test-boundary/throw");
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);

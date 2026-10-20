@@ -48,7 +48,7 @@ public sealed class PaymentWebhooksHttpTests : IAsyncLifetime
                 builder.UseSetting("Payment:SePay:ApiKey", ConfiguredApiKey);
                 builder.UseSetting("Payment:SePay:Gateway", "MBBank");
                 builder.UseSetting("Payment:SePay:AccountNumber", "0383799632");
-
+                builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
                 builder.ConfigureLogging(logging =>
                 {
                     logging.ClearProviders();

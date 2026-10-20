@@ -56,7 +56,7 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
             await iCtx.Database.MigrateAsync();
         }
 
-        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        _factory = new PaymentWebApplicationFactory().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ConnectionStrings:Postgres", _connectionString);
             builder.UseSetting("Payment:Merchant:Bank", "MBBank");
@@ -65,6 +65,7 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
             builder.UseSetting("Authentication:Jwt:ServiceAudience", Audience);
             builder.UseSetting("Authentication:Jwt:ClientAudience", "dprental-clients");
             builder.UseSetting("Authentication:Jwt:JwksUri", "http://localhost/jwks");
+            builder.UseSetting("InternalAuthentication:ApiKey", PaymentWebApplicationFactory.DefaultInternalApiKey);
             builder.UseSetting("IntegrityVerification:ActiveKeyId", SigningKeyId);
             builder.UseSetting($"IntegrityVerification:PublicKeys:{SigningKeyId}", EcdsaAttestation.ExportPublicKeyBase64(_ecdsa));
             builder.ConfigureLogging(logging => logging.ClearProviders());
@@ -167,14 +168,11 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
             item.DepositAmount, 20_000m, 70_000m, "VND", "DEC-API", "settle-api-001");
 
         using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Remove("X-Api-Key");
         Assert.Equal(HttpStatusCode.Unauthorized,
             (await client.PostAsJsonAsync("/api/v1/settlements", request)).StatusCode);
 
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token("payment.invoice.write"));
-        Assert.Equal(HttpStatusCode.Forbidden,
-            (await client.PostAsJsonAsync("/api/v1/settlements", request)).StatusCode);
-
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token("payment.settlement.write"));
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
         var created = await client.PostAsJsonAsync("/api/v1/settlements", request);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var body = await created.Content.ReadFromJsonAsync<SettleRentalResponse>();

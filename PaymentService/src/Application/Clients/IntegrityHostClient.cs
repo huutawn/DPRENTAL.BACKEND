@@ -143,8 +143,8 @@ public sealed class IntegrityHostClient : ITransactionIntegrityChecker
                 request.ExpectedOutboxDigest,
                 request.Topic,
                 request.MessageKey,
-                request.ExpectedStatus);
-
+                request.ExpectedStatus,
+                request.OutboxMessageId);
             if (!string.Equals(body.RequestHash, expectedRequestHash, StringComparison.OrdinalIgnoreCase))
             {
                 return Error.Conflict("IntegrityHost.RequestHashMismatch", "RequestHash trong receipt không khớp với request thực tế.");
