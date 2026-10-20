@@ -38,7 +38,7 @@ public sealed class InventoryJwtTests
     {
         await using var factory = new InventorySecurityTestFactory();
         using var client = factory.CreateClient();
-
+        client.DefaultRequestHeaders.Remove("X-Api-Key");
         using var response = await client.GetAsync("/api/test/availability/sanitized");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }

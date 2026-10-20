@@ -29,9 +29,9 @@ public sealed class InventorySecurityTestFactory : WebApplicationFactory<Program
     public const string Issuer = "https://auth.dprental.test";
     public const string HumanAudience = "dprental-clients";
     public const string ServiceAudience = "inventory-api";
+    public const string DefaultInternalApiKey = "dev-internal-api-key-dprental-2026";
 
     public Dictionary<Guid, InventoryAsset> TestAssets { get; } = new();
-
     public RSA SigningKey { get; } = RSA.Create(2048);
     public string ActiveKeyId { get; set; } = "key-active-1";
 
@@ -78,6 +78,7 @@ public sealed class InventorySecurityTestFactory : WebApplicationFactory<Program
                 ["MediaService:TimeoutSeconds"] = "10",
                 ["CatalogService:BaseUrl"] = "http://catalog-service:8080",
                 ["CatalogService:TimeoutSeconds"] = "10",
+                ["InternalAuthentication:ApiKey"] = DefaultInternalApiKey,
             });
         });
 
@@ -127,6 +128,12 @@ public sealed class InventorySecurityTestFactory : WebApplicationFactory<Program
             // Thêm PolicyProbeController vào Mvc builder
             services.AddControllers().AddApplicationPart(typeof(PolicyProbeController).Assembly);
         });
+    }
+
+    protected override void ConfigureClient(HttpClient client)
+    {
+        base.ConfigureClient(client);
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", DefaultInternalApiKey);
     }
 
     public string CreateToken(

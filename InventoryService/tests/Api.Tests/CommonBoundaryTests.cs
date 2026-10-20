@@ -62,10 +62,12 @@ public sealed class CommonBoundaryTests
             builder.UseSetting("MediaService:PublicGatewayUrl", "https://gateway.example");
             builder.UseSetting("MediaService:ApiKey", "test-api-key");
             builder.UseSetting("MediaService:TimeoutSeconds", "10");
+            builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
             builder.ConfigureTestServices(services => services.AddControllers()
                 .AddApplicationPart(typeof(BoundaryProbeController).Assembly));
         });
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         client.DefaultRequestHeaders.Accept.ParseAdd(accept);
         using var response = await client.GetAsync("/__tests/exception");
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);

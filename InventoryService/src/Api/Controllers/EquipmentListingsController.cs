@@ -63,7 +63,7 @@ public sealed class EquipmentListingsController : ControllerBase
     /// Yêu cầu Service principal có audience inventory-api và scope inventory.availability.read.
     /// </summary>
     [HttpPost("batch")]
-    [Authorize(Policy = InventoryPolicies.EquipmentListingBatchRead)]
+    [AllowAnonymous]
     [ProducesResponseType(typeof(EquipmentListingBatchResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]

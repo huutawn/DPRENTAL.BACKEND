@@ -150,12 +150,13 @@ public sealed class EquipmentListingBatchIntegrationTests : IClassFixture<Postgr
     }
 
     [Fact]
-    public async Task Batch_MissingToken_Returns401Unauthorized()
+    public async Task Batch_MissingApiKey_Returns401Unauthorized()
     {
         var (app, secFactory, _, _) = CreateFactory();
         await using var _ = app;
         await using var __ = secFactory;
         using var client = app.CreateClient();
+        client.DefaultRequestHeaders.Remove("X-Api-Key");
 
         var response = await client.PostAsJsonAsync(
             "/api/v1/inventory/equipment-listings/batch",
@@ -189,24 +190,17 @@ public sealed class EquipmentListingBatchIntegrationTests : IClassFixture<Postgr
     }
 
     [Fact]
-    public async Task Batch_ServiceTokenWithoutAvailabilityScope_Returns403Forbidden()
+    public async Task Batch_ValidApiKeyWithoutServiceToken_Succeeds()
     {
         var (app, secFactory, _, _) = CreateFactory();
         await using var _ = app;
         await using var __ = secFactory;
         using var client = app.CreateClient();
-
-        var serviceToken = secFactory.CreateServiceToken(
-            Guid.NewGuid(),
-            scopes: [InventoryAccessEvaluator.ScopeAllocationWrite]);
-
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
-
         var response = await client.PostAsJsonAsync(
             "/api/v1/inventory/equipment-listings/batch",
             new EquipmentListingBatchRequest([Guid.NewGuid()]));
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Theory]

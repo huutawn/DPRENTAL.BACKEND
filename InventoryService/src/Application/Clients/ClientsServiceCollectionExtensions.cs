@@ -47,6 +47,11 @@ public static class ClientsServiceCollectionExtensions
             var options = sp.GetRequiredService<IOptions<CatalogServiceOptions>>().Value;
             client.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
             client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+            string internalKey = configuration["InternalAuthentication:ApiKey"] ?? configuration["INTERNAL_API_KEY"] ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(internalKey))
+            {
+                client.DefaultRequestHeaders.Add("X-Api-Key", internalKey);
+            }
         })
         .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
         {

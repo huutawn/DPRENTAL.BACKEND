@@ -11,30 +11,33 @@ namespace Dprental.InventoryService.Api.Security;
 public sealed class InventoryCallerContext : IInventoryCallerContext
 {
     private readonly ClaimsPrincipal? _user;
+    private readonly bool _hasValidApiKey;
 
     public InventoryCallerContext(IHttpContextAccessor httpContextAccessor)
     {
-        _user = httpContextAccessor.HttpContext?.User;
+        var context = httpContextAccessor.HttpContext;
+        _user = context?.User;
+        _hasValidApiKey = context?.Items.ContainsKey("InternalApiKeyVerified") == true;
     }
 
     // Constructor phục vụ testing trực tiếp với ClaimsPrincipal
-    public InventoryCallerContext(ClaimsPrincipal? user)
+    public InventoryCallerContext(ClaimsPrincipal? user, bool hasValidApiKey = false)
     {
         _user = user;
+        _hasValidApiKey = hasValidApiKey || user?.FindFirst("u")?.Value == "svc";
     }
 
     /// <inheritdoc />
-    public bool IsAuthenticated => _user?.Identity?.IsAuthenticated == true;
+    public bool IsAuthenticated => (_user?.Identity?.IsAuthenticated == true) || _hasValidApiKey;
 
     /// <inheritdoc />
-    public bool IsService => IsAuthenticated && _user?.FindFirst("u")?.Value == "svc";
+    public bool IsService => (_hasValidApiKey && (_user?.Identity?.IsAuthenticated != true)) || _user?.FindFirst("u")?.Value == "svc";
 
     /// <inheritdoc />
-    public bool IsHuman => IsAuthenticated && !IsService;
+    public bool IsHuman => _user?.Identity?.IsAuthenticated == true && !IsService;
 
     /// <inheritdoc />
     public bool IsAdmin => IsHuman && Roles.Contains("adm");
-
     /// <inheritdoc />
     public Guid? UserId
     {

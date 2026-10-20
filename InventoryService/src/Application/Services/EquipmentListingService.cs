@@ -436,12 +436,12 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
 
         if (!InventoryAccessEvaluator.CanReadEquipmentListingBatch(caller))
         {
-            return Error.Forbidden("FORBIDDEN", "Chỉ Service với scope inventory.availability.read mới có quyền đọc batch listing.");
+            return Error.Forbidden("FORBIDDEN", "Chỉ Service nội bộ mới có quyền đọc batch listing.");
         }
 
         if (request.IncludeWarehouse && !InventoryAccessEvaluator.CanReadWarehouseBatch(caller))
         {
-            return Error.Forbidden("FORBIDDEN", "Yêu cầu địa chỉ kho cần có scope inventory.warehouse.read.");
+            return Error.Forbidden("FORBIDDEN", "Chỉ Service nội bộ mới có quyền đọc thông tin kho trong batch listing.");
         }
 
         var deduplicatedIds = new List<Guid>();
