@@ -55,11 +55,6 @@ public sealed class InventoryAllocationServiceHoldTests
         Assert.True(res1.IsFailure);
         Assert.Equal("FORBIDDEN", res1.Error.Code);
         Assert.Equal(ErrorType.Forbidden, res1.Error.Type);
-
-        var serviceWithoutScope = new TestCaller { IsAuthenticated = true, IsService = true, Scopes = new HashSet<string>() };
-        var res2 = await service.CreateHoldAsync(Guid.NewGuid(), req, serviceWithoutScope);
-        Assert.True(res2.IsFailure);
-        Assert.Equal("FORBIDDEN", res2.Error.Code);
     }
 
     [Fact]

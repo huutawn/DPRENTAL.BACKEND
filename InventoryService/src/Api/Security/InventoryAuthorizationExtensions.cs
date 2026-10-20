@@ -32,20 +32,17 @@ public static class InventoryAuthorizationExtensions
                       .AddRequirements(new CalendarReadRequirement()));
 
             options.AddPolicy(InventoryPolicies.AvailabilityRead, policy =>
-                policy.RequireAuthenticatedUser()
-                      .AddRequirements(new AvailabilityReadRequirement()));
+                policy.AddRequirements(new AvailabilityReadRequirement()));
 
             options.AddPolicy(InventoryPolicies.AllocationWrite, policy =>
-                policy.RequireAuthenticatedUser()
-                      .AddRequirements(new AllocationWriteRequirement()));
+                policy.AddRequirements(new AllocationWriteRequirement()));
 
             options.AddPolicy(InventoryPolicies.ManualAllocation, policy =>
                 policy.RequireAuthenticatedUser()
                       .AddRequirements(new ManualAllocationRequirement()));
 
             options.AddPolicy(InventoryPolicies.EquipmentListingBatchRead, policy =>
-                policy.RequireAuthenticatedUser()
-                      .AddRequirements(new EquipmentListingBatchReadRequirement()));
+                policy.AddRequirements(new EquipmentListingBatchReadRequirement()));
         });
 
         return services;

@@ -58,6 +58,7 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
             .Select(l => new EquipmentListingBatchItem(
                 l.Id,
                 l.OwnerUserId,
+                l.EquipmentTypeId,
                 l.Name,
                 l.ThumbnailMediaId,
                 l.DailyRate,

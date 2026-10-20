@@ -145,7 +145,27 @@ HealthCheckOptions readinessOptions = new()
 };
 app.MapHealthChecks("/health/ready", readinessOptions).AllowAnonymous();
 
+app.UseMiddleware<InternalApiKeyMiddleware>();
 app.UseAuthentication();
+app.Use(async (context, next) =>
+{
+    if (context.Request.Headers.ContainsKey("Authorization") &&
+        context.User?.Identity?.IsAuthenticated != true)
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        context.Response.ContentType = "application/problem+json";
+        await context.Response.WriteAsJsonAsync(new ProblemDetails
+        {
+            Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+            Title = "Unauthorized",
+            Status = StatusCodes.Status401Unauthorized,
+            Detail = "Invalid or expired JWT token.",
+            Instance = context.Request.Path
+        }, options: null, contentType: "application/problem+json");
+        return;
+    }
+    await next();
+});
 app.UseAuthorization();
 
 app.MapControllers();

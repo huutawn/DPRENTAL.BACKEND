@@ -8,6 +8,7 @@ namespace Dprental.InventoryService.Domain.IRepositories;
 public sealed record EquipmentListingBatchItem(
     Guid Id,
     Guid OwnerUserId,
+    Guid EquipmentTypeId,
     string Name,
     Guid? ThumbnailMediaId,
     decimal DailyRate,

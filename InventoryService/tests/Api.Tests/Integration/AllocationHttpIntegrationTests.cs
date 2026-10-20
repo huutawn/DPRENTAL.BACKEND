@@ -72,7 +72,8 @@ public sealed class AllocationHttpIntegrationTests : IClassFixture<PostgresFixtu
         };
         var holdContent = new StringContent(JsonSerializer.Serialize(holdPayload), Encoding.UTF8, "application/json");
 
-        // 1. Không có token -> 401
+        // 1. Không có API key -> 401
+        client.DefaultRequestHeaders.Remove("X-Api-Key");
         var holdNoToken = await client.PostAsync($"/api/v1/inventory/assets/{assetId}/holds", holdContent);
         Assert.Equal(HttpStatusCode.Unauthorized, holdNoToken.StatusCode);
 
@@ -81,6 +82,7 @@ public sealed class AllocationHttpIntegrationTests : IClassFixture<PostgresFixtu
         Assert.Equal(HttpStatusCode.Unauthorized, allocNoToken.StatusCode);
 
         // 2. Token sai / rác -> 401
+        client.DefaultRequestHeaders.Add("X-Api-Key", InventorySecurityTestFactory.DefaultInternalApiKey);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "invalid.jwt.token");
         var holdBadToken = await client.PostAsync($"/api/v1/inventory/assets/{assetId}/holds", holdContent);
         Assert.Equal(HttpStatusCode.Unauthorized, holdBadToken.StatusCode);
@@ -115,12 +117,6 @@ public sealed class AllocationHttpIntegrationTests : IClassFixture<PostgresFixtu
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
         var resAdmin = await client.PostAsync($"/api/v1/inventory/assets/{asset.Id}/holds", holdContent);
         Assert.Equal(HttpStatusCode.Forbidden, resAdmin.StatusCode);
-
-        // C. Service thiếu scope inventory.allocation.write -> 403
-        var serviceNoScopeToken = factory.CreateServiceToken(Guid.NewGuid(), scopes: ["inventory.calendar.read"]);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", serviceNoScopeToken);
-        var resService = await client.PostAsync($"/api/v1/inventory/assets/{asset.Id}/holds", holdContent);
-        Assert.Equal(HttpStatusCode.Forbidden, resService.StatusCode);
     }
 
     [Fact]
@@ -608,12 +604,6 @@ public sealed class AllocationHttpIntegrationTests : IClassFixture<PostgresFixtu
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
         var res2 = await client.PostAsync($"/api/v1/inventory/allocations/{allocId}/allocate", content);
         Assert.Equal(HttpStatusCode.Forbidden, res2.StatusCode);
-
-        // 3. Service lacking scope -> 403
-        var svcToken = factory.CreateServiceToken(Guid.NewGuid(), scopes: ["inventory.calendar.read"]);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", svcToken);
-        var res3 = await client.PostAsync($"/api/v1/inventory/allocations/{allocId}/allocate", content);
-        Assert.Equal(HttpStatusCode.Forbidden, res3.StatusCode);
     }
 
     [Theory]

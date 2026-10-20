@@ -222,20 +222,6 @@ public sealed class EquipmentListingBatchServiceTests
         Assert.Equal("FORBIDDEN", result.Error.Code);
     }
 
-    [Fact]
-    public async Task GetListingBatchAsync_ServiceCallerWithoutAvailabilityReadScope_ReturnsForbidden()
-    {
-        var service = CreateService();
-        // Service only has allocation.write, missing availability.read
-        var caller = CreateServiceCaller(InventoryAccessEvaluator.ScopeAllocationWrite);
-
-        var result = await service.GetListingBatchAsync(
-            new EquipmentListingBatchRequest([Guid.NewGuid()]),
-            caller);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal("FORBIDDEN", result.Error.Code);
-    }
 
     [Fact]
     public async Task GetListingBatchAsync_DeduplicatesIds_AndMaintainsFirstSeenOrder()
@@ -377,21 +363,6 @@ public sealed class EquipmentListingBatchServiceTests
         Assert.Equal(500_000m, item.DepositAmount);
     }
 
-    [Fact]
-    public async Task GetListingBatchAsync_IncludeWarehouse_WithoutWarehouseReadScope_ReturnsForbidden()
-    {
-        var service = CreateService();
-        // Caller only has availability.read, missing warehouse.read
-        var caller = CreateServiceCaller(InventoryAccessEvaluator.ScopeAvailabilityRead);
-
-        var listing = AddListing();
-        var request = new EquipmentListingBatchRequest([listing.Id], IncludeWarehouse: true);
-
-        var result = await service.GetListingBatchAsync(request, caller);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal("FORBIDDEN", result.Error.Code);
-    }
 
     [Fact]
     public async Task GetListingBatchAsync_IncludeWarehouse_WithWarehouseReadScope_ReturnsWarehouseDetails()

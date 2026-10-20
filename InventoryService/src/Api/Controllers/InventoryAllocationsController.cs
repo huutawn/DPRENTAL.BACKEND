@@ -14,7 +14,7 @@ namespace Dprental.InventoryService.Api.Controllers;
 /// Yêu cầu Service Principal với scope inventory.allocation.write.
 /// </summary>
 [ApiController]
-[Authorize(Policy = InventoryPolicies.AllocationWrite)]
+[AllowAnonymous]
 [Route("")]
 public sealed class InventoryAllocationsController : ControllerBase
 {

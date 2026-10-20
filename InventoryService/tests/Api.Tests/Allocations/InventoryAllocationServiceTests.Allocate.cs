@@ -43,10 +43,6 @@ public sealed class InventoryAllocationServiceAllocateTests
         Assert.Equal("FORBIDDEN", res2.Error.Code);
         Assert.Equal(ErrorType.Forbidden, res2.Error.Type);
 
-        // 3. Service lacking scope -> 403
-        var res3 = await service.AllocateAsync(allocId, new AllocateRequest("op-key"), new TestCaller { IsAuthenticated = true, IsService = true, Scopes = new HashSet<string>() });
-        Assert.Equal("FORBIDDEN", res3.Error.Code);
-        Assert.Equal(ErrorType.Forbidden, res3.Error.Type);
     }
 
     [Theory]

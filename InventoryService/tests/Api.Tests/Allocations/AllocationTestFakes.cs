@@ -53,6 +53,7 @@ internal sealed class FakeListingRepository : IEquipmentListingRepository
             .Select(l => new EquipmentListingBatchItem(
                 l.Id,
                 l.OwnerUserId,
+                l.EquipmentTypeId,
                 l.Name,
                 l.ThumbnailMediaId,
                 l.DailyRate,

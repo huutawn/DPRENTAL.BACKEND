@@ -60,6 +60,7 @@ public sealed class HealthEndpointTests
                 builder.UseSetting("MediaService:PublicGatewayUrl", "https://gateway.example");
                 builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("MediaService:TimeoutSeconds", "10");
+                builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
             });
 
         Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
@@ -74,5 +75,6 @@ public sealed class HealthEndpointTests
                 builder.UseSetting("MediaService:PublicGatewayUrl", "https://gateway.example");
                 builder.UseSetting("MediaService:ApiKey", "test-api-key");
                 builder.UseSetting("MediaService:TimeoutSeconds", "10");
+                builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
             });
 }
