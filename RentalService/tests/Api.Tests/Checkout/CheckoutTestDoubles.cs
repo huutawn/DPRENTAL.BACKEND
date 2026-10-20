@@ -301,6 +301,9 @@ internal sealed class FakeInventoryListingClient : IInventoryRentalClient
 /// <summary>Thông tin máy theo hợp đồng Inventory cho test checkout.</summary>
 internal static class TestListings
 {
+    public static readonly Guid EquipmentTypeId = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+    public static readonly Guid BrandId = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000001");
+
     public static ListingRentalSnapshotDto Create(
         Guid listingId,
         Guid supplierId,
@@ -308,12 +311,21 @@ internal static class TestListings
         decimal dailyRate,
         bool isActive = true,
         Guid? thumbnailMediaId = null,
-        string currency = "VND") => new(
+        string currency = "VND",
+        decimal depositPerUnit = 0m) => new(
         listingId,
         supplierId,
         name,
         thumbnailMediaId,
         dailyRate,
         currency,
-        isActive ? "Active" : "Inactive");
+        isActive ? "Active" : "Inactive",
+        EquipmentTypeId: EquipmentTypeId,
+        BrandId: BrandId,
+        Model: "A7 IV",
+        DepositPerUnit: depositPerUnit,
+        SpecSchemaVersion: 1,
+        SpecValues: System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>("{\"resolutionMp\":33}"),
+        EquipmentTypeName: "Camera",
+        BrandName: "Sony");
 }

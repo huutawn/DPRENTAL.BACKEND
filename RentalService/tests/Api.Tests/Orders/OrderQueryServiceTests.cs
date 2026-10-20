@@ -118,6 +118,9 @@ public sealed class OrderQueryServiceTests
         Assert.Equal(20_000_000m, excavator.DepositAmount);
         Assert.Equal(excavatorItem.SupplierConfirmationDeadline, excavator.SupplierConfirmationDeadline);
         Assert.Equal("Máy xúc", excavator.Listing.EquipmentTypeName);
+        Assert.Equal(excavatorItem.EquipmentTypeId, excavator.Listing.EquipmentTypeId);
+        Assert.Equal(excavatorItem.BrandId, excavator.Listing.BrandId);
+        Assert.Equal(excavatorItem.SpecSchemaVersionSnapshot, excavator.Listing.SpecSchemaVersion);
         Assert.Equal("Caterpillar", excavator.Listing.BrandName);
         Assert.Null(excavator.Listing.PickupLocation);
         Assert.Equal(excavatorItem.ThumbnailMediaIdSnapshot, excavator.Listing.ThumbnailMediaId);

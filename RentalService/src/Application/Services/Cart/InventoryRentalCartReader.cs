@@ -5,6 +5,7 @@ using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
+using Dprental.RentalService.Common.Utils;
 
 namespace Dprental.RentalService.Application.Services.Cart;
 
@@ -40,6 +41,13 @@ public sealed class InventoryRentalCartReader(IInventoryRentalClient inventory) 
         }
 
         ListingRentalSnapshotDto snapshot = result.Value;
+        if (snapshot.DepositPerUnit is not { } deposit ||
+            VndAmountValidator.ValidateVndAmount(deposit).IsFailure ||
+            VndAmountValidator.ValidateVndAmount(snapshot.DailyRate).IsFailure ||
+            !string.Equals(snapshot.Currency, CheckoutRules.Currency, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Inventory rental snapshot is missing a valid deposit per unit.");
+        }
         bool active = string.Equals(snapshot.Status, "Active", StringComparison.OrdinalIgnoreCase);
 
         // Inventory không có phiên bản giá: lấy chính giá thuê làm phiên bản, giá đổi thì phiên bản đổi.
@@ -49,8 +57,8 @@ public sealed class InventoryRentalCartReader(IInventoryRentalClient inventory) 
             IsPublished: active,
             AcceptsBookings: active,
             snapshot.DailyRate,
-            CheckoutRules.DepositPerUnit,
-            snapshot.DailyRate.ToString(CultureInfo.InvariantCulture));
+            deposit,
+            $"{snapshot.DailyRate.ToString(CultureInfo.InvariantCulture)}:{deposit.ToString(CultureInfo.InvariantCulture)}");
     }
 
     public async Task<int?> GetAvailableQuantityAsync(

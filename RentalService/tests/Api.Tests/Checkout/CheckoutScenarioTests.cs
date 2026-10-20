@@ -29,7 +29,7 @@ public sealed class CheckoutScenarioTests
     {
         Guid cameraSupplier = Guid.NewGuid();
         Guid lightSupplier = Guid.NewGuid();
-        // Máy ảnh: 2 x 500.000 x 3 ngày = 3.000.000. Inventory chưa có tiền cọc nên cọc = 0.
+        // Máy ảnh: 2 x 500.000 x 3 ngày = 3.000.000; fixture này dùng cọc = 0.
         Guid camera = _harness.AddListing(cameraSupplier, 500_000m);
         // Đèn: 1 x 150.000 x 3 ngày = 450.000.
         Guid light = _harness.AddListing(lightSupplier, 150_000m);
