@@ -24,7 +24,7 @@ app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<GatewayExceptionMiddleware>();
 app.UseGatewaySecurity();
 app.UseAuthentication();
-
+app.UseMiddleware<ServiceOnlyRouteBlockingMiddleware>();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwaggerUI(options =>
@@ -33,6 +33,8 @@ if (app.Environment.IsDevelopment())
         options.SwaggerEndpoint("/swagger/v1/swagger.json", "AuthService");
         options.SwaggerEndpoint("/media/swagger/v1/swagger.json", "MediaService");
         options.SwaggerEndpoint("/catalog/swagger/v1/swagger.json", "CatalogService");
+        options.SwaggerEndpoint("/inventory/swagger/v1/swagger.json", "InventoryService");
+        options.SwaggerEndpoint("/rental/swagger/v1/swagger.json", "RentalService");
     });
 }
 
@@ -52,7 +54,7 @@ HealthCheckOptions readinessOptions = new()
 app.UseHealthChecks("/health/ready", readinessOptions);
 app.UseHealthChecks("/_health/ready", readinessOptions);
 
-await app.UseOcelot();
+await app.UseGatewayOcelot();
 
 app.Run();
 

@@ -110,6 +110,10 @@ smoke_test_gateway_public_health() {
   curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
     "https://${domain}/health/ready" >/dev/null || \
     fail 'health endpoint công khai qua Gateway thất bại; không tự rollback image.'
+
+  curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
+    "https://${domain}/api/v1/catalog/brands" >/dev/null || \
+    fail 'API brands anonymous qua Gateway thất bại; không tự rollback image.'
 }
 
 smoke_test_gateway_internal_health() {
@@ -151,4 +155,4 @@ wait_for_gateway_health
 smoke_test_gateway_internal_health
 smoke_test_gateway_public_health "$dev_domain"
 
-printf 'Gateway revision %s đã healthy; Gateway health công khai và nội bộ đã pass.\n' "$release_sha"
+printf 'Gateway revision %s đã healthy; Gateway health và API brands anonymous đã pass.\n' "$release_sha"

@@ -35,6 +35,11 @@ public sealed class GatewaySecurityOptions
     /// Cấu hình chuyển tiếp danh tính đáng tin cậy xuống các dịch vụ nội bộ (Downstream Services).
     /// </summary>
     public GatewayIdentityOptions Identity { get; set; } = new();
+
+    /// <summary>
+    /// Cấu hình kiểm soát tần suất request (Rate Limiting) theo User ID và dự phòng bằng IP.
+    /// </summary>
+    public GatewayRateLimitingOptions RateLimiting { get; set; } = new();
 }
 
 /// <summary>
@@ -60,7 +65,7 @@ public sealed class GatewayCorsOptions
     /// <summary>
     /// Danh sách các tiêu đề HTTP mà trình duyệt của client được phép đọc từ phản hồi.
     /// </summary>
-    public string[] ExposedHeaders { get; set; } = ["X-Correlation-ID"];
+    public string[] ExposedHeaders { get; set; } = ["X-Correlation-ID", "Retry-After"];
 
     /// <summary>
     /// Cho phép gửi kèm thông tin xác thực (cookies, authorization headers) trong cross-origin request.
@@ -191,4 +196,40 @@ public sealed class GatewayIdentityOptions
     /// Mặc định: "ApiGateway".
     /// </summary>
     public string ServiceName { get; set; } = "ApiGateway";
+}
+
+/// <summary>
+/// Cấu hình chi tiết cho chính sách Rate Limiting của Gateway.
+/// </summary>
+public sealed class GatewayRateLimitingOptions
+{
+    /// <summary>
+    /// Thời lượng của cửa sổ trượt (Sliding Window) tính bằng giây. Mặc định: 60 giây.
+    /// </summary>
+    public int WindowSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Số phân đoạn trong mỗi cửa sổ trượt. Cửa sổ phải chia hết cho số đoạn. Mặc định: 6 đoạn.
+    /// </summary>
+    public int SegmentsPerWindow { get; set; } = 6;
+
+    /// <summary>
+    /// Hạn mức request đọc (GET, HEAD) cho mỗi user đã xác thực trong một cửa sổ. Mặc định: 300 request/phút.
+    /// </summary>
+    public int UserReadLimit { get; set; } = 300;
+
+    /// <summary>
+    /// Hạn mức request ghi (POST, PUT, PATCH, DELETE, ...) cho mỗi user đã xác thực trong một cửa sổ. Mặc định: 30 request/phút.
+    /// </summary>
+    public int UserWriteLimit { get; set; } = 30;
+
+    /// <summary>
+    /// Hạn mức request đọc (GET, HEAD) cho mỗi IP chưa xác thực trong một cửa sổ. Mặc định: 1.200 request/phút.
+    /// </summary>
+    public int IpReadLimit { get; set; } = 1200;
+
+    /// <summary>
+    /// Hạn mức request ghi (POST, PUT, PATCH, DELETE, ...) cho mỗi IP chưa xác thực trong một cửa sổ. Mặc định: 120 request/phút.
+    /// </summary>
+    public int IpWriteLimit { get; set; } = 120;
 }

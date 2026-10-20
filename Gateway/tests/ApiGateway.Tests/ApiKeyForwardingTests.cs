@@ -51,38 +51,41 @@ public sealed class ApiKeyForwardingTests
     }
 
     [Theory]
-    [InlineData("GET", "/api/v1/media/11111111-1111-4111-8111-111111111111/verify", true)]
-    [InlineData("POST", "/api/v1/media/uploads", false)]
-    [InlineData("GET", "/api/v1/auth/users", false)]
-    public async Task TrustedIdentityDelegatingHandlerForwardsApiKeyOnlyForInternalRoutes(string method, string path, bool shouldForwardKey)
+    [InlineData("http://downstream/api/v1/media/uploads", true)]
+    [InlineData("http://downstream/api/v1/auth/users", true)]
+    [InlineData("https://external.example.com/api", false)]
+    public async Task TrustedIdentityDelegatingHandlerInjectsApiKeyOnlyForInternalBackends(string url, bool isInternal)
     {
+        const string configuredKey = "gateway-internal-key-test";
         var context = new DefaultHttpContext();
-        context.Request.Method = method;
-        context.Request.Path = path;
-        context.Request.Headers["X-Api-Key"] = "test-key-123";
+        context.Request.Headers["X-Api-Key"] = "spoofed-client-key";
 
         var contextAccessor = new HttpContextAccessor { HttpContext = context };
         var extractor = new IdentityExtractor();
         var options = Options.Create(new GatewaySecurityOptions());
-        var policy = Policy();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["InternalAuthentication:ApiKey"] = configuredKey
+            }).Build();
 
         var captureHandler = new CaptureHandler();
-        var handler = new TrustedIdentityDelegatingHandler(contextAccessor, extractor, options, policy)
+        var handler = new TrustedIdentityDelegatingHandler(contextAccessor, extractor, options, config)
         {
             InnerHandler = captureHandler
         };
 
         using var invoker = new HttpMessageInvoker(handler);
-        using var request = new HttpRequestMessage(new HttpMethod(method), "http://downstream" + path);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
         using var response = await invoker.SendAsync(request, CancellationToken.None);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(captureHandler.LastRequest);
 
-        if (shouldForwardKey)
+        if (isInternal)
         {
             Assert.True(captureHandler.LastRequest.Headers.Contains("X-Api-Key"));
-            Assert.Equal("test-key-123", captureHandler.LastRequest.Headers.GetValues("X-Api-Key").Single());
+            Assert.Equal(configuredKey, captureHandler.LastRequest.Headers.GetValues("X-Api-Key").Single());
         }
         else
         {

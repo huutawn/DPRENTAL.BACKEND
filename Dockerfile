@@ -13,7 +13,9 @@ RUN dotnet restore Gateway/ocelot/ocelot.csproj
 # Sao chép toàn bộ mã nguồn và thực hiện build release
 COPY Gateway/ocelot/ Gateway/ocelot/
 WORKDIR /src/Gateway/ocelot
-RUN dotnet publish -c Release -o /app/publish --no-restore
+# Development settings contain host-machine localhost ports, not Docker service addresses.
+RUN dotnet publish -c Release -o /app/publish --no-restore \
+    && rm /app/publish/appsettings.Development.json
 
 # ==========================================
 # Runtime Stage: Image chạy tối giản và an toàn

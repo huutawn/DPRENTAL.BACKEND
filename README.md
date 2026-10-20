@@ -18,10 +18,21 @@ Gateway/
 ```
 Gateway nhận JWT được AuthService ký và chỉ tải public key từ JWKS. Không đặt private key, token, hoặc password vào `appsettings*.json`.
 
+## Inventory public API
+
+GET `/api/v1/inventory/public/equipment-listings` và GET
+`/api/v1/inventory/public/equipment-listings/{id}` cho phép anonymous.
+Hai route này thay thế đường dẫn `/public/assets` đã được InventoryService loại bỏ.
+
 ## CatalogService
 
 Gateway chuyển tiếp nguyên path/query/body của `/api/v1/catalog` tới `catalog-service:8080`.
-Bốn route GET công khai là categories, categories/{id}, equipment-types và equipment-types/{id}.
+Các route GET công khai là categories, categories/{id}, brands, brands/{id}, equipment-types,
+equipment-types/{id}, equipment-types/{id}/schema, equipment-types/{id}/schemas/{version}
+và equipment-types/{id}/spec-schemas/{version}.
+POST equipment-types/{id}/schemas/batch cũng cho phép anonymous vì đây là truy vấn chỉ đọc.
+Các route public chỉ mở đúng HTTP method và path; admin, ghi dữ liệu và validate specifications vẫn yêu cầu JWT.
+Route mới được nối cuối danh sách; appsettings.Development.json giữ override theo cùng index để không đổi đích của route hiện có.
 Template detail kết thúc bằng `/` để Ocelot chỉ match một segment ID; URL caller không cần slash cuối.
 Các request Catalog còn lại yêu cầu JWT Bearer với audience `Gateway:Authentication:Jwt:Audience`;
 Catalog tự kiểm tra role `Admin` cho POST/PATCH/publish/disable. Gateway không thêm nghiệp vụ Catalog.
@@ -113,7 +124,8 @@ Gateway là điểm vào công khai tại `http://localhost:5050`:
 - `GET /health/ready` (hoặc `/_health/ready`): yêu cầu JWKS và cấu hình proxy sẵn sàng.
     - `POST /api/v1/auth/register`: được proxy nguyên đường dẫn tới AuthService.
     - `GET/POST /api/v1/inventory/{everything}`: được proxy nguyên đường dẫn tới InventoryService (scheme `InventoryBearer` với audience isolation).
-Trong Swagger UI, chọn **AuthService**, gọi `/api/v1/auth/register` để tạo user local, rồi `/api/v1/auth/login`. Browser lưu cookie HttpOnly `accessToken` do AuthService đặt trên cùng Gateway origin. Sau đó chuyển menu sang **MediaService** và gọi `POST /api/v1/media/uploads` với 1–10 phần `files`; không cần tạo entity hoặc nhập Bearer cho upload. Gateway xác thực cookie, chuyển thành Bearer và MediaService xác thực lại JWT bằng JWKS. Cookie không được chuyển tới MediaService.
+    - `GET/POST /api/v1/rental/{everything}`: được proxy nguyên đường dẫn tới RentalService (Bearer forwarding, bao gồm `/api/v1/rental/me/calendar`).
+    - `/rental/swagger/v1/swagger.json`: OpenAPI schema của RentalService (AllowAnonymous).
 
 API key là credential dùng chung cho các API nội bộ, dùng header `X-Api-Key` (sử dụng cùng giá trị bí mật với `Auth:AdminBootstrap:CreationKey`). Gateway cho bốn route nội bộ của MediaService (`verify`, metadata, `access`, `visibility`) đi qua mà không yêu cầu Bearer token, chuyển tiếp `X-Api-Key` tới MediaService và loại bỏ header này khỏi các route khác. MediaService tự kiểm tra key trực tiếp, nên gọi thẳng trong mạng nội bộ không bỏ qua xác thực.
 
@@ -139,6 +151,7 @@ Danh mục mã lỗi canonical chuẩn hóa của Gateway:
 | :--- | :--- | :--- |
 | `403 Forbidden` | `Gateway.Security.CorsOriginDenied` | Nguồn gốc (Origin) của request không nằm trong whitelist CORS. |
 | `413 Payload Too Large` | `Gateway.Request.PayloadTooLarge` | Kích thước request body vượt quá ngưỡng cho phép (MaxRequestBodySize). |
+| `429 Too Many Requests` | `Gateway.RateLimitExceeded` | Số lượng request vượt quá hạn mức cho phép (Rate Limit Exceeded). |
 | `500 Internal Error` | `Gateway.UnexpectedFailure` | Lỗi không mong đợi phát sinh trong nội bộ Gateway. |
 
 Ocelot xử lý xác thực và lỗi proxy theo phản hồi riêng: route được bảo vệ trả `401` khi thiếu hoặc sai JWT; lỗi kết nối upstream trả `502`; timeout upstream trả `503` trên Ocelot 25.0. Những phản hồi này không dùng payload JSON ở trên. Phản hồi và lỗi nghiệp vụ từ service đích được chuyển tiếp nguyên trạng.
@@ -181,6 +194,19 @@ Gateway đóng vai trò là ranh giới bảo mật vững chắc trước khi r
      - `Referrer-Policy: strict-origin-when-cross-origin`
      - `Content-Security-Policy: default-src 'self'; frame-ancestors 'none';`
      - `Strict-Transport-Security` (khi request là HTTPS).
+
+
+5. **Kiểm soát tần suất request (Rate Limiting)**:
+   - Áp dụng hạn mức riêng cho nhóm đọc (`GET`, `HEAD`) và nhóm ghi (`POST`, `PUT`, `PATCH`, `DELETE`, ...).
+   - Sử dụng `PartitionedRateLimiter` với cửa sổ trượt (sliding window 60s, 6 phân đoạn, không xếp hàng):
+     - **Đọc (`GET`, `HEAD`)**: 300 req/phút/user đã xác thực | 1.200 req/phút/IP (không có user ID hợp lệ).
+     - **Ghi (`POST`, `PUT`, `PATCH`, `DELETE`)**: 30 req/phút/user đã xác thực | 120 req/phút/IP (không có user ID hợp lệ).
+   - User đã xác thực chỉ chịu quota user, không chịu thêm quota IP.
+   - Quota được cộng chung trên toàn bộ route proxy trong từng nhóm đọc/ghi; đổi endpoint/query cùng user không tạo quota mới.
+   - Miễn trừ cho `OPTIONS` (preflight) và các endpoint health check (`/health/*`, `/_health/*`).
+   - Khi vượt quota: Gateway trả về `429 Too Many Requests`, header `Retry-After` (giây, tối thiểu 1) và JSON lỗi `Gateway.RateLimitExceeded`.
+   - CORS cấu hình `ExposedHeaders` bao gồm `Retry-After` để frontend có thể đọc và hiển thị thời gian chờ.
+   - Cấu hình qua section `Gateway:Security:RateLimiting` hoặc biến môi trường `RATE_LIMIT_WINDOW_SECONDS`, `RATE_LIMIT_SEGMENTS_PER_WINDOW`, `RATE_LIMIT_USER_READ`, `RATE_LIMIT_USER_WRITE`, `RATE_LIMIT_IP_READ`, `RATE_LIMIT_IP_WRITE`.
 
 ## Timeout và lỗi kết nối downstream
 
@@ -245,6 +271,9 @@ Dockerfile ở repository root xây dựng runtime image tối giản cho Gatewa
 docker build --target runtime -t ghcr.io/<org>/dprental-gateway:<git-sha> .
 ```
 
+Image Docker loại bỏ `appsettings.Development.json` chứa localhost/port dành cho chạy trực tiếp trên máy.
+Container dùng địa chỉ service từ `appsettings.json` và biến môi trường, kể cả khi bật Development để xem Swagger.
+
 Runtime lắng nghe cổng `8080`, chạy non-root user `$APP_UID` và tích hợp sẵn `HEALTHCHECK` tự động thăm dò endpoint `/health/ready`.
 
 ## CI/CD Gateway cho dev
@@ -269,7 +298,7 @@ DEV_VPS_PORT              # tùy chọn, mặc định 22
 
 Workflow nạp deploy key vào `ssh-agent` qua stdin và kiểm tra host key đã lưu trong `DEV_VPS_KNOWN_HOSTS`. Nó truyền `GITHUB_TOKEN` cùng deploy script qua stdin của kết nối SSH, không đặt token trong câu lệnh SSH. Trên VPS, script đăng nhập GHCR bằng Docker config tạm rồi thực thi [deploy-gateway.sh](scripts/deploy-gateway.sh) từ commit đang phát hành. Docker credential tạm bị xóa ngay khi script kết thúc; user SSH của workflow cần quyền đọc `.env` và ghi `release.env`.
 
-Script cập nhật **chỉ duy nhất biến `GATEWAY_IMAGE`** trong `/opt/dprental/dev/release.env`, bảo toàn nguyên vẹn mọi image khác (`AUTH_SERVICE_IMAGE`, `AUTH_MIGRATOR_IMAGE`...). Nó pull duy nhất image `gateway`, khởi động lại container với `--no-deps --force-recreate gateway`, chờ Gateway đạt trạng thái healthy và thực hiện kiểm thử khói (smoke tests) cả nội bộ lẫn qua domain công khai.
+Script cập nhật **chỉ duy nhất biến `GATEWAY_IMAGE`** trong `/opt/dprental/dev/release.env`, bảo toàn nguyên vẹn mọi image khác (`AUTH_SERVICE_IMAGE`, `AUTH_MIGRATOR_IMAGE`...). Nó pull duy nhất image `gateway`, khởi động lại container với `--no-deps --force-recreate gateway`, chờ Gateway đạt trạng thái healthy và thực hiện kiểm thử khói (smoke tests) health cả nội bộ lẫn qua domain công khai và GET brands anonymous.
 
 Ví dụ cấp quyền ghi `release.env` cho user GitHub Actions trên VPS (thay `deploy` bằng user thực tế):
 

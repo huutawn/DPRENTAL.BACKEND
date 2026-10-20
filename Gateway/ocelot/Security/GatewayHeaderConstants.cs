@@ -66,6 +66,7 @@ public static class GatewayHeaderConstants
         "X-Permissions",
         "X-Permission",
         "X-Scope",
-        "X-Scopes"
+        "X-Scopes",
+        "X-Api-Key"
     };
 }

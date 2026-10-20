@@ -142,7 +142,7 @@ public sealed class GatewaySecurityIntegrationTests
         Assert.Equal(WhitelistedOrigin, response.Headers.GetValues("Access-Control-Allow-Origin").Single());
         Assert.Equal("true", response.Headers.GetValues("Access-Control-Allow-Credentials").Single());
         Assert.False(response.Headers.Contains("Access-Control-Allow-Methods"));
-        Assert.Equal("X-Correlation-ID", response.Headers.GetValues("Access-Control-Expose-Headers").Single());
+        Assert.Equal("X-Correlation-ID, Retry-After", response.Headers.GetValues("Access-Control-Expose-Headers").Single());
         string vary = string.Join(",", response.Headers.GetValues("Vary"));
         Assert.Contains("Accept-Encoding", vary, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Origin", vary, StringComparison.OrdinalIgnoreCase);
@@ -460,7 +460,7 @@ public sealed class GatewaySecurityIntegrationTests
     [InlineData("/api/v1/media/{0}", "GET")]
     [InlineData("/api/v1/media/{0}/access", "POST")]
     [InlineData("/api/v1/media/{0}/visibility", "PUT")]
-    public async Task InternalMediaRoutePassesWithoutBearerAndForwardsApiKey(string routeTemplate, string method)
+    public async Task InternalMediaRouteIsBlockedAtGatewayReturns403Forbidden(string routeTemplate, string method)
     {
         using RSA signingKey = RSA.Create(2048);
         await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
@@ -471,18 +471,13 @@ public sealed class GatewaySecurityIntegrationTests
         string path = string.Format(System.Globalization.CultureInfo.InvariantCulture, routeTemplate, mediaId);
         using HttpRequestMessage request = new(new HttpMethod(method), path);
         request.Headers.Add("X-Api-Key", "sak_test-secret");
-        request.Headers.Add("Cookie", "accessToken=stale-user-token");
         using HttpResponseMessage response = await client.SendAsync(request);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("sak_test-secret", upstream.LastRequest.Headers["X-Api-Key"]);
-        Assert.False(upstream.LastRequest.Headers.ContainsKey("Authorization"));
-        Assert.False(upstream.LastRequest.Headers.ContainsKey("Cookie"));
-        Assert.False(upstream.LastRequest.Headers.ContainsKey(GatewayHeaderConstants.UserId));
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]
-    public async Task NonInternalRouteStripsApiKey()
+    public async Task NonInternalRouteStripsClientApiKeyAndInjectsGatewayKey()
     {
         using RSA signingKey = RSA.Create(2048);
         await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
@@ -496,7 +491,9 @@ public sealed class GatewaySecurityIntegrationTests
         using HttpResponseMessage response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.False(upstream.LastRequest.Headers.ContainsKey("X-Api-Key"));
+        Assert.True(upstream.LastRequest.Headers.ContainsKey("X-Api-Key"));
+        Assert.NotEqual("stray-key", upstream.LastRequest.Headers["X-Api-Key"]);
+        Assert.Equal("dev-internal-api-key-dprental-2026", upstream.LastRequest.Headers["X-Api-Key"]);
     }
 
     [Fact]

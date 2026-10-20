@@ -1,11 +1,20 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using Dprental.Gateway.Errors;
 using Dprental.Gateway.Security;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Net.Http.Headers;
 using Ocelot.DependencyInjection;
-
+using Ocelot.Middleware;
 namespace Dprental.Gateway.Proxy;
 
 /// <summary>
@@ -30,6 +39,76 @@ public static class OcelotServiceCollectionExtensions
             .AddDelegatingHandler<GatewayCorsDelegatingHandler>(global: true);
 
         return services;
+    }
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// Kích hoạt Ocelot middleware pipeline cho Gateway, tích hợp hook kiểm soát rate limit tại PreAuthorizationMiddleware.
+    /// </summary>
+    /// <param name="app">Đối tượng IApplicationBuilder xây dựng pipeline.</param>
+    /// <returns>Đối tượng IApplicationBuilder để xâu chuỗi.</returns>
+    public static async Task<IApplicationBuilder> UseGatewayOcelot(this IApplicationBuilder app)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+
+        OcelotPipelineConfiguration pipelineConfiguration = new()
+        {
+            PreAuthorizationMiddleware = async (context, next) =>
+            {
+                IGatewayRateLimiter rateLimiter = context.RequestServices.GetRequiredService<IGatewayRateLimiter>();
+                GatewayRateLimitResult result = rateLimiter.CheckRateLimit(context);
+
+                if (result.IsAllowed)
+                {
+                    await next();
+                    return;
+                }
+
+                ApplyRateLimitExceededResponse(context, result);
+            }
+        };
+
+        return await app.UseOcelot(pipelineConfiguration);
+    }
+
+    /// <summary>
+    /// Tạo và gắn response từ chối do vượt rate limit vào luồng phản hồi của Ocelot để tránh bị responder ghi đè.
+    /// Trả về HTTP 429 Too Many Requests, tiêu đề Retry-After (giây, tối thiểu 1) và JSON lỗi chuẩn Gateway.RateLimitExceeded.
+    /// </summary>
+    /// <param name="context">Ngữ cảnh HTTP của request.</param>
+    /// <param name="result">Kết quả rate limit bị từ chối.</param>
+    private static void ApplyRateLimitExceededResponse(HttpContext context, GatewayRateLimitResult result)
+    {
+        string retryAfter = result.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+
+        GatewayErrorResponse errorPayload = new(
+            GatewayError.RateLimitExceeded.Code,
+            GatewayError.RateLimitExceeded.Message,
+            context.TraceIdentifier);
+
+        string jsonBody = JsonSerializer.Serialize(errorPayload, JsonOptions);
+        StringContent content = new(jsonBody, Encoding.UTF8, "application/json");
+
+        List<Header> headers =
+        [
+            new("Retry-After", [retryAfter])
+        ];
+
+        DownstreamResponse downstreamResponse = new(
+            content,
+            HttpStatusCode.TooManyRequests,
+            headers,
+            "Too Many Requests");
+
+        // Gắn vào Items của Ocelot để ResponderMiddleware dùng làm response chính thức, tránh bị responder ghi đè
+        context.Items.UpsertDownstreamResponse(downstreamResponse);
+
+        if (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            context.Response.Headers[HeaderNames.RetryAfter] = retryAfter;
+        }
     }
 
     /// <summary>

@@ -60,10 +60,26 @@ services:
       - Routes__13__DownstreamHostAndPorts__0__Host=${CATALOG_SERVICE_HOST:-catalog-service}
       - Routes__13__DownstreamHostAndPorts__0__Port=${CATALOG_SERVICE_PORT:-8080}
 
+      # Inventory public routes 14..15
+      - Routes__14__DownstreamScheme=${INVENTORY_SERVICE_SCHEME:-http}
+      - Routes__14__DownstreamHostAndPorts__0__Host=${INVENTORY_SERVICE_HOST:-inventory-service}
+      - Routes__14__DownstreamHostAndPorts__0__Port=${INVENTORY_SERVICE_PORT:-8080}
+      - Routes__15__DownstreamScheme=${INVENTORY_SERVICE_SCHEME:-http}
+      - Routes__15__DownstreamHostAndPorts__0__Host=${INVENTORY_SERVICE_HOST:-inventory-service}
+      - Routes__15__DownstreamHostAndPorts__0__Port=${INVENTORY_SERVICE_PORT:-8080}
+
       # Cấu hình Bảo mật CORS & Kích thước Payload
       - Gateway__Security__Cors__AllowedOrigins__0=${CORS_ALLOWED_ORIGIN_0:-http://localhost:3000}
       - Gateway__Security__Cors__AllowedOrigins__1=${CORS_ALLOWED_ORIGIN_1:-http://localhost:5173}
       - Gateway__Security__RequestSize__MaxRequestBodySizeBytes=${MAX_REQUEST_BODY_SIZE_BYTES:-10485760}
+
+      # Cấu hình Rate Limiting
+      - Gateway__Security__RateLimiting__WindowSeconds=${RATE_LIMIT_WINDOW_SECONDS:-60}
+      - Gateway__Security__RateLimiting__SegmentsPerWindow=${RATE_LIMIT_SEGMENTS_PER_WINDOW:-6}
+      - Gateway__Security__RateLimiting__UserReadLimit=${RATE_LIMIT_USER_READ:-300}
+      - Gateway__Security__RateLimiting__UserWriteLimit=${RATE_LIMIT_USER_WRITE:-30}
+      - Gateway__Security__RateLimiting__IpReadLimit=${RATE_LIMIT_IP_READ:-1200}
+      - Gateway__Security__RateLimiting__IpWriteLimit=${RATE_LIMIT_IP_WRITE:-120}
 
       # Thời gian chờ proxy tới downstream
       - GlobalConfiguration__Timeout=${DEFAULT_TIMEOUT_SECONDS:-10}
