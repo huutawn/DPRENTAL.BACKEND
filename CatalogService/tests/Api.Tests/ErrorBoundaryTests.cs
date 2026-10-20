@@ -109,7 +109,7 @@ public sealed class ErrorBoundaryTests
     }
 
     private static WebApplicationFactory<Program> CreateThrowingFactory(Exception ex) =>
-        new WebApplicationFactory<Program>()
+        new CatalogWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");

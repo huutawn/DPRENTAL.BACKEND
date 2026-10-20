@@ -34,7 +34,7 @@ public sealed class BrandEndpointApiTests : IAsyncLifetime, IDisposable
 
     public BrandEndpointApiTests()
     {
-        factory = new WebApplicationFactory<Program>()
+        factory = new CatalogWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", PostgreSqlFixture.ConnectionString);

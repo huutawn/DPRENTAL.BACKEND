@@ -52,7 +52,7 @@ public sealed class HealthEndpointTests
     [Fact]
     public void MissingPostgresConnection_FailsAtStartup()
     {
-        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
+        using WebApplicationFactory<Program> factory = new CatalogWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "");
@@ -65,7 +65,7 @@ public sealed class HealthEndpointTests
     }
 
     private static WebApplicationFactory<Program> CreateFactory() =>
-        new WebApplicationFactory<Program>()
+        new CatalogWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");

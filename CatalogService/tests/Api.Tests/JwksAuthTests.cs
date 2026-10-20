@@ -162,7 +162,7 @@ public sealed class JwksAuthTests
         }, timeProvider);
 
     private static WebApplicationFactory<Program> CreateFactory(HttpMessageHandler jwksHandler) =>
-        new WebApplicationFactory<Program>()
+        new CatalogWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");

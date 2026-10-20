@@ -32,7 +32,7 @@ public sealed class CategoryEndpointApiTests : IAsyncLifetime, IDisposable
 
     public CategoryEndpointApiTests()
     {
-        _factory = new WebApplicationFactory<Program>()
+        _factory = new CatalogWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", PostgreSqlFixture.ConnectionString);
