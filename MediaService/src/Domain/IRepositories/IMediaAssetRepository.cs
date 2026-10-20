@@ -11,4 +11,10 @@ public interface IMediaAssetRepository
     Task<MediaAsset?> GetByIdUntrackedAsync(Guid id, CancellationToken cancellationToken = default);
     Task AddAsync(MediaAsset asset, CancellationToken cancellationToken = default);
     Task UpdateAsync(MediaAsset asset, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<MediaAsset>> GetReadyImagesMissingVariantsAsync(
+        int batchSize,
+        Guid? afterId,
+        int processingVersion,
+        CancellationToken cancellationToken = default);
+    Task AddVariantsAsync(IEnumerable<MediaImageVariant> variants, CancellationToken cancellationToken = default);
 }

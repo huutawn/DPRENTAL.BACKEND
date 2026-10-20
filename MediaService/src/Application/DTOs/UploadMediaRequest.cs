@@ -6,4 +6,8 @@ public sealed record UploadMediaRequest(
     string ContentType,
     long SizeBytes,
     Stream Content,
-    string? Sha256Checksum = null);
+    string? Sha256Checksum = null,
+    int BatchSize = 1)
+{
+    public const int MaximumBatchSize = 10;
+}

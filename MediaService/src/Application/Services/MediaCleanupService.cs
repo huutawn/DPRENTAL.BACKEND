@@ -32,8 +32,13 @@ public partial class MediaCleanupService : IMediaCleanupService
 
     public async Task<int> ProcessPendingCleanupsAsync(int limit = 50, CancellationToken cancellationToken = default)
     {
-        var pendingItems = await _cleanupRepository.GetPendingItemsAsync(limit, cancellationToken);
-        if (pendingItems.Count == 0)
+        var pendingItems = await _cleanupRepository.ClaimPendingItemsAsync(
+            limit, TimeSpan.FromMinutes(5), "cleanup-worker", cancellationToken);
+        if (pendingItems == null || pendingItems.Count == 0)
+        {
+            pendingItems = await _cleanupRepository.GetPendingItemsAsync(limit, cancellationToken);
+        }
+        if (pendingItems == null || pendingItems.Count == 0)
         {
             return 0;
         }
@@ -49,6 +54,7 @@ public partial class MediaCleanupService : IMediaCleanupService
                 item.Status = CleanupItemStatus.Completed;
                 item.ProcessedAtUtc = now;
                 item.LastError = null;
+                item.LeaseExpiresAtUtc = null;
                 processedCount++;
             }
             catch (Exception ex)

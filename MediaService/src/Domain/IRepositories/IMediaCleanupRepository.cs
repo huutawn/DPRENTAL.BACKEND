@@ -10,4 +10,7 @@ public interface IMediaCleanupRepository
     Task AddAsync(MediaCleanupItem item, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<MediaCleanupItem>> GetPendingItemsAsync(int limit, CancellationToken cancellationToken = default);
     Task UpdateAsync(MediaCleanupItem item, CancellationToken cancellationToken = default);
+    Task RemoveRangeByStorageKeysAsync(IEnumerable<string> storageKeys, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<MediaCleanupItem>> ClaimPendingItemsAsync(int limit, TimeSpan leaseDuration, string workerId, CancellationToken cancellationToken = default);
+    Task<bool> HasClaimedMarkersAsync(IEnumerable<string> storageKeys, CancellationToken cancellationToken = default);
 }

@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Dprental.MediaService.Application.DTOs;
 using Dprental.MediaService.Api.Health;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
@@ -23,21 +25,26 @@ public class MediaServiceTestFactory : WebApplicationFactory<Program>
     private static readonly RSA SigningKey = RSA.Create(2048);
     private const string Issuer = "https://auth.test";
     private const string Audience = "media-tests";
-    private const string CatalogServiceId = "11111111-1111-1111-1111-111111111111";
+    public const string DefaultApiKey = "test-shared-bootstrap-key";
+
+    public static void SetApiKey(HttpClient client, string key = DefaultApiKey) =>
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", key);
 
     public static void SetUserToken(HttpClient client, string userId) =>
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken(userId));
 
-    public static void SetServiceToken(HttpClient client, params string[] scopes) =>
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
-            CreateToken(CatalogServiceId, true, scopes.Length == 0 ? ["media.verify"] : scopes));
-
-    private static string CreateToken(string subject, bool isService = false, string[]? scopes = null)
+    public static void SetUserTokenOnly(HttpClient client, string userId) =>
+        SetUserToken(client, userId);
+    private static string CreateToken(string subject, bool isService = false, string[]? scopes = null, bool fromApiKey = false)
     {
         var claims = new List<Claim> { new("sub", subject) };
         if (isService)
         {
             claims.Add(new Claim("u", "svc"));
+            if (fromApiKey)
+            {
+                claims.Add(new Claim("amr", "api_key"));
+            }
             foreach (string scope in scopes ?? ["media.verify"])
             {
                 claims.Add(new Claim("s", scope));
@@ -72,7 +79,8 @@ public class MediaServiceTestFactory : WebApplicationFactory<Program>
                 ["ObjectStorage:SecretKey"] = "mediasecretpassword",
                 ["Jwt:Issuer"] = Issuer,
                 ["Jwt:Audience"] = Audience,
-                ["Jwt:JwksUri"] = "https://auth.test/.well-known/jwks.json"
+                ["Jwt:JwksUri"] = "https://auth.test/.well-known/jwks.json",
+                ["ApiKey"] = DefaultApiKey
             };
 
             foreach (var (k, v) in ConfigurationOverrides)

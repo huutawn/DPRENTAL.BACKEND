@@ -1,9 +1,5 @@
 namespace Dprental.MediaService.Application.DTOs;
 
-public sealed record ServiceCaller(string? Id, IReadOnlySet<string> Scopes)
-{
-    public bool HasScope(string scope) => Scopes?.Contains(scope) == true;
-}
 
 public sealed record MediaMetadataDto(
     Guid MediaId,
@@ -12,11 +8,16 @@ public sealed record MediaMetadataDto(
     long? SizeBytes,
     string Status,
     string Visibility,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    IReadOnlyList<MediaImageVariantDto>? ImageVariants = null)
+{
+    public IReadOnlyList<MediaImageVariantDto> ImageVariants { get; init; } = ImageVariants ?? [];
+}
 
 public sealed record MediaAccessRequest(
     string Action,
-    bool Download = false);
+    bool Download = false,
+    string? Variant = null);
 
 public sealed record MediaReadUrlDto(Guid MediaId, string Url, DateTimeOffset ExpiresAtUtc);
 

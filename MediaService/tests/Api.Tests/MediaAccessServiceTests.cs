@@ -2,11 +2,11 @@ using Dprental.MediaService.Application.DTOs;
 using Dprental.MediaService.Application.Policies;
 using Dprental.MediaService.Application.Services;
 using Dprental.MediaService.Common.Enums;
+using Dprental.MediaService.Domain;
 using Dprental.MediaService.Domain.Entities;
 using Dprental.MediaService.Domain.IRepositories;
 using Dprental.MediaService.Domain.IStorage;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Xunit;
@@ -19,10 +19,6 @@ public class MediaAccessServiceTests
     private readonly IObjectStorageService _storage = Substitute.For<IObjectStorageService>();
     private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
     private readonly MediaAccessService _sut;
-
-    private static readonly ServiceCaller VerifyCaller = new("11111111-1111-4111-8111-111111111111", new HashSet<string> { "media.verify" });
-    private static readonly ServiceCaller ReadCaller = new("11111111-1111-4111-8111-111111111111", new HashSet<string> { "media.read" });
-    private static readonly ServiceCaller PublishCaller = new("11111111-1111-4111-8111-111111111111", new HashSet<string> { "media.publish" });
 
     public MediaAccessServiceTests()
     {
@@ -58,34 +54,28 @@ public class MediaAccessServiceTests
     }
 
     [Fact]
-    public async Task Verify_RequiresServiceIdentityAndScope()
+    public async Task Verify_RequiresValidIdAndExistingAsset()
     {
-        var anonymous = await _sut.VerifyMediaAsync(new ServiceCaller(null, new HashSet<string>()), Guid.NewGuid());
-        var invalidId = await _sut.VerifyMediaAsync(new ServiceCaller("not-a-guid", new HashSet<string> { "media.verify" }), Guid.NewGuid());
-        var wrongScope = await _sut.VerifyMediaAsync(ReadCaller, Guid.NewGuid());
+        var invalidId = await _sut.VerifyMediaAsync(Guid.Empty);
+        Assert.Equal("InvalidMediaId", invalidId.Error.Code);
 
-        Assert.Equal("UnauthorizedService", anonymous.Error.Code);
-        Assert.Equal("UnauthorizedService", invalidId.Error.Code);
-        Assert.Equal("MissingServiceScope", wrongScope.Error.Code);
-        await _assets.DidNotReceive().GetByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        _assets.GetByIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((MediaAsset?)null);
+        var notFound = await _sut.VerifyMediaAsync(Guid.NewGuid());
+        Assert.Equal("MediaNotFound", notFound.Error.Code);
     }
 
     [Fact]
-    public async Task Verify_OnlyReadyMediaForScopedService()
+    public async Task Verify_OnlyReadyMediaIsVerified()
     {
         MediaAsset asset = Asset();
         Store(asset);
 
-        var otherService = await _sut.VerifyMediaAsync(
-            new ServiceCaller("22222222-2222-4222-8222-222222222222", new HashSet<string> { "media.verify" }), asset.Id);
-        Assert.True(otherService.IsSuccess);
-
         asset.Status = MediaStatus.PendingUpload;
-        var pending = await _sut.VerifyMediaAsync(VerifyCaller, asset.Id);
+        var pending = await _sut.VerifyMediaAsync(asset.Id);
         Assert.Equal("MediaNotReady", pending.Error.Code);
 
         asset.Status = MediaStatus.Ready;
-        var ready = await _sut.VerifyMediaAsync(VerifyCaller, asset.Id);
+        var ready = await _sut.VerifyMediaAsync(asset.Id);
         Assert.True(ready.IsSuccess);
         Assert.Equal("image/jpeg", ready.Value.ContentType);
         Assert.Equal("user-1", ready.Value.UploadedByUserId);
@@ -101,39 +91,34 @@ public class MediaAccessServiceTests
         asset.ActualSizeBytes = null;
         Store(asset);
 
-        var pending = await _sut.GetMetadataAsync(ReadCaller, asset.Id);
+        var pending = await _sut.GetMetadataAsync(asset.Id);
         Assert.True(pending.IsSuccess);
         Assert.Equal("PendingUpload", pending.Value.Status);
         Assert.Null(pending.Value.ContentType);
         Assert.Null(pending.Value.SizeBytes);
 
         asset.Status = MediaStatus.Deleted;
-        var deleted = await _sut.GetMetadataAsync(ReadCaller, asset.Id);
+        var deleted = await _sut.GetMetadataAsync(asset.Id);
         Assert.Equal("MediaNotFound", deleted.Error.Code);
     }
 
     [Fact]
-    public async Task PrivateAccess_ValidatesActionScopeStateAndStorage()
+    public async Task PrivateAccess_ValidatesActionStateAndStorage()
     {
         MediaAsset asset = Asset();
         Store(asset);
         var request = new MediaAccessRequest("read", true);
 
         Assert.Equal("InvalidAction", (await _sut.CreatePrivateReadUrlAsync(
-            ReadCaller, asset.Id, request with { Action = "write" })).Error.Code);
-        Assert.Equal("MissingServiceScope", (await _sut.CreatePrivateReadUrlAsync(
-            VerifyCaller, asset.Id, request)).Error.Code);
+            asset.Id, request with { Action = "write" })).Error.Code);
 
         asset.Status = MediaStatus.Rejected;
         Assert.Equal("MediaNotReady", (await _sut.CreatePrivateReadUrlAsync(
-            ReadCaller, asset.Id, request)).Error.Code);
+            asset.Id, request)).Error.Code);
 
         asset.Status = MediaStatus.Ready;
-        Assert.Equal("MediaNotFound", (await _sut.CreatePrivateReadUrlAsync(
-            ReadCaller, asset.Id, request)).Error.Code);
-
         ConfigureStorage();
-        var granted = await _sut.CreatePrivateReadUrlAsync(ReadCaller, asset.Id, request);
+        var granted = await _sut.CreatePrivateReadUrlAsync(asset.Id, request);
         Assert.True(granted.IsSuccess);
         Assert.Equal("https://storage.test/signed", granted.Value.Url);
         Assert.InRange(granted.Value.ExpiresAtUtc, DateTimeOffset.UtcNow.AddMinutes(4), DateTimeOffset.UtcNow.AddMinutes(6));
@@ -151,7 +136,7 @@ public class MediaAccessServiceTests
             .ThrowsAsync(new InvalidOperationException("internal storage detail"));
 
         var result = await _sut.CreatePrivateReadUrlAsync(
-            ReadCaller, asset.Id, new MediaAccessRequest("read"));
+            asset.Id, new MediaAccessRequest("read"));
 
         Assert.Equal("StorageUnavailable", result.Error.Code);
         Assert.DoesNotContain("internal storage detail", result.Error.Message, StringComparison.Ordinal);
@@ -196,15 +181,17 @@ public class MediaAccessServiceTests
     }
 
     [Fact]
-    public async Task Visibility_RequiresScopeAndReadyMedia()
+    public async Task Visibility_RequiresValidVisibilityAndReadyMedia()
     {
         MediaAsset asset = Asset();
         Store(asset);
-        var request = new ChangeMediaVisibilityRequest("public");
 
-        Assert.Equal("MissingServiceScope", (await _sut.SetVisibilityAsync(ReadCaller, asset.Id, request)).Error.Code);
+        var invalidReq = new ChangeMediaVisibilityRequest("invalid");
+        Assert.Equal("InvalidVisibility", (await _sut.SetVisibilityAsync(asset.Id, invalidReq)).Error.Code);
+
+        var request = new ChangeMediaVisibilityRequest("public");
         asset.Status = MediaStatus.PendingUpload;
-        Assert.Equal("MediaNotReady", (await _sut.SetVisibilityAsync(PublishCaller, asset.Id, request)).Error.Code);
+        Assert.Equal("MediaNotReady", (await _sut.SetVisibilityAsync(asset.Id, request)).Error.Code);
         await _unitOfWork.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
@@ -215,10 +202,10 @@ public class MediaAccessServiceTests
         Store(asset);
         var request = new ChangeMediaVisibilityRequest("public");
 
-        var first = await _sut.SetVisibilityAsync(PublishCaller, asset.Id, request);
+        var first = await _sut.SetVisibilityAsync(asset.Id, request);
         Assert.True(first.IsSuccess);
         Assert.Equal(MediaVisibility.Public, asset.Visibility);
-        var repeated = await _sut.SetVisibilityAsync(PublishCaller, asset.Id, request);
+        var repeated = await _sut.SetVisibilityAsync(asset.Id, request);
         Assert.True(repeated.IsSuccess);
         await _unitOfWork.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
 
@@ -233,7 +220,7 @@ public class MediaAccessServiceTests
                 Visibility = MediaVisibility.Public
             });
 
-        var raced = await _sut.SetVisibilityAsync(PublishCaller, asset.Id, request);
+        var raced = await _sut.SetVisibilityAsync(asset.Id, request);
         Assert.True(raced.IsSuccess);
     }
 }

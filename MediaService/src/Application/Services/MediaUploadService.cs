@@ -22,6 +22,7 @@ public partial class MediaUploadService : IMediaUploadService
     private readonly IMediaCleanupRepository _cleanupRepository;
     private readonly IObjectStorageService _objectStorageService;
     private readonly IMediaAccessService _accessService;
+    private readonly IImageVariantService _variantService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<MediaUploadService> _logger;
     private readonly TimeSpan _sessionLifetime;
@@ -32,6 +33,7 @@ public partial class MediaUploadService : IMediaUploadService
         IMediaCleanupRepository cleanupRepository,
         IObjectStorageService objectStorageService,
         IMediaAccessService accessService,
+        IImageVariantService variantService,
         IUnitOfWork unitOfWork,
         IOptions<UploadSettings> settings,
         ILogger<MediaUploadService> logger)
@@ -41,10 +43,41 @@ public partial class MediaUploadService : IMediaUploadService
         _cleanupRepository = cleanupRepository ?? throw new ArgumentNullException(nameof(cleanupRepository));
         _objectStorageService = objectStorageService ?? throw new ArgumentNullException(nameof(objectStorageService));
         _accessService = accessService ?? throw new ArgumentNullException(nameof(accessService));
+        _variantService = variantService ?? throw new ArgumentNullException(nameof(variantService));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _sessionLifetime = TimeSpan.FromMinutes(settings?.Value.SessionLifetimeMinutes
             ?? throw new ArgumentNullException(nameof(settings)));
+    }
+
+    public async Task<Result<IReadOnlyList<UploadFileResultDto>>> UploadManyAsync(
+        string authenticatedUserId,
+        string? idempotencyKey,
+        IReadOnlyList<UploadMediaRequest> files,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(authenticatedUserId))
+            return Result.Failure<IReadOnlyList<UploadFileResultDto>>(
+                Error.Unauthorized("UnauthorizedUser", "Yêu cầu phải được xác thực từ một người dùng hợp lệ."));
+        if (files is null || files.Count is < 1 or > UploadMediaRequest.MaximumBatchSize ||
+            idempotencyKey?.Trim().Length > 200 || files.Any(file => file is null))
+            return Result.Failure<IReadOnlyList<UploadFileResultDto>>(
+                Error.Validation("InvalidUploadBatch", "Danh sách file hoặc Idempotency-Key không hợp lệ."));
+
+        var results = new List<UploadFileResultDto>(files.Count);
+        for (int index = 0; index < files.Count; index++)
+        {
+            UploadMediaRequest file = files[index] with { BatchSize = files.Count };
+            string? fileKey = string.IsNullOrWhiteSpace(idempotencyKey)
+                ? null
+                : $"batch:{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{idempotencyKey.Trim()}:{index}")))}";
+            Result<MediaCompletedDto> result = await UploadAsync(
+                authenticatedUserId, fileKey, file, cancellationToken);
+            results.Add(new UploadFileResultDto(index, file.FileName,
+                result.IsSuccess ? result.Value : null,
+                result.IsFailure ? new UploadFileErrorDto(result.Error.Code, result.Error.Message) : null));
+        }
+        return Result.Success<IReadOnlyList<UploadFileResultDto>>(results);
     }
 
     public async Task<Result<MediaCompletedDto>> UploadAsync(
@@ -73,7 +106,8 @@ public partial class MediaUploadService : IMediaUploadService
                 Error.Validation("UnsupportedContentType", "Định dạng tệp không được hỗ trợ."));
         }
 
-        if (string.IsNullOrWhiteSpace(request.FileName) || request.FileName.Length > 1024 ||
+        if (request.BatchSize is < 1 or > UploadMediaRequest.MaximumBatchSize ||
+            string.IsNullOrWhiteSpace(request.FileName) || request.FileName.Length > 1024 ||
             string.IsNullOrWhiteSpace(request.ContentType) || request.ContentType.Length > 100 ||
             request.Content is null)
         {
@@ -259,17 +293,36 @@ public partial class MediaUploadService : IMediaUploadService
         return Result.Success(completed);
     }
 
-    private static MediaCompletedDto ToCompletedDto(MediaAsset asset) => new(
-        asset.Id, asset.Status.ToString(), asset.OriginalFileName,
-        asset.ActualContentType ?? asset.DeclaredContentType,
-        asset.ActualSizeBytes ?? asset.DeclaredSizeBytes);
+    private static MediaCompletedDto ToCompletedDto(MediaAsset asset)
+    {
+        var variantDtos = (asset.ImageVariants ?? [])
+            .Where(v => v.ProcessingVersion == ImageVariantPolicy.CurrentProcessingVersion)
+            .OrderBy(v => v.Width)
+            .Select(v => new MediaImageVariantDto(
+                v.VariantName,
+                v.Width,
+                v.Height,
+                v.ContentType,
+                v.SizeBytes,
+                ImageVariantPolicy.BuildContentPath(asset.Id, v.VariantName)))
+            .ToList();
+
+        return new MediaCompletedDto(
+            asset.Id,
+            asset.Status.ToString(),
+            asset.OriginalFileName,
+            asset.ActualContentType ?? asset.DeclaredContentType,
+            asset.ActualSizeBytes ?? asset.DeclaredSizeBytes,
+            ImageVariants: variantDtos);
+    }
 
     private static string ComputePayloadHash(UploadMediaRequest request, string fileHash)
     {
         string raw = JsonSerializer.Serialize(new object?[]
         {
             request.FileName?.Trim(), request.ContentType?.Trim().ToLowerInvariant(),
-            request.SizeBytes, request.Sha256Checksum?.Trim().ToLowerInvariant(), fileHash
+            request.SizeBytes, request.Sha256Checksum?.Trim().ToLowerInvariant(), fileHash,
+            request.BatchSize
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw))).ToLowerInvariant();
     }

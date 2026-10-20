@@ -36,4 +36,59 @@ public class MediaCleanupRepository : IMediaCleanupRepository
         _context.MediaCleanupItems.Update(item);
         return Task.CompletedTask;
     }
+
+    public async Task RemoveRangeByStorageKeysAsync(IEnumerable<string> storageKeys, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(storageKeys);
+        var keyList = storageKeys.ToList();
+        if (keyList.Count == 0) return;
+
+        var items = await _context.MediaCleanupItems
+            .Where(c => keyList.Contains(c.StorageKey))
+            .ToListAsync(cancellationToken);
+
+        if (items.Count > 0)
+        {
+            _context.MediaCleanupItems.RemoveRange(items);
+        }
+    }
+
+    public async Task<IReadOnlyList<MediaCleanupItem>> ClaimPendingItemsAsync(
+        int limit, TimeSpan leaseDuration, string workerId, CancellationToken cancellationToken = default)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        var items = await _context.MediaCleanupItems
+            .Where(c => c.EligibleAtUtc <= now &&
+                (c.Status == CleanupItemStatus.Pending || (c.Status == CleanupItemStatus.Failed && c.RetryCount < 3)) &&
+                (c.LeaseExpiresAtUtc == null || c.LeaseExpiresAtUtc < now))
+            .OrderBy(c => c.CreatedAtUtc)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+
+        if (items.Count == 0) return items;
+
+        foreach (var item in items)
+        {
+            item.ClaimedAtUtc = now;
+            item.LeaseExpiresAtUtc = now.Add(leaseDuration);
+            item.ClaimedByWorkerId = workerId;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return items;
+    }
+
+    public async Task<bool> HasClaimedMarkersAsync(
+        IEnumerable<string> storageKeys, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(storageKeys);
+        var keyList = storageKeys.ToList();
+        if (keyList.Count == 0) return false;
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        return await _context.MediaCleanupItems
+            .AnyAsync(c => keyList.Contains(c.StorageKey) &&
+                c.LeaseExpiresAtUtc != null && c.LeaseExpiresAtUtc > now,
+                cancellationToken);
+    }
 }

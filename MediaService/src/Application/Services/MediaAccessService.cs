@@ -17,9 +17,6 @@ public sealed class MediaAccessService : IMediaAccessService
         LoggerMessage.Define<Guid, string>(LogLevel.Warning, new EventId(1, "ReadUrlFailure"),
             "Failed to create read URL for media {MediaId}: {ErrorType}");
 
-    public const string VerifyScope = "media.verify";
-    public const string ReadScope = "media.read";
-    public const string PublishScope = "media.publish";
 
     private readonly IMediaAssetRepository _assets;
     private readonly IObjectStorageService _storage;
@@ -48,9 +45,9 @@ public sealed class MediaAccessService : IMediaAccessService
     }
 
     public async Task<Result<MediaVerificationDto>> VerifyMediaAsync(
-        ServiceCaller caller, Guid mediaId, CancellationToken cancellationToken = default)
+        Guid mediaId, CancellationToken cancellationToken = default)
     {
-        var found = await FindServiceAssetAsync(caller, VerifyScope, mediaId, cancellationToken);
+        var found = await FindAssetAsync(mediaId, cancellationToken);
         if (found.IsFailure)
         {
             return Result.Failure<MediaVerificationDto>(found.Error);
@@ -71,9 +68,9 @@ public sealed class MediaAccessService : IMediaAccessService
     }
 
     public async Task<Result<MediaMetadataDto>> GetMetadataAsync(
-        ServiceCaller caller, Guid mediaId, CancellationToken cancellationToken = default)
+        Guid mediaId, CancellationToken cancellationToken = default)
     {
-        var found = await FindServiceAssetAsync(caller, ReadScope, mediaId, cancellationToken);
+        var found = await FindAssetAsync(mediaId, cancellationToken);
         if (found.IsFailure)
         {
             return Result.Failure<MediaMetadataDto>(found.Error);
@@ -85,14 +82,26 @@ public sealed class MediaAccessService : IMediaAccessService
             return Result.Failure<MediaMetadataDto>(MediaNotFound());
         }
 
+        var variantDtos = (asset.ImageVariants ?? [])
+            .Where(v => v.ProcessingVersion == ImageVariantPolicy.CurrentProcessingVersion)
+            .OrderBy(v => v.Width)
+            .Select(v => new MediaImageVariantDto(
+                v.VariantName,
+                v.Width,
+                v.Height,
+                v.ContentType,
+                v.SizeBytes,
+                ImageVariantPolicy.BuildContentPath(asset.Id, v.VariantName)))
+            .ToList();
+
         return Result.Success(new MediaMetadataDto(
             asset.Id, asset.OriginalFileName, asset.ActualContentType,
             asset.ActualSizeBytes, asset.Status.ToString(),
-            asset.Visibility.ToString(), asset.CreatedAtUtc));
+            asset.Visibility.ToString(), asset.CreatedAtUtc,
+            variantDtos));
     }
-
     public async Task<Result<MediaReadUrlDto>> CreatePrivateReadUrlAsync(
-        ServiceCaller caller, Guid mediaId, MediaAccessRequest request, CancellationToken cancellationToken = default)
+        Guid mediaId, MediaAccessRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!string.Equals(request.Action, "read", StringComparison.OrdinalIgnoreCase))
@@ -101,7 +110,14 @@ public sealed class MediaAccessService : IMediaAccessService
                 Error.Validation("InvalidAction", "MVP chỉ hỗ trợ thao tác read."));
         }
 
-        var found = await FindServiceAssetAsync(caller, ReadScope, mediaId, cancellationToken);
+        bool isOriginalVariant = string.Equals(request.Variant?.Trim(), ImageVariantPolicy.Original, StringComparison.OrdinalIgnoreCase);
+        if (request.Download && !string.IsNullOrWhiteSpace(request.Variant) && !isOriginalVariant)
+        {
+            return Result.Failure<MediaReadUrlDto>(
+                Error.Validation("InvalidVariantDownload", "download=true chỉ dùng với bản gốc; kết hợp với variant trả 400."));
+        }
+
+        var found = await FindAssetAsync(mediaId, cancellationToken);
         if (found.IsFailure)
         {
             return Result.Failure<MediaReadUrlDto>(found.Error);
@@ -115,9 +131,33 @@ public sealed class MediaAccessService : IMediaAccessService
                 Error.Conflict("MediaNotReady", "Media chưa sẵn sàng để truy cập."));
         }
 
+        if (isOriginalVariant)
+        {
+            return await CreateSignedReadUrlAsync(asset, request.Download, cancellationToken);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Variant))
+        {
+            if (!ImageVariantPolicy.TryNormalizeVariantName(request.Variant, out string normalized))
+            {
+                return Result.Failure<MediaReadUrlDto>(
+                    Error.Validation("InvalidVariant", "Variant không hợp lệ. Chỉ chấp nhận thumbnail, medium, hoặc large."));
+            }
+
+            var variant = asset.ImageVariants.FirstOrDefault(v =>
+                v.ProcessingVersion == ImageVariantPolicy.CurrentProcessingVersion &&
+                string.Equals(v.VariantName, normalized, StringComparison.OrdinalIgnoreCase));
+
+            if (variant == null)
+            {
+                return Result.Failure<MediaReadUrlDto>(
+                    Error.NotFound("VariantNotFound", "Biến thể hình ảnh không tồn tại."));
+            }
+
+            return await CreateSignedVariantReadUrlAsync(asset, variant, cancellationToken);
+        }
         return await CreateSignedReadUrlAsync(asset, request.Download, cancellationToken);
     }
-
     public async Task<Result<MediaReadUrlDto>> CreateUploaderPreviewUrlAsync(
         string authenticatedUserId, Guid mediaId, CancellationToken cancellationToken = default)
     {
@@ -137,6 +177,15 @@ public sealed class MediaAccessService : IMediaAccessService
             asset.Status != MediaStatus.Ready)
         {
             return Result.Failure<MediaReadUrlDto>(MediaNotFound());
+        }
+
+        var mediumVariant = (asset.ImageVariants ?? []).FirstOrDefault(v =>
+            v.ProcessingVersion == ImageVariantPolicy.CurrentProcessingVersion &&
+            string.Equals(v.VariantName, ImageVariantPolicy.Medium, StringComparison.OrdinalIgnoreCase));
+
+        if (mediumVariant != null)
+        {
+            return await CreateSignedVariantReadUrlAsync(asset, mediumVariant, cancellationToken);
         }
 
         return await CreateSignedReadUrlAsync(asset, false, cancellationToken);
@@ -160,8 +209,129 @@ public sealed class MediaAccessService : IMediaAccessService
         return await CreateSignedReadUrlAsync(asset, download, cancellationToken);
     }
 
+    public async Task<Result<MediaVariantContentDto>> GetPublicVariantContentAsync(
+        Guid mediaId, string? variantName, string? ifNoneMatch = null, CancellationToken cancellationToken = default)
+    {
+        if (mediaId == Guid.Empty)
+        {
+            return Result.Failure<MediaVariantContentDto>(InvalidMediaId());
+        }
+
+        MediaAsset? asset = await _assets.GetByIdAsync(mediaId, cancellationToken);
+        if (asset is null || asset.Status != MediaStatus.Ready || asset.Visibility != MediaVisibility.Public)
+        {
+            return Result.Failure<MediaVariantContentDto>(MediaNotFound());
+        }
+
+        string targetVariantName;
+        if (string.IsNullOrWhiteSpace(variantName))
+        {
+            var defaultMedium = (asset.ImageVariants ?? []).FirstOrDefault(v =>
+                v.ProcessingVersion == ImageVariantPolicy.CurrentProcessingVersion &&
+                string.Equals(v.VariantName, ImageVariantPolicy.Medium, StringComparison.OrdinalIgnoreCase));
+
+            if (defaultMedium is null)
+            {
+                return Result.Success(new MediaVariantContentDto(
+                    asset.Id, "original", asset.ActualContentType ?? "application/octet-stream", asset.ActualSizeBytes ?? 0, "", null, FallbackToOriginal: true));
+            }
+
+            targetVariantName = ImageVariantPolicy.Medium;
+        }
+        else if (string.Equals(variantName.Trim(), ImageVariantPolicy.Original, StringComparison.OrdinalIgnoreCase))
+        {
+            return Result.Success(new MediaVariantContentDto(
+                asset.Id, "original", asset.ActualContentType ?? "application/octet-stream", asset.ActualSizeBytes ?? 0, "", null, FallbackToOriginal: true));
+        }
+        else
+        {
+            if (!ImageVariantPolicy.TryNormalizeVariantName(variantName, out string normalized) || normalized is ImageVariantPolicy.Original)
+            {
+                return Result.Failure<MediaVariantContentDto>(
+                    Error.Validation("InvalidVariant", "Variant không hợp lệ. Chỉ chấp nhận thumbnail, medium, large, hoặc original."));
+            }
+            targetVariantName = normalized;
+        }
+
+        var variant = (asset.ImageVariants ?? []).FirstOrDefault(v =>
+            v.ProcessingVersion == ImageVariantPolicy.CurrentProcessingVersion &&
+            string.Equals(v.VariantName, targetVariantName, StringComparison.OrdinalIgnoreCase));
+
+        if (variant is null)
+        {
+            return Result.Failure<MediaVariantContentDto>(
+                Error.NotFound("VariantNotFound", "Biến thể hình ảnh chưa tồn tại."));
+        }
+
+        // Kiểm tra ETag trước khi đọc toàn bộ object để tránh tải MinIO không cần thiết khi revalidate
+        string etag = $"\"{variant.ChecksumSha256}\"";
+        if (!string.IsNullOrWhiteSpace(ifNoneMatch) && string.Equals(ifNoneMatch.Trim(), etag, StringComparison.Ordinal))
+        {
+            return Result.Success(new MediaVariantContentDto(
+                asset.Id,
+                variant.VariantName,
+                variant.ContentType,
+                variant.SizeBytes,
+                variant.ChecksumSha256,
+                null,
+                IsNotModified: true));
+        }
+
+        try
+        {
+            Stream? stream = await _storage.GetObjectStreamAsync(variant.StorageKey, cancellationToken);
+            if (stream is null)
+            {
+                return Result.Failure<MediaVariantContentDto>(MediaNotFound());
+            }
+
+            return Result.Success(new MediaVariantContentDto(
+                asset.Id,
+                variant.VariantName,
+                variant.ContentType,
+                variant.SizeBytes,
+                variant.ChecksumSha256,
+                stream,
+                IsNotModified: false));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            LogReadUrlFailure(_logger, asset.Id, exception.GetType().Name, null);
+            return Result.Failure<MediaVariantContentDto>(
+                Error.Failure("StorageUnavailable", "Không thể truy cập tệp lúc này."));
+        }
+    }
+
+    private async Task<Result<MediaReadUrlDto>> CreateSignedVariantReadUrlAsync(
+        MediaAsset asset, MediaImageVariant variant, CancellationToken cancellationToken)
+    {
+        try
+        {
+            DateTimeOffset expiresAt = DateTimeOffset.UtcNow.Add(_readUrlLifetime);
+            string fileName = $"{Path.GetFileNameWithoutExtension(asset.OriginalFileName)}_{variant.VariantName}.webp";
+            string url = await _storage.GeneratePresignedReadUrlAsync(
+                variant.StorageKey, variant.ContentType,
+                fileName, false, _readUrlLifetime, cancellationToken);
+            return Result.Success(new MediaReadUrlDto(asset.Id, url, expiresAt));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            LogReadUrlFailure(_logger, asset.Id, exception.GetType().Name, null);
+            return Result.Failure<MediaReadUrlDto>(
+                Error.Failure("StorageUnavailable", "Không thể truy cập tệp lúc này."));
+        }
+    }
+
     public async Task<Result<MediaVisibilityDto>> SetVisibilityAsync(
-        ServiceCaller caller, Guid mediaId, ChangeMediaVisibilityRequest request, CancellationToken cancellationToken = default)
+        Guid mediaId, ChangeMediaVisibilityRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         MediaVisibility desired;
@@ -179,7 +349,7 @@ public sealed class MediaAccessService : IMediaAccessService
                 Error.Validation("InvalidVisibility", "Visibility phải là public hoặc private."));
         }
 
-        var found = await FindServiceAssetAsync(caller, PublishScope, mediaId, cancellationToken);
+        var found = await FindAssetAsync(mediaId, cancellationToken);
         if (found.IsFailure)
         {
             return Result.Failure<MediaVisibilityDto>(found.Error);
@@ -220,22 +390,8 @@ public sealed class MediaAccessService : IMediaAccessService
         return Result.Success(new MediaVisibilityDto(mediaId, desired.ToString()));
     }
 
-    private async Task<Result<MediaAsset>> FindServiceAssetAsync(
-        ServiceCaller caller, string requiredScope, Guid mediaId, CancellationToken cancellationToken)
+    private async Task<Result<MediaAsset>> FindAssetAsync(Guid mediaId, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(caller);
-        if (!Guid.TryParse(caller.Id, out Guid serviceId) || serviceId == Guid.Empty)
-        {
-            return Result.Failure<MediaAsset>(
-                Error.Unauthorized("UnauthorizedService", "Yêu cầu phải được xác thực từ một service hợp lệ."));
-        }
-
-        if (!caller.HasScope(requiredScope))
-        {
-            return Result.Failure<MediaAsset>(
-                Error.Forbidden("MissingServiceScope", "Service không có quyền thực hiện thao tác này."));
-        }
-
         if (mediaId == Guid.Empty)
         {
             return Result.Failure<MediaAsset>(InvalidMediaId());
