@@ -20,10 +20,6 @@ public static class PermissionCode
     public const string IdentityRolesAssignOrganization = "identity.roles.assign.organization";
     public const string IdentityRolesRevokeOrganization = "identity.roles.revoke.organization";
 
-    public const string IdentityServicePrincipalsRead = "identity.service-principals.read";
-    public const string IdentityServicePrincipalsManage = "identity.service-principals.manage";
-    public const string IdentityServicePrincipalsRotateSecret = "identity.service-principals.rotate-secret";
-    public const string IdentityServicePrincipalsManageScopes = "identity.service-principals.manage-scopes";
     public const string InventoryAssetManage = "inventory.asset.manage";
     public const string InventoryCalendarRead = "inventory.calendar.read";
     public const string InventoryAllocationWrite = "inventory.allocation.write";
@@ -43,10 +39,6 @@ public static class PermissionCode
         IdentityRolesRevokeGlobal,
         IdentityRolesAssignOrganization,
         IdentityRolesRevokeOrganization,
-        IdentityServicePrincipalsRead,
-        IdentityServicePrincipalsManage,
-        IdentityServicePrincipalsRotateSecret,
-        IdentityServicePrincipalsManageScopes,
         InventoryAssetManage,
         InventoryCalendarRead,
         InventoryAllocationWrite

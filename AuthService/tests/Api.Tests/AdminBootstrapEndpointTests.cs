@@ -25,7 +25,6 @@ public sealed class AdminBootstrapEndpointTests
 
     [Theory]
     [InlineData("admins", HttpStatusCode.Unauthorized)]
-    [InlineData("service-token", HttpStatusCode.BadRequest)]
     public async Task InternalAuthEndpointIsHiddenFromSwaggerButRemainsAvailable(string route, HttpStatusCode expectedStatus)
     {
         using WebApplicationFactory<Program> factory = CreateFactory();
@@ -181,7 +180,7 @@ public sealed class AdminBootstrapEndpointTests
             ["Auth:AdminBootstrap:CreationKey"] = ConfiguredBootstrapKey
         };
 
-        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        return new AuthWebApplicationFactory().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("MediaService:ApiKey", "test-media-key");
             builder.UseSetting("MediaService:PublicGatewayUrl", "http://gateway.example.test");

@@ -82,11 +82,6 @@ public static class AuthErrorCode
     }
 
 
-    public static class ServicePrincipal
-    {
-        public const string InvalidClient = "ServicePrincipal.InvalidClient";
-        public const string InvalidScope = "ServicePrincipal.InvalidScope";
-    }
 
     public static class ExternalLogin
     {

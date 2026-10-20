@@ -78,10 +78,10 @@ public sealed class RbacMigrationTests
         Assert.Contains(insertedPermValues, v => v.Equals(PermissionCode.IdentityRolesRead));
         Assert.Contains(insertedPermValues, v => v.Equals(PermissionCode.IdentityRolesAssignOrganization));
         Assert.Contains(insertedPermValues, v => v.Equals(PermissionCode.IdentityRolesRevokeOrganization));
-        Assert.Contains(insertedPermValues, v => v.Equals(PermissionCode.IdentityServicePrincipalsRead));
-        Assert.Contains(insertedPermValues, v => v.Equals(PermissionCode.IdentityServicePrincipalsManage));
-        Assert.Contains(insertedPermValues, v => v.Equals(PermissionCode.IdentityServicePrincipalsRotateSecret));
-        Assert.Contains(insertedPermValues, v => v.Equals(PermissionCode.IdentityServicePrincipalsManageScopes));
+        Assert.Contains(insertedPermValues, v => v.Equals("identity.service-principals.read"));
+        Assert.Contains(insertedPermValues, v => v.Equals("identity.service-principals.manage"));
+        Assert.Contains(insertedPermValues, v => v.Equals("identity.service-principals.rotate-secret"));
+        Assert.Contains(insertedPermValues, v => v.Equals("identity.service-principals.manage-scopes"));
     }
 
     [Fact]
@@ -103,29 +103,25 @@ public sealed class RbacMigrationTests
             [new Guid("c3030000-0000-0000-0000-000000000004")] = PermissionCode.IdentityRolesRead,
             [new Guid("c3030000-0000-0000-0000-000000000005")] = PermissionCode.IdentityRolesAssignOrganization,
             [new Guid("c3030000-0000-0000-0000-000000000006")] = PermissionCode.IdentityRolesRevokeOrganization,
-            [new Guid("c3030000-0000-0000-0000-000000000007")] = PermissionCode.IdentityServicePrincipalsRead,
-            [new Guid("c3030000-0000-0000-0000-000000000008")] = PermissionCode.IdentityServicePrincipalsManage,
-            [new Guid("c3030000-0000-0000-0000-000000000009")] = PermissionCode.IdentityServicePrincipalsRotateSecret,
-            [new Guid("c3030000-0000-0000-0000-000000000010")] = PermissionCode.IdentityServicePrincipalsManageScopes,
             [new Guid("e5050000-0000-0000-0000-000000000002")] = PermissionCode.InventoryAssetManage,
             [new Guid("e5050000-0000-0000-0000-000000000003")] = PermissionCode.InventoryCalendarRead,
             [new Guid("e5050000-0000-0000-0000-000000000004")] = PermissionCode.InventoryAllocationWrite,
         };
 
         // All canonical permissions present (17 identity + 3 inventory), and zero legacy permissions
-        Assert.Equal(20, permissions.Count);
+        Assert.Equal(16, permissions.Count);
         Assert.All(permissions.Values, code => Assert.True(code.StartsWith("identity.", StringComparison.Ordinal) || code.StartsWith("inventory.", StringComparison.Ordinal)));
         Assert.Equal(PermissionCode.All.OrderBy(x => x), permissions.Values.OrderBy(x => x));
 
         // Admin: all identity permissions
         HashSet<string> adminPerms = [.. permissions.Values];
-        Assert.Equal(20, adminPerms.Count);
+        Assert.Equal(16, adminPerms.Count);
 
         // Platform Admin: all except global role assign/revoke
         HashSet<string> platformAdminPerms = [.. permissions.Values];
         platformAdminPerms.Remove(PermissionCode.IdentityRolesAssignGlobal);
         platformAdminPerms.Remove(PermissionCode.IdentityRolesRevokeGlobal);
-        Assert.Equal(18, platformAdminPerms.Count);
+        Assert.Equal(14, platformAdminPerms.Count);
         Assert.DoesNotContain(PermissionCode.IdentityRolesAssignGlobal, platformAdminPerms);
         Assert.DoesNotContain(PermissionCode.IdentityRolesRevokeGlobal, platformAdminPerms);
 

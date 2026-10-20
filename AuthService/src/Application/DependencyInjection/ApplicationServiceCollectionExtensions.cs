@@ -31,8 +31,14 @@ public static class ApplicationServiceCollectionExtensions
         services.AddSingleton<IValidateOptions<MediaServiceOptions>, MediaServiceOptionsValidator>();
         services.AddOptions<MediaServiceOptions>()
             .Bind(configuration.GetSection(MediaServiceOptions.SectionName))
+            .PostConfigure(opts =>
+            {
+                if (string.IsNullOrWhiteSpace(opts.ApiKey))
+                {
+                    opts.ApiKey = configuration["InternalAuthentication:ApiKey"] ?? configuration["INTERNAL_API_KEY"] ?? string.Empty;
+                }
+            })
             .ValidateOnStart();
-
         services.AddOptions<OrganizationReviewOptions>()
             .Bind(configuration.GetSection(OrganizationReviewOptions.SectionName))
             .Validate(
@@ -47,7 +53,6 @@ public static class ApplicationServiceCollectionExtensions
         services.AddTransient<IPasswordHasher<User>, PasswordHasher<User>>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IRoleAssignmentService, RoleAssignmentService>();
-        services.AddScoped<IServiceIdentityService, ServiceIdentityService>();
         services.AddScoped<IExternalLoginService, ExternalLoginService>();
         services.AddScoped<IFirebaseLoginService, FirebaseLoginService>();
         services.AddScoped<IOrganizationService, OrganizationService>();

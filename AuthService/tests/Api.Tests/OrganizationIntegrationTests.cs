@@ -449,7 +449,7 @@ public sealed class OrganizationIntegrationTests
             ["Auth:AdminBootstrap:CreationKey"] = "test-bootstrap-creation-key"
         };
 
-        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        return new AuthWebApplicationFactory().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("MediaService:ApiKey", "test-media-key");
             builder.UseSetting("MediaService:PublicGatewayUrl", "http://gateway.example.test");

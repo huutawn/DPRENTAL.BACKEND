@@ -46,13 +46,6 @@ public static class Permissions
         public const string Manage = PermissionCode.IdentityUsersManage;
     }
 
-    public static class ServicePrincipals
-    {
-        public const string Read = PermissionCode.IdentityServicePrincipalsRead;
-        public const string Manage = PermissionCode.IdentityServicePrincipalsManage;
-        public const string RotateSecret = PermissionCode.IdentityServicePrincipalsRotateSecret;
-        public const string ManageScopes = PermissionCode.IdentityServicePrincipalsManageScopes;
-    }
 
 
     /// <summary>Toàn bộ mã quyền đã khai báo — dùng để đăng ký policy hàng loạt, tránh quên khi thêm quyền mới.</summary>

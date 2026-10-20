@@ -466,68 +466,6 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.ToTable("RolePermissions", "auth");
                 });
 
-            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.ServicePrincipal", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ClientId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("SecretHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ClientId")
-                        .IsUnique();
-
-                    b.ToTable("ServicePrincipals", "auth");
-                });
-
-            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.ServicePrincipalScope", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Audience")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("Scope")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<Guid>("ServicePrincipalId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ServicePrincipalId", "Scope", "Audience")
-                        .IsUnique();
-
-                    b.ToTable("ServicePrincipalScopes", "auth");
-                });
-
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Session", b =>
                 {
                     b.Property<Guid>("Id")
@@ -726,17 +664,6 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Navigation("Role");
                 });
 
-            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.ServicePrincipalScope", b =>
-                {
-                    b.HasOne("Dprental.AuthService.Domain.Entities.ServicePrincipal", "ServicePrincipal")
-                        .WithMany("Scopes")
-                        .HasForeignKey("ServicePrincipalId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("ServicePrincipal");
-                });
-
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Session", b =>
                 {
                     b.HasOne("Dprental.AuthService.Domain.Entities.User", "User")
@@ -782,11 +709,6 @@ namespace Dprental.AuthService.Domain.Migrations
                     b.Navigation("RolePermissions");
 
                     b.Navigation("UserRoles");
-                });
-
-            modelBuilder.Entity("Dprental.AuthService.Domain.Entities.ServicePrincipal", b =>
-                {
-                    b.Navigation("Scopes");
                 });
 
             modelBuilder.Entity("Dprental.AuthService.Domain.Entities.Session", b =>

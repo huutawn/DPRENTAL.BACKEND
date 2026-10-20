@@ -159,7 +159,7 @@ public sealed class MyOrganizationsEndpointTests
         string publicKey = rsa.ExportRSAPublicKeyPem();
         string privateKey = rsa.ExportRSAPrivateKeyPem();
 
-        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        return new AuthWebApplicationFactory().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("MediaService:ApiKey", "test-media-key");
             builder.UseSetting("MediaService:PublicGatewayUrl", "http://gateway.example.test");
