@@ -27,14 +27,20 @@ public class MediaServiceTestFactory : WebApplicationFactory<Program>
     private const string Audience = "media-tests";
     public const string DefaultApiKey = "test-shared-bootstrap-key";
 
-    public static void SetApiKey(HttpClient client, string key = DefaultApiKey) =>
+    public static void SetApiKey(HttpClient client, string key = DefaultApiKey)
+    {
+        client.DefaultRequestHeaders.Remove("X-Api-Key");
         client.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", key);
+    }
 
-    public static void SetUserToken(HttpClient client, string userId) =>
+    public static void SetUserToken(HttpClient client, string userId)
+    {
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken(userId));
+        SetApiKey(client, DefaultApiKey);
+    }
 
     public static void SetUserTokenOnly(HttpClient client, string userId) =>
-        SetUserToken(client, userId);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken(userId));
     private static string CreateToken(string subject, bool isService = false, string[]? scopes = null, bool fromApiKey = false)
     {
         var claims = new List<Claim> { new("sub", subject) };
@@ -80,7 +86,8 @@ public class MediaServiceTestFactory : WebApplicationFactory<Program>
                 ["Jwt:Issuer"] = Issuer,
                 ["Jwt:Audience"] = Audience,
                 ["Jwt:JwksUri"] = "https://auth.test/.well-known/jwks.json",
-                ["ApiKey"] = DefaultApiKey
+                ["ApiKey"] = DefaultApiKey,
+                ["InternalAuthentication:ApiKey"] = DefaultApiKey
             };
 
             foreach (var (k, v) in ConfigurationOverrides)

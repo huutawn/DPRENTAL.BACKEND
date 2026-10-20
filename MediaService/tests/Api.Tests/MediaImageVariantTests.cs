@@ -253,7 +253,7 @@ public class MediaImageVariantTests
         var visRes = await client.PutAsJsonAsync($"/api/v1/media/{mediaId}/visibility", new ChangeMediaVisibilityRequest("public"));
         Assert.Equal(HttpStatusCode.OK, visRes.StatusCode);
         using var anonClient = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-
+        MediaServiceTestFactory.SetApiKey(anonClient);
         // GET không có variant -> mặc định trả medium WebP 200 trực tiếp đối với ảnh đã xử lý
         using var defaultRes = await anonClient.GetAsync($"/api/v1/media/{mediaId}/content");
         Assert.Equal(HttpStatusCode.OK, defaultRes.StatusCode);
@@ -428,6 +428,7 @@ public class MediaImageVariantTests
 
         // GET /content không có variant khi chưa có biến thể: trả 302 Found redirect tới ảnh gốc
         using var anonClient = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        MediaServiceTestFactory.SetApiKey(anonClient);
         using var beforeBackfillRes = await anonClient.GetAsync($"/api/v1/media/{mediaId}/content");
         Assert.Equal(HttpStatusCode.Redirect, beforeBackfillRes.StatusCode);
 

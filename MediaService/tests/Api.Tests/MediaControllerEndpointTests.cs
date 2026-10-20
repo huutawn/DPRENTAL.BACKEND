@@ -192,6 +192,7 @@ public class MediaControllerEndpointTests
     {
         using var factory = new MediaServiceTestFactory();
         using var client = factory.CreateClient();
+        MediaServiceTestFactory.SetApiKey(client);
 
         var response = await client.PostAsync($"/api/v1/media/uploads/{Guid.NewGuid()}/complete", null);
 
@@ -222,7 +223,7 @@ public class MediaControllerEndpointTests
 
         // 3. User JWT không thay thế được key -> 401
         using var userJwtClient = factory.CreateClient();
-        MediaServiceTestFactory.SetUserToken(userJwtClient, "user-123");
+        MediaServiceTestFactory.SetUserTokenOnly(userJwtClient, "user-123");
         var userJwtResponse = await SendInternalRequest(userJwtClient, method, path);
         Assert.Equal(HttpStatusCode.Unauthorized, userJwtResponse.StatusCode);
 

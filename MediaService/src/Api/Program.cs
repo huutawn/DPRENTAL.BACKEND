@@ -320,6 +320,7 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 
 app.UseCors();
+app.UseMiddleware<InternalApiKeyMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 
