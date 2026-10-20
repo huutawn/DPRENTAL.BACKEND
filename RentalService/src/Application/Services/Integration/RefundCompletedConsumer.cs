@@ -11,6 +11,7 @@ using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.IServices.Integration;
 using Microsoft.Extensions.Logging;
+using Dprental.RentalService.Application.Policies;
 
 namespace Dprental.RentalService.Application.Services.Integration;
 
@@ -45,7 +46,7 @@ public sealed class RefundCompletedConsumer : IRefundCompletedConsumer
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    public async Task<Result> ApplyRefundCompletedStagedAsync(
+    public async Task<Result<bool>> ApplyRefundCompletedStagedAsync(
         RentalOrder order,
         KafkaMessageEnvelope<RefundCompletedPayload> envelope,
         RentalInboxMessage inboxMessage,
@@ -175,7 +176,7 @@ public sealed class RefundCompletedConsumer : IRefundCompletedConsumer
                 {
                     _logger.LogInformation("RefundCompleted event {MessageId} replayed for already completed refund {RefundRef}",
                         envelope.MessageId, payload.RefundRef);
-                    return Result.Success();
+                    return Result.Success(false);
                 }
             }
             catch
@@ -212,7 +213,9 @@ public sealed class RefundCompletedConsumer : IRefundCompletedConsumer
         receipt.SetRefundCompletion(JsonSerializer.Serialize(payload, JsonOptions), utcNow);
         receipt.MarkSucceeded(utcNow);
 
-        return Result.Success();
+        RentalOrderStatusPolicy.Apply(order, utcNow, payload.OperationKey);
+
+        return Result.Success(true);
     }
 
     public async Task<Result> ProcessRefundCompletedAsync(
@@ -276,27 +279,43 @@ public sealed class RefundCompletedConsumer : IRefundCompletedConsumer
             utcNow,
             payloadFingerprint);
 
-        if (existingInbox == null)
+        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
         {
-            await _inboxRepository.AddAsync(inboxMessage, cancellationToken);
-        }
+            if (existingInbox == null)
+            {
+                await _inboxRepository.AddAsync(inboxMessage, cancellationToken);
+            }
 
-        var result = await ApplyRefundCompletedStagedAsync(order, envelope, inboxMessage, cancellationToken);
-        if (result.IsFailure)
-        {
-            return result;
-        }
+            var result = await ApplyRefundCompletedStagedAsync(order, envelope, inboxMessage, cancellationToken);
+            if (result.IsFailure)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return result;
+            }
 
-        inboxMessage.MarkProcessed(utcNow);
-        if (existingInbox != null)
-        {
+            inboxMessage.MarkProcessed(utcNow);
             _inboxRepository.Update(inboxMessage);
-        }
-        order.IncrementVersion();
-        await _orderRepository.UpdateAsync(order, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return Result.Success();
+            if (result.Value)
+            {
+                order.RecordReadModelUpdate(utcNow);
+                await _orderRepository.UpdateAsync(order, cancellationToken);
+            }
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            _unitOfWork.DiscardChanges();
+            _logger.LogError(ex, "Transaction failed while processing RefundCompleted message {MessageId}", envelope.MessageId);
+            throw;
+        }
     }
 
     private static string ComputeHash(string input)

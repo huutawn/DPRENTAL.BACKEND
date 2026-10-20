@@ -4,6 +4,7 @@ using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Domain.Errors;
 
 namespace Dprental.RentalService.Application.Services.Operations;
@@ -143,9 +144,11 @@ public sealed partial class RentalOperationExecutor
         List<SupplierDecisionResponse> responses = [];
         foreach (var (item, key, fingerprint) in decisions)
         {
-            responses.Add(await ApplySupplierRejectAsync(order, item, supplierId, reason, note, key, fingerprint, utcNow, cancellationToken));
+            responses.Add(await ApplySupplierRejectAsync(order, item, supplierId, reason, note, key, fingerprint, utcNow, cancellationToken, rollup: false));
         }
 
+        RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
+        order.RecordReadModelUpdate(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
         return Result.Success<IReadOnlyList<SupplierDecisionResponse>>(responses);
     }

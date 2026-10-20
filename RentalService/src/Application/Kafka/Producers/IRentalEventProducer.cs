@@ -13,4 +13,22 @@ public interface IRentalEventProducer
         string? correlationId = null,
         Guid? causationId = null,
         CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueCartItemAddedAsync(
+        CartItemAddedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueRentalItemPaidAsync(
+        RentalItemPaidPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueRentalItemCompletedAsync(
+        RentalItemCompletedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
 }

@@ -4,7 +4,10 @@ using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.DTOs.Supplier;
+using Dprental.RentalService.Application.IServices.Checkout;
+using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.Services.Operations;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;
@@ -97,17 +100,65 @@ public sealed class RentalOperationExecutorAdvancedTests
 
         return (order, order.Items.First());
     }
+    private static RentalOrder CreatePendingOrder(
+        Guid supplierId,
+        DateTimeOffset? deadline = null)
+    {
+        Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
+        Guid itemId = Guid.NewGuid();
+
+        var assignments = new[] { new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()) };
+        var item = new InitialRentalItemDto(
+            itemId,
+            Guid.NewGuid(),
+            supplierId,
+            1,
+            new DateOnly(2026, 10, 15),
+            new DateOnly(2026, 10, 18),
+            "Camera Sony",
+            null,
+            "Pickup",
+            200_000m,
+            500_000m,
+            "grp-01",
+            assignments,
+            TestListingSnapshots.Default);
+
+        return RentalOrder.Create(
+            orderId,
+            "ORD-ADV-001",
+            renterId,
+            "VND",
+            "Pickup",
+            "Customer",
+            "0909123456",
+            "Address",
+            null,
+            "ORIGINAL_PAYMENT_SOURCE",
+            "terms-1",
+            "doc-1",
+            "hash-1",
+            "op-create",
+            FixedNow,
+            [item],
+            paymentDeadline: deadline ?? FixedNow.AddMinutes(30)).Value;
+    }
+
 
     private static RentalOperationExecutor CreateExecutor(
         RentalServiceDbContext db,
         IInventoryRentalClient inventoryClient,
-        IPaymentRentalClient paymentClient)
+        IPaymentRentalClient paymentClient,
+        ICheckoutInvoiceIssuer? invoiceIssuer = null,
+        IRentalCheckoutOperationRepository? checkoutOpRepo = null,
+        TimeProvider? timeProvider = null)
     {
         var orderRepo = new RentalOrderRepository(db);
         var receiptRepo = new OperationReceiptRepository(db);
         var outboxRepo = new OutboxRepository(db);
         var lockManager = new FakeOrderLockManager();
-        var time = new TestTimeProvider(FixedNow);
+        var time = timeProvider ?? new TestTimeProvider(FixedNow);
         var config = new ConfigurationBuilder().Build();
         return new RentalOperationExecutor(
             orderRepo,
@@ -116,10 +167,13 @@ public sealed class RentalOperationExecutorAdvancedTests
             lockManager,
             inventoryClient,
             paymentClient,
-            db,
-            config,
-            NullLogger<RentalOperationExecutor>.Instance,
-            time);
+            inventoryCommands: null!,
+            unitOfWork: db,
+            configuration: config,
+            logger: NullLogger<RentalOperationExecutor>.Instance,
+            invoiceIssuer: invoiceIssuer,
+            checkoutOperationRepo: checkoutOpRepo,
+            timeProvider: time);
     }
 
     private sealed class StubInventoryClient : IInventoryRentalClient
@@ -254,7 +308,7 @@ public sealed class RentalOperationExecutorAdvancedTests
 
         // Item was already rejected
         item.ApplySupplierReject(supplierId, FixedNow, "Rejected before", null, "op-rej-prev");
-        order.EvaluateOrderStatusRollup(FixedNow, "op-rej-prev");
+        RentalOrderStatusPolicy.Apply(order, FixedNow, "op-rej-prev");
 
         string inFlightKey = "op-in-flight-key";
         var inFlightReceipt = new RentalOperationReceipt(
@@ -347,5 +401,262 @@ public sealed class RentalOperationExecutorAdvancedTests
         Assert.Equal(keyFromReject, keyFromTimeout);
         Assert.Equal(keyFromReject, keyFromHoldFailure);
         Assert.True(keyFromReject.Length <= 64);
+    }
+    [Fact]
+    public async Task CreateInvoice_Exceeding10Attempts_StillPickedUpByQueryAndContinuesRetry()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        var order = CreatePendingOrder(Guid.NewGuid(), FixedNow.AddMinutes(20));
+
+        string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
+        var receipt = new RentalOperationReceipt(
+            Guid.NewGuid(), order.Id, opKey, "CreateInvoice", "fp-1",
+            isSuccess: false, errorCode: "Payment.Http503", errorMessage: "Unavailable",
+            createdAt: FixedNow.AddMinutes(-5),
+            status: RentalOperationReceipt.StatusPending,
+            retryCount: 10,
+            lastAttemptedAt: FixedNow.AddMinutes(-1),
+            nextRetryAt: FixedNow.AddSeconds(-5),
+            isTransient: true);
+        order.AddOperationReceipt(receipt);
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var receiptRepo = new OperationReceiptRepository(db);
+        var pending = await receiptRepo.GetPendingOperationDescriptorsAsync(
+            FixedNow, 50, unlimitedAttemptActions: ["CreateInvoice"]);
+        var desc = Assert.Single(pending, p => p.Action == "CreateInvoice");
+        Assert.Equal(10, desc.RetryCount);
+
+        bool paymentCalled = false;
+        var fakePayment = new StubPaymentClient();
+        var fakeIssuer = new FakeInvoiceIssuer
+        {
+            Handler = o =>
+            {
+                paymentCalled = true;
+                o.AttachInvoice("INV-RETRY-10", FixedNow);
+                o.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey)?.MarkSucceeded(FixedNow);
+                return Task.FromResult(Result.Success());
+            }
+        };
+        var executor = CreateExecutor(db, new StubInventoryClient(), fakePayment, invoiceIssuer: fakeIssuer);
+        var res = await executor.ExecuteScheduledOperationAsync(desc);
+
+        Assert.True(res.IsSuccess, res.IsFailure ? res.Error.ToString() : null);
+        Assert.True(paymentCalled);
+        var reloaded = await db.RentalOperationReceipts.FirstAsync(r => r.Id == receipt.Id);
+        Assert.Equal(11, reloaded.RetryCount);
+        Assert.True(reloaded.IsSuccess);
+    }
+
+    [Fact]
+    public async Task OtherActions_StoppingAt10Attempts_NotPickedUpByQueryAndNotExecuted()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        var (order, item) = CreatePaidOrderWithSucceededHold(Guid.NewGuid());
+
+        string opKey = RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
+        var receipt = new RentalOperationReceipt(
+            Guid.NewGuid(), order.Id, opKey, "ReleaseAllocation", "fp-rel",
+            isSuccess: false, errorCode: "Inventory.Unavailable", errorMessage: "Unavailable",
+            createdAt: FixedNow.AddMinutes(-5),
+            status: RentalOperationReceipt.StatusPending,
+            retryCount: 10,
+            nextRetryAt: FixedNow.AddSeconds(-5),
+            targetItemId: item.Id,
+            isTransient: true);
+        order.AddOperationReceipt(receipt);
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var receiptRepo = new OperationReceiptRepository(db);
+        var pending = await receiptRepo.GetPendingOperationDescriptorsAsync(
+            FixedNow, 50, unlimitedAttemptActions: ["CreateInvoice"]);
+        Assert.DoesNotContain(pending, p => p.Action == "ReleaseAllocation");
+
+        var desc = new OperationReceiptDescriptor(
+            receipt.Id, order.Id, opKey, "ReleaseAllocation", item.Id,
+            RentalOperationReceipt.StatusPending, 10, receipt.NextRetryAt, receipt.CreatedAt, null, false);
+
+        var executor = CreateExecutor(db, new StubInventoryClient(), new StubPaymentClient());
+        var res = await executor.ExecuteScheduledOperationAsync(desc);
+        Assert.True(res.IsSuccess);
+        Assert.Equal(10, receipt.RetryCount); // Not incremented!
+    }
+
+    [Fact]
+    public async Task Recovery_OldExhaustedReceipt_RecoveredIfPendingPaymentAndBeforeDeadline()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        var order = CreatePendingOrder(Guid.NewGuid(), FixedNow.AddMinutes(20));
+
+        string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
+        var receipt = new RentalOperationReceipt(
+            Guid.NewGuid(), order.Id, opKey, "CreateInvoice", "fp-exh",
+            isSuccess: false, errorCode: "Payment.Timeout", errorMessage: "Timeout",
+            createdAt: FixedNow.AddMinutes(-10),
+            status: RentalOperationReceipt.StatusFailed,
+            retryCount: 10,
+            nextRetryAt: null,
+            errorClassification: RentalOperationReceipt.ClassificationTransientExhausted,
+            isTransient: false);
+        order.AddOperationReceipt(receipt);
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var receiptRepo = new OperationReceiptRepository(db);
+        var pending = await receiptRepo.GetPendingOperationDescriptorsAsync(
+            FixedNow, 50, unlimitedAttemptActions: ["CreateInvoice"]);
+        var desc = Assert.Single(pending, p => p.OperationId == opKey);
+        Assert.Equal(RentalOperationReceipt.StatusFailed, desc.Status);
+
+        bool called = false;
+        var fakeIssuer = new FakeInvoiceIssuer
+        {
+            Handler = o =>
+            {
+                called = true;
+                o.AttachInvoice("INV-RECOVERED", FixedNow);
+                o.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey)?.MarkSucceeded(FixedNow);
+                return Task.FromResult(Result.Success());
+            }
+        };
+        var executor = CreateExecutor(db, new StubInventoryClient(), new StubPaymentClient(), invoiceIssuer: fakeIssuer);
+        var res = await executor.ExecuteScheduledOperationAsync(desc);
+
+        Assert.True(res.IsSuccess, res.IsFailure ? res.Error.ToString() : null);
+        Assert.True(called);
+        var reloaded = await db.RentalOperationReceipts.FirstAsync(r => r.Id == receipt.Id);
+        Assert.Equal(11, reloaded.RetryCount);
+        Assert.True(reloaded.IsSuccess);
+    }
+
+    [Fact]
+    public async Task Recovery_OldExhaustedReceipt_ClosedIfOrderExpired()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        var order = CreatePendingOrder(Guid.NewGuid(), FixedNow.AddMinutes(20));
+        order.MarkPaymentExpired(FixedNow.AddMinutes(-5), "op-expire");
+
+        string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
+        var receipt = new RentalOperationReceipt(
+            Guid.NewGuid(), order.Id, opKey, "CreateInvoice", "fp-exh",
+            isSuccess: false, errorCode: "Payment.Timeout", errorMessage: "Timeout",
+            createdAt: FixedNow.AddMinutes(-10),
+            status: RentalOperationReceipt.StatusFailed,
+            retryCount: 10,
+            errorClassification: RentalOperationReceipt.ClassificationTransientExhausted);
+        order.AddOperationReceipt(receipt);
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var desc = new OperationReceiptDescriptor(
+            receipt.Id, order.Id, opKey, "CreateInvoice", null,
+            RentalOperationReceipt.StatusFailed, 10, null, receipt.CreatedAt, null, false);
+
+        bool called = false;
+        var fakeIssuer = new FakeInvoiceIssuer { Handler = _ => { called = true; return Task.FromResult(Result.Success()); } };
+        var executor = CreateExecutor(db, new StubInventoryClient(), new StubPaymentClient(), invoiceIssuer: fakeIssuer);
+        var res = await executor.ExecuteScheduledOperationAsync(desc);
+
+        Assert.True(res.IsSuccess);
+        Assert.False(called);
+        Assert.Equal(10, receipt.RetryCount);
+        Assert.Equal(RentalOperationReceipt.StatusFailed, receipt.Status);
+    }
+
+    [Fact]
+    public async Task Recovery_OldExhaustedReceipt_CompletedLocallyIfOrderHasInvoice()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        var order = CreatePendingOrder(Guid.NewGuid(), FixedNow.AddMinutes(20));
+        order.AttachInvoice("INV-EXISTING", FixedNow);
+        string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
+        var receipt = new RentalOperationReceipt(
+            Guid.NewGuid(), order.Id, opKey, "CreateInvoice", "fp-exh",
+            isSuccess: false, errorCode: "Payment.Timeout", errorMessage: "Timeout",
+            createdAt: FixedNow.AddMinutes(-10),
+            status: RentalOperationReceipt.StatusFailed,
+            retryCount: 10,
+            errorClassification: RentalOperationReceipt.ClassificationTransientExhausted);
+        order.AddOperationReceipt(receipt);
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var desc = new OperationReceiptDescriptor(
+            receipt.Id, order.Id, opKey, "CreateInvoice", null,
+            RentalOperationReceipt.StatusFailed, 10, null, receipt.CreatedAt, null, false);
+
+        bool issuerCalled = false;
+        var fakePayment = new StubPaymentClient();
+        var fakeIssuer = new FakeInvoiceIssuer
+        {
+            Handler = o =>
+            {
+                issuerCalled = true;
+                o.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey)?.MarkSucceeded(FixedNow);
+                return Task.FromResult(Result.Success());
+            }
+        };
+        var executor = CreateExecutor(db, new StubInventoryClient(), fakePayment, invoiceIssuer: fakeIssuer);
+        var res = await executor.ExecuteScheduledOperationAsync(desc);
+
+        Assert.True(res.IsSuccess);
+        Assert.True(issuerCalled);
+        Assert.Equal(10, receipt.RetryCount);
+        var reloaded = await db.RentalOperationReceipts.FirstAsync(r => r.Id == receipt.Id);
+        Assert.True(reloaded.IsSuccess);
+        Assert.Equal(RentalOperationReceipt.StatusSucceeded, reloaded.Status);
+    }
+
+    [Fact]
+    public async Task Recovery_DeterministicBusinessFailedReceipt_NotRecovered()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        var order = CreatePendingOrder(Guid.NewGuid(), FixedNow.AddMinutes(20));
+
+        string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
+        var receipt = new RentalOperationReceipt(
+            Guid.NewGuid(), order.Id, opKey, "CreateInvoice", "fp-bus",
+            isSuccess: false, errorCode: "Checkout.InvoiceRejected", errorMessage: "Rejected",
+            createdAt: FixedNow.AddMinutes(-10),
+            status: RentalOperationReceipt.StatusFailed,
+            retryCount: 1,
+            errorClassification: RentalOperationReceipt.ClassificationBusiness);
+        order.AddOperationReceipt(receipt);
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var receiptRepo = new OperationReceiptRepository(db);
+        var pending = await receiptRepo.GetPendingOperationDescriptorsAsync(
+            FixedNow, 50, unlimitedAttemptActions: ["CreateInvoice"]);
+        Assert.DoesNotContain(pending, p => p.OperationId == opKey);
+
+        var desc = new OperationReceiptDescriptor(
+            receipt.Id, order.Id, opKey, "CreateInvoice", null,
+            RentalOperationReceipt.StatusFailed, 1, null, receipt.CreatedAt, null, false);
+
+        bool called = false;
+        var fakeIssuer = new FakeInvoiceIssuer { Handler = _ => { called = true; return Task.FromResult(Result.Success()); } };
+        var executor = CreateExecutor(db, new StubInventoryClient(), new StubPaymentClient(), invoiceIssuer: fakeIssuer);
+        var res = await executor.ExecuteScheduledOperationAsync(desc);
+
+        Assert.True(res.IsSuccess);
+        Assert.False(called);
+        Assert.Equal(RentalOperationReceipt.StatusFailed, receipt.Status);
+    }
+
+    private sealed class FakeInvoiceIssuer : ICheckoutInvoiceIssuer
+    {
+        public Func<RentalOrder, Task<Result>>? Handler { get; set; }
+        public Task<Result> EnsureInvoiceAsync(RentalOrder order, CancellationToken cancellationToken = default) =>
+            Handler != null ? Handler(order) : Task.FromResult(Result.Success());
     }
 }

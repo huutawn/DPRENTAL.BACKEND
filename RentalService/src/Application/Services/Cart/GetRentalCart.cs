@@ -63,12 +63,21 @@ public sealed class GetRentalCart(
                 continue;
             }
 
-            RentalListingSnapshot? listing = await listingReader.GetListingAsync(item.EquipmentListingId, cancellationToken);
-            if (listing is null)
+            Result<RentalListingSnapshot> listingResult = await listingReader.GetListingAsync(item.EquipmentListingId, cancellationToken);
+            if (listingResult.IsFailure)
             {
-                lines.Add(CreateFailedLine(item, RentalCartLineStatus.Unavailable, "Sản phẩm không tồn tại hoặc đã bị xóa."));
+                if (listingResult.Error.Type == ErrorType.NotFound)
+                {
+                    lines.Add(CreateFailedLine(item, RentalCartLineStatus.Unavailable, "Sản phẩm không tồn tại hoặc đã bị xóa."));
+                }
+                else
+                {
+                    return Error.ServiceUnavailable("INVENTORY_UNAVAILABLE", "Không thể kiểm tra thông tin thiết bị lúc này.");
+                }
                 continue;
             }
+
+            RentalListingSnapshot listing = listingResult.Value;
 
             // MỚI: Check listing do chính mình sở hữu
             if (listing.OwnerId == renterId)
@@ -91,15 +100,15 @@ public sealed class GetRentalCart(
                 continue;
             }
 
-            int? availableQty = await availabilityReader.GetAvailableQuantityAsync(
+            Result<int> availResult = await availabilityReader.GetAvailableQuantityAsync(
                 item.EquipmentListingId, item.ExpectedStartDate, item.ExpectedEndDate, cancellationToken);
 
-            // Phân biệt Null (Lỗi hệ thống) và 0 (hết hàng)
-            if (availableQty is null)
+            if (availResult.IsFailure)
             {
-                lines.Add(CreateLine(item, listing, duration, RentalCartLineStatus.ValidationFailed, "Không thể kiểm tra tồn kho tại thời điểm này."));
-                continue;
+                return Error.ServiceUnavailable("INVENTORY_UNAVAILABLE", "Không thể kiểm tra tồn kho lúc này.");
             }
+
+            int availableQty = availResult.Value;
 
             if (availableQty < item.Quantity)
             {

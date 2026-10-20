@@ -96,7 +96,7 @@ public class RentalOutboxMessage
         LockedUntilUtc = null;
     }
 
-    public void RecordFailure(string errorMessage, DateTimeOffset attemptedAt, DateTimeOffset? nextScheduledAt = null)
+    public void RecordFailure(string errorMessage, DateTimeOffset attemptedAt, DateTimeOffset? nextScheduledAt = null, string? targetStatus = null)
     {
         RetryCount++;
         LastAttemptedAt = attemptedAt;
@@ -104,13 +104,32 @@ public class RentalOutboxMessage
         ScheduledAt = nextScheduledAt;
         LockedBy = null;
         LockedUntilUtc = null;
-        if (RetryCount >= 10)
+        if (!string.IsNullOrWhiteSpace(targetStatus))
+        {
+            Status = targetStatus;
+            if (targetStatus == "DeadLettered")
+            {
+                ScheduledAt = null;
+            }
+        }
+        else if (RetryCount >= 10)
         {
             Status = "DeadLettered";
+            ScheduledAt = null;
         }
         else
         {
             Status = "Pending";
         }
+    }
+
+    public void ResetForReplay(DateTimeOffset scheduledAt)
+    {
+        Status = "Pending";
+        ScheduledAt = scheduledAt;
+        PublishedAt = null;
+        LockedBy = null;
+        LockedUntilUtc = null;
+        ErrorMessage = null;
     }
 }

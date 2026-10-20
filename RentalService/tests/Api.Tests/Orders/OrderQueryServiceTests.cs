@@ -118,8 +118,11 @@ public sealed class OrderQueryServiceTests
         Assert.Equal(20_000_000m, excavator.DepositAmount);
         Assert.Equal(excavatorItem.SupplierConfirmationDeadline, excavator.SupplierConfirmationDeadline);
         Assert.Equal("Máy xúc", excavator.Listing.EquipmentTypeName);
+        Assert.Equal(excavatorItem.EquipmentTypeId, excavator.Listing.EquipmentTypeId);
+        Assert.Equal(excavatorItem.BrandId, excavator.Listing.BrandId);
+        Assert.Equal(excavatorItem.SpecSchemaVersionSnapshot, excavator.Listing.SpecSchemaVersion);
         Assert.Equal("Caterpillar", excavator.Listing.BrandName);
-        Assert.Equal("Kho Thủ Đức, TP.HCM", excavator.Listing.PickupLocation);
+        Assert.Null(excavator.Listing.PickupLocation);
         Assert.Equal(excavatorItem.ThumbnailMediaIdSnapshot, excavator.Listing.ThumbnailMediaId);
         Assert.Equal(55, excavator.Listing.SpecValues!.Value.GetProperty("cong_suat_kw").GetInt32());
         Assert.Equal(new OrderItemRefundResponse(OrderRefundState.None, null), excavator.Refund);
@@ -480,7 +483,7 @@ public sealed class OrderQueryServiceTests
         Result<RenterOrderDetailResponse> beforeConfirm =
             await RenterService().GetMyOrderAsync(_paidMixedOrder.Id, OrderTestData.User(_an));
         Assert.True(beforeConfirm.IsSuccess);
-        Assert.Null(beforeConfirm.Value.SubOrders[0].Items[0].PickupLocation);
+        Assert.Null(beforeConfirm.Value.SubOrders[0].Items[0].Listing.PickupLocation);
 
         // 2. Chủ kho xác nhận: chuyển mục thuê sang AwaitingHandover
         await using (RentalServiceDbContext context = NewContext())
@@ -496,7 +499,7 @@ public sealed class OrderQueryServiceTests
         Result<RenterOrderDetailResponse> afterConfirm =
             await RenterService().GetMyOrderAsync(_paidMixedOrder.Id, OrderTestData.User(_an));
         Assert.True(afterConfirm.IsSuccess);
-        Assert.Equal("Kho Thủ Đức, TP.HCM", afterConfirm.Value.SubOrders[0].Items[0].PickupLocation);
+        Assert.Equal("Kho Thủ Đức, TP.HCM", afterConfirm.Value.SubOrders[0].Items[0].Listing.PickupLocation);
     }
 
     [Fact]

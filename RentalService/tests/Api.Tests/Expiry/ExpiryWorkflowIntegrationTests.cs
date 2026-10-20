@@ -11,6 +11,7 @@ using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.IServices.Expiry;
 using Dprental.RentalService.Application.Services.Expiry;
 using Dprental.RentalService.Application.Services.Integration;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;
@@ -316,7 +317,7 @@ public sealed class ExpiryWorkflowIntegrationTests
 
         var item = order.Items.First();
         item.ApplySupplierReject(item.SupplierId, FixedNow, "Busy", null, "op-rej-1");
-        order.EvaluateOrderStatusRollup(FixedNow, "op-rej-1");
+        RentalOrderStatusPolicy.Apply(order, FixedNow, "op-rej-1");
 
         var refundItems = new List<RefundItemRequest> { new(item.Id, 500_000m, 1_000_000m) };
         var refundReceipt = new RentalOperationReceipt(
@@ -334,10 +335,10 @@ public sealed class ExpiryWorkflowIntegrationTests
             payloadJson: JsonSerializer.Serialize(new RequestRefundRequest(orderId, "INV-001", "PAY-001", refundItems, "Rejected", "refund:rejected:001")));
         order.AddOperationReceipt(refundReceipt);
 
+        long initialVersion = order.Version;
         db.RentalOrders.Add(order);
         await db.SaveChangesAsync();
-
-        var consumer = CreateRefundConsumer(db);
+        await db.DisposeAsync();
 
         var payload = new RefundCompletedPayload(
             orderId,
@@ -361,16 +362,37 @@ public sealed class ExpiryWorkflowIntegrationTests
             null,
             payload);
 
-        var result = await consumer.ProcessRefundCompletedAsync(envelope);
+        await using (var processDb = CreateDbContext(dbName))
+        {
+            var consumer = CreateRefundConsumer(processDb);
+            var result = await consumer.ProcessRefundCompletedAsync(envelope);
+            Assert.True(result.IsSuccess);
+        }
 
-        Assert.True(result.IsSuccess);
+        await using (var verifyDb = CreateDbContext(dbName))
+        {
+            var reloadedOrder = await verifyDb.RentalOrders
+                .Include(o => o.Items)
+                .Include(o => o.OperationReceipts)
+                .Include(o => o.StateTransitions)
+                .FirstAsync(o => o.Id == orderId);
 
-        var reloadedItem = await db.RentalItems.FirstAsync(i => i.Id == item.Id);
-        Assert.Equal("REF-COMPLETED-001", reloadedItem.RefundRef);
-        // Invariant: RefundCompleted does NOT change rejected/expired item to Completed!
-        Assert.Equal(RentalItemStatus.Rejected, reloadedItem.Status);
+            var reloadedItem = reloadedOrder.Items.First(i => i.Id == item.Id);
+            Assert.Equal("REF-COMPLETED-001", reloadedItem.RefundRef);
+            // Invariant: RefundCompleted does NOT change rejected/expired item to Completed!
+            Assert.Equal(RentalItemStatus.Rejected, reloadedItem.Status);
 
-        var reloadedOrder = await db.RentalOrders.Include(o => o.StateTransitions).FirstAsync(o => o.Id == orderId);
-        Assert.Contains(reloadedOrder.StateTransitions, t => t.Action == "RefundCompleted");
+            Assert.Contains(reloadedOrder.StateTransitions, t => t.Action == "RefundCompleted");
+            Assert.Equal(initialVersion + 1, reloadedOrder.Version);
+            Assert.Equal(FixedNow, reloadedOrder.UpdatedAt);
+
+            var receipt = reloadedOrder.OperationReceipts.First(r => r.OperationId == "refund:rejected:001");
+            Assert.Equal(RentalOperationReceipt.StatusSucceeded, receipt.Status);
+            Assert.False(string.IsNullOrWhiteSpace(receipt.RefundCompletionJson));
+
+            var inbox = await verifyDb.RentalInboxMessages.FirstOrDefaultAsync(m => m.MessageId == envelope.MessageId);
+            Assert.NotNull(inbox);
+            Assert.Equal(RentalInboxMessage.StatusProcessed, inbox.Status);
+        }
     }
 }

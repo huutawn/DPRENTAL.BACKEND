@@ -57,10 +57,22 @@ public class RentalCart
         int quantity,
         DateOnly expectedStartDate,
         DateOnly expectedEndDate,
+        DateTimeOffset utcNow) =>
+        AddItem(itemId, equipmentListingId, equipmentListingOwnerId, Guid.NewGuid(), quantity, expectedStartDate, expectedEndDate, utcNow);
+
+    public Result<RentalCartItem> AddItem(
+        Guid itemId,
+        Guid equipmentListingId,
+        Guid equipmentListingOwnerId,
+        Guid equipmentTypeId,
+        int quantity,
+        DateOnly expectedStartDate,
+        DateOnly expectedEndDate,
         DateTimeOffset utcNow)
     {
         if (Status != RentalCartStatus.Active) return RentalErrors.CartNotActive;
         if (itemId == Guid.Empty || equipmentListingId == Guid.Empty) return RentalErrors.CartItemNotFound;
+        if (equipmentTypeId == Guid.Empty) return Error.Validation("INVALID_EQUIPMENT_TYPE_ID", "EquipmentTypeId không được để trống hoặc rỗng.");
 
         Result requestValidation = ValidateRentalRequest(
             equipmentListingOwnerId, expectedStartDate, expectedEndDate);
@@ -83,7 +95,7 @@ public class RentalCart
             return existing;
         }
 
-        RentalCartItem newItem = new(itemId, Id, equipmentListingId, quantity, expectedStartDate, expectedEndDate, utcNow);
+        RentalCartItem newItem = new(itemId, Id, equipmentListingId, equipmentTypeId, quantity, expectedStartDate, expectedEndDate, utcNow);
         _items.Add(newItem);
         UpdatedAt = utcNow;
         Version++;

@@ -380,6 +380,7 @@ public sealed class RenterCalendarIntegrationTests
         }
 
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Test");
 
         var response = await client.GetAsync("/api/v1/rental/me/calendar?month=2026-10");

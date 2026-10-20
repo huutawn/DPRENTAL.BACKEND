@@ -50,6 +50,10 @@ public static class CheckoutErrors
 
     public static readonly Error OrderExpired =
         Error.Expired("Checkout.OrderExpired", "Đơn hàng đã hết hạn thanh toán. Vui lòng đặt lại.");
+    /// <summary>Xung đột concurrency token khi lưu trạng thái hóa đơn; yêu cầu nạp lại aggregate trước khi tiếp tục.</summary>
+    public static readonly Error InvoicePersistenceConflict =
+        Error.Conflict("Checkout.InvoicePersistenceConflict", "Xung đột đồng thời khi lưu thông tin hóa đơn.");
+
 
     public static readonly Error DependencyUnavailable =
         Error.ServiceUnavailable("Checkout.DependencyUnavailable", "Chưa kiểm tra được thiết bị. Vui lòng thử lại.");

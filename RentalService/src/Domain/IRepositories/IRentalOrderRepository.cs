@@ -25,6 +25,8 @@ public interface IRentalOrderRepository
     Task<bool> UpdateAsync(RentalOrder order, CancellationToken cancellationToken = default);
 
     Task<RentalOrder?> GetByIdWithDetailsAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<RentalOrder?> GetForCheckoutPollingAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<Guid?> GetRenterIdByOrderIdAsync(Guid orderId, CancellationToken cancellationToken = default);
 
     Task<RentalOrder?> GetByItemIdWithDetailsAsync(Guid itemId, CancellationToken cancellationToken = default);
 
@@ -34,6 +36,10 @@ public interface IRentalOrderRepository
 
     Task<IReadOnlyList<Guid>> GetPendingSupplierTimeoutItemIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Guid>> GetOverdueUnprotectedOrderIdsAsync(
+        DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
+
+    Task<IReadOnlyList<Guid>> GetHandoverOverdueOrderIdsAsync(
         DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
 

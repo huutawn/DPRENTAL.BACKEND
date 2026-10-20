@@ -283,6 +283,14 @@ public class RentalOperationReceipt
         LastAttemptedAt = requestedAt;
         IsTransient = true;
     }
+    internal void ResumeRetry(DateTimeOffset attemptedAt, DateTimeOffset? nextRetryAt = null)
+    {
+        Status = StatusPending;
+        LastAttemptedAt = attemptedAt;
+        NextRetryAt = nextRetryAt;
+        IsTransient = true;
+    }
+
 
     internal void MarkManualReconciliationRequired(DateTimeOffset utcNow, string? reason = null)
     {

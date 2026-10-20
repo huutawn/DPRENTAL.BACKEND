@@ -8,11 +8,6 @@ namespace Dprental.RentalService.Application.Clients;
 /// </summary>
 public interface IInventoryRentalClient
 {
-    // Read & Hold Operations
-    Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(
-        Guid listingId,
-        CancellationToken ct = default);
-
     Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(
         ListingAvailabilityCheckRequest request,
         CancellationToken ct = default);

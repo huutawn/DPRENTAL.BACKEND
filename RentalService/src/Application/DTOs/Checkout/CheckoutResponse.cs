@@ -19,7 +19,7 @@ public sealed record CheckoutResponse(
     string OrderCode,
     RentalOrderStatus Status,
     DateTimeOffset PaymentDeadline,
-    string InvoiceRef,
+    string? InvoiceRef,
     string Currency,
     decimal TotalRentalAmount,
     decimal TotalDepositAmount,
@@ -35,7 +35,7 @@ public sealed record CheckoutResponse(
             order.OrderCode,
             order.Status,
             order.PaymentDeadline,
-            order.InvoiceRef!,
+            order.InvoiceRef,
             order.Currency,
             order.TotalRentalAmount,
             order.TotalDepositAmount,
@@ -95,4 +95,5 @@ public sealed record CheckoutOperationStatusResponse(
     CheckoutResponse? Order = null,
     string? ErrorCode = null,
     string? ErrorMessage = null,
-    string? InvoiceStatus = null);
+    string? InvoiceStatus = null,
+    bool ReadyForPayment = false);

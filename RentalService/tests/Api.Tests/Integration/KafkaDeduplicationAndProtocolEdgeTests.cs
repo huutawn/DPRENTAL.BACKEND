@@ -440,15 +440,22 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
 
         public Task AddAsync(RentalOutboxMessage message, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<bool> MarkPublishedAsync(Guid id, string claimToken, DateTimeOffset publishedAt, CancellationToken cancellationToken = default) => Task.FromResult(true);
-        public Task<bool> RecordFailureAsync(Guid id, string claimToken, string errorMessage, DateTimeOffset attemptedAt, DateTimeOffset? nextScheduledAt = null, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> RecordFailureAsync(Guid id, string claimToken, string errorMessage, DateTimeOffset attemptedAt, DateTimeOffset? nextScheduledAt = null, string? targetStatus = null, CancellationToken cancellationToken = default) => Task.FromResult(true);
     }
 
     private sealed class StubPaymentWorkflow : IPaymentWorkflowService
     {
         public Func<KafkaMessageEnvelope<InvoicePaidPayload>, Task<Result>>? Handler { get; set; }
 
-        public Task<Result> ApplyInvoicePaidStagedAsync(RentalOrder order, KafkaMessageEnvelope<InvoicePaidPayload> envelope, RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default) =>
-            Handler != null ? Handler(envelope) : Task.FromResult(Result.Success());
+        public async Task<Result<bool>> ApplyInvoicePaidStagedAsync(RentalOrder order, KafkaMessageEnvelope<InvoicePaidPayload> envelope, RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default)
+        {
+            if (Handler != null)
+            {
+                var res = await Handler(envelope);
+                return res.IsFailure ? res.Error : Result.Success(true);
+            }
+            return Result.Success(true);
+        }
 
         public Task<Result> ProcessInvoicePaidAsync(KafkaMessageEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default) =>
             Handler != null ? Handler(envelope) : Task.FromResult(Result.Success());
@@ -456,8 +463,8 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
 
     private sealed class StubRefundConsumer : IRefundCompletedConsumer
     {
-        public Task<Result> ApplyRefundCompletedStagedAsync(RentalOrder order, KafkaMessageEnvelope<RefundCompletedPayload> envelope, RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success());
+        public Task<Result<bool>> ApplyRefundCompletedStagedAsync(RentalOrder order, KafkaMessageEnvelope<RefundCompletedPayload> envelope, RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(true));
 
         public Task<Result> ProcessRefundCompletedAsync(KafkaMessageEnvelope<RefundCompletedPayload> envelope, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success());

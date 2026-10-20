@@ -1,75 +1,81 @@
+using System;
 using System.Globalization;
-using Dprental.RentalService.Application.DTOs.Cart;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
+using Dprental.RentalService.Common.Utils;
 
 namespace Dprental.RentalService.Application.Services.Cart;
 
 /// <summary>Adapts the frozen Inventory contract to Cart's read and ownership ports.</summary>
 public sealed class InventoryRentalCartReader(IInventoryRentalClient inventory) :
-    IRentalListingOwnerProvider,
     IRentalListingReader,
     IRentalAvailabilityReader
 {
-    public async Task<Guid?> GetOwnerIdAsync(Guid equipmentListingId, CancellationToken cancellationToken = default)
+    public async Task<Result<RentalListingSnapshot>> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default)
     {
-        Result<ListingRentalSnapshotDto> result = await inventory.GetListingRentalSnapshotAsync(
-            equipmentListingId, cancellationToken);
+        Result<ListingRentalSnapshotsResponse> result = await inventory.GetListingRentalSnapshotsAsync(
+            new ListingRentalSnapshotsRequest([listingId]), cancellationToken);
 
         if (result.IsFailure)
         {
-            if (result.Error.Type == ErrorType.NotFound) return null;
-            throw DependencyFailure(result.Error);
+            return result.Error;
         }
 
-        return result.Value.OwnerUserId == Guid.Empty ? null : result.Value.OwnerUserId;
-    }
-
-    public async Task<RentalListingSnapshot?> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default)
-    {
-        Result<ListingRentalSnapshotDto> result = await inventory.GetListingRentalSnapshotAsync(
-            listingId, cancellationToken);
-
-        if (result.IsFailure)
+        var snapshot = result.Value.Items.FirstOrDefault(x => x.Id == listingId);
+        if (snapshot is null)
         {
-            if (result.Error.Type == ErrorType.NotFound) return null;
-            throw DependencyFailure(result.Error);
+            return Error.NotFound("LISTING_NOT_FOUND", "Sản phẩm không tồn tại hoặc đã bị xóa.");
         }
 
-        ListingRentalSnapshotDto snapshot = result.Value;
+        if (snapshot.DepositPerUnit is not { } deposit ||
+            VndAmountValidator.ValidateVndAmount(deposit).IsFailure ||
+            VndAmountValidator.ValidateVndAmount(snapshot.DailyRate).IsFailure ||
+            !string.Equals(snapshot.Currency, CheckoutRules.Currency, StringComparison.OrdinalIgnoreCase))
+        {
+            return Error.ServiceUnavailable("INVENTORY_CONTRACT_INVALID", "Inventory rental snapshot is missing valid pricing data.");
+        }
         bool active = string.Equals(snapshot.Status, "Active", StringComparison.OrdinalIgnoreCase);
 
         // Inventory không có phiên bản giá: lấy chính giá thuê làm phiên bản, giá đổi thì phiên bản đổi.
-        return new RentalListingSnapshot(
+        return Result.Success(new RentalListingSnapshot(
             snapshot.Id,
             snapshot.OwnerUserId,
-            IsPublished: active,
-            AcceptsBookings: active,
+            snapshot.EquipmentTypeId,
+            active,
+            active,
             snapshot.DailyRate,
-            CheckoutRules.DepositPerUnit,
-            snapshot.DailyRate.ToString(CultureInfo.InvariantCulture));
+            deposit,
+            $"{snapshot.DailyRate.ToString(CultureInfo.InvariantCulture)}:{deposit.ToString(CultureInfo.InvariantCulture)}"));
     }
 
-    public async Task<int?> GetAvailableQuantityAsync(
+    public async Task<Result<int>> GetAvailableQuantityAsync(
         Guid listingId,
         DateOnly startDate,
         DateOnly endDate,
         CancellationToken cancellationToken = default)
     {
-        if (startDate > endDate) return null;
+        if (startDate > endDate)
+        {
+            return Error.Validation("INVALID_DATES", "Ngày bắt đầu không được lớn hơn ngày kết thúc.");
+        }
 
         // Giỏ và Inventory cùng tính ngày cuối có tính, nên gửi thẳng ngày của giỏ.
         Result<ListingAvailabilityCheckResponse> result = await inventory.CheckListingAvailabilityAsync(
             new ListingAvailabilityCheckRequest(listingId, startDate, endDate, RequestedQuantity: 1),
             cancellationToken);
 
-        if (result.IsFailure) throw DependencyFailure(result.Error);
-        return result.Value.AvailableQuantity;
-    }
+        if (result.IsFailure)
+        {
+            return result.Error;
+        }
 
-    private static InvalidOperationException DependencyFailure(Error error) =>
-        new($"Inventory contract call failed ({error.Code}).");
+        return Result.Success(result.Value.AvailableQuantity);
+    }
 }

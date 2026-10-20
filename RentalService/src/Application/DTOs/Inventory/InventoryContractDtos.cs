@@ -1,11 +1,11 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Dprental.RentalService.Common.Enums;
 
 namespace Dprental.RentalService.Application.DTOs.Inventory;
 
 // 1. GetListingRentalSnapshot
-// Theo dạng Inventory đưa ngày 15/10/2026: chỉ những gì Rental cần để tính tiền, chia đơn con và hiển thị.
-// Inventory chưa có tiền cọc, Rental tạm tính cọc = 0.
+// Snapshot thương mại do Inventory cung cấp tại thời điểm checkout.
 public sealed record ListingWarehouseDto(
     string? AddressDetail,
     string? ProvinceCode,
@@ -18,13 +18,21 @@ public sealed record ListingWarehouseDto(
 public sealed record ListingRentalSnapshotDto(
     Guid Id,
     Guid OwnerUserId,
+    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
     string Name,
     Guid? ThumbnailMediaId,
     decimal DailyRate,
     string Currency,
     string Status,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    ListingWarehouseDto? Warehouse = null);
+[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    ListingWarehouseDto? Warehouse = null,
+    Guid? BrandId = null,
+    string? Model = null,
+    decimal? DepositPerUnit = null,
+    int? SpecSchemaVersion = null,
+    JsonElement? SpecValues = null,
+    string? EquipmentTypeName = null,
+    string? BrandName = null);
 
 // 2. CheckListingAvailability: POST /equipment-listings/{listingId}/availability/check, đúng dạng Inventory.
 // EndDate là ngày dùng máy cuối cùng (có tính): thuê 18, 19, 20 thì gửi startDate 18, endDate 20.

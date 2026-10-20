@@ -1,0 +1,7 @@
+# Rental checkout and payment deadline
+
+- Checkout acceptance creates a 30-minute Inventory hold. The resulting RentalOrder, when created, uses the same `HoldExpiresAt` instant as `PaymentDeadline`; invoice creation receives that same deadline. Creating the invoice does not extend it.
+- `GET /api/v1/rental/checkout/operations/{operationId}` retains `status = Succeeded` to mean that the order was created. The response also returns `invoiceStatus` and `readyForPayment`. The frontend must show the payment screen only when `readyForPayment = true`. Rental sets that flag only while the order is `PendingPayment`, an invoice reference is attached, and the shared deadline is still in the future.
+- A temporary invoice creation failure is retried throughout the remaining hold window, including after the normal operation retry budget of 10 attempts. At or after the deadline no new invoice is requested. The existing payment expiry workflow cancels an invoice if present and releases Inventory allocations.
+- `InvoicePaid.PaidAt` is the payment business timestamp. `PaidAt < PaymentDeadline` is on time; equality and later are late. Kafka envelope `OccurredAt` is publication metadata and does not determine lateness. An order already `Expired` or `Cancelled` still enters the late-payment refund flow when `InvoicePaid` arrives.
+- Duplicate `InvoicePaid` events remain idempotent through the existing inbox and `PaymentRef` checks.

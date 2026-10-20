@@ -182,7 +182,7 @@ internal sealed class CheckoutTestHarness
     {
         await using RentalServiceDbContext context = NewContext();
         return await new OperationReceiptRepository(context)
-            .GetPendingOperationDescriptorsAsync(Clock.GetUtcNow(), 50);
+            .GetPendingOperationDescriptorsAsync(Clock.GetUtcNow(), 50, excludedActions: [], unlimitedAttemptActions: ["CreateInvoice"]);
     }
 
     public async Task<List<RentalOrder>> LoadOrdersAsync()

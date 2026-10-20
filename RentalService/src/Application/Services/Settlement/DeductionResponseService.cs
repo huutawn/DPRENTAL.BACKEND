@@ -8,6 +8,7 @@ using Dprental.RentalService.Application.IServices.Settlement;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Validation;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
@@ -111,7 +112,8 @@ public sealed partial class DeductionResponseService(
             Guid.NewGuid(), order.Id, key, RespondAction, fingerprint, true, null, null, now,
             targetItemId: item.Id, payloadJson: payload, apiResponseJson: JsonSerializer.Serialize(response)));
 
-        order.IncrementVersion();
+        RentalOrderStatusPolicy.Apply(order, now, key);
+        order.RecordReadModelUpdate(now);
         try
         {
             await orders.UpdateAsync(order, cancellationToken);
@@ -164,7 +166,8 @@ public sealed partial class DeductionResponseService(
 
         if (!item.TryAutoAcceptDeduction(now, opKey)) return Result.Success();
 
-        order.IncrementVersion();
+        RentalOrderStatusPolicy.Apply(order, now, opKey);
+        order.RecordReadModelUpdate(now);
         try
         {
             await orders.UpdateAsync(order, cancellationToken);

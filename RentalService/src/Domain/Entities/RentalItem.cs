@@ -203,6 +203,12 @@ public partial class RentalItem
         }
     }
 
+    public void SetEquipmentTypeId(Guid equipmentTypeId)
+    {
+        if (equipmentTypeId == Guid.Empty) throw new ArgumentException("EquipmentTypeId cannot be empty.", nameof(equipmentTypeId));
+        EquipmentTypeId = equipmentTypeId;
+    }
+
     public void SetHandoverRecord(HandoverRecord handoverRecord)
     {
         ArgumentNullException.ThrowIfNull(handoverRecord);
@@ -318,9 +324,14 @@ public partial class RentalItem
 
     internal void ApplyHandover(DateTimeOffset utcNow, string operationKey)
     {
+        // Kết quả trùng từ Inventory hoặc dòng đã đi tiếp thì không ghi đè trạng thái, không ghi thêm lịch sử.
+        if (Status != RentalItemStatus.AwaitingHandover)
+        {
+            return;
+        }
+
         string from = Status.ToString();
         Status = RentalItemStatus.InRental;
-
 
         RentalOrder?.AddStateTransition(new RentalStateTransition(
             Guid.NewGuid(),
@@ -406,13 +417,18 @@ public partial class RentalItem
             operationId));
     }
 
-    internal void MarkAssignmentsReleased(DateTimeOffset? releasedAt = null)
+    internal bool MarkAssignmentsReleased(DateTimeOffset releasedAt)
     {
-        DateTimeOffset now = releasedAt ?? DateTimeOffset.UtcNow;
+        bool changed = false;
         foreach (var unit in _unitAssignments)
         {
-            unit.Release(now);
+            if (unit.Status != RentalUnitAssignmentStatus.Released)
+            {
+                unit.Release(releasedAt);
+                changed = true;
+            }
         }
+        return changed;
     }
 
     internal void RecordRefund(string refundRef)

@@ -31,6 +31,10 @@ using Dprental.RentalService.Application.Services.SupplierStatistics;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net.Http;
 using Dprental.RentalService.Application.Services.Overdue;
+using Dprental.RentalService.Application.IServices.Cancellation;
+using Dprental.RentalService.Application.Services.Cancellation;
+using Dprental.RentalService.Application.IServices.Handover;
+using Dprental.RentalService.Application.Services.Handover;
 using Dprental.RentalService.Application.IServices.Settlement;
 using Dprental.RentalService.Application.Services.Settlement;
 
@@ -47,14 +51,11 @@ public static class ApplicationServiceCollectionExtensions
         // Cart Policy & Adapter
         services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
         services.AddScoped<InventoryRentalCartReader>();
-        services.AddScoped<IRentalListingOwnerProvider>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
         services.AddScoped<IRentalListingReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
         services.AddScoped<IRentalAvailabilityReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
 
         // External Clients
         services.AddHttpClient<IRentalMediaClient, HttpRentalMediaClient>()
-            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
-        services.AddHttpClient<IServiceTokenProvider, AuthServiceTokenProvider>()
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddHttpClient<IPaymentRentalClient, HttpPaymentRentalClient>()
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
@@ -88,6 +89,10 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<ISupplierDecisionService, SupplierDecisionService>();
         services.AddScoped<ISupplierStatisticsService, SupplierStatisticsService>();
 
+        // Handover Acknowledgement & Item Cancellation
+        services.AddScoped<IHandoverAcknowledgementService, HandoverAcknowledgementService>();
+        services.AddScoped<IItemCancellationService, ItemCancellationService>();
+
         // Expiry
         services.AddScoped<IExpiryWorkflowService, ExpiryWorkflowService>();
 
@@ -112,6 +117,12 @@ public static class ApplicationServiceCollectionExtensions
         services.AddOptions<OverdueProtectionOptions>()
             .BindConfiguration(OverdueProtectionOptions.SectionName);
         services.AddScoped<IOverdueProtectionService, OverdueProtectionService>();
+
+        // Handover Overdue & Auto-Cancellation
+        services.AddOptions<HandoverOverdueOptions>()
+            .BindConfiguration(HandoverOverdueOptions.SectionName);
+        services.AddScoped<IHandoverOverdueService, HandoverOverdueService>();
+        services.AddHostedService<HandoverOverdueWorker>();
 
         // Settlement
         services.AddScoped<IDeductionService, DeductionService>();

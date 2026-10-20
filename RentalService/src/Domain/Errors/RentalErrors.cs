@@ -52,6 +52,12 @@ public static class RentalErrors
     public static readonly Error OrderCancellationForbidden =
         Error.Conflict("Order.CancellationForbidden", "Không thể hủy đơn thuê ở trạng thái hiện tại.");
 
+    public static readonly Error CancelTooEarly =
+        Error.Conflict("CANCEL_TOO_EARLY", "Chưa qua mốc quá hạn giao thiết bị; người thuê chưa thể hủy.");
+
+    public static readonly Error HandoverInProgress =
+        Error.Conflict("HANDOVER_IN_PROGRESS", "Bằng chứng bàn giao đang được xử lý; không thể hủy mục thuê.");
+
     public static readonly Error PaymentDeadlineNotReached =
         Error.Validation("Order.PaymentDeadlineNotReached", "Chưa đến thời hạn hết hạn thanh toán.");
 

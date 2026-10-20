@@ -151,6 +151,11 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
 
     public Task<RentalOrder?> GetByIdWithDetailsAsync(Guid id, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+    public Task<RentalOrder?> GetForCheckoutPollingAsync(Guid id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(PendingPaymentOrder?.Id == id ? PendingPaymentOrder : null);
+    public Task<Guid?> GetRenterIdByOrderIdAsync(Guid orderId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(PendingPaymentOrder?.Id == orderId ? (Guid?)PendingPaymentOrder.RenterId : null);
+
 
     public Task<RentalOrder?> GetByItemIdWithDetailsAsync(Guid itemId, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
@@ -301,6 +306,9 @@ internal sealed class FakeInventoryListingClient : IInventoryRentalClient
 /// <summary>Thông tin máy theo hợp đồng Inventory cho test checkout.</summary>
 internal static class TestListings
 {
+    public static readonly Guid EquipmentTypeId = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+    public static readonly Guid BrandId = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000001");
+
     public static ListingRentalSnapshotDto Create(
         Guid listingId,
         Guid supplierId,
@@ -308,12 +316,22 @@ internal static class TestListings
         decimal dailyRate,
         bool isActive = true,
         Guid? thumbnailMediaId = null,
-        string currency = "VND") => new(
+        string currency = "VND",
+        Guid? equipmentTypeId = null,
+        decimal depositPerUnit = 0m) => new(
         listingId,
         supplierId,
+        equipmentTypeId ?? EquipmentTypeId,
         name,
         thumbnailMediaId,
         dailyRate,
         currency,
-        isActive ? "Active" : "Inactive");
+        isActive ? "Active" : "Inactive",
+        BrandId: BrandId,
+        Model: "A7 IV",
+        DepositPerUnit: depositPerUnit,
+        SpecSchemaVersion: 1,
+        SpecValues: System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>("{\"resolutionMp\":33}"),
+        EquipmentTypeName: "Camera",
+        BrandName: "Sony");
 }

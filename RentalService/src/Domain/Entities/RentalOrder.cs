@@ -470,9 +470,15 @@ public class RentalOrder
         _operationReceipts.Add(receipt);
     }
 
-    internal void IncrementVersion()
+    internal void RecordReadModelUpdate(DateTimeOffset utcNow)
     {
         Version++;
+        UpdatedAt = utcNow;
+    }
+
+    internal void IncrementVersion()
+    {
+        RecordReadModelUpdate(UpdatedAt);
     }
 
     public bool HasInFlightAccept(Guid itemId)
@@ -599,116 +605,28 @@ public class RentalOrder
             paymentRef));
     }
 
-    internal void EvaluateOrderStatusRollup(DateTimeOffset utcNow, string operationId)
+    internal void ApplyStatusRollup(RentalOrderStatus newStatus, DateTimeOffset utcNow, string operationId, string? reason = null)
     {
-        if (Status != RentalOrderStatus.Paid && Status != RentalOrderStatus.AwaitingHandover)
+        if (Status == newStatus)
         {
             return;
         }
 
-        // If any item is still waiting for supplier decision, Order remains in Paid status
-        if (_items.Any(i => i.Status == RentalItemStatus.PendingSupplierConfirmation))
-        {
-            return;
-        }
-
-        // If all items finished supplier decision:
-        var activeItems = _items.Where(i => i.Status is not (RentalItemStatus.Rejected or RentalItemStatus.Expired or RentalItemStatus.Cancelled)).ToList();
-        if (activeItems.Count > 0 && activeItems.All(i => i.Status is RentalItemStatus.InRental or RentalItemStatus.PendingSettlement or RentalItemStatus.Completed))
-        {
-            if (Status != RentalOrderStatus.InRental)
-            {
-                string from = Status.ToString();
-                Status = RentalOrderStatus.InRental;
-                UpdatedAt = utcNow;
-                AddStateTransition(new RentalStateTransition(
-                    Guid.NewGuid(),
-                    Id,
-                    null,
-                    from,
-                    RentalOrderStatus.InRental.ToString(),
-                    "OrderRollup",
-                    null,
-                    ActorRole.System,
-                    "All items handed over; rental in progress",
-                    utcNow,
-                    operationId));
-            }
-            return;
-        }
-
-        // 1. Any item is accepted/awaiting handover (or beyond) -> Order moves to AwaitingHandover
-        if (_items.Any(i => i.Status is RentalItemStatus.AwaitingHandover or RentalItemStatus.InRental or RentalItemStatus.PendingSettlement or RentalItemStatus.Completed))
-        {
-            if (Status != RentalOrderStatus.AwaitingHandover)
-            {
-                string from = Status.ToString();
-                Status = RentalOrderStatus.AwaitingHandover;
-                UpdatedAt = utcNow;
-                AddStateTransition(new RentalStateTransition(
-                    Guid.NewGuid(),
-                    Id,
-                    null,
-                    from,
-                    RentalOrderStatus.AwaitingHandover.ToString(),
-                    "OrderRollup",
-                    null,
-                    ActorRole.System,
-                    "Supplier confirmation completed with accepted items; awaiting handover",
-                    utcNow,
-                    operationId));
-            }
-            return;
-        }
-
-        // 2. All items are Rejected -> Order moves to Rejected
-        if (_items.All(i => i.Status == RentalItemStatus.Rejected))
-        {
-            if (Status != RentalOrderStatus.Rejected)
-            {
-                string from = Status.ToString();
-                Status = RentalOrderStatus.Rejected;
-                UpdatedAt = utcNow;
-                AddStateTransition(new RentalStateTransition(
-                    Guid.NewGuid(),
-                    Id,
-                    null,
-                    from,
-                    RentalOrderStatus.Rejected.ToString(),
-                    "OrderRollup",
-                    null,
-                    ActorRole.System,
-                    "All items rejected by supplier",
-                    utcNow,
-                    operationId));
-            }
-            return;
-        }
-
-        // 3. All items ended in reject/expiry and at least one is Expired -> Order moves to Expired
-        if (_items.All(i => i.Status is RentalItemStatus.Rejected or RentalItemStatus.Expired) &&
-            _items.Any(i => i.Status == RentalItemStatus.Expired))
-        {
-            if (Status != RentalOrderStatus.Expired)
-            {
-                string from = Status.ToString();
-                Status = RentalOrderStatus.Expired;
-                UpdatedAt = utcNow;
-                AddStateTransition(new RentalStateTransition(
-                    Guid.NewGuid(),
-                    Id,
-                    null,
-                    from,
-                    RentalOrderStatus.Expired.ToString(),
-                    "OrderRollup",
-                    null,
-                    ActorRole.System,
-                    "Items ended in reject/expiry without any accepted items",
-                    utcNow,
-                    operationId));
-            }
-            return;
-        }
+        string from = Status.ToString();
+        Status = newStatus;
+        UpdatedAt = utcNow;
+        AddStateTransition(new RentalStateTransition(
+            Guid.NewGuid(),
+            Id,
+            null,
+            from,
+            newStatus.ToString(),
+            "OrderRollup",
+            null,
+            ActorRole.System,
+            reason ?? $"Order status rolled up to {newStatus}",
+            utcNow,
+            operationId));
     }
 
     internal void MarkPaymentExpired(DateTimeOffset utcNow, string operationId)

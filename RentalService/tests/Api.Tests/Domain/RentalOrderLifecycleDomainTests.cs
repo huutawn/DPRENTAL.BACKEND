@@ -1,5 +1,6 @@
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Application.Policies;
 using Xunit;
 
 namespace Dprental.RentalService.Api.Tests.Domain;
@@ -201,7 +202,7 @@ public sealed class RentalOrderLifecycleDomainTests
         DateTimeOffset acceptTime = FixedNow.AddMinutes(15);
 
         item.ApplySupplierAccept(supplierId, acceptTime, "CONF-INV-001", "op-accept");
-        order.EvaluateOrderStatusRollup(acceptTime, "op-accept");
+        RentalOrderStatusPolicy.Apply(order, acceptTime, "op-accept");
 
         Assert.Equal(RentalItemStatus.AwaitingHandover, item.Status);
         Assert.Equal(supplierId, item.SupplierDecisionBy);
@@ -223,7 +224,7 @@ public sealed class RentalOrderLifecycleDomainTests
         DateTimeOffset rejectTime = FixedNow.AddMinutes(20);
 
         item.ApplySupplierReject(supplierId, rejectTime, "Device undergoing repair", "Optional note", "op-reject");
-        order.EvaluateOrderStatusRollup(rejectTime, "op-reject");
+        RentalOrderStatusPolicy.Apply(order, rejectTime, "op-reject");
 
         Assert.Equal(RentalItemStatus.Rejected, item.Status);
         Assert.Equal("Device undergoing repair", item.SupplierDecisionReason);
@@ -245,7 +246,7 @@ public sealed class RentalOrderLifecycleDomainTests
 
         var items = order.Items.ToList();
         items[0].ApplySupplierAccept(items[0].SupplierId, FixedNow.AddMinutes(5), "CONF-1", "op-acc1");
-        order.EvaluateOrderStatusRollup(FixedNow.AddMinutes(5), "op-acc1");
+        RentalOrderStatusPolicy.Apply(order, FixedNow.AddMinutes(5), "op-acc1");
 
         // Item 1 accepted, item 2 still waiting -> Order status must remain Paid
         Assert.Equal(RentalOrderStatus.Paid, order.Status);
@@ -260,7 +261,7 @@ public sealed class RentalOrderLifecycleDomainTests
         var items = order.Items.ToList();
         items[0].ApplySupplierAccept(items[0].SupplierId, FixedNow.AddMinutes(5), "CONF-1", "op-acc1");
         items[1].ApplySupplierReject(items[1].SupplierId, FixedNow.AddMinutes(10), "Out of stock", null, "op-rej2");
-        order.EvaluateOrderStatusRollup(FixedNow.AddMinutes(10), "op-rej2");
+        RentalOrderStatusPolicy.Apply(order, FixedNow.AddMinutes(10), "op-rej2");
 
         Assert.Equal(RentalItemStatus.AwaitingHandover, items[0].Status);
         Assert.Equal(RentalItemStatus.Rejected, items[1].Status);
@@ -276,7 +277,7 @@ public sealed class RentalOrderLifecycleDomainTests
         var items = order.Items.ToList();
         items[0].ApplySupplierReject(items[0].SupplierId, FixedNow.AddMinutes(5), "Busy", null, "op-rej1");
         items[1].ApplySupplierTimeout(FixedNow.AddHours(25), "op-timeout2");
-        order.EvaluateOrderStatusRollup(FixedNow.AddHours(25), "op-timeout2");
+        RentalOrderStatusPolicy.Apply(order, FixedNow.AddHours(25), "op-timeout2");
 
         Assert.Equal(RentalItemStatus.Rejected, items[0].Status);
         Assert.Equal(RentalItemStatus.Expired, items[1].Status);

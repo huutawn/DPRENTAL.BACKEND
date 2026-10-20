@@ -22,18 +22,16 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
     };
 
     private readonly HttpClient _httpClient;
-    private readonly IServiceTokenProvider _tokenProvider;
     private readonly ILogger<HttpInventoryRentalClient> _logger;
     private readonly string _baseUrl;
+    private readonly string _apiKey;
 
     public HttpInventoryRentalClient(
         HttpClient httpClient,
-        IServiceTokenProvider tokenProvider,
         IConfiguration configuration,
         ILogger<HttpInventoryRentalClient> logger)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        _tokenProvider = tokenProvider ?? throw new ArgumentNullException(nameof(tokenProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         string configuredBase = configuration["Services:Inventory:BaseUrl"] ?? "http://inventory-service:8080";
@@ -42,6 +40,10 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
         {
             _baseUrl += "/api/v1/inventory";
         }
+
+        _apiKey = configuration["InternalAuthentication:ApiKey"]
+            ?? configuration["INTERNAL_API_KEY"]
+            ?? string.Empty;
 
         _httpClient.Timeout = TimeSpan.FromSeconds(10);
     }
@@ -206,22 +208,15 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
         string scope,
         CancellationToken ct)
     {
-        // 1. Obtain token with audience & scope
-        var tokenResult = await _tokenProvider.GetServiceTokenAsync(InventoryAudience, scope, ct);
-        if (tokenResult.IsFailure)
-        {
-            _logger.LogError("Không thể lấy token cho InventoryService (Audience: {Audience}, Scope: {Scope}): {Error}",
-                InventoryAudience, scope, tokenResult.Error.Message);
-            return tokenResult.Error;
-        }
-
         string fullUrl = $"{_baseUrl}{relativeRoute}";
 
         try
         {
             using var httpRequest = new HttpRequestMessage(method, fullUrl);
-            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenResult.Value);
-
+            if (!string.IsNullOrWhiteSpace(_apiKey))
+            {
+                httpRequest.Headers.TryAddWithoutValidation("X-Api-Key", _apiKey);
+            }
             if (requestBody != null)
             {
                 string json = JsonSerializer.Serialize(requestBody, JsonOptions);
@@ -241,6 +236,11 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
                     return Result.Success(data);
                 }
                 return Error.Failure("INVENTORY_DESERIALIZATION_FAILED", "Không thể deserialize phản hồi từ InventoryService.");
+            }
+            if (httpResponse.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+            {
+                _logger.LogWarning("InventoryService authentication failed with status {StatusCode}", httpResponse.StatusCode);
+                return Error.ServiceUnavailable("INVENTORY_UNAVAILABLE", "Không thể xác thực hoặc kết nối tới InventoryService (503).");
             }
 
             string errorCode = $"Inventory.Http{(int)httpResponse.StatusCode}";

@@ -41,6 +41,11 @@ public static class KafkaContractSpec
         public const string DeadLetter = "DeadLetter";
         public const string InventoryAllocationCommandSucceeded = "InventoryAllocationCommandSucceeded";
         public const string InventoryAllocationCommandRejected = "InventoryAllocationCommandRejected";
+        public const string RentalItemCancelled = "RentalItemCancelled";
+        public const string RentalHandoverOverdue = "RentalHandoverOverdue";
+        public const string CartItemAdded = "CartItemAdded";
+        public const string RentalItemPaid = "RentalItemPaid";
+        public const string RentalItemCompleted = "RentalItemCompleted";
     }
 
     public static class CommandTypes
