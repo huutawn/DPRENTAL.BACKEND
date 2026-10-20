@@ -30,6 +30,10 @@ builder.Services.AddScoped<ICatalogCallerContext, CatalogCallerContext>();
 
 var mediaSection = builder.Configuration.GetSection(MediaServiceOptions.SectionName);
 var mediaOptions = mediaSection.Get<MediaServiceOptions>() ?? new MediaServiceOptions();
+if (string.IsNullOrWhiteSpace(mediaOptions.ApiKey))
+{
+    mediaOptions.ApiKey = builder.Configuration["InternalAuthentication:ApiKey"] ?? string.Empty;
+}
 if (!string.IsNullOrWhiteSpace(builder.Configuration["PublicGatewayUrl"]))
 {
     mediaOptions.PublicGatewayUrl = builder.Configuration["PublicGatewayUrl"]!;
@@ -52,6 +56,10 @@ builder.Services.AddOptions<MediaServiceOptions>()
         {
             opts.PublicGatewayUrl = builder.Configuration["PublicGatewayUrl"]!;
         }
+        if (string.IsNullOrWhiteSpace(opts.ApiKey))
+        {
+            opts.ApiKey = builder.Configuration["InternalAuthentication:ApiKey"] ?? string.Empty;
+        }
     })
     .ValidateOnStart();
 
@@ -73,6 +81,11 @@ builder.Services.AddHttpClient<IInventoryServiceClient, InventoryServiceClient>(
     var opts = sp.GetRequiredService<IOptions<InventoryServiceOptions>>().Value;
     client.BaseAddress = new Uri(opts.BaseUrl.TrimEnd('/') + "/");
     client.Timeout = TimeSpan.FromSeconds(opts.TimeoutSeconds);
+    string internalKey = builder.Configuration["InternalAuthentication:ApiKey"] ?? string.Empty;
+    if (!string.IsNullOrWhiteSpace(internalKey))
+    {
+        client.DefaultRequestHeaders.Add("X-Api-Key", internalKey);
+    }
 });
 
 string[] configuredOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
@@ -158,6 +171,7 @@ if (app.Environment.IsDevelopment())
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseCors();
+app.UseMiddleware<InternalApiKeyMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 

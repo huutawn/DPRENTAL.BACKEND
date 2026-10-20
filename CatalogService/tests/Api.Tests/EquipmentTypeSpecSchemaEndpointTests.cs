@@ -42,7 +42,7 @@ public sealed class EquipmentTypeSpecSchemaEndpointTests : IAsyncLifetime
 
     public EquipmentTypeSpecSchemaEndpointTests()
     {
-        factory = new WebApplicationFactory<Program>()
+        factory = new CatalogWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", PostgreSqlFixture.ConnectionString);

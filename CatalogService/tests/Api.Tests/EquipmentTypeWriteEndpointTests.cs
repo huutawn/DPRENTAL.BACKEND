@@ -34,7 +34,7 @@ public sealed class EquipmentTypeWriteEndpointTests : IAsyncLifetime, IDisposabl
 
     public EquipmentTypeWriteEndpointTests()
     {
-        factory = new WebApplicationFactory<Program>()
+        factory = new CatalogWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", PostgreSqlFixture.ConnectionString);

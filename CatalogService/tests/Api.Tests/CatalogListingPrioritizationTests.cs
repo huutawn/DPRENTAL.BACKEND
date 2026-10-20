@@ -75,7 +75,7 @@ public sealed partial class CatalogListingPrioritizationTests : IAsyncLifetime, 
 
     public CatalogListingPrioritizationTests()
     {
-        _factory = new WebApplicationFactory<Program>()
+        _factory = new CatalogWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", PostgreSqlFixture.ConnectionString);

@@ -51,7 +51,7 @@ public sealed class EquipmentTypeCanonicalSpecificationEndpointTests : IAsyncLif
 
     public EquipmentTypeCanonicalSpecificationEndpointTests()
     {
-        factory = new WebApplicationFactory<Program>()
+        factory = new CatalogWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", PostgreSqlFixture.ConnectionString);

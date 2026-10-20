@@ -265,7 +265,7 @@ public sealed class StartupAndConfigurationTests
     [Fact]
     public async Task SwaggerDocument_AssertsExactPatchContract_AndSerializesSuccessfully()
     {
-        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
+        using WebApplicationFactory<Program> factory = new CatalogWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
@@ -342,7 +342,7 @@ public sealed class StartupAndConfigurationTests
     [Fact]
     public async Task Cors_Development_AllowsLocalhost3000()
     {
-        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
+        using WebApplicationFactory<Program> factory = new CatalogWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Development);
@@ -367,7 +367,7 @@ public sealed class StartupAndConfigurationTests
     [Fact]
     public async Task Cors_Production_DoesNotAllowLocalhost3000_UnlessConfigured()
     {
-        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
+        using WebApplicationFactory<Program> factory = new CatalogWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting(WebHostDefaults.EnvironmentKey, Environments.Production);
