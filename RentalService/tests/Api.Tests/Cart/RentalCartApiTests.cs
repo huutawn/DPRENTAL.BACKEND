@@ -179,19 +179,16 @@ public class RentalCartApiTests : IClassFixture<RentalApiFixture>
     }
 
     [Fact]
-    public async Task GetCart_WithClientPriceVersion_ReturnsPriceChangedWhenVersionIsStale()
+    public async Task GetCart_UsesCurrentPriceWithoutQueryParameters()
     {
         using var addResponse = await _renter1Client.PostAsJsonAsync("rental/cart/items", NewItemRequest());
         await EnsureSuccessAsync(addResponse);
-        using var addDoc = await addResponse.Content.ReadFromJsonAsync<JsonDocument>();
-        Guid itemId = addDoc!.RootElement.GetProperty("cartItemId").GetGuid();
 
-        using var getResponse = await _renter1Client.GetAsync(
-            $"rental/cart?clientPriceVersions[{itemId}]=old-version");
+        using var getResponse = await _renter1Client.GetAsync("rental/cart");
         await EnsureSuccessAsync(getResponse);
         using var cartDoc = await getResponse.Content.ReadFromJsonAsync<JsonDocument>();
         var item = Assert.Single(cartDoc!.RootElement.GetProperty("items").EnumerateArray());
-        Assert.Equal("PRICE_CHANGED", item.GetProperty("status").GetString());
+        Assert.Equal("AVAILABLE", item.GetProperty("status").GetString());
         Assert.Equal("v1", item.GetProperty("currentPriceVersion").GetString());
     }
 

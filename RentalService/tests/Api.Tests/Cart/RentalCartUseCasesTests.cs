@@ -111,7 +111,7 @@ public sealed class RentalCartUseCasesTests
     }
 
     [Fact]
-    public async Task RemoveCartItem_RepositoryUpdateFails_ReturnsCartNotFound()
+    public async Task RemoveCartItem_RepositoryUpdateFails_ReturnsConflict()
     {
         var cart = RentalCart.Create(Guid.NewGuid(), _renterId, _timeProvider.GetUtcNow()).Value;
         Guid cartItemId = Guid.NewGuid();
@@ -129,7 +129,47 @@ public sealed class RentalCartUseCasesTests
         var result = await _sut.RemoveCartItemAsync(_renterId, cartItemId);
 
         Assert.True(result.IsFailure);
-        Assert.Equal(RentalErrors.CartNotFound, result.Error);
+        Assert.Equal("CONCURRENCY_CONFLICT", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task RemoveCartItem_DoesNotDependOnInventoryAvailability()
+    {
+        var cart = RentalCart.Create(Guid.NewGuid(), _renterId, _timeProvider.GetUtcNow()).Value;
+        Guid cartItemId = cart.AddItem(Guid.NewGuid(), _listingId, _ownerId, 1,
+            _validStartDate, _validEndDate, _timeProvider.GetUtcNow()).Value.Id;
+        _cartRepoMock.Setup(x => x.GetActiveByRenterIdAsync(_renterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cart);
+        _cartRepoMock.Setup(x => x.UpdateAsync(cart, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _listingReaderMock.Setup(x => x.GetListingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Error.ServiceUnavailable("INVENTORY_UNAVAILABLE", "Inventory unavailable."));
+
+        Result result = await _sut.RemoveCartItemAsync(_renterId, cartItemId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(cart.Items);
+        _listingReaderMock.Verify(x => x.GetListingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ClearCart_DoesNotDependOnInventoryAvailability()
+    {
+        var cart = RentalCart.Create(Guid.NewGuid(), _renterId, _timeProvider.GetUtcNow()).Value;
+        cart.AddItem(Guid.NewGuid(), _listingId, _ownerId, 1,
+            _validStartDate, _validEndDate, _timeProvider.GetUtcNow());
+        _cartRepoMock.Setup(x => x.GetActiveByRenterIdAsync(_renterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cart);
+        _cartRepoMock.Setup(x => x.UpdateAsync(cart, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _listingReaderMock.Setup(x => x.GetListingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Error.ServiceUnavailable("INVENTORY_UNAVAILABLE", "Inventory unavailable."));
+
+        Result result = await _sut.ClearCartAsync(_renterId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(cart.Items);
+        _listingReaderMock.Verify(x => x.GetListingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

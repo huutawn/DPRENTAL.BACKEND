@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Common;
@@ -114,7 +115,7 @@ public sealed class InventoryRentalConsumerContractTests
         string json = JsonSerializer.Serialize(result.Value, JsonOptions);
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement root = document.RootElement;
-        Assert.Equal(2_000_000m, root.GetProperty("depositPerUnit").GetDecimal());
+        Assert.Equal(2_000_000m, root.GetProperty("depositAmount").GetDecimal());
         Assert.Equal(fixture.EquipmentTypeId, root.GetProperty("equipmentTypeId").GetGuid());
         Assert.Equal(fixture.BrandId, root.GetProperty("brandId").GetGuid());
         Assert.Equal("FX3", root.GetProperty("model").GetString());
@@ -123,7 +124,9 @@ public sealed class InventoryRentalConsumerContractTests
         Assert.DoesNotContain("serialNumber", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("assetCode", json, StringComparison.OrdinalIgnoreCase);
 
-        ListingRentalSnapshotDto? deserialized = JsonSerializer.Deserialize<ListingRentalSnapshotDto>(json, JsonOptions);
+        ListingRentalSnapshotDto? deserialized = JsonSerializer.Deserialize<ListingRentalSnapshotDto>(
+            """{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","ownerUserId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","equipmentTypeId":"cccccccc-cccc-cccc-cccc-cccccccccccc","name":"Sony FX3","dailyRate":500000,"currency":"VND","status":"Active","depositAmount":2000000,"brandId":"dddddddd-dddd-dddd-dddd-dddddddddddd","model":"FX3","specSchemaVersion":1,"specValues":{"sensor":"full-frame"}}""",
+            JsonOptions);
         Assert.NotNull(deserialized);
         Assert.Equal(fixture.Id, deserialized.Id);
         Assert.Equal(fixture.DepositPerUnit, deserialized.DepositPerUnit);
@@ -165,6 +168,25 @@ public sealed class InventoryRentalConsumerContractTests
         Assert.Equal(1_000_000m, before.Value.Deposit);
         Assert.Equal(2_000_000m, after.Value.Deposit);
         Assert.NotEqual(before.Value.PriceVersion, after.Value.PriceVersion);
+    }
+
+    [Fact]
+    public async Task CartReader_MapsInventoryDepositAmountAndAcceptsZeroDeposit()
+    {
+        Guid listingId = Guid.NewGuid();
+        ListingRentalSnapshotDto? inventoryPayload = JsonSerializer.Deserialize<ListingRentalSnapshotDto>(
+            $$"""{"id":"{{listingId}}","ownerUserId":"{{Guid.NewGuid()}}","equipmentTypeId":"{{Guid.NewGuid()}}","name":"Camera","dailyRate":120000,"currency":"VND","status":"Active","depositAmount":0}""",
+            JsonOptions);
+        Assert.NotNull(inventoryPayload);
+
+        _stub.GetSnapshotsHandler = _ => Task.FromResult(Result.Success(
+            new ListingRentalSnapshotsResponse([inventoryPayload], [])));
+
+        InventoryRentalCartReader reader = new(_stub);
+        Result<RentalListingSnapshot> result = await reader.GetListingAsync(listingId);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal(0m, result.Value.Deposit);
     }
 
     // 3. Availability Check Fixture & Serialization

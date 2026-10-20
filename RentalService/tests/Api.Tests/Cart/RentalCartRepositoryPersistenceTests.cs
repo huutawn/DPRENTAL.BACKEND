@@ -73,4 +73,27 @@ public sealed class RentalCartRepositoryPersistenceTests
         Assert.Empty(reloaded.Items);
         Assert.Equal(0, await readContext.RentalCartItems.CountAsync());
     }
+
+    [Fact]
+    public async Task UpdateAsync_PersistsNewItemAddedToExistingCart()
+    {
+        await SeedCartWithTwoItemsAsync();
+        Guid newListingId = Guid.NewGuid();
+        Guid newItemId;
+
+        await using (RentalServiceDbContext context = NewContext())
+        {
+            RentalCartRepository repository = new(context);
+            RentalCart cart = (await repository.GetActiveByRenterIdAsync(_renterId))!;
+            newItemId = cart.AddItem(
+                Guid.NewGuid(), newListingId, Guid.NewGuid(), 1, Start.AddDays(1), End.AddDays(1), Now.AddMinutes(1)).Value.Id;
+
+            Assert.True(await repository.UpdateAsync(cart));
+        }
+
+        await using RentalServiceDbContext readContext = NewContext();
+        RentalCart reloaded = (await new RentalCartRepository(readContext).GetActiveByRenterIdAsync(_renterId))!;
+        Assert.Equal(3, reloaded.Items.Count);
+        Assert.Contains(reloaded.Items, item => item.Id == newItemId && item.EquipmentListingId == newListingId);
+    }
 }

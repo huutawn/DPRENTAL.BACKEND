@@ -28,7 +28,7 @@ public sealed record ListingRentalSnapshotDto(
     ListingWarehouseDto? Warehouse = null,
     Guid? BrandId = null,
     string? Model = null,
-    decimal? DepositPerUnit = null,
+    [property: JsonPropertyName("depositAmount")] decimal? DepositPerUnit = null,
     int? SpecSchemaVersion = null,
     JsonElement? SpecValues = null,
     string? EquipmentTypeName = null,
