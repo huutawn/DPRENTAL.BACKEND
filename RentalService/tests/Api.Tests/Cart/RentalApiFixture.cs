@@ -5,6 +5,7 @@ using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Api.Security;
+using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
@@ -42,14 +43,27 @@ public class RentalApiFixture : WebApplicationFactory<Program>
         return client;
     }
 
+    protected override void ConfigureClient(HttpClient client)
+    {
+        base.ConfigureClient(client);
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", "dev-internal-api-key-dprental-2026");
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("ConnectionStrings:Postgres", PostgresTestDatabaseHelper.BaseConnectionString);
+        builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
         builder.ConfigureTestServices(services =>
         {
             // 1. Vượt qua [Authorize] bằng TestAuthHandler
             services.AddAuthentication("TestAuth")
                     .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("TestAuth", options => { });
+            services.PostConfigure<AuthenticationOptions>(options =>
+            {
+                options.DefaultScheme = "TestAuth";
+                options.DefaultAuthenticateScheme = "TestAuth";
+                options.DefaultChallengeScheme = "TestAuth";
+            });
 
             // 2. Mock CurrentRenter lấy từ Header
             services.AddHttpContextAccessor();
@@ -158,11 +172,11 @@ public class RentalApiFixture : WebApplicationFactory<Program>
 
     private sealed class FakeDependencies : IRentalListingReader, IRentalAvailabilityReader
     {
-        public Task<RentalListingSnapshot?> GetListingAsync(Guid listingId, CancellationToken token = default)
-            => Task.FromResult<RentalListingSnapshot?>(new RentalListingSnapshot(
-                listingId, Guid.NewGuid(), Guid.NewGuid(), true, true, 100m, 50m, "v1"));
+        public Task<Result<RentalListingSnapshot>> GetListingAsync(Guid listingId, CancellationToken token = default)
+            => Task.FromResult(Result.Success(new RentalListingSnapshot(
+                listingId, Guid.NewGuid(), Guid.NewGuid(), true, true, 100m, 50m, "v1")));
 
-        public Task<int?> GetAvailableQuantityAsync(Guid listingId, DateOnly start, DateOnly end, CancellationToken token = default)
-            => Task.FromResult<int?>(999); // Luôn dồi dào số lượng
+        public Task<Result<int>> GetAvailableQuantityAsync(Guid listingId, DateOnly start, DateOnly end, CancellationToken token = default)
+            => Task.FromResult(Result.Success(999)); // Luôn dồi dào số lượng
     }
 }

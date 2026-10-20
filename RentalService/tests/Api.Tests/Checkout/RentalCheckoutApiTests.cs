@@ -368,9 +368,16 @@ public sealed class RentalCheckoutApiTests
             return client;
         }
 
+        protected override void ConfigureClient(HttpClient client)
+        {
+            base.ConfigureClient(client);
+            client.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", "dev-internal-api-key-dprental-2026");
+        }
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+            builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
             builder.UseSetting("Rental:Terms:CurrentVersion", "v1.0");
             builder.UseSetting("Rental:Terms:DocumentRef", "terms/v1.0.pdf");
             builder.UseSetting("Rental:Terms:ContentHash", "hash123456");

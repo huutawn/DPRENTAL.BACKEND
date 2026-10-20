@@ -53,8 +53,6 @@ public static class ApplicationServiceCollectionExtensions
         // External Clients
         services.AddHttpClient<IRentalMediaClient, HttpRentalMediaClient>()
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
-        services.AddHttpClient<IServiceTokenProvider, AuthServiceTokenProvider>()
-            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddHttpClient<IPaymentRentalClient, HttpPaymentRentalClient>()
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddHttpClient<IInventoryRentalClient, HttpInventoryRentalClient>()

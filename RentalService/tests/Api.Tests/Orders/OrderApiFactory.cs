@@ -61,6 +61,11 @@ internal sealed class OrderApiFactory : WebApplicationFactory<Program>
         return client;
     }
 
+    protected override void ConfigureClient(HttpClient client)
+    {
+        base.ConfigureClient(client);
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", "dev-internal-api-key-dprental-2026");
+    }
     /// <summary>Đơn của người thuê gồm máy xúc của Bình và máy trộn của Cường, đã thanh toán.</summary>
     public RentalOrder SeedPaidMixedOrder()
     {
@@ -83,6 +88,7 @@ internal sealed class OrderApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+        builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
 
         builder.ConfigureTestServices(services =>
         {

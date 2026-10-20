@@ -526,7 +526,7 @@ public sealed class RentalToRecommendationE2EIntegrationTests
 
     private sealed class StubListingReader(RentalListingSnapshot snapshot) : IRentalListingReader
     {
-        public Task<RentalListingSnapshot?> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<RentalListingSnapshot?>(snapshot);
+        public Task<Result<RentalListingSnapshot>> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(snapshot));
     }
 }

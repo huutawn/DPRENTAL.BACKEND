@@ -105,9 +105,9 @@ User `deploy` phải thuộc group `docker`; quyền Docker tương đương quy
 
 Đường dẫn triển khai trên VPS giữ nguyên `/opt/dprental/dev` và toàn bộ danh sách secrets môi trường như AuthService. Trước khi kích hoạt CI/CD RentalService trên VPS, môi trường dev cần hoàn tất các điều kiện sau:
 
-1. **Cấu hình Compose (`compose.yaml`)**: Hiện tại Compose dev chung tại VPS chưa định nghĩa hai service `rental-service` và `rental-migrate`. Cần bổ sung định nghĩa cho `rental-service` (cùng network services, phụ thuộc postgres và valkey/kafka, trỏ image `${RENTAL_SERVICE_IMAGE}`) và `rental-migrate` (profile `migration`, trỏ image `${RENTAL_MIGRATOR_IMAGE}`).
-2. **Cấu hình môi trường (`.env`)**: Bổ sung đầy đủ các biến môi trường cho RentalService (ConnectionStrings__Postgres, Kafka, JWT validation options, v.v.).
-3. **Khai báo image trong `release.env`**: File `/opt/dprental/dev/release.env` phải có sẵn hai dòng cấu hình image ban đầu kèm tag hợp lệ (để script cập nhật SHA mới):
+1. **Cấu hình Compose**: Hai service `rental-service` và `rental-migrate` đã được khai báo trong [deploy/dev/compose.yaml](../deploy/dev/compose.yaml). Runtime dùng PostgreSQL hiện có với schema `rental`; migrator chạy qua profile `migration` trước khi service được recreate.
+2. **Cấu hình môi trường (`.env`)**: Đảm bảo `.env` trên VPS có `INTERNAL_API_KEY`, cùng issuer/audience của JWT hiện đang dùng cho AuthService và Gateway. Compose truyền API key vào RentalService bằng `InternalAuthentication__ApiKey`; client đăng nhập vẫn dùng email/password và nhận JWT như trước.
+3. **Khai báo image trong `release.env`**: Hai biến image đã có trong `release.env.example`; file `/opt/dprental/dev/release.env` cần có tag ban đầu hợp lệ để script cập nhật SHA:
    ```text
    RENTAL_SERVICE_IMAGE=ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-rental:initial
    RENTAL_MIGRATOR_IMAGE=ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-rental-migrator:initial
@@ -117,7 +117,7 @@ User `deploy` phải thuộc group `docker`; quyền Docker tương đương quy
 
 Template có `Result`/`Result<T>` và `Error`/`ErrorType` (tham khảo AuthService).
 Application trả `Result` cho lỗi dự kiến; controller dùng `this.ToProblem(result.Error)`
-để ánh xạ sang 400/401/403/404/409/410/422/500. Không gọi `ToProblem(Error.None)`.
+để ánh xạ sang 400/401/403/404/409/410/422/500/503. Không gọi `ToProblem(Error.None)`.
 `GlobalExceptionHandler` đã đăng ký tại API, trả 500 ProblemDetails kèm `traceId`,
 không trả exception message hoặc payload; request bị hủy không chuyển thành lỗi nghiệp vụ.
 

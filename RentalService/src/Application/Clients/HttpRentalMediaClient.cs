@@ -21,7 +21,9 @@ public sealed class HttpRentalMediaClient : IRentalMediaClient
         if (Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) &&
             (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
             _baseUri = uri;
-        _apiKey = configuration["MediaService:ApiKey"];
+        _apiKey = configuration["InternalAuthentication:ApiKey"]
+            ?? configuration["MediaService:ApiKey"]
+            ?? configuration["INTERNAL_API_KEY"];
     }
 
     public Task<Result<MediaVerifyDto>> VerifyMediaAsync(Guid mediaId, CancellationToken ct = default) =>

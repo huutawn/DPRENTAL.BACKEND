@@ -334,6 +334,7 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
                 builder.ConfigureTestServices(services =>
                 {
                     services.RemoveAll<DbContextOptions<RentalServiceDbContext>>();
@@ -352,12 +353,18 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
             });
     }
 
+    private static HttpClient CreateClientWithKey(WebApplicationFactory<Program> factory)
+    {
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
+        return client;
+    }
     [Fact]
     public async Task Http_Unauthenticated_Returns401()
     {
         TestAuthHandler.Claims = [];
         using var factory = CreateTestFactory();
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
 
         var response = await client.GetAsync($"/api/v1/rental/admin/suppliers/{Guid.NewGuid()}/confirmation-statistics?fromUtc=2026-10-01T00:00:00Z&toUtc=2026-11-01T00:00:00Z");
 
@@ -375,7 +382,7 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
         ];
 
         using var factory = CreateTestFactory();
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
 
         var response = await client.GetAsync($"/api/v1/rental/admin/suppliers/{Guid.NewGuid()}/confirmation-statistics?fromUtc=2026-10-01T00:00:00Z&toUtc=2026-11-01T00:00:00Z");
 
@@ -393,7 +400,7 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
         ];
 
         using var factory = CreateTestFactory();
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
 
         var response = await client.GetAsync($"/api/v1/rental/admin/suppliers/{Guid.NewGuid()}/confirmation-statistics?fromUtc=2026-10-01T00:00:00Z&toUtc=2026-11-01T00:00:00Z");
 
@@ -418,7 +425,7 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
             services.RemoveAll<IRentalOrderRepository>();
             services.AddSingleton<IRentalOrderRepository>(fakeRepo);
         });
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
 
         var response = await client.GetAsync($"/api/v1/rental/admin/suppliers/{supplierId}/confirmation-statistics?fromUtc=2026-10-01T00:00:00Z&toUtc=2026-11-01T00:00:00Z");
 
@@ -458,7 +465,7 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
         ];
 
         using var factory = CreateTestFactory();
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
 
         var response = await client.GetAsync($"/api/v1/rental/admin/suppliers/{Guid.NewGuid()}/confirmation-statistics?{queryString}");
 
@@ -478,7 +485,7 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
         ];
 
         using var factory = CreateTestFactory();
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
 
         var response = await client.GetAsync($"/api/v1/rental/admin/suppliers/{invalidSupplierId}/confirmation-statistics?fromUtc=2026-10-01T00:00:00Z&toUtc=2026-11-01T00:00:00Z");
 
@@ -503,7 +510,7 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
             services.RemoveAll<IRentalOrderRepository>();
             services.AddSingleton<IRentalOrderRepository>(fakeRepo);
         });
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
 
         var response = await client.GetAsync($"/api/v1/rental/admin/suppliers/{supplierId}/confirmation-statistics?fromUtc=2026-10-01T07:00:00%2B07:00&toUtc=2026-11-01T07:00:00%2B07:00");
 
@@ -523,7 +530,7 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
         ];
 
         using var factory = CreateTestFactory();
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
 
         var response = await client.GetAsync($"/api/v1/rental/admin/suppliers/{Guid.NewGuid()}/confirmation-statistics?fromUtc=2026-10-01T07:00:00+07:00&toUtc=2026-11-01T07:00:00+07:00");
 
@@ -545,7 +552,7 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
             services.RemoveAll<IRentalOrderRepository>();
             services.AddSingleton<IRentalOrderRepository>(new FakeRentalOrderRepository());
         });
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
 
         var response = await client.GetAsync($"/api/v1/rental/admin/suppliers/{Guid.NewGuid()}/confirmation-statistics?fromUtc=2026-10-01T00:00:00Z&toUtc=2026-11-01T00:00:00Z");
         Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.BadRequest);

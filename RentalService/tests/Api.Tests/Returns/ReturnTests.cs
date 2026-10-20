@@ -120,8 +120,10 @@ public sealed class ReturnTests : IAsyncLifetime
         using var client = factory.CreateClient();
         string route = $"/api/v1/rental/items/{item.Id}/returns";
         var request = Request(item.UnitAssignments.First().Id);
+        client.DefaultRequestHeaders.Remove("X-Api-Key");
         using var anonymous = await client.PostAsJsonAsync(route, request);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         client.DefaultRequestHeaders.Add("X-Test-Renter-Id", Guid.NewGuid().ToString());
         client.DefaultRequestHeaders.Add("Idempotency-Key", "api-key");
         using var foreign = await client.PostAsJsonAsync(route, request);

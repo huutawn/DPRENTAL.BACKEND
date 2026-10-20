@@ -134,6 +134,7 @@ public sealed class AdminReplayIntegrationTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
                 builder.ConfigureTestServices(services =>
                 {
                     services.RemoveAll<DbContextOptions<RentalServiceDbContext>>();
@@ -147,6 +148,13 @@ public sealed class AdminReplayIntegrationTests
             });
     }
 
+    private static HttpClient CreateClientWithKey(WebApplicationFactory<Program> factory)
+    {
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
+        return client;
+    }
+
     [Fact]
     public async Task AdminReplay_AnonymousCaller_Returns401Unauthorized()
     {
@@ -154,7 +162,7 @@ public sealed class AdminReplayIntegrationTests
         using var factory = CreateTestFactory(dbName);
         TestAuthHandler.Claims = [];
 
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
         Guid orderId = Guid.NewGuid();
         string opId = "op-1";
 
@@ -181,7 +189,7 @@ public sealed class AdminReplayIntegrationTests
             new Claim(RentalAuthClaims.Roles, "service")
         ];
 
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
 
         Guid orderId = Guid.NewGuid();
@@ -210,7 +218,7 @@ public sealed class AdminReplayIntegrationTests
             new Claim(RentalAuthClaims.Roles, "customer,owner")
         ];
 
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
 
         Guid orderId = Guid.NewGuid();
@@ -239,7 +247,7 @@ public sealed class AdminReplayIntegrationTests
             new Claim(RentalAuthClaims.Roles, "admin")
         ];
 
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
 
         Guid orderId = Guid.NewGuid();
@@ -267,7 +275,7 @@ public sealed class AdminReplayIntegrationTests
             new Claim(RentalAuthClaims.Roles, "admin")
         ];
 
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
 
         Guid orderId = Guid.NewGuid();
@@ -307,7 +315,7 @@ public sealed class AdminReplayIntegrationTests
             new Claim(RentalAuthClaims.Roles, "admin")
         ];
 
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/rental/internal/orders/{order.Id}/operations/op-succeeded-1/replay")
@@ -344,7 +352,7 @@ public sealed class AdminReplayIntegrationTests
             new Claim(RentalAuthClaims.Roles, "admin")
         ];
 
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/rental/internal/orders/{order.Id}/operations/op-corrupt-1/replay")
@@ -387,7 +395,7 @@ public sealed class AdminReplayIntegrationTests
             new Claim(RentalAuthClaims.Roles, "admin")
         ];
 
-        using var client = factory.CreateClient();
+        using var client = CreateClientWithKey(factory);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
 
         string reason = "Confirmed upstream network restored; manual replay authorized";

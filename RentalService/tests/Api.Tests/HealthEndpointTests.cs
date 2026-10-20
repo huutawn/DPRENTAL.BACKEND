@@ -1,5 +1,6 @@
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Cart;
+using Dprental.RentalService.Common;
 using System.Net;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Repositories;
@@ -56,7 +57,11 @@ public sealed class HealthEndpointTests
     public void MissingPostgresConnection_FailsAtStartup()
     {
         using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder => builder.UseSetting("ConnectionStrings:Postgres", ""));
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
+                builder.UseSetting("ConnectionStrings:Postgres", "");
+            });
 
         Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
     }
@@ -65,6 +70,7 @@ public sealed class HealthEndpointTests
         new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
+                builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
                 builder.UseSetting(
                     "ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
                 builder.ConfigureTestServices(services =>
@@ -80,14 +86,14 @@ public sealed class HealthEndpointTests
         IRentalAvailabilityReader
     {
 
-        public Task<RentalListingSnapshot?> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<RentalListingSnapshot?>(null);
+        public Task<Result<RentalListingSnapshot>> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<Result<RentalListingSnapshot>>(Error.NotFound("NOT_FOUND", "Not found"));
 
-        public Task<int?> GetAvailableQuantityAsync(
+        public Task<Result<int>> GetAvailableQuantityAsync(
             Guid listingId,
             DateOnly startDate,
             DateOnly endDate,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<int?>(null);
+            Task.FromResult<Result<int>>(Error.NotFound("NOT_FOUND", "Not found"));
     }
 }

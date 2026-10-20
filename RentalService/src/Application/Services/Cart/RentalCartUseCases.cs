@@ -33,13 +33,18 @@ public sealed class RentalCartUseCases(
         if (renterId == Guid.Empty)
             return RentalErrors.CartNotFound;
 
-        RentalListingSnapshot? listing = await listingReader.GetListingAsync(
+        Result<RentalListingSnapshot> listingResult = await listingReader.GetListingAsync(
             equipmentListingId,
             cancellationToken);
 
-        if (listing is null)
-            return RentalErrors.OwnerIdRequired;
+        if (listingResult.IsFailure)
+        {
+            if (listingResult.Error.Type == ErrorType.NotFound)
+                return RentalErrors.OwnerIdRequired;
+            return listingResult.Error;
+        }
 
+        RentalListingSnapshot listing = listingResult.Value;
         if (listing.EquipmentTypeId == Guid.Empty)
             return Error.Validation("INVALID_EQUIPMENT_TYPE_ID", "EquipmentTypeId của listing không được để trống hoặc rỗng.");
 
@@ -173,13 +178,18 @@ public sealed class RentalCartUseCases(
         if (item is null)
             return RentalErrors.CartItemNotFound;
 
-        RentalListingSnapshot? listing = await listingReader.GetListingAsync(
+        Result<RentalListingSnapshot> listingResult = await listingReader.GetListingAsync(
             item.EquipmentListingId,
             cancellationToken);
 
-        if (listing is null)
-            return RentalErrors.OwnerIdRequired;
+        if (listingResult.IsFailure)
+        {
+            if (listingResult.Error.Type == ErrorType.NotFound)
+                return RentalErrors.OwnerIdRequired;
+            return listingResult.Error;
+        }
 
+        RentalListingSnapshot listing = listingResult.Value;
         Guid ownerId = listing.OwnerId;
 
         Result updated = cart.UpdateItemQuantity(
@@ -212,13 +222,18 @@ public sealed class RentalCartUseCases(
         if (item is null)
             return RentalErrors.CartItemNotFound;
 
-        RentalListingSnapshot? listing = await listingReader.GetListingAsync(
+        Result<RentalListingSnapshot> listingResult = await listingReader.GetListingAsync(
             item.EquipmentListingId,
             cancellationToken);
 
-        if (listing is null)
-            return RentalErrors.OwnerIdRequired;
+        if (listingResult.IsFailure)
+        {
+            if (listingResult.Error.Type == ErrorType.NotFound)
+                return RentalErrors.OwnerIdRequired;
+            return listingResult.Error;
+        }
 
+        RentalListingSnapshot listing = listingResult.Value;
         Guid ownerId = listing.OwnerId;
 
         Result updated = cart.UpdateItemDates(

@@ -17,9 +17,11 @@ public sealed class DeductionAuthorizationApiTests
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+            builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
             builder.ConfigureTestServices(services => services.RemoveAll<IHostedService>());
         });
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         Guid itemId = Guid.NewGuid();
         using var response = await client.PostAsJsonAsync($"/api/v1/rental/items/{itemId}/deductions/response",
             new { decision = "ACCEPT" });

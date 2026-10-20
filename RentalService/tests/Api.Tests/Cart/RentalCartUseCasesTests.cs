@@ -66,7 +66,7 @@ public sealed class RentalCartUseCasesTests
         _validEndDate = todayVn.AddDays(5);
 
         _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RentalListingSnapshot(_listingId, _ownerId, _equipmentTypeId, true, true, 100m, 50m, "v1"));
+            .ReturnsAsync(Result.Success(new RentalListingSnapshot(_listingId, _ownerId, _equipmentTypeId, true, true, 100m, 50m, "v1")));
     }
 
     [Fact]
@@ -101,7 +101,7 @@ public sealed class RentalCartUseCasesTests
     {
         // Setup Provider trả về OwnerId trùng với RenterId
         _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RentalListingSnapshot(_listingId, _renterId, _equipmentTypeId, true, true, 100m, 50m, "v1"));
+            .ReturnsAsync(Result.Success(new RentalListingSnapshot(_listingId, _renterId, _equipmentTypeId, true, true, 100m, 50m, "v1")));
 
         var result = await _sut.AddCartItemAsync(_renterId, _listingId, 1, _validStartDate, _validEndDate);
 
@@ -258,7 +258,7 @@ public sealed class RentalCartUseCasesTests
     public async Task AddCartItem_WhenMissingEquipmentTypeId_ReturnsError_DoesNotPersist()
     {
         _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RentalListingSnapshot(_listingId, _ownerId, Guid.Empty, true, true, 100m, 50m, "v1"));
+            .ReturnsAsync(Result.Success(new RentalListingSnapshot(_listingId, _ownerId, Guid.Empty, true, true, 100m, 50m, "v1")));
 
         var result = await _sut.AddCartItemAsync(_renterId, _listingId, 1, _validStartDate, _validEndDate);
 
@@ -267,5 +267,17 @@ public sealed class RentalCartUseCasesTests
         _cartRepoMock.Verify(x => x.CreateAsync(It.IsAny<RentalCart>(), It.IsAny<CancellationToken>()), Times.Never);
         _eventProducerMock.Verify(x => x.EnqueueCartItemAddedAsync(
             It.IsAny<CartItemAddedPayload>(), null, null, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AddCartItem_WhenInventoryFailsWith503_ReturnsServiceUnavailable()
+    {
+        _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Error.ServiceUnavailable("INVENTORY_UNAVAILABLE", "Unavailable"));
+
+        var result = await _sut.AddCartItemAsync(_renterId, _listingId, 1, _validStartDate, _validEndDate);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.ServiceUnavailable, result.Error.Type);
     }
 }
