@@ -152,7 +152,9 @@ public sealed class CatalogGatewayIntegrationTests
         Assert.False(upstream.LastRequest.Headers.ContainsKey("Cookie"));
         Assert.False(upstream.LastRequest.Headers.ContainsKey(GatewayHeaderConstants.UserId));
         Assert.False(upstream.LastRequest.Headers.ContainsKey(GatewayHeaderConstants.Role));
-        Assert.False(upstream.LastRequest.Headers.ContainsKey("X-Api-Key"));
+        Assert.True(upstream.LastRequest.Headers.ContainsKey("X-Api-Key"));
+        Assert.NotEqual("spoofed-key", upstream.LastRequest.Headers["X-Api-Key"]);
+        Assert.Equal("dev-internal-api-key-dprental-2026", upstream.LastRequest.Headers["X-Api-Key"]);
         Assert.Equal(correlationId, upstream.LastRequest.Headers[GatewayHeaderConstants.CorrelationId]);
     }
 

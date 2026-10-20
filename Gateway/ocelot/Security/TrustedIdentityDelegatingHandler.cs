@@ -5,8 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Dprental.Gateway.Authentication;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
-
 namespace Dprental.Gateway.Security;
 
 /// <summary>
@@ -18,7 +18,8 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
     private readonly IHttpContextAccessor httpContextAccessor;
     private readonly IdentityExtractor identityExtractor;
     private readonly IOptions<GatewaySecurityOptions> securityOptions;
-    private readonly ApiKeyRoutePolicy routePolicy;
+    private readonly ApiKeyRoutePolicy? routePolicy;
+    private readonly string _internalApiKey;
 
     /// <summary>
     /// Khởi tạo DelegatingHandler với các dịch vụ bảo mật và truy xuất ngữ cảnh HTTP.
@@ -27,14 +28,26 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
         IHttpContextAccessor httpContextAccessor,
         IdentityExtractor identityExtractor,
         IOptions<GatewaySecurityOptions> securityOptions,
-        ApiKeyRoutePolicy routePolicy)
+        IConfiguration configuration,
+        ApiKeyRoutePolicy? routePolicy = null)
     {
         this.httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         this.identityExtractor = identityExtractor ?? throw new ArgumentNullException(nameof(identityExtractor));
         this.securityOptions = securityOptions ?? throw new ArgumentNullException(nameof(securityOptions));
-        this.routePolicy = routePolicy ?? throw new ArgumentNullException(nameof(routePolicy));
+        this.routePolicy = routePolicy;
+        _internalApiKey = configuration["InternalAuthentication:ApiKey"]
+            ?? configuration["INTERNAL_API_KEY"]
+            ?? string.Empty;
     }
 
+    public TrustedIdentityDelegatingHandler(
+        IHttpContextAccessor httpContextAccessor,
+        IdentityExtractor identityExtractor,
+        IOptions<GatewaySecurityOptions> securityOptions,
+        ApiKeyRoutePolicy routePolicy)
+        : this(httpContextAccessor, identityExtractor, securityOptions, new ConfigurationBuilder().Build(), routePolicy)
+    {
+    }
     /// <inheritdoc />
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -62,13 +75,9 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
                 headers.Remove(untrustedHeader);
             }
             headers.Remove("X-Api-Key");
-            if (routePolicy.RequiresApiKey(httpContext.Request))
+            if (IsInternalBackend(request.RequestUri) && !string.IsNullOrWhiteSpace(_internalApiKey))
             {
-                headers.Remove("Authorization");
-                if (httpContext.Request.Headers.TryGetValue("X-Api-Key", out var apiKeys))
-                {
-                    headers.TryAddWithoutValidation("X-Api-Key", apiKeys.ToArray());
-                }
+                headers.TryAddWithoutValidation("X-Api-Key", _internalApiKey);
             }
 
             // Gateway đã chấp nhận forwarded metadata chỉ từ trusted proxy đã cấu hình.
@@ -100,9 +109,8 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
                 headers.TryAddWithoutValidation(GatewayHeaderConstants.ServiceName, serviceName);
             }
 
-            // Chuyển đổi Cookie token sang Authorization Bearer cho downstream nếu client chỉ gửi Cookie (không áp dụng cho ApiKey routes)
-            if (!routePolicy.RequiresApiKey(httpContext.Request) &&
-                headers.Authorization is null &&
+            // Chuyển đổi Cookie token sang Authorization Bearer cho downstream nếu client chỉ gửi Cookie
+            if (headers.Authorization is null &&
                 httpContext.Request.Cookies.TryGetValue("accessToken", out string? cookieToken) &&
                 !string.IsNullOrWhiteSpace(cookieToken))
             {
@@ -149,5 +157,13 @@ public sealed class TrustedIdentityDelegatingHandler : DelegatingHandler
         }
 
         return await base.SendAsync(request, cancellationToken);
+    }
+
+    private static bool IsInternalBackend(Uri? uri)
+    {
+        if (uri is null) return false;
+        string host = uri.Host;
+        return host is "auth-service" or "catalog-service" or "inventory-service" or "media-service" or "rental-service" or "payment-service" or "recommendation-service"
+            || host is "localhost" or "127.0.0.1" or "downstream";
     }
 }

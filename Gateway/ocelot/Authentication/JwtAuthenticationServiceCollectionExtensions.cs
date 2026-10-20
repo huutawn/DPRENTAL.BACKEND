@@ -118,15 +118,6 @@ internal static class JwtAuthenticationServiceCollectionExtensions
     {
         OnMessageReceived = async context =>
         {
-            var routePolicy = context.HttpContext.RequestServices.GetService<ApiKeyRoutePolicy>();
-            if (routePolicy?.RequiresApiKey(context.Request) == true)
-            {
-                var identity = new ClaimsIdentity([new Claim("u", "svc")], "Bearer");
-                context.Principal = new ClaimsPrincipal(identity);
-                context.Success();
-                return;
-            }
-
             if (string.IsNullOrWhiteSpace(context.Request.Headers.Authorization) &&
                 string.IsNullOrWhiteSpace(context.Token) &&
                 context.Request.Cookies.TryGetValue("accessToken", out string? accessToken) &&

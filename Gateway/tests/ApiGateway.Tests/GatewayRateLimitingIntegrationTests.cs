@@ -315,7 +315,7 @@ public sealed class GatewayRateLimitingIntegrationTests
     }
 
     [Fact]
-    public async Task ApiKeyRouteWithoutUserIdUsesIpQuotaAndDoesNotUseApiKeyAsKey()
+    public async Task RouteWithoutUserIdUsesIpQuota()
     {
         using RSA signingKey = RSA.Create(2048);
         await using LoopbackTestService upstream = new(CreateJwks(signingKey, "key-1"));
@@ -327,24 +327,17 @@ public sealed class GatewayRateLimitingIntegrationTests
 
         string sharedIp = "192.0.2.77";
 
-        // Client 1 gửi API key A
-        using HttpRequestMessage req1 = new(HttpMethod.Get, "/api/v1/media/11111111-1111-4111-8111-111111111111/verify");
-        req1.Headers.Add("X-Api-Key", "api-key-alpha");
+        using HttpRequestMessage req1 = new(HttpMethod.Get, "/api/v1/media/11111111-1111-4111-8111-111111111111/content");
         req1.Headers.Add("X-Test-Remote-IP", sharedIp);
         using HttpResponseMessage res1 = await client.SendAsync(req1);
         Assert.Equal(HttpStatusCode.OK, res1.StatusCode);
 
-        // Client 2 gửi API key B khác từ CÙNG IP
-        using HttpRequestMessage req2 = new(HttpMethod.Get, "/api/v1/media/11111111-1111-4111-8111-111111111111/verify");
-        req2.Headers.Add("X-Api-Key", "api-key-beta");
+        using HttpRequestMessage req2 = new(HttpMethod.Get, "/api/v1/media/11111111-1111-4111-8111-111111111111/content");
         req2.Headers.Add("X-Test-Remote-IP", sharedIp);
         using HttpResponseMessage res2 = await client.SendAsync(req2);
         Assert.Equal(HttpStatusCode.OK, res2.StatusCode);
 
-        // Client 3 gửi API key C từ CÙNG IP -> 429 Too Many Requests
-        // Không dùng API key làm khóa mà dùng IP, nên 2 request trước đã tiêu hao hết quota của IP đó
-        using HttpRequestMessage req3 = new(HttpMethod.Get, "/api/v1/media/11111111-1111-4111-8111-111111111111/verify");
-        req3.Headers.Add("X-Api-Key", "api-key-gamma");
+        using HttpRequestMessage req3 = new(HttpMethod.Get, "/api/v1/media/11111111-1111-4111-8111-111111111111/content");
         req3.Headers.Add("X-Test-Remote-IP", sharedIp);
         using HttpResponseMessage res3 = await client.SendAsync(req3);
         Assert.Equal(HttpStatusCode.TooManyRequests, res3.StatusCode);

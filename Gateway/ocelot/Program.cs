@@ -24,7 +24,7 @@ app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<GatewayExceptionMiddleware>();
 app.UseGatewaySecurity();
 app.UseAuthentication();
-
+app.UseMiddleware<ServiceOnlyRouteBlockingMiddleware>();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwaggerUI(options =>
