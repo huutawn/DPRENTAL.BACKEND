@@ -27,7 +27,7 @@ public sealed class RentalGatewayIntegrationTests
         using HttpResponseMessage response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("/api/v1/rental/me/calendar?month=2026-10", upstream.LastRequest?.Path);
+        Assert.Equal("/rental/me/calendar?month=2026-10", upstream.LastRequest?.Path);
         Assert.Equal($"Bearer {token}", upstream.LastRequest?.Authorization);
     }
 
