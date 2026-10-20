@@ -21,7 +21,6 @@ public sealed class GetRentalCart(
 {
     public async Task<Result<RentalCartReadModel>> ExecuteAsync(
         Guid renterId,
-        IReadOnlyDictionary<Guid, string>? clientPriceVersions,
         CancellationToken cancellationToken = default)
     {
         if (renterId == Guid.Empty) return Result.Success(new RentalCartReadModel(Guid.Empty, []));
@@ -89,14 +88,6 @@ public sealed class GetRentalCart(
             if (!listing.IsPublished || !listing.AcceptsBookings)
             {
                 lines.Add(CreateLine(item, listing, duration, RentalCartLineStatus.ListingDisabled, "Sản phẩm hiện không nhận đơn thuê."));
-                continue;
-            }
-
-            // MỚI: Kiểm tra PriceVersion từ Client gửi lên so với bản Snapshot hiện tại
-            string? clientVersion = clientPriceVersions != null && clientPriceVersions.TryGetValue(item.Id, out var v) ? v : null;
-            if (clientVersion != null && clientVersion != listing.PriceVersion)
-            {
-                lines.Add(CreateLine(item, listing, duration, RentalCartLineStatus.PriceChanged, "Giá hoặc cọc đã thay đổi, vui lòng xác nhận lại."));
                 continue;
             }
 

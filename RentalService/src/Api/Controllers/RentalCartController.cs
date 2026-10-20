@@ -36,18 +36,14 @@ public sealed class RentalCartController(
     /// </summary>
     /// <remarks>
     /// Endpoint này tự động kiểm tra lại giá (DailyRentalRate, Deposit) và tính khả dụng của thiết bị từ InventoryService:
-    /// - Đối chiếu phiên bản giá client đang giữ (<paramref name="clientPriceVersions"/>) để phát hiện biến động giá (<c>PriceChanged</c>).
+    /// - Luôn trả về giá mới nhất từ Inventory; checkout sẽ đối chiếu tổng tiền người thuê xác nhận.
     /// - Kiểm tra số lượng thiết bị rảnh trong suốt khoảng thời gian thuê yêu cầu.
-    /// - <c>status</c> là chuỗi: AVAILABLE, PRICE_CHANGED, INSUFFICIENT_QUANTITY, UNAVAILABLE, LISTING_DISABLED, VALIDATION_FAILED hoặc DATE_PASSED.
+    /// - <c>status</c> là chuỗi: AVAILABLE, INSUFFICIENT_QUANTITY, UNAVAILABLE, LISTING_DISABLED, VALIDATION_FAILED hoặc DATE_PASSED.
     /// - Tiền thuê ước tính = đơn giá/ngày × số lượng × số ngày (tính cả ngày đầu và cuối); tiền cọc là giá mỗi đơn vị.
     /// - Chưa có giỏ hàng thì trả 200 với cartId rỗng và items rỗng. Việc đọc không tạo hold hay khóa giá.
     /// </remarks>
-    /// <param name="clientPriceVersions">
-    /// Tùy chọn. Gửi dạng <c>clientPriceVersions[CartItemId]=priceVersion</c>, ví dụ <c>clientPriceVersions[11111111-1111-1111-1111-111111111111]=v1</c>. Khóa là CartItemId, không phải EquipmentListingId; bỏ qua thì không so sánh phiên bản giá.
-    /// </param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <response code="200">Lấy giỏ hàng thành công, trả về danh sách mục và trạng thái kiểm tra.</response>
-    /// <response code="400">Yêu cầu không hợp lệ hoặc dữ liệu truy vấn sai quy cách.</response>
     /// <response code="401">Người dùng chưa được xác thực (thiếu hoặc sai token JWT).</response>
     /// <response code="403">Người dùng không có quyền truy cập giỏ hàng (không thỏa mãn policy Renter).</response>
     /// <returns>Dữ liệu giỏ hàng kèm trạng thái kiểm tra từng mục thuê.</returns>
@@ -57,10 +53,10 @@ public sealed class RentalCartController(
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
-    public async Task<IActionResult> Get([FromQuery] Dictionary<Guid, string>? clientPriceVersions, CancellationToken cancellationToken)
+    public async Task<IActionResult> Get(CancellationToken cancellationToken)
     {
         Result<RentalCartReadModel> result = await getRentalCart.ExecuteAsync(
-            currentRenter.RenterId, clientPriceVersions, cancellationToken);
+            currentRenter.RenterId, cancellationToken);
 
         return result.IsFailure
             ? this.ToProblem(result.Error)

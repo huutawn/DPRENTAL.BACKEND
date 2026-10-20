@@ -28,18 +28,30 @@ public sealed class InventoryRentalCartReader(IInventoryRentalClient inventory) 
             return result.Error;
         }
 
-        var snapshot = result.Value.Items.FirstOrDefault(x => x.Id == listingId);
-        if (snapshot is null)
+        if (result.Value.Items is null || result.Value.MissingIds is null)
+        {
+            return InvalidInventoryContract("Inventory rental snapshot response is missing its item collections.");
+        }
+
+        ListingRentalSnapshotDto[] matches = result.Value.Items.Where(x => x.Id == listingId).Take(2).ToArray();
+        if (matches.Length == 0 && result.Value.MissingIds.Contains(listingId))
         {
             return Error.NotFound("LISTING_NOT_FOUND", "Sản phẩm không tồn tại hoặc đã bị xóa.");
         }
+
+        if (matches.Length != 1 || result.Value.MissingIds.Contains(listingId))
+        {
+            return InvalidInventoryContract("Inventory rental snapshot response does not contain exactly one requested listing.");
+        }
+
+        ListingRentalSnapshotDto snapshot = matches[0];
 
         if (snapshot.DepositPerUnit is not { } deposit ||
             VndAmountValidator.ValidateVndAmount(deposit).IsFailure ||
             VndAmountValidator.ValidateVndAmount(snapshot.DailyRate).IsFailure ||
             !string.Equals(snapshot.Currency, CheckoutRules.Currency, StringComparison.OrdinalIgnoreCase))
         {
-            return Error.ServiceUnavailable("INVENTORY_CONTRACT_INVALID", "Inventory rental snapshot is missing valid pricing data.");
+            return InvalidInventoryContract("Inventory rental snapshot is missing valid pricing data.");
         }
         bool active = string.Equals(snapshot.Status, "Active", StringComparison.OrdinalIgnoreCase);
 
@@ -54,6 +66,9 @@ public sealed class InventoryRentalCartReader(IInventoryRentalClient inventory) 
             deposit,
             $"{snapshot.DailyRate.ToString(CultureInfo.InvariantCulture)}:{deposit.ToString(CultureInfo.InvariantCulture)}"));
     }
+
+    private static Error InvalidInventoryContract(string detail) =>
+        Error.ServiceUnavailable("INVENTORY_CONTRACT_INVALID", detail);
 
     public async Task<Result<int>> GetAvailableQuantityAsync(
         Guid listingId,

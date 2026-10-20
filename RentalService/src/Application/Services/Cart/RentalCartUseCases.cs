@@ -8,7 +8,6 @@ using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Domain.Policies;
-using System.Security.AccessControl;
 
 namespace Dprental.RentalService.Application.Services.Cart;
 
@@ -170,6 +169,9 @@ public sealed class RentalCartUseCases(
         int quantity,
         CancellationToken cancellationToken = default)
     {
+        await using var renterLock = await lockManager.AcquireRenterLockAsync(
+            renterId, TimeSpan.FromSeconds(5), cancellationToken);
+
         RentalCart? cart = await GetActiveCartAsync(renterId, cancellationToken);
         if (cart is null)
             return RentalErrors.CartNotFound;
@@ -203,7 +205,7 @@ public sealed class RentalCartUseCases(
 
         return await carts.UpdateAsync(cart, cancellationToken)
             ? Result.Success()
-            : RentalErrors.CartNotFound;
+            : Error.Conflict("CONCURRENCY_CONFLICT", "Giỏ hàng đã bị thay đổi đồng thời.");
     }
 
     public async Task<Result> UpdateCartItemDatesAsync(
@@ -214,6 +216,9 @@ public sealed class RentalCartUseCases(
         CancellationToken cancellationToken = default)
     {
         Result dateCheck = ValidateRentalDates(startDate, endDate); if (dateCheck.IsFailure) return dateCheck.Error;
+        await using var renterLock = await lockManager.AcquireRenterLockAsync(
+            renterId, TimeSpan.FromSeconds(5), cancellationToken);
+
         RentalCart? cart = await GetActiveCartAsync(renterId, cancellationToken);
         if (cart is null)
             return RentalErrors.CartNotFound;
@@ -248,7 +253,7 @@ public sealed class RentalCartUseCases(
 
         return await carts.UpdateAsync(cart, cancellationToken)
             ? Result.Success()
-            : RentalErrors.CartNotFound;
+            : Error.Conflict("CONCURRENCY_CONFLICT", "Giỏ hàng đã bị thay đổi đồng thời.");
     }
 
     public async Task<Result> RemoveCartItemAsync(
@@ -256,6 +261,9 @@ public sealed class RentalCartUseCases(
         Guid cartItemId,
         CancellationToken cancellationToken = default)
     {
+        await using var renterLock = await lockManager.AcquireRenterLockAsync(
+            renterId, TimeSpan.FromSeconds(5), cancellationToken);
+
         RentalCart? cart = await GetActiveCartAsync(renterId, cancellationToken);
         if (cart is null)
             return RentalErrors.CartNotFound;
@@ -266,13 +274,16 @@ public sealed class RentalCartUseCases(
 
         return await carts.UpdateAsync(cart, cancellationToken)
             ? Result.Success()
-            : RentalErrors.CartNotFound;
+            : Error.Conflict("CONCURRENCY_CONFLICT", "Giỏ hàng đã bị thay đổi đồng thời.");
     }
 
     public async Task<Result> ClearCartAsync(
         Guid renterId,
         CancellationToken cancellationToken = default)
     {
+        await using var renterLock = await lockManager.AcquireRenterLockAsync(
+            renterId, TimeSpan.FromSeconds(5), cancellationToken);
+
         RentalCart? cart = await GetActiveCartAsync(renterId, cancellationToken);
         if (cart is null)
             return RentalErrors.CartNotFound;
@@ -283,7 +294,7 @@ public sealed class RentalCartUseCases(
 
         return await carts.UpdateAsync(cart, cancellationToken)
             ? Result.Success()
-            : RentalErrors.CartNotFound;
+            : Error.Conflict("CONCURRENCY_CONFLICT", "Giỏ hàng đã bị thay đổi đồng thời.");
     }
     private Result ValidateRentalDates(DateOnly startDate, DateOnly endDate)
     {
