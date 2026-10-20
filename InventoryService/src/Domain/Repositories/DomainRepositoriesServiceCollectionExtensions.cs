@@ -21,13 +21,17 @@ public static class DomainRepositoriesServiceCollectionExtensions
 
         services.AddDbContext<InventoryServiceDbContext>(options => options.UseNpgsql(connectionString, npgsql => npgsql.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName)));
 
+        services.AddScoped<IEquipmentListingRepository, EquipmentListingRepository>();
         services.AddScoped<IInventoryAssetRepository, InventoryAssetRepository>();
         services.AddScoped<IAssetAllocationRepository, AssetAllocationRepository>();
         services.AddScoped<ICalendarBlockRepository, CalendarBlockRepository>();
+        services.AddScoped<IWarehouseRepository, WarehouseRepository>();
 
         services.AddScoped<IOutboxStore, OutboxStore>();
         services.AddScoped<IInboxStore, InboxStore>();
+        services.AddScoped<ISearchProjectionStore, SearchProjectionStore>();
 
+        services.AddScoped<ICacheInvalidationStore, CacheInvalidationStore>();
         services.AddScoped<IInventoryWriteTransaction, InventoryWriteTransaction>();
 
         return services;

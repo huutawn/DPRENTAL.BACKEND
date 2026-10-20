@@ -93,11 +93,7 @@ public sealed partial class PostgresIntegrationTests
     {
         await using var context = await CreateMigratedDbContextAsync();
 
-        var asset = InventoryAsset.Create(
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-            "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
-        context.Assets.Add(asset);
-
+        var asset = await IntegrationTestHelper.InsertTestAssetAsync(context);
         var period = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
         var alloc = AssetAllocation.CreateManual(Guid.NewGuid(), asset.Id, period, DateTimeOffset.UtcNow).Value;
         context.AssetAllocations.Add(alloc);
@@ -119,10 +115,8 @@ public sealed partial class PostgresIntegrationTests
     {
         await using var context = await CreateMigratedDbContextAsync();
 
-        var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
-        context.Assets.Add(asset);
-        await context.SaveChangesAsync();
+        var asset = await IntegrationTestHelper.InsertTestAssetAsync(context);
+        var assetId = asset.Id;
 
         // Cố tình chèn allocation với start_date > end_date qua raw SQL để kiểm tra check constraint DB
         var invalidInsertSql = $"""
@@ -143,10 +137,8 @@ public sealed partial class PostgresIntegrationTests
     {
         await using var context = await CreateMigratedDbContextAsync();
 
-        var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
-        context.Assets.Add(asset);
-        await context.SaveChangesAsync();
+        var asset = await IntegrationTestHelper.InsertTestAssetAsync(context);
+        var assetId = asset.Id;
 
         // Chèn status Held (1) nhưng hold_expires_at = NULL
         var invalidInsertSql = $"""
@@ -167,10 +159,8 @@ public sealed partial class PostgresIntegrationTests
     {
         await using var context = await CreateMigratedDbContextAsync();
 
-        var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
-        context.Assets.Add(asset);
-        await context.SaveChangesAsync();
+        var asset = await IntegrationTestHelper.InsertTestAssetAsync(context);
+        var assetId = asset.Id;
 
         const string sourceSystem = "rental_service";
         var externalReference = $"REF_{Guid.NewGuid():N}";
@@ -197,10 +187,8 @@ public sealed partial class PostgresIntegrationTests
         await using var context1 = await CreateMigratedDbContextAsync();
         await using var context2 = await CreateMigratedDbContextAsync();
 
-        var assetId = Guid.NewGuid();
-        var asset = InventoryAsset.Create(assetId, Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
-        context1.Assets.Add(asset);
-        await context1.SaveChangesAsync();
+        var asset = await IntegrationTestHelper.InsertTestAssetAsync(context1);
+        var assetId = asset.Id;
 
         var a1 = await context1.Assets.FindAsync(assetId);
         var a2 = await context2.Assets.FindAsync(assetId);
@@ -226,11 +214,11 @@ public sealed partial class PostgresIntegrationTests
         var org = Guid.NewGuid();
         var type = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
+        var aId = Guid.NewGuid();
+        var bId = Guid.NewGuid();
 
-        var assetA = InventoryAsset.Create(Guid.NewGuid(), ownerA, type, "Sony FX3", 1, "{}", now).Value;
-        var assetB = InventoryAsset.Create(Guid.NewGuid(), ownerB, type, "Sony A7S III", 1, "{}", now).Value;
-        db.Assets.AddRange(assetA, assetB);
-        await db.SaveChangesAsync();
+        var assetA = await IntegrationTestHelper.InsertTestAssetAsync(db, assetId: aId, ownerId: ownerA, eqTypeId: type, now: now);
+        var assetB = await IntegrationTestHelper.InsertTestAssetAsync(db, assetId: bId, ownerId: ownerB, eqTypeId: type, now: now);
 
         using var scope = sp.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IInventoryAssetRepository>();
@@ -243,7 +231,7 @@ public sealed partial class PostgresIntegrationTests
         var notFoundForOwnerB = await repo.GetByIdForOwnerAsync(assetA.Id, ownerB);
         Assert.Null(notFoundForOwnerB);
 
-        var listA = await repo.ListByOwnerAsync(ownerA, 0, 10);
+        var listA = await repo.SearchForOwnerAsync(OwnerAssetSearchCriteria.ForOwner(ownerA, 0, 10));
         Assert.Single(listA);
         Assert.Equal(assetA.Id, listA[0].Id);
     }

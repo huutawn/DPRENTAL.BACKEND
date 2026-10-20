@@ -5,19 +5,15 @@ using Dprental.InventoryService.Application.DTOs.Assets;
 namespace Dprental.InventoryService.Application.Serialization.Converters;
 
 /// <summary>
-/// Custom JsonConverter cho PatchInventoryAssetRequest thực thi presence tracking,
-/// từ chối các trường bị cấm/không rõ nguồn gốc và xác thực kiểu dữ liệu nghiêm ngặt.
+/// Custom JsonConverter cho PatchInventoryAssetRequest thực thi presence tracking cho physical assets,
+/// chỉ cho phép serialNumber và manufactureYear, từ chối các trường khác và xác thực kiểu nghiêm ngặt.
 /// </summary>
 public sealed class PatchInventoryAssetRequestJsonConverter : JsonConverter<PatchInventoryAssetRequest>
 {
     private static readonly HashSet<string> AllowedProperties = new(StringComparer.OrdinalIgnoreCase)
     {
-        "model",
         "serialNumber",
-        "manufactureYear",
-        "thumbnailMediaId",
-        "schemaVersion",
-        "specValues"
+        "manufactureYear"
     };
 
     public override PatchInventoryAssetRequest Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
@@ -39,123 +35,63 @@ public sealed class PatchInventoryAssetRequestJsonConverter : JsonConverter<Patc
 
             if (reader.TokenType != JsonTokenType.PropertyName)
             {
-                throw new JsonException("Cú pháp JSON không hợp lệ.");
+                throw new JsonException("Mong đợi tên thuộc tính JSON.");
             }
 
-            var propName = reader.GetString() ?? string.Empty;
-            if (!AllowedProperties.Contains(propName))
+            string propertyName = reader.GetString()!;
+
+            if (!seenProperties.Add(propertyName))
             {
-                throw new JsonException($"Trường '{propName}' không hợp lệ hoặc bị cấm trong cập nhật thông tin tài sản.");
+                throw new JsonException($"Thuộc tính '{propertyName}' bị lặp lại trong nội dung yêu cầu.");
             }
 
-            if (!seenProperties.Add(propName))
+            if (!AllowedProperties.Contains(propertyName))
             {
-                throw new JsonException($"Trường '{propName}' bị lặp lại trong nội dung JSON.");
+                throw new JsonException($"Thuộc tính '{propertyName}' không được phép cập nhật trên đơn vị thiết bị vật lý.");
             }
 
-            if (!reader.Read())
-            {
-                throw new JsonException("Nội dung JSON bị kết thúc bất thường.");
-            }
+            reader.Read();
 
-            if (string.Equals(propName, "model", StringComparison.OrdinalIgnoreCase))
+            switch (propertyName.ToLowerInvariant())
             {
-                if (reader.TokenType == JsonTokenType.Null)
-                {
-                    throw new JsonException("Trường 'model' không được null.");
-                }
-
-                if (reader.TokenType != JsonTokenType.String)
-                {
-                    throw new JsonException("Trường 'model' phải là chuỗi ký tự.");
-                }
-
-                request.IsModelSpecified = true;
-                request.Model = reader.GetString();
-            }
-            else if (string.Equals(propName, "serialNumber", StringComparison.OrdinalIgnoreCase))
-            {
-                if (reader.TokenType == JsonTokenType.Null)
-                {
+                case "serialnumber":
                     request.IsSerialNumberSpecified = true;
-                    request.SerialNumber = null;
-                }
-                else if (reader.TokenType == JsonTokenType.String)
-                {
-                    request.IsSerialNumberSpecified = true;
-                    request.SerialNumber = reader.GetString();
-                }
-                else
-                {
-                    throw new JsonException("Trường 'serialNumber' phải là chuỗi ký tự hoặc null.");
-                }
-            }
-            else if (string.Equals(propName, "manufactureYear", StringComparison.OrdinalIgnoreCase))
-            {
-                if (reader.TokenType == JsonTokenType.Null)
-                {
+                    if (reader.TokenType == JsonTokenType.Null)
+                    {
+                        request.SerialNumber = null;
+                    }
+                    else if (reader.TokenType == JsonTokenType.String)
+                    {
+                        request.SerialNumber = reader.GetString();
+                    }
+                    else
+                    {
+                        throw new JsonException("Thuộc tính 'serialNumber' phải là kiểu chuỗi hoặc null.");
+                    }
+                    break;
+
+                case "manufactureyear":
                     request.IsManufactureYearSpecified = true;
-                    request.ManufactureYear = null;
-                }
-                else if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var year))
-                {
-                    request.IsManufactureYearSpecified = true;
-                    request.ManufactureYear = year;
-                }
-                else
-                {
-                    throw new JsonException("Trường 'manufactureYear' phải là số nguyên hoặc null.");
-                }
-            }
-            else if (string.Equals(propName, "thumbnailMediaId", StringComparison.OrdinalIgnoreCase))
-            {
-                if (reader.TokenType == JsonTokenType.Null)
-                {
-                    request.IsThumbnailMediaIdSpecified = true;
-                    request.ThumbnailMediaId = null;
-                }
-                else if (reader.TokenType == JsonTokenType.String && reader.TryGetGuid(out var thumbId))
-                {
-                    request.IsThumbnailMediaIdSpecified = true;
-                    request.ThumbnailMediaId = thumbId;
-                }
-                else
-                {
-                    throw new JsonException("Trường 'thumbnailMediaId' phải là GUID hợp lệ hoặc null.");
-                }
-            }
-            else if (string.Equals(propName, "schemaVersion", StringComparison.OrdinalIgnoreCase))
-            {
-                if (reader.TokenType == JsonTokenType.Null)
-                {
-                    throw new JsonException("Trường 'schemaVersion' không được null.");
-                }
-
-                if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var ver))
-                {
-                    request.IsSchemaVersionSpecified = true;
-                    request.SchemaVersion = ver;
-                }
-                else
-                {
-                    throw new JsonException("Trường 'schemaVersion' phải là số nguyên.");
-                }
-            }
-            else if (string.Equals(propName, "specValues", StringComparison.OrdinalIgnoreCase))
-            {
-                if (reader.TokenType == JsonTokenType.Null)
-                {
-                    throw new JsonException("Trường 'specValues' không được null.");
-                }
-
-                if (reader.TokenType != JsonTokenType.StartObject)
-                {
-                    throw new JsonException("Trường 'specValues' phải là JSON object.");
-                }
-
-                using var doc = JsonDocument.ParseValue(ref reader);
-                request.IsSpecValuesSpecified = true;
-                request.SpecValues = doc.RootElement.Clone();
+                    if (reader.TokenType == JsonTokenType.Null)
+                    {
+                        request.ManufactureYear = null;
+                    }
+                    else if (reader.TokenType == JsonTokenType.Number)
+                    {
+                        if (reader.TryGetInt32(out int year))
+                        {
+                            request.ManufactureYear = year;
+                        }
+                        else
+                        {
+                            throw new JsonException("Thuộc tính 'manufactureYear' phải là số nguyên hợp lệ.");
+                        }
+                    }
+                    else
+                    {
+                        throw new JsonException("Thuộc tính 'manufactureYear' phải là số nguyên hoặc null.");
+                    }
+                    break;
             }
         }
 
@@ -166,53 +102,27 @@ public sealed class PatchInventoryAssetRequestJsonConverter : JsonConverter<Patc
     {
         writer.WriteStartObject();
 
-        if (value.IsModelSpecified)
-        {
-            writer.WriteString("model", value.Model);
-        }
-
         if (value.IsSerialNumberSpecified)
         {
-            if (value.SerialNumber is null)
+            if (value.SerialNumber == null)
+            {
                 writer.WriteNull("serialNumber");
+            }
             else
+            {
                 writer.WriteString("serialNumber", value.SerialNumber);
+            }
         }
 
         if (value.IsManufactureYearSpecified)
         {
-            if (value.ManufactureYear is null)
-                writer.WriteNull("manufactureYear");
-            else
-                writer.WriteNumber("manufactureYear", value.ManufactureYear.Value);
-        }
-
-        if (value.IsThumbnailMediaIdSpecified)
-        {
-            if (value.ThumbnailMediaId is null)
-                writer.WriteNull("thumbnailMediaId");
-            else
-                writer.WriteString("thumbnailMediaId", value.ThumbnailMediaId.Value);
-        }
-
-        if (value.IsSchemaVersionSpecified)
-        {
-            if (value.SchemaVersion.HasValue)
-                writer.WriteNumber("schemaVersion", value.SchemaVersion.Value);
-            else
-                writer.WriteNull("schemaVersion");
-        }
-
-        if (value.IsSpecValuesSpecified)
-        {
-            if (value.SpecValues.HasValue)
+            if (value.ManufactureYear == null)
             {
-                writer.WritePropertyName("specValues");
-                value.SpecValues.Value.WriteTo(writer);
+                writer.WriteNull("manufactureYear");
             }
             else
             {
-                writer.WriteNull("specValues");
+                writer.WriteNumber("manufactureYear", value.ManufactureYear.Value);
             }
         }
 

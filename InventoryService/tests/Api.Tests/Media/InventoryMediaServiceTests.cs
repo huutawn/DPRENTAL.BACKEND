@@ -1,7 +1,8 @@
 using Dprental.InventoryService.Application.Clients;
+using Dprental.InventoryService.Application.DTOs.Catalog;
 using Dprental.InventoryService.Application.DTOs.Media;
-using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Options;
+using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Services;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
@@ -68,30 +69,48 @@ public sealed class InventoryMediaServiceTests
     }
 
     [Fact]
-    public async Task PreparePublicAsync_NullMediaId_ReturnsSuccessNull_WithoutCallingClient()
+    public async Task PreparePublicAsync_EmptyListAndNullThumbnail_ReturnsEmptyList_WithoutCallingClient()
     {
         var sut = CreateService();
         var caller = new TestCaller(Guid.NewGuid());
 
-        var result = await sut.PreparePublicAsync(null, caller);
+        var result = await sut.PreparePublicAsync([], null, caller);
 
         Assert.True(result.IsSuccess);
-        Assert.Null(result.Value);
+        Assert.Empty(result.Value);
         Assert.Equal(0, _mediaClient.VerifyCallCount);
         Assert.Equal(0, _mediaClient.SetPublicCallCount);
     }
 
     [Fact]
-    public async Task PreparePublicAsync_EmptyGuid_ReturnsValidation_WithoutCallingClient()
+    public async Task PreparePublicAsync_EmptyGuidOrDuplicateOrLimitOrThumbnailOutsideList_ReturnsValidation_WithoutCallingClient()
     {
         var sut = CreateService();
         var caller = new TestCaller(Guid.NewGuid());
+        var id1 = Guid.NewGuid();
+        var id2 = Guid.NewGuid();
 
-        var result = await sut.PreparePublicAsync(Guid.Empty, caller);
+        // 1. Empty Guid in mediaIds
+        var emptyRes = await sut.PreparePublicAsync([Guid.Empty], null, caller);
+        Assert.True(emptyRes.IsFailure);
+        Assert.Equal("INVALID_MEDIA_ID", emptyRes.Error.Code);
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("INVALID_MEDIA_ID", result.Error.Code);
-        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        // 2. Duplicate Guid in mediaIds
+        var dupRes = await sut.PreparePublicAsync([id1, id1], null, caller);
+        Assert.True(dupRes.IsFailure);
+        Assert.Equal("DUPLICATE_MEDIA_ID", dupRes.Error.Code);
+
+        // 3. Exceeding 20 items
+        var twentyOne = Enumerable.Range(0, 21).Select(_ => Guid.NewGuid()).ToList();
+        var limitRes = await sut.PreparePublicAsync(twentyOne, null, caller);
+        Assert.True(limitRes.IsFailure);
+        Assert.Equal("MEDIA_LIMIT_EXCEEDED", limitRes.Error.Code);
+
+        // 4. Thumbnail not in mediaIds
+        var thumbOutsideRes = await sut.PreparePublicAsync([id1], id2, caller);
+        Assert.True(thumbOutsideRes.IsFailure);
+        Assert.Equal("INVALID_THUMBNAIL_MEDIA_ID", thumbOutsideRes.Error.Code);
+
         Assert.Equal(0, _mediaClient.VerifyCallCount);
     }
 
@@ -103,19 +122,19 @@ public sealed class InventoryMediaServiceTests
 
         // 1. Chưa xác thực -> 401
         var unauthCaller = new TestCaller(Guid.NewGuid(), isAuthenticated: false);
-        var unauthRes = await sut.PreparePublicAsync(mediaId, unauthCaller);
+        var unauthRes = await sut.PreparePublicAsync([mediaId], mediaId, unauthCaller);
         Assert.True(unauthRes.IsFailure);
         Assert.Equal(ErrorType.Unauthorized, unauthRes.Error.Type);
 
         // 2. Service principal -> 403
         var serviceCaller = new TestCaller(Guid.NewGuid(), isHuman: false);
-        var svcRes = await sut.PreparePublicAsync(mediaId, serviceCaller);
+        var svcRes = await sut.PreparePublicAsync([mediaId], mediaId, serviceCaller);
         Assert.True(svcRes.IsFailure);
         Assert.Equal(ErrorType.Forbidden, svcRes.Error.Type);
 
         // 3. UserId null -> 403
         var noUserCaller = new TestCaller(null, isHuman: true);
-        var noUserRes = await sut.PreparePublicAsync(mediaId, noUserCaller);
+        var noUserRes = await sut.PreparePublicAsync([mediaId], mediaId, noUserCaller);
         Assert.True(noUserRes.IsFailure);
         Assert.Equal(ErrorType.Forbidden, noUserRes.Error.Type);
 
@@ -123,28 +142,64 @@ public sealed class InventoryMediaServiceTests
     }
 
     [Fact]
-    public async Task PreparePublicAsync_ValidUploaderAndReady_CallsPublishAndReturnsResponse()
+    public async Task PreparePublicAsync_MultipleImagesAndVideos_PreservesOrderAndPublishesAll()
     {
         var sut = CreateService();
-        var mediaId = Guid.NewGuid();
+        var videoId = Guid.NewGuid();
+        var imgId = Guid.NewGuid();
         var callerId = Guid.NewGuid();
         var caller = new TestCaller(callerId);
 
         _mediaClient.VerifyHandler = (id, ct) =>
-            Task.FromResult(Result.Success(new MediaVerificationInfo(id, "Ready", callerId.ToString("D"))));
+        {
+            string contentType = id == videoId ? "video/mp4" : "image/webp";
+            return Task.FromResult(Result.Success(new MediaVerificationInfo(id, "Ready", callerId.ToString("D"), contentType)));
+        };
 
         _mediaClient.SetPublicHandler = (id, ct) =>
             Task.FromResult(Result.Success(new MediaVisibilityInfo(id, "Public")));
 
-        var result = await sut.PreparePublicAsync(mediaId, caller);
+        var result = await sut.PreparePublicAsync([videoId, imgId], imgId, caller);
 
         Assert.True(result.IsSuccess);
-        Assert.NotNull(result.Value);
-        Assert.Equal(mediaId, result.Value.Id);
-        Assert.Equal($"https://gateway.example/api/v1/media/{mediaId:D}/content", result.Value.Url);
+        Assert.Equal(2, result.Value.Count);
+        Assert.Equal(videoId, result.Value[0].Id);
+        Assert.Equal($"https://gateway.example/api/v1/media/{videoId:D}/content", result.Value[0].Url);
+        Assert.Equal(imgId, result.Value[1].Id);
+        Assert.Equal($"https://gateway.example/api/v1/media/{imgId:D}/content", result.Value[1].Url);
 
-        Assert.Equal(1, _mediaClient.VerifyCallCount);
-        Assert.Equal(1, _mediaClient.SetPublicCallCount);
+        Assert.Equal(2, _mediaClient.VerifyCallCount);
+        Assert.Equal(2, _mediaClient.SetPublicCallCount);
+    }
+
+    [Fact]
+    public async Task PreparePublicAsync_ThumbnailIsVideo_OrMediaIsPdf_RejectedWithoutCallingSetPublic()
+    {
+        var sut = CreateService();
+        var videoId = Guid.NewGuid();
+        var pdfId = Guid.NewGuid();
+        var callerId = Guid.NewGuid();
+        var caller = new TestCaller(callerId);
+
+        _mediaClient.VerifyHandler = (id, ct) =>
+        {
+            string contentType = id == videoId ? "video/mp4" : "application/pdf";
+            return Task.FromResult(Result.Success(new MediaVerificationInfo(id, "Ready", callerId.ToString("D"), contentType)));
+        };
+
+        // 1. Thumbnail là video -> bị từ chối, không gọi SetPublic
+        var videoThumbRes = await sut.PreparePublicAsync([videoId], videoId, caller);
+        Assert.True(videoThumbRes.IsFailure);
+        Assert.Equal(ErrorType.Validation, videoThumbRes.Error.Type);
+        Assert.Equal("INVALID_THUMBNAIL_CONTENT_TYPE", videoThumbRes.Error.Code);
+        Assert.Equal(0, _mediaClient.SetPublicCallCount);
+
+        // 2. Media là PDF (không phải ảnh/video) -> bị từ chối, không gọi SetPublic
+        var pdfRes = await sut.PreparePublicAsync([pdfId], null, caller);
+        Assert.True(pdfRes.IsFailure);
+        Assert.Equal(ErrorType.Validation, pdfRes.Error.Type);
+        Assert.Equal("INVALID_MEDIA_CONTENT_TYPE", pdfRes.Error.Code);
+        Assert.Equal(0, _mediaClient.SetPublicCallCount);
     }
 
     [Fact]
@@ -163,16 +218,15 @@ public sealed class InventoryMediaServiceTests
         var caller = new TestCaller(callerId);
 
         _mediaClient.VerifyHandler = (id, ct) =>
-            Task.FromResult(Result.Success(new MediaVerificationInfo(id, "Ready", callerId.ToString("D"))));
+            Task.FromResult(Result.Success(new MediaVerificationInfo(id, "Ready", callerId.ToString("D"), "image/jpeg")));
         _mediaClient.SetPublicHandler = (id, ct) =>
             Task.FromResult(Result.Success(new MediaVisibilityInfo(id, "Public")));
 
-        var result = await sut.PreparePublicAsync(mediaId, caller);
+        var result = await sut.PreparePublicAsync([mediaId], mediaId, caller);
 
         Assert.True(result.IsSuccess);
-        Assert.NotNull(result.Value);
-        // Không bị lặp dấu slash
-        Assert.Equal($"https://gateway.example/api/v1/media/{mediaId:D}/content", result.Value.Url);
+        Assert.Single(result.Value);
+        Assert.Equal($"https://gateway.example/api/v1/media/{mediaId:D}/content", result.Value[0].Url);
     }
 
     [Fact]
@@ -186,7 +240,7 @@ public sealed class InventoryMediaServiceTests
         _mediaClient.VerifyHandler = (id, ct) =>
             Task.FromResult(Result.Failure<MediaVerificationInfo>(Error.Validation("MEDIA_NOT_FOUND", "Không tìm thấy media.")));
 
-        var result = await sut.PreparePublicAsync(mediaId, caller);
+        var result = await sut.PreparePublicAsync([mediaId], mediaId, caller);
 
         Assert.True(result.IsFailure);
         Assert.Equal("MEDIA_NOT_FOUND", result.Error.Code);
@@ -203,9 +257,9 @@ public sealed class InventoryMediaServiceTests
         var caller = new TestCaller(callerId);
 
         _mediaClient.VerifyHandler = (id, ct) =>
-            Task.FromResult(Result.Success(new MediaVerificationInfo(id, "PendingUpload", callerId.ToString("D"))));
+            Task.FromResult(Result.Success(new MediaVerificationInfo(id, "PendingUpload", callerId.ToString("D"), "image/jpeg")));
 
-        var result = await sut.PreparePublicAsync(mediaId, caller);
+        var result = await sut.PreparePublicAsync([mediaId], mediaId, caller);
 
         Assert.True(result.IsFailure);
         Assert.Equal(ErrorType.Conflict, result.Error.Type);
@@ -222,13 +276,12 @@ public sealed class InventoryMediaServiceTests
         var callerId = Guid.NewGuid();
         var anotherUploaderId = Guid.NewGuid();
 
-        // Admin caller cố dùng media của người khác -> Cấm bypass
         var adminCaller = new TestCaller(callerId, isHuman: true, isAuthenticated: true, isAdmin: true);
 
         _mediaClient.VerifyHandler = (id, ct) =>
-            Task.FromResult(Result.Success(new MediaVerificationInfo(id, "Ready", anotherUploaderId.ToString("D"))));
+            Task.FromResult(Result.Success(new MediaVerificationInfo(id, "Ready", anotherUploaderId.ToString("D"), "image/jpeg")));
 
-        var result = await sut.PreparePublicAsync(mediaId, adminCaller);
+        var result = await sut.PreparePublicAsync([mediaId], mediaId, adminCaller);
 
         Assert.True(result.IsFailure);
         Assert.Equal(ErrorType.Forbidden, result.Error.Type);
@@ -246,37 +299,56 @@ public sealed class InventoryMediaServiceTests
         var caller = new TestCaller(callerId);
 
         _mediaClient.VerifyHandler = (id, ct) =>
-            Task.FromResult(Result.Success(new MediaVerificationInfo(id, "Ready", callerId.ToString("D"))));
+            Task.FromResult(Result.Success(new MediaVerificationInfo(id, "Ready", callerId.ToString("D"), "image/jpeg")));
 
         _mediaClient.SetPublicHandler = (id, ct) =>
             Task.FromResult(Result.Failure<MediaVisibilityInfo>(Error.Unavailable("MEDIA_SERVICE_UNAVAILABLE", "Lỗi publish.")));
 
-        var result = await sut.PreparePublicAsync(mediaId, caller);
+        var result = await sut.PreparePublicAsync([mediaId], mediaId, caller);
 
         Assert.True(result.IsFailure);
         Assert.Equal("MEDIA_SERVICE_UNAVAILABLE", result.Error.Code);
     }
 
     [Fact]
-    public async Task PreparePublicAsync_AlreadyPublic_RetrySucceeds()
+    public async Task PreparePublicAsync_WithExistingMedia_OnlyVerifiesNewAndChangedThumbnail()
     {
         var sut = CreateService();
-        var mediaId = Guid.NewGuid();
+        var existingImg = Guid.NewGuid();
+        var existingVid = Guid.NewGuid();
+        var newImg = Guid.NewGuid();
         var callerId = Guid.NewGuid();
         var caller = new TestCaller(callerId);
 
         _mediaClient.VerifyHandler = (id, ct) =>
-            Task.FromResult(Result.Success(new MediaVerificationInfo(id, "Ready", callerId.ToString("D"))));
-
-        // MediaService SetPublic có tính idempotent (nếu đã Public vẫn trả 200 Public)
+        {
+            string ctStr = id == existingVid ? "video/mp4" : "image/jpeg";
+            return Task.FromResult(Result.Success(new MediaVerificationInfo(id, "Ready", callerId.ToString("D"), ctStr)));
+        };
         _mediaClient.SetPublicHandler = (id, ct) =>
             Task.FromResult(Result.Success(new MediaVisibilityInfo(id, "Public")));
 
-        var first = await sut.PreparePublicAsync(mediaId, caller);
-        var second = await sut.PreparePublicAsync(mediaId, caller);
+        // 1. Giữ nguyên existingImg và existingVid, chỉ thêm newImg -> chỉ verify & publish newImg (1 lần)
+        var res1 = await sut.PreparePublicAsync(
+            [existingImg, existingVid, newImg],
+            existingImg,
+            caller,
+            existingMediaIds: [existingImg, existingVid],
+            existingThumbnailMediaId: existingImg);
 
-        Assert.True(first.IsSuccess);
-        Assert.True(second.IsSuccess);
-        Assert.Equal(first.Value?.Url, second.Value?.Url);
+        Assert.True(res1.IsSuccess);
+        Assert.Equal(1, _mediaClient.VerifyCallCount);
+        Assert.Equal(1, _mediaClient.SetPublicCallCount);
+
+        // 2. Đổi thumbnail sang existingVid (đã có trong danh sách nhưng là video) -> bị từ chối!
+        var res2 = await sut.PreparePublicAsync(
+            [existingImg, existingVid],
+            existingVid,
+            caller,
+            existingMediaIds: [existingImg, existingVid],
+            existingThumbnailMediaId: existingImg);
+
+        Assert.True(res2.IsFailure);
+        Assert.Equal("INVALID_THUMBNAIL_CONTENT_TYPE", res2.Error.Code);
     }
 }

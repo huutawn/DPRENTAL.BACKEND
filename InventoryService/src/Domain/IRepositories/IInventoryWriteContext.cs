@@ -3,15 +3,25 @@ using Dprental.InventoryService.Domain.Entities;
 namespace Dprental.InventoryService.Domain.IRepositories;
 
 /// <summary>
-/// Bối cảnh thực thi ghi trong phạm vi giao dịch phân tán độc quyền của tài sản.
-/// Cung cấp quyền truy cập tới các repository dùng chung DbContext đã được bảo vệ bởi advisory lock.
+/// Bối cảnh thực thi ghi trong phạm vi giao dịch phân tán độc quyền của Listing và Asset.
+/// Cung cấp quyền truy cập tới các repository dùng chung DbContext đã được bảo vệ bởi advisory locks.
 /// </summary>
 public interface IInventoryWriteContext
 {
     /// <summary>
-    /// Tài sản được khóa độc quyền cho toàn bộ operation.
+    /// Tài sản được khóa độc quyền (nếu là transaction cấp đơn vị tài sản).
     /// </summary>
     Guid AssetId { get; }
+
+    /// <summary>
+    /// Listing được khóa độc quyền trong transaction boundary.
+    /// </summary>
+    Guid? ListingId { get; }
+
+    /// <summary>
+    /// Repository quản lý danh mục niêm yết thiết bị.
+    /// </summary>
+    IEquipmentListingRepository Listings { get; }
 
     /// <summary>
     /// Repository quản lý tài sản trong kho.
@@ -29,7 +39,58 @@ public interface IInventoryWriteContext
     ICalendarBlockRepository CalendarBlocks { get; }
 
     /// <summary>
+    /// Repository quản lý kho của các bên cho thuê.
+    /// </summary>
+    IWarehouseRepository Warehouses => null!;
+
+    /// <summary>
+    /// Khóa độc quyền kho của bên cho thuê bằng PostgreSQL advisory transaction lock.
+    /// </summary>
+    Task AcquireWarehouseLockAsync(Guid ownerUserId, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    /// <summary>
+    /// Khóa bổ sung các đơn vị tài sản vật lý theo thứ tự ID tăng dần trong cùng transaction boundary.
+    /// </summary>
+    Task AcquireAssetLocksAsync(IEnumerable<Guid> assetIds, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Đưa thông điệp Outbox vào hàng đợi lưu trữ trong cùng một transaction.
     /// </summary>
     void StageOutbox(OutboxMessage message);
+
+    /// <summary>
+    /// Đưa công việc xóa cache theo danh sách scope vào hàng đợi lưu trữ trong cùng transaction nghiệp vụ.
+    /// </summary>
+    void StageCacheInvalidation(IEnumerable<string> scopes);
+
+    /// <summary>
+    /// Đưa công việc xóa cache dạng fanout theo owner vào hàng đợi lưu trữ trong cùng transaction nghiệp vụ.
+    /// </summary>
+    void StageWarehouseFanoutInvalidation(Guid ownerUserId, IEnumerable<string>? initialScopes = null);
+    /// <summary>
+    /// Lấy giá trị revision tuần tự tiếp theo từ sequence search_projection_revision_seq trong transaction hiện tại.
+    /// </summary>
+    Guid? SearchBackfillRunId { get; }
+
+    Task<long> GetNextSearchRevisionAsync(CancellationToken cancellationToken = default);
+
+    Task<AllocationOperationReceipt?> GetReceiptAsync(string sourceSystem, string operationKey, CancellationToken cancellationToken = default) =>
+        Task.FromResult<AllocationOperationReceipt?>(null);
+
+    Task<AllocationOperationReceipt?> GetGroupTombstoneAsync(string sourceSystem, string groupReference, CancellationToken cancellationToken = default) =>
+        Task.FromResult<AllocationOperationReceipt?>(null);
+
+    void AddReceipt(AllocationOperationReceipt receipt) { }
+
+    Task AcquireListingLockAsync(Guid listingId, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    Task RollbackToSavepointAsync(string name, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    void ClearChangeTracker() { }
+
+    Task MarkInboxProcessedAsync(string handler, string messageId, DateTimeOffset nowUtc, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
 }

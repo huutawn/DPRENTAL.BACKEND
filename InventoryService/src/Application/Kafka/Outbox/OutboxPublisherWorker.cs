@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Dprental.InventoryService.Application.Caching;
 using Dprental.InventoryService.Application.Kafka.Contracts;
 using Dprental.InventoryService.Common.Utils;
 using Dprental.InventoryService.Domain.Entities;
@@ -24,7 +25,6 @@ public sealed class OutboxPublisherWorker : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IKafkaProducer _producer;
     private readonly ILogger<OutboxPublisherWorker>? _logger;
-
     public int BatchSize { get; set; } = 20;
     public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromSeconds(30);
     public TimeSpan IdleDelay { get; set; } = TimeSpan.FromMilliseconds(100);
@@ -34,8 +34,8 @@ public sealed class OutboxPublisherWorker : BackgroundService
         IKafkaProducer producer,
         ILogger<OutboxPublisherWorker>? logger = null)
     {
-        _scopeFactory = scopeFactory;
-        _producer = producer;
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+        _producer = producer ?? throw new ArgumentNullException(nameof(producer));
         _logger = logger;
     }
 
@@ -141,6 +141,7 @@ public sealed class OutboxPublisherWorker : BackgroundService
                 }
             }
 
+
             // Publish ngoài transaction lên Kafka broker và chờ ACK
             await _producer.ProduceRawAsync(
                 message.Topic,
@@ -192,4 +193,5 @@ public sealed class OutboxPublisherWorker : BackgroundService
                 cancellationToken);
         }
     }
+
 }

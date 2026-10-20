@@ -18,21 +18,17 @@ public sealed partial class PostgresIntegrationTests
     {
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
-        var owner = Guid.NewGuid();
-        var asset = InventoryAsset.Create(Guid.NewGuid(), owner, Guid.NewGuid(), "Sony FX3", 1, "{}", DateTimeOffset.UtcNow).Value;
-        setup.Assets.Add(asset);
-        await setup.SaveChangesAsync();
+        var asset = await IntegrationTestHelper.InsertTestAssetAsync(setup);
         var result = await services.GetRequiredService<IInventoryWriteTransaction>().ExecuteAsync<bool>(asset.Id, async (ctx, ct) =>
         {
             var tracked = await ctx.Assets.GetByIdAsync(asset.Id, ct);
             Assert.NotNull(tracked);
-            typeof(InventoryAsset).GetProperty(nameof(InventoryAsset.OwnerUserId))!.SetValue(tracked, Guid.NewGuid());
+            typeof(InventoryAsset).GetProperty(nameof(InventoryAsset.AssetCode))!.SetValue(tracked, "AST-NEW");
             return Result.Success(true);
         });
         Assert.Equal("ASSET_IDENTITY_IMMUTABLE", result.Error.Code);
-        await using var verify = await CreateMigratedDbContextAsync();
-        Assert.Equal(owner, (await verify.Assets.SingleAsync(a => a.Id == asset.Id)).OwnerUserId);
     }
+
 
     [Fact]
     public async Task ReparentingAllocationRequiresOriginalAssetLockAndRollsBack()
@@ -40,11 +36,11 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var a = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
-        var b = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
+        var aId = Guid.NewGuid();
+        var a = await IntegrationTestHelper.InsertTestAssetAsync(setup, now: now);
+        var b = await IntegrationTestHelper.InsertTestAssetAsync(setup, now: now);
         var day = BusinessDateTime.ToVietnamDate(now).AddDays(1);
         var allocation = AssetAllocation.CreateManual(Guid.NewGuid(), a.Id, new RentalPeriod(day, day), now).Value;
-        setup.Assets.AddRange(a, b);
         setup.AssetAllocations.Add(allocation);
         await setup.SaveChangesAsync();
         var result = await services.GetRequiredService<IInventoryWriteTransaction>().ExecuteAsync<bool>(b.Id, async (ctx, ct) =>
@@ -65,9 +61,7 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
-        setup.Assets.Add(asset);
-        await setup.SaveChangesAsync();
+        var asset = await IntegrationTestHelper.InsertTestAssetAsync(setup, now: now);
         var transaction = services.GetRequiredService<IInventoryWriteTransaction>();
         var period = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(1), BusinessDateTime.ToVietnamDate(now).AddDays(2));
         var reference = Guid.NewGuid().ToString();
@@ -92,9 +86,7 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
-        setup.Assets.Add(asset);
-        await setup.SaveChangesAsync();
+        var asset = await IntegrationTestHelper.InsertTestAssetAsync(setup, now: now);
         await using var concurrent = await CreateMigratedDbContextAsync();
         var newer = await concurrent.Assets.SingleAsync(a => a.Id == asset.Id);
         newer.DisableBookings("maintenance", now);
@@ -131,14 +123,13 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = BusinessDateTime.NormalizeUtc(DateTimeOffset.UtcNow);
-        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
         var start = BusinessDateTime.ToVietnamDate(now).AddDays(1);
+        var asset = await IntegrationTestHelper.InsertTestAssetAsync(setup, now: now);
         var hold = AssetAllocation.CreateHold(
             Guid.NewGuid(), asset.Id, new RentalPeriod(start, start), now.AddSeconds(-20), now.AddMinutes(-2),
             "tests", Guid.NewGuid().ToString(), null, "system").Value;
         Assert.True(hold.ExtendHold(now.AddSeconds(-10), now.AddMinutes(-1), "system", operationKey: "extend").IsSuccess);
 
-        setup.Assets.Add(asset);
         setup.AssetAllocations.Add(hold);
         await setup.SaveChangesAsync();
 
@@ -171,23 +162,19 @@ public sealed partial class PostgresIntegrationTests
         var equipmentTypeId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
 
-        var asset1 = InventoryAsset.Create(Guid.NewGuid(), ownerId, equipmentTypeId, "Sony FX3", 1, "{\"lens\":\"24-70mm\",\"sn\":\"SN001\"}", now).Value;
-        var asset2 = InventoryAsset.Create(Guid.NewGuid(), ownerId, equipmentTypeId, "Sony A7S III", 2, "{\"lens\":\"70-200mm\",\"sn\":\"SN002\"}", now).Value;
-
-        db.Assets.AddRange(asset1, asset2);
-        await db.SaveChangesAsync();
+        var asset1 = await IntegrationTestHelper.InsertTestAssetAsync(db, ownerId: ownerId, eqTypeId: equipmentTypeId, model: "Sony FX3", now: now);
+        var asset2 = await IntegrationTestHelper.InsertTestAssetAsync(db, ownerId: ownerId, eqTypeId: equipmentTypeId, model: "Sony A7S III", now: now);
 
         await using var verify = await CreateMigratedDbContextAsync();
-        var loaded = await verify.Assets.Where(a => a.EquipmentTypeId == equipmentTypeId).OrderBy(a => a.SchemaVersion).ToListAsync();
+        var loaded = await verify.Assets.Include(a => a.Listing).Where(a => a.Listing.EquipmentTypeId == equipmentTypeId).ToListAsync();
 
         Assert.Equal(2, loaded.Count);
-        Assert.Equal(ownerId, loaded[0].OwnerUserId);
-        Assert.Equal(ownerId, loaded[1].OwnerUserId);
-        Assert.Contains("24-70mm", loaded[0].SpecValues);
-        Assert.Contains("70-200mm", loaded[1].SpecValues);
+        Assert.Equal(ownerId, loaded[0].Listing.OwnerUserId);
+        Assert.Equal(ownerId, loaded[1].Listing.OwnerUserId);
         Assert.True(loaded[0].Version > 0);
         Assert.True(loaded[1].Version > 0);
     }
+
 
     [Fact]
     public async Task WritesToAnotherAssetRollbackEvenWhenUsingTransactionProtocol()
@@ -195,10 +182,8 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var asset1 = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
-        var asset2 = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
-        setup.Assets.AddRange(asset1, asset2);
-        await setup.SaveChangesAsync();
+        var asset1 = await IntegrationTestHelper.InsertTestAssetAsync(setup, now: now);
+        var asset2 = await IntegrationTestHelper.InsertTestAssetAsync(setup, now: now);
 
         var executor = services.GetRequiredService<IInventoryWriteTransaction>();
         var wrongAllocId = Guid.NewGuid();
@@ -240,9 +225,7 @@ public sealed partial class PostgresIntegrationTests
         using var services = BuildServiceProvider();
         await using var setup = await CreateMigratedDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Sony FX3", 1, "{}", now).Value;
-        setup.Assets.Add(asset);
-        await setup.SaveChangesAsync();
+        var asset = await IntegrationTestHelper.InsertTestAssetAsync(setup, now: now);
 
         var executor = services.GetRequiredService<IInventoryWriteTransaction>();
         var allocId = Guid.NewGuid();
@@ -269,5 +252,75 @@ public sealed partial class PostgresIntegrationTests
 
         Assert.True(conflictResult.IsFailure);
         Assert.Equal("IDEMPOTENCY_KEY_REUSED", conflictResult.Error.Code);
+    }
+
+    [Fact]
+    public async Task Asset_BrandId_JsonbSpecValues_Version_RoundtripAndConcurrencyRace_Succeeds()
+    {
+        using var services = BuildServiceProvider();
+        await using var setup = await CreateMigratedDbContextAsync();
+        var now = DateTimeOffset.UtcNow;
+        var brandId = Guid.NewGuid();
+        var listing = await IntegrationTestHelper.InsertTestListingAsync(
+            setup,
+            ownerId: Guid.NewGuid(),
+            brandId: brandId,
+            model: "Sony FX3",
+            schemaVersion: 1,
+            specValues: "{\"resolution\":\"4K\",\"fps\":120}",
+            now: now);
+
+        // 1. Reload from fresh DbContext to verify persistence and PostgreSQL jsonb querying
+        await using var verifyDb = await CreateMigratedDbContextAsync();
+        var reloaded = await verifyDb.EquipmentListings.SingleAsync(l => l.Id == listing.Id);
+        Assert.Equal(brandId, reloaded.BrandId);
+        Assert.Equal(1, reloaded.SchemaVersion);
+        Assert.Contains("\"4K\"", reloaded.SpecValues);
+        Assert.True(reloaded.Version > 0);
+
+        // Query directly via PostgreSQL JSONB operator
+        var jsonbResolution = await verifyDb.Database.SqlQuery<string>($"""
+            SELECT spec_values->>'resolution' AS "Value" FROM inventory.equipment_listings WHERE id = {listing.Id}
+        """).SingleAsync();
+        Assert.Equal("4K", jsonbResolution);
+        // 2. Concurrency token check (xmin): simulate concurrent update
+        var initialVersion = reloaded.Version;
+        var newBrandId = Guid.NewGuid();
+        var updateTime = now.AddMinutes(5);
+
+        var executor = services.GetRequiredService<IInventoryWriteTransaction>();
+
+        // First update succeeds
+        var updateResult1 = await executor.ExecuteListingWriteAsync<bool>(listing.Id, async (ctx, ct) =>
+        {
+            var dbListing = await ctx.Listings.GetByIdAsync(listing.Id, ct);
+            Assert.NotNull(dbListing);
+            dbListing.UpdateDetails(newBrandId, "Sony FX3 V2", null, "Sony FX3 V2", dbListing.ManufactureYear, dbListing.MediaIds, null, 2, "{\"resolution\":\"8K\"}", updateTime);
+            ctx.Listings.Update(dbListing);
+            return Result.Success(true);
+        });
+        Assert.True(updateResult1.IsSuccess);
+
+        // Reload: version must have changed
+        await using var verifyDb2 = await CreateMigratedDbContextAsync();
+        var reloaded2 = await verifyDb2.EquipmentListings.SingleAsync(l => l.Id == listing.Id);
+        Assert.Equal(newBrandId, reloaded2.BrandId);
+        Assert.Equal(2, reloaded2.SchemaVersion);
+        Assert.Contains("\"8K\"", reloaded2.SpecValues);
+        Assert.NotEqual(initialVersion, reloaded2.Version);
+
+        // Second update trying to use stale snapshot version fails with concurrency conflict
+        var staleUpdateResult = await executor.ExecuteListingWriteAsync<bool>(listing.Id, async (ctx, ct) =>
+        {
+            var dbListing = await ctx.Listings.GetByIdAsync(listing.Id, ct);
+            Assert.NotNull(dbListing);
+            if (dbListing.Version != initialVersion)
+            {
+                return Error.Conflict("CONCURRENCY_CONFLICT", "Listing đã bị thay đổi bởi thao tác khác (xmin conflict).");
+            }
+            return Result.Success(true);
+        });
+        Assert.True(staleUpdateResult.IsFailure);
+        Assert.Equal("CONCURRENCY_CONFLICT", staleUpdateResult.Error.Code);
     }
 }

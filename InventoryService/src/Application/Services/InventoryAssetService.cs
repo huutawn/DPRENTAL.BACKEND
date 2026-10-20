@@ -1,12 +1,19 @@
+using System.Text.Json;
+using Dprental.InventoryService.Common.Utils;
 using Dprental.InventoryService.Application.Clients;
-using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Catalog;
+using Dprental.InventoryService.Application.Options;
+using Dprental.InventoryService.Application.DTOs.Media;
+using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Mapping;
 using Dprental.InventoryService.Application.Security;
+using Dprental.InventoryService.Application.Validation;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Domain.IRepositories;
+using Dprental.InventoryService.Application.Search;
+using Microsoft.Extensions.Logging;
 
 namespace Dprental.InventoryService.Application.Services;
 
@@ -20,20 +27,53 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
     private readonly IInventoryWriteTransaction _writeTransaction;
     private readonly ICatalogServiceClient _catalogClient;
     private readonly IInventoryMediaService _mediaService;
+    private readonly AssetSearchQueryValidator _queryValidator;
+    private readonly AssetSearchFilterResolver _filterResolver;
     private readonly TimeProvider _timeProvider;
+    private readonly IInventorySearchIndexService? _searchIndexService;
+    private readonly ILogger<InventoryAssetService>? _logger;
+    private readonly Dprental.InventoryService.Application.Caching.IInventoryReadCache _cache;
+    private readonly Dprental.InventoryService.Application.Caching.InventoryCacheOptions _cacheOptions;
 
     public InventoryAssetService(
         IInventoryAssetRepository assetRepository,
         IInventoryWriteTransaction writeTransaction,
         ICatalogServiceClient catalogClient,
         IInventoryMediaService mediaService,
-        TimeProvider? timeProvider = null)
+        AssetSearchQueryValidator queryValidator,
+        AssetSearchFilterResolver filterResolver,
+        TimeProvider? timeProvider = null,
+        IInventorySearchIndexService? searchIndexService = null,
+        ILogger<InventoryAssetService>? logger = null)
+        : this(assetRepository, writeTransaction, catalogClient, mediaService, queryValidator, filterResolver, null, null, timeProvider, searchIndexService, logger)
+    {
+    }
+
+    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
+    public InventoryAssetService(
+        IInventoryAssetRepository assetRepository,
+        IInventoryWriteTransaction writeTransaction,
+        ICatalogServiceClient catalogClient,
+        IInventoryMediaService mediaService,
+        AssetSearchQueryValidator queryValidator,
+        AssetSearchFilterResolver filterResolver,
+        Dprental.InventoryService.Application.Caching.IInventoryReadCache? cache = null,
+        Microsoft.Extensions.Options.IOptions<Dprental.InventoryService.Application.Caching.InventoryCacheOptions>? cacheOptions = null,
+        TimeProvider? timeProvider = null,
+        IInventorySearchIndexService? searchIndexService = null,
+        ILogger<InventoryAssetService>? logger = null)
     {
         _assetRepository = assetRepository ?? throw new ArgumentNullException(nameof(assetRepository));
         _writeTransaction = writeTransaction ?? throw new ArgumentNullException(nameof(writeTransaction));
         _catalogClient = catalogClient ?? throw new ArgumentNullException(nameof(catalogClient));
         _mediaService = mediaService ?? throw new ArgumentNullException(nameof(mediaService));
+        _queryValidator = queryValidator ?? throw new ArgumentNullException(nameof(queryValidator));
+        _filterResolver = filterResolver ?? throw new ArgumentNullException(nameof(filterResolver));
+        _cache = cache ?? Dprental.InventoryService.Application.Caching.NoOpInventoryReadCache.Instance;
+        _cacheOptions = cacheOptions?.Value ?? new Dprental.InventoryService.Application.Caching.InventoryCacheOptions();
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _searchIndexService = searchIndexService;
+        _logger = logger;
     }
 
     /// <summary>
@@ -52,29 +92,52 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
             return callerCheck.Error;
         }
 
-        var asset = await _assetRepository.GetByIdAsync(assetId, cancellationToken);
-        if (asset is null)
+        string scope = $"asset:{assetId:D}";
+        string queryType = "asset-detail";
+        string inputHash = "detail";
+
+        var pipelineResult = await _cache.GetOrCreateAsync<CachedAssetDetailPayload>(
+            scope,
+            queryType,
+            inputHash,
+            async (genToken, ct) =>
+            {
+                var asset = await _assetRepository.GetByIdAsync(assetId, ct);
+                if (asset is null)
+                {
+                    return Error.NotFound("ASSET_NOT_FOUND", "Tài sản không tồn tại.");
+                }
+
+                var response = InventoryAssetMapper.ToResponse(asset);
+                var ttl = _timeProvider.GetUtcNow().AddSeconds(_cacheOptions.MetadataTtlSeconds > 0 ? _cacheOptions.MetadataTtlSeconds : 120);
+                return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CachedAssetDetailPayload>(
+                    new CachedAssetDetailPayload(asset.Listing.OwnerUserId, response),
+                    ttl));
+            },
+            cancellationToken);
+
+        if (pipelineResult.IsFailure)
         {
-            return Error.NotFound("ASSET_NOT_FOUND", "Tài sản không tồn tại.");
+            return pipelineResult.Error;
         }
 
-        if (!InventoryAccessEvaluator.CanManageAsset(caller, asset.OwnerUserId))
+        var payload = pipelineResult.Value;
+        if (!InventoryAccessEvaluator.CanManageAsset(caller, payload.OwnerUserId))
         {
             return Error.Forbidden("FORBIDDEN", "Không có quyền truy cập tài sản này.");
         }
 
-        return Result.Success(InventoryAssetMapper.ToResponse(asset));
+        return payload.Response;
     }
-
     /// <summary>
     /// Lấy danh sách tài sản phân trang của người dùng hiện tại (JWT sub).
     /// </summary>
-    public async Task<Result<PagedResponse<InventoryAssetResponse>>> ListAssetsAsync(
-        int page,
-        int pageSize,
+    public async Task<Result<SearchExecution<PagedResponse<InventoryAssetResponse>>>> ListAssetsAsync(
+        ListAssetsRequest request,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(caller);
 
         var authResult = AuthorizeManager(caller);
@@ -83,50 +146,143 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
             return authResult.Error;
         }
 
-        if (page < 1)
+        Guid ownerUserId = caller.UserId!.Value;
+
+        var valResult = _queryValidator.Validate(
+            request.Page,
+            request.PageSize,
+            request.Q,
+            request.EquipmentTypeId,
+            request.BrandId,
+            request.ManufactureYearFrom,
+            request.ManufactureYearTo,
+            request.Sort);
+        if (valResult.IsFailure)
         {
-            return Error.Validation("INVALID_PAGE", "Số trang phải lớn hơn hoặc bằng 1.");
+            return valResult.Error;
+        }
+        var validated = valResult.Value;
+
+        var structCheck = AssetSearchFilterResolver.ValidateStructure(request.Filters, validated.EquipmentTypeId);
+        if (structCheck.IsFailure)
+        {
+            return structCheck.Error;
         }
 
-        if (pageSize < 1 || pageSize > 100)
-        {
-            return Error.Validation("INVALID_PAGE_SIZE", "Kích thước trang phải từ 1 đến 100.");
-        }
+        string searchScope = $"owner:{ownerUserId:D}";
+        string searchQueryType = "owner-assets";
+        string searchHash = Dprental.InventoryService.Application.Caching.CacheKeyHelper.ComputeOwnerAssetSearchHash(
+            request.Page,
+            request.PageSize,
+            request.Q,
+            request.EquipmentTypeId,
+            request.BrandId,
+            request.ManufactureYearFrom,
+            request.ManufactureYearTo,
+            request.AcceptingBookings,
+            request.Sort,
+            request.Filters);
 
-        long offset = (long)(page - 1) * pageSize;
-        if (offset > int.MaxValue)
-        {
-            return Error.Validation("INVALID_PAGE", "Chỉ số trang vượt quá giới hạn hệ thống.");
-        }
+        return await _cache.GetOrCreateAsync<SearchExecution<PagedResponse<InventoryAssetResponse>>>(
+            searchScope,
+            searchQueryType,
+            searchHash,
+            async (genToken, ct) =>
+            {
+                IReadOnlyList<Guid>? candidateIds = null;
+                string backend = "postgres";
 
-        int skip = (int)offset;
-        var items = await _assetRepository.ListByOwnerAsync(caller.UserId!.Value, skip, pageSize, cancellationToken);
-        var totalCount = await _assetRepository.CountByOwnerAsync(caller.UserId.Value, cancellationToken);
-        var totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling((double)totalCount / pageSize);
+                if (!string.IsNullOrWhiteSpace(validated.SearchKeyword) && _searchIndexService != null)
+                {
+                    var candidateResult = await _searchIndexService.SearchOwnerAssetCandidatesAsync(
+                        new OwnerAssetSearchIndexQuery(
+                            ownerUserId,
+                            validated.SearchKeyword,
+                            validated.EquipmentTypeId,
+                            validated.BrandId,
+                            request.AcceptingBookings,
+                            validated.ManufactureYearFrom,
+                            validated.ManufactureYearTo),
+                        ct);
 
-        var responseList = items.Select(InventoryAssetMapper.ToResponse).ToList();
-        return Result.Success(new PagedResponse<InventoryAssetResponse>(responseList, page, pageSize, totalCount, totalPages));
+                    if (candidateResult.IsFailure && candidateResult.Error.Code is
+                        "SEARCH_CREDENTIALS_INVALID" or "SEARCH_CONFIGURATION_INVALID")
+                        return candidateResult.Error;
+
+                    if (candidateResult.IsSuccess && !candidateResult.Value.IsTruncated)
+                    {
+                        candidateIds = candidateResult.Value.CandidateIds;
+                        backend = "meilisearch";
+                    }
+                    else
+                    {
+                        _logger?.LogWarning(
+                            "Meilisearch query failed or candidates truncated for query '{Keyword}'. Falling back to PostgreSQL.",
+                            validated.SearchKeyword);
+                        candidateIds = null;
+                        backend = "postgres";
+                    }
+                }
+
+                var resolveResult = await _filterResolver.ResolveAsync(
+                    request.Filters,
+                    validated.EquipmentTypeId,
+                    cancellationToken => _assetRepository.GetDistinctSchemaVersionsForOwnerAsync(
+                        new OwnerAssetSearchCriteria(
+                            ownerUserId,
+                            new AssetSearchFilters(
+                                candidateIds == null ? validated.SearchKeyword : null,
+                                validated.EquipmentTypeId,
+                                validated.BrandId,
+                                validated.ManufactureYearFrom,
+                                validated.ManufactureYearTo,
+                                CandidateIds: candidateIds),
+                            acceptingBookings: request.AcceptingBookings),
+                        cancellationToken),
+                    isFieldForbidden: null,
+                    ct);
+                if (resolveResult.IsFailure)
+                {
+                    return resolveResult.Error;
+                }
+                var resolvedFilters = resolveResult.Value;
+
+                var searchFilters = new AssetSearchFilters(
+                    SearchKeyword: candidateIds == null ? validated.SearchKeyword : null,
+                    EquipmentTypeId: validated.EquipmentTypeId,
+                    BrandId: validated.BrandId,
+                    ManufactureYearFrom: validated.ManufactureYearFrom,
+                    ManufactureYearTo: validated.ManufactureYearTo,
+                    Sort: validated.Sort,
+                    CompatibleSchemaVersions: resolvedFilters.CompatibleSchemaVersions,
+                    DynamicFilters: resolvedFilters.Criteria,
+                    CandidateIds: candidateIds);
+
+                var searchCriteria = new OwnerAssetSearchCriteria(
+                    ownerUserId: ownerUserId,
+                    filters: searchFilters,
+                    acceptingBookings: request.AcceptingBookings,
+                    skip: validated.Skip,
+                    take: validated.Take);
+                var items = await _assetRepository.SearchForOwnerAsync(searchCriteria, ct);
+                var totalCount = await _assetRepository.CountForOwnerAsync(searchCriteria, ct);
+                int totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling((double)totalCount / validated.Take);
+
+                var responseList = items.Select(InventoryAssetMapper.ToResponse).ToList();
+                var paged = new PagedResponse<InventoryAssetResponse>(responseList, request.Page, request.PageSize, totalCount, totalPages);
+                var searchExecutionResult = new SearchExecution<PagedResponse<InventoryAssetResponse>>(paged, backend);
+
+                var ttl = _timeProvider.GetUtcNow().AddSeconds(_cacheOptions.MetadataTtlSeconds > 0 ? _cacheOptions.MetadataTtlSeconds : 120);
+                return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<SearchExecution<PagedResponse<InventoryAssetResponse>>>(searchExecutionResult, ttl));
+            },
+            cancellationToken);
     }
 
-    private async Task<Result> ValidateCatalogSpecificationAsync(
-        Guid equipmentTypeId,
-        int schemaVersion,
-        string specValues,
-        CancellationToken cancellationToken)
-    {
-        var specResult = await _catalogClient.ValidateSpecificationAsync(equipmentTypeId, schemaVersion, specValues, cancellationToken);
-        if (specResult.IsFailure)
-        {
-            return specResult.Error;
-        }
+    internal sealed record CachedAssetDetailPayload(
+        Guid OwnerUserId,
+        InventoryAssetResponse Response
+    );
 
-        return specResult.Value.Status switch
-        {
-            CatalogSpecValidationStatus.Valid or CatalogSpecValidationStatus.NotSupported => Result.Success(),
-            CatalogSpecValidationStatus.Invalid => Error.Validation("INVALID_SPECIFICATION", specResult.Value.Message ?? "Thông số kỹ thuật không hợp lệ."),
-            _ => Error.Unavailable("CATALOG_SERVICE_INVALID_RESPONSE", "Trạng thái thẩm tra spec không hợp lệ.")
-        };
-    }
 
     private static Result CheckAuthenticatedHuman(IInventoryCallerContext caller)
     {

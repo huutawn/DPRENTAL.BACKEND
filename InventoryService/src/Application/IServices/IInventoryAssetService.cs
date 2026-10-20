@@ -1,5 +1,6 @@
 using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Pagination;
+using Dprental.InventoryService.Application.Search;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 
@@ -10,19 +11,13 @@ namespace Dprental.InventoryService.Application.IServices;
 /// </summary>
 public interface IInventoryAssetService
 {
-    Task<Result<InventoryAssetResponse>> CreateAssetAsync(
-        CreateInventoryAssetRequest request,
-        IInventoryCallerContext caller,
-        CancellationToken cancellationToken = default);
-
     Task<Result<InventoryAssetResponse>> GetAssetByIdAsync(
         Guid assetId,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);
 
-    Task<Result<PagedResponse<InventoryAssetResponse>>> ListAssetsAsync(
-        int page,
-        int pageSize,
+    Task<Result<SearchExecution<PagedResponse<InventoryAssetResponse>>>> ListAssetsAsync(
+        ListAssetsRequest request,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);
 
@@ -37,4 +32,5 @@ public interface IInventoryAssetService
         ToggleAcceptingBookingsRequest request,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);
+
 }

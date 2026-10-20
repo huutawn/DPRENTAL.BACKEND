@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Dprental.InventoryService.Common.Utils;
 using Dprental.InventoryService.Domain.Entities;
 using Xunit;
@@ -8,33 +7,22 @@ namespace Dprental.InventoryService.Api.Tests.Domain;
 public sealed class InventoryAssetDomainTests
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 10, 2, 10, 0, 0, TimeSpan.Zero);
-    private static readonly Guid TestOwnerId = Guid.NewGuid();
-    private static readonly Guid TestEquipmentTypeId = Guid.NewGuid();
 
     [Fact]
-    public void Create_ValidMinimalFields_DefaultsAcceptingBookingsAndNullReason()
+    public void Create_ValidParameters_SucceedsWithAssetCode()
     {
         var id = Guid.NewGuid();
-        var result = InventoryAsset.Create(
-            id,
-            TestOwnerId,
-            TestEquipmentTypeId,
-            "Sony FX3 Cinema Line",
-            1,
-            "{\"resolution\":\"4K\"}",
-            FixedNow);
+        var listingId = Guid.NewGuid();
+
+        var result = InventoryAsset.Create(id, listingId, "SN-12345", FixedNow, 2024);
 
         Assert.True(result.IsSuccess);
         var asset = result.Value;
         Assert.Equal(id, asset.Id);
-        Assert.Equal(TestOwnerId, asset.OwnerUserId);
-        Assert.Equal(TestEquipmentTypeId, asset.EquipmentTypeId);
-        Assert.Equal("Sony FX3 Cinema Line", asset.Model);
-        Assert.Null(asset.SerialNumber);
-        Assert.Null(asset.ManufactureYear);
-        Assert.Null(asset.ThumbnailMediaId);
-        Assert.Equal(1, asset.SchemaVersion);
-        Assert.Equal("{\"resolution\":\"4K\"}", asset.SpecValues);
+        Assert.Equal(listingId, asset.EquipmentListingId);
+        Assert.Equal($"AST-{id:N}", asset.AssetCode);
+        Assert.Equal("SN-12345", asset.SerialNumber);
+        Assert.Equal(2024, asset.ManufactureYear);
         Assert.True(asset.AcceptingBookings);
         Assert.Null(asset.SuspensionReason);
         Assert.Equal(FixedNow, asset.CreatedAt);
@@ -42,244 +30,103 @@ public sealed class InventoryAssetDomainTests
     }
 
     [Fact]
-    public void Create_ValidAllFields_NormalizesAndPersistsProperly()
+    public void Create_EmptyAssetId_FailsValidation()
     {
-        var id = Guid.NewGuid();
-        var thumbId = Guid.NewGuid();
-        var result = InventoryAsset.Create(
-            id,
-            TestOwnerId,
-            TestEquipmentTypeId,
-            "  Sony FX3  ",
-            2,
-            "{}",
-            FixedNow,
-            serialNumber: "  SN-123456  ",
-            manufactureYear: 2024,
-            thumbnailMediaId: thumbId);
-
-        Assert.True(result.IsSuccess);
-        var asset = result.Value;
-        Assert.Equal("Sony FX3", asset.Model);
-        Assert.Equal("SN-123456", asset.SerialNumber);
-        Assert.Equal(2024, asset.ManufactureYear);
-        Assert.Equal(thumbId, asset.ThumbnailMediaId);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData(null)]
-    public void Create_InvalidModel_Fails(string? model)
-    {
-        var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId,
-            model!, 1, "{}", FixedNow);
+        var result = InventoryAsset.Create(Guid.Empty, Guid.NewGuid(), "SN-12345", FixedNow);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("INVALID_MODEL", result.Error.Code);
+        Assert.Equal("INVALID_ASSET_ID", result.Error.Code);
     }
 
     [Fact]
-    public void Create_ModelTooLong_Fails()
+    public void Create_EmptyListingId_FailsValidation()
     {
-        var longModel = new string('A', 201);
-        var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId,
-            longModel, 1, "{}", FixedNow);
+        var result = InventoryAsset.Create(Guid.NewGuid(), Guid.Empty, "SN-12345", FixedNow);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("INVALID_MODEL", result.Error.Code);
+        Assert.Equal("INVALID_EQUIPMENT_LISTING_ID", result.Error.Code);
     }
 
     [Fact]
-    public void Create_WhitespaceSerialNumber_NormalizedToNull()
+    public void Create_SerialNumberTooLong_FailsValidation()
     {
-        var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId,
-            "Model X", 1, "{}", FixedNow,
-            serialNumber: "   ");
-
-        Assert.True(result.IsSuccess);
-        Assert.Null(result.Value.SerialNumber);
-    }
-
-    [Fact]
-    public void Create_SerialNumberTooLong_Fails()
-    {
-        var longSerial = new string('S', 101);
-        var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId,
-            "Model X", 1, "{}", FixedNow,
-            serialNumber: longSerial);
+        var longSerial = new string('A', 101);
+        var result = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), longSerial, FixedNow);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_SERIAL_NUMBER", result.Error.Code);
     }
 
-    [Theory]
-    [InlineData(1899)]
-    [InlineData(2030)] // Greater than 2026 (Vietnam current year in FixedNow)
-    public void Create_ManufactureYearOutOfRange_Fails(int year)
+    [Fact]
+    public void Create_ManufactureYearOutOfRange_FailsValidation()
     {
-        var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId,
-            "Model X", 1, "{}", FixedNow,
-            manufactureYear: year);
+        var resultTooOld = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), "SN-12345", FixedNow, 1899);
+        Assert.True(resultTooOld.IsFailure);
+        Assert.Equal("INVALID_MANUFACTURE_YEAR", resultTooOld.Error.Code);
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("INVALID_MANUFACTURE_YEAR", result.Error.Code);
+        int nextYear = BusinessDateTime.ToVietnamDate(FixedNow).Year + 1;
+        var resultFuture = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), "SN-12345", FixedNow, nextYear);
+        Assert.True(resultFuture.IsFailure);
+        Assert.Equal("INVALID_MANUFACTURE_YEAR", resultFuture.Error.Code);
     }
 
     [Fact]
-    public void Create_ManufactureYearBoundary1900AndCurrentVietnamYear_Succeeds()
+    public void UpdatePhysicalDetails_ValidDetails_UpdatesValues()
     {
-        var currentYear = BusinessDateTime.ToVietnamDate(FixedNow).Year;
-
-        var r1 = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId,
-            "Model X", 1, "{}", FixedNow,
-            manufactureYear: 1900);
-        Assert.True(r1.IsSuccess);
-        Assert.Equal(1900, r1.Value.ManufactureYear);
-
-        var r2 = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId,
-            "Model X", 1, "{}", FixedNow,
-            manufactureYear: currentYear);
-        Assert.True(r2.IsSuccess);
-        Assert.Equal(currentYear, r2.Value.ManufactureYear);
-    }
-
-    [Fact]
-    public void Create_EmptyGuidThumbnail_Fails()
-    {
-        var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId,
-            "Model X", 1, "{}", FixedNow,
-            thumbnailMediaId: Guid.Empty);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal("INVALID_THUMBNAIL_MEDIA_ID", result.Error.Code);
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    public void Create_InvalidSchemaVersion_Fails(int version)
-    {
-        var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId,
-            "Model X", version, "{}", FixedNow);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal("INVALID_SCHEMA_VERSION", result.Error.Code);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData("[]")]
-    [InlineData("\"string\"")]
-    [InlineData("123")]
-    [InlineData("not-json")]
-    public void Create_InvalidSpecValues_Fails(string specs)
-    {
-        var result = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId,
-            "Model X", 1, specs, FixedNow);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal("INVALID_SPEC_VALUES", result.Error.Code);
-    }
-
-    [Fact]
-    public void Create_EmptyIdentities_Fails()
-    {
-        var r1 = InventoryAsset.Create(Guid.Empty, TestOwnerId, TestEquipmentTypeId, "M", 1, "{}", FixedNow);
-        Assert.Equal("INVALID_ASSET_ID", r1.Error.Code);
-
-        var r2 = InventoryAsset.Create(Guid.NewGuid(), Guid.Empty, TestEquipmentTypeId, "M", 1, "{}", FixedNow);
-        Assert.Equal("INVALID_OWNER_USER_ID", r2.Error.Code);
-
-        var r3 = InventoryAsset.Create(Guid.NewGuid(), TestOwnerId, Guid.Empty, "M", 1, "{}", FixedNow);
-        Assert.Equal("INVALID_EQUIPMENT_TYPE_ID", r3.Error.Code);
-    }
-
-    [Fact]
-    public void UpdateDetails_ValidValues_UpdatesAllAndMutatesTime()
-    {
-        var asset = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId,
-            "Model A", 1, "{}", FixedNow).Value;
-
+        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), "SN-12345", FixedNow).Value;
         var updateTime = FixedNow.AddHours(2);
-        var thumb = Guid.NewGuid();
-        var result = asset.UpdateDetails("Model B", "SN-999", 2025, thumb, 2, "{\"color\":\"black\"}", updateTime);
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal("Model B", asset.Model);
-        Assert.Equal("SN-999", asset.SerialNumber);
+        var updateResult = asset.UpdatePhysicalDetails("SN-UPDATED", 2025, updateTime);
+
+        Assert.True(updateResult.IsSuccess);
+        Assert.Equal("SN-UPDATED", asset.SerialNumber);
         Assert.Equal(2025, asset.ManufactureYear);
-        Assert.Equal(thumb, asset.ThumbnailMediaId);
-        Assert.Equal(2, asset.SchemaVersion);
-        Assert.Equal("{\"color\":\"black\"}", asset.SpecValues);
         Assert.Equal(updateTime, asset.UpdatedAt);
     }
 
     [Fact]
-    public void UpdateDetails_InvalidValue_DoesNotMutateState()
+    public void ToggleBookings_EnableAndDisable_WorksAsExpected()
     {
-        var asset = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId,
-            "Model Original", 1, "{\"k\":\"v\"}", FixedNow,
-            serialNumber: "SN-ORIG",
-            manufactureYear: 2020).Value;
-
-        var invalidResult = asset.UpdateDetails(
-            "   ", // Invalid model
-            "SN-NEW",
-            2025,
-            null,
-            2,
-            "{}",
-            FixedNow.AddDays(1));
-
-        Assert.True(invalidResult.IsFailure);
-        Assert.Equal("INVALID_MODEL", invalidResult.Error.Code);
-
-        // State remains pristine
-        Assert.Equal("Model Original", asset.Model);
-        Assert.Equal("SN-ORIG", asset.SerialNumber);
-        Assert.Equal(2020, asset.ManufactureYear);
-        Assert.Equal(1, asset.SchemaVersion);
-        Assert.Equal("{\"k\":\"v\"}", asset.SpecValues);
-        Assert.Equal(FixedNow, asset.UpdatedAt);
-    }
-
-    [Fact]
-    public void BookingToggle_EnableAndDisable_WorksAsExpected()
-    {
-        var asset = InventoryAsset.Create(
-            Guid.NewGuid(), TestOwnerId, TestEquipmentTypeId,
-            "Model A", 1, "{}", FixedNow).Value;
-
+        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), "SN-12345", FixedNow).Value;
         Assert.True(asset.CanAcceptBookings());
 
-        // Disable with reason
         var disableTime = FixedNow.AddHours(1);
-        var disRes = asset.DisableBookings("Under maintenance", disableTime);
-        Assert.True(disRes.IsSuccess);
+        var disableResult = asset.DisableBookings("Maintenance", disableTime);
+
+        Assert.True(disableResult.IsSuccess);
         Assert.False(asset.AcceptingBookings);
-        Assert.Equal("Under maintenance", asset.SuspensionReason);
+        Assert.Equal("Maintenance", asset.SuspensionReason);
         Assert.Equal(disableTime, asset.UpdatedAt);
 
-        // Enable again clears reason
         var enableTime = FixedNow.AddHours(2);
-        var enRes = asset.EnableBookings(enableTime);
-        Assert.True(enRes.IsSuccess);
+        var enableResult = asset.EnableBookings(enableTime);
+
+        Assert.True(enableResult.IsSuccess);
         Assert.True(asset.AcceptingBookings);
         Assert.Null(asset.SuspensionReason);
         Assert.Equal(enableTime, asset.UpdatedAt);
+    }
+
+    [Fact]
+    public void DisableBookings_ReasonTooLong_FailsValidation()
+    {
+        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), "SN-12345", FixedNow).Value;
+        var longReason = new string('A', 501);
+
+        var result = asset.DisableBookings(longReason, FixedNow);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("SUSPENSION_REASON_TOO_LONG", result.Error.Code);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Create_NullOrWhitespaceSerialNumber_FailsValidation(string? serial)
+    {
+        var result = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), serial!, FixedNow);
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_SERIAL_NUMBER", result.Error.Code);
     }
 }

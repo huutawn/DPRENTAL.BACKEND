@@ -13,6 +13,12 @@ public interface IOutboxStore
     /// </summary>
     void Add(OutboxMessage message);
 
+
+    /// <summary>
+    /// Lưu các thay đổi của outbox messages xuống persistence storage.
+    /// </summary>
+    Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
     /// <summary>
     /// Tìm thông điệp Outbox theo Id.
     /// </summary>

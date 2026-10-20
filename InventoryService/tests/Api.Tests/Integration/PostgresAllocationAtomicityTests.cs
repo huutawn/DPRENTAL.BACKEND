@@ -51,18 +51,7 @@ public sealed class PostgresAllocationAtomicityTests : IClassFixture<PostgresFix
     private async Task<InventoryAsset> SeedAssetAsync(Guid ownerUserId)
     {
         await using var db = CreateDbContext();
-        var asset = InventoryAsset.Create(
-            Guid.NewGuid(),
-            ownerUserId,
-            Guid.NewGuid(),
-            "Sony FX3",
-            1,
-            "{}",
-            FixedNow).Value;
-
-        db.Assets.Add(asset);
-        await db.SaveChangesAsync();
-        return asset;
+        return await IntegrationTestHelper.InsertTestAssetAsync(db, ownerId: ownerUserId, now: FixedNow);
     }
 
     private sealed class ServiceCallerContext : IInventoryCallerContext

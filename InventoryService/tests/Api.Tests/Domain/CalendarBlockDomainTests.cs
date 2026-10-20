@@ -20,14 +20,25 @@ public sealed class CalendarBlockDomainTests
 
     private InventoryAsset CreateAsset(bool acceptingBookings = true)
     {
-        var asset = InventoryAsset.Create(
-            _assetId,
+        var listing = EquipmentListing.Create(
+            Guid.NewGuid(),
             _ownerUserId,
             _equipmentTypeId,
+            Guid.NewGuid(),
+            "Sony FX3",
+            null,
             "Sony FX3",
             1,
             "{}",
-            _now).Value;
+            100_000m,
+            null,
+            null,
+            "VND",
+            _now,
+            2024).Value;
+
+        var asset = InventoryAsset.Create(_assetId, listing.Id, "SN-CAL-1", _now).Value;
+        typeof(InventoryAsset).GetProperty(nameof(InventoryAsset.Listing))?.SetValue(asset, listing);
 
         if (!acceptingBookings)
         {

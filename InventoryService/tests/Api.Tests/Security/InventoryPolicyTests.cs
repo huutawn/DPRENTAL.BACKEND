@@ -55,14 +55,26 @@ public sealed class InventoryPolicyTests
     private static InventoryAsset CreateTestAsset(InventorySecurityTestFactory factory, Guid ownerId, Guid? assetId = null)
     {
         var id = assetId ?? Guid.NewGuid();
-        var asset = InventoryAsset.Create(
-            id,
+        var now = DateTimeOffset.UtcNow;
+        var listing = EquipmentListing.Create(
+            Guid.NewGuid(),
             ownerId,
             Guid.NewGuid(),
+            Guid.NewGuid(),
+            "Sony FX3",
+            null,
             "Sony FX3",
             1,
             "{\"serial\":\"TEST\"}",
-            DateTimeOffset.UtcNow).Value;
+            100_000m,
+            null,
+            null,
+            "VND",
+            now,
+            2024).Value;
+
+        var asset = InventoryAsset.Create(id, listing.Id, $"SN-{id:N}", now).Value;
+        typeof(InventoryAsset).GetProperty(nameof(InventoryAsset.Listing))?.SetValue(asset, listing);
         factory.TestAssets[id] = asset;
         return asset;
     }
@@ -203,20 +215,46 @@ public sealed class InventoryPolicyTests
     }
 
     [Fact]
-    public async Task ScopedService_CanReadSanitizedAvailability_AndExecuteAllocationCommands()
+    public async Task ScopedService_CanReadAvailability_AndExecuteAllocationCommands()
     {
         await using var factory = new InventorySecurityTestFactory();
         using var client = factory.CreateClient();
 
         string readServiceToken = factory.CreateServiceToken(
             Guid.NewGuid(),
-            scopes: ["inventory.calendar.read"]);
+            scopes: ["inventory.availability.read"]);
 
         using var readReq = new HttpRequestMessage(HttpMethod.Get, "/api/test/availability/sanitized");
         readReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", readServiceToken);
         var readResp = await client.SendAsync(readReq);
         Assert.Equal(HttpStatusCode.OK, readResp.StatusCode);
 
+        // inventory.calendar.read riêng lẻ bị từ chối đọc availability
+        string calendarReadServiceToken = factory.CreateServiceToken(
+            Guid.NewGuid(),
+            scopes: ["inventory.calendar.read"]);
+        using var calReq = new HttpRequestMessage(HttpMethod.Get, "/api/test/availability/sanitized");
+        calReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", calendarReadServiceToken);
+        var calResp = await client.SendAsync(calReq);
+        Assert.Equal(HttpStatusCode.Forbidden, calResp.StatusCode);
+
+        // inventory.allocation.write riêng lẻ bị từ chối đọc availability
+        string writeOnlyToken = factory.CreateServiceToken(
+            Guid.NewGuid(),
+            scopes: ["inventory.allocation.write"]);
+        using var writeOnlyReq = new HttpRequestMessage(HttpMethod.Get, "/api/test/availability/sanitized");
+        writeOnlyReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", writeOnlyToken);
+        var writeOnlyResp = await client.SendAsync(writeOnlyReq);
+        Assert.Equal(HttpStatusCode.Forbidden, writeOnlyResp.StatusCode);
+
+        // Service có availability.read gọi operational calendar bị từ chối
+        var testAsset = CreateTestAsset(factory, _ownerUserId);
+        using var opCalReq = new HttpRequestMessage(HttpMethod.Get, $"/api/test/assets/{testAsset.Id}/calendar");
+        opCalReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", readServiceToken);
+        var opCalResp = await client.SendAsync(opCalReq);
+        Assert.Equal(HttpStatusCode.Forbidden, opCalResp.StatusCode);
+
+        // Service có allocation.write thực thi allocation command thành công
         string writeServiceToken = factory.CreateServiceToken(
             Guid.NewGuid(),
             scopes: ["inventory.allocation.write"]);
@@ -226,7 +264,6 @@ public sealed class InventoryPolicyTests
         var writeResp = await client.SendAsync(writeReq);
         Assert.Equal(HttpStatusCode.OK, writeResp.StatusCode);
     }
-
     [Fact]
     public async Task ForgedIdentityHeaders_DoNotBypassAuthorization()
     {

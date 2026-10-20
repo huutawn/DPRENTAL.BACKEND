@@ -1,3 +1,6 @@
+using Dprental.InventoryService.Application;
+using Dprental.InventoryService.Application.DTOs.Assets;
+using Dprental.InventoryService.Application.DTOs.Listings;
 using System.Reflection;
 using Dprental.InventoryService.Application.Kafka.Contracts;
 using Dprental.InventoryService.Common;
@@ -9,6 +12,16 @@ namespace Dprental.InventoryService.Api.Tests.Architecture;
 public sealed class ArchitectureContractTests
 {
     [Fact]
+    public void Domain_DoesNotReference_ApplicationOrApi()
+    {
+        var domainAssembly = typeof(OutboxMessage).Assembly;
+        var referencedAssemblies = domainAssembly.GetReferencedAssemblies();
+
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Application", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Api", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
     public void DomainAndCommon_DoNotReference_ConfluentKafka()
     {
         var domainAssembly = typeof(OutboxMessage).Assembly;
@@ -19,6 +32,28 @@ public sealed class ArchitectureContractTests
 
         Assert.DoesNotContain(domainReferencedAssemblies, a => a.Name?.Contains("Confluent.Kafka", StringComparison.OrdinalIgnoreCase) == true);
         Assert.DoesNotContain(commonReferencedAssemblies, a => a.Name?.Contains("Confluent.Kafka", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
+    public void Application_DoesNotReference_DatabasePersistenceSdks()
+    {
+        var applicationAssembly = typeof(ApplicationAssemblyMarker).Assembly;
+        var referencedAssemblies = applicationAssembly.GetReferencedAssemblies();
+
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Microsoft.EntityFrameworkCore", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
+    public void Common_DoesNotReference_TechnicalVendorSdks()
+    {
+        var commonAssembly = typeof(Result).Assembly;
+        var referencedAssemblies = commonAssembly.GetReferencedAssemblies();
+
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Microsoft.EntityFrameworkCore", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("Confluent.Kafka", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.DoesNotContain(referencedAssemblies, a => a.Name?.Contains("StackExchange.Redis", StringComparison.OrdinalIgnoreCase) == true);
     }
 
     [Fact]
@@ -64,5 +99,22 @@ public sealed class ArchitectureContractTests
         Assert.False(
             ns.StartsWith("Confluent.Kafka", StringComparison.OrdinalIgnoreCase),
             $"Public member '{memberName}' on '{declaringType.Name}' exposes Confluent.Kafka type '{t.FullName}'.");
+    }
+
+    [Fact]
+    public void PublicAssetContracts_DoNotExpose_InternalOrOwnerFields()
+    {
+        var publicProps = typeof(PublicEquipmentListingResponse).GetProperties().Select(p => p.Name).ToList();
+        Assert.DoesNotContain("OwnerUserId", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("SerialNumber", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("SuspensionReason", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Version", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Xmin", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DisplayName", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ThumbnailMediaId", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("AssetCode", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("AssetId", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Assets", publicProps, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("GroupReference", publicProps, StringComparer.OrdinalIgnoreCase);
     }
 }

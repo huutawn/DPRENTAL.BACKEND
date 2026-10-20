@@ -8,8 +8,112 @@ public static class InventoryAccessEvaluator
 {
     public const string PermissionAssetManage = "inventory.asset.manage";
     public const string ScopeAllocationWrite = "inventory.allocation.write";
-    public const string ScopeCalendarRead = "inventory.calendar.read";
+    public const string ScopeAvailabilityRead = "inventory.availability.read";
+    public const string ScopeWarehouseRead = "inventory.warehouse.read";
 
+    /// <summary>
+    /// Kiểm tra quyền quản lý inventory của chính mình (Tạo Listing, Thiết lập/Cập nhật Kho):
+    /// - Chỉ Human có permission inventory.asset.manage hoặc Human Admin (r=adm).
+    /// - Service principal bị từ chối.
+    /// </summary>
+    public static bool CanManageOwnInventory(IInventoryCallerContext caller)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated || caller.IsService)
+        {
+            return false;
+        }
+
+        if (!caller.UserId.HasValue || caller.UserId.Value == Guid.Empty)
+        {
+            return false;
+        }
+
+        return caller.IsAdmin || caller.Permissions.Contains(PermissionAssetManage);
+    }
+
+    /// <summary>
+    /// Kiểm tra quyền xem hoặc chỉnh sửa thông tin EquipmentListing (Get/Patch/Assets):
+    /// - Chỉ Human Owner (JWT sub == listingOwnerUserId) hoặc Human Admin (r=adm).
+    /// - Service principal bị từ chối.
+    /// - Thiếu listingOwnerUserId phải fail closed.
+    /// </summary>
+    public static bool CanViewOrEditListing(IInventoryCallerContext caller, Guid? listingOwnerUserId)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated || caller.IsService)
+        {
+            return false;
+        }
+
+        if (!caller.UserId.HasValue || caller.UserId.Value == Guid.Empty)
+        {
+            return false;
+        }
+
+        if (listingOwnerUserId is null || listingOwnerUserId == Guid.Empty)
+        {
+            return false;
+        }
+
+        if (caller.IsAdmin)
+        {
+            return true;
+        }
+
+        return caller.UserId.Value == listingOwnerUserId.Value;
+    }
+
+    /// <summary>
+    /// Kiểm tra quyền thêm thiết bị vật lý vào EquipmentListing:
+    /// - Chỉ Human Owner (JWT sub == listingOwnerUserId) có permission inventory.asset.manage, hoặc Human Admin (r=adm).
+    /// - Service principal bị từ chối.
+    /// </summary>
+    public static bool CanAddListingAsset(IInventoryCallerContext caller, Guid? listingOwnerUserId)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated || caller.IsService)
+        {
+            return false;
+        }
+
+        if (!caller.UserId.HasValue || caller.UserId.Value == Guid.Empty)
+        {
+            return false;
+        }
+
+        if (listingOwnerUserId is null || listingOwnerUserId == Guid.Empty)
+        {
+            return false;
+        }
+
+        if (caller.IsAdmin)
+        {
+            return true;
+        }
+
+        return caller.UserId.Value == listingOwnerUserId.Value && caller.Permissions.Contains(PermissionAssetManage);
+    }
+
+    /// <summary>
+    /// Kiểm tra quyền cập nhật bảng giá niêm yết của EquipmentListing:
+    /// - Chỉ Human Owner (JWT sub == listingOwnerUserId) hoặc Human Admin (r=adm).
+    /// - Không yêu cầu permission 'inventory.asset.manage'.
+    /// - Service principal bị từ chối.
+    /// </summary>
+    public static bool CanUpdateListingRentalRate(IInventoryCallerContext caller, Guid? listingOwnerUserId) =>
+        CanViewOrEditListing(caller, listingOwnerUserId);
+
+    /// <summary>
+    /// Kiểm tra quyền truy cập lịch dùng chung cấp Listing:
+    /// - Cho phép Human Owner (JWT sub == listingOwnerUserId) hoặc Human Admin (r=adm).
+    /// - Service principal bị từ chối.
+    /// </summary>
+    public static bool CanAccessListingCalendar(IInventoryCallerContext caller, Guid? listingOwnerUserId) =>
+        CanViewOrEditListing(caller, listingOwnerUserId);
     /// <summary>
     /// Kiểm tra quyền quản lý tài sản (Asset management):
     /// - Human có permission inventory.asset.manage và sở hữu tài sản (assetOwnerUserId == sub).
@@ -37,6 +141,35 @@ public static class InventoryAccessEvaluator
         }
 
         return caller.Permissions.Contains(PermissionAssetManage) && caller.UserId == assetOwnerUserId;
+    }
+
+    /// <summary>
+    /// Kiểm tra quyền cập nhật giá thuê niêm yết của tài sản (Update Rental Rate):
+    /// - Chỉ Human Owner (JWT sub == assetOwnerUserId) hoặc Human Admin (r=adm) được phép.
+    /// - Không yêu cầu permission 'inventory.asset.manage'.
+    /// - Service principal và người dùng khác bị từ chối.
+    /// - Thiếu caller.UserId hoặc assetOwnerUserId phải fail closed.
+    /// </summary>
+    public static bool CanUpdateRentalRate(IInventoryCallerContext caller, Guid? assetOwnerUserId)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated || caller.IsService)
+        {
+            return false;
+        }
+
+        if (assetOwnerUserId is null || assetOwnerUserId == Guid.Empty)
+        {
+            return false;
+        }
+
+        if (caller.IsAdmin)
+        {
+            return true;
+        }
+
+        return caller.UserId.HasValue && caller.UserId.Value == assetOwnerUserId.Value;
     }
 
     /// <summary>
@@ -70,11 +203,12 @@ public static class InventoryAccessEvaluator
     }
 
     /// <summary>
-    /// Kiểm tra quyền xem lịch khả dụng đã làm sạch (Sanitized availability):
+    /// Kiểm tra quyền xem lịch khả dụng (Availability Read):
     /// - Bất kỳ Human đã xác thực (kể cả Admin).
-    /// - Service có scope inventory.calendar.read.
+    /// - Service có scope inventory.availability.read.
+    /// - inventory.calendar.read hoặc inventory.allocation.write riêng lẻ không cấp quyền.
     /// </summary>
-    public static bool CanReadSanitizedAvailability(IInventoryCallerContext caller)
+    public static bool CanReadAvailability(IInventoryCallerContext caller)
     {
         ArgumentNullException.ThrowIfNull(caller);
 
@@ -85,7 +219,7 @@ public static class InventoryAccessEvaluator
 
         if (caller.IsService)
         {
-            return caller.Scopes.Contains(ScopeCalendarRead);
+            return caller.Scopes.Contains(ScopeAvailabilityRead);
         }
 
         // Bất kỳ human nào đã xác thực
@@ -136,5 +270,38 @@ public static class InventoryAccessEvaluator
         }
 
         return caller.Permissions.Contains(PermissionAssetManage) && caller.UserId == assetOwnerUserId;
+    }
+
+    /// <summary>
+    /// Kiểm tra quyền đọc batch EquipmentListing:
+    /// - Chỉ Service u=svc có scope s=inventory.availability.read.
+    /// - Human (kể cả Admin) bị từ chối hoàn toàn.
+    /// </summary>
+    public static bool CanReadEquipmentListingBatch(IInventoryCallerContext caller)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated || !caller.IsService)
+        {
+            return false;
+        }
+
+        return caller.Scopes.Contains(ScopeAvailabilityRead);
+    }
+
+    /// <summary>
+    /// Kiểm tra quyền đọc thông tin kho đầy đủ trong batch EquipmentListing:
+    /// - Chỉ Service u=svc có scope s=inventory.warehouse.read.
+    /// </summary>
+    public static bool CanReadWarehouseBatch(IInventoryCallerContext caller)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated || !caller.IsService)
+        {
+            return false;
+        }
+
+        return caller.Scopes.Contains(ScopeWarehouseRead);
     }
 }

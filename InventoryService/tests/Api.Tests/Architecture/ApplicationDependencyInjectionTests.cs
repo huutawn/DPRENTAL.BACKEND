@@ -1,8 +1,11 @@
+using Dprental.InventoryService.Domain.IRepositories;
+using Dprental.InventoryService.Domain.Repositories;
 using Dprental.InventoryService.Api.Controllers;
 using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.DependencyInjection;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Services;
+using Dprental.InventoryService.Application.Validation;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -34,6 +37,26 @@ public sealed class ApplicationDependencyInjectionTests
         Assert.NotNull(allocationDescriptor);
         Assert.Equal(typeof(InventoryAllocationService), allocationDescriptor.ImplementationType);
         Assert.Equal(ServiceLifetime.Scoped, allocationDescriptor.Lifetime);
+
+        var listingDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IEquipmentListingService));
+        Assert.NotNull(listingDescriptor);
+        Assert.Equal(typeof(EquipmentListingService), listingDescriptor.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, listingDescriptor.Lifetime);
+
+        var publicListingDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IPublicEquipmentListingService));
+        Assert.NotNull(publicListingDescriptor);
+        Assert.Equal(typeof(PublicEquipmentListingService), publicListingDescriptor.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, publicListingDescriptor.Lifetime);
+
+        var validatorDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(AssetSearchQueryValidator));
+        Assert.NotNull(validatorDescriptor);
+        Assert.Equal(typeof(AssetSearchQueryValidator), validatorDescriptor.ImplementationType);
+        Assert.Equal(ServiceLifetime.Singleton, validatorDescriptor.Lifetime);
+
+        var resolverDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(AssetSearchFilterResolver));
+        Assert.NotNull(resolverDescriptor);
+        Assert.Equal(typeof(AssetSearchFilterResolver), resolverDescriptor.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, resolverDescriptor.Lifetime);
     }
 
     [Fact]
@@ -54,6 +77,10 @@ public sealed class ApplicationDependencyInjectionTests
         var allocationService = scope.ServiceProvider.GetService<IInventoryAllocationService>();
         Assert.NotNull(allocationService);
 
+        var listingService = scope.ServiceProvider.GetService<IEquipmentListingService>();
+        Assert.NotNull(listingService);
+        var publicListingService = scope.ServiceProvider.GetService<IPublicEquipmentListingService>();
+        Assert.NotNull(publicListingService);
 
         // Khẳng định Controllers kích hoạt thành công phụ thuộc vào interfaces
         var assetController = ActivatorUtilities.CreateInstance<InventoryAssetsController>(scope.ServiceProvider);
@@ -63,5 +90,38 @@ public sealed class ApplicationDependencyInjectionTests
         Assert.NotNull(calendarController);
         var allocationController = ActivatorUtilities.CreateInstance<InventoryAllocationsController>(scope.ServiceProvider);
         Assert.NotNull(allocationController);
+
+        var listingController = ActivatorUtilities.CreateInstance<EquipmentListingsController>(scope.ServiceProvider);
+        Assert.NotNull(listingController);
+
+        var publicListingController = ActivatorUtilities.CreateInstance<PublicEquipmentListingsController>(scope.ServiceProvider);
+        Assert.NotNull(publicListingController);
+    }
+
+    [Fact]
+    public void DomainRepositories_RegisteredWithExpectedScopedLifetime()
+    {
+        var services = new ServiceCollection();
+        services.AddInventoryServiceDomainRepositories("Host=localhost;Database=test;Username=test;Password=test");
+
+        var assetRepoDesc = services.SingleOrDefault(d => d.ServiceType == typeof(IInventoryAssetRepository));
+        Assert.NotNull(assetRepoDesc);
+        Assert.Equal(typeof(InventoryAssetRepository), assetRepoDesc.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, assetRepoDesc.Lifetime);
+
+        var allocRepoDesc = services.SingleOrDefault(d => d.ServiceType == typeof(IAssetAllocationRepository));
+        Assert.NotNull(allocRepoDesc);
+        Assert.Equal(typeof(AssetAllocationRepository), allocRepoDesc.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, allocRepoDesc.Lifetime);
+
+        var calRepoDesc = services.SingleOrDefault(d => d.ServiceType == typeof(ICalendarBlockRepository));
+        Assert.NotNull(calRepoDesc);
+        Assert.Equal(typeof(CalendarBlockRepository), calRepoDesc.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, calRepoDesc.Lifetime);
+
+        var listingRepoDesc = services.SingleOrDefault(d => d.ServiceType == typeof(IEquipmentListingRepository));
+        Assert.NotNull(listingRepoDesc);
+        Assert.Equal(typeof(EquipmentListingRepository), listingRepoDesc.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, listingRepoDesc.Lifetime);
     }
 }

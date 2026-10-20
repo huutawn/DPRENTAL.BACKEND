@@ -7,7 +7,6 @@ using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Utils;
 using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Domain.IRepositories;
-using Dprental.InventoryService.Domain.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -436,7 +435,6 @@ public sealed class KafkaConsumerWorker : BackgroundService
     {
         await using var scope = _scopeFactory.CreateAsyncScope();
         var outboxStore = scope.ServiceProvider.GetRequiredService<IOutboxStore>();
-        var db = scope.ServiceProvider.GetRequiredService<InventoryServiceDbContext>();
 
         var dlqTopic = KafkaTopics.GetDlqTopic(consumeResult.Topic);
         var dlqRecord = new DlqRecord
@@ -463,6 +461,6 @@ public sealed class KafkaConsumerWorker : BackgroundService
             DateTimeOffset.UtcNow);
 
         outboxStore.Add(outboxMsg);
-        await db.SaveChangesAsync(ct);
+        await outboxStore.SaveChangesAsync(ct);
     }
 }

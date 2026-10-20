@@ -31,7 +31,8 @@ public sealed class AssetAllocationRepository : IAssetAllocationRepository
         return await _context.AssetAllocations
             .Include(a => a.Transitions)
             .Include(a => a.Asset)
-            .FirstOrDefaultAsync(a => a.Id == id && a.Asset.OwnerUserId == ownerUserId, cancellationToken);
+                .ThenInclude(ast => ast.Listing)
+            .FirstOrDefaultAsync(a => a.Id == id && a.Asset.Listing.OwnerUserId == ownerUserId, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -44,6 +45,29 @@ public sealed class AssetAllocationRepository : IAssetAllocationRepository
             .Include(a => a.Transitions)
             .FirstOrDefaultAsync(a => a.SourceSystem == sourceSystem.Trim() && a.ExternalReference == externalReference.Trim(), cancellationToken);
     }
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<AssetAllocation>> GetByGroupReferenceAsync(
+        string sourceSystem,
+        string groupReference,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sourceSystem) || string.IsNullOrWhiteSpace(groupReference))
+        {
+            return Array.Empty<AssetAllocation>();
+        }
+
+        string trimmedSource = sourceSystem.Trim();
+        string trimmedGroup = groupReference.Trim();
+
+        return await _context.AssetAllocations
+            .Include(a => a.Transitions)
+            .Include(a => a.Asset)
+                .ThenInclude(ast => ast.Listing)
+            .Where(a => a.SourceSystem == trimmedSource && a.GroupReference == trimmedGroup)
+            .OrderBy(a => a.AssetId)
+            .ToListAsync(cancellationToken);
+    }
+
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<AssetAllocation>> GetActiveCandidatesAsync(
@@ -57,7 +81,7 @@ public sealed class AssetAllocationRepository : IAssetAllocationRepository
             .Where(a => a.AssetId == assetId &&
                         (a.Status == AllocationStatus.Held || a.Status == AllocationStatus.Allocated) &&
                         a.RentalPeriod.StartDate <= endDate &&
-                        a.RentalPeriod.EndDate >= startDate)
+                        (a.RentalPeriod.EndDate >= startDate || (a.Status == AllocationStatus.Allocated && a.HandedOverAt != null && a.ReturnedAt == null)))
             .ToListAsync(cancellationToken);
     }
 
@@ -102,7 +126,8 @@ public sealed class AssetAllocationRepository : IAssetAllocationRepository
         return await _context.AssetAllocations
             .AsNoTracking()
             .Include(a => a.Asset)
-            .Where(a => a.Asset.OwnerUserId == ownerUserId)
+                .ThenInclude(ast => ast.Listing)
+            .Where(a => a.Asset.Listing.OwnerUserId == ownerUserId)
             .OrderByDescending(a => a.CreatedAt)
             .Skip(skip)
             .Take(take)
@@ -115,6 +140,13 @@ public sealed class AssetAllocationRepository : IAssetAllocationRepository
         ArgumentNullException.ThrowIfNull(allocation);
         _context.AssetAllocations.Add(allocation);
     }
+    /// <inheritdoc />
+    public void AddRange(IEnumerable<AssetAllocation> allocations)
+    {
+        ArgumentNullException.ThrowIfNull(allocations);
+        _context.AssetAllocations.AddRange(allocations);
+    }
+
 
     /// <inheritdoc />
     public void Update(AssetAllocation allocation)

@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.DTOs.Catalog;
 using Dprental.InventoryService.Common;
 
@@ -15,8 +16,26 @@ public interface ICatalogServiceClient
     Task<Result<CatalogEquipmentTypeResponse>> GetPublishedEquipmentTypeAsync(Guid equipmentTypeId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Thẩm tra specification động theo schema version từ CatalogService.
-    /// Hiện tại CatalogService chưa hỗ trợ và trả về kết quả NotSupported.
+    /// Tra cứu thương hiệu theo ID từ CatalogService.
     /// </summary>
-    Task<Result<CatalogSpecValidationResult>> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default);
+    Task<Result<CatalogBrandResponse>> GetBrandAsync(Guid brandId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Thẩm tra specification động theo schema version từ CatalogService.
+    /// </summary>
+    Task<Result> ValidateSpecificationAsync(Guid equipmentTypeId, int schemaVersion, string specValues, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy batch specification schemas của loại thiết bị từ CatalogService (gồm current schema và các version được yêu cầu).
+    /// </summary>
+    Task<Result<Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>>> GetEquipmentTypeSchemasBatchAsync(Guid equipmentTypeId, IReadOnlyList<int> versions, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<CatalogBatchSchemasResponse>(
+            new CatalogBatchSchemasResponse(equipmentTypeId, 1, [new CatalogBatchSchemaItemResponse(1, [])]),
+            DateTimeOffset.UtcNow.AddMinutes(5))));
+
+    /// <summary>
+    /// Lấy danh sách ID các loại thiết bị đã công khai thuộc một danh mục (Category).
+    /// </summary>
+    Task<Result<Dprental.InventoryService.Application.Caching.CachedRead<IReadOnlyList<Guid>>>> GetEquipmentTypeIdsByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<IReadOnlyList<Guid>>(Array.Empty<Guid>(), DateTimeOffset.UtcNow.AddMinutes(5))));
 }

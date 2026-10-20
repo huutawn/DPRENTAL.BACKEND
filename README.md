@@ -8,9 +8,9 @@ Dịch vụ InventoryService cho hệ sinh thái DPRENTAL, được xây dựng 
 InventoryService/
   src/
     Common/          # Kiểu dùng chung, Result/Error, AllocationStatus và utility
-    Domain/          # Entities (Asset, Allocation, Block), repository contracts và EF Core persistence
-    Application/     # DTOs, Kafka transport, Security evaluators & policies
-    Api/             # Controllers, Filters, JWT Authentication, Authorization handlers, HTTP composition root
+    Domain/          # Entities, Policies, ValueObjects, IRepositories, Repositories, Migrations, Clients, Caching, Kafka
+    Application/     # Services, IServices, API DTOs, Mapping, Validation
+    Api/             # Controllers, Security, Filters, Routing, Program
   tests/             # Unit, Integration, Migration & Security Tests
 Directory.Build.props
 Directory.Packages.props
@@ -24,12 +24,14 @@ scripts/             # Scripts hỗ trợ, Git hooks và migration preflight
 
 **Inventory bảo vệ dữ liệu theo `OwnerUserId`, không kiểm tra permission theo organization.**
 
-- **Human thông thường**: Bắt buộc có permission `inventory.asset.manage` trong claim `p` và quyền sở hữu tài sản (`asset.OwnerUserId == JWT.sub`).
-- **Human Admin (`r=adm`)**: Được phép đọc/sửa tài sản xuyên người dùng trong quản lý tài sản (`AssetManage`).
+- **Human thông thường**: Bắt buộc có permission `inventory.asset.manage` trong claim `p` và quyền sở hữu danh mục (`listing.OwnerUserId == JWT.sub`).
+- **Human Admin (`r=adm`)**: Được phép đọc/sửa Listing xuyên người dùng trong quản lý kho.
 - **Danh sách tài sản (`GET /api/v1/inventory/assets`)**: Luôn chỉ trả tài sản thuộc sở hữu của người dùng hiện tại (`JWT.sub`), kể cả khi caller là Admin.
-- **Chi tiết lịch (`CalendarRead` / DPR-149)**: Giữ nghiêm ngặt owner-only (`asset.OwnerUserId == JWT.sub`), Admin không được bypass.
-- **Service Principal**: Bắt buộc `u=svc`, `aud=inventory-api` và scope tương ứng trong claim `s` (`inventory.allocation.write`, `inventory.calendar.read`). Bị từ chối trên các API quản lý tài sản của cá nhân.
+- **Chi tiết lịch Physical Asset (`CalendarRead` / DPR-149)**: Giữ nghiêm ngặt quy ước **owner-only** (`asset.OwnerUserId == JWT.sub`), Admin không được bypass.
+- **Lịch Listing (`GET /api/v1/inventory/equipment-listings/{id}/calendar`)**: Cho phép cả Owner và Admin truy cập để quản lý tình trạng dùng chung của danh mục.
+- **Service Principal**: Bắt buộc `u=svc`, `aud=inventory-api` và scope tương ứng trong claim `s` (`inventory.allocation.write`, `inventory.availability.read`). Bị từ chối trên các API quản lý Listing của cá nhân.
 - **Loại bỏ OrganizationId**: Tài sản không còn thuộc tính `organization_id`. Danh tính người sở hữu duy nhất được lấy từ JWT `sub`.
+- **Ranh giới giá với RentalService**: Inventory sở hữu giá niêm yết hiện tại trên `EquipmentListing`; RentalService đọc/revalidate và lưu `PriceSnapshot` khi tạo đơn thuê (`RentalOrder`). Thay đổi giá trên Inventory không sửa đơn hàng cũ.
 
 ## Chạy hạ tầng cục bộ
 
@@ -62,65 +64,225 @@ dotnet build InventoryService.sln
 dotnet test InventoryService.sln
 ```
 
-## Quản lý tài sản (Inventory Asset Management - DPR-160)
+---
 
-### APIs
+## Quản lý danh mục niêm yết (EquipmentListing) và Đơn vị vật lý (InventoryAsset)
 
-| Method | Endpoint | Mô tả |
-|---|---|---|
-| `POST` | `/api/v1/inventory/assets` | Tạo mới tài sản (201 Created + Location header). Owner lấy từ JWT sub. |
-| `GET` | `/api/v1/inventory/assets` | Danh sách tài sản phân trang của current user (`page` default 1, `pageSize` default 20, max 100). Chặn query khác. |
-| `GET` | `/api/v1/inventory/assets/{id}` | Chi tiết tài sản (200 OK). 404 nếu không tìm thấy, 403 nếu cross-user (Admin bypass allowed). |
-| `PATCH` | `/api/v1/inventory/assets/{id}` | Cập nhật thông tin chi tiết với presence tracking. Omitted giữ nguyên; explicit null clear serial/year/thumbnail. |
-| `PATCH` | `/api/v1/inventory/assets/{id}/accepting-bookings` | Bật/tắt nhận lịch: `{ "acceptingBookings": bool, "reason": string? }`. Đổi cờ phát sự kiện availability qua Outbox. |
+### Mô hình nghiệp vụ cốt lõi
 
-### Tích hợp Catalog & Media
+1. **EquipmentListing (Danh mục niêm yết)**: Đại diện cho tin đăng chào thuê trên thị trường. Sở hữu:
+   - Tên hiển thị (`Name`): Bắt buộc, trim, tối đa 200 ký tự.
+   - Mô tả (`Description`): Tùy chọn, tối đa 2.000 ký tự (chuỗi trắng chuẩn hóa thành null).
+   - Tên model kỹ thuật (`Model`): Bắt buộc, tối đa 200 ký tự.
+   - Năm sản xuất (`ManufactureYear`): Bắt buộc khi tạo mới (từ 1900 đến năm hiện tại theo múi giờ Việt Nam), dùng làm năm mặc định kế thừa khi tạo đơn vị vật lý.
+   - Danh sách multimedia (`MediaIds`): Lưu bằng cột `uuid[]` có thứ tự (tối đa 20 mục, không trùng, không GUID rỗng, định dạng ảnh hoặc video), cùng lựa chọn ảnh đại diện (`ThumbnailMediaId` phải là ảnh và nằm trong `MediaIds` nếu có).
+   - Metadata Catalog chuẩn: `EquipmentTypeId`, `BrandId`, `SpecValues` (JSONB).
+   - Bảng giá niêm yết: `DailyRate`, `WeeklyRate`, `MonthlyRate`, `Currency` (`"VND"`).
+   - Vòng đời trạng thái: `Draft` (khởi tạo), `Active` (đang mở thuê), `Inactive` (tạm dừng). Chuyển sang `Active` bắt buộc phải có ít nhất 1 physical unit đang nhận lịch (`AcceptingBookings = true`).
+   - Cung ứng phái sinh (`totalQuantity`): Số lượng physical units trực thuộc đang sẵn sàng nhận đặt lịch (`accepting_bookings = true`).
+2. **InventoryAsset (Đơn vị vật lý)**: Đại diện cho từng thiết bị cụ thể trong kho:
+   - Định danh duy nhất: `AssetCode` (`AST-{AssetId:N}`) sinh tự động bởi hệ thống.
+   - Số serial (`SerialNumber`): Bắt buộc, không được để trống, duy nhất trong cùng Listing (không phân biệt hoa/thường và khoảng trắng đầu cuối).
+   - Năm sản xuất (`ManufactureYear`): Kế thừa năm của Listing tại thời điểm tạo asset (đọc dưới khóa transaction của Listing); vẫn cho phép PATCH năm riêng trên từng asset mà không ảnh hưởng Listing hay các asset khác.
+   - Cờ nhận lịch (`AcceptingBookings`): Khi tắt (`false`), giữ nguyên lịch sử allocation/calendar block nhưng không tính vào `totalQuantity` khả dụng của Listing.
 
-- **CatalogService**: Tra cứu Published equipment type qua `GET /api/v1/catalog/equipment-types/{id}`. Canonical specification validation trả về rõ ràng `NotSupported` theo quyết định MVP và được chấp nhận sau khi kiểm tra cấu trúc JSON object tại Inventory.
-- **MediaService**: Tái sử dụng `PreparePublicAsync` khi tạo hoặc cập nhật thumbnail thành GUID mới. Clear thumbnail (`null`) không gọi MediaService.
+---
 
-### Kafka Event Key & Cutover Rollout
-
-- Sự kiện `InventoryAssetAvailabilityChanged` phát lên topic `inventory.asset.events.v1` với Kafka partition key là **Aggregate ID** (`assetId`), payload `{ "assetId": Guid, "changedAt": DateTimeOffset }`.
-- **Quy trình Cutover**:
-  1. Dừng traffic ghi và drain publisher Outbox hiện có.
-  2. **Bắt buộc**: Consumer phải xử lý hết backlog sự kiện cũ trước khi hệ thống mới phát sự kiện với partition key mới (`assetId` thay vì `orgId:assetId`), vì Kafka không bảo đảm thứ tự giữa hai partition keys khác nhau.
-  3. Chạy preflight script `scripts/complete-asset-management-preflight.sql` và nạp dữ liệu staging vào `inventory.asset_model_backfill`.
-  4. Áp dụng migration `20261002030000_CompleteInventoryAssetManagement` (tự động rollback nếu backfill thiếu hoặc vi phạm year tương lai).
-  5. Cấu hình `CatalogService__BaseUrl` và khởi động binary mới.
-
-
-## Quản lý giữ chỗ và phân bổ tài sản (Hold & Allocation Core - DPR-151)
-
-### APIs
+### APIs Quản lý Listing & Physical Units
 
 | Method | Endpoint | Yêu cầu quyền | Mô tả |
 |---|---|---|---|
-| `POST` | `/api/v1/inventory/assets/{assetId}/holds` | Service (`s=inventory.allocation.write`) | Tạo giữ chỗ tạm thời (201 Created khi mới; 200 OK khi replay đúng payload). |
-| `POST` | `/api/v1/inventory/allocations/{allocationId}/allocate` | Service (`s=inventory.allocation.write`) | Chuyển đổi trạng thái Held sang Allocated (200 OK, trả allocation hiện tại). |
+| `POST` | `/api/v1/inventory/equipment-listings` | `inventory.asset.manage` / Admin | Tạo mới Listing Draft kèm **đúng một unit vật lý ban đầu có serial**, bắt buộc `name`, `model` và `manufactureYear`, tùy chọn `description`, `mediaIds` (tối đa 20 ảnh/video) và `thumbnailMediaId` (ảnh thuộc `mediaIds`). Trả 201 Created + Location. |
+| `GET` | `/api/v1/inventory/equipment-listings` | Owner / Admin | Danh sách Listing của current user phân trang (`page`, `pageSize`, `q` tìm kiếm chuỗi con trong `name` hoặc `model`, `equipmentTypeId`, `brandId`, `status`). Hai SELECTs trong RepeatableRead snapshot. |
+| `GET` | `/api/v1/inventory/equipment-listings/{id}` | Owner / Admin | Chi tiết Listing (bao gồm `manufactureYear`, `media: [{id, url}]`, `thumbnailMediaId`, `thumbnailUrl`) và derived `totalQuantity`. |
+| `PATCH` | `/api/v1/inventory/equipment-listings/{id}` | Owner / Admin | Cập nhật metadata/status (presence tracking cho `name`, `description`, `brandId`, `model`, `manufactureYear`, `mediaIds`, `thumbnailMediaId`, `schemaVersion`, `specValues`, `status`). Từ chối `name: null`, `manufactureYear: null`, `mediaIds: null`; `mediaIds: []` xóa danh sách (nếu xóa media đang làm thumbnail phải đồng thời xóa hoặc đổi thumbnail). Draft → Active yêu cầu >= 1 unit accepting bookings. |
+| `PUT` | `/api/v1/inventory/equipment-listings/{id}/rental-rate` | Owner / Admin | Thay thế toàn bộ bảng giá thuê niêm yết của Listing (VND, số nguyên dương). |
+| `GET` | `/api/v1/inventory/equipment-listings/{id}/assets` | Owner / Admin | Danh sách đơn vị vật lý thuộc Listing có phân trang. |
+| `POST` | `/api/v1/inventory/equipment-listings/{id}/assets` | `inventory.asset.manage` / Admin | Thêm **từng đơn vị vật lý (add-one)** vào Listing bằng `serialNumber`; kế thừa `manufactureYear` hiện tại của Listing trong transaction có khóa Listing (từ chối nếu Listing chưa có năm hợp lệ). Trả 201 Created + Location trỏ tới Asset. |
+| `GET` | `/api/v1/inventory/equipment-listings/{id}/calendar?from=&to=` | Owner / Admin | Lịch dùng chung tổng hợp cấp Listing (cửa sổ tối đa 6 tháng). |
+| `POST` | `/api/v1/inventory/equipment-listings/{id}/availability/check` | `AvailabilityRead` | Kiểm tra tính khả dụng toàn khoảng thời gian cho số lượng yêu cầu. |
+| `POST` | `/api/v1/inventory/equipment-listings/{id}/holds` | `inventory.allocation.write` | Tạo giữ chỗ tạm thời theo nhóm (Group Hold) trên Listing. |
 
-### Transaction Flow và Idempotency
+---
 
-- **Create Hold**:
-  1. Bắt buộc Service Principal với scope `inventory.allocation.write` (Human/Admin bị từ chối 403).
-  2. Validate cấu trúc request DTO (từ chối unknown properties, kiểm tra ngày bắt buộc, `startDate <= endDate`, chuẩn hóa `holdExpiresAt` về microsecond UTC bằng `BusinessDateTime.NormalizeUtc`).
-  3. Mở transaction độc lập dưới PostgreSQL `pg_advisory_xact_lock` trên mức tài sản (`assetId`).
-  4. Đọc lại asset và lấy clock từ `TimeProvider` sau khi có advisory lock (404 nếu asset không tồn tại).
-  5. Tra cứu business key `(sourceSystem, externalReference)`. Nếu đã tồn tại: gọi `ValidateExternalRetry` đối chiếu asset, period, canonical expiry và notes. Replay đúng payload trả allocation hiện tại (200 OK, status có thể là `Held` hoặc `Allocated`) mà không thêm Outbox; khác payload trả 409 Conflict (`EXTERNAL_REFERENCE_REUSED`).
-  6. Với key mới: validate nghiệp vụ qua `CreateHold`, tải candidate allocations và calendar blocks, kiểm tra availability. Nếu tài sản tắt bookings trả 400 (`ASSET_NOT_ACCEPTING_BOOKINGS`); nếu trùng lặp trả 409 Conflict (`ASSET_BLOCKED` hoặc `ASSET_UNAVAILABLE`) với thông báo đã làm sạch, không để lộ thông tin lịch của đối tượng khác.
-  7. Stage thực thể Hold và phát đúng một sự kiện `InventoryAssetAvailabilityChanged` vào Outbox cùng transaction atomically.
-  8. Nếu vi phạm unique constraint do hai asset dùng cùng business key: sau rollback, thực hiện đối chiếu lại dưới cùng asset lock. Row tìm được qua `ValidateExternalRetry`, khác payload trả 409; không tìm được giữ lỗi ban đầu.
-- **Held → Allocated**:
-  1. Bắt buộc Service Principal với scope `inventory.allocation.write` và validate `operationKey` không rỗng.
-  2. Tra cứu allocation để lấy `AssetId` (404 nếu không tìm thấy).
-  3. Acquire advisory lock trên `AssetId` qua `ExecuteAsync`, đọc lại allocation cùng transitions, lấy clock mới.
-  4. Domain kiểm tra replay trước state/expiry: nếu `operationKey` đã được sử dụng thành công cho Allocate trước đó, trả về thành công (200 OK) mà không ghi thêm transition.
-  5. Nếu key mới trên hold đã hết hạn hoặc trạng thái không phải Held (`HOLD_EXPIRED`, `INVALID_STATUS_TRANSITION`, `ALLOCATION_IN_TERMINAL_STATE`): Application service trực tiếp chuyển lỗi thành `Error.Conflict` (HTTP 409).
-  6. Lưu thay đổi qua EF tracking, không query overlap lại, không kiểm tra `AcceptingBookings`, không phát sự kiện Outbox (khoảng thời gian chiếm lịch không đổi).
-## Hợp đồng dùng chung và Concurrency Protocol
+### APIs Đơn vị vật lý (Physical Asset)
 
-- `Common/Result.cs`: Result và Result<T> cho lỗi dự kiến.
-- `Common/Error.cs`: Error/ErrorType với mã chuẩn.
-- `Domain/IRepositories/IRepo.cs`: Hợp đồng đọc theo ID. Inventory ghi qua `IInventoryWriteTransaction` để giữ PostgreSQL advisory lock (`AssetLockKey.FromAssetId`), optimistic concurrency qua `xmin` và atomic commit.
-- `Application/Security/InventoryAccessEvaluator.cs`: Thực thi ma trận phân quyền DPR-147.
-- `Application/Kafka/Contracts/KafkaTopics.cs`: Các topics target: `inventory.allocation.commands.v1`, `inventory.allocation.events.v1`, `inventory.asset.events.v1` cùng DLQ tương ứng.
+| Method | Endpoint | Yêu cầu quyền | Mô tả |
+|---|---|---|---|
+| `GET` | `/api/v1/inventory/assets` | Owner / Admin | Danh sách đơn vị vật lý của current user (hỗ trợ lọc theo `manufactureYearFrom/To`). |
+| `GET` | `/api/v1/inventory/assets/{id}` | Owner / Admin | Chi tiết đơn vị vật lý (`assetCode`, `serialNumber`, `manufactureYear`, `acceptingBookings`). |
+| `PATCH` | `/api/v1/inventory/assets/{id}` | Owner / Admin | Cập nhật thông tin vật lý (`serialNumber`, `manufactureYear`). Xử lý optimistic concurrency qua `xmin`. |
+| `PATCH` | `/api/v1/inventory/assets/{id}/accepting-bookings` | Owner / Admin | Bật/tắt nhận lịch của đơn vị vật lý. Tắt yêu cầu cung cấp `reason`. |
+| `GET` | `/api/v1/inventory/assets/{id}/calendar` | Owner Only | Lịch sử dụng chi tiết của đơn vị vật lý (Admin bị từ chối 403). |
+| `POST` | `/api/v1/inventory/assets/{id}/calendar-blocks` | Owner Only | Tạo khoảng chặn lịch bảo trì/kiểm định cho đơn vị vật lý. |
+| `DELETE` | `/api/v1/inventory/assets/{id}/calendar-blocks/{blockId}` | Owner Only | Xóa khoảng chặn lịch của đơn vị vật lý. |
+
+---
+
+### Ví dụ Payload Create Listing & Add Asset
+
+#### 1. Tạo Listing Draft với Serial ban đầu (`POST /api/v1/inventory/equipment-listings`)
+```json
+{
+  "equipmentTypeId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "brandId": "7d9b23b4-18c2-48f1-8be5-612b489d89a1",
+  "name": "Sony FX3 kèm bộ phụ kiện quay",
+  "description": "Máy quay điện ảnh Full-frame chuyên nghiệp kèm cage và pin dự phòng",
+  "model": "FX3",
+  "serialNumber": "FX3-VN-2026-0001",
+  "manufactureYear": 2024,
+  "schemaVersion": 1,
+  "specValues": {
+    "sensor": "Full-Frame",
+    "resolution": "4K"
+  },
+  "mediaIds": [
+    "11111111-2222-3333-4444-555555555555",
+    "66666666-7777-8888-9999-aaaaaaaaaaaa"
+  ],
+  "thumbnailMediaId": "11111111-2222-3333-4444-555555555555",
+  "rentalRate": {
+    "dailyRate": 500000,
+    "weeklyRate": 3000000,
+    "monthlyRate": 10000000,
+    "currency": "VND"
+  },
+  "depositAmount": 500000
+}
+```
+*Phản hồi*: `201 Created` kèm `Location: /api/v1/inventory/equipment-listings/{listingId}`.
+*Quy tắc*: Gửi trường cũ `quantity` sẽ bị từ chối ngay lập tức với `400 Bad Request`.
+
+#### 2. Thêm một đơn vị vật lý mới (`POST /api/v1/inventory/equipment-listings/{id}/assets`)
+```json
+{
+  "serialNumber": "FX3-VN-2026-0002"
+}
+```
+*Phản hồi*: `201 Created` kèm `Location: /api/v1/inventory/assets/{assetId}` và body là `InventoryAssetResponse`.
+*Quy tắc*: Nếu trùng serial (kể cả unit đang bị disable), trả về `409 Conflict` với mã lỗi `SERIAL_ALREADY_EXISTS`.
+
+---
+
+## Khám phá và Đọc Listing công khai (Public Equipment Listing Discovery)
+
+### APIs Công khai (AllowAnonymous)
+
+| Method | Endpoint | Mô tả |
+|---|---|---|
+| `GET` | `/api/v1/inventory/public/equipment-listings` | Khám phá và tìm kiếm danh sách Listing Active phân trang. Hỗ trợ lọc theo `from`, `to`, `requestedQuantity`, `q` (tìm chuỗi con trong `name` hoặc `model`, không phân biệt hoa thường, giữ phân biệt dấu tiếng Việt), `equipmentTypeId`, `brandId`, dynamic filters. Lọc khả dụng thực hiện trước pagination. |
+| `GET` | `/api/v1/inventory/public/equipment-listings/{id}` | Đọc chi tiết Listing Active công khai đã làm sạch dữ liệu nhạy cảm. Listing Draft/Inactive trả 404. |
+
+### Bảo vệ dữ liệu nhạy cảm (Privacy & Security)
+- Phản hồi công khai chỉ hiển thị cấp Listing: `id`, `equipmentTypeId`, `brandId`, `name`, `description`, `model`, `manufactureYear`, `schemaVersion`, `specValues`, `rentalRate`, `depositAmount`, `media` (`[{id, url}]`), `thumbnailUrl`, `totalQuantity`, `availableQuantity`.
+- Tuyệt đối không rò rỉ `serialNumber`, `assetCode`, hay các GUID định danh đơn vị vật lý (`assetId`).
+- Từ chối tham số ngoài whitelist: Việc truyền `manufactureYearFrom` hay `manufactureYearTo` vào endpoint công khai sẽ bị từ chối `400 INVALID_QUERY_PARAMETER` (năm sản xuất thuộc từng unit vật lý, không thuộc Listing).
+
+---
+
+## Lịch tổng hợp (Shared Calendar) & Quản lý giữ chỗ nhóm (Group Hold)
+
+### 1. Lịch tổng hợp cấp Listing (`GET /api/v1/inventory/equipment-listings/{id}/calendar`)
+- Thống kê chi tiết theo từng ngày trong khoảng yêu cầu (`from` đến `to`, tối đa 6 tháng):
+  - `occupiedQuantity`: Số unit đang có lượt giữ chỗ hợp lệ hoặc đơn thuê đã xác nhận.
+  - `blockedQuantity`: Số unit đang có khoảng chặn lịch vận hành (`CalendarBlock`).
+  - `availableQuantity`: Số unit hoạt động và hoàn toàn rảnh rỗi (`totalQuantity - distinct unavailable`).
+  - `suspendedOccupiedQuantity` & `suspendedBlockedQuantity`: Thống kê riêng cho các unit tạm dừng nhận lịch (`accepting_bookings = false`).
+- Các ngày không có lịch (ngày trống) tự động trả về `occupied = 0`, `blocked = 0`, `available = totalQuantity`.
+- Lượt giữ chỗ đã hết hạn (`hold_expires_at <= now`) hoặc đã hủy/giải phóng (`Released`/`Cancelled`) không làm tăng số lượng occupied.
+- Mỗi physical unit chỉ được tính tối đa một lần cho từng trạng thái trong ngày (`distinct-unit counting`).
+
+### 2. Giữ chỗ tạm thời theo nhóm (Group Hold - DPR-151)
+- Endpoint: `POST /api/v1/inventory/equipment-listings/{id}/holds`.
+- Khóa phân cấp nghiêm ngặt: `Group Lock` → `Listing Lock` → `Asset Locks` (theo thứ tự ID tăng dần).
+- **Tính nguyên tử tuyệt đối (Atomicity)**: Cấp phát N units cùng các transitions và Outbox messages trong duy nhất một PostgreSQL transaction. Nếu có bất kỳ lỗi nào xảy ra giữa chừng, toàn bộ nhóm được rollback; không bao giờ phát sinh tình trạng cấp phát dở dang (partial allocations).
+- **Replay Idempotency**:
+  - Gửi lại cùng `(sourceSystem, groupReference)` và cùng payload: Trả về 201 Created / 200 OK với kết quả nhóm hiện tại (`isReplay = true`), không tạo thêm allocation hay Outbox message.
+  - Replay khi nhóm đã hết hạn hoặc đã giải phóng: Trả về `409 Conflict` (`HOLD_EXPIRED`).
+  - Replay với payload khác biệt (sai số lượng, ngày, ghi chú): Trả về `409 Conflict` (`EXTERNAL_REFERENCE_REUSED`).
+  - Dùng cùng key cho Listing khác: Trả về `409 Conflict` (`EXTERNAL_REFERENCE_REUSED`).
+- **Yêu cầu trạng thái Listing Active**: Cả giữ chỗ đơn (`POST /api/v1/inventory/assets/{assetId}/holds`) và giữ chỗ nhóm (`POST /api/v1/inventory/equipment-listings/{id}/holds`) khi tạo mới đều bắt buộc Listing cha phải ở trạng thái `Active`. Nếu Listing ở trạng thái `Draft` hoặc `Inactive`, yêu cầu bị từ chối bằng `409 Conflict` (`LISTING_NOT_ACTIVE`). Replay hợp lệ và xác nhận phân bổ (`Allocate`) cho các lượt giữ chỗ đã tạo thành công trước đó vẫn tiếp tục hoạt động ngay cả khi Listing chuyển sang `Inactive`.
+- **Đánh giá thời gian thực**: Lịch tổng hợp cấp Listing lấy clock đánh giá occupancy sau khi tải snapshot từ database, đảm bảo tính nhất quán tuyệt đối với availability queries nếu có hold hết hạn trong quá trình I/O.
+
+---
+
+## Breaking Changes so với phiên bản trước
+
+1. **Bỏ các endpoints cũ**:
+   - `POST /api/v1/inventory/assets` → Chuyển thành `POST /api/v1/inventory/equipment-listings`.
+   - `PUT /api/v1/inventory/assets/{id}/rental-rate` → Chuyển thành `PUT /api/v1/inventory/equipment-listings/{id}/rental-rate`.
+   - `GET /api/v1/inventory/public/assets` → Chuyển thành `GET /api/v1/inventory/public/equipment-listings`.
+2. **Loại bỏ input quantity**: Payload tạo Listing không nhận trường `quantity`. Quantity là giá trị phái sinh (`totalQuantity`) từ số lượng physical units đang hoạt động.
+3. **Thêm Asset dạng add-one**: Thêm đơn vị vật lý nhận từng serial và trả về `201 Created` kèm header `Location: /api/v1/inventory/assets/{assetId}`, thay vì nhận mảng quantity trả về 200.
+4. **Loại bỏ lọc năm sản xuất công khai**: Public discovery không cho phép lọc theo năm sản xuất; tính năng lọc năm được giữ cho API quản lý của Owner.
+
+---
+
+## Runbook Migrations & Điều kiện Cutover
+
+### Hai Forward Migrations bắt buộc
+1. `20261007000000_RefactorEquipmentListingAndInventoryAsset`:
+   - Phân tách bảng `inventory.equipment_listings` và tái cấu trúc `inventory.assets`.
+2. `20261008000000_RequireAssetSerialNumberAndUniqueListingSerial`:
+   - Bắt buộc `serial_number NOT NULL` với CHECK constraint `length(btrim(serial_number)) > 0 AND length(serial_number) <= 100`.
+   - Tạo unique expression index `ix_assets_listing_serial_unique` trên `(equipment_listing_id, lower(btrim(serial_number)))`.
+
+### Preflight Check & Quy tắc An toàn dữ liệu
+- Migration chạy preflight script kiểm tra:
+  - Tất cả assets hiện có phải có `serial_number` hợp lệ (không null, không rỗng sau khi trim).
+  - Không có các serial trùng lặp sau khi lowercase và trim trong cùng một Listing.
+- **Xử lý khi vi phạm**: Nếu phát hiện dữ liệu lỗi, migration lập tức ném exception và rollback toàn bộ transaction; không ghi nhận vào `__EFMigrationsHistory` và không thay đổi bất kỳ dữ liệu nào.
+- **Chính sách Backfill**: Tuyệt đối **không tự động backfill serial giả** và **không tự động xóa dữ liệu**. Mọi dữ liệu thiếu hoặc trùng phải được rà soát và khắc phục thủ công trước khi chạy migration.
+
+### Yêu cầu Gateway trước Cutover
+- Gateway bắt buộc phải cấu hình và định tuyến các route mới (`/api/v1/inventory/equipment-listings`, `/api/v1/inventory/public/equipment-listings`) trước khi thực hiện cutover.
+- Smoke test thành công qua Gateway là điều kiện tiên quyết ngoài repository Inventory trước khi mở traffic production.
+
+---
+
+## Phạm vi hoãn lại (Deferred Scope & Non-Goals)
+
+Các tính năng sau tiếp tục được giữ ngoài phạm vi MVP hiện tại:
+- **Day drill-down**: Xem chi tiết danh sách từng physical unit công khai theo ngày.
+- **Bulk import serial**: Nhập hàng loạt số serial qua file CSV/Excel.
+- **Group allocate / Group release nguyên tử**: Chuyển trạng thái phân bổ hoặc giải phóng đồng loạt cho cả nhóm giữ chỗ (hiện tại xử lý theo từng unit allocation).
+- **Location-based discovery**: Lọc và tìm kiếm thiết bị theo khoảng cách địa lý / vị trí kho bãi.
+
+
+## Thống kê discovery và lọc category
+
+- `GET /api/v1/inventory/public/equipment-listings/statistics` là anonymous, chỉ đếm
+  listing Active; không chấp nhận query parameter.
+- `GET /api/v1/inventory/equipment-listings/statistics?status=Active` yêu cầu JWT human,
+  owner lấy từ sub kể cả Admin; service token trả 403. Không truyền status thì tính
+  mọi trạng thái. Query lạ hoặc scalar lặp trả 400.
+- Response giữ `{ byEquipmentType: { "<uuid>": count }, byBrand: { "<uuid>": count } }`.
+  Mỗi listing tính một, không phụ thuộc số physical unit. Hai chiều được tổng hợp từ
+  cùng một SELECT PostgreSQL và cùng snapshot.
+- Public listing list nhận `categoryId`, lấy đủ các trang type Published từ Catalog
+  (100 type/trang). Nếu equipmentTypeId không thuộc category thì tìm toàn category.
+  Lỗi HTTP hoặc pagination contract không hợp lệ trả 503, không trả kết quả thiếu.
+  Toàn bộ vòng phân trang dùng chung deadline `CatalogService:TimeoutSeconds` (mặc định 10 giây).
+  Category rỗng vẫn kiểm tra ngày thuê, requestedQuantity và dynamic filters.
+
+### Kiểm thử hai API process thật
+
+Yêu cầu .NET 10 SDK, dotnet-ef 10, OpenSSL, Docker và PostgreSQL test container
+`catalogservice-pg-test` (PostgreSQL 17, cổng 5436, user/password test `postgres`).
+Catalog PostgreSQL test fixture có thể tạo container này. Trong workspace có cả hai repo:
+
+```bash
+dotnet build ../CatalogService/CatalogService.sln
+dotnet build InventoryService.sln
+dotnet build ../Gateway/Gateway/Gateway.sln
+python3 scripts/test-catalog-inventory.py
+```
+
+Có thể override `CONTRACT_TEST_PG_CONTAINER`, `CONTRACT_TEST_PG_PORT`,
+`CONTRACT_TEST_PG_USER`, `CONTRACT_TEST_PG_PASSWORD` bằng environment.
+Harness tạo hai database `contract_*_<uuid>`, migrate, seed dữ liệu test riêng, chạy hai
+binary API thực, Gateway và JWKS test. Nó kiểm tra category 101 type (tin ở trang hai), số đếm
+public/mine, Bearer/cookie, ưu tiên header, owner/Admin, service token, validation và
+Inventory outage. Smoke test cũng đi qua Gateway thực. Process, database và khóa RSA tạm được thu hồi khi kết thúc.
+Không trỏ harness vào PostgreSQL production. Meilisearch/Kafka không bị mock; các
+request discovery này không dùng search keyword và không cần search index sẵn sàng.

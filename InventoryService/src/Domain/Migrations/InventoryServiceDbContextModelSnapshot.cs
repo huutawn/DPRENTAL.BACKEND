@@ -24,6 +24,90 @@ namespace InventoryService.Domain.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.HasSequence("search_projection_revision_seq", "inventory");
+
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AllocationOperationReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("ClosesGroup")
+                        .HasColumnType("boolean")
+                        .HasColumnName("closes_group");
+
+                    b.Property<string>("CommandType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("command_type");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("error_code");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("error_message");
+
+                    b.Property<string>("GroupReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("group_reference");
+
+                    b.Property<string>("OperationKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("operation_key");
+
+                    b.Property<string>("PayloadFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("payload_fingerprint");
+
+                    b.Property<Guid>("RentalOrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("rental_order_id");
+
+                    b.Property<string>("ResultPayloadJson")
+                        .HasColumnType("text")
+                        .HasColumnName("result_payload_json");
+
+                    b.Property<string>("SourceSystem")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("source_system");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RentalOrderId")
+                        .HasDatabaseName("ix_allocation_operation_receipts_order");
+
+                    b.HasIndex("SourceSystem", "GroupReference")
+                        .HasDatabaseName("ix_allocation_operation_receipts_group")
+                        .HasFilter("\"group_reference\" IS NOT NULL");
+
+                    b.HasIndex("SourceSystem", "OperationKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_allocation_operation_receipts_source_opkey");
+
+                    b.ToTable("allocation_operation_receipts", "inventory");
+                });
+
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AllocationTransition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -122,6 +206,15 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("external_reference");
 
+                    b.Property<string>("GroupReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("group_reference");
+
+                    b.Property<DateTimeOffset?>("HandedOverAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("handed_over_at");
+
                     b.Property<DateTimeOffset?>("HoldExpiresAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("hold_expires_at");
@@ -130,6 +223,10 @@ namespace InventoryService.Domain.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
                         .HasColumnName("notes");
+
+                    b.Property<DateTimeOffset?>("ReturnedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("returned_at");
 
                     b.Property<string>("SourceSystem")
                         .IsRequired()
@@ -173,12 +270,25 @@ namespace InventoryService.Domain.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_asset_allocations_source_system_external_reference");
 
+                    b.HasIndex("SourceSystem", "GroupReference")
+                        .HasDatabaseName("ix_asset_allocations_source_system_group_reference")
+                        .HasFilter("\"group_reference\" IS NOT NULL");
+
                     b.HasIndex("Status", "HoldExpiresAt")
                         .HasDatabaseName("ix_asset_allocations_hold_expiry")
                         .HasFilter("\"status\" = 1 AND \"hold_expires_at\" IS NOT NULL");
 
+                    b.HasIndex("SourceSystem", "GroupReference", "AssetId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_asset_allocations_source_system_group_asset")
+                        .HasFilter("\"group_reference\" IS NOT NULL");
+
                     b.ToTable("asset_allocations", "inventory", t =>
                         {
+                            t.HasCheckConstraint("ck_asset_allocations_group_reference", "\"group_reference\" IS NULL OR (length(btrim(\"group_reference\")) > 0 AND length(\"group_reference\") <= 100)");
+
+                            t.HasCheckConstraint("ck_asset_allocations_handover_return", "(\"returned_at\" IS NULL OR \"handed_over_at\" IS NOT NULL) AND (\"returned_at\" IS NULL OR \"returned_at\" >= \"handed_over_at\")");
+
                             t.HasCheckConstraint("ck_asset_allocations_held_hold_expires_at", "\"status\" <> 1 OR \"hold_expires_at\" IS NOT NULL");
 
                             t.HasCheckConstraint("ck_asset_allocations_rental_period_order", "\"start_date\" <= \"end_date\"");
@@ -187,6 +297,68 @@ namespace InventoryService.Domain.Migrations
 
                             t.HasCheckConstraint("ck_asset_allocations_status", "\"status\" IN (1, 2, 5, 6)");
                         });
+                });
+
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.CacheInvalidationJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("FanoutAfterListingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("fanout_after_listing_id");
+
+                    b.Property<Guid?>("FanoutOwnerUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("fanout_owner_user_id");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("text")
+                        .HasColumnName("last_error");
+
+                    b.Property<DateTimeOffset?>("LockLeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lock_lease_expires_at");
+
+                    b.Property<Guid?>("LockLeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lock_lease_token");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at");
+
+                    b.Property<DateTimeOffset?>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("retry_count");
+
+                    b.PrimitiveCollection<string[]>("Scopes")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("scopes");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status", "NextAttemptAt", "LockLeaseExpiresAt")
+                        .HasDatabaseName("ix_cache_invalidation_jobs_claim");
+
+                    b.ToTable("cache_invalidation_jobs", "inventory");
                 });
 
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.CalendarBlock", b =>
@@ -241,6 +413,159 @@ namespace InventoryService.Domain.Migrations
                     b.ToTable("calendar_blocks", "inventory", t =>
                         {
                             t.HasCheckConstraint("ck_calendar_blocks_date_order", "\"start_date\" <= \"end_date\"");
+                        });
+                });
+
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.EquipmentListing", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("BrandId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("brand_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("currency");
+
+                    b.Property<decimal>("DailyRate")
+                        .HasColumnType("numeric(18,0)")
+                        .HasColumnName("daily_rate");
+
+                    b.Property<decimal>("DepositAmount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("numeric(18,0)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("deposit_amount");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("description");
+
+                    b.Property<Guid>("EquipmentTypeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("equipment_type_id");
+
+                    b.Property<int?>("ManufactureYear")
+                        .HasColumnType("integer")
+                        .HasColumnName("manufacture_year");
+
+                    b.PrimitiveCollection<Guid[]>("MediaIds")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid[]")
+                        .HasColumnName("media_ids")
+                        .HasDefaultValueSql("'{}'::uuid[]");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("model");
+
+                    b.Property<decimal?>("MonthlyRate")
+                        .HasColumnType("numeric(18,0)")
+                        .HasColumnName("monthly_rate");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_user_id");
+
+                    b.Property<int>("SchemaVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("schema_version");
+
+                    b.Property<string>("SpecValues")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("spec_values");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<Guid?>("ThumbnailMediaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("thumbnail_media_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<decimal?>("WeeklyRate")
+                        .HasColumnType("numeric(18,0)")
+                        .HasColumnName("weekly_rate");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BrandId")
+                        .HasDatabaseName("ix_equipment_listings_brand_id");
+
+                    b.HasIndex("DailyRate")
+                        .HasDatabaseName("ix_equipment_listings_daily_rate");
+
+                    b.HasIndex("EquipmentTypeId")
+                        .HasDatabaseName("ix_equipment_listings_equipment_type_id");
+
+                    b.HasIndex("OwnerUserId")
+                        .HasDatabaseName("ix_equipment_listings_owner_user_id");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("ix_equipment_listings_status");
+
+                    b.ToTable("equipment_listings", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_equipment_listings_currency", "currency = 'VND'");
+
+                            t.HasCheckConstraint("ck_equipment_listings_daily_rate", "daily_rate >= 1 AND daily_rate <= 999999999999999999 AND trunc(daily_rate) = daily_rate");
+
+                            t.HasCheckConstraint("ck_equipment_listings_deposit_amount", "deposit_amount >= 0 AND deposit_amount <= 999999999999999999 AND trunc(deposit_amount) = deposit_amount");
+
+                            t.HasCheckConstraint("ck_equipment_listings_description", "description IS NULL OR (description ~ '\\S' AND length(description) <= 2000)");
+
+                            t.HasCheckConstraint("ck_equipment_listings_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid AND brand_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_equipment_listings_manufacture_year", "manufacture_year IS NULL OR manufacture_year >= 1900");
+
+                            t.HasCheckConstraint("ck_equipment_listings_media_ids", "cardinality(media_ids) <= 20 AND array_position(media_ids, NULL) IS NULL AND NOT ('00000000-0000-0000-0000-000000000000'::uuid = ANY(media_ids)) AND (thumbnail_media_id IS NULL OR thumbnail_media_id = ANY(media_ids))");
+
+                            t.HasCheckConstraint("ck_equipment_listings_model", "model ~ '\\S' AND length(model) <= 200");
+
+                            t.HasCheckConstraint("ck_equipment_listings_monthly_rate", "monthly_rate IS NULL OR (monthly_rate >= 1 AND monthly_rate <= 999999999999999999 AND trunc(monthly_rate) = monthly_rate)");
+
+                            t.HasCheckConstraint("ck_equipment_listings_name", "name ~ '\\S' AND length(name) <= 200");
+
+                            t.HasCheckConstraint("ck_equipment_listings_schema_version", "schema_version >= 1");
+
+                            t.HasCheckConstraint("ck_equipment_listings_spec_values_object", "jsonb_typeof(spec_values) = 'object'");
+
+                            t.HasCheckConstraint("ck_equipment_listings_status", "\"status\" IN (1, 2, 3)");
+
+                            t.HasCheckConstraint("ck_equipment_listings_thumbnail_media_id", "thumbnail_media_id IS NULL OR thumbnail_media_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_equipment_listings_weekly_rate", "weekly_rate IS NULL OR (weekly_rate >= 1 AND weekly_rate <= 999999999999999999 AND trunc(weekly_rate) = weekly_rate)");
                         });
                 });
 
@@ -318,49 +643,34 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("accepting_bookings");
 
+                    b.Property<string>("AssetCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("asset_code");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<Guid>("EquipmentTypeId")
+                    b.Property<Guid>("EquipmentListingId")
                         .HasColumnType("uuid")
-                        .HasColumnName("equipment_type_id");
+                        .HasColumnName("equipment_listing_id");
 
                     b.Property<int?>("ManufactureYear")
                         .HasColumnType("integer")
                         .HasColumnName("manufacture_year");
 
-                    b.Property<string>("Model")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("model");
-                    b.Property<Guid>("OwnerUserId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("owner_user_id");
-
                     b.Property<string>("SerialNumber")
+                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("serial_number");
-
-                    b.Property<int>("SchemaVersion")
-                        .HasColumnType("integer")
-                        .HasColumnName("schema_version");
-
-                    b.Property<string>("SpecValues")
-                        .IsRequired()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("spec_values");
 
                     b.Property<string>("SuspensionReason")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
                         .HasColumnName("suspension_reason");
-                    b.Property<Guid?>("ThumbnailMediaId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("thumbnail_media_id");
-
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -374,27 +684,22 @@ namespace InventoryService.Domain.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EquipmentTypeId")
-                        .HasDatabaseName("ix_assets_equipment_type_id");
+                    b.HasIndex("AssetCode")
+                        .IsUnique()
+                        .HasDatabaseName("ix_assets_asset_code");
 
-                    b.HasIndex("OwnerUserId")
-                        .HasDatabaseName("ix_assets_owner_user_id");
+                    b.HasIndex("EquipmentListingId")
+                        .HasDatabaseName("ix_assets_equipment_listing_id");
 
                     b.ToTable("assets", "inventory", t =>
                         {
-                            t.HasCheckConstraint("ck_assets_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_type_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+                            t.HasCheckConstraint("ck_assets_asset_code", "asset_code ~ '^AST-[0-9a-fA-F]{32}$'");
+
+                            t.HasCheckConstraint("ck_assets_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_listing_id <> '00000000-0000-0000-0000-000000000000'::uuid");
 
                             t.HasCheckConstraint("ck_assets_manufacture_year", "manufacture_year IS NULL OR manufacture_year >= 1900");
 
-                            t.HasCheckConstraint("ck_assets_model", "model ~ '\\S' AND length(model) <= 200");
-
-                            t.HasCheckConstraint("ck_assets_schema_version", "schema_version >= 1");
-
-                            t.HasCheckConstraint("ck_assets_serial_number", "serial_number IS NULL OR (serial_number ~ '\\S' AND length(serial_number) <= 100)");
-
-                            t.HasCheckConstraint("ck_assets_spec_values_object", "jsonb_typeof(spec_values) = 'object'");
-
-                            t.HasCheckConstraint("ck_assets_thumbnail_media_id", "thumbnail_media_id IS NULL OR thumbnail_media_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+                            t.HasCheckConstraint("ck_assets_serial_number", "length(btrim(serial_number)) > 0 AND length(serial_number) <= 100");
                         });
                 });
 
@@ -466,6 +771,372 @@ namespace InventoryService.Domain.Migrations
                     b.ToTable("outbox_messages", "inventory");
                 });
 
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.SearchBackfillReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("message_id");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("run_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId", "MessageId")
+                        .IsUnique();
+
+                    b.ToTable("search_backfill_receipts", "inventory");
+                });
+
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.SearchBackfillRun", b =>
+                {
+                    b.Property<Guid>("RunId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("run_id");
+
+                    b.Property<int>("ActiveSlot")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("integer")
+                        .HasColumnName("active_slot")
+                        .HasComputedColumnSql("1", true);
+
+                    b.Property<Guid?>("AssetCursor")
+                        .HasColumnType("uuid")
+                        .HasColumnName("asset_cursor");
+
+                    b.Property<bool>("AssetsLoaded")
+                        .HasColumnType("boolean")
+                        .HasColumnName("assets_loaded");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text")
+                        .HasColumnName("error_message");
+
+                    b.Property<Guid?>("ListingCursor")
+                        .HasColumnType("uuid")
+                        .HasColumnName("listing_cursor");
+
+                    b.Property<bool>("ListingsLoaded")
+                        .HasColumnType("boolean")
+                        .HasColumnName("listings_loaded");
+
+                    b.Property<string>("StagingOwnerAssetsIndex")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("staging_owner_assets_index");
+
+                    b.Property<string>("StagingOwnerListingsIndex")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("staging_owner_listings_index");
+
+                    b.Property<string>("StagingPublicIndex")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("staging_public_index");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<long?>("StartingOutboxSequence")
+                        .HasColumnType("bigint")
+                        .HasColumnName("starting_outbox_sequence");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("status");
+
+                    b.Property<int?>("SwapTaskUid")
+                        .HasColumnType("integer")
+                        .HasColumnName("swap_task_uid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("RunId");
+
+                    b.HasIndex("ActiveSlot")
+                        .IsUnique()
+                        .HasDatabaseName("ux_search_backfill_active")
+                        .HasFilter("status IN ('Building', 'CatchingUp', 'Swapping')");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("ix_search_backfill_runs_status");
+
+                    b.ToTable("search_backfill_runs", "inventory");
+                });
+
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.SearchGeneration", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("ActiveRunId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("active_run_id");
+
+                    b.Property<string>("ErrorCode")
+                        .HasColumnType("text")
+                        .HasColumnName("error_code");
+
+                    b.Property<bool>("IsReady")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_ready");
+
+                    b.Property<string>("LiveOwnerAssetsIndex")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("live_owner_assets_index");
+
+                    b.Property<string>("LiveOwnerListingsIndex")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("live_owner_listings_index");
+
+                    b.Property<string>("LivePublicIndex")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("live_public_index");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("search_generations", "inventory");
+                });
+
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.SearchProjectionJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("action");
+
+                    b.Property<long>("AppliedRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("applied_revision");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<long>("DesiredRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("desired_revision");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("entity_id");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("entity_type");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text")
+                        .HasColumnName("error_message");
+
+                    b.Property<long>("FanoutAppliedRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("fanout_applied_revision");
+
+                    b.Property<bool>("FanoutCompleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("fanout_completed");
+
+                    b.Property<Guid?>("FanoutCursor")
+                        .HasColumnType("uuid")
+                        .HasColumnName("fanout_cursor");
+
+                    b.Property<long>("FanoutRequestedRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("fanout_requested_revision");
+
+                    b.Property<long?>("FanoutRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("fanout_revision");
+
+                    b.Property<DateTimeOffset?>("LockLeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lock_lease_expires_at");
+
+                    b.Property<Guid?>("LockLeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lock_lease_token");
+
+                    b.Property<bool>("NeedsAssetFanout")
+                        .HasColumnType("boolean")
+                        .HasColumnName("needs_asset_fanout");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at");
+
+                    b.PrimitiveCollection<int[]>("PendingTaskUids")
+                        .IsRequired()
+                        .HasColumnType("integer[]")
+                        .HasColumnName("pending_task_uids");
+
+                    b.Property<long?>("ProcessingRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("processing_revision");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("retry_count");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<bool>("SubmissionComplete")
+                        .HasColumnType("boolean")
+                        .HasColumnName("submission_complete");
+
+                    b.Property<long?>("SubmissionRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("submission_revision");
+
+                    b.Property<bool>("SubmissionStarted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("submission_started");
+
+                    b.Property<bool>("SubmissionUncertain")
+                        .HasColumnType("boolean")
+                        .HasColumnName("submission_uncertain");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EntityType", "EntityId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_search_projection_jobs_entity");
+
+                    b.HasIndex("Status", "NextAttemptAt", "LockLeaseExpiresAt")
+                        .HasDatabaseName("ix_search_projection_jobs_claim");
+
+                    b.ToTable("search_projection_jobs", "inventory");
+                });
+
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.Warehouse", b =>
+                {
+                    b.Property<Guid>("OwnerUserId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_user_id");
+
+                    b.Property<string>("AddressDetail")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("address_detail");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<double?>("Latitude")
+                        .HasColumnType("double precision")
+                        .HasColumnName("latitude");
+
+                    b.Property<double?>("Longitude")
+                        .HasColumnType("double precision")
+                        .HasColumnName("longitude");
+
+                    b.Property<string>("ProvinceCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("province_code");
+
+                    b.Property<string>("ProvinceName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("province_name");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<string>("WardCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("ward_code");
+
+                    b.Property<string>("WardName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("ward_name");
+
+                    b.HasKey("OwnerUserId");
+
+                    b.HasIndex("ProvinceCode", "WardCode")
+                        .HasDatabaseName("ix_warehouses_province_ward");
+
+                    b.ToTable("warehouses", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_warehouses_address_detail", "address_detail IS NULL OR (address_detail ~ '\\S' AND length(address_detail) <= 500)");
+
+                            t.HasCheckConstraint("ck_warehouses_identity", "owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_warehouses_latitude", "latitude IS NULL OR (latitude >= -90.0 AND latitude <= 90.0)");
+
+                            t.HasCheckConstraint("ck_warehouses_longitude", "longitude IS NULL OR (longitude >= -180.0 AND longitude <= 180.0)");
+
+                            t.HasCheckConstraint("ck_warehouses_province_code", "province_code IS NULL OR (province_code ~ '\\S' AND length(province_code) <= 20)");
+
+                            t.HasCheckConstraint("ck_warehouses_province_name", "province_name IS NULL OR (province_name ~ '\\S' AND length(province_name) <= 200)");
+
+                            t.HasCheckConstraint("ck_warehouses_ward_code", "ward_code IS NULL OR (ward_code ~ '\\S' AND length(ward_code) <= 20)");
+
+                            t.HasCheckConstraint("ck_warehouses_ward_name", "ward_name IS NULL OR (ward_name ~ '\\S' AND length(ward_name) <= 200)");
+                        });
+                });
+
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AllocationTransition", b =>
                 {
                     b.HasOne("Dprental.InventoryService.Domain.Entities.AssetAllocation", "Allocation")
@@ -499,9 +1170,36 @@ namespace InventoryService.Domain.Migrations
                     b.Navigation("Asset");
                 });
 
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.EquipmentListing", b =>
+                {
+                    b.HasOne("Dprental.InventoryService.Domain.Entities.Warehouse", "Warehouse")
+                        .WithMany("Listings")
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Warehouse");
+                });
+
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.InventoryAsset", b =>
+                {
+                    b.HasOne("Dprental.InventoryService.Domain.Entities.EquipmentListing", "Listing")
+                        .WithMany("Assets")
+                        .HasForeignKey("EquipmentListingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Listing");
+                });
+
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AssetAllocation", b =>
                 {
                     b.Navigation("Transitions");
+                });
+
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.EquipmentListing", b =>
+                {
+                    b.Navigation("Assets");
                 });
 
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.InventoryAsset", b =>
@@ -509,6 +1207,11 @@ namespace InventoryService.Domain.Migrations
                     b.Navigation("Allocations");
 
                     b.Navigation("CalendarBlocks");
+                });
+
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.Warehouse", b =>
+                {
+                    b.Navigation("Listings");
                 });
 #pragma warning restore 612, 618
         }

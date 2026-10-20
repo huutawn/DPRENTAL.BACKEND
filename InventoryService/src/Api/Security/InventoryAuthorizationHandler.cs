@@ -6,9 +6,10 @@ namespace Dprental.InventoryService.Api.Security;
 
 public sealed class AssetManageRequirement : IAuthorizationRequirement { }
 public sealed class CalendarReadRequirement : IAuthorizationRequirement { }
-public sealed class SanitizedAvailabilityRequirement : IAuthorizationRequirement { }
+public sealed class AvailabilityReadRequirement : IAuthorizationRequirement { }
 public sealed class AllocationWriteRequirement : IAuthorizationRequirement { }
 public sealed class ManualAllocationRequirement : IAuthorizationRequirement { }
+public sealed class EquipmentListingBatchReadRequirement : IAuthorizationRequirement { }
 
 /// <summary>
 /// Authorization Handler tập trung xử lý toàn bộ 5 chính sách phân quyền của Inventory Service.
@@ -37,8 +38,8 @@ public sealed class InventoryAuthorizationHandler : IAuthorizationHandler
                     HandleCalendarRead(context, calReq);
                     break;
 
-                case SanitizedAvailabilityRequirement availReq:
-                    HandleSanitizedAvailability(context, availReq);
+                case AvailabilityReadRequirement availReq:
+                    HandleAvailabilityRead(context, availReq);
                     break;
 
                 case AllocationWriteRequirement allocReq:
@@ -47,6 +48,10 @@ public sealed class InventoryAuthorizationHandler : IAuthorizationHandler
 
                 case ManualAllocationRequirement manualReq:
                     HandleManualAllocation(context, manualReq);
+                    break;
+
+                case EquipmentListingBatchReadRequirement batchReq:
+                    HandleEquipmentListingBatchRead(context, batchReq);
                     break;
             }
         }
@@ -80,9 +85,9 @@ public sealed class InventoryAuthorizationHandler : IAuthorizationHandler
         }
     }
 
-    private void HandleSanitizedAvailability(AuthorizationHandlerContext context, SanitizedAvailabilityRequirement req)
+    private void HandleAvailabilityRead(AuthorizationHandlerContext context, AvailabilityReadRequirement req)
     {
-        if (InventoryAccessEvaluator.CanReadSanitizedAvailability(_caller))
+        if (InventoryAccessEvaluator.CanReadAvailability(_caller))
         {
             context.Succeed(req);
         }
@@ -95,6 +100,18 @@ public sealed class InventoryAuthorizationHandler : IAuthorizationHandler
     private void HandleAllocationWrite(AuthorizationHandlerContext context, AllocationWriteRequirement req)
     {
         if (InventoryAccessEvaluator.CanWriteAllocations(_caller))
+        {
+            context.Succeed(req);
+        }
+        else
+        {
+            context.Fail();
+        }
+    }
+
+    private void HandleEquipmentListingBatchRead(AuthorizationHandlerContext context, EquipmentListingBatchReadRequirement req)
+    {
+        if (InventoryAccessEvaluator.CanReadEquipmentListingBatch(_caller))
         {
             context.Succeed(req);
         }
@@ -121,7 +138,8 @@ public sealed class InventoryAuthorizationHandler : IAuthorizationHandler
     {
         return resource switch
         {
-            InventoryAsset asset => asset.OwnerUserId,
+            EquipmentListing listing => listing.OwnerUserId,
+            InventoryAsset asset => asset.Listing?.OwnerUserId,
             _ => null
         };
     }
