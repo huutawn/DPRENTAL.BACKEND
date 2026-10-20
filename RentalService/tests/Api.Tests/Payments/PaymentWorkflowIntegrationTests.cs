@@ -376,7 +376,7 @@ public sealed class PaymentWorkflowIntegrationTests
         Assert.NotNull(outbox);
     }
     [Fact]
-    public async Task ProcessInvoicePaid_PaidBeforeDeadline_PublishedAfterDeadline_RemainsOnTime()
+    public async Task ProcessInvoicePaid_TransferBeforeDeadline_ProcessedAfterDeadline_IsOnTimePayment_MovesOrderToPaid()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -386,20 +386,11 @@ public sealed class PaymentWorkflowIntegrationTests
         db.RentalOrders.Add(order);
         await db.SaveChangesAsync();
 
-        bool refundCalled = false;
-        var paymentClient = new StubPaymentClient
-        {
-            RequestRefundHandler = req =>
-            {
-                refundCalled = true;
-                return Task.FromResult(Result.Success(new RequestRefundResponse("REF-LATE-002", req.OperationKey, "Accepted", req.TotalRefundAmount, "VND", false)));
-            }
-        };
-
         var inventoryClient = new StubInventoryClient();
+        var paymentClient = new StubPaymentClient();
         var service = CreateWorkflowService(db, inventoryClient, paymentClient, FixedNow.AddMinutes(35));
 
-        // PaidAt is before the deadline; Kafka publication and handling are later.
+        // paidAt is before deadline (FixedNow + 10m < FixedNow + 30m), but processing occurredAt and consume time are after deadline (FixedNow + 35m)
         var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
             Guid.NewGuid(),
             "InvoicePaid",
@@ -409,47 +400,115 @@ public sealed class PaymentWorkflowIntegrationTests
             FixedNow.AddMinutes(35),
             "corr-2",
             null,
-            new InvoicePaidPayload(orderId, renterId, "INV-001", "PAY-LATE-PROC", order.TotalPayableAmount, "VND", FixedNow.AddMinutes(10)));
+            new InvoicePaidPayload(orderId, renterId, "INV-001", "PAY-ONTIME-PROC", order.TotalPayableAmount, "VND", FixedNow.AddMinutes(10)));
 
         var result = await service.ProcessInvoicePaidAsync(envelope);
 
         Assert.True(result.IsSuccess);
-        Assert.False(refundCalled);
 
         var reloaded = await db.RentalOrders.Include(o => o.OperationReceipts).FirstAsync(o => o.Id == orderId);
+        // Order in PendingPayment transitions to Paid
         Assert.Equal(RentalOrderStatus.Paid, reloaded.Status);
         Assert.False(reloaded.LatePaymentRefundRequired);
-        Assert.Equal("PAY-LATE-PROC", reloaded.PaymentRef);
+        Assert.Equal("PAY-ONTIME-PROC", reloaded.PaymentRef);
+        Assert.Equal(FixedNow.AddMinutes(10), reloaded.PaymentConfirmedAt);
 
-        Assert.DoesNotContain(reloaded.OperationReceipts, r => r.Action == "RequestRefund");
+        var refundReceipt = reloaded.OperationReceipts.FirstOrDefault(r => r.Action == "RequestRefund");
+        Assert.Null(refundReceipt);
 
-        var outbox = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "LatePaymentRefundRequested");
-        Assert.Null(outbox);
+        var lateOutbox = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "LatePaymentRefundRequested");
+        Assert.Null(lateOutbox);
+
+        var extendOutbox = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "ExtendHold");
+        Assert.NotNull(extendOutbox);
+    }
+
+    [Theory]
+    [InlineData(-2000, 5000, true)]   // Deadline - 2s, OccurredAt = Deadline + 5s -> On-time
+    [InlineData(-1, 10000, true)]     // Deadline - 1 tick (1ms/1tick earlier), OccurredAt = after -> On-time
+    [InlineData(0, -5000, false)]     // Exactly deadline, OccurredAt = before -> Late
+    [InlineData(0, 5000, false)]      // Exactly deadline, OccurredAt = after -> Late
+    [InlineData(1000, -5000, false)]  // After deadline, OccurredAt = before -> Late
+    public async Task ProcessInvoicePaid_DeadlineBoundaries_DeterminedStrictlyByPaidAt(
+        long paidAtOffsetMs,
+        long occurredAtOffsetMs,
+        bool expectOnTime)
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
+        var order = CreateOrder(orderId, renterId); // deadline = FixedNow + 30m
+        DateTimeOffset deadline = order.PaymentDeadline;
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        DateTimeOffset paidAt = paidAtOffsetMs == -1 ? deadline.AddTicks(-1) : deadline.AddMilliseconds(paidAtOffsetMs);
+        DateTimeOffset occurredAt = deadline.AddMilliseconds(occurredAtOffsetMs);
+
+        var inventoryClient = new StubInventoryClient();
+        var paymentClient = new StubPaymentClient();
+        var service = CreateWorkflowService(db, inventoryClient, paymentClient, occurredAt);
+
+        var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
+            Guid.NewGuid(),
+            "InvoicePaid",
+            1,
+            "payment-service",
+            orderId.ToString("D"),
+            occurredAt,
+            "corr-boundary",
+            null,
+            new InvoicePaidPayload(orderId, renterId, "INV-001", $"PAY-{paidAtOffsetMs}-{occurredAtOffsetMs}", order.TotalPayableAmount, "VND", paidAt));
+
+        var result = await service.ProcessInvoicePaidAsync(envelope);
+        Assert.True(result.IsSuccess);
+
+        var reloaded = await db.RentalOrders.Include(o => o.OperationReceipts).FirstAsync(o => o.Id == orderId);
+        if (expectOnTime)
+        {
+            Assert.Equal(RentalOrderStatus.Paid, reloaded.Status);
+            Assert.False(reloaded.LatePaymentRefundRequired);
+            Assert.Equal(paidAt, reloaded.PaymentConfirmedAt);
+            Assert.Null(reloaded.OperationReceipts.FirstOrDefault(r => r.Action == "RequestRefund"));
+            Assert.Null(await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "LatePaymentRefundRequested"));
+        }
+        else
+        {
+            Assert.Equal(RentalOrderStatus.Expired, reloaded.Status);
+            Assert.True(reloaded.LatePaymentRefundRequired);
+            Assert.Equal(paidAt, reloaded.PaymentConfirmedAt);
+            Assert.NotNull(reloaded.OperationReceipts.FirstOrDefault(r => r.Action == "RequestRefund"));
+            Assert.NotNull(await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "LatePaymentRefundRequested"));
+        }
     }
 
     [Fact]
-    public async Task ProcessInvoicePaid_AtPaymentDeadline_IsLate()
+    public async Task ProcessInvoicePaid_DefaultPaidAt_ReturnsValidationError()
     {
-        await using var db = CreateDbContext(Guid.NewGuid().ToString("N"));
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
         Guid orderId = Guid.NewGuid();
         Guid renterId = Guid.NewGuid();
         var order = CreateOrder(orderId, renterId);
         db.RentalOrders.Add(order);
         await db.SaveChangesAsync();
 
-        var service = CreateWorkflowService(db, new StubInventoryClient(), new StubPaymentClient(),
-            FixedNow.AddMinutes(31));
+        var service = CreateWorkflowService(db, new StubInventoryClient(), new StubPaymentClient());
         var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
-            Guid.NewGuid(), "InvoicePaid", 1, "payment-service", orderId.ToString("D"),
-            FixedNow.AddMinutes(31), "corr-boundary", null,
-            new InvoicePaidPayload(orderId, renterId, "INV-001", "PAY-BOUNDARY",
-                order.TotalPayableAmount, "VND", order.PaymentDeadline));
+            Guid.NewGuid(),
+            "InvoicePaid",
+            1,
+            "payment-service",
+            orderId.ToString("D"),
+            FixedNow,
+            "corr-default-paidat",
+            null,
+            new InvoicePaidPayload(orderId, renterId, "INV-001", "PAY-INVALID", order.TotalPayableAmount, "VND", default));
 
-        Assert.True((await service.ProcessInvoicePaidAsync(envelope)).IsSuccess);
-        var reloaded = await db.RentalOrders.Include(o => o.OperationReceipts).SingleAsync(o => o.Id == orderId);
-        Assert.Equal(RentalOrderStatus.Expired, reloaded.Status);
-        Assert.True(reloaded.LatePaymentRefundRequired);
-        Assert.Contains(reloaded.OperationReceipts, r => r.Action == "RequestRefund");
+        var result = await service.ProcessInvoicePaidAsync(envelope);
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_PAID_AT", result.Error.Code);
     }
 
     [Fact]

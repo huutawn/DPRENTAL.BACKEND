@@ -7,6 +7,7 @@ using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
@@ -117,7 +118,7 @@ public sealed class CheckoutService : ICheckoutService
             var plan = prepared.Plan;
             var expectedOrderId = Guid.NewGuid();
             var utcNow = _timeProvider.GetUtcNow();
-            var holdExpiresAt = utcNow.AddMinutes(30);
+            var holdExpiresAt = utcNow.Add(CheckoutRules.PaymentWindow);
 
             // 4. Mở transaction trước khi enqueue Outbox đầu tiên để đảm bảo nguyên tử toàn bộ
             await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
@@ -207,19 +208,63 @@ public sealed class CheckoutService : ICheckoutService
 
         if (op.Status == CheckoutOperationStatus.Succeeded)
         {
-            var order = await _orders.GetByIdWithDetailsAsync(op.ExpectedRentalOrderId, cancellationToken);
-            var orderDto = order != null ? CheckoutResponse.From(order, false) : null;
-            bool readyForPayment = order is not null &&
-                order.Status == RentalOrderStatus.PendingPayment &&
-                !string.IsNullOrWhiteSpace(order.InvoiceRef) &&
-                order.PaymentDeadline > _timeProvider.GetUtcNow();
+            var order = await _orders.GetForCheckoutPollingAsync(op.ExpectedRentalOrderId, cancellationToken);
+            if (order != null && order.RenterId != renterUserId)
+            {
+                order = null;
+            }
+
+            if (order is null)
+            {
+                return new CheckoutOperationStatusResponse(
+                    OperationId: op.OperationId,
+                    Status: op.Status.ToString(),
+                    OrderId: null,
+                    OrderCode: null,
+                    Order: null,
+                    InvoiceStatus: null,
+                    ReadyForPayment: false);
+            }
+
+            var now = _timeProvider.GetUtcNow();
+            bool hasValidInvoice = !string.IsNullOrWhiteSpace(order.InvoiceRef);
+            bool readyForPayment = order.Status == RentalOrderStatus.PendingPayment
+                && hasValidInvoice
+                && now < order.PaymentDeadline;
+
+            string invoiceStatus;
+            if (hasValidInvoice)
+            {
+                invoiceStatus = "Ready";
+            }
+            else
+            {
+                string invoiceOpKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
+                var invoiceReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == invoiceOpKey);
+
+                if (order.Status is not RentalOrderStatus.PendingPayment || now >= order.PaymentDeadline)
+                {
+                    invoiceStatus = "Failed";
+                }
+                else if (invoiceReceipt?.Status == RentalOperationReceipt.StatusFailed &&
+                         invoiceReceipt.ErrorClassification == RentalOperationReceipt.ClassificationBusiness)
+                {
+                    invoiceStatus = "Failed";
+                }
+                else
+                {
+                    invoiceStatus = "Pending";
+                }
+            }
+
+            var orderDto = CheckoutResponse.From(order, false);
             return new CheckoutOperationStatusResponse(
                 OperationId: op.OperationId,
                 Status: op.Status.ToString(),
-                OrderId: order?.Id,
-                OrderCode: order?.OrderCode,
+                OrderId: order.Id,
+                OrderCode: order.OrderCode,
                 Order: orderDto,
-                InvoiceStatus: readyForPayment ? "Ready" : op.InvoiceStatus,
+                InvoiceStatus: invoiceStatus,
                 ReadyForPayment: readyForPayment);
         }
 
@@ -229,7 +274,8 @@ public sealed class CheckoutService : ICheckoutService
                 OperationId: op.OperationId,
                 Status: op.Status.ToString(),
                 ErrorCode: op.ErrorCode ?? "FAILED",
-                ErrorMessage: op.ErrorMessage ?? "Thao tác gửi đơn thất bại.");
+                ErrorMessage: op.ErrorMessage ?? "Thao tác gửi đơn thất bại.",
+                ReadyForPayment: false);
         }
 
         if (op.Status == CheckoutOperationStatus.TimedOut)
@@ -238,12 +284,14 @@ public sealed class CheckoutService : ICheckoutService
                 OperationId: op.OperationId,
                 Status: op.Status.ToString(),
                 ErrorCode: "TIMEOUT",
-                ErrorMessage: "Hết hạn giữ lịch cho đơn hàng.");
+                ErrorMessage: "Hết hạn giữ lịch cho đơn hàng.",
+                ReadyForPayment: false);
         }
 
         return new CheckoutOperationStatusResponse(
             OperationId: op.OperationId,
-            Status: op.Status.ToString());
+            Status: op.Status.ToString(),
+            ReadyForPayment: false);
     }
 
     private static string ComputeRequestFingerprint(Guid renterId, CheckoutRequest request)

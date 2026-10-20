@@ -153,15 +153,44 @@ public sealed class OutboxPublisherWorker : BackgroundService
                     _logger.LogWarning("Outbox message {MessageId} lease expired or was reclaimed before completion could be saved.", msg.Id);
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("Outbox publisher process cancelled during host shutdown.");
+                break;
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to publish outbox message {MessageId}", msg.Id);
 
-                // Exponential backoff with jitter, capped at 60s
-                double baseDelay = Math.Min(60, Math.Pow(2, msg.RetryCount));
+                string targetStatus;
+                if (IsPermanentError(ex))
+                {
+                    targetStatus = "DeadLettered";
+                }
+                else if (IsTransientError(ex))
+                {
+                    targetStatus = "Pending";
+                }
+                else
+                {
+                    targetStatus = msg.RetryCount + 1 >= 10 ? "DeadLettered" : "Pending";
+                }
+
+                int safeExponent = Math.Clamp(msg.RetryCount, 0, 6);
+                double baseDelay = Math.Min(60, Math.Pow(2, safeExponent));
                 int jitterMs = Random.Shared.Next(0, 1000);
-                DateTimeOffset nextRetry = DateTimeOffset.UtcNow.AddSeconds(baseDelay).AddMilliseconds(jitterMs);
-                await outboxRepository.RecordFailureAsync(msg.Id, claimToken, ex.Message, DateTimeOffset.UtcNow, nextRetry, cancellationToken);
+                DateTimeOffset? nextRetry = targetStatus == "DeadLettered"
+                    ? null
+                    : DateTimeOffset.UtcNow.AddSeconds(baseDelay).AddMilliseconds(jitterMs);
+
+                await outboxRepository.RecordFailureAsync(
+                    msg.Id,
+                    claimToken,
+                    ex.Message,
+                    DateTimeOffset.UtcNow,
+                    nextRetry,
+                    targetStatus,
+                    CancellationToken.None);
             }
         }
 
@@ -183,5 +212,25 @@ public sealed class OutboxPublisherWorker : BackgroundService
         }
 
         await base.StopAsync(cancellationToken);
+    }
+
+    private static bool IsTransientError(Exception ex)
+    {
+        return ex is Confluent.Kafka.KafkaException kEx && !kEx.Error.IsFatal && !kEx.Error.IsLocalError ||
+               ex is TimeoutException ||
+               ex is System.Net.Sockets.SocketException ||
+               ex is System.IO.IOException ||
+               ex.Message.Contains("broker", StringComparison.OrdinalIgnoreCase) ||
+               ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+               ex.Message.Contains("chưa xác nhận persist", StringComparison.OrdinalIgnoreCase) ||
+               ex.Message.Contains("chưa được cấu hình", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPermanentError(Exception ex)
+    {
+        return ex is System.Text.Json.JsonException ||
+               ex is InvalidDataException ||
+               ex is FormatException ||
+               (ex is Confluent.Kafka.KafkaException kEx && (kEx.Error.Code == Confluent.Kafka.ErrorCode.TopicException || kEx.Error.Code == Confluent.Kafka.ErrorCode.TopicAuthorizationFailed || kEx.Error.Code == Confluent.Kafka.ErrorCode.GroupAuthorizationFailed));
     }
 }

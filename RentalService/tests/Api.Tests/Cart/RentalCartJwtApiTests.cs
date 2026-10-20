@@ -1,5 +1,8 @@
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Cart;
+using Dprental.RentalService.Common;
+using Dprental.RentalService.Api.Tests.TestHelpers;
+using Dprental.RentalService.Application.Kafka.Producers;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -99,7 +102,8 @@ public sealed class RentalCartJwtApiTests : IClassFixture<RentalCartJwtApiTests.
                     ["ConnectionStrings:Postgres"] = "Host=localhost;Database=rental-test;Username=test;Password=test",
                     ["Authentication:Jwt:Issuer"] = Issuer,
                     ["Authentication:Jwt:Audience"] = Audience,
-                    ["Authentication:Jwt:JwksUri"] = "http://localhost/test-jwks"
+                    ["Authentication:Jwt:JwksUri"] = "http://localhost/test-jwks",
+                    ["InternalAuthentication:ApiKey"] = "dev-internal-api-key-dprental-2026"
                 }));
 
             builder.ConfigureTestServices(services =>
@@ -112,10 +116,18 @@ public sealed class RentalCartJwtApiTests : IClassFixture<RentalCartJwtApiTests.
                 });
                 services.RemoveAll<IRentalCartRepository>();
                 services.AddSingleton<IRentalCartRepository>(_carts);
-                services.AddSingleton<IRentalListingOwnerProvider>(_inventory);
                 services.AddSingleton<IRentalListingReader>(_inventory);
                 services.AddSingleton<IRentalAvailabilityReader>(_inventory);
+                services.AddSingleton<IOrderLockManager>(new FakeOrderLockManager());
+                services.AddSingleton<IUnitOfWork>(new FakeUnitOfWork());
+                services.AddSingleton<IRentalEventProducer>(new FakeRentalEventProducer());
             });
+        }
+
+        protected override void ConfigureClient(HttpClient client)
+        {
+            base.ConfigureClient(client);
+            client.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", "dev-internal-api-key-dprental-2026");
         }
 
         public string CreateToken(
@@ -215,20 +227,17 @@ public sealed class RentalCartJwtApiTests : IClassFixture<RentalCartJwtApiTests.
             => Task.FromResult(_carts.TryRemove(id, out _));
     }
 
-    private sealed class FakeInventoryReaders : IRentalListingOwnerProvider, IRentalListingReader, IRentalAvailabilityReader
+    private sealed class FakeInventoryReaders : IRentalListingReader, IRentalAvailabilityReader
     {
-        public Task<Guid?> GetOwnerIdAsync(Guid equipmentListingId, CancellationToken cancellationToken = default)
-            => Task.FromResult<Guid?>(Guid.NewGuid());
+        public Task<Result<RentalListingSnapshot>> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default)
+            => Task.FromResult(Result.Success(new RentalListingSnapshot(
+                listingId, Guid.NewGuid(), Guid.NewGuid(), true, true, 100m, 50m, "v1")));
 
-        public Task<RentalListingSnapshot?> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default)
-            => Task.FromResult<RentalListingSnapshot?>(new RentalListingSnapshot(
-                listingId, Guid.NewGuid(), true, true, 100m, 50m, "v1"));
-
-        public Task<int?> GetAvailableQuantityAsync(
+        public Task<Result<int>> GetAvailableQuantityAsync(
             Guid listingId,
             DateOnly startDate,
             DateOnly endDate,
             CancellationToken cancellationToken = default)
-            => Task.FromResult<int?>(10);
+            => Task.FromResult(Result.Success(10));
     }
 }

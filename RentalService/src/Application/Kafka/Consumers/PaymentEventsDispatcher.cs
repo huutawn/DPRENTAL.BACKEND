@@ -432,8 +432,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         }
         else
         {
-            var orderDesc = await _orderRepository.GetByIdAsync(orderId, cancellationToken);
-            if (orderDesc != null) renterUserId = orderDesc.RenterId;
+            renterUserId = await _orderRepository.GetRenterIdByOrderIdAsync(orderId, cancellationToken);
         }
 
         IAsyncDisposable? renterLock = null;

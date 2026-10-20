@@ -169,11 +169,13 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
             services.AddSingleton<TimeProvider>(_clock);
         }));
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Remove("X-Api-Key");
         client.DefaultRequestHeaders.Add("Idempotency-Key", "auth-check");
         var request = new SubmitDeductionRequest(1, "Damage", [Guid.NewGuid()], [item.UnitAssignments.Single().AssetId]);
         string route = $"/api/v1/rental/items/{item.Id}/deductions";
         using var anonymous = await client.PostAsJsonAsync(route, request);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         client.DefaultRequestHeaders.Add("X-Test-Renter-Id", Guid.NewGuid().ToString());
         using var foreign = await client.PostAsJsonAsync(route, request);
         // Supplier khác nhận 404 như khi khoản thuê không tồn tại (IDOR).

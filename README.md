@@ -105,9 +105,9 @@ User `deploy` phải thuộc group `docker`; quyền Docker tương đương quy
 
 Đường dẫn triển khai trên VPS giữ nguyên `/opt/dprental/dev` và toàn bộ danh sách secrets môi trường như AuthService. Trước khi kích hoạt CI/CD RentalService trên VPS, môi trường dev cần hoàn tất các điều kiện sau:
 
-1. **Cấu hình Compose (`compose.yaml`)**: Hiện tại Compose dev chung tại VPS chưa định nghĩa hai service `rental-service` và `rental-migrate`. Cần bổ sung định nghĩa cho `rental-service` (cùng network services, phụ thuộc postgres và valkey/kafka, trỏ image `${RENTAL_SERVICE_IMAGE}`) và `rental-migrate` (profile `migration`, trỏ image `${RENTAL_MIGRATOR_IMAGE}`).
-2. **Cấu hình môi trường (`.env`)**: Bổ sung đầy đủ các biến môi trường cho RentalService (ConnectionStrings__Postgres, Kafka, JWT validation options, v.v.).
-3. **Khai báo image trong `release.env`**: File `/opt/dprental/dev/release.env` phải có sẵn hai dòng cấu hình image ban đầu kèm tag hợp lệ (để script cập nhật SHA mới):
+1. **Cấu hình Compose**: Hai service `rental-service` và `rental-migrate` đã được khai báo trong [deploy/dev/compose.yaml](../deploy/dev/compose.yaml). Runtime dùng PostgreSQL hiện có với schema `rental`; migrator chạy qua profile `migration` trước khi service được recreate.
+2. **Cấu hình môi trường (`.env`)**: Đảm bảo `.env` trên VPS có `INTERNAL_API_KEY`, cùng issuer/audience của JWT hiện đang dùng cho AuthService và Gateway. Compose truyền API key vào RentalService bằng `InternalAuthentication__ApiKey`; client đăng nhập vẫn dùng email/password và nhận JWT như trước.
+3. **Khai báo image trong `release.env`**: Hai biến image đã có trong `release.env.example`; file `/opt/dprental/dev/release.env` cần có tag ban đầu hợp lệ để script cập nhật SHA:
    ```text
    RENTAL_SERVICE_IMAGE=ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-rental:initial
    RENTAL_MIGRATOR_IMAGE=ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-rental-migrator:initial
@@ -117,7 +117,7 @@ User `deploy` phải thuộc group `docker`; quyền Docker tương đương quy
 
 Template có `Result`/`Result<T>` và `Error`/`ErrorType` (tham khảo AuthService).
 Application trả `Result` cho lỗi dự kiến; controller dùng `this.ToProblem(result.Error)`
-để ánh xạ sang 400/401/403/404/409/410/422/500. Không gọi `ToProblem(Error.None)`.
+để ánh xạ sang 400/401/403/404/409/410/422/500/503. Không gọi `ToProblem(Error.None)`.
 `GlobalExceptionHandler` đã đăng ký tại API, trả 500 ProblemDetails kèm `traceId`,
 không trả exception message hoặc payload; request bị hủy không chuyển thành lỗi nghiệp vụ.
 
@@ -194,20 +194,23 @@ Mọi quyết định "ai được làm gì" nằm trong `RentalAuthorizationPol
 - Header bắt buộc: `Idempotency-Key` (tối đa 64 ký tự). Client sinh một key mới cho mỗi lần bấm "Đặt hàng" và dùng lại đúng key đó khi gửi lại.
 - Body: `cartItemIds`, `delivery`, `refundAccount`, `termsVersion`, `termsAccepted`, `expectedTotalAmount`.
 - Đặt trước tối thiểu 3 ngày (giờ Việt Nam, `RentalBookingPolicy.MinimumLeadDays`; SRS cũ ghi "từ ngày mai"): hôm nay 14/10 thì ngày bắt đầu thuê sớm nhất là 17/10. Quy tắc áp ở ba chỗ: thêm/sửa dòng giỏ (`400 Cart.StartDateInvalid`), xem giỏ (dòng `DatePassed`) và checkout (dòng `StartDateNotInFuture`). Mã lỗi giữ nguyên, chỉ đổi câu thông báo. Ngoài ra ngày bắt đầu trong vòng 6 tháng, tối đa 30 ngày thuê.
-- Luồng xử lý: khóa theo người thuê → tìm đơn theo key → chuẩn bị (đọc lại Listing, giá, lịch) → Inventory giữ lịch tất cả các dòng → lưu đơn và dọn giỏ trong một transaction → tạo hóa đơn bên Payment (`Σ RentalAmount + Σ DepositAmount`) và gắn `InvoiceRef`.
+- Luồng xử lý: khóa theo người thuê → kiểm tra idempotency theo key → kiểm tra đơn chờ thanh toán hiện có → chuẩn bị (đọc lại Listing, giá, lịch) → gửi lệnh giữ lịch cho mọi dòng qua Outbox và lưu RentalCheckoutOperation trong cùng một transaction.
 - Kết quả:
-  - `201`: đơn mới ở trạng thái `PENDING_PAYMENT`, `paymentDeadline` = thời điểm gửi + 30 phút, đã có `invoiceRef`.
-  - `200` + `isReplay: true`: key này đã tạo đơn từ lần gửi trước; trả lại đúng đơn đó, không giữ thêm lịch và không tạo thêm hóa đơn.
+  - `202 Accepted` cho cả lần gửi mới lẫn replay cùng Idempotency-Key. Response trả về `operationId` và `statusUrl` (`/api/v1/rental/checkout/operations/{operationId}`).
   - Response không chứa `AssetId`, `AllocationId` hay `AllocationGroupId`.
 - Idempotency:
   - Key được gắn với người thuê (`CheckoutRules.DeriveOperationId`), nên hai người thuê trùng key không đụng nhau.
   - Cùng key nhưng khác danh sách dòng giỏ: `409 Checkout.IdempotencyKeyReused`.
   - Mỗi người thuê chỉ có một checkout chạy tại một thời điểm (PostgreSQL advisory lock theo `RenterId`). Request đến sau chờ tối đa 10 giây, quá hạn nhận `409 Checkout.InProgress`.
-- Khi không tạo được hóa đơn, đơn và lịch đã giữ được giữ nguyên; lỗi trả kèm `orderCode`, `paymentDeadline` và `retryable`:
-  - `503 Checkout.InvoiceTemporarilyUnavailable`: Payment không phản hồi (server đã tự gọi lại một lần). Gửi lại cùng key chỉ tạo nốt hóa đơn. Nếu người thuê quay lại bằng key mới, hóa đơn của đơn đang chờ cũng được tạo nốt trước khi trả `409 Checkout.PendingOrderExists`.
-  - `409 Checkout.InvoiceRejected`: Payment từ chối hoặc trả hóa đơn lệch tổng tiền; gửi lại không có kết quả khác.
-  - `410 Checkout.OrderExpired`: đã quá hạn thanh toán.
-  - Đơn không có hóa đơn hết hạn như mọi đơn chờ thanh toán khác: Expiry worker nhả lịch và chuyển đơn sang `Expired`. Vì không có hóa đơn để hủy nên không gọi Payment và không tạo receipt `CancelInvoice`.
+- Polling trạng thái checkout: `GET /rental/checkout/operations/{operationId}`
+  - `status = Succeeded`: đã tạo thành công Order.
+  - `readyForPayment`: boolean duy nhất quyết định FE có được chuyển sang màn thanh toán hay không. FE không chuyển màn dựa riêng vào `status === "Succeeded"` hay sự xuất hiện của `orderId`.
+  - `readyForPayment = true` chỉ khi: `status == Succeeded` AND Order tồn tại AND `Order.Status == PendingPayment` AND `Order.InvoiceRef` hợp lệ đã được gắn AND `now < Order.PaymentDeadline`.
+  - `invoiceStatus`: `Pending` khi đơn đã tạo nhưng hóa đơn đang chờ/retry; `Ready` khi hóa đơn đã sẵn sàng; `Failed` khi bị từ chối nghiệp vụ hoặc quá hạn.
+  - Deadline thanh toán (`PaymentDeadline` = thời điểm checkout accepted + 30 phút, `CheckoutRules.PaymentWindow`) là cố định xuyên suốt giữa Rental, Inventory hold và Payment invoice, không được reset khi tạo order hay xuất hiện invoice muộn.
+  - Lỗi tạo invoice tạm thời tiếp tục được retry qua `OperationRecoveryWorker` trong suốt cửa sổ thanh toán (kể cả sau attempt thứ 10); lỗi nghiệp vụ xác định dừng retry ngay lập tức dù trước đó có attempt timeout.
+  - Receipt exhausted từ phiên bản cũ thuộc Order expired/terminal được đóng tự động với `ClassificationBusiness` để không chiếm batch recovery; nếu Order còn hợp lệ sẽ được phục hồi retry trên receipt cũ mà không reset budget.
+  - Đến deadline mà chưa có thanh toán thành công, Order chưa có invoice vẫn được expiry và release hold tự động. Vì không có hóa đơn để hủy nên không gọi Payment và không tạo receipt `CancelInvoice`.
 - Bù trừ khi checkout hỏng giữa chừng (không tạo đơn thì không được để lại hold):
   - Một dòng không giữ được lịch: nhả các dòng đã giữ theo thứ tự ngược, trả `409 Checkout.HoldFailed` kèm `conflicts`.
   - Lưu đơn thất bại, kể cả exception ngoài dự kiến như database lỗi hoặc renter ngắt kết nối: nhả toàn bộ hold bằng `CancellationToken.None` rồi mới trả lỗi.
@@ -232,7 +235,8 @@ Mọi quyết định "ai được làm gì" nằm trong `RentalAuthorizationPol
 - Deadline xác nhận từng item: `min(PaidAt + 24h, 00:00 ngày thuê tại Asia/Ho_Chi_Minh − 1 giây)`, lưu UTC và cố định khi retry.
 - Sau commit local: gọi Inventory `ExtendHold`. Thành công phát Outbox event `RentalSupplierConfirmationRequested` trên topic `rental.events.v1`.
 - Hold hết hạn hoặc deadline đã qua: chuyển item sang `Expired`, lên lịch giải phóng hold và hoàn tiền 100% cho riêng item mà không ảnh hưởng item khác.
-- Late payment: thanh toán đến sau hạn hoặc trên Order `Expired/Cancelled` giữ trạng thái kết thúc, ghi nhận payment reference, cờ `LatePaymentRefundRequired = true` và yêu cầu hoàn tiền toàn bộ.
+- Timestamp nghiệp vụ xét thanh toán đúng hạn: `InvoicePaid.PaidAt` (thanh toán đúng hạn khi `PaidAt < PaymentDeadline`). Thời điểm publish hay consume Kafka (`OccurredAt`) là metadata và không tham gia xét deadline.
+- Late payment: thanh toán đến sau hạn (`PaidAt >= PaymentDeadline`) hoặc trên Order đã kết thúc (`Expired/Cancelled`) giữ trạng thái kết thúc, ghi nhận payment reference, cờ `LatePaymentRefundRequired = true` và yêu cầu hoàn tiền toàn bộ, kể cả khi sự kiện mang timestamp thanh toán trước deadline. Thanh toán trên invoice không đồng nghĩa khôi phục được allocation đã hết hạn; giữ cleanup/refund hiện có nếu Inventory từ chối extend hold.
 
 ### 2. Supplier Decision API
 - `POST /api/v1/rental/supplier/sub-orders/{subOrderId}/accept`

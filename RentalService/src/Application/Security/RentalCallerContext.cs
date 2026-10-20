@@ -85,7 +85,7 @@ public sealed class RentalCallerContext : IRentalCallerContext
             return Anonymous;
         }
 
-        string? sub = claimList.FirstOrDefault(c => c.Key == RentalAuthClaims.Subject).Value;
+        string? sub = claimList.FirstOrDefault(c => c.Key == RentalAuthClaims.Subject || c.Key == ClaimTypes.NameIdentifier || c.Key == "sub").Value;
         string? pcStr = claimList.FirstOrDefault(c => c.Key == RentalAuthClaims.ProfileCompleted).Value;
         string? u = claimList.FirstOrDefault(c => c.Key == RentalAuthClaims.UserTypeOrAlias).Value;
         string? username = claimList.FirstOrDefault(c => c.Key == RentalAuthClaims.Username || c.Key == "username" || c.Key == "name").Value;

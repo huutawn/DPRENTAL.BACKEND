@@ -18,14 +18,14 @@ public sealed record ListingWarehouseDto(
 public sealed record ListingRentalSnapshotDto(
     Guid Id,
     Guid OwnerUserId,
+    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
     string Name,
     Guid? ThumbnailMediaId,
     decimal DailyRate,
     string Currency,
     string Status,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     ListingWarehouseDto? Warehouse = null,
-    Guid? EquipmentTypeId = null,
     Guid? BrandId = null,
     string? Model = null,
     decimal? DepositPerUnit = null,

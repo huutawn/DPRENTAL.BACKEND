@@ -174,6 +174,7 @@ public sealed class RentalItemsControllerIntegrationTests
             });
 
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         var response = await client.PostAsync($"/api/v1/rental/supplier/sub-orders/{Guid.NewGuid()}/accept", null);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -209,6 +210,7 @@ public sealed class RentalItemsControllerIntegrationTests
             });
 
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
         // No Idempotency-Key header
         var response = await client.PostAsync($"/api/v1/rental/supplier/sub-orders/{Guid.NewGuid()}/accept", null);
@@ -260,6 +262,7 @@ public sealed class RentalItemsControllerIntegrationTests
         }
 
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
         client.DefaultRequestHeaders.Add("Idempotency-Key", "idemp-ctrl-accept-1");
 
@@ -322,6 +325,7 @@ public sealed class RentalItemsControllerIntegrationTests
         }
 
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
         client.DefaultRequestHeaders.Add("Idempotency-Key", "idemp-ctrl-rej-1");
 

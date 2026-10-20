@@ -106,8 +106,9 @@ public sealed class RentalCheckoutController(
     /// Xem trạng thái một lần gửi đơn (checkout) đang xử lý bất đồng bộ.
     /// </summary>
     /// <remarks>
-    /// Sau khi gửi đơn nhận 202 kèm <c>statusUrl</c>, người thuê gọi API này cho tới khi trạng thái là thành công
-    /// (đã có đơn chờ thanh toán), thất bại hoặc hết hạn giữ lịch. Chỉ người thuê đã gửi mới xem được.
+    /// Sau khi gửi đơn nhận 202 kèm <c>statusUrl</c>, FE tiếp tục polling API này cho tới khi <c>readyForPayment === true</c>
+    /// để chuyển sang màn hình thanh toán. FE không chuyển màn dựa riêng vào <c>status === "Succeeded"</c> vì Order có thể
+    /// đã tạo nhưng hóa đơn đang trong trạng thái <c>Pending</c>. Khi thất bại hoặc hết hạn giữ lịch, polling dừng. Chỉ người thuê đã gửi mới xem được.
     /// </remarks>
     /// <param name="operationId">Mã lần gửi đơn trả về trong 202.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>

@@ -12,7 +12,7 @@ public sealed record KafkaMessageEnvelope<TPayload>(
     [property: JsonPropertyName("version")] int Version,
     [property: JsonPropertyName("producer")] string Producer,
     [property: JsonPropertyName("aggregateId")] string AggregateId,
-    [property: JsonPropertyName("occurredAt")] DateTimeOffset OccurredAt,
+    [property: JsonPropertyName("occurredAt"), JsonConverter(typeof(UtcIsoDateTimeOffsetConverter))] DateTimeOffset OccurredAt,
     [property: JsonPropertyName("correlationId")] string? CorrelationId,
     [property: JsonPropertyName("causationId")] Guid? CausationId,
     [property: JsonPropertyName("payload")] TPayload Payload,

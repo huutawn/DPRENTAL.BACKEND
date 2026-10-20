@@ -113,13 +113,17 @@ public sealed class ReturnTests : IAsyncLifetime
             services.AddScoped(_ => NewDb());
             services.RemoveAll<IOrderLockManager>();
             services.AddSingleton<IOrderLockManager>(new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance));
+            services.RemoveAll<IUnitOfWork>();
+            services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<RentalServiceDbContext>());
             services.AddSingleton<TimeProvider>(_clock);
         }));
         using var client = factory.CreateClient();
         string route = $"/api/v1/rental/items/{item.Id}/returns";
         var request = Request(item.UnitAssignments.First().Id);
+        client.DefaultRequestHeaders.Remove("X-Api-Key");
         using var anonymous = await client.PostAsJsonAsync(route, request);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         client.DefaultRequestHeaders.Add("X-Test-Renter-Id", Guid.NewGuid().ToString());
         client.DefaultRequestHeaders.Add("Idempotency-Key", "api-key");
         using var foreign = await client.PostAsJsonAsync(route, request);
@@ -185,8 +189,8 @@ public sealed class ReturnTests : IAsyncLifetime
                 .ToList();
             Assert.Equal(["DAMAGED", "NORMAL"], conditions);
             var pending = await new OperationReceiptRepository(db)
-                .GetPendingOperationDescriptorsExcludingActionsAsync(_clock.GetUtcNow(), 50,
-                    [RentalItem.ApplyReturnedUnitsAction]);
+                .GetPendingOperationDescriptorsAsync(_clock.GetUtcNow(), 50,
+                    excludedActions: [RentalItem.ApplyReturnedUnitsAction]);
             Assert.DoesNotContain(pending, r => r.Action == RentalItem.ApplyReturnedUnitsAction);
             Assert.All(await db.RentalUnitAssignments.ToListAsync(), u => Assert.Null(u.AllocationClosedAt));
         }

@@ -11,6 +11,7 @@ using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Repositories;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.OpenApi;
@@ -82,6 +83,32 @@ builder.Services.AddSwaggerGen(options =>
     }
 });
 
+string internalKey = builder.Configuration["InternalAuthentication:ApiKey"]
+    ?? builder.Configuration["INTERNAL_API_KEY"]
+    ?? string.Empty;
+if (string.IsNullOrWhiteSpace(internalKey))
+{
+    throw new InvalidOperationException("InternalAuthentication:ApiKey is required.");
+}
+
+string? inventoryUrl = builder.Configuration["Services:Inventory:BaseUrl"];
+if (!string.IsNullOrWhiteSpace(inventoryUrl) && !Uri.TryCreate(inventoryUrl, UriKind.Absolute, out _))
+{
+    throw new InvalidOperationException("Services:Inventory:BaseUrl must be a valid absolute URL.");
+}
+
+string? paymentUrl = builder.Configuration["Services:Payment:BaseUrl"];
+if (!string.IsNullOrWhiteSpace(paymentUrl) && (!Uri.TryCreate(paymentUrl, UriKind.Absolute, out _) || paymentUrl.Contains("placeholder", StringComparison.OrdinalIgnoreCase)))
+{
+    throw new InvalidOperationException("Services:Payment:BaseUrl must be a valid absolute URL and not a placeholder.");
+}
+
+string? mediaUrl = builder.Configuration["Services:Media:BaseUrl"];
+if (!string.IsNullOrWhiteSpace(mediaUrl) && !Uri.TryCreate(mediaUrl, UriKind.Absolute, out _))
+{
+    throw new InvalidOperationException("Services:Media:BaseUrl must be a valid absolute URL.");
+}
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -92,7 +119,28 @@ if (app.Environment.IsDevelopment())
 
 app.UseExceptionHandler();
 app.UseStatusCodePages();
+app.UseMiddleware<InternalApiKeyMiddleware>();
 app.UseAuthentication();
+app.Use(async (context, next) =>
+{
+    string authHeader = context.Request.Headers.Authorization.ToString();
+    if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) &&
+        context.User?.Identity?.IsAuthenticated != true)
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        context.Response.ContentType = "application/problem+json";
+        await context.Response.WriteAsJsonAsync(new ProblemDetails
+        {
+            Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+            Title = "Unauthorized",
+            Status = StatusCodes.Status401Unauthorized,
+            Detail = "Invalid or expired JWT token.",
+            Instance = context.Request.Path
+        }, options: null, contentType: "application/problem+json");
+        return;
+    }
+    await next();
+});
 app.UseAuthorization();
 
 HealthCheckOptions livenessOptions = new()

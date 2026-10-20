@@ -91,12 +91,12 @@ public sealed class InventoryRentalConsumerContractTests
         ListingRentalSnapshotDto fixture = new(
             listingId,
             supplierId,
+            Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"),
             "Sony FX3",
             Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
             500_000m,
             "VND",
             "Active",
-            EquipmentTypeId: Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"),
             BrandId: Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"),
             Model: "FX3",
             DepositPerUnit: 2_000_000m,
@@ -149,18 +149,22 @@ public sealed class InventoryRentalConsumerContractTests
     {
         Guid listingId = Guid.NewGuid();
         decimal deposit = 1_000_000m;
-        _stub.GetSnapshotHandler = _ => Task.FromResult(Result.Success(new ListingRentalSnapshotDto(
-            listingId, Guid.NewGuid(), "Camera", null, 500_000m, "VND", "Active",
-            DepositPerUnit: deposit)));
+        _stub.GetSnapshotsHandler = _ => Task.FromResult(Result.Success(
+            new ListingRentalSnapshotsResponse([
+                new ListingRentalSnapshotDto(
+                    listingId, Guid.NewGuid(), Guid.NewGuid(), "Camera", null, 500_000m, "VND", "Active",
+                    DepositPerUnit: deposit)], [])));
         InventoryRentalCartReader reader = new(_stub);
 
         var before = await reader.GetListingAsync(listingId);
         deposit = 2_000_000m;
         var after = await reader.GetListingAsync(listingId);
 
-        Assert.Equal(1_000_000m, before!.Deposit);
-        Assert.Equal(2_000_000m, after!.Deposit);
-        Assert.NotEqual(before.PriceVersion, after.PriceVersion);
+        Assert.True(before.IsSuccess);
+        Assert.True(after.IsSuccess);
+        Assert.Equal(1_000_000m, before.Value.Deposit);
+        Assert.Equal(2_000_000m, after.Value.Deposit);
+        Assert.NotEqual(before.Value.PriceVersion, after.Value.PriceVersion);
     }
 
     // 3. Availability Check Fixture & Serialization
@@ -353,6 +357,7 @@ public sealed class InventoryRentalConsumerContractTests
     private sealed class StubInventoryRentalClient : IInventoryRentalClient
     {
         public Func<Guid, Task<Result<ListingRentalSnapshotDto>>>? GetSnapshotHandler { get; set; }
+        public Func<ListingRentalSnapshotsRequest, Task<Result<ListingRentalSnapshotsResponse>>>? GetSnapshotsHandler { get; set; }
         public Func<ListingAvailabilityCheckRequest, Task<Result<ListingAvailabilityCheckResponse>>>? CheckAvailabilityHandler { get; set; }
         public Func<CreateHoldRequest, Task<Result<CreateHoldResponse>>>? CreateHoldHandler { get; set; }
         public Func<string, ExtendHoldRequest, Task<Result<ExtendHoldResponse>>>? ExtendHoldHandler { get; set; }
@@ -363,7 +368,8 @@ public sealed class InventoryRentalConsumerContractTests
         public Func<string, MarkAssetsReturnedRequest, Task<Result<MarkAssetsReturnedResponse>>>? MarkReturnedHandler { get; set; }
         public Func<string, BlockDamagedAssetsRequest, Task<Result<BlockDamagedAssetsResponse>>>? BlockDamagedHandler { get; set; }
 
-        public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) =>
+            GetSnapshotsHandler?.Invoke(request) ?? Task.FromResult(Result.Failure<ListingRentalSnapshotsResponse>(Error.NotFound("NotConfigured", "Stub not configured.")));
         public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) =>
             GetSnapshotHandler?.Invoke(listingId) ?? Task.FromResult(Result.Failure<ListingRentalSnapshotDto>(Error.NotFound("NotConfigured", "Stub not configured.")));
 

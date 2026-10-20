@@ -56,6 +56,7 @@ public sealed class RentalCartController(
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> Get([FromQuery] Dictionary<Guid, string>? clientPriceVersions, CancellationToken cancellationToken)
     {
         Result<RentalCartReadModel> result = await getRentalCart.ExecuteAsync(

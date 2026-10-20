@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using Dprental.RentalService.Common.Utils;
 
 namespace Dprental.RentalService.Application.Kafka.Events;
@@ -104,3 +105,24 @@ public sealed record RentalHandoverOverduePayload(
     Guid RenterId,
     DateOnly ExpectedStartDate,
     DateTimeOffset OverdueAt);
+
+public sealed record CartItemAddedPayload(
+    [property: JsonPropertyName("userId")] Guid UserId,
+    [property: JsonPropertyName("equipmentListingId")] Guid EquipmentListingId,
+    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
+    [property: JsonPropertyName("cartId")] Guid CartId,
+    [property: JsonPropertyName("cartItemId")] Guid CartItemId);
+
+public sealed record RentalItemPaidPayload(
+    [property: JsonPropertyName("userId")] Guid UserId,
+    [property: JsonPropertyName("equipmentListingId")] Guid EquipmentListingId,
+    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
+    [property: JsonPropertyName("rentalOrderId")] Guid RentalOrderId,
+    [property: JsonPropertyName("rentalItemId")] Guid RentalItemId);
+
+public sealed record RentalItemCompletedPayload(
+    [property: JsonPropertyName("userId")] Guid UserId,
+    [property: JsonPropertyName("equipmentListingId")] Guid EquipmentListingId,
+    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
+    [property: JsonPropertyName("rentalOrderId")] Guid RentalOrderId,
+    [property: JsonPropertyName("rentalItemId")] Guid RentalItemId);

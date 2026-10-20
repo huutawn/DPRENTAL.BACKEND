@@ -76,7 +76,7 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
             heldLines,
             checkoutOperationId,
             Guid.NewGuid(),
-            utcNow.AddMinutes(30),
+            utcNow.Add(CheckoutRules.PaymentWindow),
             utcNow,
             cancellationToken);
     }

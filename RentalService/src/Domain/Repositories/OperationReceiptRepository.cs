@@ -20,21 +20,28 @@ public sealed class OperationReceiptRepository : IOperationReceiptRepository
             .FirstOrDefaultAsync(r => r.RentalOrderId == orderId && r.OperationId == operationId, cancellationToken);
     }
 
-    public async Task<IReadOnlyList<OperationReceiptDescriptor>> GetPendingOperationDescriptorsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
-        => await GetPendingOperationDescriptorsExcludingActionsAsync(utcNow, batchSize, [], cancellationToken);
-
-    public async Task<IReadOnlyList<OperationReceiptDescriptor>> GetPendingOperationDescriptorsExcludingActionsAsync(
-        DateTimeOffset utcNow, int batchSize, IReadOnlyCollection<string> excludedActions,
+    public async Task<IReadOnlyList<OperationReceiptDescriptor>> GetPendingOperationDescriptorsAsync(
+        DateTimeOffset utcNow,
+        int batchSize,
+        IReadOnlyCollection<string>? excludedActions = null,
+        IReadOnlyCollection<string>? unlimitedAttemptActions = null,
         CancellationToken cancellationToken = default)
     {
-        string[] excluded = excludedActions.ToArray();
+        string[] excluded = excludedActions?.ToArray() ?? [];
+        string[] unlimited = unlimitedAttemptActions?.ToArray() ?? [];
+
         return await _dbContext.RentalOperationReceipts
             .AsNoTracking()
-            .Where(r => (r.Status == RentalOperationReceipt.StatusPending || r.Status == RentalOperationReceipt.StatusProcessing) &&
-                        (r.RetryCount < 10 || r.Action == "CreateInvoice") &&
-                        (r.NextRetryAt == null || r.NextRetryAt <= utcNow) &&
-                        !excluded.Contains(r.Action))
+            .Where(r => (excluded.Length == 0 || !excluded.Contains(r.Action)) &&
+                ((r.Status == RentalOperationReceipt.StatusPending || r.Status == RentalOperationReceipt.StatusProcessing) &&
+                 (r.NextRetryAt == null || r.NextRetryAt <= utcNow) &&
+                 (unlimited.Contains(r.Action) || r.RetryCount < 10) ||
+                 (unlimited.Contains(r.Action) && r.Status == RentalOperationReceipt.StatusFailed &&
+                  (r.ErrorClassification == RentalOperationReceipt.ClassificationTransientExhausted ||
+                   r.ErrorClassification == RentalOperationReceipt.ClassificationUncertainExhausted) &&
+                  (r.NextRetryAt == null || r.NextRetryAt <= utcNow))))
             .OrderBy(r => r.CreatedAt)
+            .ThenBy(r => r.Id)
             .Take(batchSize)
             .Select(r => new OperationReceiptDescriptor(
                 r.Id,

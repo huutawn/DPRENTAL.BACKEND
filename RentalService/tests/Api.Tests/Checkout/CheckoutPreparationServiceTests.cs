@@ -427,7 +427,7 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(CheckoutLineIssueCode.ListingUnavailable, Assert.Single(result.LineIssues).Code);
     }
 
-    public static TheoryData<string> IncompleteSnapshotFields => ["OwnerUserId", "Name", "Status", "Currency", "EquipmentTypeId", "BrandId", "Model", "DepositPerUnit", "SpecSchemaVersion", "SpecValues"];
+    public static TheoryData<string> IncompleteSnapshotFields => ["OwnerUserId", "Name", "Status", "Currency", "BrandId", "Model", "DepositPerUnit", "SpecSchemaVersion", "SpecValues"];
 
     [Theory]
     [MemberData(nameof(IncompleteSnapshotFields))]
@@ -439,7 +439,7 @@ public sealed class CheckoutPreparationServiceTests
             "OwnerUserId" => listing with { OwnerUserId = Guid.Empty },
             "Name" => listing with { Name = " " },
             "Status" => listing with { Status = null! },
-            "EquipmentTypeId" => listing with { EquipmentTypeId = null },
+            "EquipmentTypeId" => listing with { EquipmentTypeId = Guid.Empty },
             "BrandId" => listing with { BrandId = null },
             "Model" => listing with { Model = null },
             "DepositPerUnit" => listing with { DepositPerUnit = null },
