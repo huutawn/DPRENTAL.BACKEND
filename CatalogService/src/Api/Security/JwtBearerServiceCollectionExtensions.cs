@@ -43,6 +43,7 @@ internal static partial class JwtBearerServiceCollectionExtensions
                 // Giữ tên claim nguyên bản (sub, r, sid, u)
                 bearerOptions.MapInboundClaims = false;
                 bearerOptions.ConfigurationManager = jwksManager;
+                bearerOptions.SaveToken = true;
                 bearerOptions.Events = new JwtBearerEvents
                 {
                     OnMessageReceived = async context =>

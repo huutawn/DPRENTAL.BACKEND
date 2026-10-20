@@ -1,3 +1,4 @@
+using CatalogService.Application.DTOs.Category;
 using Dprental.CatalogService.Application.Options;
 using Dprental.CatalogService.Common;
 using Microsoft.Extensions.Options;
@@ -13,6 +14,24 @@ public sealed class CategoryListQueryValidator(IOptions<CatalogDiscoveryOptions>
         "name_desc"
     };
 
+
+    public Result ValidateDiscovery(GetCategoriesRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.Keyword != null && (request.Keyword.Contains('\0') || request.Keyword.Trim().Length > options.Value.MaxKeywordLength))
+        {
+            return Result.Failure(CatalogErrors.Category.InvalidKeyword);
+        }
+
+        Result sortResult = DiscoveryQueryValidationHelper.ValidateDiscoverySort(request.Sort, CatalogErrors.Category.InvalidSort);
+        if (sortResult.IsFailure)
+        {
+            return sortResult;
+        }
+
+        return DiscoveryQueryValidationHelper.ValidateScopeAndListingStatus(request.Scope, request.ListingStatus);
+    }
     public Result Validate(int page, int pageSize, string? keyword, string? sort)
     {
         Result pagingResult = PaginationValidationHelper.Validate(page, pageSize);

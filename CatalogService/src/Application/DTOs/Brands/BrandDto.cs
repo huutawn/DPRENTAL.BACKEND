@@ -1,4 +1,5 @@
 using Dprental.CatalogService.Application.Common;
+using System.Text.Json.Serialization;
 using Dprental.CatalogService.Domain.Entities;
 
 namespace Dprental.CatalogService.Application.DTOs.Brands;
@@ -15,9 +16,12 @@ public sealed record BrandDto(
     string? LogoUrl,
     bool IsActive,
     DateTime CreatedAt,
-    DateTime? UpdatedAt)
+    DateTime? UpdatedAt,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? ListingCount = null)
 {
-    public static BrandDto FromEntity(Brand entity)
+    public static BrandDto FromEntity(Brand entity) => FromEntity(entity, null);
+
+    public static BrandDto FromEntity(Brand entity, int? listingCount)
     {
         ArgumentNullException.ThrowIfNull(entity);
 
@@ -30,6 +34,7 @@ public sealed record BrandDto(
             MediaUrlResolver.ResolvePublicUrl(entity.LogoMediaId),
             entity.IsActive,
             entity.CreatedAt,
-            entity.UpdatedAt);
+            entity.UpdatedAt,
+            listingCount);
     }
 }

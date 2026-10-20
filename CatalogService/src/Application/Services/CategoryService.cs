@@ -1,5 +1,6 @@
 using CatalogService.Application.DTOs.Category;
 using Dprental.CatalogService.Application.Clients;
+using Dprental.CatalogService.Application.IServices;
 using Dprental.CatalogService.Application.Common;
 using Dprental.CatalogService.Application.Validators;
 using Dprental.CatalogService.Common;
@@ -16,17 +17,23 @@ public partial class CategoryService : ICategoryService
     private readonly IMediaServiceClient _mediaServiceClient;
     private readonly CategoryListQueryValidator _listQueryValidator;
     private readonly ILogger<CategoryService> _logger;
+    private readonly IInventoryServiceClient _inventoryClient;
+    private readonly ICatalogCallerContext? _caller;
 
     public CategoryService(
         ICategoryRepository repository,
         IMediaServiceClient mediaServiceClient,
         CategoryListQueryValidator listQueryValidator,
-        ILogger<CategoryService> logger)
+        ILogger<CategoryService> logger,
+        IInventoryServiceClient inventoryClient,
+        ICatalogCallerContext? caller = null)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _mediaServiceClient = mediaServiceClient ?? throw new ArgumentNullException(nameof(mediaServiceClient));
         _listQueryValidator = listQueryValidator ?? throw new ArgumentNullException(nameof(listQueryValidator));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _inventoryClient = inventoryClient;
+        _caller = caller;
     }
 
     public async Task<Result<CategoryDetailResponse>> CreateCategoryAsync(
@@ -50,10 +57,87 @@ public partial class CategoryService : ICategoryService
         return Logged("Update", id, await UpdateCoreAsync(id, request, operatorUserId, cancellationToken));
     }
 
-    public async Task<IEnumerable<CategoryDetailResponse>> GetActiveCategoriesAsync(CancellationToken cancellationToken = default)
+
+
+    public async Task<Result<IEnumerable<CategoryDetailResponse>>> GetActiveCategoriesAsync(
+        GetCategoriesRequest request,
+        CancellationToken cancellationToken = default)
     {
-        var categories = await _repository.GetAllActiveAsync(cancellationToken);
-        return categories.Select(ToResponse);
+        ArgumentNullException.ThrowIfNull(request);
+
+        var valResult = _listQueryValidator.ValidateDiscovery(request);
+        if (valResult.IsFailure)
+        {
+            return valResult.Error;
+        }
+
+        string scope = string.IsNullOrWhiteSpace(request.Scope) ? "public" : request.Scope.Trim().ToLowerInvariant();
+        if (scope == "mine")
+        {
+            if (_caller == null || !_caller.IsAuthenticated || !_caller.UserId.HasValue)
+            {
+                return Error.Unauthorized("AUTH_REQUIRED", "Yêu cầu đăng nhập để truy cập scope=mine.");
+            }
+        }
+
+        string? effectiveListingStatus = request.ListingStatus;
+        var statsResult = await _inventoryClient.GetListingStatisticsAsync(scope, effectiveListingStatus, cancellationToken);
+        if (statsResult.IsFailure)
+        {
+            return statsResult.Error;
+        }
+        var typeCounts = statsResult.Value.ByEquipmentType;
+
+        var categoriesWithTypes = await _repository.GetActiveCategoriesWithPublishedTypesAsync(cancellationToken);
+
+        var items = categoriesWithTypes.Select(c =>
+        {
+            int listingCount = c.PublishedTypeIds
+                .Distinct()
+                .Sum(typeId => typeCounts.GetValueOrDefault(typeId, 0));
+
+            return new
+            {
+                Response = ToResponse(c.Category, listingCount),
+                ListingCount = listingCount,
+                c.Category.Name,
+                c.Category.Id,
+                c.Category.CreatedAtUtc
+            };
+        });
+
+        if (!string.IsNullOrWhiteSpace(request.Keyword))
+        {
+            string keyword = request.Keyword.Trim();
+            items = items.Where(x => x.Name.Contains(keyword, StringComparison.OrdinalIgnoreCase) ||
+                                     x.Response.Slug.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+        }
+
+        string sort = string.IsNullOrWhiteSpace(request.Sort) ? "listing_count_desc" : request.Sort.Trim().ToLowerInvariant();
+        var sorted = sort switch
+        {
+            "listing_count_asc" => items
+                .OrderBy(x => x.ListingCount == 0 ? 1 : 0)
+                .ThenBy(x => x.ListingCount)
+                .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(x => x.Id),
+            "name_asc" => items
+                .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(x => x.Id),
+            "name_desc" => items
+                .OrderByDescending(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(x => x.Id),
+            "newest" => items
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .ThenBy(x => x.Id),
+            _ => items
+                .OrderBy(x => x.ListingCount == 0 ? 1 : 0)
+                .ThenByDescending(x => x.ListingCount)
+                .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(x => x.Id)
+        };
+
+        return Result.Success<IEnumerable<CategoryDetailResponse>>(sorted.Select(x => x.Response).ToList());
     }
 
     public async Task<Result<CategoryDetailResponse>> GetActiveCategoryByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -94,7 +178,7 @@ public partial class CategoryService : ICategoryService
         };
 
         var pagedEntities = await _repository.SearchAsync(query, cancellationToken);
-        var dtos = pagedEntities.Items.Select(ToResponse).ToList();
+        var dtos = pagedEntities.Items.Select(c => ToResponse(c)).ToList();
 
         return new PagedResult<CategoryDetailResponse>(dtos, pagedEntities.Page, pagedEntities.PageSize, pagedEntities.TotalCount);
     }
@@ -343,7 +427,9 @@ public partial class CategoryService : ICategoryService
         return ToResponse(category);
     }
 
-    private static CategoryDetailResponse ToResponse(Category category) =>
+    private static CategoryDetailResponse ToResponse(Category category) => ToResponse(category, null);
+
+    private static CategoryDetailResponse ToResponse(Category category, int? listingCount) =>
         new(
             category.Id,
             category.Name,
@@ -351,8 +437,8 @@ public partial class CategoryService : ICategoryService
             category.Description,
             category.IsActive,
             category.ImageMediaId,
-            MediaUrlResolver.ResolvePublicUrl(category.ImageMediaId));
-
+            MediaUrlResolver.ResolvePublicUrl(category.ImageMediaId),
+            listingCount);
     private Result<CategoryDetailResponse> Logged(string operation, Guid? categoryId, Result<CategoryDetailResponse> result)
     {
         if (result.IsSuccess)

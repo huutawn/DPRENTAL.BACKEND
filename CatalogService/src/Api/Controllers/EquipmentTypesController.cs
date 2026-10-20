@@ -15,17 +15,18 @@ namespace Dprental.CatalogService.Api.Controllers;
 [Produces("application/json")]
 public sealed partial class EquipmentTypesController(IEquipmentTypeService service, ICatalogCallerContext caller) : ControllerBase
 {
-    private static readonly HashSet<string> AllowedQueryKeys = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> PublicAllowedQueryKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "keyword", "categoryId", "page", "pageSize", "sort", "scope", "listingStatus"
+    };
+
+    private static readonly HashSet<string> AdminAllowedQueryKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "keyword",
         "categoryId",
         "page",
         "pageSize",
-        "sort"
-    };
-
-    private static readonly HashSet<string> AdminAllowedQueryKeys = new(AllowedQueryKeys, StringComparer.OrdinalIgnoreCase)
-    {
+        "sort",
         "status"
     };
 
@@ -34,11 +35,15 @@ public sealed partial class EquipmentTypesController(IEquipmentTypeService servi
     [HttpGet]
     [ProducesResponseType<PagedResult<EquipmentTypeListItemDto>>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<PagedResult<EquipmentTypeListItemDto>>> Search(
         [FromQuery] GetEquipmentTypesRequest request,
         CancellationToken cancellationToken)
     {
-        if (Request.Query.Keys.Any(k => !AllowedQueryKeys.Contains(k)))
+
+        if (Request.Query.Any(q => !PublicAllowedQueryKeys.Contains(q.Key) || q.Value.Count != 1))
         {
             return this.ToProblem(CatalogErrors.EquipmentType.InvalidQuery);
         }

@@ -44,46 +44,6 @@ public partial class EquipmentTypeRepository(CatalogServiceDbContext dbContext) 
                     s.Definition))
                 .FirstOrDefault());
 
-    public async Task<PagedResult<EquipmentTypeListItemDto>> SearchPublishedAsync(
-        GetEquipmentTypesRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        var query = ApplyFilters(
-            dbContext.EquipmentTypes.AsNoTracking().Where(e => e.Status == EquipmentTypeStatus.Published),
-            request.Keyword,
-            request.CategoryId);
-
-        var totalCount = await query.CountAsync(cancellationToken);
-
-        var skip = (request.Page - 1) * request.PageSize;
-        var items = await ApplySort(query, request.Sort)
-            .Skip(skip)
-            .Take(request.PageSize)
-            .Select(e => new EquipmentTypeListItemDto(
-                e.Id,
-                e.Code,
-                e.Name,
-                e.Description,
-                e.Categories
-                    .OrderBy(c => c.Name)
-                    .ThenBy(c => c.Id)
-                    .Select(c => new CategoryDto(c.Id, c.Name, c.ImageMediaId, null))
-                    .ToList(),
-                e.Media
-                    .OrderByDescending(m => m.IsThumbnail)
-                    .ThenBy(m => m.DisplayOrder)
-                    .ThenBy(m => m.Id)
-                    .Select(m => (Guid?)m.MediaId)
-                    .FirstOrDefault(),
-                null,
-                e.CurrentSchemaVersion
-            ))
-            .ToListAsync(cancellationToken);
-
-        return new PagedResult<EquipmentTypeListItemDto>(items, request.Page, request.PageSize, totalCount);
-    }
 
     public async Task<PagedResult<EquipmentTypeAdminListItemDto>> SearchAdminAsync(
         GetAdminEquipmentTypesRequest request,
@@ -137,11 +97,11 @@ public partial class EquipmentTypeRepository(CatalogServiceDbContext dbContext) 
     {
         if (!string.IsNullOrWhiteSpace(keyword))
         {
-            var trimmedKeyword = keyword.Trim();
+            var trimmedKeyword = CountRelationHelper.EscapeLikePattern(keyword.Trim());
             query = query.Where(e =>
-                EF.Functions.ILike(e.Code, $"%{trimmedKeyword}%") ||
-                EF.Functions.ILike(e.Name, $"%{trimmedKeyword}%") ||
-                (e.Description != null && EF.Functions.ILike(e.Description, $"%{trimmedKeyword}%")));
+                EF.Functions.ILike(e.Code, $"%{trimmedKeyword}%", "\\") ||
+                EF.Functions.ILike(e.Name, $"%{trimmedKeyword}%", "\\") ||
+                (e.Description != null && EF.Functions.ILike(e.Description, $"%{trimmedKeyword}%", "\\")));
         }
 
         if (categoryId.HasValue)

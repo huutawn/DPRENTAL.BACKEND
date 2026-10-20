@@ -1,4 +1,5 @@
 using Dprental.CatalogService.Common;
+using System.Data;
 using Dprental.CatalogService.Domain.Entities;
 using Dprental.CatalogService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
@@ -19,44 +20,67 @@ public sealed class BrandRepository(CatalogServiceDbContext dbContext) : IBrandR
             dbQuery = dbQuery.Where(b => b.IsActive == query.IsActive.Value);
         }
 
-        var codeKeyword = query.Keyword?.Trim();
-        var nameKeyword = query.NameKeyword?.Trim() ?? codeKeyword;
+        var codeKeyword = query.Keyword is null ? null : CountRelationHelper.EscapeLikePattern(query.Keyword.Trim());
+        var nameKeyword = query.NameKeyword is null ? codeKeyword : CountRelationHelper.EscapeLikePattern(query.NameKeyword.Trim());
 
         if (!string.IsNullOrWhiteSpace(codeKeyword) && !string.IsNullOrWhiteSpace(nameKeyword) && !string.Equals(codeKeyword, nameKeyword, StringComparison.Ordinal))
         {
             dbQuery = dbQuery.Where(b =>
-                EF.Functions.ILike(b.Code, $"%{codeKeyword}%") ||
-                EF.Functions.ILike(b.Name, $"%{nameKeyword}%"));
+                EF.Functions.ILike(b.Code, $"%{codeKeyword}%", "\\") ||
+                EF.Functions.ILike(b.Name, $"%{nameKeyword}%", "\\"));
         }
         else if (!string.IsNullOrWhiteSpace(codeKeyword))
         {
             dbQuery = dbQuery.Where(b =>
-                EF.Functions.ILike(b.Code, $"%{codeKeyword}%") ||
-                EF.Functions.ILike(b.Name, $"%{codeKeyword}%"));
+                EF.Functions.ILike(b.Code, $"%{codeKeyword}%", "\\") ||
+                EF.Functions.ILike(b.Name, $"%{codeKeyword}%", "\\"));
         }
         else if (!string.IsNullOrWhiteSpace(nameKeyword))
         {
             dbQuery = dbQuery.Where(b =>
-                EF.Functions.ILike(b.Name, $"%{nameKeyword}%"));
+                EF.Functions.ILike(b.Name, $"%{nameKeyword}%", "\\"));
         }
 
-        var totalCount = await dbQuery.CountAsync(cancellationToken);
+        if (query.ListingCounts != null)
+        {
+            var counts = CountRelationHelper.Query(dbContext, query.ListingCounts);
+            var ranked = from entity in dbQuery
+                         join count in counts on entity.Id equals count.Id into matches
+                         from count in matches.DefaultIfEmpty()
+                         select new { Entity = entity, ListingCount = (int?)count.ListingCount ?? 0 };
+            var ordered = query.Sort?.Trim().ToLowerInvariant() switch
+            {
+                "listing_count_asc" => ranked.OrderBy(r => r.ListingCount == 0).ThenBy(r => r.ListingCount).ThenBy(r => r.Entity.Name).ThenBy(r => r.Entity.Id),
+                "name_asc" => ranked.OrderBy(r => r.Entity.Name).ThenBy(r => r.Entity.Id),
+                "name_desc" => ranked.OrderByDescending(r => r.Entity.Name).ThenBy(r => r.Entity.Id),
+                "newest" => ranked.OrderByDescending(r => r.Entity.CreatedAt).ThenBy(r => r.Entity.Id),
+                _ => ranked.OrderBy(r => r.ListingCount == 0).ThenByDescending(r => r.ListingCount).ThenBy(r => r.Entity.Name).ThenBy(r => r.Entity.Id)
+            };
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
+            int total = await dbQuery.CountAsync(cancellationToken);
+            var items = await ordered.Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)
+                .Select(r => r.Entity).ToListAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return new PagedResult<Brand>(items, query.Page, query.PageSize, total);
+        }
 
-        string sort = query.Sort?.Trim().ToLowerInvariant() ?? string.Empty;
-        dbQuery = sort switch
+        var totalCountAdmin = await dbQuery.CountAsync(cancellationToken);
+
+        string sortAdmin = query.Sort?.Trim().ToLowerInvariant() ?? string.Empty;
+        dbQuery = sortAdmin switch
         {
             "name_asc" => dbQuery.OrderBy(b => b.Name).ThenBy(b => b.Id),
             "name_desc" => dbQuery.OrderByDescending(b => b.Name).ThenBy(b => b.Id),
             _ => dbQuery.OrderByDescending(b => b.CreatedAt).ThenBy(b => b.Id)
         };
 
-        var skip = (query.Page - 1) * query.PageSize;
-        var items = await dbQuery
-            .Skip(skip)
+        var skipAdmin = (query.Page - 1) * query.PageSize;
+        var itemsAdmin = await dbQuery
+            .Skip(skipAdmin)
             .Take(query.PageSize)
             .ToListAsync(cancellationToken);
 
-        return new PagedResult<Brand>(items, query.Page, query.PageSize, totalCount);
+        return new PagedResult<Brand>(itemsAdmin, query.Page, query.PageSize, totalCountAdmin);
     }
 
     public async Task<Brand?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)

@@ -63,6 +63,18 @@ builder.Services.AddHttpClient<IMediaServiceClient, MediaServiceClient>((sp, cli
     client.DefaultRequestHeaders.Add("X-Api-Key", opts.ApiKey);
 });
 
+builder.Services.AddSingleton<IValidateOptions<InventoryServiceOptions>, InventoryServiceOptionsValidator>();
+builder.Services.AddOptions<InventoryServiceOptions>()
+    .Bind(builder.Configuration.GetSection(InventoryServiceOptions.SectionName))
+    .ValidateOnStart();
+
+builder.Services.AddHttpClient<IInventoryServiceClient, InventoryServiceClient>((sp, client) =>
+{
+    var opts = sp.GetRequiredService<IOptions<InventoryServiceOptions>>().Value;
+    client.BaseAddress = new Uri(opts.BaseUrl.TrimEnd('/') + "/");
+    client.Timeout = TimeSpan.FromSeconds(opts.TimeoutSeconds);
+});
+
 string[] configuredOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
     ?? builder.Configuration.GetSection("Cors:Origins").Get<string[]>()
     ?? [];
