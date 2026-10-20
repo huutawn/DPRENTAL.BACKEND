@@ -11,7 +11,11 @@ public static class ConfigurationValidationExtensions
     public static string? GetConfiguredApiKey(this IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
-        string? key = configuration["ApiKey"];
+        string? key = configuration["InternalAuthentication:ApiKey"];
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            key = configuration["ApiKey"];
+        }
         if (string.IsNullOrWhiteSpace(key))
         {
             key = configuration["Authentication:ApiKey"];
@@ -19,6 +23,10 @@ public static class ConfigurationValidationExtensions
         if (string.IsNullOrWhiteSpace(key))
         {
             key = configuration["Security:ApiKey"];
+        }
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            key = configuration["INTERNAL_API_KEY"];
         }
         return string.IsNullOrWhiteSpace(key) ? null : key.Trim();
     }

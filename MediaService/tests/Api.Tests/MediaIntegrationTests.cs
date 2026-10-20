@@ -122,6 +122,7 @@ public class MediaIntegrationTests
         Assert.Equal(HttpStatusCode.OK, publish.StatusCode);
 
         using var anonymous = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        MediaServiceTestFactory.SetApiKey(anonymous);
         using var publicResponse = await anonymous.GetAsync($"/api/v1/media/{media.MediaId}/content");
         Assert.Equal(HttpStatusCode.Redirect, publicResponse.StatusCode);
         Assert.NotNull(publicResponse.Headers.Location);
@@ -203,6 +204,7 @@ public class MediaIntegrationTests
             new ChangeMediaVisibilityRequest("public"));
         Assert.Equal(HttpStatusCode.OK, publish.StatusCode);
         using var anonymous = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        MediaServiceTestFactory.SetApiKey(anonymous);
         using var publicResponse = await anonymous.GetAsync($"/api/v1/media/{uploaded.MediaId}/content?variant=original");
         Assert.Equal(HttpStatusCode.Redirect, publicResponse.StatusCode);
         Assert.NotNull(publicResponse.Headers.Location);
