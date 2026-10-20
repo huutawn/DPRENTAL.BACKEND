@@ -205,7 +205,7 @@ public sealed class RegistrationEndpointTests
             ["Auth:AdminBootstrap:CreationKey"] = "test-admin-bootstrap-secret-key-12345"
         };
 
-        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        return new AuthWebApplicationFactory().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("MediaService:ApiKey", "test-media-key");
             builder.UseSetting("MediaService:PublicGatewayUrl", "http://gateway.example.test");

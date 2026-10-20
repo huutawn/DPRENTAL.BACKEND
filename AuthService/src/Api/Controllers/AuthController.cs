@@ -19,7 +19,6 @@ namespace Dprental.AuthService.Api.Controllers;
 public sealed class AuthController(
     IAuthSessionService authSessionService,
     IUserService userService,
-    IServiceIdentityService serviceIdentityService,
     IFirebaseLoginService firebaseLoginService,
     IOptions<JwtOptions> jwtOptions,
     IWebHostEnvironment environment) : ControllerBase
@@ -142,19 +141,6 @@ public sealed class AuthController(
         AuthCookies.Clear(Response, Request, environment);
 
         return NoContent();
-    }
-
-    /// <summary>Cấp access token OAuth2 client_credentials cho service, không đại diện người dùng.</summary>
-    [HttpPost("service-token")]
-    [ApiExplorerSettings(IgnoreApi = true)]
-    [ProducesResponseType<ServiceTokenResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
-    public async Task<ActionResult<ServiceTokenResponse>> ServiceToken(ServiceTokenRequest request, CancellationToken cancellationToken)
-    {
-        Result<ServiceTokenResponse> result = await serviceIdentityService.IssueTokenAsync(request, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
     /// <summary>Yêu cầu đặt lại mật khẩu qua mã OTP gửi về email.</summary>

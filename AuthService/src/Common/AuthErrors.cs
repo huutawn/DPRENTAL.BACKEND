@@ -189,14 +189,6 @@ public static class AuthErrors
     }
 
 
-    public static class ServicePrincipal
-    {
-        public static readonly Error InvalidClient =
-            Error.Unauthorized(AuthErrorCode.ServicePrincipal.InvalidClient, "client_id hoặc client_secret không hợp lệ.");
-
-        public static readonly Error InvalidScope =
-            Error.Forbidden(AuthErrorCode.ServicePrincipal.InvalidScope, "Service này không được cấp scope/audience đã yêu cầu.");
-    }
 
     public static class ExternalLogin
     {

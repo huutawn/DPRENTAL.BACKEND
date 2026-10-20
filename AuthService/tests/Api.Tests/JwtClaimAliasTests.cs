@@ -253,7 +253,7 @@ public sealed class JwtClaimAliasTests
             ["Auth:AdminBootstrap:CreationKey"] = BootstrapKey
         };
 
-        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        return new AuthWebApplicationFactory().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("MediaService:ApiKey", "test-media-key");
             builder.UseSetting("MediaService:PublicGatewayUrl", "http://gateway.example.test");

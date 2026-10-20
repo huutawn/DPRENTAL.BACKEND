@@ -38,8 +38,11 @@ public sealed class AuthMigrationConsistencyTests
                 context.Organizations.Add(org);
                 context.OrganizationMemberships.Add(new OrganizationMembership
                 {
-                    Id = Guid.NewGuid(), UserId = user.Id, OrganizationId = org.Id,
-                    RoleId = OwnerRoleId, Status = MembershipStatus.Active
+                    Id = Guid.NewGuid(),
+                    UserId = user.Id,
+                    OrganizationId = org.Id,
+                    RoleId = OwnerRoleId,
+                    Status = MembershipStatus.Active
                 });
                 Role owner = await context.Roles.SingleAsync(r => r.Id == OwnerRoleId);
                 owner.Description = "Preserve existing description";
@@ -181,8 +184,11 @@ public sealed class AuthMigrationConsistencyTests
                 context.Organizations.Add(org);
                 context.OrganizationMemberships.Add(new OrganizationMembership
                 {
-                    Id = Guid.NewGuid(), UserId = user.Id, OrganizationId = org.Id,
-                    RoleId = OpsRoleId, Status = MembershipStatus.Active
+                    Id = Guid.NewGuid(),
+                    UserId = user.Id,
+                    OrganizationId = org.Id,
+                    RoleId = OpsRoleId,
+                    Status = MembershipStatus.Active
                 });
                 await context.SaveChangesAsync();
             }
@@ -213,7 +219,8 @@ public sealed class AuthMigrationConsistencyTests
     {
         NpgsqlConnectionStringBuilder connection = new("Host=localhost;Port=5435;Username=postgres;Password=postgres")
         {
-            Database = $"authservice_role_seed_{Guid.NewGuid():N}", Pooling = false
+            Database = $"authservice_role_seed_{Guid.NewGuid():N}",
+            Pooling = false
         };
         await using AuthDbContext context = new(new DbContextOptionsBuilder<AuthDbContext>()
             .UseNpgsql(connection.ConnectionString).Options);

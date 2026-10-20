@@ -141,19 +141,6 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
         Assert.False(sessionRepo.RotateCalled);
     }
 
-    [Fact]
-    public async Task ServiceIdentityService_IssueTokenAsync_EmptyClientId_ReturnsValidation()
-    {
-        ServiceIdentityService service = new(
-            new RecordingServicePrincipalRepo(),
-            new RecordingTokenIssuer());
-
-        ServiceTokenRequest request = new("", "secret", "aud", "scope");
-        Result<ServiceTokenResponse> result = await service.IssueTokenAsync(request);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(ErrorType.Validation, result.Error.Type);
-    }
 
     // ========================================================================
     // 2. DỮ LIỆU TRÙNG (DB CONSTRAINT) -> ÁNH XẠ SANG LỖI 409 PHÙ HỢP
@@ -661,11 +648,6 @@ public sealed class ServiceBoundaryValidationAndExceptionTests
             Task.FromResult(Roles.Values.Count(r => roleIds.Contains(r.Id)));
     }
 
-    private sealed class RecordingServicePrincipalRepo : IServicePrincipalRepository
-    {
-        public Task<ServicePrincipal?> GetByClientIdAsync(string clientId, CancellationToken cancellationToken = default) => Task.FromResult<ServicePrincipal?>(null);
-        public Task<bool> HasScopeAsync(Guid servicePrincipalId, string scope, string audience, CancellationToken cancellationToken = default) => Task.FromResult(true);
-    }
 
     private sealed class FakeProblemDetailsService : IProblemDetailsService
     {

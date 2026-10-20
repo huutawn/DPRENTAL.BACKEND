@@ -16,8 +16,6 @@ public sealed class AuthDbContext : DbContext
     public DbSet<RefreshToken> RefreshTokens { get; set; }
     public DbSet<Permission> Permissions { get; set; }
     public DbSet<RolePermission> RolePermissions { get; set; }
-    public DbSet<ServicePrincipal> ServicePrincipals { get; set; }
-    public DbSet<ServicePrincipalScope> ServicePrincipalScopes { get; set; }
     public DbSet<Organization> Organizations { get; set; }
     public DbSet<OrganizationMembership> OrganizationMemberships { get; set; }
     public DbSet<ExternalLogin> ExternalLogins { get; set; }

@@ -461,7 +461,7 @@ public sealed class ApiBoundaryResponseTests
         using RSA rsa = RSA.Create(2048);
         string publicKey = rsa.ExportRSAPublicKeyPem();
         string privateKey = rsa.ExportRSAPrivateKeyPem();
-        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        return new AuthWebApplicationFactory().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("MediaService:ApiKey", "test-media-key");
             builder.UseSetting("MediaService:PublicGatewayUrl", "http://gateway.example.test");
@@ -470,6 +470,7 @@ public sealed class ApiBoundaryResponseTests
             {
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
+                    ["InternalAuthentication:ApiKey"] = AuthWebApplicationFactory.DefaultInternalApiKey,
                     ["Auth:AdminBootstrap:CreationKey"] = BootstrapKey,
                     ["Auth:Jwt:ActiveKeyId"] = "key-2026-01",
                     ["Auth:Jwt:Keys:0:KeyId"] = "key-2026-01",

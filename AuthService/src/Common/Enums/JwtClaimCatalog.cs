@@ -84,10 +84,6 @@ public static class JwtClaimCatalog
         public const string IdentityRolesAssignOrganization = "id.r.ao";
         public const string IdentityRolesRevokeOrganization = "id.r.ro";
 
-        public const string IdentityServicePrincipalsRead = "id.sp.r";
-        public const string IdentityServicePrincipalsManage = "id.sp.m";
-        public const string IdentityServicePrincipalsRotateSecret = "id.sp.rs";
-        public const string IdentityServicePrincipalsManageScopes = "id.sp.ms";
 
         private static readonly Dictionary<string, string> CanonicalToAlias = new(StringComparer.Ordinal)
         {
@@ -104,10 +100,6 @@ public static class JwtClaimCatalog
             [PermissionCode.IdentityRolesRevokeGlobal] = IdentityRolesRevokeGlobal,
             [PermissionCode.IdentityRolesAssignOrganization] = IdentityRolesAssignOrganization,
             [PermissionCode.IdentityRolesRevokeOrganization] = IdentityRolesRevokeOrganization,
-            [PermissionCode.IdentityServicePrincipalsRead] = IdentityServicePrincipalsRead,
-            [PermissionCode.IdentityServicePrincipalsManage] = IdentityServicePrincipalsManage,
-            [PermissionCode.IdentityServicePrincipalsRotateSecret] = IdentityServicePrincipalsRotateSecret,
-            [PermissionCode.IdentityServicePrincipalsManageScopes] = IdentityServicePrincipalsManageScopes,
         };
 
         private static readonly Dictionary<string, string> AliasToCanonical = new(StringComparer.Ordinal)
@@ -125,10 +117,6 @@ public static class JwtClaimCatalog
             [IdentityRolesRevokeGlobal] = PermissionCode.IdentityRolesRevokeGlobal,
             [IdentityRolesAssignOrganization] = PermissionCode.IdentityRolesAssignOrganization,
             [IdentityRolesRevokeOrganization] = PermissionCode.IdentityRolesRevokeOrganization,
-            [IdentityServicePrincipalsRead] = PermissionCode.IdentityServicePrincipalsRead,
-            [IdentityServicePrincipalsManage] = PermissionCode.IdentityServicePrincipalsManage,
-            [IdentityServicePrincipalsRotateSecret] = PermissionCode.IdentityServicePrincipalsRotateSecret,
-            [IdentityServicePrincipalsManageScopes] = PermissionCode.IdentityServicePrincipalsManageScopes,
         };
 
         public static string ToAlias(string canonicalPermission) =>
