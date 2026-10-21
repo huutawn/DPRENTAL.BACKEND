@@ -223,18 +223,16 @@ public sealed class RentalEventProducer : IRentalEventProducer
     {
         if (payload == null)
             return Error.Validation("INVALID_PAYLOAD", "RentalItemPaidPayload cannot be null.");
-        if (payload.RenterId == Guid.Empty)
-            return Error.Validation("INVALID_RENTER_ID", "RenterId cannot be empty.");
+        if (payload.UserId == Guid.Empty)
+            return Error.Validation("INVALID_USER_ID", "UserId cannot be empty.");
         if (payload.EquipmentListingId == Guid.Empty)
             return Error.Validation("INVALID_LISTING_ID", "EquipmentListingId cannot be empty.");
-        if (payload.EquipmentTypeId == Guid.Empty)
+        if (payload.EquipmentTypeId.HasValue && payload.EquipmentTypeId.Value == Guid.Empty)
             return Error.Validation("INVALID_TYPE_ID", "EquipmentTypeId cannot be empty.");
         if (payload.RentalOrderId == Guid.Empty)
             return Error.Validation("INVALID_ORDER_ID", "RentalOrderId cannot be empty.");
         if (payload.RentalItemId == Guid.Empty)
             return Error.Validation("INVALID_ITEM_ID", "RentalItemId cannot be empty.");
-        if (payload.Quantity <= 0 || payload.OccurredAt == default)
-            return Error.Validation("INVALID_EVENT_CONTEXT", "Quantity and OccurredAt must be valid.");
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
@@ -267,18 +265,16 @@ public sealed class RentalEventProducer : IRentalEventProducer
     {
         if (payload == null)
             return Error.Validation("INVALID_PAYLOAD", "RentalItemCompletedPayload cannot be null.");
-        if (payload.RenterId == Guid.Empty)
-            return Error.Validation("INVALID_RENTER_ID", "RenterId cannot be empty.");
+        if (payload.UserId == Guid.Empty)
+            return Error.Validation("INVALID_USER_ID", "UserId cannot be empty.");
         if (payload.EquipmentListingId == Guid.Empty)
             return Error.Validation("INVALID_LISTING_ID", "EquipmentListingId cannot be empty.");
-        if (payload.EquipmentTypeId == Guid.Empty)
+        if (payload.EquipmentTypeId.HasValue && payload.EquipmentTypeId.Value == Guid.Empty)
             return Error.Validation("INVALID_TYPE_ID", "EquipmentTypeId cannot be empty.");
         if (payload.RentalOrderId == Guid.Empty)
             return Error.Validation("INVALID_ORDER_ID", "RentalOrderId cannot be empty.");
         if (payload.RentalItemId == Guid.Empty)
             return Error.Validation("INVALID_ITEM_ID", "RentalItemId cannot be empty.");
-        if (payload.Quantity <= 0 || payload.OccurredAt == default)
-            return Error.Validation("INVALID_EVENT_CONTEXT", "Quantity and OccurredAt must be valid.");
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(

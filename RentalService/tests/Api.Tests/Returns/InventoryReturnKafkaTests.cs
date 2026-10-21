@@ -79,6 +79,7 @@ public sealed class InventoryReturnKafkaTests
         Assert.Single(order.OperationReceipts, r => r.Action == RentalItem.ApplyReturnedUnitsAction);
         Assert.DoesNotContain(order.OperationReceipts, r => r.Action == RentalItem.MarkReturnedAction);
         tx.Verify(t => t.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+        producer.Verify(p => p.EnqueueApplyReturnedUnitsAsync(It.IsAny<ApplyReturnedUnitsCommandPayload>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

@@ -8,6 +8,7 @@ using Dprental.RecommendationService.Application.Services;
 using Dprental.RecommendationService.Application.Validation;
 using Dprental.RecommendationService.Domain.IRepositories;
 using Dprental.RecommendationService.Domain.Repositories;
+using Dprental.RecommendationService.Application.IServices;
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Cart;
@@ -213,6 +214,7 @@ public sealed class RentalToRecommendationE2EIntegrationTests(ITestOutputHelper 
                 recUserInterestRepo,
                 recPopularityRepo,
                 recUow,
+                Mock.Of<ISnapshotPublishingService>(),
                 NullLogger<InteractionIngestionService>.Instance);
 
             var ingestRes1 = await ingestionService.ProcessEventAsync(cr1.Message.Value, InteractionEventSource.Rental, CancellationToken.None);
