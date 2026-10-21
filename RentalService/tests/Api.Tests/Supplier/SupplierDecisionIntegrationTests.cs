@@ -378,7 +378,7 @@ public sealed class SupplierDecisionIntegrationTests
         // Trạng thái phải giữ nguyên PendingSupplierConfirmation, phiếu nhận ghi lỗi của Inventory.
         await using var verify = CreateDbContext(dbName);
         Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, (await verify.RentalItems.FirstAsync(i => i.Id == item.Id)).Status);
-        RentalOperationReceipt receipt = await verify.RentalOperationReceipts.SingleAsync(r => r.OperationId == confirm.OperationKey);
+        RentalOperationReceipt receipt = await verify.RentalOperationReceipts.SingleAsync(r => r.OperationId == confirm.OperationKey || r.InventoryOperationKey == confirm.OperationKey);
         Assert.Equal(RentalOperationReceipt.StatusFailed, receipt.Status);
         Assert.Equal("INVALID_ALLOCATION", receipt.ErrorCode);
         Assert.False(await verify.RentalOutboxMessages.AnyAsync(m => m.MessageType == "RentalItemConfirmed"));

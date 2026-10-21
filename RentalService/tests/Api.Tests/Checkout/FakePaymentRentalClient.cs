@@ -78,6 +78,16 @@ internal sealed class FakePaymentRentalClient : IPaymentRentalClient
             new CancelInvoiceResponse(request.InvoiceRef, true, DateTimeOffset.UnixEpoch, false)));
     }
 
+    public List<AcceptLatePaymentRequest> AcceptLatePaymentRequests { get; } = [];
+
+    public Task<Result<AcceptLatePaymentResponse>> AcceptLatePaymentAsync(
+        string invoiceRef, AcceptLatePaymentRequest request, CancellationToken ct = default)
+    {
+        AcceptLatePaymentRequests.Add(request);
+        return Task.FromResult(Result.Success(
+            new AcceptLatePaymentResponse(invoiceRef, "PAID", false, DateTimeOffset.UtcNow)));
+    }
+
     public List<RequestRefundRequest> RefundRequests { get; } = [];
 
     public Task<Result<RequestRefundResponse>> RequestRefundAsync(RequestRefundRequest request, CancellationToken ct = default)

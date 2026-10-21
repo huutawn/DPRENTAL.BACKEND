@@ -36,6 +36,7 @@ public sealed class OperationRecoveryWorker : BackgroundService
             "MarkAssetsHandedOver",
             "ConfirmAllocation",
             "ExtendHold",
+            "RecoveryHold",
             "ReleaseAllocation",
             RentalItem.CancelNotDeliveredAction,
             "HandoverOverdueNotice"

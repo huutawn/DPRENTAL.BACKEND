@@ -561,6 +561,19 @@ public class RentalOrder
         return Result.Success();
     }
 
+    internal void RecordPaymentReceived(string invoiceRef, string paymentRef, DateTimeOffset paidAt, DateTimeOffset utcNow)
+    {
+        InvoiceRef = invoiceRef;
+        PaymentRef = paymentRef;
+        PaymentConfirmedAt = paidAt;
+        UpdatedAt = utcNow;
+    }
+
+    internal void ClearLatePaymentFlag()
+    {
+        LatePaymentRefundRequired = false;
+    }
+
     internal void MarkAsLatePayment(string invoiceRef, string paymentRef, DateTimeOffset paidAt, DateTimeOffset utcNow)
     {
         LatePaymentRefundRequired = true;

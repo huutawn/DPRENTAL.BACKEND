@@ -115,22 +115,18 @@ public sealed record CartItemAddedPayload(
     [property: JsonPropertyName("cartItemId")] Guid CartItemId);
 
 public sealed record RentalItemPaidPayload(
-    [property: JsonPropertyName("renterId")] Guid RenterId,
+    [property: JsonPropertyName("userId")] Guid UserId,
     [property: JsonPropertyName("equipmentListingId")] Guid EquipmentListingId,
-    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
+    [property: JsonPropertyName("equipmentTypeId")] Guid? EquipmentTypeId,
     [property: JsonPropertyName("rentalOrderId")] Guid RentalOrderId,
-    [property: JsonPropertyName("rentalItemId")] Guid RentalItemId,
-    [property: JsonPropertyName("quantity")] int Quantity,
-    [property: JsonPropertyName("occurredAt"), JsonConverter(typeof(UtcIsoDateTimeOffsetConverter))] DateTimeOffset OccurredAt);
+    [property: JsonPropertyName("rentalItemId")] Guid RentalItemId);
 
 public sealed record RentalItemCompletedPayload(
-    [property: JsonPropertyName("renterId")] Guid RenterId,
+    [property: JsonPropertyName("userId")] Guid UserId,
     [property: JsonPropertyName("equipmentListingId")] Guid EquipmentListingId,
-    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
+    [property: JsonPropertyName("equipmentTypeId")] Guid? EquipmentTypeId,
     [property: JsonPropertyName("rentalOrderId")] Guid RentalOrderId,
-    [property: JsonPropertyName("rentalItemId")] Guid RentalItemId,
-    [property: JsonPropertyName("quantity")] int Quantity,
-    [property: JsonPropertyName("occurredAt"), JsonConverter(typeof(UtcIsoDateTimeOffsetConverter))] DateTimeOffset OccurredAt);
+    [property: JsonPropertyName("rentalItemId")] Guid RentalItemId);
 
 public sealed record RentalItemHandoverCompletedPayload(
     Guid RentalOrderId, Guid RentalItemId, Guid RenterId, Guid SupplierId,

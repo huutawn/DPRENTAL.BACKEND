@@ -86,6 +86,13 @@ public class RentalUnitAssignment
         Status = RentalUnitAssignmentStatus.Assigned;
     }
 
+    internal void UpdateAllocation(Guid newAssetId, Guid newAllocationId)
+    {
+        AssetId = newAssetId;
+        AllocationId = newAllocationId;
+        Status = RentalUnitAssignmentStatus.Assigned;
+    }
+
     internal void RecordHandover(
         Guid handoverRecordId,
         UnitCondition condition,

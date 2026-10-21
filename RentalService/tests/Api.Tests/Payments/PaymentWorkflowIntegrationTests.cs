@@ -395,20 +395,21 @@ public sealed class PaymentWorkflowIntegrationTests
 
         var inventoryClient = new StubInventoryClient();
         var paymentClient = new StubPaymentClient();
-        var service = CreateWorkflowService(db, inventoryClient, paymentClient, FixedNow.AddMinutes(35));
+        // OccurredAt is past cutoff (> 15 minutes after deadline) -> cannot recover, immediate refund
+        var service = CreateWorkflowService(db, inventoryClient, paymentClient, FixedNow.AddMinutes(50));
 
-        // paidAt is before deadline (FixedNow + 10m < FixedNow + 30m), but processing occurredAt and consume time are after deadline (FixedNow + 35m)
+        // paidAt is before deadline (FixedNow + 10m < FixedNow + 30m), but processing occurredAt and consume time are past cutoff (FixedNow + 50m)
         var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
             Guid.NewGuid(),
             "InvoicePaid",
             1,
             "payment-service",
             orderId.ToString("D"),
-            FixedNow.AddMinutes(35),
+            FixedNow.AddMinutes(50),
             "corr-2",
             null,
             new InvoicePaidPayload(orderId, renterId, "INV-001", "PAY-LATE-PROC", order.TotalPayableAmount, "VND", FixedNow.AddMinutes(10),
-                "LATE_REQUIRES_REFUND", FixedNow.AddMinutes(35)));
+                "LATE_REQUIRES_REFUND", FixedNow.AddMinutes(50)));
 
         var result = await service.ProcessInvoicePaidAsync(envelope);
 
@@ -435,9 +436,9 @@ public sealed class PaymentWorkflowIntegrationTests
     [Theory]
     [InlineData(-2000, 5000, true)]   // Deadline - 2s, OccurredAt = Deadline + 5s -> On-time
     [InlineData(-1, 10000, true)]     // Deadline - 1 tick (1ms/1tick earlier), OccurredAt = after -> On-time
-    [InlineData(0, -5000, false)]     // Exactly deadline, OccurredAt = before -> Late
-    [InlineData(0, 5000, false)]      // Exactly deadline, OccurredAt = after -> Late
-    [InlineData(1000, -5000, false)]  // After deadline, OccurredAt = before -> Late
+    [InlineData(0, 20 * 60 * 1000, false)]      // Exactly deadline, OccurredAt = 20m past deadline (past cutoff) -> Expired
+    [InlineData(0, 25 * 60 * 1000, false)]      // Exactly deadline, OccurredAt = 25m past deadline (past cutoff) -> Expired
+    [InlineData(1000, 20 * 60 * 1000, false)]   // After deadline, OccurredAt = past cutoff -> Expired
     public async Task ProcessInvoicePaid_DeadlineBoundaries_DeterminedStrictlyByPaidAt(
         long paidAtOffsetMs,
         long occurredAtOffsetMs,
@@ -614,6 +615,11 @@ public sealed class PaymentWorkflowIntegrationTests
         var replies = new InventoryReplySimulator(() => CreateDbContext(dbName), new TestTimeProvider(FixedNow), payment: paymentClient);
         var extendCmd = Assert.Single(await replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ExtendHold));
         Assert.True((await replies.RejectAsync(extendCmd, "HOLD_EXPIRED", "Hold on Inventory has expired.")).IsSuccess);
+
+        // Under recovery policy, a RecoveryHold (CreateHold) command is queued to attempt re-allocation
+        var recoveryCmd = Assert.Single(await replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.CreateHold));
+        // Rejecting the recovery hold triggers all-or-nothing compensation and refund
+        Assert.True((await replies.RejectAsync(recoveryCmd, "INSUFFICIENT_AVAILABILITY", "No units left.")).IsSuccess);
 
         await using var verify = CreateDbContext(dbName);
         var reloaded = await verify.RentalOrders.Include(o => o.Items).Include(o => o.OperationReceipts).FirstAsync(o => o.Id == orderId);

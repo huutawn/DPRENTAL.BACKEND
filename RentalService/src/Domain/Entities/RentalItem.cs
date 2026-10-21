@@ -232,6 +232,26 @@ public partial class RentalItem
         ArgumentNullException.ThrowIfNull(unit);
         _unitAssignments.Add(unit);
     }
+
+    public void ReassignAllocationGroup(string newAllocationGroupId, IEnumerable<InitialRentalUnitAssignmentDto> newAssignments)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(newAllocationGroupId);
+        ArgumentNullException.ThrowIfNull(newAssignments);
+
+        AllocationGroupId = newAllocationGroupId;
+        var list = newAssignments.ToList();
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (i < _unitAssignments.Count)
+            {
+                _unitAssignments[i].UpdateAllocation(list[i].AssetId, list[i].AllocationId);
+            }
+            else
+            {
+                _unitAssignments.Add(new RentalUnitAssignment(list[i].Id, Id, list[i].AssetId, list[i].AllocationId));
+            }
+        }
+    }
     public bool ContainsEvidenceMedia(Guid mediaId)
     {
         if (mediaId == Guid.Empty) return false;

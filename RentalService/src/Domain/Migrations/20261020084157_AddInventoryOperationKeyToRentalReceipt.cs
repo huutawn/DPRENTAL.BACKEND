@@ -11,19 +11,13 @@ namespace RentalService.Domain.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string>(
-                name: "InventoryOperationKey",
-                schema: "rental",
-                table: "rental_operation_receipts",
-                type: "character varying(100)",
-                maxLength: 100,
-                nullable: true);
+            migrationBuilder.Sql("""
+                ALTER TABLE rental.rental_operation_receipts
+                ADD COLUMN IF NOT EXISTS "InventoryOperationKey" character varying(100);
 
-            migrationBuilder.CreateIndex(
-                name: "IX_rental_operation_receipts_RentalOrderId_InventoryOperationK~",
-                schema: "rental",
-                table: "rental_operation_receipts",
-                columns: new[] { "RentalOrderId", "InventoryOperationKey" });
+                CREATE INDEX IF NOT EXISTS "IX_rental_operation_receipts_RentalOrderId_InventoryOperationK~"
+                ON rental.rental_operation_receipts ("RentalOrderId", "InventoryOperationKey");
+                """);
 
             // Backfill only provider keys that can be proven from the persisted request or command outbox.
             migrationBuilder.Sql("""
