@@ -12,6 +12,9 @@ public static partial class CheckoutRequestValidator
     private const string InvalidLength = "INVALID_LENGTH";
     private const string InvalidFormat = "INVALID_FORMAT";
     private const string Duplicate = "DUPLICATE";
+
+    /// <summary>Độ dài tối đa của ghi chú giao hàng, lúc checkout và khi sửa sau khi đặt.</summary>
+    public const int MaxDeliveryNoteLength = 500;
     private const string Conflicting = "CONFLICTING";
 
     [GeneratedRegex(@"^(0|\+84)[0-9]{9}$")]
@@ -129,9 +132,9 @@ public static partial class CheckoutRequestValidator
             errors.Add(new("addressId", InvalidFormat, "Mã địa chỉ không hợp lệ."));
         }
 
-        if (request.DeliveryNote is not null && request.DeliveryNote.Trim().Length > 500)
+        if (request.DeliveryNote is not null && request.DeliveryNote.Trim().Length > MaxDeliveryNoteLength)
         {
-            errors.Add(new("deliveryNote", InvalidLength, "Ghi chú tối đa 500 ký tự."));
+            errors.Add(new("deliveryNote", InvalidLength, $"Ghi chú tối đa {MaxDeliveryNoteLength} ký tự."));
         }
     }
 
@@ -145,9 +148,9 @@ public static partial class CheckoutRequestValidator
 
         ValidateAddress(delivery.Province, delivery.AddressDetail, delivery.RecipientName, delivery.RecipientPhone, "delivery.", errors);
 
-        if (delivery.Note is not null && delivery.Note.Trim().Length > 500)
+        if (delivery.Note is not null && delivery.Note.Trim().Length > MaxDeliveryNoteLength)
         {
-            errors.Add(new("delivery.note", InvalidLength, "Ghi chú tối đa 500 ký tự."));
+            errors.Add(new("delivery.note", InvalidLength, $"Ghi chú tối đa {MaxDeliveryNoteLength} ký tự."));
         }
     }
 

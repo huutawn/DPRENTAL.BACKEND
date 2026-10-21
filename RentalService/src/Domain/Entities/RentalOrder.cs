@@ -470,6 +470,13 @@ public class RentalOrder
         _operationReceipts.Add(receipt);
     }
 
+    /// <summary>Gán ghi chú giao hàng mới (null là xóa). Kiểm tra quyền và thời điểm được sửa nằm ở Application.</summary>
+    public void UpdateDeliveryNote(string? note, DateTimeOffset utcNow)
+    {
+        DeliveryNote = note;
+        RecordReadModelUpdate(utcNow);
+    }
+
     internal void RecordReadModelUpdate(DateTimeOffset utcNow)
     {
         Version++;

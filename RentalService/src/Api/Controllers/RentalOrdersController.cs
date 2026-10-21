@@ -20,6 +20,7 @@ namespace Dprental.RentalService.Api.Controllers;
 public sealed class RentalOrdersController(
     IRenterOrderQueryService orders,
     IRenterOrderCancellationService cancellation,
+    IRenterDeliveryNoteService deliveryNotes,
     IRentalCallerContext callerContext) : ControllerBase
 {
     /// <summary>
@@ -109,6 +110,37 @@ public sealed class RentalOrdersController(
         CancellationToken cancellationToken = default)
     {
         Result<RenterOrderDetailResponse> result = await orders.GetMyOrderAsync(orderId, callerContext, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : this.ToProblem(result.Error);
+    }
+
+    /// <summary>
+    /// Sửa ghi chú giao hàng cho nhà cung cấp, trước khi máy được bàn giao.
+    /// </summary>
+    /// <param name="orderId">Mã định danh đơn hàng.</param>
+    /// <param name="request">Ghi chú mới; null hoặc rỗng là xóa ghi chú.</param>
+    /// <param name="cancellationToken">Token hủy yêu cầu.</param>
+    /// <response code="200">Đã lưu ghi chú; trả về thông tin giao hàng của đơn.</response>
+    /// <response code="400">Ghi chú quá 500 ký tự (Order.InvalidDeliveryNote).</response>
+    /// <response code="401">Người dùng chưa được xác thực.</response>
+    /// <response code="403">Người gọi không phải tài khoản cá nhân có quyền Renter.</response>
+    /// <response code="404">Không tìm thấy đơn của người gọi (Order.NotFound).</response>
+    /// <response code="409">Máy đã được bàn giao hoặc đơn đã kết thúc (Order.DeliveryNoteLocked), hoặc đơn vừa được cập nhật (Order.ConcurrencyConflict).</response>
+    /// <returns>Thông tin giao hàng sau khi sửa.</returns>
+    [HttpPatch("{orderId:guid}/delivery-note")]
+    [Consumes("application/json")]
+    [ProducesResponseType(typeof(OrderDeliveryResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> UpdateDeliveryNote(
+        [FromRoute] Guid orderId,
+        [FromBody] UpdateDeliveryNoteRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        Result<OrderDeliveryResponse> result = await deliveryNotes.UpdateDeliveryNoteAsync(
+            orderId, request, callerContext, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : this.ToProblem(result.Error);
     }
 }

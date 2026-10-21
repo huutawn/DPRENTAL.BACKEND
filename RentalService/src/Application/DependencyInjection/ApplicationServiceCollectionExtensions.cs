@@ -75,6 +75,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IRenterOrderCancellationService, RenterOrderCancellationService>();
         services.AddScoped<ISupplierSubOrderQueryService, SupplierSubOrderQueryService>();
         services.AddScoped<IAdminOrderQueryService, AdminOrderQueryService>();
+        services.AddScoped<IRenterDeliveryNoteService, RenterDeliveryNoteService>();
 
         // Returns
         services.AddScoped<IReturnService, ReturnService>();
