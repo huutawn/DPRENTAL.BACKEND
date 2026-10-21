@@ -126,6 +126,7 @@ Gateway là điểm vào công khai tại `http://localhost:5050`:
     - `GET/POST /api/v1/inventory/{everything}`: được proxy nguyên đường dẫn tới InventoryService (scheme `InventoryBearer` với audience isolation).
     - `GET/POST /api/v1/rental/{everything}`: được proxy nguyên đường dẫn tới RentalService (Bearer forwarding, bao gồm `/api/v1/rental/me/calendar`).
     - `/rental/swagger/v1/swagger.json`: OpenAPI schema của RentalService (AllowAnonymous).
+    - `/payment/swagger/v1/swagger.json`: OpenAPI schema của PaymentService (AllowAnonymous), chọn PaymentService trong menu Swagger UI.
 
 API key là credential dùng chung cho các API nội bộ, dùng header `X-Api-Key` (sử dụng cùng giá trị bí mật với `Auth:AdminBootstrap:CreationKey`). Gateway cho bốn route nội bộ của MediaService (`verify`, metadata, `access`, `visibility`) đi qua mà không yêu cầu Bearer token, chuyển tiếp `X-Api-Key` tới MediaService và loại bỏ header này khỏi các route khác. MediaService tự kiểm tra key trực tiếp, nên gọi thẳng trong mạng nội bộ không bỏ qua xác thực.
 
