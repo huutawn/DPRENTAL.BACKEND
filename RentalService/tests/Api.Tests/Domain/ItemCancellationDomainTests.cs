@@ -214,6 +214,28 @@ public sealed class ItemCancellationDomainTests
     }
 
     [Fact]
+    public void OrderStatusPolicy_WhenAllItemsExpireWithoutHandover_RollsUpToExpired()
+    {
+        var order = CreateTwoItemOrder(RentalItemStatus.Expired, RentalItemStatus.Expired);
+        typeof(RentalOrder).GetProperty(nameof(RentalOrder.Status))!.SetValue(order, RentalOrderStatus.AwaitingHandover);
+
+        RentalOrderStatusPolicy.Apply(order, FixedNow, "op-rollup-handover-expired");
+
+        Assert.Equal(RentalOrderStatus.Expired, order.Status);
+    }
+
+    [Fact]
+    public void OrderStatusPolicy_WhenOneItemExpiresButAnotherAwaitsHandover_StaysAwaitingHandover()
+    {
+        var order = CreateTwoItemOrder(RentalItemStatus.Expired, RentalItemStatus.AwaitingHandover);
+        typeof(RentalOrder).GetProperty(nameof(RentalOrder.Status))!.SetValue(order, RentalOrderStatus.AwaitingHandover);
+
+        RentalOrderStatusPolicy.Apply(order, FixedNow, "op-rollup-partial-handover-expired");
+
+        Assert.Equal(RentalOrderStatus.AwaitingHandover, order.Status);
+    }
+
+    [Fact]
     public void OrderStatusPolicy_WhenOneInRentalAndOneCancelled_RollsUpToInRental()
     {
         var order = CreateTwoItemOrder(RentalItemStatus.InRental, RentalItemStatus.Cancelled);
@@ -247,7 +269,7 @@ public sealed class ItemCancellationDomainTests
     }
 
     [Fact]
-    public void HandoverOverdue_And_AutoCancellable_Milestones_AreCalculatedProperly()
+    public void HandoverOverdue_And_AutoExpiry_Milestones_AreCalculatedProperly()
     {
         var order = CreateOrderWithStatus(RentalItemStatus.AwaitingHandover);
         var item = order.Items.Single();
@@ -257,14 +279,13 @@ public sealed class ItemCancellationDomainTests
         DateTimeOffset beforeOverdue = new(2026, 10, 22, 23, 59, 59, TimeSpan.FromHours(7));
         DateTimeOffset atOverdue = new(2026, 10, 23, 0, 0, 0, TimeSpan.FromHours(7));
 
-        Assert.False(item.IsHandoverOverdue(beforeOverdue));
-        Assert.True(item.IsHandoverOverdue(atOverdue));
+        Assert.False(HandoverDeadlinePolicy.IsNoticeDue(item, beforeOverdue));
+        Assert.True(HandoverDeadlinePolicy.IsNoticeDue(item, atOverdue));
 
-        // Tự hủy: 00:00 VN ngày 28/10/2026 (sau ngày kết thúc 27/10)
-        DateTimeOffset beforeAutoCancel = new(2026, 10, 27, 23, 59, 59, TimeSpan.FromHours(7));
-        DateTimeOffset atAutoCancel = new(2026, 10, 28, 0, 0, 0, TimeSpan.FromHours(7));
+        DateTimeOffset beforeAutoExpire = new(2026, 10, 23, 23, 59, 59, TimeSpan.FromHours(7));
+        DateTimeOffset atAutoExpire = new(2026, 10, 24, 0, 0, 0, TimeSpan.FromHours(7));
 
-        Assert.False(item.IsHandoverAutoCancellable(beforeAutoCancel));
-        Assert.True(item.IsHandoverAutoCancellable(atAutoCancel));
+        Assert.False(HandoverDeadlinePolicy.IsAutoExpireDue(item, beforeAutoExpire, 24));
+        Assert.True(HandoverDeadlinePolicy.IsAutoExpireDue(item, atAutoExpire, 24));
     }
 }

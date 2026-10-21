@@ -81,6 +81,8 @@ public partial class RentalItem
 
     public RentalItemStatus Status { get; private set; }
 
+    internal void SetStatus(RentalItemStatus status) => Status = status;
+
     [Required]
     [MaxLength(64)]
     public string AllocationGroupId { get; private set; } = string.Empty;
@@ -434,6 +436,30 @@ public partial class RentalItem
             ActorRole.System,
             reason,
             expiredAt,
+            operationId));
+    }
+
+    internal void ApplyCancelled(
+        DateTimeOffset cancelledAt,
+        string operationId,
+        string reason,
+        Guid? actorId = null,
+        ActorRole actorRole = ActorRole.System)
+    {
+        string from = Status.ToString();
+        Status = RentalItemStatus.Cancelled;
+
+        RentalOrder?.AddStateTransition(new RentalStateTransition(
+            Guid.NewGuid(),
+            RentalOrderId,
+            Id,
+            from,
+            RentalItemStatus.Cancelled.ToString(),
+            "Cancellation",
+            actorId,
+            actorRole,
+            reason,
+            cancelledAt,
             operationId));
     }
 

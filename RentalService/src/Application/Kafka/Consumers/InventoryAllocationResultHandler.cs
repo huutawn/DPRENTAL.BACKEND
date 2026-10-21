@@ -972,6 +972,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
 
                 RentalOrderStatusPolicy.Apply(order, utcNow, operationKey);
                 order.RecordReadModelUpdate(utcNow);
+
             }
 
             receipt.MarkSucceeded(utcNow, payloadElement.GetRawText());

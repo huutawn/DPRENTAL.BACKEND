@@ -45,8 +45,11 @@ public sealed class RentalSubOrderMigrationPostgreSqlTests
             {
                 // Chỉ lên tới migration đơn con rồi lùi lại: migration hoàn tiền trễ đứng sau cố ý chặn lùi.
                 await context.GetService<IMigrator>().MigrateAsync(SubOrdersMigration);
-                context.RentalOrders.Add(order);
-                await context.SaveChangesAsync();
+                await using (var seed = new HistoricalReceiptSeedDbContext(options))
+                {
+                    seed.RentalOrders.Add(order);
+                    await seed.SaveChangesAsync();
+                }
 
                 // Quay về trước migration: đơn và dòng còn nguyên, đơn con bị xóa.
                 await context.GetService<IMigrator>().MigrateAsync(MigrationBeforeSubOrders);

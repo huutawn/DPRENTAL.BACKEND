@@ -73,10 +73,10 @@ public sealed class RentalItemPickupLocationSnapshotMigrationPostgreSqlTests
                     [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
                     TestListingSnapshots.Default));
 
-            await using (RentalServiceDbContext context = new(options))
+            await using (var seed = new HistoricalReceiptSeedDbContext(options))
             {
-                context.RentalOrders.Add(order);
-                await context.SaveChangesAsync();
+                seed.RentalOrders.Add(order);
+                await seed.SaveChangesAsync();
             }
 
             // 3. Đọc lại từ database và kiểm tra snapshot được lưu nguyên vẹn

@@ -70,6 +70,7 @@ public static class ApplicationServiceCollectionExtensions
 
         // Orders
         services.AddScoped<IRenterOrderQueryService, RenterOrderQueryService>();
+        services.AddScoped<IRenterOrderCancellationService, RenterOrderCancellationService>();
         services.AddScoped<ISupplierSubOrderQueryService, SupplierSubOrderQueryService>();
         services.AddScoped<IAdminOrderQueryService, AdminOrderQueryService>();
 
@@ -120,7 +121,10 @@ public static class ApplicationServiceCollectionExtensions
 
         // Handover Overdue & Auto-Cancellation
         services.AddOptions<HandoverOverdueOptions>()
-            .BindConfiguration(HandoverOverdueOptions.SectionName);
+            .BindConfiguration(HandoverOverdueOptions.SectionName)
+            .Validate(o => o.AutoExpireGraceHours is >= 1 and <= 168,
+                "Rental:HandoverOverdue:AutoExpireGraceHours must be between 1 and 168.")
+            .ValidateOnStart();
         services.AddScoped<IHandoverOverdueService, HandoverOverdueService>();
         services.AddHostedService<HandoverOverdueWorker>();
 

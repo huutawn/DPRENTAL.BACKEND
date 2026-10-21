@@ -34,7 +34,7 @@ public class RentalReturnMigrationPostgreSqlTests
             }
 
             // 2. Seed orders and receipts (HTTP returns pending/processing/failed, Succeeded, and Kafka returns)
-            await using (var ctx = new RentalServiceDbContext(options))
+            await using (var ctx = new HistoricalReceiptSeedDbContext(options))
             {
                 var order = PostgresTestDatabaseHelper.CreateOrderWithItem(
                     orderId, itemId, supplierId, 1, FixedNow.AddDays(-2));

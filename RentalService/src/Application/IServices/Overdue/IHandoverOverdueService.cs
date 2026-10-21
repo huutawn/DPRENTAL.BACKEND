@@ -1,6 +1,6 @@
 namespace Dprental.RentalService.Application.IServices.Overdue;
 
-public sealed record HandoverOverdueResult(int ProcessedItems, int AutoCancelled, int NoticesSent);
+public sealed record HandoverOverdueResult(int ProcessedItems, int AutoExpired, int NoticesSent);
 
 public interface IHandoverOverdueService
 {
