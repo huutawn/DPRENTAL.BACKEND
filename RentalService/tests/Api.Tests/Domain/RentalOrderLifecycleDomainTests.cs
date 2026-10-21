@@ -285,6 +285,22 @@ public sealed class RentalOrderLifecycleDomainTests
     }
 
     [Fact]
+    public void MarkCancelled_LeavesAssignmentsAssignedUntilInventoryConfirmsRelease()
+    {
+        var order = CreateTestOrder(new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18));
+
+        order.MarkCancelled(FixedNow, "cancel-request-1", "Changed plans", order.RenterId, ActorRole.Renter);
+
+        Assert.Equal(RentalOrderStatus.Cancelled, order.Status);
+        var item = order.Items.First();
+        Assert.Equal(RentalItemStatus.Cancelled, item.Status);
+        Assert.All(item.UnitAssignments, unit => Assert.Equal(RentalUnitAssignmentStatus.Assigned, unit.Status));
+
+        item.MarkAssignmentsReleased(FixedNow.AddMinutes(1));
+        Assert.All(item.UnitAssignments, unit => Assert.Equal(RentalUnitAssignmentStatus.Released, unit.Status));
+    }
+
+    [Fact]
     public void MarkPaymentExpired_ExpiresOrderAndAllItems_AndReleasesUnits()
     {
         var order = CreateTestOrder(new DateOnly(2026, 10, 15), new DateOnly(2026, 10, 18));

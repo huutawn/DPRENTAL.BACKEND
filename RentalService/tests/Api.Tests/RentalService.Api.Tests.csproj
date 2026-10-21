@@ -20,18 +20,10 @@
     <ProjectReference Include="../../src/Api/RentalService.Api.csproj" />
     <ProjectReference Include="../../src/Application/RentalService.Application.csproj" />
     <ProjectReference Include="../../src/Domain/RentalService.Domain.csproj" />
+    <ProjectReference Include="../../../../RecommendationService/RecommendationService/src/Application/RecommendationService.Application.csproj" Condition="Exists('../../../../RecommendationService/RecommendationService/src/Application/RecommendationService.Application.csproj')" />
+    <ProjectReference Include="../../../../RecommendationService/RecommendationService/src/Domain/RecommendationService.Domain.csproj" Condition="Exists('../../../../RecommendationService/RecommendationService/src/Domain/RecommendationService.Domain.csproj')" />
   </ItemGroup>
-  <!-- Test E2E Rental -> Recommendation cần code Recommendation đặt cạnh repo (D:\RecommendationService).
-       Không có thư mục đó thì bỏ file test E2E ra khỏi build, coi như skip. -->
-  <PropertyGroup>
-    <RecommendationServiceSrc>$(MSBuildThisFileDirectory)../../../../RecommendationService/RecommendationService/src/</RecommendationServiceSrc>
-    <HasRecommendationService Condition="Exists('$(RecommendationServiceSrc)Application/RecommendationService.Application.csproj')">true</HasRecommendationService>
-  </PropertyGroup>
-  <ItemGroup Condition="'$(HasRecommendationService)' == 'true'">
-    <ProjectReference Include="$(RecommendationServiceSrc)Application/RecommendationService.Application.csproj" />
-    <ProjectReference Include="$(RecommendationServiceSrc)Domain/RecommendationService.Domain.csproj" />
-  </ItemGroup>
-  <ItemGroup Condition="'$(HasRecommendationService)' != 'true'">
+  <ItemGroup Condition="!Exists('../../../../RecommendationService/RecommendationService/src/Application/RecommendationService.Application.csproj') Or !Exists('../../../../RecommendationService/RecommendationService/src/Domain/RecommendationService.Domain.csproj')">
     <Compile Remove="Integration/RentalToRecommendationE2EIntegrationTests.cs" />
   </ItemGroup>
 </Project>

@@ -40,7 +40,8 @@ public interface IRentalOrderRepository
         Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
 
     Task<IReadOnlyList<Guid>> GetHandoverOverdueOrderIdsAsync(
-        DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
+        DateOnly todayInVietnam, DateOnly autoExpireStartBefore, int batchSize,
+        CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
 
     Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(

@@ -599,15 +599,14 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
     }
 
     public async Task<IReadOnlyList<Guid>> GetHandoverOverdueOrderIdsAsync(
-        DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
+        DateOnly todayInVietnam, DateOnly autoExpireStartBefore, int batchSize,
+        CancellationToken cancellationToken = default)
     {
-        DateOnly todayVn = RentalItem.TodayInVietnam(utcNow);
-
         return await _dbContext.RentalItems
             .AsNoTracking()
             .Where(i => i.Status == RentalItemStatus.AwaitingHandover
-                     && i.ExpectedStartDate < todayVn
-                     && (i.ExpectedEndDate < todayVn ||
+                     && i.ExpectedStartDate < todayInVietnam
+                     && (i.ExpectedStartDate < autoExpireStartBefore ||
                          !i.RentalOrder!.OperationReceipts.Any(r =>
                              r.Action == "HandoverOverdueNotice" && r.TargetItemId == i.Id)))
             .GroupBy(i => i.RentalOrderId)

@@ -119,7 +119,7 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
             Guid itemNormalId = Guid.NewGuid();
 
             // 2. Seed data before the late-refund migration
-            await using (var ctx = new LegacySchemaRentalServiceDbContext(options))
+            await using (var ctx = new HistoricalReceiptSeedDbContext(options))
             {
                 var lateOrder = CreateLateOrder(orderLateId, renterId, itemLateId);
                 lateOrder.MarkPaymentExpired(FixedNow.AddMinutes(-10), "op-expire");
@@ -727,6 +727,7 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
         public Task<Result<ReleaseAllocationResponse>> ReleaseAllocationAsync(string allocationGroupId, ReleaseAllocationRequest request, CancellationToken ct = default) =>
             Task.FromResult(Result.Success(new ReleaseAllocationResponse("group-1", request.OperationKey, allocationGroupId, FixedNow, false)));
 
+        public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotImplementedException();
@@ -744,6 +745,7 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
 
     private sealed class DummyExecutor : IRentalOperationExecutor
     {
+        public Task<Result<Dprental.RentalService.Application.DTOs.Orders.CancelOrderResponse>> ExecuteRenterCancelOrderAsync(Guid orderId, Guid renterId, string? reason, string idempotencyKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result> ExecuteExtendHoldAsync(Guid orderId, Guid itemId, string operationKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result<SupplierDecisionResponse>> ExecuteSupplierAcceptAsync(Guid orderId, Guid itemId, Guid supplierId, string idempotencyKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result<SupplierDecisionResponse>> ExecuteSupplierRejectAsync(Guid orderId, Guid itemId, Guid supplierId, string reason, string? note, string idempotencyKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();

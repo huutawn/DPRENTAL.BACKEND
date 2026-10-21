@@ -737,11 +737,12 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 RentalOrderStatusPolicy.Apply(order, utcNow, operationKey);
                 order.RecordReadModelUpdate(utcNow);
 
+                // Register the new handover record as Added before the outbox writer
+                // can flush the same unit of work.
+                await _orderRepository.UpdateAsync(order, cancellationToken);
+
                 if (item.HandoverRecord is { } handover)
                 {
-                    // Đánh dấu HandoverRecord mới là Added trước khi ghi outbox: ghi outbox có thể lưu cả context.
-                    await _orderRepository.UpdateAsync(order, cancellationToken);
-
                     var handoverPayload = new RentalItemHandoverCompletedPayload(
                         order.Id, item.Id, order.RenterId, item.SupplierId,
                         item.EquipmentListingId, item.Quantity, handover.Id,

@@ -41,22 +41,17 @@ public sealed class RentalSubOrderMigrationPostgreSqlTests
                 OrderTestData.Line(SupplierBinh, "Máy xúc CAT 320", "Máy xúc", "Caterpillar", 1, 3_000_000m, 20_000_000m),
                 OrderTestData.Line(SupplierBinh, "Máy đầm cóc Mikasa", "Máy đầm", "Mikasa", 1, 300_000m, 2_000_000m));
 
-            // Chỉ lên tới migration đơn con rồi lùi lại: migration hoàn tiền trễ đứng sau cố ý chặn lùi.
             await using (RentalServiceDbContext context = new(options))
             {
+                // Chỉ lên tới migration đơn con rồi lùi lại: migration hoàn tiền trễ đứng sau cố ý chặn lùi.
                 await context.GetService<IMigrator>().MigrateAsync(SubOrdersMigration);
-            }
+                await using (var seed = new HistoricalReceiptSeedDbContext(options))
+                {
+                    seed.RentalOrders.Add(order);
+                    await seed.SaveChangesAsync();
+                }
 
-            // Database đang ở migration cũ nên ghi bằng context bỏ các cột mới hơn.
-            await using (LegacySchemaRentalServiceDbContext context = new(options))
-            {
-                context.RentalOrders.Add(order);
-                await context.SaveChangesAsync();
-            }
-
-            // Quay về trước migration: đơn và dòng còn nguyên, đơn con bị xóa.
-            await using (RentalServiceDbContext context = new(options))
-            {
+                // Quay về trước migration: đơn và dòng còn nguyên, đơn con bị xóa.
                 await context.GetService<IMigrator>().MigrateAsync(MigrationBeforeSubOrders);
             }
 

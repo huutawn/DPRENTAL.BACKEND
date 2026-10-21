@@ -82,18 +82,19 @@ public sealed class ReturnTests : IAsyncLifetime
     private ReturnService Service(RentalServiceDbContext db, IRentalMediaClient? media = null, IConfiguration? configuration = null)
     {
         var outbox = new OutboxRepository(db);
-        configuration ??= Configuration();
-        var kafkaOptions = Microsoft.Extensions.Options.Options.Create(new KafkaOptions
-        {
-            Enabled = true,
-            RentalEventsTopic = configuration["Kafka:RentalEventsTopic"] ?? new KafkaOptions().RentalEventsTopic
-        });
-        // Producer thật ghi lệnh ApplyReturnedUnits và sự kiện RentalUnitsReturned vào Outbox cùng transaction với biên bản trả máy.
-        var inventoryCommands = new InventoryCommandProducer(outbox, kafkaOptions, _clock);
-        var rentalEvents = new RentalEventProducer(new KafkaOutboxWriter(outbox), kafkaOptions, _clock);
+        IConfiguration settings = configuration ?? Configuration();
+        // Producer thật ghi lệnh ApplyReturnedUnits vào Outbox cùng transaction với biên bản trả máy.
+        var inventoryCommands = new InventoryCommandProducer(
+            outbox, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), _clock);
         return new(
             new RentalOrderRepository(db), new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
-            db, media ?? Mock.Of<IRentalMediaClient>(), _clock, rentalEvents, configuration, inventoryCommands);
+            db, media ?? Mock.Of<IRentalMediaClient>(), _clock,
+            new RentalEventProducer(new KafkaOutboxWriter(outbox), Options.Create(new KafkaOptions
+            {
+                Enabled = true,
+                RentalEventsTopic = settings["Kafka:RentalEventsTopic"] ?? KafkaContractSpec.Topics.RentalEvents
+            }), _clock),
+            settings, inventoryCommands);
     }
     private async Task<RentalItem> SeedAsync(int quantity = 2)
     {
@@ -252,14 +253,14 @@ public sealed class ReturnTests : IAsyncLifetime
         var request = Request(item.UnitAssignments.First().Id);
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            // PostgreSQL rejects this topic when the outbox row is inserted; the whole return transaction must roll back.
+            // PostgreSQL rejects this value; the complete SaveChanges transaction must roll back.
             ["Kafka:RentalEventsTopic"] = new string('x', 257)
         }).Build();
         await using (var db = NewDb())
         {
-            // The outbox row is written with a direct SQL insert inside the transaction, so Npgsql surfaces PostgresException.
-            await Assert.ThrowsAsync<PostgresException>(() => Service(db, configuration: configuration)
+            var error = await Assert.ThrowsAsync<PostgresException>(() => Service(db, configuration: configuration)
                 .RecordReturnAsync(item.Id, Caller(item.SupplierId), request, "rollback"));
+            Assert.Equal("22001", error.SqlState);
         }
         await using (var db = NewDb())
         {
