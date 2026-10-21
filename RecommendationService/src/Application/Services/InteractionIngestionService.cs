@@ -64,7 +64,10 @@ public sealed class InteractionIngestionService : IInteractionIngestionService
         var payload = root.GetProperty("payload");
 
         Guid? userId = null;
-        if (payload.TryGetProperty("userId", out var userProp) && userProp.ValueKind == JsonValueKind.String)
+        JsonElement userProp = payload.TryGetProperty("renterId", out var renterProp)
+            ? renterProp
+            : payload.TryGetProperty("userId", out var legacyUserProp) ? legacyUserProp : default;
+        if (userProp.ValueKind == JsonValueKind.String)
         {
             if (Guid.TryParse(userProp.GetString(), out var parsedUser))
             {

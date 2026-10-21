@@ -37,7 +37,6 @@
     "payload": {
       "type": "object",
       "required": [
-        "userId",
         "equipmentListingId",
         "equipmentTypeId",
         "rentalOrderId",
@@ -45,9 +44,6 @@
       ],
       "additionalProperties": false,
       "properties": {
-        "userId": {
-          "$ref": "#/$defs/nonNilUuid"
-        },
         "equipmentListingId": {
           "$ref": "#/$defs/nonNilUuid"
         },
@@ -59,8 +55,59 @@
         },
         "rentalItemId": {
           "$ref": "#/$defs/nonNilUuid"
+        },
+        "userId": {
+          "$ref": "#/$defs/nonNilUuid"
+        },
+        "renterId": {
+          "$ref": "#/$defs/nonNilUuid"
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "occurredAt": {
+          "$ref": "#/$defs/utcIso8601Timestamp"
         }
-      }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "userId"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "renterId"
+                ]
+              },
+              {
+                "required": [
+                  "quantity"
+                ]
+              },
+              {
+                "required": [
+                  "occurredAt"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "renterId",
+            "quantity",
+            "occurredAt"
+          ],
+          "not": {
+            "required": [
+              "userId"
+            ]
+          }
+        }
+      ]
     }
   },
   "$defs": {
@@ -75,7 +122,10 @@
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
     },
     "nullableCorrelationId": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "minLength": 1
     }
   }

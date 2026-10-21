@@ -269,4 +269,32 @@ public sealed class EventSchemaValidatorTests
         Assert.Equal(EventValidationClassification.Invalid, result.Classification);
         Assert.NotNull(result.ErrorReason);
     }
+
+    [Theory]
+    [InlineData("RentalItemPaid")]
+    [InlineData("RentalItemCompleted")]
+    public void RentalLifecycleSignal_WithRenterIdAndBusinessContext_IsValid(string messageType)
+    {
+        string json = $$"""
+        {
+            "messageId": "11111111-1111-4111-8111-111111111111",
+            "messageType": "{{messageType}}",
+            "version": 1,
+            "producer": "RentalService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "renterId": "22222222-2222-4222-8222-222222222222",
+                "equipmentListingId": "33333333-3333-4333-8333-333333333333",
+                "equipmentTypeId": "44444444-4444-4444-8444-444444444444",
+                "rentalOrderId": "55555555-5555-4555-8555-555555555555",
+                "rentalItemId": "66666666-6666-4666-8666-666666666666",
+                "quantity": 2,
+                "occurredAt": "2026-10-19T10:00:00Z"
+            }
+        }
+        """;
+
+        var result = _validator.Validate(json, InteractionEventSource.Rental);
+        Assert.Equal(EventValidationClassification.Valid, result.Classification);
+    }
 }
