@@ -98,8 +98,6 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
     /// <summary>Khi chạy qua DI chỉ có một Inventory client: câu hỏi về Listing và lịch trống chuyển sang bản giả này.</summary>
     public FakeInventoryListingClient? Listings { get; set; }
 
-    public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) =>
-        Listings?.GetListingRentalSnapshotAsync(listingId, ct) ?? throw new NotSupportedException();
 
     public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) =>
         Listings?.CheckListingAvailabilityAsync(request, ct) ?? throw new NotSupportedException();

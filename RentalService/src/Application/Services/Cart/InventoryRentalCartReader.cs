@@ -16,30 +16,15 @@ public sealed class InventoryRentalCartReader(IInventoryRentalClient inventory) 
 {
     public async Task<Guid?> GetOwnerIdAsync(Guid equipmentListingId, CancellationToken cancellationToken = default)
     {
-        Result<ListingRentalSnapshotDto> result = await inventory.GetListingRentalSnapshotAsync(
-            equipmentListingId, cancellationToken);
-
-        if (result.IsFailure)
-        {
-            if (result.Error.Type == ErrorType.NotFound) return null;
-            throw DependencyFailure(result.Error);
-        }
-
-        return result.Value.OwnerUserId == Guid.Empty ? null : result.Value.OwnerUserId;
+        ListingRentalSnapshotDto? listing = await ReadListingAsync(equipmentListingId, cancellationToken);
+        return listing is null || listing.OwnerUserId == Guid.Empty ? null : listing.OwnerUserId;
     }
 
     public async Task<RentalListingSnapshot?> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default)
     {
-        Result<ListingRentalSnapshotDto> result = await inventory.GetListingRentalSnapshotAsync(
-            listingId, cancellationToken);
+        ListingRentalSnapshotDto? snapshot = await ReadListingAsync(listingId, cancellationToken);
+        if (snapshot is null) return null;
 
-        if (result.IsFailure)
-        {
-            if (result.Error.Type == ErrorType.NotFound) return null;
-            throw DependencyFailure(result.Error);
-        }
-
-        ListingRentalSnapshotDto snapshot = result.Value;
         bool active = string.Equals(snapshot.Status, "Active", StringComparison.OrdinalIgnoreCase);
 
         // Inventory không có phiên bản giá: lấy chính giá thuê làm phiên bản, giá đổi thì phiên bản đổi.
@@ -68,6 +53,28 @@ public sealed class InventoryRentalCartReader(IInventoryRentalClient inventory) 
 
         if (result.IsFailure) throw DependencyFailure(result.Error);
         return result.Value.AvailableQuantity;
+    }
+
+    /// <summary>
+    /// Đọc một Listing qua API batch của Inventory (danh sách chỉ có một mã). Listing nằm trong
+    /// <c>missingIds</c> thì trả null, như không tìm thấy.
+    /// </summary>
+    private async Task<ListingRentalSnapshotDto?> ReadListingAsync(Guid listingId, CancellationToken cancellationToken)
+    {
+        // Inventory từ chối mã rỗng (400); coi như không tìm thấy để giỏ báo đúng lỗi của mình.
+        if (listingId == Guid.Empty) return null;
+
+        Result<ListingRentalSnapshotsResponse> result = await inventory.GetListingRentalSnapshotsAsync(
+            new ListingRentalSnapshotsRequest([listingId]), cancellationToken);
+
+        if (result.IsFailure) throw DependencyFailure(result.Error);
+
+        ListingRentalSnapshotsResponse response = result.Value;
+        if (response.MissingIds?.Contains(listingId) == true) return null;
+
+        ListingRentalSnapshotDto? listing = response.Items?.SingleOrDefault(i => i?.Id == listingId);
+        return listing ?? throw DependencyFailure(Error.Failure(
+            "Inventory.InvalidBatchResponse", "Inventory không trả Listing đã hỏi trong items lẫn missingIds."));
     }
 
     private static InvalidOperationException DependencyFailure(Error error) =>
