@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Dprental.InventoryService.Application.DTOs.Listings;
@@ -16,5 +17,9 @@ public sealed record EquipmentListingBatchItemResponse(
     [property: JsonPropertyName("currency")] string Currency,
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("depositAmount")] decimal DepositAmount,
+    [property: JsonPropertyName("brandId")] Guid BrandId,
+    [property: JsonPropertyName("model")] string Model,
+    [property: JsonPropertyName("specSchemaVersion")] int SpecSchemaVersion,
+    [property: JsonPropertyName("specValues")] JsonElement SpecValues,
     [property: JsonPropertyName("warehouse")] EquipmentListingBatchWarehouseDto? Warehouse = null
 );

@@ -65,6 +65,10 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
                 l.Currency,
                 l.Status,
                 l.DepositAmount,
+                l.BrandId,
+                l.Model,
+                l.SchemaVersion,
+                l.SpecValues,
                 l.Warehouse != null ? new EquipmentListingBatchWarehouse(
                     l.Warehouse.AddressDetail,
                     l.Warehouse.ProvinceCode,
