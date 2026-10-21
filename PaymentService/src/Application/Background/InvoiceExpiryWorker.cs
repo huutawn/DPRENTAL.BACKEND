@@ -76,9 +76,9 @@ public sealed class InvoiceExpiryWorker : BackgroundService
     internal async Task ProcessBatchAsync(CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
-        var invoiceService = scope.ServiceProvider.GetRequiredService<IInvoiceService>();
+        var lifecycleService = scope.ServiceProvider.GetRequiredService<IInvoiceLifecycleService>();
 
-        int expiredCount = await invoiceService.ExpirePendingInvoicesBatchAsync(_batchSize, cancellationToken);
+        int expiredCount = await lifecycleService.ExpirePendingInvoicesBatchAsync(_batchSize, cancellationToken);
         if (expiredCount > 0)
         {
             _logger.LogInformation("Expired {Count} pending invoices in current batch.", expiredCount);

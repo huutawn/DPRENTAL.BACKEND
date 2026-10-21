@@ -1,54 +1,37 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
-using Dprental.PaymentService.Common;
 
 namespace Dprental.PaymentService.Domain.Entities;
 
-[Table("rental_item_settlements")]
 public sealed class RentalItemSettlementRecord
 {
-    [Key]
+
     public Guid Id { get; private set; }
-
-    [Required, MaxLength(64)]
     public string SettlementRef { get; private set; } = default!;
-
-    [Required, MaxLength(64)]
     public string OperationKey { get; private set; } = default!;
-
-    [Required] public Guid InvoiceId { get; private set; }
-    [Required] public Guid InvoiceItemId { get; private set; }
-    [Required] public Guid RentalItemId { get; private set; }
-    [Required] public Guid SupplierId { get; private set; }
-
-    [Required, MaxLength(256)]
+    public Guid InvoiceId { get; private set; }
+    public Guid InvoiceItemId { get; private set; }
+    public Guid RentalItemId { get; private set; }
+    public Guid SupplierId { get; private set; }
     public string DecisionRef { get; private set; } = default!;
-
-    [Column(TypeName = "numeric(18,0)")] public decimal RentalAmount { get; private set; }
-    [Column(TypeName = "numeric(18,0)")] public decimal DepositAmount { get; private set; }
-    [Column(TypeName = "numeric(18,0)")] public decimal FinalDeductionAmount { get; private set; }
-    [Column(TypeName = "numeric(18,0)")] public decimal DepositRefundDue { get; private set; }
-    [Column(TypeName = "numeric(5,4)")] public decimal PlatformFeeRate { get; private set; }
-    [Column(TypeName = "numeric(18,0)")] public decimal PlatformFeeAmount { get; private set; }
-    [Column(TypeName = "numeric(18,0)")] public decimal SupplierPayable { get; private set; }
-
-    [Required]
+    public decimal RentalAmount { get; private set; }
+    public decimal DepositAmount { get; private set; }
+    public decimal FinalDeductionAmount { get; private set; }
+    public decimal DepositRefundDue { get; private set; }
+    public decimal PlatformFeeRate { get; private set; }
+    public decimal PlatformFeeAmount { get; private set; }
+    public decimal SupplierPayable { get; private set; }
     public SettlementState Status { get; private set; }
-
-    [Required]
     public DateTimeOffset CreatedAt { get; private set; }
-
     public DateTimeOffset? CompletedAt { get; private set; }
+    public long Revision { get; private set; } = 1;
 
-    public List<SettlementLedgerEntry> Entries { get; private set; } = new();
-
+    public List<SettlementLedgerEntry> Entries { get; private set; } = [];
     public ManualRefundRequirement? RefundRequirement { get; private set; }
+    public SupplierPayout? Payout { get; private set; }
+
 
     private RentalItemSettlementRecord() { }
 
-    public SupplierPayout? Payout { get; private set; }
-
-    public static RentalItemSettlementRecord From(RentalItemSettlement s, Invoice invoice, DateTimeOffset now)
+    public static RentalItemSettlementRecord From(RentalItemSettlement s, Invoice invoice, SettlementState status, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(invoice);
         if (string.IsNullOrWhiteSpace(invoice.PaymentRef))
@@ -72,50 +55,23 @@ public sealed class RentalItemSettlementRecord
             PlatformFeeRate = s.PlatformFeeRate,
             PlatformFeeAmount = s.PlatformFeeAmount,
             SupplierPayable = s.SupplierPayable,
-            CreatedAt = now
+            CreatedAt = now.ToUniversalTime()
         };
 
-        // Luôn đủ 3 bút toán. FinalDeductionAmount KHÔNG phải khoản thứ tư:
-        // nó đã nằm trong SupplierPayable và đã làm giảm DepositRefundDue.
-        record.Entries.Add(SettlementLedgerEntry.Create(id, SettlementEntryType.SupplierPayable, s.SupplierPayable, now));
-        record.Entries.Add(SettlementLedgerEntry.Create(id, SettlementEntryType.PlatformFee, s.PlatformFeeAmount, now));
-        record.Entries.Add(SettlementLedgerEntry.Create(id, SettlementEntryType.DepositRefundDue, s.DepositRefundDue, now));
-
+        record.Status = status;
+        record.CompletedAt = status == SettlementState.Completed ? now.ToUniversalTime() : null;
         if (s.SupplierPayable > 0)
-        {
-            record.Payout = SupplierPayout.CreatePending(
-                id, s.RentalItemId, s.SupplierId,
-                s.SupplierPayable, invoice.Currency,
-                destinationRef: null, now);
-        }
-
-        if (s.DepositRefundDue > 0)
-        {
-            // Còn tiền cọc phải hoàn: chưa đóng tài chính, tạo đúng một yêu cầu hoàn thủ công.
-            record.Status = SettlementState.PendingManualRefund;
-            record.RefundRequirement = ManualRefundRequirement.CreatePending(
-                id, s.InvoiceId, s.RentalItemId, invoice.RenterId,
-                invoice.PaymentRef, s.DepositRefundDue, now);
-        }
-        else
-        {
-            record.Status = SettlementState.Completed;
-            record.CompletedAt = now;
-        }
-
+            record.Payout = SupplierPayout.CreatePending(id, s.RentalItemId, s.SupplierId,
+                s.SupplierPayable, invoice.Currency, destinationRef: null, now);
         return record;
     }
 
-    public Result CompleteAfterRefund(ManualRefundRequirement refund, DateTimeOffset now)
+    public void AssignCompleted(DateTimeOffset now)
     {
-        if (refund.SettlementId != Id || DepositRefundDue <= 0 ||
-            refund.Status != ManualRefundStatus.Completed)
-            return Error.Conflict("Payment.RefundNotCompleted", "Chưa xác nhận hoàn đủ tiền cọc cho settlement này.");
-
-        if (Status == SettlementState.Completed) return Result.Success();
-
         Status = SettlementState.Completed;
         CompletedAt = now.ToUniversalTime();
-        return Result.Success();
+        Revision++;
     }
+
+    public void AssignRefundRequirement(ManualRefundRequirement requirement) => RefundRequirement = requirement;
 }

@@ -1,7 +1,7 @@
 using Dprental.PaymentService.Application.DTOs.Payout;
 using Dprental.PaymentService.Application.IServices;
 using Dprental.PaymentService.Common;
-using Dprental.PaymentService.Domain.IRepository;
+using Dprental.PaymentService.Domain.IRepositories;
 
 namespace Dprental.PaymentService.Application.Services;
 

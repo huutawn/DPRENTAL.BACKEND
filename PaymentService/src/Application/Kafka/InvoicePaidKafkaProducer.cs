@@ -50,19 +50,41 @@ public sealed class InvoicePaidKafkaProducer : IInvoicePaidKafkaProducer, IDispo
         }
     }
 
-    public async Task ProduceAsync(string topic, string key, string payload, CancellationToken cancellationToken)
+    public async Task ProduceAsync(
+        string topic,
+        string key,
+        string payload,
+        IReadOnlyDictionary<string, string> headers,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(headers);
+        if (headers.Count == 0)
+        {
+            throw new ArgumentException("Kafka message must include integrity proof headers.", nameof(headers));
+        }
+
         if (!_enabled || _producer == null)
         {
             throw new InvalidOperationException("Kafka producer is disabled or not configured.");
         }
-
         var message = new Message<string, string>
         {
             Key = key,
             Value = payload,
-            Timestamp = new Timestamp(DateTime.UtcNow)
+            Timestamp = new Timestamp(DateTime.UtcNow),
+            Headers = new Headers()
         };
+
+        if (headers is not null)
+        {
+            foreach (var (k, v) in headers)
+            {
+                if (v is not null)
+                {
+                    message.Headers.Add(k, System.Text.Encoding.UTF8.GetBytes(v));
+                }
+            }
+        }
 
         var delivery = await _producer.ProduceAsync(topic, message, cancellationToken);
         if (delivery.Status != PersistenceStatus.Persisted)

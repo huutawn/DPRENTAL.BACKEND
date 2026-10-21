@@ -1,6 +1,7 @@
 using System.Net;
 using System.Diagnostics.CodeAnalysis;
 using Dprental.PaymentService.Api.Filters;
+using Dprental.PaymentService.Api.Tests.TestHelpers;
 using Dprental.PaymentService.Common;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
@@ -54,13 +55,14 @@ public sealed class CommonBoundaryTests
     [InlineData("text/plain")]
     public async Task UnexpectedException_ReturnsSafeProblemDetails(string accept)
     {
-        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
+        using WebApplicationFactory<Program> factory = new PaymentWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("environment", "Production");
                 builder.UseSetting("ConnectionStrings:Postgres",
                     "Host=localhost;Database=test;Username=test;Password=test");
                 builder.UseSetting("Security:ForwardedHeaders:KnownProxies:0", "127.0.0.1");
+                builder.UseSetting("InternalAuthentication:RentalApiKey", "dev-internal-api-key-dprental-2026");
                 builder.ConfigureLogging(logging => logging.ClearProviders());
                 builder.ConfigureTestServices(services =>
                 {
@@ -69,6 +71,7 @@ public sealed class CommonBoundaryTests
                 });
             });
         using HttpClient client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         client.DefaultRequestHeaders.Accept.ParseAdd(accept);
         using HttpResponseMessage response = await client.GetAsync("/test-boundary/throw");
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);

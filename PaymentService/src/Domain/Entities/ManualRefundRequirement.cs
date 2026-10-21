@@ -1,94 +1,66 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
-using Dprental.PaymentService.Common;
-
 namespace Dprental.PaymentService.Domain.Entities;
 
-public enum ManualRefundStatus
-{
-    PendingManualRefund = 1,
-    Completed = 2
-}
+public enum ManualRefundStatus { PendingManualRefund = 1, Completed = 2 }
+public enum ManualRefundKind { SettlementDeposit = 1, RentalRefund = 2 }
 
-[Table("manual_refund_requirements")]
 public sealed class ManualRefundRequirement
 {
-    [Key]
     public Guid Id { get; private set; }
-
-    [Required, MaxLength(64)]
-    public string RequirementRef { get; private set; } = default!;
-
-    [Required] public Guid SettlementId { get; private set; }
-    [Required] public Guid InvoiceId { get; private set; }
-    [Required] public Guid RentalItemId { get; private set; }
-    [Required] public Guid RenterId { get; private set; }
-
-    [Required, MaxLength(64)]
-    public string PaymentRef { get; private set; } = default!;
-
-    [Required, MaxLength(256)]
-    public string Reason { get; private set; } = default!;
-
-    [Required]
-    [Column(TypeName = "numeric(18,0)")]
+    public string RequirementRef { get; private set; } = string.Empty;
+    public Guid? SettlementId { get; private set; }
+    public Guid InvoiceId { get; private set; }
+    public Guid? RentalItemId { get; private set; }
+    public Guid RenterId { get; private set; }
+    public string PaymentRef { get; private set; } = string.Empty;
+    public string Reason { get; private set; } = string.Empty;
+    public string OperationKey { get; private set; } = string.Empty;
+    public ManualRefundKind Kind { get; private set; }
     public decimal Amount { get; private set; }
-
-    [Required]
     public ManualRefundStatus Status { get; private set; }
-
-    [Required]
     public DateTimeOffset CreatedAt { get; private set; }
-
     public DateTimeOffset? CompletedAt { get; private set; }
-
-    [MaxLength(256)]
+    public long Revision { get; private set; } = 1;
     public string? ExternalTransferReference { get; private set; }
-
     public Guid? CompletedBy { get; private set; }
-
-    [ForeignKey(nameof(SettlementId))]
     public RentalItemSettlementRecord? Settlement { get; private set; }
+    public List<ManualRefundItem> Items { get; private set; } = [];
 
     private ManualRefundRequirement() { }
 
-    internal static ManualRefundRequirement CreatePending(
-        Guid settlementId, Guid invoiceId, Guid rentalItemId, Guid renterId,
-        string paymentRef, decimal amount, DateTimeOffset now)
+    public static ManualRefundRequirement Create(Guid invoiceId, Guid renterId, string paymentRef,
+        string operationKey, string reason, ManualRefundKind kind, Guid? settlementId,
+        IReadOnlyList<ManualRefundItem> items, DateTimeOffset now)
     {
-        var id = Guid.NewGuid();
+        Guid id = Guid.NewGuid();
+        foreach (var item in items) item.AssignRequirement(id);
         return new ManualRefundRequirement
         {
-            Id = id,
-            RequirementRef = $"MRF-{id:N}",
-            SettlementId = settlementId,
-            InvoiceId = invoiceId,
-            RentalItemId = rentalItemId,
-            RenterId = renterId,
-            PaymentRef = paymentRef,
-            Reason = "RENTAL_DEPOSIT_REFUND",
-            Amount = amount,
-            Status = ManualRefundStatus.PendingManualRefund,
-            CreatedAt = now
+            Id = id, RequirementRef = $"MRF-{id:N}", InvoiceId = invoiceId, RenterId = renterId,
+            PaymentRef = paymentRef, OperationKey = operationKey, Reason = reason, Kind = kind,
+            SettlementId = settlementId, RentalItemId = items.Count == 1 ? items[0].RentalItemId : null,
+            Amount = items.Sum(x => x.RentalAmount + x.DepositAmount), Items = items.ToList(),
+            Status = ManualRefundStatus.PendingManualRefund, CreatedAt = now.ToUniversalTime()
         };
     }
 
-    public Result<bool> Complete(string externalTransferReference, Guid completedBy, DateTimeOffset now)
+    public void AssignCompleted(string reference, Guid adminId, DateTimeOffset now)
     {
-        if (string.IsNullOrWhiteSpace(externalTransferReference) ||
-            externalTransferReference.Trim().Length > 256 || completedBy == Guid.Empty)
-            return Error.Validation("Payment.InvalidRefundConfirmation", "Mã chuyển khoản và người xác nhận phải hợp lệ.");
-
-        var reference = externalTransferReference.Trim();
-        if (Status == ManualRefundStatus.Completed)
-        {
-            return Error.Conflict("Payment.RefundAlreadyCompleted", "Yêu cầu hoàn cọc đã được xác nhận hoàn tất.");
-        }
-
         Status = ManualRefundStatus.Completed;
         ExternalTransferReference = reference;
-        CompletedBy = completedBy;
+        CompletedBy = adminId;
         CompletedAt = now.ToUniversalTime();
-        return Result.Success(true);
+        Revision++;
     }
+}
+
+public sealed class ManualRefundItem
+{
+    public Guid RequirementId { get; private set; }
+    public Guid RentalItemId { get; private set; }
+    public decimal RentalAmount { get; private set; }
+    public decimal DepositAmount { get; private set; }
+    private ManualRefundItem() { }
+    public static ManualRefundItem Create(Guid itemId, decimal rentalAmount, decimal depositAmount) =>
+        new() { RentalItemId = itemId, RentalAmount = rentalAmount, DepositAmount = depositAmount };
+    internal void AssignRequirement(Guid id) => RequirementId = id;
 }

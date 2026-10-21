@@ -1,7 +1,7 @@
 ﻿using Dprental.PaymentService.Application.DTOs.Operations;
 using Dprental.PaymentService.Common;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Domain.IRepository;
+using Dprental.PaymentService.Domain.IRepositories;
 using Dprental.PaymentService.Application.DTOs.Invoice;
 using Dprental.PaymentService.Application.DTOs.Payout;
 using Dprental.PaymentService.Application.DTOs.Settlement;

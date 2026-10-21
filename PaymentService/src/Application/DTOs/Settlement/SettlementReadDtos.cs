@@ -21,7 +21,7 @@ namespace Dprental.PaymentService.Application.DTOs.Settlement
         SettlementSupplierView? Supplier);         // supplier, admin
 
     public sealed record ManualRefundListItem(
-        Guid RequirementId, string RequirementRef, string SettlementRef, Guid RentalItemId, Guid RenterId,
+        Guid RequirementId, string RequirementRef, string? SettlementRef, Guid? RentalItemId, Guid RenterId,
         decimal Amount, string Status, string? ExternalTransferReference,
         Guid? CompletedBy, DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt);
 }

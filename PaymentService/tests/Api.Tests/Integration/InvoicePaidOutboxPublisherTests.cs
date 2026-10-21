@@ -5,14 +5,16 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text.Json;
 using Dprental.PaymentService.Application.Background;
 using Dprental.PaymentService.Application.Kafka;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Application.Services;
+using Dprental.PaymentService.Application.IServices;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Domain.IRepository;
-using Dprental.PaymentService.Domain.Persistence;
-using Dprental.PaymentService.Domain.Repository;
+using Dprental.PaymentService.Domain.IRepositories;
+using Dprental.PaymentService.Domain.Repositories;
+using Dprental.PaymentService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -25,13 +27,34 @@ namespace Dprental.PaymentService.Api.Tests.Integration;
 public class InvoicePaidOutboxPublisherTests
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 10, 15, 10, 0, 0, TimeSpan.Zero);
+    private static readonly JsonSerializerOptions JsonOptions = JsonSerializerOptions.Web;
+
+    private static OutboxMessage CreateOutbox(string type, Guid orderId, DateTimeOffset createdAt)
+    {
+        Guid messageId = Guid.NewGuid();
+        Guid eventId = Guid.NewGuid();
+        Guid operationId = Guid.NewGuid();
+        string payload = JsonSerializer.Serialize(new
+        {
+            messageId,
+            messageType = type,
+            version = 1,
+            producer = "payment-service",
+            aggregateId = orderId.ToString("D"),
+            occurredAt = createdAt,
+            correlationId = orderId.ToString("D"),
+            causationId = (Guid?)null,
+            payload = new { rentalOrderId = orderId }
+        }, JsonOptions);
+        return OutboxMessage.Create(messageId, type, "RentalOrder", orderId.ToString("D"), payload, createdAt, eventId, operationId);
+    }
 
     private sealed class FakeKafkaProducer : IInvoicePaidKafkaProducer
     {
         public ConcurrentBag<(string Topic, string Key, string Payload)> ProducedMessages { get; } = new();
         public Func<string, string, string, Task>? OnProduce { get; set; }
 
-        public async Task ProduceAsync(string topic, string key, string payload, CancellationToken cancellationToken)
+        public async Task ProduceAsync(string topic, string key, string payload, IReadOnlyDictionary<string, string> headers, CancellationToken cancellationToken)
         {
             if (OnProduce != null)
             {
@@ -44,12 +67,15 @@ public class InvoicePaidOutboxPublisherTests
     private static (IServiceProvider Provider, FakeKafkaProducer Producer, FakeTimeProvider TimeProvider) BuildTestServices(
         string connString,
         FakeTimeProvider timeProvider,
+        ITransactionIntegrityChecker checker,
         PaymentKafkaOptions? kafkaOptions = null,
         FakeKafkaProducer? producer = null)
     {
         var services = new ServiceCollection();
         services.AddDbContext<PaymentServiceDbContext>(options => options.UseNpgsql(connString));
         services.AddScoped<IOutboxRepository, EfOutboxRepository>();
+        services.AddScoped<ITransactionJournalRepository, EfTransactionJournalRepository>();
+        services.AddSingleton(checker);
 
         var fakeProducer = producer ?? new FakeKafkaProducer();
         services.AddSingleton<IInvoicePaidKafkaProducer>(fakeProducer);
@@ -72,6 +98,31 @@ public class InvoicePaidOutboxPublisherTests
         return (services.BuildServiceProvider(), fakeProducer, timeProvider);
     }
 
+    private static TransactionJournalEntry AddConfirmedJournal(PaymentServiceDbContext ctx, OutboxMessage outbox, FinancialWorkflowHarness harness)
+    {
+        var journal = JournalEntryFactory.CreateEntry(
+            operationId: outbox.OperationId!.Value,
+            streamId: $"STREAM-{outbox.MessageId}",
+            streamType: JournalStreamTypes.Invoice,
+            version: 1,
+            eventId: outbox.EventId!.Value,
+            eventType: JournalEventTypes.InvoiceCreated,
+            amount: 1_000_000m,
+            currency: "VND",
+            status: "PAID",
+            confirmationSource: JournalConfirmationSources.System,
+            actor: "SYSTEM",
+            timestampUtc: FixedNow.AddMinutes(-5),
+            previousHash: CanonicalJournalHasher.GenesisHash,
+            encryptor: new PaymentDataEncryptor(new byte[32]),
+            outboxDigest: CanonicalJournalHasher.ComputeOutboxDigest(outbox.Payload),
+            outboxMessageId: outbox.MessageId);
+
+        harness.SignJournal(journal, FixedNow.AddMinutes(-4));
+        ctx.TransactionJournals.Add(journal);
+        return journal;
+    }
+
     private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T> where T : class
     {
         public TestOptionsMonitor(T currentValue) => CurrentValue = currentValue;
@@ -84,6 +135,7 @@ public class InvoicePaidOutboxPublisherTests
     public async Task Publisher_delivers_rental_settled_after_earlier_invoice_paid_for_same_order()
     {
         var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        await using var harness = await FinancialWorkflowHarness.AttachPaymentDatabaseAsync(connectionString);
         try
         {
             var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
@@ -92,15 +144,19 @@ public class InvoicePaidOutboxPublisherTests
             await using (var db = new PaymentServiceDbContext(options))
             {
                 await db.Database.MigrateAsync();
-                db.OutboxMessages.Add(OutboxMessage.Create(Guid.NewGuid(), "InvoicePaid", "RentalOrder",
-                    orderId.ToString("D"), "{\"messageType\":\"InvoicePaid\"}", now.AddMinutes(-1)));
-                db.OutboxMessages.Add(OutboxMessage.Create(Guid.NewGuid(), "RentalSettled", "RentalOrder",
-                    orderId.ToString("D"), "{\"messageType\":\"RentalSettled\"}", now));
+                var outbox1 = CreateOutbox("InvoicePaid", orderId, now.AddMinutes(-1));
+                var outbox2 = CreateOutbox("RentalSettled", orderId, now);
+                db.OutboxMessages.Add(outbox1);
+                db.OutboxMessages.Add(outbox2);
+                var journal1 = AddConfirmedJournal(db, outbox1, harness);
+                var journal2 = AddConfirmedJournal(db, outbox2, harness);
                 await db.SaveChangesAsync();
+                await harness.RecordJournalAttestationAsync(journal1);
+                await harness.RecordJournalAttestationAsync(journal2);
             }
 
             var clock = new FakeTimeProvider(now);
-            var (provider, producer, _) = BuildTestServices(connectionString, clock);
+            var (provider, producer, _) = BuildTestServices(connectionString, clock, harness.Checker());
             using (provider as IDisposable)
             {
                 var worker = new InvoicePaidOutboxPublisherWorker(
@@ -129,6 +185,7 @@ public class InvoicePaidOutboxPublisherTests
     public async Task ProcessPendingMessages_ClaimsAndPublishesWithOrderKey_AndMarksPublished()
     {
         var (connString, dbName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        await using var harness = await FinancialWorkflowHarness.AttachPaymentDatabaseAsync(connString);
         try
         {
             var options = PostgresTestDatabaseHelper.CreateOptions(connString);
@@ -138,18 +195,17 @@ public class InvoicePaidOutboxPublisherTests
             }
 
             var timeProvider = new FakeTimeProvider(FixedNow);
-            var (sp, fakeProducer, _) = BuildTestServices(connString, timeProvider);
+            var (sp, fakeProducer, _) = BuildTestServices(connString, timeProvider, harness.Checker());
 
             Guid orderId = Guid.NewGuid();
-            Guid msgId = Guid.NewGuid();
-            var outbox = OutboxMessage.Create(
-                msgId, "InvoicePaid", "RentalOrder", orderId.ToString("D"),
-                "{\"rentalOrderId\":\"" + orderId + "\",\"amount\":1000000}", FixedNow.AddMinutes(-5));
+            var outbox = CreateOutbox("InvoicePaid", orderId, FixedNow.AddMinutes(-5));
 
             await using (var ctx = new PaymentServiceDbContext(options))
             {
                 ctx.OutboxMessages.Add(outbox);
+                var journal = AddConfirmedJournal(ctx, outbox, harness);
                 await ctx.SaveChangesAsync();
+                await harness.RecordJournalAttestationAsync(journal);
             }
 
             var worker = new InvoicePaidOutboxPublisherWorker(
@@ -188,6 +244,7 @@ public class InvoicePaidOutboxPublisherTests
     public async Task TwoWorkersConcurrent_ClaimDisjointBatchesViaSkipLocked_WithoutConflict()
     {
         var (connString, dbName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        await using var harness = await FinancialWorkflowHarness.AttachPaymentDatabaseAsync(connString);
         try
         {
             var options = PostgresTestDatabaseHelper.CreateOptions(connString);
@@ -197,18 +254,18 @@ public class InvoicePaidOutboxPublisherTests
             }
 
             var timeProvider = new FakeTimeProvider(FixedNow);
-            var (sp, fakeProducer, _) = BuildTestServices(connString, timeProvider);
+            var (sp, fakeProducer, _) = BuildTestServices(connString, timeProvider, harness.Checker());
 
             // Seed 4 outbox messages
             for (int i = 0; i < 4; i++)
             {
                 Guid orderId = Guid.NewGuid();
-                var msg = OutboxMessage.Create(
-                    Guid.NewGuid(), "InvoicePaid", "RentalOrder", orderId.ToString("D"),
-                    "{\"orderIndex\":" + i + "}", FixedNow.AddMinutes(-10 + i));
+                var msg = CreateOutbox("InvoicePaid", orderId, FixedNow.AddMinutes(-10 + i));
                 await using var ctx = new PaymentServiceDbContext(options);
                 ctx.OutboxMessages.Add(msg);
+                    var journal = AddConfirmedJournal(ctx, msg, harness);
                 await ctx.SaveChangesAsync();
+                    await harness.RecordJournalAttestationAsync(journal);
             }
 
             var worker1 = new InvoicePaidOutboxPublisherWorker(
@@ -249,6 +306,7 @@ public class InvoicePaidOutboxPublisherTests
     public async Task BrokerFailure_IncrementsRetryAndSetsBackoff_AndExhaustedDoesNotPublishOrDelete()
     {
         var (connString, dbName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        await using var harness = await FinancialWorkflowHarness.AttachPaymentDatabaseAsync(connString);
         try
         {
             var options = PostgresTestDatabaseHelper.CreateOptions(connString);
@@ -263,17 +321,17 @@ public class InvoicePaidOutboxPublisherTests
                 OnProduce = (_, _, _) => throw new InvalidOperationException("Broker unreachable")
             };
 
-            var (sp, _, _) = BuildTestServices(connString, timeProvider, producer: fakeProducer);
+            var (sp, _, _) = BuildTestServices(connString, timeProvider, harness.Checker(), producer: fakeProducer);
 
             Guid orderId = Guid.NewGuid();
-            var outbox = OutboxMessage.Create(
-                Guid.NewGuid(), "InvoicePaid", "RentalOrder", orderId.ToString("D"),
-                "{\"payload\":\"failing\"}", FixedNow.AddMinutes(-5));
+            var outbox = CreateOutbox("InvoicePaid", orderId, FixedNow.AddMinutes(-5));
 
             await using (var ctx = new PaymentServiceDbContext(options))
             {
                 ctx.OutboxMessages.Add(outbox);
+                var journal = AddConfirmedJournal(ctx, outbox, harness);
                 await ctx.SaveChangesAsync();
+                await harness.RecordJournalAttestationAsync(journal);
             }
 
             var worker = new InvoicePaidOutboxPublisherWorker(

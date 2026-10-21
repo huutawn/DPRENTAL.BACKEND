@@ -10,8 +10,8 @@ using Dprental.PaymentService.Api.Tests.TestHelpers;
 using Dprental.PaymentService.Application.DTOs.Invoice;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Domain.Repository;
-using Dprental.PaymentService.Domain.Persistence;
+using Dprental.PaymentService.Domain.Repositories;
+using Dprental.PaymentService.Domain.Repositories;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
@@ -53,7 +53,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
             await ctx.Database.MigrateAsync();
         }
 
-        _factory = new WebApplicationFactory<Program>()
+        _factory = new PaymentWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", _connString);
@@ -63,7 +63,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
                 builder.UseSetting("Authentication:Jwt:ServiceAudience", ServiceAudience);
                 builder.UseSetting("Authentication:Jwt:ClientAudience", ClientAudience);
                 builder.UseSetting("Authentication:Jwt:JwksUri", "http://localhost/jwks");
-
+                builder.UseSetting("InternalAuthentication:RentalApiKey", PaymentWebApplicationFactory.DefaultInternalApiKey);
                 builder.ConfigureLogging(logging => logging.ClearProviders());
 
                 builder.ConfigureTestServices(services =>
@@ -93,8 +93,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
     public async Task CreateInvoice_ValidServiceToken_Returns201Created_WithContractV1()
     {
         using var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateServiceToken());
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
 
         Guid orderId = Guid.NewGuid();
         Guid renterId = Guid.NewGuid();
@@ -118,8 +117,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
     public async Task CreateInvoice_WithPlus07OffsetDeadline_HttpRoundtripAndUtcReplay_Returns201Then200()
     {
         using var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateServiceToken());
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
 
         Guid orderId = Guid.NewGuid();
         Guid renterId = Guid.NewGuid();
@@ -159,8 +157,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
     public async Task CreateInvoice_Replay_Returns200Ok_WithIsReplayTrue()
     {
         using var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateServiceToken());
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
 
         Guid orderId = Guid.NewGuid();
         var req = new CreateInvoiceRequest(
@@ -184,8 +181,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
     public async Task CreateInvoice_CallerSendingExtraTotalAmount_DoesNotAffectCalculation()
     {
         using var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateServiceToken());
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
 
         Guid orderId = Guid.NewGuid();
         Guid renterId = Guid.NewGuid();
@@ -234,7 +230,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         // 1. Create invoice via service token
         using (var svcClient = _factory.CreateClient())
         {
-            svcClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateServiceToken());
+            svcClient.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
             var createReq = new CreateInvoiceRequest(
                 orderId, "ORD-GET-001", renterId, "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                 [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 250_000m, 500_000m)],
@@ -284,7 +280,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
 
         using (var svcClient = _factory.CreateClient())
         {
-            svcClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateServiceToken());
+            svcClient.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
             var createResp = await svcClient.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
                 Guid.NewGuid(), "ORD-404-001", actualRenterId, "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                 [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 100_000m, 0m)],
@@ -311,27 +307,27 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
     {
         using var client = _factory.CreateClient();
 
-        // 1. Anonymous -> 401
+        // 1. Missing API key -> 401
+        client.DefaultRequestHeaders.Remove("X-Api-Key");
         using var anonResp = await client.PostAsJsonAsync("/api/v1/invoices", new { });
         Assert.Equal(HttpStatusCode.Unauthorized, anonResp.StatusCode);
 
-        // 2. Service endpoint with user token -> 403
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateUserToken(Guid.NewGuid()));
-        using var userOnSvc = await client.PostAsJsonAsync("/api/v1/invoices", new { });
-        Assert.Equal(HttpStatusCode.Forbidden, userOnSvc.StatusCode);
+        // A service JWT alone does not replace the dedicated Rental API key.
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateServiceToken());
+        using var jwtOnlyResp = await client.PostAsJsonAsync("/api/v1/invoices", new { });
+        Assert.Equal(HttpStatusCode.Unauthorized, jwtOnlyResp.StatusCode);
+        client.DefaultRequestHeaders.Authorization = null;
 
-        // 3. Service token missing scope -> 403
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateServiceToken(scope: "payment.refund.write"));
-        using var badScope = await client.PostAsJsonAsync("/api/v1/invoices", new { });
-        Assert.Equal(HttpStatusCode.Forbidden, badScope.StatusCode);
+        // 2. Key present, invalid JWT on user endpoint -> 401
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "invalid-token");
+        using var badJwtResp = await client.GetAsync("/api/v1/invoices/INV-TEST");
+        Assert.Equal(HttpStatusCode.Unauthorized, badJwtResp.StatusCode);
 
-        // 4. GET endpoint with service token -> 403
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateServiceToken());
-        using var svcOnUser = await client.GetAsync("/api/v1/invoices/INV-TEST");
-        Assert.Equal(HttpStatusCode.Forbidden, svcOnUser.StatusCode);
+        // 3. GET endpoint without user JWT -> 401
+        client.DefaultRequestHeaders.Authorization = null;
+        using var noUserJwtResp = await client.GetAsync("/api/v1/invoices/INV-TEST");
+        Assert.Equal(HttpStatusCode.Unauthorized, noUserJwtResp.StatusCode);
     }
 
     [Fact]
@@ -341,8 +337,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         string invoiceRef;
 
         using var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateServiceToken());
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
 
         // 1. Create invoice
         var createResp = await client.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
@@ -351,7 +346,6 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
             "op-create-for-cancel"));
         var createBody = await createResp.Content.ReadFromJsonAsync<CreateInvoiceResponse>();
         invoiceRef = createBody!.InvoiceRef;
-
         // 2. Mismatched route vs body -> 400
         var mismatchReq = new CancelInvoiceRequest(orderId, "INV-DIFFERENT", "Reason", "op-cancel-1");
         using var mismatchResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/cancel", mismatchReq);
@@ -380,8 +374,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         string invoiceRef;
 
         using var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", CreateServiceToken());
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
 
         // Create zero-total invoice (initializes directly to PAID)
         var createResp = await client.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
@@ -409,7 +402,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
 
         using (var svcClient = _factory.CreateClient())
         {
-            svcClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateServiceToken());
+            svcClient.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
             var createResp = await svcClient.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
                 Guid.NewGuid(), "ORD-PAID-QR-001", renterId, "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                 [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 0m, 0m)],
@@ -439,7 +432,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
 
         using (var svcClient = _factory.CreateClient())
         {
-            svcClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateServiceToken());
+            svcClient.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
             var createResp = await svcClient.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
                 Guid.NewGuid(), "ORD-SNAPSHOT-001", renterId, "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                 [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],

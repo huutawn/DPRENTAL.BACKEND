@@ -18,8 +18,8 @@ public sealed class ManualRefundOperationAudit
     [Required, MaxLength(64)] public string PayloadFingerprint { get; private set; } = default!;
 
     [Required] public Guid RefundRequirementId { get; private set; }
-    [Required] public Guid SettlementId { get; private set; }
-    [Required] public Guid RentalItemId { get; private set; }
+    public Guid? SettlementId { get; private set; }
+    public Guid? RentalItemId { get; private set; }
     [Required] public Guid ActorId { get; private set; }
 
     [Required, Column(TypeName = "numeric(18,0)")] public decimal Amount { get; private set; }

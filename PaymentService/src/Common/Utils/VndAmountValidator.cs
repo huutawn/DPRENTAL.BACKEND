@@ -26,4 +26,13 @@ public static class VndAmountValidator
 
         return Result.Success();
     }
+
+    public static string FormatVndAmount(decimal amount)
+    {
+        if (decimal.Truncate(amount) != amount)
+        {
+            throw new InvalidOperationException($"Số tiền VND phải là số nguyên, nhận được: {amount}");
+        }
+        return decimal.ToInt64(amount).ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
 }

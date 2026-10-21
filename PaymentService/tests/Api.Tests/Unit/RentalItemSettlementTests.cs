@@ -16,7 +16,7 @@ public class RentalItemSettlementTests
 
     private static RentalItemSettlement Ok(decimal rental, decimal deposit, decimal deduction)
     {
-        var result = RentalItemSettlement.Create(Item(rental, deposit), deduction, "DEC-1", "rental-operation-key");
+        var result = SettlementService.Calculate(Item(rental, deposit), deduction, "DEC-1", "rental-operation-key");
         Assert.False(result.IsFailure);
         return result.Value;
     }
@@ -95,7 +95,7 @@ public class RentalItemSettlementTests
     [InlineData(0.5, "Money.FractionalVndNotAllowed")]
     public void Invalid_deduction_is_rejected(double deduction, string expectedCode)
     {
-        var result = RentalItemSettlement.Create(Item(1_000_000, 500_000), (decimal)deduction, "DEC-1", "rental-operation-key");
+        var result = SettlementService.Calculate(Item(1_000_000, 500_000), (decimal)deduction, "DEC-1", "rental-operation-key");
         Assert.True(result.IsFailure);
         Assert.Equal(expectedCode, result.Error.Code);
     }
@@ -103,7 +103,7 @@ public class RentalItemSettlementTests
     [Fact]
     public void Deduction_above_vnd_limit_is_rejected()
     {
-        var result = RentalItemSettlement.Create(
+        var result = SettlementService.Calculate(
             Item(1_000_000, 500_000), VndAmountValidator.MaxVndAmount + 1, "DEC-1", "rental-operation-key");
         Assert.True(result.IsFailure);
         Assert.Equal("Money.AmountLimitExceeded", result.Error.Code);
@@ -115,7 +115,7 @@ public class RentalItemSettlementTests
     [InlineData("   ")]
     public void Missing_decision_ref_is_rejected(string? decisionRef)
     {
-        var result = RentalItemSettlement.Create(Item(1_000, 500), 0, decisionRef!, "rental-operation-key");
+        var result = SettlementService.Calculate(Item(1_000, 500), 0, decisionRef!, "rental-operation-key");
         Assert.True(result.IsFailure);
         Assert.Equal("Payment.InvalidDecisionRef", result.Error.Code);
     }
@@ -123,7 +123,7 @@ public class RentalItemSettlementTests
     [Fact]
     public void Decision_ref_is_trimmed()
     {
-        var result = RentalItemSettlement.Create(Item(1_000, 500), 0, "  DEC-9  ", "rental-operation-key");
+        var result = SettlementService.Calculate(Item(1_000, 500), 0, "  DEC-9  ", "rental-operation-key");
         Assert.False(result.IsFailure);
         Assert.Equal("DEC-9", result.Value.DecisionRef);
     }
@@ -131,7 +131,7 @@ public class RentalItemSettlementTests
     [Fact]
     public void Decision_ref_longer_than_contract_limit_is_rejected()
     {
-        var result = RentalItemSettlement.Create(Item(1_000, 500), 0, new string('d', 257), "rental-operation-key");
+        var result = SettlementService.Calculate(Item(1_000, 500), 0, new string('d', 257), "rental-operation-key");
 
         Assert.True(result.IsFailure);
         Assert.Equal("Payment.DecisionRefTooLong", result.Error.Code);
@@ -141,7 +141,7 @@ public class RentalItemSettlementTests
     public void Settlement_preserves_operation_key_received_from_rental()
     {
         const string rentalKey = "4b97863c531d21644fd134e8a3c177ef";
-        var result = RentalItemSettlement.Create(Item(1_000, 500), 0, "DEC-1", rentalKey);
+        var result = SettlementService.Calculate(Item(1_000, 500), 0, "DEC-1", rentalKey);
 
         Assert.False(result.IsFailure);
         Assert.Equal(rentalKey, result.Value.OperationKey);
@@ -152,7 +152,7 @@ public class RentalItemSettlementTests
     [InlineData("   ")]
     public void Invalid_operation_key_is_rejected(string operationKey)
     {
-        var result = RentalItemSettlement.Create(Item(1_000, 500), 0, "DEC-1", operationKey);
+        var result = SettlementService.Calculate(Item(1_000, 500), 0, "DEC-1", operationKey);
 
         Assert.True(result.IsFailure);
         Assert.Equal("Payment.InvalidOperationKey", result.Error.Code);
@@ -161,7 +161,7 @@ public class RentalItemSettlementTests
     [Fact]
     public void Operation_key_longer_than_contract_limit_is_rejected()
     {
-        var result = RentalItemSettlement.Create(Item(1_000, 500), 0, "DEC-1", new string('k', 65));
+        var result = SettlementService.Calculate(Item(1_000, 500), 0, "DEC-1", new string('k', 65));
 
         Assert.True(result.IsFailure);
         Assert.Equal("Payment.InvalidOperationKey", result.Error.Code);

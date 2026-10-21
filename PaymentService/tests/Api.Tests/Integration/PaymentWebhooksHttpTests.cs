@@ -10,7 +10,7 @@ using Dprental.PaymentService.Application.DTOs.SePay;
 using Dprental.PaymentService.Application.IServices;
 using Dprental.PaymentService.Common;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Domain.Persistence;
+using Dprental.PaymentService.Domain.Repositories;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -39,7 +39,7 @@ public sealed class PaymentWebhooksHttpTests : IAsyncLifetime
             await ctx.Database.MigrateAsync();
         }
 
-        _factory = new WebApplicationFactory<Program>()
+        _factory = new PaymentWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", _connString);
@@ -48,7 +48,7 @@ public sealed class PaymentWebhooksHttpTests : IAsyncLifetime
                 builder.UseSetting("Payment:SePay:ApiKey", ConfiguredApiKey);
                 builder.UseSetting("Payment:SePay:Gateway", "MBBank");
                 builder.UseSetting("Payment:SePay:AccountNumber", "0383799632");
-
+                builder.UseSetting("InternalAuthentication:RentalApiKey", "dev-internal-api-key-dprental-2026");
                 builder.ConfigureLogging(logging =>
                 {
                     logging.ClearProviders();

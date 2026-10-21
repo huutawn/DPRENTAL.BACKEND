@@ -4,11 +4,15 @@ using System.Threading;
 using System.Threading.Tasks;
 using Dprental.PaymentService.Application.Kafka;
 using Dprental.PaymentService.Application.Options;
-using Dprental.PaymentService.Domain.IRepository;
+using Dprental.PaymentService.Domain.IRepositories;
+using Dprental.PaymentService.Application.DTOs.Verification;
+using Dprental.PaymentService.Application.IServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Dprental.PaymentService.Domain.Entities;
+using Dprental.PaymentService.Common.Cryptography;
 
 namespace Dprental.PaymentService.Application.Background;
 
@@ -93,6 +97,7 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var outboxRepo = scope.ServiceProvider.GetRequiredService<IOutboxRepository>();
         var producer = scope.ServiceProvider.GetRequiredService<IInvoicePaidKafkaProducer>();
+        var journalRepo = scope.ServiceProvider.GetRequiredService<ITransactionJournalRepository>();
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         var leaseDuration = TimeSpan.FromSeconds(Math.Max(5, config.LeaseDurationSeconds));
@@ -122,12 +127,66 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
             // AggregateId holds the RentalOrderId
             string key = message.AggregateId;
 
+            TransactionJournalEntry? journalEntry = null;
+            string digest = CanonicalJournalHasher.ComputeOutboxDigest(message.Payload);
+
+            if (journalRepo is not null)
+            {
+                if (message.EventId.HasValue)
+                {
+                    journalEntry = await journalRepo.GetByEventIdAsync(message.EventId.Value, cancellationToken);
+                }
+                if (journalEntry is null)
+                {
+                    journalEntry = await journalRepo.GetByOutboxDigestAsync(digest, cancellationToken);
+                }
+            }
+
+            if (journalEntry is null)
+            {
+                _logger.LogWarning("Outbox message {MessageId} has no corresponding journal entry; cannot publish without evidence proof.", message.MessageId);
+                await outboxRepo.DeferMessageAsync(message.Id, _workerId, utcNow.AddSeconds(5), "AWAITING_JOURNAL_ENTRY", cancellationToken);
+                continue;
+            }
+
+            if (!journalEntry.IsConfirmed || string.IsNullOrWhiteSpace(journalEntry.ProofSignature))
+            {
+                _logger.LogInformation("Outbox message {MessageId} awaiting integrity confirmation before publish; deferring lease.", message.MessageId);
+                await outboxRepo.DeferMessageAsync(message.Id, _workerId, utcNow.AddSeconds(5), "AWAITING_CONFIRMATION", cancellationToken);
+                continue;
+            }
+
+            var checker = scope.ServiceProvider.GetRequiredService<ITransactionIntegrityChecker>();
+            var publicationEvidence = await checker.VerifyAsync(new TransactionVerificationRequest(
+                message.MessageId.ToString("D"), VerificationPurposes.OutboxPublication, Guid.NewGuid().ToString("N"),
+                CallerIdentity: $"PUBLISHER:{_workerId}", ExpectedOutboxDigest: digest,
+                Topic: topic, MessageKey: key, OutboxMessageId: message.MessageId), cancellationToken);
+            if (publicationEvidence.IsFailure || publicationEvidence.Value.PublicationProof is null ||
+                publicationEvidence.Value.Integrity.Status != IntegrityStatuses.Valid || !publicationEvidence.Value.Usability.IsUsable)
+            {
+                if (publicationEvidence.IsSuccess && publicationEvidence.Value.Integrity.Status == IntegrityStatuses.Tampered)
+                    await outboxRepo.QuarantineMessageAsync(message.Id, _workerId, publicationEvidence.Value.Usability.Reason, utcNow, cancellationToken);
+                else if (publicationEvidence.IsFailure && publicationEvidence.Error.Code != "Payment.Verification.Timeout" &&
+                    !publicationEvidence.Error.Code.StartsWith("IntegrityHost.Unavailable", StringComparison.Ordinal))
+                    await outboxRepo.QuarantineMessageAsync(message.Id, _workerId, publicationEvidence.Error.Code, utcNow, cancellationToken);
+                else
+                    await outboxRepo.DeferMessageAsync(message.Id, _workerId, utcNow.AddSeconds(5), "PUBLICATION_PROOF_UNAVAILABLE", cancellationToken);
+                continue;
+            }
+            var proof = publicationEvidence.Value.PublicationProof;
+            var headers = new Dictionary<string, string>
+            {
+                ["x-dprental-proof"] = System.Text.Json.JsonSerializer.Serialize(proof, System.Text.Json.JsonSerializerOptions.Web)
+            };
+            message.RecordAttempt();
+            int attempt = message.RetryCount;
+
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, config.DeliveryTimeoutSeconds)));
 
-                await producer.ProduceAsync(topic, key, message.Payload, cts.Token);
+                await producer.ProduceAsync(topic, key, message.Payload, headers, cts.Token);
 
                 DateTimeOffset ackNow = _timeProvider.GetUtcNow();
                 bool marked = await outboxRepo.MarkPublishedAsync(message.Id, _workerId, ackNow, cancellationToken);
@@ -144,11 +203,9 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
             catch (Exception ex)
             {
                 DateTimeOffset failNow = _timeProvider.GetUtcNow();
-                int attempt = message.RetryCount;
                 int baseDelay = Math.Min(config.MaxBackoffSeconds, (int)Math.Pow(2, Math.Min(attempt, 6)));
                 int jitter = Random.Shared.Next(0, Math.Max(1, baseDelay / 4));
                 var nextRetryAt = failNow.AddSeconds(baseDelay + jitter);
-
                 bool isExhausted = attempt >= config.MaxRetries;
                 if (isExhausted)
                 {

@@ -15,5 +15,22 @@ services:
       timeout: 5s
       retries: 10
 
+  postgres-integrity:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${INTEGRITY_POSTGRES_DB:-integrity_evidence}
+      POSTGRES_USER: ${INTEGRITY_POSTGRES_USER:-integrityservice}
+      POSTGRES_PASSWORD: ${INTEGRITY_POSTGRES_PASSWORD:?Set INTEGRITY_POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${INTEGRITY_POSTGRES_PORT:-26281}:5432"
+    volumes:
+      - integrity-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   payment-pg:
+  integrity-pg:

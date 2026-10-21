@@ -1,4 +1,7 @@
+using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
+using Dprental.PaymentService.Application.Security;
 
 namespace Dprental.PaymentService.Api.Security;
 
@@ -40,5 +43,37 @@ public static class PaymentClaimsPrincipalExtensions
         userId = Guid.Empty;
         string? sub = user.FindFirst("sub")?.Value;
         return Guid.TryParse(sub, out userId);
+    }
+
+    public static CallerContext ToCallerContext(this ClaimsPrincipal user)
+    {
+        if (user.IsServiceToken())
+        {
+            string serviceId = user.FindFirst("client_id")?.Value
+                ?? user.FindFirst("sub")?.Value
+                ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "service";
+            var scopes = user.FindAll("s")
+                .Concat(user.FindAll("scope"))
+                .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                .ToList();
+            return CallerContext.ForService(serviceId, scopes);
+        }
+
+        if (user.IsPlatformAdmin() && user.TryGetSubjectUserId(out var adminId))
+        {
+            return CallerContext.ForAdmin(adminId);
+        }
+
+        if (user.TryGetSubjectUserId(out var userId))
+        {
+            return CallerContext.ForRenter(userId);
+        }
+
+        string identifier = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? user.FindFirst("sub")?.Value
+            ?? user.Identity?.Name
+            ?? "anonymous";
+        return new CallerContext(identifier, "user");
     }
 }

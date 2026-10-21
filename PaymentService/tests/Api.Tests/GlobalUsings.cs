@@ -1,0 +1,9 @@
+global using Dprental.PaymentService.Domain.Repositories;
+global using Dprental.PaymentService.Domain.IRepositories;
+global using Dprental.PaymentService.Common.Cryptography;
+global using Dprental.PaymentService.Application.Services;
+global using Dprental.PaymentService.Application.Services.Integrity;
+global using Dprental.PaymentService.Application.Clients;
+global using Dprental.PaymentService.Domain.Entities.Integrity;
+global using Dprental.PaymentService.IntegrityHost.Services;
+global using Dprental.PaymentService.IntegrityHost.Options;

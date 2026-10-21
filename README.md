@@ -7,18 +7,19 @@ Dịch vụ PaymentService cho hệ sinh thái DPRENTAL, được xây dựng b�
 ```text
 PaymentService/
   src/
-    Common/          # Kiểu dùng chung, Result/Error, Utils (VndAmountValidator, VietQrUrlGenerator, PaymentCodeGenerator, PayloadFingerprinter)
-    Domain/          # Entities, IRepository, Repository (EfInvoiceRepository), Persistence (DbContext, Factory), Migrations
-    Application/     # DTOs, IServices, Services (InvoiceService, Creation, Lifecycle, InvoicePaymentProcessor), Background (InvoiceExpiryWorker), Options
-    Api/             # Controllers, Filters, JWT Auth, HTTP composition root
-  tests/             # Kiểm thử đơn vị và tích hợp (PostgreSQL 17)
+    Common/          # Kiểu dùng chung, Result/Error, Utils, Cryptography (AesGcm, CanonicalJournalHasher, EcdsaAttestation, SensitiveFieldEncryptor)
+    Domain/          # Pure Data Entities, IRepositories contracts, DbContexts (PaymentServiceDbContext, IntegrityDbContext), EF Configurations, Migrations (Payment, Integrity)
+    Application/     # Use cases, DTOs, Services theo nghiệp vụ (Invoices, Payments, Publishing, Refunds, Settlement, Integrity), Background workers, Clients
+    IntegrityHost/   # Tiến trình độc lập, composition root, endpoints nội bộ, adapter quản lý khóa ký (IIntegritySigningAdapter, IntegrityKeyManager)
+    Api/             # Routing, Controllers, Filters, JWT Auth, Public HTTP APIs
+  tests/             # Kiểm thử đơn vị, tích hợp (PostgreSQL 17), tamper detection, load & benchmark (1M bản ghi)
+```
 Directory.Build.props
 Directory.Packages.props
 Dockerfile
 docker-compose.yml
 docs/                # Tài liệu kỹ thuật
 scripts/             # Scripts hỗ trợ và Git hooks
-```
 
 ## Chạy hạ tầng cục bộ
 
@@ -39,8 +40,22 @@ set -a
 . ./.env
 set +a
 export ConnectionStrings__Postgres="Host=127.0.0.1;Port=${POSTGRES_PORT};Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+export InternalAuthentication__RentalApiKey="$PAYMENT_RENTAL_API_KEY"
+export IntegrityHost__BaseUrl="http://127.0.0.1:8081"
+export IntegrityHost__InternalApiKey="$PAYMENT_INTEGRITY_API_KEY"
+export PaymentEncryption__ActiveKeyId="$PAYMENT_ENCRYPTION_KEY_ID"
+export PaymentEncryption__DataEncryptionKeyBase64="$PAYMENT_DATA_ENCRYPTION_KEY_BASE64"
+export Payment__SePay__ApiKey="$PAYMENT_SEPAY_API_KEY"
+export Payment__Merchant__Bank="$PAYMENT_MERCHANT_BANK"
+export Payment__Merchant__Account="$PAYMENT_MERCHANT_ACCOUNT"
 dotnet run --project PaymentService/src/Api/PaymentService.Api.csproj
 ```
+
+IntegrityHost runs as a separate process and requires the same Payment database, the integrity database,
+`IntegrityHost__InternalApiKey`, `IntegrityHost__SigningKeyId`, and
+`IntegrityHost__PrivateKeyBase64`. Supply persistent development keys through the environment; both
+hosts intentionally fail at startup when required credentials or key material are missing. Do not use
+sample or shared credentials outside a local disposable environment.
 
 Trên PowerShell, chạy `./scripts/run-payment-api.ps1` để nạp `.env` và khởi động API tại `http://127.0.0.1:46280`. Script từ chối cấu hình trỏ tới database `rentalservice`.
 
@@ -105,6 +120,50 @@ SePay gửi webhook JSON với các trường: `id`, `gateway`, `transactionDate
   - `MATCHED`: Tiền vào (`transferType = "in"`), mã thanh toán khớp duy nhất, số tiền khớp đúng `TotalAmount`, tài khoản khớp cấu hình/snapshot, còn hạn -> Hóa đơn chuyển `PAID` và phát 1 sự kiện Outbox `InvoicePaid`.
   - `UNMATCHED`: Thiếu mã thanh toán hoặc mã hợp lệ nhưng không tìm thấy hóa đơn -> Lưu transaction `UNMATCHED`, không xác nhận hóa đơn.
   - `REVIEW_REQUIRED`: Mã mơ hồ/mâu thuẫn, sai số tiền, sai tài khoản nhận, giao dịch tiền ra (`transferType != "in"`), hoặc hóa đơn đã ghi nhận thanh toán trước đó -> Lưu transaction `REVIEW_REQUIRED`, không xác nhận hóa đơn.
-  - `MANUAL_REFUND_REQUIRED`: Khớp đầy đủ nhưng giao dịch trễ hạn thanh toán (thời điểm chuyển khoản hoặc thời điểm xử lý sau khi lấy khóa đạt/vượt `PaymentDeadline`, hoặc hóa đơn đã `EXPIRED`/`CANCELLED`) -> Hóa đơn `PENDING` chuyển `EXPIRED`, hóa đơn đã đóng giữ nguyên; lưu `PaymentRef`/`PaidAt` và phát 1 Outbox `InvoicePaid` (với `paidAt` là giờ ngân hàng, `occurredAt` là giờ xử lý) để Rental Service điều phối hoàn tiền thủ công.
+  - `MANUAL_REFUND_REQUIRED`: Khớp đầy đủ nhưng giao dịch ngân hàng đến hạn hoặc muộn, hoặc hóa đơn đã `EXPIRED`/`CANCELLED`. Nếu webhook chỉ được xử lý sau deadline thì vẫn là thanh toán trễ, kể cả `transactionDate` sớm hơn deadline. Hóa đơn đã đóng không được mở lại. Payment ghi transaction/journal/outbox trong cùng transaction; Rental đăng ký refund qua API Payment và admin chuyển khoản ngoài hệ thống rồi xác nhận.
 - **Idempotency & Khóa hàng:** Claim ID nhà cung cấp (`Provider = "SEPAY"`, `ProviderTransactionId = id`) và khóa hàng hóa đơn `FOR UPDATE` trong cùng một database transaction. Giao dịch duplicate cùng ID trả 200 `{"success": true}` đã lưu; trùng ID nhưng dữ liệu nghiệp vụ khác trả 409 Conflict.
-- **Phạm vi tích hợp:** Kết quả tích hợp dừng ở commit Outbox atomic trong database. Kafka publisher, đối soát admin UI và thực hiện disburse refund nằm ngoài phạm vi này.
+- **Tích hợp Kafka:** `InvoicePaidOutboxPublisherWorker` publish `InvoicePaid`, `RefundCompleted` và `RentalSettled` sau khi journal được xác nhận. Header `x-dprental-proof` mang bằng chứng ECDSA bền vững, ràng buộc payload, topic, key, message/event/operation IDs và không hết hạn theo thời gian Kafka backlog.
+
+### Settlement và refund
+
+- `POST /api/v1/settlements`: ghi đủ ba ledger entries và journal `RentalSettled`; nếu cần hoàn cọc thì chờ admin hoàn tiền và xác nhận trước khi phát sự kiện settlement.
+- `POST /api/v1/refunds`: Rental đăng ký khoản refund cần chuyển khoản thủ công. Đây là thao tác ghi idempotent theo `OperationKey`; endpoint không thực hiện chuyển tiền.
+- `GET /api/v1/manual-refunds` và `GET /api/v1/manual-refunds/{id}`: admin truy vấn các yêu cầu cần xử lý.
+- `POST /api/v1/manual-refunds/{id}/complete`: admin xác nhận chuyển khoản ngoài hệ thống bằng `ExternalTransferReference` và `OperationKey`. Payment phát `RefundCompleted` hoặc `RentalSettled` sau khi journal được xác nhận.
+- Service-to-service ghi hóa đơn, settlement và refund dùng `X-Api-Key` riêng cho Rental→Payment. JWT vẫn bảo vệ endpoint khách hàng và thao tác admin.
+
+## Lịch sử và kiểm chứng giao dịch Payment theo SOLID
+
+### 1. Kiến trúc phân tầng và ranh giới quyền sở hữu
+- **Domain:** Thuần túy chứa quy tắc nghiệp vụ, thực thể, value objects và interface repository (`IRepository`). Không phụ thuộc EF Core hay PostgreSQL.
+- **Infrastructure:** Sở hữu `PaymentServiceDbContext`, các migration EF, mapping PostgreSQL và triển khai các repository.
+- **Application:** Sở hữu use case nghiệp vụ, bộ kiểm tra toàn vẹn dùng chung (`ITransactionIntegrityChecker`) và các service chuyên biệt (`InvoiceCreationService`, `InvoiceLifecycleService`, `InvoicePaymentProcessor`, `SettlementService`, `ManualRefundService`). Đã loại bỏ hoàn toàn `InvoiceService` chuyển tiếp thừa.
+- **IntegrityHost:** Chạy như một host độc lập, sở hữu cơ sở dữ liệu bằng chứng riêng (`IntegrityDbContext`), credential riêng và nắm giữ khóa riêng ECDSA P-256 (`nistP256`). PaymentService chỉ sở hữu public key qua cấu hình (`IntegrityVerification:PublicKeys`).
+
+### 2. Sổ nhật ký giao dịch bất biến (Transaction Journal)
+- Ghi nhận append-only cho mọi thay đổi tài chính trong cùng transaction nghiệp vụ:
+  - Hóa đơn: `INVOICE_CREATED`, `INVOICE_CANCELLED`, `INVOICE_EXPIRED`
+  - Ngân hàng: `BANK_INCOMING`, `BANK_OUTGOING`
+  - Matching: `PAYMENT_MATCHED`, `PAYMENT_UNMATCHED`
+  - Settlement & Hoàn tiền: `RENTAL_SETTLED`, `REFUND_REQUIRED`, `REFUND_CONFIRMED`
+- Mỗi luồng thực thể (`StreamId`) có phiên bản tuần tự đơn điệu tăng dần (`Version`), `EventId`, `PreviousHash` (bắt đầu bằng `GENESIS`) và `PayloadHash` chuẩn hóa SHA-256 từ canonical payload.
+- Dữ liệu nhạy cảm được mã hóa AES-256-GCM với nonce 12 byte và tag 16 byte riêng biệt.
+
+### 3. Quy trình xác nhận và chống sửa đổi (IntegrityHost Pipeline)
+1. **Commit:** Payment ghi nhận nghiệp vụ và journal entry nguyên tử (`IsConfirmed = false`).
+2. **Xác nhận (IntegrityConfirmationWorker):** Chạy định kỳ (mặc định 250 ms, batch 100), xác minh chuỗi phiên bản, hash trước và hash nội dung, ký bằng chứng ECDSA P-256 và lưu mốc xác thực vào kho riêng (`integrity_stream_manifests`, `integrity_attestations`), sau đó cập nhật `ProofSignature` vào Payment DB.
+3. **Rà soát định kỳ (IntegrityPeriodicScannerWorker):** Quét toàn bộ manifest để phát hiện xóa bản ghi, sửa đổi trực tiếp trong DB hoặc quay lui DB nghiệp vụ (`ROLLBACK_DETECTED`, `UNAUTHORIZED_EDIT`). Khi phát hiện sai lệch, tiến trình chặn stream ngay lập tức và ghi nhận incident, không tự ý sửa đổi hay hợp thức hóa.
+4. **Kafka Outbox:** Publisher chỉ phát outbox khi nội dung khớp bằng chứng đã được IntegrityHost xác nhận; bổ sung bằng chứng xác thực qua Kafka headers (`x-dprental-signature`, `x-dprental-key-id`, `x-dprental-proof`, `x-dprental-stream-id`, `x-dprental-stream-version`, `x-dprental-event-id`).
+
+### 4. API Kiểm chứng & Lịch sử
+- `POST /api/v1/payment/verifications`: Yêu cầu Service JWT có scope `payment.transaction.verify`.
+  - Quy ước status code:
+    - `200 OK`: Kiểm tra tính toàn vẹn thành công (kể cả khi không đủ điều kiện nghiệp vụ như lệch số tiền).
+    - `202 Accepted`: Giao dịch đang chờ IntegrityHost xác nhận (`PENDING_CONFIRMATION`).
+    - `409 Conflict`: Phát hiện dữ liệu bị chỉnh sửa trái phép, hash không khớp hoặc chữ ký sai (`TAMPERED`).
+    - `503 Service Unavailable`: Vượt quá ngân sách thời gian xử lý server (mặc định 900 ms).
+- `GET /api/v1/payment/history` (hoặc `/journals`): Yêu cầu Service JWT có scope `payment.transaction.history` hoặc Admin token. Phân trang cursor an toàn, không lộ dữ liệu ngân hàng nhạy cảm mặc định.
+
+### 5. Hiệu năng & Kiểm thử
+- Đạt p99 < 1 giây tại tải 100 check/giây trên kho 1.000.000 bản ghi có đồng thời ghi và worker chạy song song (được kiểm chứng qua `TransactionIntegrityBenchmarkTests`).
+- 100% test suite đạt chuẩn (232 tests bao phủ unit, integration PostgreSQL thật, tamper detection, và pre-push hook).

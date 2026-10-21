@@ -6,7 +6,7 @@ using Dprental.PaymentService.Application.IServices;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Common;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Domain.IRepository;
+using Dprental.PaymentService.Domain.IRepositories;
 using Microsoft.Extensions.Options;
 
 namespace Dprental.PaymentService.Application.Services;

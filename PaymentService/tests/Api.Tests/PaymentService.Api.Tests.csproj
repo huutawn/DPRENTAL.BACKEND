@@ -19,6 +19,7 @@
     <ProjectReference Include="../../src/Api/PaymentService.Api.csproj" />
     <ProjectReference Include="../../src/Application/PaymentService.Application.csproj" />
     <ProjectReference Include="../../src/Domain/PaymentService.Domain.csproj" />
+    <ProjectReference Include="../../src/IntegrityHost/PaymentService.IntegrityHost.csproj" />
     <ProjectReference Include="../../src/Common/PaymentService.Common.csproj" />
   </ItemGroup>
 </Project>

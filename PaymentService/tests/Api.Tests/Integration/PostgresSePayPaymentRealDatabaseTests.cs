@@ -1,4 +1,5 @@
 using Dprental.PaymentService.Api.Tests.TestHelpers;
+using System.Security.Cryptography;
 using System.Globalization;
 using Dprental.PaymentService.Application.DTOs.SePay;
 using Dprental.PaymentService.Application.DTOs.Invoice;
@@ -7,9 +8,9 @@ using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Application.Services;
 using Dprental.PaymentService.Common;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Domain.IRepository;
-using Dprental.PaymentService.Domain.Persistence;
-using Dprental.PaymentService.Domain.Repository;
+using Dprental.PaymentService.Domain.IRepositories;
+using Dprental.PaymentService.Domain.Repositories;
+using Dprental.PaymentService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -38,16 +39,22 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
                 ["MB"] = "MBBank"
             }
         });
+    private static readonly IPaymentDataEncryptor TestEncryptor =
+        new PaymentDataEncryptor(RandomNumberGenerator.GetBytes(32), "test-enc-key");
 
-    private static InvoiceService CreateInvoiceService(
+    private static InvoiceCreationService CreateCreationService(
         IInvoiceRepository repo,
         TimeProvider? timeProvider = null)
     {
         var tp = timeProvider ?? TimeProvider.System;
-        var lifecycle = new InvoiceLifecycleService(repo, tp);
-        var creation = new InvoiceCreationService(repo, MerchantOptions, lifecycle, tp);
-        return new InvoiceService(creation, lifecycle);
+        var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor, tp);
+        return new InvoiceCreationService(repo, MerchantOptions, lifecycle, TestEncryptor, tp);
     }
+
+    private static InvoiceLifecycleService CreateLifecycleService(
+        IInvoiceRepository repo,
+        TimeProvider? timeProvider = null) =>
+        new(repo, null, TestEncryptor, timeProvider ?? TimeProvider.System);
 
     private static InvoicePaymentProcessor CreateProcessor(
         IInvoiceRepository repo,
@@ -56,9 +63,8 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
         var tp = timeProvider ?? TimeProvider.System;
         var mo = new TestOptionsMonitor<PaymentMerchantOptions>(MerchantOptions.Value);
         var so = new TestOptionsMonitor<SePayOptions>(SePayConfig.Value);
-        return new InvoicePaymentProcessor(repo, mo, so, tp);
+        return new InvoicePaymentProcessor(repo, mo, so, null, TestEncryptor, tp);
     }
-
     private static SePayWebhookPayload CreateBankTx(
         long id,
         string paymentCode,
@@ -99,7 +105,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             string paymentCode;
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var invoiceService = CreateInvoiceService(new EfInvoiceRepository(setupCtx));
+                var invoiceService = CreateCreationService(new EfInvoiceRepository(setupCtx));
                 var createRes = await invoiceService.CreateInvoiceAsync(new CreateInvoiceRequest(
                     Guid.NewGuid(), "ORD-SEQ-001", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -162,7 +168,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             string paymentCode;
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var invoiceService = CreateInvoiceService(new EfInvoiceRepository(setupCtx));
+                var invoiceService = CreateCreationService(new EfInvoiceRepository(setupCtx));
                 var createRes = await invoiceService.CreateInvoiceAsync(new CreateInvoiceRequest(
                     Guid.NewGuid(), "ORD-DUP-DIFF", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -222,7 +228,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             string paymentCode;
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var invoiceService = CreateInvoiceService(new EfInvoiceRepository(setupCtx));
+                var invoiceService = CreateCreationService(new EfInvoiceRepository(setupCtx));
                 var createRes = await invoiceService.CreateInvoiceAsync(new CreateInvoiceRequest(
                     Guid.NewGuid(), "ORD-BARRIER-SAME", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -300,7 +306,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             string paymentCode;
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var invoiceService = CreateInvoiceService(new EfInvoiceRepository(setupCtx));
+                var invoiceService = CreateCreationService(new EfInvoiceRepository(setupCtx));
                 var createRes = await invoiceService.CreateInvoiceAsync(new CreateInvoiceRequest(
                     Guid.NewGuid(), "ORD-BARRIER-DIFF", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -383,7 +389,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             string paymentCode;
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var invoiceService = CreateInvoiceService(new EfInvoiceRepository(setupCtx));
+                var invoiceService = CreateCreationService(new EfInvoiceRepository(setupCtx));
                 var createRes = await invoiceService.CreateInvoiceAsync(new CreateInvoiceRequest(
                     Guid.NewGuid(), "ORD-UNMATCHED-CHANGE", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -440,7 +446,11 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
     {
         private int _readCount;
 
-        public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
+        public Task<Invoice?> GetInvoiceSnapshotByIdAsync(Guid id, CancellationToken cancellationToken = default) => inner.GetInvoiceSnapshotByIdAsync(id, cancellationToken);
+    public Task SaveFinancialOperationAsync(OperationReceipt receipt, IReadOnlyList<TransactionJournalEntry> journals,
+        IReadOnlyList<OutboxMessage> messages, CancellationToken cancellationToken = default) => inner.SaveFinancialOperationAsync(receipt, journals, messages, cancellationToken);
+
+    public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
             inner.BeginTransactionAsync(cancellationToken);
 
         public Task<OperationReceipt?> GetOperationReceiptAsync(string operationKey, CancellationToken cancellationToken = default) =>
@@ -454,6 +464,9 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
 
         public Task<bool> IsPaymentRefDuplicateAsync(string paymentRef, string currentInvoiceRef, CancellationToken cancellationToken = default) =>
             inner.IsPaymentRefDuplicateAsync(paymentRef, currentInvoiceRef, cancellationToken);
+        public Task<TransactionJournalEntry?> GetLatestJournalEntryAsync(string streamId, CancellationToken cancellationToken = default) =>
+            inner.GetLatestJournalEntryAsync(streamId, cancellationToken);
+
 
         public Task<Invoice?> FindInvoiceWithRowLockAsync(string invoiceRef, CancellationToken cancellationToken = default) =>
             inner.FindInvoiceWithRowLockAsync(invoiceRef, cancellationToken);
@@ -471,8 +484,14 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
         public Task<Invoice?> FindInvoiceByPaymentCodeWithRowLockAsync(string paymentCode, CancellationToken cancellationToken = default) =>
             inner.FindInvoiceByPaymentCodeWithRowLockAsync(paymentCode, cancellationToken);
 
-        public Task SavePaymentTransactionAsync(PaymentTransaction transaction, Invoice? invoice = null, OutboxMessage? outboxMessage = null, CancellationToken cancellationToken = default) =>
-            inner.SavePaymentTransactionAsync(transaction, invoice, outboxMessage, cancellationToken);
+        public Task SavePaymentTransactionAsync(
+            PaymentTransaction transaction,
+            Invoice? invoice,
+            OutboxMessage? outboxMessage,
+            TransactionJournalEntry journalEntry,
+            TransactionJournalEntry? invoiceJournalEntry,
+            CancellationToken cancellationToken = default) =>
+            inner.SavePaymentTransactionAsync(transaction, invoice, outboxMessage, journalEntry, invoiceJournalEntry, cancellationToken);
 
         public Task<IReadOnlyList<Guid>> GetPendingExpiredCandidateIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
             inner.GetPendingExpiredCandidateIdsAsync(utcNow, batchSize, cancellationToken);
@@ -480,12 +499,21 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
         public Task<Invoice?> FindInvoiceByIdWithRowLockSkipLockedAsync(Guid id, CancellationToken cancellationToken = default) =>
             inner.FindInvoiceByIdWithRowLockSkipLockedAsync(id, cancellationToken);
 
-        public Task SaveNewInvoiceAsync(Invoice invoice, OperationReceipt receipt, OutboxMessage? outboxMessage = null, CancellationToken cancellationToken = default) =>
-            inner.SaveNewInvoiceAsync(invoice, receipt, outboxMessage, cancellationToken);
+        public Task SaveNewInvoiceAsync(
+            Invoice invoice,
+            OperationReceipt receipt,
+            OutboxMessage? outboxMessage,
+            TransactionJournalEntry journalEntry,
+            CancellationToken cancellationToken = default) =>
+            inner.SaveNewInvoiceAsync(invoice, receipt, outboxMessage, journalEntry, cancellationToken);
 
-        public Task SaveInvoiceChangesAsync(Invoice invoice, OperationReceipt? receipt = null, OutboxMessage? outboxMessage = null, CancellationToken cancellationToken = default) =>
-            inner.SaveInvoiceChangesAsync(invoice, receipt, outboxMessage, cancellationToken);
-
+        public Task SaveInvoiceChangesAsync(
+            Invoice invoice,
+            OperationReceipt? receipt,
+            OutboxMessage? outboxMessage,
+            TransactionJournalEntry journalEntry,
+            CancellationToken cancellationToken = default) =>
+            inner.SaveInvoiceChangesAsync(invoice, receipt, outboxMessage, journalEntry, cancellationToken);
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
             inner.SaveChangesAsync(cancellationToken);
     }
@@ -506,7 +534,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             string paymentCode;
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var invoiceService = CreateInvoiceService(new EfInvoiceRepository(setupCtx));
+                var invoiceService = CreateCreationService(new EfInvoiceRepository(setupCtx));
                 var createRes = await invoiceService.CreateInvoiceAsync(new CreateInvoiceRequest(
                     Guid.NewGuid(), "ORD-TWO-TX", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -571,7 +599,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             string paymentCode;
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var invoiceService = CreateInvoiceService(new EfInvoiceRepository(setupCtx));
+                var invoiceService = CreateCreationService(new EfInvoiceRepository(setupCtx));
                 var createRes = await invoiceService.CreateInvoiceAsync(new CreateInvoiceRequest(
                     Guid.NewGuid(), "ORD-CONC-TX", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -646,7 +674,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             string paymentCode;
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var invoiceService = CreateInvoiceService(new EfInvoiceRepository(setupCtx));
+                var invoiceService = CreateCreationService(new EfInvoiceRepository(setupCtx));
                 var createRes = await invoiceService.CreateInvoiceAsync(new CreateInvoiceRequest(
                     Guid.NewGuid(), "ORD-ROLLBACK-TEST", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -716,7 +744,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             Guid orderId = Guid.NewGuid();
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var invoiceService = CreateInvoiceService(new EfInvoiceRepository(setupCtx));
+                var invoiceService = CreateCreationService(new EfInvoiceRepository(setupCtx));
                 var createRes = await invoiceService.CreateInvoiceAsync(new CreateInvoiceRequest(
                     orderId, "ORD-RACE-CANCEL", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -725,7 +753,8 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
                 paymentCode = (await setupCtx.Invoices.SingleAsync(i => i.InvoiceRef == invoiceRef)).PaymentCode;
 
                 // Cancel commits first
-                var cancelRes = await invoiceService.CancelInvoiceAsync(
+                var lifecycle = CreateLifecycleService(new EfInvoiceRepository(setupCtx));
+                var cancelRes = await lifecycle.CancelInvoiceAsync(
                     invoiceRef,
                     new CancelInvoiceRequest(orderId, invoiceRef, "Renter cancelled", "op-cancel-1"));
                 Assert.True(cancelRes.IsSuccess);
@@ -780,7 +809,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             var fakeTime = new FakeTimeProvider(DateTimeOffset.UtcNow);
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var invoiceService = CreateInvoiceService(new EfInvoiceRepository(setupCtx), fakeTime);
+                var invoiceService = CreateCreationService(new EfInvoiceRepository(setupCtx), fakeTime);
                 var createRes = await invoiceService.CreateInvoiceAsync(new CreateInvoiceRequest(
                     Guid.NewGuid(), "ORD-RACE-EXP", Guid.NewGuid(), "VND", fakeTime.GetUtcNow().AddMinutes(30),
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -790,7 +819,8 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
 
                 // Advance time past deadline and run expiry worker batch
                 fakeTime.Advance(TimeSpan.FromMinutes(35));
-                int expiredCount = await invoiceService.ExpirePendingInvoicesBatchAsync(10);
+                var lifecycle = CreateLifecycleService(new EfInvoiceRepository(setupCtx), fakeTime);
+                int expiredCount = await lifecycle.ExpirePendingInvoicesBatchAsync(10);
                 Assert.Equal(1, expiredCount);
             }
 
@@ -849,7 +879,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             string paymentCode;
             await using (var setupCtx = new PaymentServiceDbContext(options))
             {
-                var invoiceService = CreateInvoiceService(new EfInvoiceRepository(setupCtx), new FakeTimeProvider(startTime));
+                var invoiceService = CreateCreationService(new EfInvoiceRepository(setupCtx), new FakeTimeProvider(startTime));
                 var createRes = await invoiceService.CreateInvoiceAsync(new CreateInvoiceRequest(
                     Guid.NewGuid(), "ORD-LATE-PROC", Guid.NewGuid(), "VND", deadline,
                     [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
@@ -890,7 +920,11 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
 
     private sealed class FaultyInvoiceRepository(IInvoiceRepository inner, bool shouldThrowOnSave) : IInvoiceRepository
     {
-        public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
+        public Task<Invoice?> GetInvoiceSnapshotByIdAsync(Guid id, CancellationToken cancellationToken = default) => inner.GetInvoiceSnapshotByIdAsync(id, cancellationToken);
+    public Task SaveFinancialOperationAsync(OperationReceipt receipt, IReadOnlyList<TransactionJournalEntry> journals,
+        IReadOnlyList<OutboxMessage> messages, CancellationToken cancellationToken = default) => inner.SaveFinancialOperationAsync(receipt, journals, messages, cancellationToken);
+
+    public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
             inner.BeginTransactionAsync(cancellationToken);
 
         public Task<OperationReceipt?> GetOperationReceiptAsync(string operationKey, CancellationToken cancellationToken = default) =>
@@ -904,6 +938,9 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
 
         public Task<bool> IsPaymentRefDuplicateAsync(string paymentRef, string currentInvoiceRef, CancellationToken cancellationToken = default) =>
             inner.IsPaymentRefDuplicateAsync(paymentRef, currentInvoiceRef, cancellationToken);
+        public Task<TransactionJournalEntry?> GetLatestJournalEntryAsync(string streamId, CancellationToken cancellationToken = default) =>
+            inner.GetLatestJournalEntryAsync(streamId, cancellationToken);
+
 
         public Task<Invoice?> FindInvoiceWithRowLockAsync(string invoiceRef, CancellationToken cancellationToken = default) =>
             inner.FindInvoiceWithRowLockAsync(invoiceRef, cancellationToken);
@@ -914,13 +951,19 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
         public Task<Invoice?> FindInvoiceByPaymentCodeWithRowLockAsync(string paymentCode, CancellationToken cancellationToken = default) =>
             inner.FindInvoiceByPaymentCodeWithRowLockAsync(paymentCode, cancellationToken);
 
-        public Task SavePaymentTransactionAsync(PaymentTransaction transaction, Invoice? invoice = null, OutboxMessage? outboxMessage = null, CancellationToken cancellationToken = default)
+        public Task SavePaymentTransactionAsync(
+            PaymentTransaction transaction,
+            Invoice? invoice,
+            OutboxMessage? outboxMessage,
+            TransactionJournalEntry journalEntry,
+            TransactionJournalEntry? invoiceJournalEntry,
+            CancellationToken cancellationToken = default)
         {
             if (shouldThrowOnSave)
             {
                 throw new InvalidOperationException("Simulated database failure before commit.");
             }
-            return inner.SavePaymentTransactionAsync(transaction, invoice, outboxMessage, cancellationToken);
+            return inner.SavePaymentTransactionAsync(transaction, invoice, outboxMessage, journalEntry, invoiceJournalEntry, cancellationToken);
         }
 
         public Task<IReadOnlyList<Guid>> GetPendingExpiredCandidateIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
@@ -929,11 +972,21 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
         public Task<Invoice?> FindInvoiceByIdWithRowLockSkipLockedAsync(Guid id, CancellationToken cancellationToken = default) =>
             inner.FindInvoiceByIdWithRowLockSkipLockedAsync(id, cancellationToken);
 
-        public Task SaveNewInvoiceAsync(Invoice invoice, OperationReceipt receipt, OutboxMessage? outboxMessage = null, CancellationToken cancellationToken = default) =>
-            inner.SaveNewInvoiceAsync(invoice, receipt, outboxMessage, cancellationToken);
+        public Task SaveNewInvoiceAsync(
+            Invoice invoice,
+            OperationReceipt receipt,
+            OutboxMessage? outboxMessage,
+            TransactionJournalEntry journalEntry,
+            CancellationToken cancellationToken = default) =>
+            inner.SaveNewInvoiceAsync(invoice, receipt, outboxMessage, journalEntry, cancellationToken);
 
-        public Task SaveInvoiceChangesAsync(Invoice invoice, OperationReceipt? receipt = null, OutboxMessage? outboxMessage = null, CancellationToken cancellationToken = default) =>
-            inner.SaveInvoiceChangesAsync(invoice, receipt, outboxMessage, cancellationToken);
+        public Task SaveInvoiceChangesAsync(
+            Invoice invoice,
+            OperationReceipt? receipt,
+            OutboxMessage? outboxMessage,
+            TransactionJournalEntry journalEntry,
+            CancellationToken cancellationToken = default) =>
+            inner.SaveInvoiceChangesAsync(invoice, receipt, outboxMessage, journalEntry, cancellationToken);
 
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
             inner.SaveChangesAsync(cancellationToken);

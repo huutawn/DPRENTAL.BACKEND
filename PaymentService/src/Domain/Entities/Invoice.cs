@@ -1,84 +1,42 @@
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
 using Dprental.PaymentService.Common;
 using Dprental.PaymentService.Common.Utils;
+using Dprental.PaymentService.Domain.Events;
 
 namespace Dprental.PaymentService.Domain.Entities;
 
-[Table("invoices")]
 public sealed class Invoice
 {
     private readonly List<InvoiceItem> _items = [];
+    private readonly List<IFinancialDomainEvent> _domainEvents = [];
 
-    [Key]
     public Guid Id { get; private set; }
-
-    [Required]
-    [MaxLength(64)]
     public string InvoiceRef { get; private set; } = string.Empty;
-
-    [Required]
     public Guid RentalOrderId { get; private set; }
-
-    [Required]
-    [MaxLength(64)]
     public string OrderCode { get; private set; } = string.Empty;
-
-    [Required]
     public Guid RenterId { get; private set; }
-
-    [Required]
-    [MaxLength(3)]
     public string Currency { get; private set; } = "VND";
-
-    [Required]
-    [Column(TypeName = "numeric(18,0)")]
     public decimal TotalRentalAmount { get; private set; }
-
-    [Required]
-    [Column(TypeName = "numeric(18,0)")]
     public decimal TotalDepositAmount { get; private set; }
-
-    [Required]
-    [Column(TypeName = "numeric(18,0)")]
     public decimal TotalAmount { get; private set; }
-
-    [Required]
-    [MaxLength(32)]
     public string Status { get; private set; } = InvoiceStatus.Pending;
-
-    [Required]
-    [MaxLength(32)]
     public string PaymentCode { get; private set; } = string.Empty;
-
-    [Required]
-    [MaxLength(64)]
     public string MerchantBank { get; private set; } = string.Empty;
-
-    [Required]
-    [MaxLength(64)]
     public string MerchantAccount { get; private set; } = string.Empty;
-
-    [Required]
     public DateTimeOffset PaymentDeadline { get; private set; }
-
-    [Required]
     public DateTimeOffset CreatedAt { get; private set; }
-
     public DateTimeOffset? PaidAt { get; private set; }
-
     public DateTimeOffset? CancelledAt { get; private set; }
-
     public DateTimeOffset? ExpiredAt { get; private set; }
-
-    [MaxLength(500)]
     public string? CancelReason { get; private set; }
-
-    [MaxLength(64)]
     public string? PaymentRef { get; private set; }
+    public long Revision { get; private set; } = 1;
 
-    [InverseProperty(nameof(InvoiceItem.Invoice))]
     public IReadOnlyList<InvoiceItem> Items => _items.AsReadOnly();
+    public IReadOnlyList<IFinancialDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
+
+    public void ClearDomainEvents() => _domainEvents.Clear();
+    internal void AddDomainEvent(IFinancialDomainEvent domainEvent) => _domainEvents.Add(domainEvent);
+
     private Invoice()
     {
     }
@@ -173,13 +131,19 @@ public sealed class Invoice
             CreatedAt = utcCreated
         };
 
-        invoice._items.AddRange(items);
+        foreach (var item in items)
+        {
+            item.AttachToInvoice(invoice.Id);
+            invoice._items.Add(item);
+        }
 
         if (totalAmount == 0m)
         {
             invoice.Status = InvoiceStatus.Paid;
             invoice.PaidAt = utcCreated;
             invoice.PaymentRef = $"PAY-{Guid.NewGuid():N}";
+            invoice.AddDomainEvent(new InvoicePaidDomainEvent(
+                invoice.Id, invoice.InvoiceRef, invoice.RentalOrderId, invoice.PaymentRef, 0m, "VND", utcCreated, utcCreated));
         }
         else
         {
@@ -190,6 +154,18 @@ public sealed class Invoice
 
             invoice.Status = InvoiceStatus.Pending;
         }
+
+        invoice.AddDomainEvent(new InvoiceCreatedDomainEvent(
+            invoice.Id,
+            invoice.InvoiceRef,
+            invoice.RentalOrderId,
+            invoice.OrderCode,
+            invoice.RenterId,
+            invoice.TotalAmount,
+            invoice.Currency,
+            invoice.Status,
+            invoice.PaymentDeadline,
+            utcCreated));
 
         return Result.Success(invoice);
     }
@@ -240,10 +216,13 @@ public sealed class Invoice
         {
             return Error.Conflict("INVOICE_EXPIRED", "Thời điểm thanh toán đã quá hạn thanh toán của hóa đơn.");
         }
-
         Status = InvoiceStatus.Paid;
         PaymentRef = normalizedPaymentRef;
         PaidAt = utcPaidAt;
+        Revision++;
+
+        AddDomainEvent(new InvoicePaidDomainEvent(
+            Id, InvoiceRef, RentalOrderId, normalizedPaymentRef, TotalAmount, Currency, utcPaidAt, utcPaidAt));
 
         return Result.Success();
     }
@@ -268,10 +247,13 @@ public sealed class Invoice
         {
             Status = InvoiceStatus.Expired;
             ExpiredAt = utcProcessedAt;
+            Revision++;
+            AddDomainEvent(new InvoiceExpiredDomainEvent(Id, InvoiceRef, RentalOrderId, utcProcessedAt));
         }
 
         PaymentRef = normalizedPaymentRef;
         PaidAt = utcPaidAt;
+        Revision++;
 
         return Result.Success();
     }
@@ -294,9 +276,13 @@ public sealed class Invoice
             return Result.Success();
         }
 
+        DateTimeOffset utcCancelledAt = cancelledAt.ToUniversalTime();
         Status = InvoiceStatus.Cancelled;
-        CancelledAt = cancelledAt.ToUniversalTime();
+        CancelledAt = utcCancelledAt;
         CancelReason = reason;
+        Revision++;
+
+        AddDomainEvent(new InvoiceCancelledDomainEvent(Id, InvoiceRef, RentalOrderId, reason, utcCancelledAt));
 
         return Result.Success();
     }
@@ -313,8 +299,12 @@ public sealed class Invoice
             return Result.Success();
         }
 
+        DateTimeOffset utcExpiredAt = expiredAt.ToUniversalTime();
         Status = InvoiceStatus.Expired;
-        ExpiredAt = expiredAt.ToUniversalTime();
+        ExpiredAt = utcExpiredAt;
+        Revision++;
+
+        AddDomainEvent(new InvoiceExpiredDomainEvent(Id, InvoiceRef, RentalOrderId, utcExpiredAt));
 
         return Result.Success();
     }

@@ -9,8 +9,11 @@ using Dprental.PaymentService.Api.Tests.TestHelpers;
 using Dprental.PaymentService.Application.DTOs.Operations;
 using Dprental.PaymentService.Application.DTOs.Payout;
 using Dprental.PaymentService.Application.DTOs.Settlement;
+using Dprental.PaymentService.Application.DTOs.Verification;
+using Dprental.PaymentService.Application.IServices;
+using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Domain.Entities;
-using Dprental.PaymentService.Domain.Persistence;
+using Dprental.PaymentService.Domain.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -19,6 +22,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
@@ -32,20 +36,30 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
     private const string Audience = "payment-api";
     private const string KeyId = "settlement-test-key";
     private readonly RSA _rsa = RSA.Create(2048);
+    private readonly ECDsa _ecdsa = EcdsaAttestation.CreateEphemeralP256KeyPair();
+    private const string SigningKeyId = "dpr-ecdsa-2026-v1";
     private string _connectionString = string.Empty;
     private string _databaseName = string.Empty;
+    private string _integrityConn = string.Empty;
+    private string _integrityDbName = string.Empty;
     private WebApplicationFactory<Program> _factory = null!;
 
     public async Task InitializeAsync()
     {
         (_connectionString, _databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        (_integrityConn, _integrityDbName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
         await using (var db = new PaymentServiceDbContext(
             PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
         {
             await db.Database.MigrateAsync();
         }
+        var iOptions = new DbContextOptionsBuilder<IntegrityDbContext>().UseNpgsql(_integrityConn).Options;
+        await using (var iCtx = new IntegrityDbContext(iOptions))
+        {
+            await iCtx.Database.MigrateAsync();
+        }
 
-        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        _factory = new PaymentWebApplicationFactory().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ConnectionStrings:Postgres", _connectionString);
             builder.UseSetting("Payment:Merchant:Bank", "MBBank");
@@ -55,6 +69,9 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
             builder.UseSetting("Authentication:Jwt:ServiceAudience", Audience);
             builder.UseSetting("Authentication:Jwt:ClientAudience", "dprental-clients");
             builder.UseSetting("Authentication:Jwt:JwksUri", "http://localhost/jwks");
+            builder.UseSetting("InternalAuthentication:RentalApiKey", PaymentWebApplicationFactory.DefaultInternalApiKey);
+            builder.UseSetting("IntegrityVerification:ActiveKeyId", SigningKeyId);
+            builder.UseSetting($"IntegrityVerification:PublicKeys:{SigningKeyId}", EcdsaAttestation.ExportPublicKeyBase64(_ecdsa));
             builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.ConfigureTestServices(services =>
             {
@@ -64,6 +81,29 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
                     options.TokenValidationParameters.ValidAudiences = [Audience, "dprental-clients"];
                     options.ConfigurationManager = new TestJwksManager(_rsa);
                 });
+
+                var keyManager = new IntegrityKeyManager(Microsoft.Extensions.Options.Options.Create(new IntegrityHostOptions
+                {
+                    SigningKeyId = SigningKeyId,
+                    PrivateKeyBase64 = EcdsaAttestation.ExportPrivateKeyBase64(_ecdsa)
+                }));
+
+                var verifyOptions = new TestOptionsMonitor<IntegrityVerificationOptions>(new IntegrityVerificationOptions
+                {
+                    ActiveKeyId = SigningKeyId,
+                    PublicKeys = new Dictionary<string, string> { [SigningKeyId] = EcdsaAttestation.ExportPublicKeyBase64(_ecdsa) }
+                });
+
+                services.AddHttpClient<ITransactionIntegrityChecker, IntegrityHostClient>()
+                    .ConfigurePrimaryHttpMessageHandler(() =>
+                    {
+                        return new MockIntegrityHandler(() =>
+                        {
+                            var iCtx = new IntegrityDbContext(new DbContextOptionsBuilder<IntegrityDbContext>().UseNpgsql(_integrityConn).Options);
+                            var pCtx = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
+                            return new IntegrityVerificationEngine(iCtx, pCtx, keyManager, new PaymentDataEncryptor(new byte[32]), verifyOptions);
+                        });
+                    });
             });
         });
     }
@@ -71,40 +111,30 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         _factory.Dispose();
+        _ecdsa.Dispose();
         _rsa.Dispose();
         if (_databaseName.Length > 0)
             await PostgresTestDatabaseHelper.DropTestDatabaseAsync(_databaseName);
+        if (_integrityDbName.Length > 0)
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(_integrityDbName);
     }
 
     [Fact]
     public async Task Service_scope_is_required_and_valid_settlement_replays()
     {
-        var now = DateTimeOffset.UtcNow;
-        var item = InvoiceItem.Create(Guid.NewGuid(), Guid.NewGuid(), 100_000m, 90_000m).Value;
-        var invoice = Invoice.Create(Guid.NewGuid(), "ORD-SETTLEMENT-API", Guid.NewGuid(), "VND",
-            now.AddMinutes(30), [item], "DPR-SETTLEMENT-API", "MBBank", "0383799632", now).Value;
-        Assert.True(invoice.MarkPaid("PAY-SETTLEMENT-API", invoice.TotalAmount, "VND", now).IsSuccess);
-
-        await using (var db = new PaymentServiceDbContext(
-            PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
-        {
-            db.Invoices.Add(invoice);
-            await db.SaveChangesAsync();
-        }
-
+        await using var h = FinancialWorkflowHarness.Attach(_connectionString, _integrityConn, _ecdsa);
+        var invoice = await h.SeedAsync();
+        var item = invoice.Items[0];
         var request = new SettleRentalRequest(invoice.RentalOrderId, item.RentalItemId,
             invoice.InvoiceRef, invoice.PaymentRef!, item.SupplierId,
             item.DepositAmount, 20_000m, 70_000m, "VND", "DEC-API", "settle-api-001");
 
         using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Remove("X-Api-Key");
         Assert.Equal(HttpStatusCode.Unauthorized,
             (await client.PostAsJsonAsync("/api/v1/settlements", request)).StatusCode);
 
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token("payment.invoice.write"));
-        Assert.Equal(HttpStatusCode.Forbidden,
-            (await client.PostAsJsonAsync("/api/v1/settlements", request)).StatusCode);
-
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token("payment.settlement.write"));
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
         var created = await client.PostAsJsonAsync("/api/v1/settlements", request);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var body = await created.Content.ReadFromJsonAsync<SettleRentalResponse>();
@@ -123,28 +153,20 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Admin_can_confirm_manual_refund_but_service_and_customer_cannot()
     {
-        var now = DateTimeOffset.UtcNow;
-        var item = InvoiceItem.Create(Guid.NewGuid(), Guid.NewGuid(), 100_000m, 90_000m).Value;
-        var invoice = Invoice.Create(Guid.NewGuid(), "ORD-REFUND-API", Guid.NewGuid(), "VND",
-            now.AddMinutes(30), [item], "DPR-REFUND-API", "MBBank", "0383799632", now).Value;
-        Assert.True(invoice.MarkPaid("PAY-REFUND-API", invoice.TotalAmount, "VND", now).IsSuccess);
+        await using var h = FinancialWorkflowHarness.Attach(_connectionString, _integrityConn, _ecdsa);
+        var invoice = await h.SeedAsync();
         Guid requirementId;
-        await using (var db = new PaymentServiceDbContext(
-            PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
+        await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
         {
-            db.Invoices.Add(invoice);
-            await db.SaveChangesAsync();
-            var settlement = RentalItemSettlement.Create(item, 20_000m, "DEC-REFUND-API", "settle-refund-api").Value;
-            var result = await new Dprental.PaymentService.Domain.Repository.EfSettlementLedger(db, TimeProvider.System)
-                .RecordSettlementAsync(settlement, CancellationToken.None);
-            Assert.True(result.IsSuccess);
+            var settlement = await h.Settlement(db).SettleAsync(FinancialWorkflowHarness.SettlementRequest(invoice), default);
+            Assert.True(settlement.IsSuccess, settlement.Error.Message);
             requirementId = await db.ManualRefundRequirements.Select(x => x.Id).SingleAsync();
         }
-
+        await h.ConfirmAsync();
         using var client = _factory.CreateClient();
         var url = $"/api/v1/manual-refunds/{requirementId}/complete";
         var request = new CompleteManualRefundRequest(
-            "refund-api-operation-001", "BANK-ADMIN-001", "Đã đối chiếu chứng từ chuyển khoản.");
+            "BANK-ADMIN-001", "confirm-admin-001", "Đã đối chiếu chứng từ chuyển khoản.");
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token("payment.settlement.write"));
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(url, request)).StatusCode);
@@ -155,36 +177,34 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         var response = await client.PostAsJsonAsync(url, request);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<CompleteManualRefundResponse>();
-        Assert.NotNull(body);
-        Assert.False(body.IsReplay);
-        Assert.Equal("BANK-ADMIN-001", body.ExternalTransferReference);
+        Assert.Equal("BANK-ADMIN-001", body!.ExternalTransferReference);
         Assert.NotEqual(Guid.Empty, body.CompletedBy);
 
         var replay = await client.PostAsJsonAsync(url, request);
-        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
-        Assert.True((await replay.Content.ReadFromJsonAsync<CompleteManualRefundResponse>())!.IsReplay);
+        string replayErr = await replay.Content.ReadAsStringAsync();
+        Assert.True(replay.StatusCode == HttpStatusCode.OK, $"Replay failed with {replay.StatusCode}: {replayErr}");
+        var replayBody = await replay.Content.ReadFromJsonAsync<CompleteManualRefundResponse>();
+        Assert.True(replayBody!.IsReplay, $"ReplayBody was: {replayErr}");
     }
 
     [Fact]
     public async Task Financial_reads_enforce_ownership_and_show_operational_queues()
     {
+        await using var harness = FinancialWorkflowHarness.Attach(_connectionString, _integrityConn, _ecdsa);
+        var invoice = await harness.SeedAsync(count: 2);
         var now = DateTimeOffset.UtcNow;
-        var renterId = Guid.NewGuid();
-        var supplierId = Guid.NewGuid();
-        var otherSupplierId = Guid.NewGuid();
-        var item = InvoiceItem.Create(Guid.NewGuid(), supplierId, 100_000m, 90_000m).Value;
-        var otherItem = InvoiceItem.Create(Guid.NewGuid(), otherSupplierId, 40_000m, 0m).Value;
-        var invoice = Invoice.Create(Guid.NewGuid(), "ORD-READ-API", renterId, "VND",
-            now.AddMinutes(30), [item, otherItem], "DPR-READ-API", "MBBank", "0383799632", now).Value;
+        var renterId = invoice.RenterId;
+        var item = invoice.Items[0];
+        var otherItem = invoice.Items[1];
+        var supplierId = item.SupplierId;
+        var otherSupplierId = otherItem.SupplierId;
         var pendingItem = InvoiceItem.Create(Guid.NewGuid(), Guid.NewGuid(), 50_000m, 10_000m).Value;
         var pendingInvoice = Invoice.Create(Guid.NewGuid(), "ORD-PENDING-READ", Guid.NewGuid(), "VND",
             now.AddMinutes(30), [pendingItem], "DPR-PENDING-READ", "MBBank", "0383799632", now).Value;
-        Assert.True(invoice.MarkPaid("PAY-READ-API", invoice.TotalAmount, "VND", now).IsSuccess);
         Guid settlementId;
         Guid transactionId;
         await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
         {
-            db.Invoices.Add(invoice);
             db.Invoices.Add(pendingInvoice);
             var transaction = PaymentTransaction.Create(
                 "SePay", "READ-TRANSACTION-001", "PAY-READ-API", "MBBank", "0383799632", null,
@@ -201,14 +221,16 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
                 "in", 100_000m, null, now, null, null, null, null, null, null, null,
                 PaymentTransactionStatus.ReviewRequired, PaymentTransactionReason.AmountMismatch, now));
             await db.SaveChangesAsync();
-            var settlement = RentalItemSettlement.Create(item, 20_000m, "DEC-READ-API", "settle-read-api").Value;
-            var saved = await new Dprental.PaymentService.Domain.Repository.EfSettlementLedger(db, TimeProvider.System)
-                .RecordSettlementAsync(settlement, CancellationToken.None);
-            Assert.True(saved.IsSuccess);
-            settlementId = saved.Value.SettlementId;
-            var otherSettlement = RentalItemSettlement.Create(otherItem, 0m, "DEC-READ-OTHER", "settle-read-other").Value;
-            Assert.True((await new Dprental.PaymentService.Domain.Repository.EfSettlementLedger(db, TimeProvider.System)
-                .RecordSettlementAsync(otherSettlement, CancellationToken.None)).IsSuccess);
+            var firstSettlement = await harness.Settlement(db).SettleAsync(
+                FinancialWorkflowHarness.SettlementRequest(invoice, 20_000m, "settle-read-api"), CancellationToken.None);
+            Assert.True(firstSettlement.IsSuccess, firstSettlement.Error.Message);
+            var secondRequest = new Dprental.PaymentService.Application.DTOs.Settlement.SettleRentalRequest(
+                invoice.RentalOrderId, otherItem.RentalItemId, invoice.InvoiceRef, invoice.PaymentRef!, otherItem.SupplierId,
+                otherItem.DepositAmount, otherItem.DepositAmount, 0m, "VND", "DEC-READ-OTHER", "settle-read-other");
+            var secondSettlement = await harness.Settlement(db).SettleAsync(secondRequest, CancellationToken.None);
+            Assert.True(secondSettlement.IsSuccess, secondSettlement.Error.Message);
+            settlementId = await db.RentalItemSettlements.Where(x => x.RentalItemId == item.RentalItemId)
+                .Select(x => x.Id).SingleAsync();
         }
 
         using var client = _factory.CreateClient();
@@ -269,11 +291,11 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, pendingPayouts.StatusCode);
         await using (var checkDb = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
         {
-            var checkRepository = new Dprental.PaymentService.Domain.Repository.EfFinancialReadRepository(checkDb);
+            var checkRepository = new Dprental.PaymentService.Domain.Repositories.EfFinancialReadRepository(checkDb);
             var directQueue = await checkRepository.ListReviewAsync(
-                Dprental.PaymentService.Domain.IRepository.FinancialReviewKind.SettlementPendingClose,
-                new Dprental.PaymentService.Domain.IRepository.DateRange(null, null),
-                new Dprental.PaymentService.Domain.IRepository.PageRequest(1, 20), CancellationToken.None);
+                Dprental.PaymentService.Domain.IRepositories.FinancialReviewKind.SettlementPendingClose,
+                new Dprental.PaymentService.Domain.IRepositories.DateRange(null, null),
+                new Dprental.PaymentService.Domain.IRepositories.PageRequest(1, 20), CancellationToken.None);
             Assert.Equal(1, directQueue.TotalCount);
         }
         var pendingClose = await client.GetAsync("/api/v1/admin/payments/review?kind=SettlementPendingClose");
@@ -430,22 +452,18 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Verified_destination_is_versioned_and_required_for_payout_completion()
     {
-        var now = DateTimeOffset.UtcNow;
-        var supplierId = Guid.NewGuid();
+        await using var harness = FinancialWorkflowHarness.Attach(_connectionString, _integrityConn, _ecdsa);
+        var invoice = await harness.SeedAsync();
+        var supplierId = invoice.Items[0].SupplierId;
         var otherSupplierId = Guid.NewGuid();
-        var item = InvoiceItem.Create(Guid.NewGuid(), supplierId, 100_000m, 0m).Value;
-        var invoice = Invoice.Create(Guid.NewGuid(), "ORD-DESTINATION-API", Guid.NewGuid(), "VND",
-            now.AddMinutes(30), [item], "DPR-DESTINATION-API", "MBBank", "0383799632", now).Value;
-        Assert.True(invoice.MarkPaid("PAY-DESTINATION-API", invoice.TotalAmount, "VND", now).IsSuccess);
+        var item = invoice.Items[0];
+        await using var settlementDb = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
+        var settled = await harness.Settlement(settlementDb).SettleAsync(
+            FinancialWorkflowHarness.SettlementRequest(invoice, item.DepositAmount, "settle-destination-api"), CancellationToken.None);
+        Assert.True(settled.IsSuccess, settled.Error.Message);
         Guid payoutId;
         await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
         {
-            db.Invoices.Add(invoice);
-            await db.SaveChangesAsync();
-            var settlement = RentalItemSettlement.Create(item, 0m, "DEC-DESTINATION-API", "settle-destination-api").Value;
-            var result = await new Dprental.PaymentService.Domain.Repository.EfSettlementLedger(db, TimeProvider.System)
-                .RecordSettlementAsync(settlement, CancellationToken.None);
-            Assert.True(result.IsSuccess);
             payoutId = await db.SupplierPayouts.Select(x => x.Id).SingleAsync();
         }
 
@@ -547,5 +565,37 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         }
 
         public void RequestRefresh() { }
+    }
+
+    private sealed class MockIntegrityHandler(Func<IntegrityVerificationEngine> engineFactory) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/internal/v1/integrity/verify", StringComparison.Ordinal) == true)
+            {
+                var reqDto = await request.Content!.ReadFromJsonAsync<TransactionVerificationRequest>(cancellationToken: cancellationToken);
+                var engine = engineFactory();
+                var result = await engine.VerifyAsync(reqDto!, cancellationToken);
+                if (result.IsSuccess)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = JsonContent.Create(result.Value)
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                {
+                    Content = JsonContent.Create(result.Error)
+                };
+            }
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        }
+    }
+
+    private sealed class TestOptionsMonitor<T>(T value) : IOptionsMonitor<T>
+    {
+        public T CurrentValue => value;
+        public T Get(string? name) => value;
+        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }

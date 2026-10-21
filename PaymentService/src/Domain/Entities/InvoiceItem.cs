@@ -1,42 +1,25 @@
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
 using Dprental.PaymentService.Common;
 using Dprental.PaymentService.Common.Utils;
 
 namespace Dprental.PaymentService.Domain.Entities;
 
-[Table("invoice_items")]
 public sealed class InvoiceItem
 {
-    [Key]
     public Guid Id { get; private set; }
-
-    [Required]
     public Guid InvoiceId { get; private set; }
-
-    [Required]
     public Guid RentalItemId { get; private set; }
-
-    [Required]
     public Guid SupplierId { get; private set; }
-
-    [Required]
-    [Column(TypeName = "numeric(18,0)")]
     public decimal RentalAmount { get; private set; }
-
-    [Required]
-    [Column(TypeName = "numeric(18,0)")]
     public decimal DepositAmount { get; private set; }
-
-    [Required]
-    [Column(TypeName = "numeric(18,0)")]
     public decimal TotalAmount { get; private set; }
-
-    [ForeignKey(nameof(InvoiceId))]
+    public long Revision { get; private set; } = 1;
     public Invoice? Invoice { get; private set; }
-    private InvoiceItem()
+    internal void AttachToInvoice(Guid invoiceId)
     {
+        InvoiceId = invoiceId;
     }
+
+    private InvoiceItem() { }
 
     public static Result<InvoiceItem> Create(
         Guid rentalItemId,
