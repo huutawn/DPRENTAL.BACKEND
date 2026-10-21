@@ -303,6 +303,11 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == operationId);
         if (receipt == null) return Error.NotFound("OPERATION_NOT_FOUND", $"Không tìm thấy operation '{operationId}'.");
 
+        if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired)
+        {
+            return Error.Conflict("MANUAL_REFUND_REQUIRED", "Refund receipt is reserved for manual reconciliation and cannot be replayed automatically.");
+        }
+
         if (receipt.IsSuccess && receipt.Status == RentalOperationReceipt.StatusSucceeded)
         {
             return Error.Conflict("OPERATION_ALREADY_SUCCEEDED", "Operation đã hoàn thành thành công (Succeeded); không thể replay.");
@@ -380,6 +385,11 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
 
             var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == operationId);
             if (receipt == null) return Error.NotFound("RECEIPT_NOT_FOUND", "Không tìm thấy operation receipt.");
+
+            if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired)
+            {
+                return Error.Conflict("MANUAL_REFUND_REQUIRED", "Refund receipt is reserved for manual reconciliation and cannot be replayed automatically.");
+            }
 
             receipt.ReopenForManualReplay(utcNow);
             await CommitLocalChangesAsync(order, cancellationToken);

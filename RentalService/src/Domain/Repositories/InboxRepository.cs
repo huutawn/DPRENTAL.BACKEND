@@ -25,6 +25,15 @@ public sealed class InboxRepository : IInboxRepository
             .FirstOrDefaultAsync(m => m.Id == id, cancellationToken);
     }
 
+    public async Task<string?> GetPayloadByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalInboxMessages
+            .AsNoTracking()
+            .Where(m => m.Id == id)
+            .Select(m => m.Payload)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<InboxMessageDescriptor?> GetDescriptorByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         return await _dbContext.RentalInboxMessages

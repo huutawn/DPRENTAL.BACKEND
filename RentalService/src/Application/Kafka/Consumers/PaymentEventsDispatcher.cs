@@ -468,9 +468,9 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             return Error.Validation("INVALID_AGGREGATE_ID", "AggregateId không phải Guid.");
         }
 
-        var identityMessage = await _inboxRepository.GetByIdForProcessingAsync(inboxMessageId, cancellationToken);
-        if (identityMessage is null) return Error.NotFound("INBOX_MESSAGE_NOT_FOUND", "Inbox message was not found.");
-        Guid payloadOrderId = ReadPayloadOrderId(identityMessage.Payload);
+        string? identityPayload = await _inboxRepository.GetPayloadByIdAsync(inboxMessageId, cancellationToken);
+        if (identityPayload is null) return Error.NotFound("INBOX_MESSAGE_NOT_FOUND", "Inbox message was not found.");
+        Guid payloadOrderId = ReadPayloadOrderId(identityPayload);
         if (payloadOrderId == Guid.Empty || payloadOrderId != orderId)
             return await DeadLetterInboxAsync(inboxMessageId, "AGGREGATE_PAYLOAD_MISMATCH",
                 "AggregateId must equal payload RentalOrderId.", cancellationToken);
