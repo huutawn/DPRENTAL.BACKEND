@@ -100,4 +100,3 @@ public sealed record RequestRefundResponse(
     decimal TotalRefundAmount,
     [Required] string Currency,
     bool IsReplay);
-
