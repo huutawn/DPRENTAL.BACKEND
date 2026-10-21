@@ -73,7 +73,7 @@ public sealed class RentalItemPickupLocationSnapshotMigrationPostgreSqlTests
                     [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
                     TestListingSnapshots.Default));
 
-            await using (RentalServiceDbContext context = new(options))
+            await using (LegacySchemaRentalServiceDbContext context = new(options))
             {
                 context.RentalOrders.Add(order);
                 await context.SaveChangesAsync();

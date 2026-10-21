@@ -119,7 +119,7 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
             Guid itemNormalId = Guid.NewGuid();
 
             // 2. Seed data before the late-refund migration
-            await using (var ctx = new RentalServiceDbContext(options))
+            await using (var ctx = new LegacySchemaRentalServiceDbContext(options))
             {
                 var lateOrder = CreateLateOrder(orderLateId, renterId, itemLateId);
                 lateOrder.MarkPaymentExpired(FixedNow.AddMinutes(-10), "op-expire");
