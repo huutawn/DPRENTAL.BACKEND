@@ -251,30 +251,38 @@ Mỗi sự kiện được xử lý trong một transaction duy nhất:
 
 RecommendationService là bên duy nhất sinh và cập nhật cache; InventoryService truy cập cache với vai trò người đọc (read-only).
 
-### Cấu Trúc Cache Key & Snapshot Format
+### Cấu Trúc Serving Cache Key & ZSET Contract
 
-Các key được lưu trữ trên Valkey (Redis compatible) dưới dạng JSON snapshot hoàn chỉnh:
+Các key được lưu trữ trên Valkey (Redis compatible) dưới dạng ZSET phục vụ Inventory đọc trực tiếp theo rank:
 
-| Key Pattern | Cấu trúc JSON Snapshot |
-|---|---|
-| `rec:v1:user:{userId}:equipment-types` | `{"version": 1, "generatedAt": "...", "items": [{"equipmentTypeId": "...", "score": 45}]}` |
-| `rec:v1:global:popular-listings` | `{"version": 1, "generatedAt": "...", "items": [{"equipmentListingId": "...", "score": 150}]}` |
+| Key Pattern | Member | Score | Limit | Thứ tự đọc |
+|---|---|---|---|---|
+| `rec:v1:user:{userId}:equipment-types` | `EquipmentTypeId` (UUID lowercase định dạng D) | Score persist từ PostgreSQL ($1 \le \text{score} \le 2^{53}$) | Top 20 | score DESC, UUID DESC |
+| `rec:v1:global:popular-listings` | `ListingId` (UUID lowercase định dạng D) | Score persist từ PostgreSQL ($1 \le \text{score} \le 2^{53}$) | Top 300 | score DESC, UUID DESC |
+
+**Lệnh đọc của InventoryService**:
+```bash
+# User personalized top equipment types
+ZRANGE rec:v1:user:<userId>:equipment-types 0 19 REV WITHSCORES
+
+# Global popular listings with pagination
+ZRANGE rec:v1:global:popular-listings <offset> <offset+pageSize-1> REV WITHSCORES
+```
 
 **Quy chuẩn dữ liệu cache**:
-- `{userId}` trong key là chuỗi UUID chuẩn định dạng D (lowercase, có dấu gạch ngang, ví dụ: `rec:v1:user:22222222-2222-4222-8222-222222222222:equipment-types`).
+- `{userId}` trong key là chuỗi UUID chuẩn định dạng D (lowercase, không chứa dấu ngoặc nhọn, ví dụ: `rec:v1:user:22222222-2222-4222-8222-222222222222:equipment-types`).
+- Không chứa JSON, envelope version, `generatedAt` hoặc metadata dưới dạng member.
+- Member không trùng lặp; không encode score hoặc thứ tự vào member.
+- Tập ranking rỗng được biểu diễn bằng key không tồn tại (Valkey không giữ empty ZSET).
 - Giới hạn kích thước danh sách:
-  - Cache user interest: Tối đa **20** `equipmentTypeId`.
-  - Cache global popularity: Tối đa **100** `equipmentListingId`.
-- Định dạng danh sách `items`:
-  - Không chứa ID trùng lặp.
-  - Điểm `score` là số nguyên dương (`int64 > 0`).
-  - Sắp xếp: Điểm `score` giảm dần (`DESC`). Trong trường hợp hòa điểm (`tie-break`), sắp xếp theo UUID chuẩn hóa tăng dần (`ASC`).
-- Nguyên tử, chu kỳ và hạn sử dụng:
-  - Ghi đè toàn bộ snapshot bằng thao tác `SET key json EX 300` nguyên tử; Time-To-Live (TTL) là **300 giây**.
-  - Snapshot hết hạn khi tuổi `generatedAt` đạt 300 giây.
-  - Từ chối snapshot cũ ghi đè snapshot mới: background worker chỉ ghi đè khi snapshot mới có `generatedAt >= snapshot hiện tại`.
-  - Worker định kỳ làm mới snapshot tối đa mỗi **60 giây** trong điều kiện bình thường.
-  - Tuyệt đối không dùng lệnh `INCR` trực tiếp trên Redis để tính điểm hoặc coi cache là nơi lưu trữ trạng thái gốc.
+  - User interest: Tối đa **20** `equipmentTypeId`.
+  - Global popularity: Tối đa **300** `equipmentListingId`.
+- Độ chính xác score: PostgreSQL tiếp tục dùng bigint. Cache chỉ nhận $1 \le \text{score} \le 9.007.199.254.740.992$ ($2^{53}$), giới hạn bảo toàn số nguyên của ZSET. Nếu ranking chứa score ngoài miền này, từ chối publish ranking đó, ghi log lỗi và giữ nguyên dữ liệu PostgreSQL.
+- Concurrency và Lease:
+  - Dùng lease Valkey riêng cho mỗi data key: `rec:v1:lease:{<dataKey>}` (hash tag chứa toàn bộ data key để bảo đảm cùng hash slot trong cluster).
+  - Thay ranking nguyên tử bằng Lua script kiểm tra lease token: xóa key cũ (kể cả string JSON cũ), ghi toàn bộ ZSET bằng score tuyệt đối, đặt TTL **300 giây**, và giải phóng lease.
+  - Worker định kỳ làm mới serving cache tối đa mỗi **60 giây** (mặc định) trong điều kiện bình thường.
+  - Tuyệt đối không dùng lệnh `ZINCRBY` từ event delta để cập nhật ZSET; mỗi lần publish đọc lại toàn bộ top N từ PostgreSQL.
 ---
 
 ### Chiến Lược Fallback Ba Tầng Tại InventoryService
@@ -484,49 +492,41 @@ Tất cả các thành phần triển khai phải thỏa mãn 4 nhóm kịch b�
 
 ---
 
-### Cache JSON Snapshot Mẫu
+### Serving Cache ZSET Mẫu
 
 #### 1. User Equipment Type Interest
-Key: `rec:v1:user:22222222-2222-4222-8222-222222222222:equipment-types`
-```json
-{
-  "version": 1,
-  "generatedAt": "2026-10-19T10:30:00Z",
-  "items": [
-    {
-      "equipmentTypeId": "44444444-4444-4444-8444-444444444444",
-      "score": 26
-    },
-    {
-      "equipmentTypeId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      "score": 12
-    },
-    {
-      "equipmentTypeId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-      "score": 12
-    }
-  ]
-}
+Key: `rec:v1:user:22222222-2222-4222-8222-222222222222:equipment-types` (Type: `zset`, TTL: 300s)
+
+Truy vấn đọc:
+```bash
+ZRANGE rec:v1:user:22222222-2222-4222-8222-222222222222:equipment-types 0 19 REV WITHSCORES
 ```
-*(Ghi chú: Hai type có cùng score 12 được xếp theo thứ tự `equipmentTypeId` tăng dần `aaaa...` trước `bbbb...`)*
+
+Kết quả trả về:
+```text
+1) "44444444-4444-4444-8444-444444444444"
+2) "26"
+3) "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+4) "12"
+5) "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+6) "12"
+```
+*(Ghi chú: Khi đọc với `REV`, hai type cùng score 12 được xếp theo thứ tự `equipmentTypeId` giảm dần `bbbb...` trước `aaaa...`)*
 
 #### 2. Global Listing Popularity
-Key: `rec:v1:global:popular-listings`
-```json
-{
-  "version": 1,
-  "generatedAt": "2026-10-19T10:30:00Z",
-  "items": [
-    {
-      "equipmentListingId": "33333333-3333-4333-8333-333333333333",
-      "score": 25
-    },
-    {
-      "equipmentListingId": "99999999-9999-4999-8999-999999999999",
-      "score": 18
-    }
-  ]
-}
+Key: `rec:v1:global:popular-listings` (Type: `zset`, TTL: 300s)
+
+Truy vấn đọc phân trang (ví dụ offset 0, page size 20):
+```bash
+ZRANGE rec:v1:global:popular-listings 0 19 REV WITHSCORES
+```
+
+Kết quả trả về:
+```text
+1) "33333333-3333-4333-8333-333333333333"
+2) "25"
+3) "99999999-9999-4999-8999-999999999999"
+4) "18"
 ```
 
 ---

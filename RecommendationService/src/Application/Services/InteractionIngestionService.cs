@@ -15,6 +15,7 @@ public sealed class InteractionIngestionService : IInteractionIngestionService
     private readonly IUserEquipmentTypeInterestRepository _userInterestRepository;
     private readonly IListingPopularityRepository _listingPopularityRepository;
     private readonly IInteractionUnitOfWork _unitOfWork;
+    private readonly ISnapshotPublishingService _publishingService;
     private readonly ILogger<InteractionIngestionService> _logger;
 
     public InteractionIngestionService(
@@ -23,6 +24,7 @@ public sealed class InteractionIngestionService : IInteractionIngestionService
         IUserEquipmentTypeInterestRepository userInterestRepository,
         IListingPopularityRepository listingPopularityRepository,
         IInteractionUnitOfWork unitOfWork,
+        ISnapshotPublishingService publishingService,
         ILogger<InteractionIngestionService> logger)
     {
         _validator = validator;
@@ -30,11 +32,12 @@ public sealed class InteractionIngestionService : IInteractionIngestionService
         _userInterestRepository = userInterestRepository;
         _listingPopularityRepository = listingPopularityRepository;
         _unitOfWork = unitOfWork;
+        _publishingService = publishingService;
         _logger = logger;
     }
-
     public async Task<EventProcessResult> ProcessEventAsync(string rawJson, InteractionEventSource source, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var validation = _validator.Validate(rawJson, source);
         if (validation.Classification == EventValidationClassification.Unrelated)
         {
@@ -115,7 +118,7 @@ public sealed class InteractionIngestionService : IInteractionIngestionService
             Envelope = rawJson
         };
 
-        return await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+        var result = await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
             var ingestResult = await _eventRepository.IngestAsync(rawEvent, ct);
 
@@ -144,5 +147,60 @@ public sealed class InteractionIngestionService : IInteractionIngestionService
 
             return new EventProcessResult(EventProcessOutcome.Processed);
         }, cancellationToken);
+
+        if (result.Outcome is not (EventProcessOutcome.Processed or EventProcessOutcome.DuplicateIgnored))
+        {
+            return result;
+        }
+
+        bool shouldPublishUser = userId.HasValue && equipmentTypeId.HasValue;
+        bool shouldPublishGlobal = equipmentListingId.HasValue;
+        bool isValkeyUnavailable = false;
+
+        if (shouldPublishUser && userId.HasValue)
+        {
+            try
+            {
+                var userPublishResult = await _publishingService.PublishUserAsync(userId.Value, cancellationToken);
+                if (userPublishResult.Outcome == PublishOutcome.Unavailable)
+                {
+                    isValkeyUnavailable = true;
+                }
+                else if (userPublishResult.Outcome is PublishOutcome.Failed)
+                {
+                    _logger.LogWarning("Post-commit user cache publish failed for user {UserId}: {Reason}", userId.Value, userPublishResult.Reason);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Exception during post-commit user cache publish for user {UserId}. Ingestion remains successful.", userId.Value);
+            }
+        }
+
+        if (shouldPublishGlobal && !isValkeyUnavailable)
+        {
+            try
+            {
+                var globalPublishResult = await _publishingService.PublishGlobalAsync(cancellationToken);
+                if (globalPublishResult.Outcome is PublishOutcome.Failed or PublishOutcome.Unavailable)
+                {
+                    _logger.LogWarning("Post-commit global cache publish failed: {Reason}", globalPublishResult.Reason);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Exception during post-commit global cache publish. Ingestion remains successful.");
+            }
+        }
+
+        return result;
     }
 }

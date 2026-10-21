@@ -35,7 +35,7 @@ public sealed class ValkeySnapshotWorker : BackgroundService
         // Run immediately on startup
         await RunCycleAsync(stoppingToken);
 
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Max(5, _options.IntervalSeconds)));
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(_options.IntervalSeconds));
         while (!stoppingToken.IsCancellationRequested && await timer.WaitForNextTickAsync(stoppingToken))
         {
             await RunCycleAsync(stoppingToken);
@@ -48,7 +48,7 @@ public sealed class ValkeySnapshotWorker : BackgroundService
         {
             using var scope = _scopeFactory.CreateScope();
             var publishingService = scope.ServiceProvider.GetRequiredService<ISnapshotPublishingService>();
-            await publishingService.PublishSnapshotsAsync(stoppingToken);
+            await publishingService.RebuildCacheAsync(stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

@@ -43,7 +43,7 @@ public sealed class ListingPopularityRepository : IListingPopularityRepository
         return await _dbContext.ListingPopularities
             .AsNoTracking()
             .OrderByDescending(x => x.Score)
-            .ThenBy(x => x.EquipmentListingId)
+            .ThenByDescending(x => x.EquipmentListingId)
             .Take(limit)
             .Select(x => new ListingPopularityItem(x.EquipmentListingId, x.Score))
             .ToListAsync(cancellationToken);

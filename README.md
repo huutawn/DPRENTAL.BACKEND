@@ -54,14 +54,23 @@ Hoặc qua Docker container:
 docker compose run --rm migration
 ```
 
-## Chạy Rebuild Projections
+## Lệnh Rebuild (Projections & Cache)
 
-Để tính toán và tái tạo lại toàn bộ điểm từ raw events trong transaction với SHARE lock:
+### 1. Rebuild Projections (PostgreSQL)
+Để tính toán và tái tạo lại toàn bộ điểm từ raw events trong PostgreSQL transaction với SHARE lock:
 
 ```bash
 dotnet run --project RecommendationService/src/Api/RecommendationService.Api.csproj -- --rebuild-projections
 ```
 
+### 2. Rebuild Serving Cache (Valkey ZSET)
+Để tái tạo serving cache ZSET trên Valkey từ dữ liệu projections hiện có trong PostgreSQL:
+
+```bash
+dotnet run --project RecommendationService/src/Api/RecommendationService.Api.csproj -- --rebuild-cache
+```
+
+*(Ghi chú: Khi cần tái tạo toàn diện cả hai tầng, có thể chạy tuần tự `--rebuild-projections` rồi đến `--rebuild-cache`)*
 ## Chạy API cục bộ
 
 Nạp biến môi trường từ `.env`:

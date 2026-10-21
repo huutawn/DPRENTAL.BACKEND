@@ -8,5 +8,5 @@ public interface IUserEquipmentTypeInterestRepository
 
     Task<IReadOnlyList<UserEquipmentTypeInterestItem>> GetTopInterestsAsync(Guid userId, int limit, CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<Guid>> GetDistinctUserIdsPagedAsync(int skip, int take, CancellationToken cancellationToken);
+    Task<IReadOnlyList<Guid>> GetDistinctUserIdsAsync(Guid? afterUserId, int take, CancellationToken cancellationToken);
 }

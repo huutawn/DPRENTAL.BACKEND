@@ -87,7 +87,7 @@ public sealed class RecommendationServiceDbContext : DbContext
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("timestamptz").HasDefaultValueSql("clock_timestamp()").IsRequired();
 
             entity.HasIndex(e => new { e.UserId, e.Score, e.EquipmentTypeId })
-                .IsDescending(false, true, false)
+                .IsDescending(false, true, true)
                 .HasDatabaseName("idx_user_interest_ranking");
 
             entity.HasIndex(e => e.UpdatedAt)
@@ -111,7 +111,7 @@ public sealed class RecommendationServiceDbContext : DbContext
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("timestamptz").HasDefaultValueSql("clock_timestamp()").IsRequired();
 
             entity.HasIndex(e => new { e.Score, e.EquipmentListingId })
-                .IsDescending(true, false)
+                .IsDescending(true, true)
                 .HasDatabaseName("idx_listing_popularity_ranking");
 
             entity.HasIndex(e => e.UpdatedAt)

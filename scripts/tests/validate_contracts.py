@@ -30,10 +30,6 @@ FIXTURE_MANIFEST = {
         "schema": "cart-item-added",
         "expected": "VALID"
     },
-    "global-popular-listings-cache.json": {
-        "schema": "global-popular-listings-cache",
-        "expected": "VALID"
-    },
     "listing-viewed-anonymous.json": {
         "schema": "listing-viewed",
         "expected": "VALID"
@@ -110,14 +106,6 @@ FIXTURE_MANIFEST = {
         "schema": "search-performed",
         "expected": "VALID"
     },
-    "user-equipment-types-cache-int64-max.json": {
-        "schema": "user-equipment-types-cache",
-        "expected": "VALID"
-    },
-    "user-equipment-types-cache.json": {
-        "schema": "user-equipment-types-cache",
-        "expected": "VALID"
-    },
 
     # 2. Invalid / Negative Fixtures
     "cart-item-added-null-user-id.json": {
@@ -139,26 +127,6 @@ FIXTURE_MANIFEST = {
     "event-invalid-timestamp-offset.json": {
         "schema": "listing-viewed",
         "expected": "SCHEMA_ERROR"
-    },
-    "global-popular-listings-cache-case-insensitive-duplicate.json": {
-        "schema": "global-popular-listings-cache",
-        "expected": "SEMANTIC_ERROR"
-    },
-    "global-popular-listings-cache-duplicate-id.json": {
-        "schema": "global-popular-listings-cache",
-        "expected": "SEMANTIC_ERROR"
-    },
-    "global-popular-listings-cache-exceeds-max.json": {
-        "schema": "global-popular-listings-cache",
-        "expected": "SCHEMA_ERROR"
-    },
-    "global-popular-listings-cache-score-exceeds-int64.json": {
-        "schema": "global-popular-listings-cache",
-        "expected": "SCHEMA_ERROR"
-    },
-    "global-popular-listings-cache-wrong-tie-break.json": {
-        "schema": "global-popular-listings-cache",
-        "expected": "SEMANTIC_ERROR"
     },
     "listing-viewed-empty-nil-uuid-listing-id.json": {
         "schema": "listing-viewed",
@@ -204,26 +172,6 @@ FIXTURE_MANIFEST = {
         "schema": "search-performed",
         "expected": "SCHEMA_ERROR"
     },
-    "user-equipment-types-cache-case-insensitive-duplicate.json": {
-        "schema": "user-equipment-types-cache",
-        "expected": "SEMANTIC_ERROR"
-    },
-    "user-equipment-types-cache-duplicate-id.json": {
-        "schema": "user-equipment-types-cache",
-        "expected": "SEMANTIC_ERROR"
-    },
-    "user-equipment-types-cache-exceeds-max.json": {
-        "schema": "user-equipment-types-cache",
-        "expected": "SCHEMA_ERROR"
-    },
-    "user-equipment-types-cache-score-exceeds-int64.json": {
-        "schema": "user-equipment-types-cache",
-        "expected": "SCHEMA_ERROR"
-    },
-    "user-equipment-types-cache-wrong-sort.json": {
-        "schema": "user-equipment-types-cache",
-        "expected": "SEMANTIC_ERROR"
-    },
     "wrong-message-type.json": {
         "schema": "listing-viewed",
         "expected": "SCHEMA_ERROR"
@@ -262,8 +210,6 @@ def load_schemas():
         "cart-item-added",
         "rental-item-paid",
         "rental-item-completed",
-        "user-equipment-types-cache",
-        "global-popular-listings-cache"
     ]
     for s_name in expected_schemas:
         schema_path = os.path.join(SCHEMA_DIR, f"{s_name}.schema.json")
@@ -276,45 +222,6 @@ def load_schemas():
 
     return schemas
 
-
-def validate_cache_semantics(cache_data: dict, is_user_cache: bool):
-    """
-    Supplementary semantic validation beyond JSON Schema Draft 2020-12:
-    - Case-insensitive uniqueness of IDs
-    - Order: score descending, tie-break normalized lowercase UUID ascending
-    """
-    items = cache_data.get("items", [])
-    id_key = "equipmentTypeId" if is_user_cache else "equipmentListingId"
-
-    seen_ids = set()
-    prev_item = None
-
-    for idx, item in enumerate(items):
-        raw_id = item.get(id_key)
-        norm_id = str(raw_id).lower() if raw_id is not None else ""
-        score = item.get("score")
-
-        if norm_id in seen_ids:
-            raise ValidationError(f"Duplicate {id_key} '{raw_id}' (case-normalized '{norm_id}') found at index {idx}")
-        seen_ids.add(norm_id)
-
-        if prev_item is not None:
-            prev_score = prev_item.get("score")
-            prev_raw_id = prev_item.get(id_key)
-            prev_norm_id = str(prev_raw_id).lower() if prev_raw_id is not None else ""
-
-            if score > prev_score:
-                raise ValidationError(
-                    f"Wrong score sort order at index {idx}: score {score} > previous score {prev_score}"
-                )
-            if score == prev_score:
-                # Tie-break rule: normalized lowercase UUID string ascending
-                if norm_id <= prev_norm_id:
-                    raise ValidationError(
-                        f"Wrong tie-break order at index {idx}: normalized ID '{norm_id}' should be > '{prev_norm_id}'"
-                    )
-
-        prev_item = item
 
 
 def test_single_fixture(fixture_path: str, filename: str, schemas: dict, format_checker: FormatChecker) -> str:
@@ -340,14 +247,6 @@ def test_single_fixture(fixture_path: str, filename: str, schemas: dict, format_
     if errors:
         return "SCHEMA_ERROR"
 
-    # 2. Supplementary semantic validation for cache snapshots
-    try:
-        if "user-equipment-types-cache" in schema_name:
-            validate_cache_semantics(fixture, is_user_cache=True)
-        elif "global-popular-listings-cache" in schema_name:
-            validate_cache_semantics(fixture, is_user_cache=False)
-    except ValidationError:
-        return "SEMANTIC_ERROR"
 
     return "VALID"
 
