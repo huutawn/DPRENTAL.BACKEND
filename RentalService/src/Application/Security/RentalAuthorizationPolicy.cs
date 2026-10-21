@@ -15,6 +15,17 @@ namespace Dprental.RentalService.Application.Security;
 /// </remarks>
 public static class RentalAuthorizationPolicy
 {
+    public static Result<Guid> AuthorizeRenterCaller(IRentalCallerContext? caller)
+    {
+        if (caller is null || !caller.IsAuthenticated || caller.IsService ||
+            !caller.UserId.HasValue || caller.UserId.Value == Guid.Empty)
+        {
+            return Error.Unauthorized(ErrorCodes.AuthRequired, "Yêu cầu đăng nhập tài khoản cá nhân của người thuê.");
+        }
+
+        return caller.UserId.Value;
+    }
+
     public static class ErrorCodes
     {
         public const string Unauthorized = "Auth.Unauthorized";

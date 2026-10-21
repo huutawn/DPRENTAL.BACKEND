@@ -77,7 +77,7 @@ public sealed class OverdueProtectionTests : IAsyncLifetime
     [Fact]
     public async Task DueHandedOverAllocation_IsProtectedByKafkaCommandInOutbox()
     {
-        var order = ReturnTests.NewOrder();
+        var order = ReturnTests.NewOrder(quantity: 1);
         var item = order.Items.Single();
         var unit = item.UnitAssignments.Single();
         await using (var db = NewDb())

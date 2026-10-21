@@ -43,6 +43,20 @@ public sealed class HandoverEvidenceTests
     }
 
     [Fact]
+    public async Task NewHandoverAfterAutoExpiryDeadline_IsRejectedBeforeInventoryCommand()
+    {
+        await SeedAsync();
+        _clock.UtcNow = new DateTimeOffset(2026, 10, 14, 0, 0, 0, TimeSpan.FromHours(7));
+
+        Result<HandoverItemResponse> result = await Service().HandoverItemAsync(
+            _item.Id, Request(), "late-handover-1", OrderTestData.User(_binh));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("HANDOVER_DEADLINE_PASSED", result.Error.Code);
+        Assert.Empty(await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver));
+    }
+
+    [Fact]
     public async Task Handover_WithoutConfirmation_IsRejectedAndNothingIsSent()
     {
         await SeedAsync();

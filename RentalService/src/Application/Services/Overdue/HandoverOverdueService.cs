@@ -5,11 +5,14 @@ using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.IServices.Overdue;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Events;
+using Dprental.RentalService.Application.Options;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Services.Overdue;
 
@@ -20,16 +23,26 @@ public sealed class HandoverOverdueService(
     IOutboxRepository outboxRepository,
     IUnitOfWork unitOfWork,
     TimeProvider timeProvider,
+    IOptions<HandoverOverdueOptions> options,
     ILogger<HandoverOverdueService> logger) : IHandoverOverdueService
 {
+    private readonly int _autoExpireGraceHours = options.Value.AutoExpireGraceHours;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true
     };
 
-    public Task<IReadOnlyList<Guid>> GetDueOrderIdsAsync(int batchSize, CancellationToken cancellationToken = default) =>
-        orders.GetHandoverOverdueOrderIdsAsync(timeProvider.GetUtcNow(), batchSize, cancellationToken);
+    public Task<IReadOnlyList<Guid>> GetDueOrderIdsAsync(int batchSize, CancellationToken cancellationToken = default)
+    {
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        return orders.GetHandoverOverdueOrderIdsAsync(
+            HandoverDeadlinePolicy.VietnamDate(now),
+            HandoverDeadlinePolicy.AutoExpireStartBefore(now, _autoExpireGraceHours),
+            batchSize,
+            cancellationToken);
+    }
 
     public async Task<HandoverOverdueResult> ProcessOrderAsync(Guid orderId, CancellationToken cancellationToken = default)
     {
@@ -37,7 +50,7 @@ public sealed class HandoverOverdueService(
         if (order is null) return new(0, 0, 0);
 
         DateTimeOffset now = timeProvider.GetUtcNow();
-        int autoCancelled = 0;
+        int autoExpired = 0;
         int noticesSent = 0;
         int processedItems = 0;
 
@@ -56,31 +69,34 @@ public sealed class HandoverOverdueService(
                 continue;
             }
 
-            // 1. Quá hạn toàn bộ kỳ thuê (now >= E + 1) -> Tự động hủy (CancelBySystemAsync tự khóa orderId)
-            if (item.IsHandoverAutoCancellable(now))
+            // Kết thúc mục thuê chưa bàn giao sau thời gian gia hạn kể từ 00:00 ngày D+1.
+            if (HandoverDeadlinePolicy.IsAutoExpireDue(item, now, _autoExpireGraceHours))
             {
-                string opKey = RentalOperationExecutor.ComputeOperationKey("AutoCancel", $"{order.Id}:{item.Id}");
-                var cancelResult = await cancellationService.CancelBySystemAsync(
+                string opKey = RentalOperationExecutor.ComputeOperationKey("HandoverDeadlineExpired", $"{order.Id}:{item.Id}");
+                var expiryResult = await cancellationService.ExpireNoHandoverAsync(
                     item.Id,
-                    "Hết kỳ thuê mà chưa bàn giao thiết bị",
+                    "Hết hạn bàn giao thiết bị",
                     opKey,
                     cancellationToken);
 
-                if (cancelResult.IsSuccess)
+                if (expiryResult.IsSuccess)
                 {
-                    autoCancelled++;
-                    processedItems++;
-                    logger.LogInformation("Tự động hủy thành công Item {ItemId} trong Order {OrderId}.", item.Id, order.Id);
+                    if (expiryResult.Value)
+                    {
+                        autoExpired++;
+                        processedItems++;
+                        logger.LogInformation("Đã kết thúc Item {ItemId} quá hạn bàn giao trong Order {OrderId}.", item.Id, order.Id);
+                    }
                 }
                 else
                 {
-                    logger.LogWarning("Tự động hủy Item {ItemId} không thành công: {Code}", item.Id, cancelResult.Error.Code);
+                    logger.LogWarning("Kết thúc Item {ItemId} quá hạn bàn giao không thành công: {Code}", item.Id, expiryResult.Error.Code);
                 }
                 continue;
             }
 
             // 2. Mới qua mốc quá hạn giao (now >= S + 1) -> Phát cảnh báo 1 lần
-            if (item.IsHandoverOverdue(now))
+            if (HandoverDeadlinePolicy.IsNoticeDue(item, now))
             {
                 await using var orderLock = await locks.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(15), cancellationToken);
 
@@ -127,7 +143,7 @@ public sealed class HandoverOverdueService(
                             freshItem.SupplierId,
                             freshOrder.RenterId,
                             freshItem.ExpectedStartDate,
-                            RentalItem.CalculateHandoverOverdueAt(freshItem.ExpectedStartDate)));
+                            HandoverDeadlinePolicy.NoticeAt(freshItem.ExpectedStartDate)));
 
                     var outbox = new RentalOutboxMessage(
                         notifyEnvelope.MessageId,
@@ -150,6 +166,6 @@ public sealed class HandoverOverdueService(
             }
         }
 
-        return new(processedItems, autoCancelled, noticesSent);
+        return new(processedItems, autoExpired, noticesSent);
     }
 }

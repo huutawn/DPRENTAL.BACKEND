@@ -119,7 +119,7 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
             Guid itemNormalId = Guid.NewGuid();
 
             // 2. Seed data before the late-refund migration
-            await using (var ctx = new RentalServiceDbContext(options))
+            await using (var ctx = new HistoricalReceiptSeedDbContext(options))
             {
                 var lateOrder = CreateLateOrder(orderLateId, renterId, itemLateId);
                 lateOrder.MarkPaymentExpired(FixedNow.AddMinutes(-10), "op-expire");
@@ -745,6 +745,7 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
 
     private sealed class DummyExecutor : IRentalOperationExecutor
     {
+        public Task<Result<Dprental.RentalService.Application.DTOs.Orders.CancelOrderResponse>> ExecuteRenterCancelOrderAsync(Guid orderId, Guid renterId, string? reason, string idempotencyKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result> ExecuteExtendHoldAsync(Guid orderId, Guid itemId, string operationKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result<SupplierDecisionResponse>> ExecuteSupplierAcceptAsync(Guid orderId, Guid itemId, Guid supplierId, string idempotencyKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Result<SupplierDecisionResponse>> ExecuteSupplierRejectAsync(Guid orderId, Guid itemId, Guid supplierId, string reason, string? note, string idempotencyKey, CancellationToken cancellationToken = default) => throw new NotImplementedException();

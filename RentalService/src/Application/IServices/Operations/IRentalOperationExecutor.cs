@@ -1,4 +1,5 @@
 using Dprental.RentalService.Application.DTOs.Operations;
+using Dprental.RentalService.Application.DTOs.Orders;
 using Dprental.RentalService.Application.DTOs.Supplier;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
@@ -8,6 +9,13 @@ namespace Dprental.RentalService.Application.IServices.Operations;
 
 public interface IRentalOperationExecutor
 {
+    Task<Result<CancelOrderResponse>> ExecuteRenterCancelOrderAsync(
+        Guid orderId,
+        Guid renterId,
+        string? reason,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default);
+
     Task<Result> ExecuteExtendHoldAsync(
         Guid orderId,
         Guid itemId,

@@ -689,7 +689,7 @@ public sealed class VersionPersistenceRegressionTests
             var replayInbox = new RentalInboxMessage(
                 Guid.NewGuid(), Guid.NewGuid(), KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded,
                 KafkaContractSpec.Producers.InventoryService, orderId.ToString("D"), null, null,
-                JsonSerializer.Serialize(new { payload = new { commandType = "ReleaseAllocation", operationKey = releaseOpKey, rentalItemId = itemId } }),
+                JsonSerializer.Serialize(new { payload = new { commandType = "ReleaseAllocation", operationKey = releaseOpKey, rentalOrderId = orderId, rentalItemId = itemId } }),
                 replayTime);
 
             var currentOrder = await db.RentalOrders.Include(x => x.Items).ThenInclude(i => i.UnitAssignments).Include(x => x.OperationReceipts).FirstAsync(x => x.Id == orderId);
@@ -731,7 +731,7 @@ public sealed class VersionPersistenceRegressionTests
             var failInbox = new RentalInboxMessage(
                 Guid.NewGuid(), Guid.NewGuid(), KafkaContractSpec.EventTypes.InventoryAllocationCommandRejected,
                 KafkaContractSpec.Producers.InventoryService, orderId.ToString("D"), null, null,
-                JsonSerializer.Serialize(new { payload = new { commandType = "ReleaseAllocation", operationKey = failOpKey, rentalItemId = itemId, errorCode = "INVENTORY_ERROR", errorMessage = "Network timeout" } }),
+                JsonSerializer.Serialize(new { payload = new { commandType = "ReleaseAllocation", operationKey = failOpKey, rentalOrderId = orderId, rentalItemId = itemId, errorCode = "INVENTORY_ERROR", errorMessage = "Network timeout" } }),
                 replayTime);
 
             var currentOrder = await db.RentalOrders.Include(x => x.Items).ThenInclude(i => i.UnitAssignments).Include(x => x.OperationReceipts).FirstAsync(x => x.Id == orderId);

@@ -4,6 +4,8 @@ using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.DTOs.Supplier;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.Services.Operations;
@@ -16,6 +18,7 @@ using Dprental.RentalService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 using Dprental.RentalService.Api.Tests.Domain;
 
@@ -152,7 +155,8 @@ public sealed class RentalOperationExecutorAdvancedTests
         IPaymentRentalClient paymentClient,
         ICheckoutInvoiceIssuer? invoiceIssuer = null,
         IRentalCheckoutOperationRepository? checkoutOpRepo = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IInventoryCommandProducer? inventoryCommands = null)
     {
         var orderRepo = new RentalOrderRepository(db);
         var receiptRepo = new OperationReceiptRepository(db);
@@ -167,7 +171,7 @@ public sealed class RentalOperationExecutorAdvancedTests
             lockManager,
             inventoryClient,
             paymentClient,
-            inventoryCommands: null!,
+            inventoryCommands: inventoryCommands!,
             unitOfWork: db,
             configuration: config,
             logger: NullLogger<RentalOperationExecutor>.Instance,
@@ -200,11 +204,14 @@ public sealed class RentalOperationExecutorAdvancedTests
 
     private sealed class StubPaymentClient : IPaymentRentalClient
     {
+        public Func<CancelInvoiceRequest, Task<Result<CancelInvoiceResponse>>>? CancelInvoiceHandler { get; set; }
+
         public Task<Result<RequestRefundResponse>> RequestRefundAsync(RequestRefundRequest request, CancellationToken ct = default) =>
             Task.FromResult(Result.Success(new RequestRefundResponse("REF-001", request.OperationKey, "Accepted", request.TotalRefundAmount, "VND", false)));
 
         public Task<Result<CreateInvoiceResponse>> CreateInvoiceAsync(CreateInvoiceRequest request, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<Result<CancelInvoiceResponse>> CancelInvoiceAsync(CancelInvoiceRequest request, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<Result<CancelInvoiceResponse>> CancelInvoiceAsync(CancelInvoiceRequest request, CancellationToken ct = default) =>
+            CancelInvoiceHandler?.Invoke(request) ?? throw new NotImplementedException();
         public Task<Result<SettleRentalResponse>> SettleRentalAsync(SettleRentalRequest request, CancellationToken ct = default) => throw new NotImplementedException();
     }
 
@@ -213,6 +220,112 @@ public sealed class RentalOperationExecutorAdvancedTests
         private readonly DateTimeOffset _utcNow;
         public TestTimeProvider(DateTimeOffset utcNow) => _utcNow = utcNow;
         public override DateTimeOffset GetUtcNow() => _utcNow;
+    }
+
+    [Fact]
+    public async Task RenterCancelOrder_ForeignRenterGetsNotFoundWithoutChangingOrder()
+    {
+        await using var db = CreateDbContext(Guid.NewGuid().ToString("N"));
+        var order = CreatePendingOrder(Guid.NewGuid());
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var executor = CreateExecutor(db, new StubInventoryClient(), new StubPaymentClient());
+        var result = await executor.ExecuteRenterCancelOrderAsync(
+            order.Id, Guid.NewGuid(), "Changed plans", "cancel-foreign-1");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Order.NotFound", result.Error.Code);
+        Assert.Equal(RentalOrderStatus.PendingPayment, order.Status);
+    }
+
+    [Fact]
+    public async Task RenterCancelOrder_PaidOrderIsNotCancelled()
+    {
+        await using var db = CreateDbContext(Guid.NewGuid().ToString("N"));
+        var order = CreatePendingOrder(Guid.NewGuid());
+        order.MarkAsPaid("INV-001", "PAY-001", FixedNow, FixedNow);
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var executor = CreateExecutor(db, new StubInventoryClient(), new StubPaymentClient());
+        var result = await executor.ExecuteRenterCancelOrderAsync(
+            order.Id, order.RenterId, "Changed plans", "cancel-paid-1");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Order.NotPendingPayment", result.Error.Code);
+        Assert.Equal(RentalOrderStatus.Paid, order.Status);
+    }
+
+    [Fact]
+    public async Task RenterCancelOrder_QueuesReleaseAndReplaysSameKeyWithoutDuplicateEvent()
+    {
+        await using var db = CreateDbContext(Guid.NewGuid().ToString("N"));
+        var order = CreatePendingOrder(Guid.NewGuid());
+        order.AddOperationReceipt(new RentalOperationReceipt(
+            Guid.NewGuid(), order.Id,
+            RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString()),
+            "CreateInvoice", "create-invoice-fingerprint", false, null, null,
+            FixedNow, RentalOperationReceipt.StatusPending));
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var producer = new Mock<IInventoryCommandProducer>();
+        producer.Setup(p => p.EnqueueReleaseAllocationAsync(
+                It.IsAny<ReleaseAllocationCommandPayload>(), It.IsAny<string?>(),
+                It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "ReleaseAllocation", "inventory.commands", "order")));
+
+        var executor = CreateExecutor(db, new StubInventoryClient(), new StubPaymentClient(),
+            inventoryCommands: producer.Object);
+        var first = await executor.ExecuteRenterCancelOrderAsync(
+            order.Id, order.RenterId, "Changed plans", "cancel-request-1");
+        var replay = await executor.ExecuteRenterCancelOrderAsync(
+            order.Id, order.RenterId, "Changed plans", "cancel-request-1");
+        var conflict = await executor.ExecuteRenterCancelOrderAsync(
+            order.Id, order.RenterId, "Different reason", "cancel-request-1");
+
+        Assert.True(first.IsSuccess);
+        Assert.True(replay.IsSuccess);
+        Assert.Equal(first.Value, replay.Value);
+        Assert.Equal(RentalOrderStatus.Cancelled, order.Status);
+        Assert.All(order.Items.Single().UnitAssignments,
+            unit => Assert.Equal(RentalUnitAssignmentStatus.Assigned, unit.Status));
+        Assert.True(conflict.IsFailure);
+        Assert.Equal("IDEMPOTENCY_CONFLICT", conflict.Error.Code);
+        Assert.Single(db.RentalOutboxMessages);
+        producer.Verify(p => p.EnqueueReleaseAllocationAsync(
+            It.IsAny<ReleaseAllocationCommandPayload>(), It.IsAny<string?>(),
+            It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RenterCancelOrder_InvoiceAlreadyPaidStopsBeforeRelease()
+    {
+        await using var db = CreateDbContext(Guid.NewGuid().ToString("N"));
+        var order = CreatePendingOrder(Guid.NewGuid());
+        Assert.True(order.AttachInvoice("INV-PAID", FixedNow).IsSuccess);
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var payment = new StubPaymentClient
+        {
+            CancelInvoiceHandler = _ => Task.FromResult<Result<CancelInvoiceResponse>>(
+                Error.Conflict("INVOICE_ALREADY_PAID", "Invoice has been paid"))
+        };
+        var producer = new Mock<IInventoryCommandProducer>();
+        var executor = CreateExecutor(db, new StubInventoryClient(), payment,
+            inventoryCommands: producer.Object);
+
+        var result = await executor.ExecuteRenterCancelOrderAsync(
+            order.Id, order.RenterId, "Changed plans", "cancel-paid-invoice-1");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVOICE_ALREADY_PAID", result.Error.Code);
+        Assert.Equal(RentalOrderStatus.PendingPayment, order.Status);
+        Assert.All(order.Items.Single().UnitAssignments,
+            unit => Assert.Equal(RentalUnitAssignmentStatus.Assigned, unit.Status));
+        producer.VerifyNoOtherCalls();
     }
 
     [Fact]

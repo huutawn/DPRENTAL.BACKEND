@@ -8,7 +8,7 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Background;
 
-public sealed record HandoverOverdueBatchResult(int Orders, int ProcessedItems, int AutoCancelled, int NoticesSent, int Failed);
+public sealed record HandoverOverdueBatchResult(int Orders, int ProcessedItems, int AutoExpired, int NoticesSent, int Failed);
 
 public sealed class HandoverOverdueWorker : BackgroundService
 {
@@ -78,7 +78,7 @@ public sealed class HandoverOverdueWorker : BackgroundService
 
         if (orderIds.Count == 0) return new(0, 0, 0, 0, 0);
 
-        int processedItems = 0, autoCancelled = 0, noticesSent = 0, failed = 0;
+        int processedItems = 0, autoExpired = 0, noticesSent = 0, failed = 0;
         foreach (Guid orderId in orderIds)
         {
             try
@@ -88,7 +88,7 @@ public sealed class HandoverOverdueWorker : BackgroundService
                 var r = await service.ProcessOrderAsync(orderId, cancellationToken);
 
                 processedItems += r.ProcessedItems;
-                autoCancelled += r.AutoCancelled;
+                autoExpired += r.AutoExpired;
                 noticesSent += r.NoticesSent;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -103,9 +103,9 @@ public sealed class HandoverOverdueWorker : BackgroundService
         }
 
         _logger.LogInformation(
-            "HandoverOverdue scan: orders={Orders} processed={Processed} cancelled={Cancelled} notices={Notices} failed={Failed}",
-            orderIds.Count, processedItems, autoCancelled, noticesSent, failed);
+            "HandoverOverdue scan: orders={Orders} processed={Processed} expired={Expired} notices={Notices} failed={Failed}",
+            orderIds.Count, processedItems, autoExpired, noticesSent, failed);
 
-        return new(orderIds.Count, processedItems, autoCancelled, noticesSent, failed);
+        return new(orderIds.Count, processedItems, autoExpired, noticesSent, failed);
     }
 }
