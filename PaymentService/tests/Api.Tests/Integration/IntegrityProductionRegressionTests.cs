@@ -191,7 +191,7 @@ public sealed class IntegrityProductionRegressionTests
             await using (var iCtx = new IntegrityDbContext(iOptions))
             {
                 var repo = new EfInvoiceRepository(pCtx);
-                var ledger = new EfSettlementLedger(pCtx, TimeProvider.System);
+                var ledger = new EfSettlementLedger(pCtx);
                 var engine = new IntegrityVerificationEngine(
                     iCtx, pCtx, keyManager, TestEncryptor,
                     new TestOptionsMonitor<IntegrityVerificationOptions>(new IntegrityVerificationOptions
@@ -202,7 +202,7 @@ public sealed class IntegrityProductionRegressionTests
 
                 // Fake checker adapter for in-process test
                 var checkerMock = new IntegrityCheckerAdapter(engine);
-                var settlementService = new SettlementService(repo, ledger, checkerMock);
+                var settlementService = new SettlementService(repo, ledger, checkerMock, new ManualRefundRepository(pCtx), new UnitOfWork(pCtx), TestEncryptor, TimeProvider.System);
 
                 var settleRes = await settlementService.SettleAsync(new SettleRentalRequest(
                     RentalOrderId: orderId,

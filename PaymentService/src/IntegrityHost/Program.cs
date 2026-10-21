@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using Dprental.PaymentService.Domain.DependencyInjection;
 using Dprental.PaymentService.Application.DTOs.Verification;
 using Dprental.PaymentService.IntegrityHost.Options;
@@ -29,22 +28,35 @@ public static class IntegrityHostProgram
         builder.Services.Configure<IntegrityHostOptions>(builder.Configuration.GetSection(IntegrityHostOptions.SectionName));
 
         // 1. Separate PostgreSQL database for Integrity evidence store
-        string integrityConn = builder.Configuration.GetConnectionString("IntegrityPostgres")
-            ?? builder.Configuration["IntegrityHost:IntegrityConnectionString"]
-            ?? "Host=127.0.0.1;Port=26280;Database=integrity_evidence;Username=paymentservice;Password=postgres";
+        string? integrityConn = builder.Configuration.GetConnectionString("IntegrityPostgres")
+            ?? builder.Configuration["IntegrityHost:IntegrityConnectionString"];
+        if (string.IsNullOrWhiteSpace(integrityConn))
+        {
+            throw new InvalidOperationException("Missing required connection string: 'ConnectionStrings:IntegrityPostgres' or 'IntegrityHost:IntegrityConnectionString'.");
+        }
 
         builder.Services.AddIntegrityEvidencePersistence(integrityConn);
 
         // 2. Payment DB context for reading unconfirmed journal and writing confirmation
-        string paymentConn = builder.Configuration.GetConnectionString("Postgres")
-            ?? builder.Configuration["IntegrityHost:PaymentConnectionString"]
-            ?? "Host=127.0.0.1;Port=26280;Database=paymentservice;Username=paymentservice;Password=postgres";
+        string? paymentConn = builder.Configuration.GetConnectionString("Postgres")
+            ?? builder.Configuration["IntegrityHost:PaymentConnectionString"];
+        if (string.IsNullOrWhiteSpace(paymentConn))
+        {
+            throw new InvalidOperationException("Missing required connection string: 'ConnectionStrings:Postgres' or 'IntegrityHost:PaymentConnectionString'.");
+        }
+
+        string configuredKey = builder.Configuration["IntegrityHost:InternalApiKey"] ?? string.Empty;
+        if (System.Text.Encoding.UTF8.GetByteCount(configuredKey) < 32)
+        {
+            throw new InvalidOperationException("IntegrityHost:InternalApiKey must be configured with at least 32 bytes.");
+        }
 
         builder.Services.AddPaymentDomainPersistence(paymentConn);
-
         // 3. Cryptographic key manager & workers
         builder.Services.AddOptions<Dprental.PaymentService.Application.Options.PaymentEncryptionOptions>()
             .BindConfiguration(Dprental.PaymentService.Application.Options.PaymentEncryptionOptions.SectionName);
+        builder.Services.AddOptions<Dprental.PaymentService.Application.Options.PaymentKafkaOptions>()
+            .BindConfiguration(Dprental.PaymentService.Application.Options.PaymentKafkaOptions.SectionName);
         builder.Services.AddSingleton<Dprental.PaymentService.Common.Cryptography.IPaymentDataEncryptor>(sp =>
         {
             var opt = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Dprental.PaymentService.Application.Options.PaymentEncryptionOptions>>().Value;
@@ -60,6 +72,13 @@ public static class IntegrityHostProgram
         builder.Services.AddHostedService<IntegrityPeriodicScannerWorker>();
 
         var app = builder.Build();
+        // Eager cryptographic key validation at startup
+        using (var scope = app.Services.CreateScope())
+        {
+            _ = scope.ServiceProvider.GetRequiredService<IntegrityKeyManager>();
+            _ = scope.ServiceProvider.GetRequiredService<Dprental.PaymentService.Common.Cryptography.IPaymentDataEncryptor>();
+        }
+
 
         app.Use(async (context, next) =>
         {
@@ -85,17 +104,10 @@ public static class IntegrityHostProgram
                 }, options: null, contentType: "application/problem+json");
                 return;
             }
+            byte[] providedDigest = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(headerValues[0]!));
+            byte[] configuredDigest = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(configuredKey));
 
-            string configuredKey = app.Configuration["InternalAuthentication:ApiKey"]
-                ?? app.Configuration["INTERNAL_API_KEY"]
-                ?? "dev-internal-api-key-dprental-2026";
-
-            byte[] providedBytes = Encoding.UTF8.GetBytes(headerValues[0]!);
-            byte[] configuredBytes = Encoding.UTF8.GetBytes(configuredKey);
-
-            if (string.IsNullOrWhiteSpace(configuredKey) ||
-                providedBytes.Length != configuredBytes.Length ||
-                !CryptographicOperations.FixedTimeEquals(providedBytes, configuredBytes))
+            if (!CryptographicOperations.FixedTimeEquals(providedDigest, configuredDigest))
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 context.Response.ContentType = "application/problem+json";

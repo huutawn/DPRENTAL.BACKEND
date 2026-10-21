@@ -65,7 +65,7 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
             builder.UseSetting("Authentication:Jwt:ServiceAudience", Audience);
             builder.UseSetting("Authentication:Jwt:ClientAudience", "dprental-clients");
             builder.UseSetting("Authentication:Jwt:JwksUri", "http://localhost/jwks");
-            builder.UseSetting("InternalAuthentication:ApiKey", PaymentWebApplicationFactory.DefaultInternalApiKey);
+            builder.UseSetting("InternalAuthentication:RentalApiKey", PaymentWebApplicationFactory.DefaultInternalApiKey);
             builder.UseSetting("IntegrityVerification:ActiveKeyId", SigningKeyId);
             builder.UseSetting($"IntegrityVerification:PublicKeys:{SigningKeyId}", EcdsaAttestation.ExportPublicKeyBase64(_ecdsa));
             builder.ConfigureLogging(logging => logging.ClearProviders());
@@ -118,51 +118,9 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Service_scope_is_required_and_valid_settlement_replays()
     {
-        var now = DateTimeOffset.UtcNow;
-        var item = InvoiceItem.Create(Guid.NewGuid(), Guid.NewGuid(), 100_000m, 90_000m).Value;
-        var invoice = Invoice.Create(Guid.NewGuid(), "ORD-SETTLEMENT-API", Guid.NewGuid(), "VND",
-            now.AddMinutes(30), [item], "DPR-SETTLEMENT-API", "MBBank", "0383799632", now).Value;
-        Assert.True(invoice.MarkPaid("PAY-SETTLEMENT-API", invoice.TotalAmount, "VND", now).IsSuccess);
-
-        await using (var db = new PaymentServiceDbContext(
-            PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
-        {
-            db.Invoices.Add(invoice);
-            var journal = JournalEntryFactory.CreateEntry(
-                operationId: Guid.NewGuid(),
-                streamId: invoice.PaymentRef!,
-                streamType: JournalStreamTypes.PaymentTransaction,
-                version: 1,
-                eventId: Guid.NewGuid(),
-                eventType: JournalEventTypes.PaymentMatched,
-                amount: invoice.TotalAmount,
-                currency: invoice.Currency,
-                status: "PAID",
-                confirmationSource: JournalConfirmationSources.Webhook,
-                actor: "WEBHOOK",
-                timestampUtc: now,
-                previousHash: CanonicalJournalHasher.GenesisHash,
-                paymentRef: invoice.PaymentRef,
-                invoiceRef: invoice.InvoiceRef,
-                rentalOrderId: invoice.RentalOrderId,
-                encryptor: new PaymentDataEncryptor(new byte[32]));
-            string attMsg = EcdsaAttestation.BuildAttestationMessage(SigningKeyId, journal.StreamId, journal.Version, journal.EventId, journal.EntryHash, now);
-            string attSig = EcdsaAttestation.Sign(_ecdsa, attMsg);
-            journal.Confirm(attSig, SigningKeyId, now);
-            db.TransactionJournals.Add(journal);
-            await db.SaveChangesAsync();
-            var iOptions = new DbContextOptionsBuilder<IntegrityDbContext>().UseNpgsql(_integrityConn).Options;
-            await using (var iCtx = new IntegrityDbContext(iOptions))
-            {
-                var att = AttestationRecord.Create(
-                    journal.StreamId, journal.Version, journal.EventId, journal.EntryHash, journal.PayloadHash, journal.PreviousHash, attSig, SigningKeyId, now);
-                iCtx.Attestations.Add(att);
-                var manifest = StreamManifest.Create(journal.StreamId, journal.Version, journal.EntryHash, journal.EventId, now);
-                iCtx.Manifests.Add(manifest);
-                await iCtx.SaveChangesAsync();
-            }
-        }
-
+        await using var h = FinancialWorkflowHarness.Attach(_connectionString, _integrityConn, _ecdsa);
+        var invoice = await h.SeedAsync();
+        var item = invoice.Items[0];
         var request = new SettleRentalRequest(invoice.RentalOrderId, item.RentalItemId,
             invoice.InvoiceRef, invoice.PaymentRef!, item.SupplierId,
             item.DepositAmount, 20_000m, 70_000m, "VND", "DEC-API", "settle-api-001");
@@ -191,165 +149,19 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Admin_can_confirm_manual_refund_but_service_and_customer_cannot()
     {
-        var now = DateTimeOffset.UtcNow;
-        var item = InvoiceItem.Create(Guid.NewGuid(), Guid.NewGuid(), 100_000m, 90_000m).Value;
-        var invoice = Invoice.Create(Guid.NewGuid(), "ORD-REFUND-API", Guid.NewGuid(), "VND",
-            now.AddMinutes(30), [item], "DPR-REFUND-API", "MBBank", "0383799632", now).Value;
-        Assert.True(invoice.MarkPaid("PAY-REFUND-API", invoice.TotalAmount, "VND", now).IsSuccess);
+        await using var h = FinancialWorkflowHarness.Attach(_connectionString, _integrityConn, _ecdsa);
+        var invoice = await h.SeedAsync();
         Guid requirementId;
-        string attSig2;
-        TransactionJournalEntry journal;
-        await using (var db = new PaymentServiceDbContext(
-            PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
+        await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
         {
-            db.Invoices.Add(invoice);
-            journal = JournalEntryFactory.CreateEntry(
-                operationId: Guid.NewGuid(),
-                streamId: invoice.PaymentRef!,
-                streamType: JournalStreamTypes.PaymentTransaction,
-                version: 1,
-                eventId: Guid.NewGuid(),
-                eventType: JournalEventTypes.PaymentMatched,
-                amount: invoice.TotalAmount,
-                currency: invoice.Currency,
-                status: "PAID",
-                confirmationSource: JournalConfirmationSources.Webhook,
-                actor: "WEBHOOK",
-                timestampUtc: now,
-                previousHash: CanonicalJournalHasher.GenesisHash,
-                paymentRef: invoice.PaymentRef,
-                invoiceRef: invoice.InvoiceRef,
-                rentalOrderId: invoice.RentalOrderId,
-                encryptor: new PaymentDataEncryptor(new byte[32]));
-            string attMsg2 = EcdsaAttestation.BuildAttestationMessage(SigningKeyId, journal.StreamId, journal.Version, journal.EventId, journal.EntryHash, now);
-            attSig2 = EcdsaAttestation.Sign(_ecdsa, attMsg2);
-            journal.Confirm(attSig2, SigningKeyId, now);
-            db.TransactionJournals.Add(journal);
-            await db.SaveChangesAsync();
-            var settlement = RentalItemSettlement.Create(item, 20_000m, "DEC-REFUND-API", "settle-refund-api").Value;
-            var result = await new Dprental.PaymentService.Domain.Repositories.EfSettlementLedger(db, TimeProvider.System)
-                .RecordSettlementAsync(settlement, CancellationToken.None);
-            Assert.True(result.IsSuccess);
+            var settlement = await h.Settlement(db).SettleAsync(FinancialWorkflowHarness.SettlementRequest(invoice), default);
+            Assert.True(settlement.IsSuccess, settlement.Error.Message);
             requirementId = await db.ManualRefundRequirements.Select(x => x.Id).SingleAsync();
-            var refundReq = await db.ManualRefundRequirements.SingleAsync();
-            Guid operationId = Guid.NewGuid();
-            Guid settlementEventId = Guid.NewGuid();
-            Guid refundEventId = Guid.NewGuid();
-            var enc = new PaymentDataEncryptor(new byte[32]);
-            var stlJ = JournalEntryFactory.CreateEntry(
-                operationId: operationId,
-                streamId: result.Value.SettlementRef,
-                streamType: JournalStreamTypes.RentalSettlement,
-                version: 1,
-                eventId: settlementEventId,
-                eventType: JournalEventTypes.RentalSettled,
-                amount: 90_000m,
-                currency: invoice.Currency,
-                status: "MANUAL_REFUND_REQUIRED",
-                confirmationSource: JournalConfirmationSources.System,
-                actor: "SYSTEM",
-                timestampUtc: now,
-                previousHash: CanonicalJournalHasher.GenesisHash,
-                relatedEntities: new Dictionary<string, string?>
-                {
-                    ["settlementRef"] = result.Value.SettlementRef,
-                    ["invoiceRef"] = invoice.InvoiceRef,
-                    ["paymentRef"] = invoice.PaymentRef,
-                    ["rentalItemId"] = item.RentalItemId.ToString("D"),
-                    ["rentalOrderId"] = invoice.RentalOrderId.ToString("D"),
-                    ["supplierId"] = item.SupplierId.ToString("D")
-                },
-                paymentRef: invoice.PaymentRef,
-                invoiceRef: invoice.InvoiceRef,
-                rentalOrderId: invoice.RentalOrderId,
-                rentalItemId: item.RentalItemId,
-                encryptor: enc);
-            db.TransactionJournals.Add(stlJ);
-            var refJ = JournalEntryFactory.CreateEntry(
-                operationId: operationId,
-                streamId: refundReq.RequirementRef,
-                streamType: JournalStreamTypes.ManualRefund,
-                version: 1,
-                eventId: refundEventId,
-                eventType: JournalEventTypes.RefundRequired,
-                amount: refundReq.Amount,
-                currency: invoice.Currency,
-                status: "PENDING_CONFIRMATION",
-                confirmationSource: JournalConfirmationSources.System,
-                actor: "SYSTEM",
-                timestampUtc: now,
-                previousHash: CanonicalJournalHasher.GenesisHash,
-                relatedEntities: new Dictionary<string, string?>
-                {
-                    ["requirementRef"] = refundReq.RequirementRef,
-                    ["settlementRef"] = result.Value.SettlementRef,
-                    ["rentalItemId"] = item.RentalItemId.ToString("D")
-                },
-                paymentRef: invoice.PaymentRef,
-                invoiceRef: invoice.InvoiceRef,
-                rentalOrderId: invoice.RentalOrderId,
-                rentalItemId: item.RentalItemId,
-                encryptor: enc);
-            db.TransactionJournals.Add(refJ);
-            await db.SaveChangesAsync();
         }
-        TransactionJournalEntry refJournal;
-        TransactionJournalEntry stlJournal;
-        string attSigRef;
-        string attSigStl;
-        await using (var pUpdate = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
-        {
-            refJournal = await pUpdate.TransactionJournals.SingleAsync(j => j.StreamType == JournalStreamTypes.ManualRefund);
-            Assert.Equal($"MRF-{requirementId:N}", refJournal.StreamId);
-            string attMsgRef = EcdsaAttestation.BuildAttestationMessageV2(SigningKeyId, "production", refJournal.StreamId, refJournal.Version, refJournal.EventId, refJournal.EntryHash, now);
-            attSigRef = EcdsaAttestation.Sign(_ecdsa, attMsgRef);
-            int rows1 = await pUpdate.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE transaction_journal SET \"IsConfirmed\" = TRUE, \"ProofSignature\" = {attSigRef}, \"SigningKeyId\" = {SigningKeyId}, \"ConfirmedAt\" = {now} WHERE \"Id\" = {refJournal.Id}");
-            Assert.Equal(1, rows1);
-            stlJournal = await pUpdate.TransactionJournals.SingleAsync(j => j.StreamType == JournalStreamTypes.RentalSettlement);
-            string attMsgStl = EcdsaAttestation.BuildAttestationMessageV2(SigningKeyId, "production", stlJournal.StreamId, stlJournal.Version, stlJournal.EventId, stlJournal.EntryHash, now);
-            attSigStl = EcdsaAttestation.Sign(_ecdsa, attMsgStl);
-            await pUpdate.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE transaction_journal SET \"IsConfirmed\" = TRUE, \"ProofSignature\" = {attSigStl}, \"SigningKeyId\" = {SigningKeyId}, \"ConfirmedAt\" = {now} WHERE \"Id\" = {stlJournal.Id}");
-        }
-
-        var iOptions2 = new DbContextOptionsBuilder<IntegrityDbContext>().UseNpgsql(_integrityConn).Options;
-        await using (var iCtx = new IntegrityDbContext(iOptions2))
-        {
-            var att = AttestationRecord.Create(
-                journal.StreamId, journal.Version, journal.EventId, journal.EntryHash, journal.PayloadHash, journal.PreviousHash, attSig2, SigningKeyId, now);
-            iCtx.Attestations.Add(att);
-            var manifest = StreamManifest.Create(journal.StreamId, journal.Version, journal.EntryHash, journal.EventId, now);
-            iCtx.Manifests.Add(manifest);
-
-            var attStl = AttestationRecord.Create(
-                stlJournal.StreamId, stlJournal.Version, stlJournal.EventId, stlJournal.EntryHash, stlJournal.PayloadHash, stlJournal.PreviousHash, attSigStl, SigningKeyId, now);
-            iCtx.Attestations.Add(attStl);
-            var manifestStl = StreamManifest.Create(stlJournal.StreamId, stlJournal.Version, stlJournal.EntryHash, stlJournal.EventId, now);
-            iCtx.Manifests.Add(manifestStl);
-
-            var attRef = AttestationRecord.Create(
-                refJournal.StreamId, refJournal.Version, refJournal.EventId, refJournal.EntryHash, refJournal.PayloadHash, refJournal.PreviousHash, attSigRef, SigningKeyId, now);
-            iCtx.Attestations.Add(attRef);
-            var manifestRef = StreamManifest.Create(refJournal.StreamId, refJournal.Version, refJournal.EntryHash, refJournal.EventId, now);
-            iCtx.Manifests.Add(manifestRef);
-
-            ManualRefundRequirement refReq;
-            await using (var dbCheck = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
-            {
-                refReq = await dbCheck.ManualRefundRequirements.SingleAsync(r => r.Id == requirementId);
-            }
-            var refSnap = OperationalSnapshotEngine.CreateManualRefundSnapshot(refReq, 1);
-            string refDigest = OperationalSnapshotEngine.ComputeSnapshotDigest(refSnap);
-
-            iCtx.EntityHeads.Add(EntityHeadRecord.Create(
-                "ManualRefundRequirement", refJournal.StreamId, attRef.Id, refJournal.Version, 1, refJournal.EntryHash, refDigest, now));
-            await iCtx.SaveChangesAsync();
-        }
-
+        await h.ConfirmAsync();
         using var client = _factory.CreateClient();
         var url = $"/api/v1/manual-refunds/{requirementId}/complete";
-        var request = new CompleteManualRefundRequest("BANK-ADMIN-001");
+        var request = new CompleteManualRefundRequest("BANK-ADMIN-001", "confirm-admin-001");
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token("payment.settlement.write"));
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(url, request)).StatusCode);

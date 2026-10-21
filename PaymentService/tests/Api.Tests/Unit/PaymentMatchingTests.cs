@@ -592,6 +592,10 @@ public sealed class PaymentMatchingTests
             _invoice = invoice;
         }
 
+        public Task<Invoice?> GetInvoiceSnapshotByIdAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(_invoice);
+        public Task SaveFinancialOperationAsync(OperationReceipt receipt, IReadOnlyList<TransactionJournalEntry> journals,
+            IReadOnlyList<OutboxMessage> messages, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         {
             TransactionStarted = true;

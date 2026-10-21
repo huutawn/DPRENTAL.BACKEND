@@ -186,6 +186,21 @@ public sealed class IntegrityHostClient : ITransactionIntegrityChecker
                 return Error.Conflict("IntegrityHost.InvalidReceiptSignature", "Chữ ký verification receipt không hợp lệ.");
             }
 
+            if (request.Purpose == VerificationPurposes.OutboxPublication && body.IsUsable)
+            {
+                var proof = verificationResponse.PublicationProof;
+                if (proof is null || !EcdsaAttestation.Verify(publicKey, proof.SigningMessage, proof.Signature))
+                    return Error.Conflict("IntegrityHost.InvalidPublicationProof", "Missing or invalid publication signature.");
+                PublicationProofBody? proofBody;
+                try { proofBody = System.Text.Json.JsonSerializer.Deserialize<PublicationProofBody>(proof.Payload, System.Text.Json.JsonSerializerOptions.Web); }
+                catch (System.Text.Json.JsonException) { return Error.Conflict("IntegrityHost.InvalidPublicationProof", "Malformed publication proof."); }
+                if (proofBody is null || proofBody.Schema != 1 || proofBody.KeyId != body.KeyId ||
+                    proofBody.Issuer != config.Issuer || proofBody.Environment != config.Environment || proofBody.Audience != "rental-service" ||
+                    proofBody.MessageId != request.OutboxMessageId || proofBody.Topic != request.Topic ||
+                    proofBody.MessageKey != request.MessageKey || proofBody.PayloadDigest != request.ExpectedOutboxDigest)
+                    return Error.Conflict("IntegrityHost.InvalidPublicationProof", "Publication evidence does not match the requested message.");
+            }
+
             var boundResponse = new TransactionVerificationResponse(
                 new TransactionIntegrityResult(
                     Status: body.IntegrityStatus,
@@ -202,7 +217,8 @@ public sealed class IntegrityHostClient : ITransactionIntegrityChecker
                     ActualAmount: body.ActualAmount,
                     ActualCurrency: body.ActualCurrency,
                     ActualStatus: body.ActualStatus),
-                Receipt: receipt);
+                Receipt: receipt,
+                PublicationProof: verificationResponse.PublicationProof);
 
             return Result.Success(boundResponse);
         }

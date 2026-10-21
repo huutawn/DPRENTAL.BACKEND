@@ -8,6 +8,7 @@ using Dprental.PaymentService.Application.Services;
 using Dprental.PaymentService.Common.Cryptography;
 using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Domain.Repositories;
+using Dprental.PaymentService.Domain.Entities.Integrity;
 using Dprental.PaymentService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -195,6 +196,17 @@ public sealed class TransactionIntegrityBenchmarkTests
                         """));
                 }
                 await ctx.Database.ExecuteSqlRawAsync(sbSql.ToString());
+                var invoices = await ctx.Invoices.AsNoTracking().Where(x => sampleStreamIds.Contains(x.PaymentRef!)).ToListAsync();
+                await using var iCtx = new IntegrityDbContext(iOptions);
+                foreach (var invoice in invoices)
+                {
+                    var entry = await ctx.TransactionJournals.SingleAsync(x => x.StreamId == invoice.PaymentRef);
+                    var attestation = await iCtx.Attestations.SingleAsync(x => x.StreamId == entry.StreamId);
+                    var claim = OperationalSnapshotEngine.CreateInvoiceClaim(invoice);
+                    iCtx.EntityHeads.Add(EntityHeadRecord.Create(claim.EntityType, claim.EntityId, attestation.Id,
+                        entry.Version, claim.Revision, entry.EntryHash, claim.Digest, entry.ConfirmedAt!.Value));
+                }
+                await iCtx.SaveChangesAsync();
             }
 
             _output.WriteLine("Cryptographic signatures prepared for benchmark sample.");

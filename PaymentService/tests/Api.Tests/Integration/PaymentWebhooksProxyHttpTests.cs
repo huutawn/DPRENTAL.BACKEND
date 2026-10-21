@@ -52,7 +52,7 @@ public sealed class PaymentWebhooksProxyHttpTests : IAsyncLifetime
         List<string>? knownProxies = null,
         List<string>? knownNetworks = null)
     {
-        return new WebApplicationFactory<Program>()
+        return new PaymentWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Production");
@@ -62,7 +62,7 @@ public sealed class PaymentWebhooksProxyHttpTests : IAsyncLifetime
                 builder.UseSetting("Payment:SePay:ApiKey", ApiKey);
                 builder.UseSetting("Payment:SePay:Gateway", "MBBank");
                 builder.UseSetting("Payment:SePay:AccountNumber", "0383799632");
-                builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
+                builder.UseSetting("InternalAuthentication:RentalApiKey", "dev-internal-api-key-dprental-2026");
                 var proxies = knownProxies ?? [TrustedProxyIp];
                 for (int i = 0; i < proxies.Count; i++)
                 {
@@ -309,7 +309,7 @@ public sealed class PaymentWebhooksProxyHttpTests : IAsyncLifetime
     [InlineData("EntireInternetV6")]
     public void Production_ProxyConfigMissingOrInvalid_FailsStartup(string scenario)
     {
-        var factory = new WebApplicationFactory<Program>()
+        var factory = new PaymentWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Production");
@@ -352,7 +352,7 @@ public sealed class PaymentWebhooksProxyHttpTests : IAsyncLifetime
         const string issuer = "dprental-authservice-dev";
         const string serviceAudience = "payment-api";
 
-        var factory = new WebApplicationFactory<Program>()
+        var factory = new PaymentWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Production");
@@ -365,7 +365,7 @@ public sealed class PaymentWebhooksProxyHttpTests : IAsyncLifetime
                 builder.UseSetting("Security:ForwardedHeaders:KnownProxies:0", TrustedProxyIp);
                 builder.UseSetting("Authentication:Jwt:Issuer", issuer);
                 builder.UseSetting("Authentication:Jwt:ServiceAudience", serviceAudience);
-                builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
+                builder.UseSetting("InternalAuthentication:RentalApiKey", "dev-internal-api-key-dprental-2026");
                 builder.ConfigureTestServices(services =>
                 {
                     services.PostConfigure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(

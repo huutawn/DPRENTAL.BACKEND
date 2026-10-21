@@ -5,6 +5,8 @@ using Dprental.PaymentService.Application.Clients;
 using System.Net;
 using Dprental.PaymentService.Api.Exceptions;
 using Dprental.PaymentService.Api.Security;
+using Dprental.PaymentService.Application.Options;
+using System.Text;
 using Dprental.PaymentService.Application.DependencyInjection;
 using Dprental.PaymentService.Domain.Repositories;
 using Microsoft.AspNetCore.Mvc;
@@ -18,21 +20,44 @@ builder.Services.AddPaymentDomainPersistence(builder.Configuration.GetConnection
 builder.Services.AddPaymentApplication(builder.Configuration);
 builder.Services.AddHttpClient<ITransactionIntegrityChecker, IntegrityHostClient>((sp, client) =>
 {
-    string hostUrl = builder.Configuration["IntegrityHost:BaseUrl"] ?? "http://127.0.0.1:8081";
+    string hostUrl = builder.Configuration["IntegrityHost:BaseUrl"]
+        ?? throw new InvalidOperationException("Missing required configuration: 'IntegrityHost:BaseUrl'.");
     client.BaseAddress = new Uri(hostUrl);
     client.Timeout = TimeSpan.FromMilliseconds(900);
-    string internalKey = builder.Configuration["InternalAuthentication:ApiKey"]
-        ?? builder.Configuration["INTERNAL_API_KEY"]
-        ?? string.Empty;
-    if (!string.IsNullOrWhiteSpace(internalKey))
-    {
-        client.DefaultRequestHeaders.Add("X-Api-Key", internalKey);
-    }
+    string internalKey = builder.Configuration["IntegrityHost:InternalApiKey"]
+        ?? throw new InvalidOperationException("Missing required configuration: 'IntegrityHost:InternalApiKey'.");
+    client.DefaultRequestHeaders.Add("X-Api-Key", internalKey);
 });
 
 builder.Services.AddPaymentJwtAuthentication(builder.Configuration);
 builder.Services.AddAuthorization(options =>
 {
+    options.AddPolicy("InvoiceServicePolicy", policy =>
+    {
+        policy.AddAuthenticationSchemes(PaymentServiceApiKeyDefaults.AuthenticationScheme);
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+            ctx.User.IsServiceToken() &&
+            ctx.User.HasScope("payment.invoice.write"));
+    });
+
+    options.AddPolicy("SettlementServicePolicy", policy =>
+    {
+        policy.AddAuthenticationSchemes(PaymentServiceApiKeyDefaults.AuthenticationScheme);
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+            ctx.User.IsServiceToken() &&
+            ctx.User.HasScope("payment.settlement.write"));
+    });
+
+    options.AddPolicy("RefundServicePolicy", policy =>
+    {
+        policy.AddAuthenticationSchemes(PaymentServiceApiKeyDefaults.AuthenticationScheme);
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+            ctx.User.IsServiceToken() && ctx.User.HasScope("payment.refund.write"));
+    });
+
     options.AddPolicy("InvoiceRenterPolicy", policy =>
     {
         policy.RequireAuthenticatedUser();
@@ -46,15 +71,17 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAuthenticatedUser();
         policy.RequireAssertion(ctx =>
             ctx.User.HasClientAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ClientAudience") ?? "dprental-clients") &&
-            ctx.User.IsPlatformAdmin() && ctx.User.TryGetSubjectUserId(out _));
+            ctx.User.IsPlatformAdmin() &&
+            !ctx.User.IsServiceToken() &&
+            ctx.User.TryGetSubjectUserId(out _));
     });
 
     options.AddPolicy("TransactionVerifyPolicy", policy =>
     {
+        policy.AddAuthenticationSchemes(PaymentServiceApiKeyDefaults.AuthenticationScheme);
         policy.RequireAuthenticatedUser();
         policy.RequireAssertion(ctx =>
             ctx.User.IsServiceToken() &&
-            ctx.User.HasServiceAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ServiceAudience") ?? "payment-api") &&
             ctx.User.HasScope("payment.transaction.verify"));
     });
 
@@ -66,9 +93,16 @@ builder.Services.AddAuthorization(options =>
              ctx.User.HasServiceAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ServiceAudience") ?? "payment-api") &&
              ctx.User.HasScope("payment.transaction.history")) ||
             (ctx.User.HasClientAudience(builder.Configuration.GetValue<string>("Authentication:Jwt:ClientAudience") ?? "dprental-clients") &&
-             ctx.User.IsPlatformAdmin()));
+             ctx.User.IsPlatformAdmin() &&
+             !ctx.User.IsServiceToken()));
     });
 });
+
+string integrityApiKey = builder.Configuration["IntegrityHost:InternalApiKey"] ?? string.Empty;
+if (Encoding.UTF8.GetByteCount(integrityApiKey) < 32)
+{
+    throw new InvalidOperationException("IntegrityHost:InternalApiKey must be configured with at least 32 bytes.");
+}
 
 var forwardedSection = builder.Configuration.GetSection(ForwardedHeadersSecurityOptions.SectionName);
 var rawProxies = forwardedSection.GetSection("KnownProxies").Get<List<string>>() ?? [];
@@ -179,7 +213,6 @@ if (hasProxyConfig)
     app.UseForwardedHeaders();
 }
 
-app.UseMiddleware<InternalApiKeyMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 HealthCheckOptions livenessOptions = new()
@@ -197,6 +230,13 @@ HealthCheckOptions readinessOptions = new()
 app.MapHealthChecks("/health/ready", readinessOptions).AllowAnonymous();
 
 app.MapControllers();
+
+// Eager validation of encryption key at startup
+using (var scope = app.Services.CreateScope())
+{
+    _ = scope.ServiceProvider.GetRequiredService<Dprental.PaymentService.Common.Cryptography.IPaymentDataEncryptor>();
+    _ = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<RentalServiceApiKeyOptions>>().Value;
+}
 
 app.Run();
 

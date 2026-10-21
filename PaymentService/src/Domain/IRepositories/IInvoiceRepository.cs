@@ -50,5 +50,8 @@ public interface IInvoiceRepository
         TransactionJournalEntry journalEntry,
         CancellationToken cancellationToken = default);
 
+    Task<Invoice?> GetInvoiceSnapshotByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task SaveFinancialOperationAsync(OperationReceipt receipt, IReadOnlyList<TransactionJournalEntry> journals,
+        IReadOnlyList<OutboxMessage> messages, CancellationToken cancellationToken = default);
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

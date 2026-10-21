@@ -14,6 +14,10 @@ public sealed class TestInvoiceRepositoryDecorator : IInvoiceRepository
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
     }
 
+    public Task<Invoice?> GetInvoiceSnapshotByIdAsync(Guid id, CancellationToken cancellationToken = default) => _inner.GetInvoiceSnapshotByIdAsync(id, cancellationToken);
+    public Task SaveFinancialOperationAsync(OperationReceipt receipt, IReadOnlyList<TransactionJournalEntry> journals,
+        IReadOnlyList<OutboxMessage> messages, CancellationToken cancellationToken = default) => _inner.SaveFinancialOperationAsync(receipt, journals, messages, cancellationToken);
+
     public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
         _inner.BeginTransactionAsync(cancellationToken);
 

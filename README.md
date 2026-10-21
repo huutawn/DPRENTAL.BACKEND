@@ -40,8 +40,22 @@ set -a
 . ./.env
 set +a
 export ConnectionStrings__Postgres="Host=127.0.0.1;Port=${POSTGRES_PORT};Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+export InternalAuthentication__RentalApiKey="$PAYMENT_RENTAL_API_KEY"
+export IntegrityHost__BaseUrl="http://127.0.0.1:8081"
+export IntegrityHost__InternalApiKey="$PAYMENT_INTEGRITY_API_KEY"
+export PaymentEncryption__ActiveKeyId="$PAYMENT_ENCRYPTION_KEY_ID"
+export PaymentEncryption__DataEncryptionKeyBase64="$PAYMENT_DATA_ENCRYPTION_KEY_BASE64"
+export Payment__SePay__ApiKey="$PAYMENT_SEPAY_API_KEY"
+export Payment__Merchant__Bank="$PAYMENT_MERCHANT_BANK"
+export Payment__Merchant__Account="$PAYMENT_MERCHANT_ACCOUNT"
 dotnet run --project PaymentService/src/Api/PaymentService.Api.csproj
 ```
+
+IntegrityHost runs as a separate process and requires the same Payment database, the integrity database,
+`IntegrityHost__InternalApiKey`, `IntegrityHost__SigningKeyId`, and
+`IntegrityHost__PrivateKeyBase64`. Supply persistent development keys through the environment; both
+hosts intentionally fail at startup when required credentials or key material are missing. Do not use
+sample or shared credentials outside a local disposable environment.
 
 Trên PowerShell, chạy `./scripts/run-payment-api.ps1` để nạp `.env` và khởi động API tại `http://127.0.0.1:46280`. Script từ chối cấu hình trỏ tới database `rentalservice`.
 
@@ -106,9 +120,17 @@ SePay gửi webhook JSON với các trường: `id`, `gateway`, `transactionDate
   - `MATCHED`: Tiền vào (`transferType = "in"`), mã thanh toán khớp duy nhất, số tiền khớp đúng `TotalAmount`, tài khoản khớp cấu hình/snapshot, còn hạn -> Hóa đơn chuyển `PAID` và phát 1 sự kiện Outbox `InvoicePaid`.
   - `UNMATCHED`: Thiếu mã thanh toán hoặc mã hợp lệ nhưng không tìm thấy hóa đơn -> Lưu transaction `UNMATCHED`, không xác nhận hóa đơn.
   - `REVIEW_REQUIRED`: Mã mơ hồ/mâu thuẫn, sai số tiền, sai tài khoản nhận, giao dịch tiền ra (`transferType != "in"`), hoặc hóa đơn đã ghi nhận thanh toán trước đó -> Lưu transaction `REVIEW_REQUIRED`, không xác nhận hóa đơn.
-  - `MANUAL_REFUND_REQUIRED`: Khớp đầy đủ nhưng giao dịch trễ hạn thanh toán (thời điểm chuyển khoản hoặc thời điểm xử lý sau khi lấy khóa đạt/vượt `PaymentDeadline`, hoặc hóa đơn đã `EXPIRED`/`CANCELLED`) -> Hóa đơn `PENDING` chuyển `EXPIRED`, hóa đơn đã đóng giữ nguyên; lưu `PaymentRef`/`PaidAt` và phát 1 Outbox `InvoicePaid` (với `paidAt` là giờ ngân hàng, `occurredAt` là giờ xử lý) để Rental Service điều phối hoàn tiền thủ công.
+  - `MANUAL_REFUND_REQUIRED`: Khớp đầy đủ nhưng giao dịch ngân hàng đến hạn hoặc muộn, hoặc hóa đơn đã `EXPIRED`/`CANCELLED`. Nếu webhook chỉ được xử lý sau deadline thì vẫn là thanh toán trễ, kể cả `transactionDate` sớm hơn deadline. Hóa đơn đã đóng không được mở lại. Payment ghi transaction/journal/outbox trong cùng transaction; Rental đăng ký refund qua API Payment và admin chuyển khoản ngoài hệ thống rồi xác nhận.
 - **Idempotency & Khóa hàng:** Claim ID nhà cung cấp (`Provider = "SEPAY"`, `ProviderTransactionId = id`) và khóa hàng hóa đơn `FOR UPDATE` trong cùng một database transaction. Giao dịch duplicate cùng ID trả 200 `{"success": true}` đã lưu; trùng ID nhưng dữ liệu nghiệp vụ khác trả 409 Conflict.
-- **Phạm vi tích hợp:** Kết quả tích hợp dừng ở commit Outbox atomic trong database. Kafka publisher, đối soát admin UI và thực hiện disburse refund nằm ngoài phạm vi này.
+- **Tích hợp Kafka:** `InvoicePaidOutboxPublisherWorker` publish `InvoicePaid`, `RefundCompleted` và `RentalSettled` sau khi journal được xác nhận. Header `x-dprental-proof` mang bằng chứng ECDSA bền vững, ràng buộc payload, topic, key, message/event/operation IDs và không hết hạn theo thời gian Kafka backlog.
+
+### Settlement và refund
+
+- `POST /api/v1/settlements`: ghi đủ ba ledger entries và journal `RentalSettled`; nếu cần hoàn cọc thì chờ admin hoàn tiền và xác nhận trước khi phát sự kiện settlement.
+- `POST /api/v1/refunds`: Rental đăng ký khoản refund cần chuyển khoản thủ công. Đây là thao tác ghi idempotent theo `OperationKey`; endpoint không thực hiện chuyển tiền.
+- `GET /api/v1/manual-refunds` và `GET /api/v1/manual-refunds/{id}`: admin truy vấn các yêu cầu cần xử lý.
+- `POST /api/v1/manual-refunds/{id}/complete`: admin xác nhận chuyển khoản ngoài hệ thống bằng `ExternalTransferReference` và `OperationKey`. Payment phát `RefundCompleted` hoặc `RentalSettled` sau khi journal được xác nhận.
+- Service-to-service ghi hóa đơn, settlement và refund dùng `X-Api-Key` riêng cho Rental→Payment. JWT vẫn bảo vệ endpoint khách hàng và thao tác admin.
 
 ## Lịch sử và kiểm chứng giao dịch Payment theo SOLID
 

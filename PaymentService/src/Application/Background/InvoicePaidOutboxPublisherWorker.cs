@@ -97,7 +97,7 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var outboxRepo = scope.ServiceProvider.GetRequiredService<IOutboxRepository>();
         var producer = scope.ServiceProvider.GetRequiredService<IInvoicePaidKafkaProducer>();
-        var journalRepo = scope.ServiceProvider.GetService<ITransactionJournalRepository>();
+        var journalRepo = scope.ServiceProvider.GetRequiredService<ITransactionJournalRepository>();
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         var leaseDuration = TimeSpan.FromSeconds(Math.Max(5, config.LeaseDurationSeconds));
@@ -156,63 +156,27 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
                 continue;
             }
 
-            var checker = scope.ServiceProvider.GetService<ITransactionIntegrityChecker>();
-            if (checker is not null)
+            var checker = scope.ServiceProvider.GetRequiredService<ITransactionIntegrityChecker>();
+            var publicationEvidence = await checker.VerifyAsync(new TransactionVerificationRequest(
+                message.MessageId.ToString("D"), VerificationPurposes.OutboxPublication, Guid.NewGuid().ToString("N"),
+                CallerIdentity: $"PUBLISHER:{_workerId}", ExpectedOutboxDigest: digest,
+                Topic: topic, MessageKey: key, OutboxMessageId: message.MessageId), cancellationToken);
+            if (publicationEvidence.IsFailure || publicationEvidence.Value.PublicationProof is null ||
+                publicationEvidence.Value.Integrity.Status != IntegrityStatuses.Valid || !publicationEvidence.Value.Usability.IsUsable)
             {
-                var pubVerifyReq = new TransactionVerificationRequest(
-                    PaymentRef: message.MessageId.ToString("D"),
-                    Purpose: VerificationPurposes.OutboxPublication,
-                    CallerNonce: Guid.NewGuid().ToString("N"),
-                    CallerIdentity: $"PUBLISHER:{_workerId}",
-                    ExpectedOutboxDigest: digest,
-                    Topic: topic,
-                    MessageKey: key,
-                    OutboxMessageId: message.MessageId);
-
-                var verifyRes = await checker.VerifyAsync(pubVerifyReq, cancellationToken);
-                if (verifyRes.IsFailure)
-                {
-                    if (verifyRes.Error.Code == "Payment.Verification.Timeout" || verifyRes.Error.Code.StartsWith("IntegrityHost.Unavailable", StringComparison.OrdinalIgnoreCase))
-                    {
-                        await outboxRepo.DeferMessageAsync(message.Id, _workerId, utcNow.AddSeconds(5), verifyRes.Error.Message, cancellationToken);
-                        continue;
-                    }
-
-                    _logger.LogError("Outbox message {MessageId} failed integrity check: {Error}. Quarantining.", message.MessageId, verifyRes.Error.Message);
-                    await outboxRepo.QuarantineMessageAsync(message.Id, _workerId, verifyRes.Error.Message, utcNow, cancellationToken);
-                    continue;
-                }
-
-                if (verifyRes.Value.Integrity.Status == IntegrityStatuses.PendingConfirmation || !verifyRes.Value.Usability.IsUsable)
-                {
-                    await outboxRepo.DeferMessageAsync(message.Id, _workerId, utcNow.AddSeconds(5), verifyRes.Value.Usability.Reason, cancellationToken);
-                    continue;
-                }
+                if (publicationEvidence.IsSuccess && publicationEvidence.Value.Integrity.Status == IntegrityStatuses.Tampered)
+                    await outboxRepo.QuarantineMessageAsync(message.Id, _workerId, publicationEvidence.Value.Usability.Reason, utcNow, cancellationToken);
+                else if (publicationEvidence.IsFailure && publicationEvidence.Error.Code != "Payment.Verification.Timeout" &&
+                    !publicationEvidence.Error.Code.StartsWith("IntegrityHost.Unavailable", StringComparison.Ordinal))
+                    await outboxRepo.QuarantineMessageAsync(message.Id, _workerId, publicationEvidence.Error.Code, utcNow, cancellationToken);
+                else
+                    await outboxRepo.DeferMessageAsync(message.Id, _workerId, utcNow.AddSeconds(5), "PUBLICATION_PROOF_UNAVAILABLE", cancellationToken);
+                continue;
             }
-
-            string versionedProof = System.Text.Json.JsonSerializer.Serialize(new
-            {
-                v = 2,
-                msgId = message.MessageId,
-                evtId = journalEntry.EventId,
-                opId = journalEntry.OperationId,
-                stream = journalEntry.StreamId,
-                ver = journalEntry.Version,
-                entryHash = journalEntry.EntryHash,
-                digest = digest,
-                keyId = journalEntry.SigningKeyId,
-                sig = journalEntry.ProofSignature,
-                confirmedAt = journalEntry.ConfirmedAt
-            });
-
+            var proof = publicationEvidence.Value.PublicationProof;
             var headers = new Dictionary<string, string>
             {
-                ["x-dprental-signature"] = journalEntry.ProofSignature,
-                ["x-dprental-key-id"] = journalEntry.SigningKeyId ?? string.Empty,
-                ["x-dprental-proof"] = versionedProof,
-                ["x-dprental-stream-id"] = journalEntry.StreamId,
-                ["x-dprental-stream-version"] = journalEntry.Version.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["x-dprental-event-id"] = journalEntry.EventId.ToString("D")
+                ["x-dprental-proof"] = System.Text.Json.JsonSerializer.Serialize(proof, System.Text.Json.JsonSerializerOptions.Web)
             };
             message.RecordAttempt();
             int attempt = message.RetryCount;

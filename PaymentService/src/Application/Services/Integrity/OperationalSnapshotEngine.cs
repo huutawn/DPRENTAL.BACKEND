@@ -103,9 +103,16 @@ public static class OperationalSnapshotEngine
             ["entityType"] = "ManualRefundRequirement",
             ["entityId"] = refund.RequirementRef,
             ["revision"] = revision,
-            ["settlementId"] = refund.SettlementId.ToString("D"),
-            ["rentalItemId"] = refund.RentalItemId.ToString("D"),
+            ["settlementId"] = refund.SettlementId?.ToString("D") ?? string.Empty,
+            ["rentalItemId"] = refund.RentalItemId?.ToString("D") ?? string.Empty,
             ["amount"] = CanonicalJournalCodec.FormatVndAmount(refund.Amount),
+            ["kind"] = refund.Kind.ToString(),
+            ["operationKey"] = refund.OperationKey,
+            ["items"] = JsonSerializer.Serialize(refund.Items.OrderBy(x => x.RentalItemId).Select(x => new
+            {
+                x.RentalItemId, RentalAmount = CanonicalJournalCodec.FormatVndAmount(x.RentalAmount),
+                DepositAmount = CanonicalJournalCodec.FormatVndAmount(x.DepositAmount)
+            })),
             ["status"] = refund.Status.ToString(),
             ["recipientAdminId"] = refund.CompletedBy?.ToString("D") ?? string.Empty,
             ["externalTransferReference"] = refund.ExternalTransferReference?.Trim() ?? string.Empty

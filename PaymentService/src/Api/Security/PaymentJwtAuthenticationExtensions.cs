@@ -1,4 +1,5 @@
 using Dprental.PaymentService.Application.Security.Jwt;
+using Dprental.PaymentService.Application.Options;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Configuration;
@@ -25,6 +26,11 @@ public static class PaymentJwtAuthenticationExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.AddOptions<RentalServiceApiKeyOptions>()
+            .Bind(configuration.GetSection(RentalServiceApiKeyOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         services.AddHttpClient("payment-auth-jwks", (sp, client) =>
         {
             var options = sp.GetRequiredService<IOptions<PaymentJwtOptions>>().Value;
@@ -41,6 +47,8 @@ public static class PaymentJwtAuthenticationExtensions
 
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer()
+            .AddScheme<AuthenticationSchemeOptions, PaymentServiceApiKeyAuthenticationHandler>(
+                PaymentServiceApiKeyDefaults.AuthenticationScheme, _ => { })
             .AddScheme<AuthenticationSchemeOptions, SePayAuthenticationHandler>(
                 SePayAuthenticationDefaults.AuthenticationScheme, _ => { });
 

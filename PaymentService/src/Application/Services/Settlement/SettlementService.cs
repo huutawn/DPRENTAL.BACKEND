@@ -1,142 +1,133 @@
-﻿using Dprental.PaymentService.Application.DTOs.Settlement;
+using System.Text.Json;
+using Dprental.PaymentService.Application.DTOs.Settlement;
+using Dprental.PaymentService.Application.DTOs.Verification;
 using Dprental.PaymentService.Application.IServices;
+using Dprental.PaymentService.Application.Services.Integrity;
 using Dprental.PaymentService.Common;
+using Dprental.PaymentService.Common.Cryptography;
+using Dprental.PaymentService.Common.Utils;
 using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Domain.IRepositories;
 
 namespace Dprental.PaymentService.Application.Services;
 
-public sealed class SettlementService : ISettlementService
+public sealed class SettlementService(
+    IInvoiceRepository invoices, ISettlementLedger ledger, ITransactionIntegrityChecker integrityChecker,
+    IManualRefundRepository refunds, IUnitOfWork unitOfWork, IPaymentDataEncryptor encryptor, TimeProvider clock) : ISettlementService
 {
-    private readonly IInvoiceRepository _invoices;
-    private readonly ISettlementLedger _ledger;
-    private readonly ITransactionIntegrityChecker _integrityChecker;
-
-    public SettlementService(
-        IInvoiceRepository invoices,
-        ISettlementLedger ledger,
-        ITransactionIntegrityChecker integrityChecker)
-    {
-        _invoices = invoices ?? throw new ArgumentNullException(nameof(invoices));
-        _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
-        _integrityChecker = integrityChecker ?? throw new ArgumentNullException(nameof(integrityChecker));
-    }
     public async Task<Result<SettleRentalResponse>> SettleAsync(SettleRentalRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
-
-        // 400: dữ liệu sai (đã gồm Refunded == Deposit - Deduction).
         var validation = request.Validate();
         if (validation.IsFailure) return validation.Error;
-
-        // 404: không có hóa đơn hoặc item.
-        var invoice = await _invoices.GetInvoiceSnapshotAsync(request.InvoiceRef.Trim(), ct);
-        if (invoice is null)
+        string fingerprint = CanonicalJournalHasher.ComputeOutboxDigest(JsonSerializer.Serialize(request with
         {
-            return Error.NotFound("Payment.InvoiceNotFound", "Không tìm thấy hóa đơn.");
-        }
+            InvoiceRef = request.InvoiceRef.Trim(), PaymentRef = request.PaymentRef.Trim(),
+            DecisionRef = request.DecisionRef.Trim(), OperationKey = request.OperationKey.Trim(), Currency = "VND"
+        }));
+        var replay = await invoices.GetOperationReceiptAsync(request.OperationKey.Trim(), ct);
+        if (replay is not null) return Replay(replay, fingerprint);
+        var verified = await integrityChecker.VerifyAsync(new TransactionVerificationRequest(
+            request.PaymentRef.Trim(), VerificationPurposes.Settlement, Guid.NewGuid().ToString("N"),
+            ExpectedCurrency: "VND", ExpectedStatus: InvoiceStatus.Paid, InvoiceRef: request.InvoiceRef.Trim(),
+            ExpectedOrderId: request.RentalOrderId, RentalItemId: request.RentalItemId,
+            SupplierId: request.SupplierId, CallerIdentity: "rental-service"), ct);
+        if (verified.IsFailure) return verified.Error;
+        var evidence = VerifiedWriteContext.FromResponse(verified.Value, VerificationPurposes.Settlement, clock.GetUtcNow());
+        if (evidence.IsFailure) return evidence.Error;
 
-        var item = invoice.Items.SingleOrDefault(i => i.RentalItemId == request.RentalItemId);
-        if (item is null)
+        await using var tx = await unitOfWork.BeginTransactionAsync(ct);
+        var invoice = await invoices.FindInvoiceWithRowLockAsync(request.InvoiceRef.Trim(), ct);
+        if (invoice is null) return Error.NotFound("INVOICE_NOT_FOUND", "Invoice not found.");
+        await unitOfWork.ExecuteStreamLockAsync("operation:" + request.OperationKey.Trim(), ct);
+        replay = await invoices.GetOperationReceiptAsync(request.OperationKey.Trim(), ct);
+        if (replay is not null) return Replay(replay, fingerprint);
+        var item = invoice.Items.SingleOrDefault(x => x.RentalItemId == request.RentalItemId);
+        if (item is null) return Error.NotFound("Payment.InvoiceItemNotFound", "Invoice item not found.");
+        var guarded = evidence.Value.Validate(clock.GetUtcNow(), ToWriteClaim(OperationalSnapshotEngine.CreateInvoiceClaim(invoice)),
+            ToWriteClaim(OperationalSnapshotEngine.CreateInvoiceItemClaim(item)));
+        if (guarded.IsFailure) return guarded.Error;
+        if (invoice.Status != InvoiceStatus.Paid || invoice.PaymentRef != request.PaymentRef.Trim() ||
+            invoice.RentalOrderId != request.RentalOrderId || item.SupplierId != request.SupplierId || item.DepositAmount != request.DepositAmount)
+            return Error.Conflict("Payment.SettlementSnapshotMismatch", "Settlement does not match the paid invoice snapshot.");
+        var existing = await ledger.FindByItemAsync(item.RentalItemId, ct);
+        if (existing is not null) return Error.Conflict("DUPLICATE_SETTLEMENT", "Item already has a settlement.");
+        var reservedRefunds = await refunds.GetForInvoiceAsync(invoice.Id, ct);
+        if (reservedRefunds.Any(x => x.Kind == ManualRefundKind.RentalRefund && x.Items.Any(i => i.RentalItemId == item.RentalItemId)))
+            return Error.Conflict("Payment.ItemAlreadyRefunded", "Item is already reserved for cancellation refund.");
+        var calculated = Calculate(item, request.FinalDeductionAmount, request.DecisionRef, request.OperationKey);
+        if (calculated.IsFailure) return calculated.Error;
+        var amounts = calculated.Value;
+        var now = clock.GetUtcNow();
+        var record = RentalItemSettlementRecord.From(amounts, invoice,
+            amounts.DepositRefundDue > 0 ? SettlementState.PendingManualRefund : SettlementState.Completed, now);
+        record.Entries.Add(SettlementLedgerEntry.Create(record.Id, SettlementEntryType.SupplierPayable, amounts.SupplierPayable, now));
+        record.Entries.Add(SettlementLedgerEntry.Create(record.Id, SettlementEntryType.PlatformFee, amounts.PlatformFeeAmount, now));
+        record.Entries.Add(SettlementLedgerEntry.Create(record.Id, SettlementEntryType.DepositRefundDue, amounts.DepositRefundDue, now));
+        await ledger.AddAsync(record, ct);
+        var response = new SettleRentalResponse(record.SettlementRef, amounts.OperationKey,
+            amounts.DepositRefundDue > 0 ? SettlementStatus.PendingManualRefund : SettlementStatus.Completed,
+            amounts.FinalDeductionAmount, amounts.DepositRefundDue, invoice.Currency, false);
+        var receipt = OperationReceipt.Create(amounts.OperationKey, "SettleRentalItem", fingerprint,
+            JsonSerializer.Serialize(response), invoice.InvoiceRef, invoice.RentalOrderId, now);
+        var claims = new List<CanonicalEntityClaim>
         {
-            return Error.NotFound("Payment.InvoiceItemNotFound", "RentalItem không thuộc hóa đơn này.");
-        }
-
-        // 409: trạng thái thanh toán và snapshot không khớp.
-        if (invoice.RentalOrderId != request.RentalOrderId)
-            return Error.Conflict("Payment.RentalOrderMismatch", "RentalOrderId không khớp hóa đơn.");
-
-        // PaymentRef có thể đã được gán cho hóa đơn EXPIRED (thanh toán trễ), nên phải kiểm tra Status.
-        if (!string.Equals(invoice.Status, InvoiceStatus.Paid, StringComparison.Ordinal))
-            return Error.Conflict("Payment.InvoiceNotPaid", "Hóa đơn chưa được thanh toán nên chưa thể settle.");
-
-        var verifyRes = await _integrityChecker.VerifyAsync(new Dprental.PaymentService.Application.DTOs.Verification.TransactionVerificationRequest(
-            PaymentRef: request.PaymentRef.Trim(),
-            Purpose: Dprental.PaymentService.Application.DTOs.Verification.VerificationPurposes.Settlement,
-            CallerNonce: Guid.NewGuid().ToString("N"),
-            CallerIdentity: "settlement-service",
-            ExpectedAmount: invoice.TotalAmount,
-            ExpectedCurrency: invoice.Currency,
-            InvoiceRef: invoice.InvoiceRef,
-            ExpectedOrderId: invoice.RentalOrderId,
-            RentalItemId: request.RentalItemId,
-            SupplierId: request.SupplierId), ct);
-
-        if (verifyRes.IsFailure)
+            OperationalSnapshotEngine.CreateSettlementClaim(record), OperationalSnapshotEngine.CreateOperationReceiptClaim(receipt)
+        };
+        var journals = new List<TransactionJournalEntry>();
+        var messages = new List<OutboxMessage>();
+        Guid operationId = Guid.NewGuid();
+        if (amounts.DepositRefundDue > 0)
         {
-            return verifyRes.Error;
+            var refund = ManualRefundRequirement.Create(invoice.Id, invoice.RenterId, invoice.PaymentRef!, amounts.OperationKey,
+                "RENTAL_DEPOSIT_REFUND", ManualRefundKind.SettlementDeposit, record.Id,
+                [ManualRefundItem.Create(item.RentalItemId, 0, amounts.DepositRefundDue)], now);
+            record.AssignRefundRequirement(refund);
+            claims.Add(OperationalSnapshotEngine.CreateManualRefundClaim(refund));
+            journals.Add(await JournalEntryFactory.CreateNextAsync(invoices, operationId, refund.RequirementRef,
+                JournalStreamTypes.ManualRefund, JournalEventTypes.RefundRequired, invoice, refund.Amount,
+                "PENDING_MANUAL_REFUND", "rental-service", now, claims, encryptor, null, ct));
         }
+        else messages.Add(PaymentOutboxFactory.CreateRentalSettled(record, invoice, null, now));
+        journals.Add(await JournalEntryFactory.CreateNextAsync(invoices, operationId, record.SettlementRef,
+            JournalStreamTypes.RentalSettlement, JournalEventTypes.RentalSettled, invoice,
+            invoice.Items.Single(x => x.RentalItemId == record.RentalItemId).TotalAmount, response.Status,
+            "rental-service", now, claims, encryptor, messages.FirstOrDefault(), ct));
+        guarded = evidence.Value.Validate(clock.GetUtcNow(), ToWriteClaim(OperationalSnapshotEngine.CreateInvoiceClaim(invoice)),
+            ToWriteClaim(OperationalSnapshotEngine.CreateInvoiceItemClaim(item)));
+        if (guarded.IsFailure) return guarded.Error;
+        await invoices.SaveFinancialOperationAsync(receipt, journals, messages, ct);
+        await tx.CommitAsync(ct);
+        return response;
+    }
 
-        if (!verifyRes.Value.Usability.IsUsable)
+    internal static VerifiedWriteClaim ToWriteClaim(CanonicalEntityClaim claim) => new(claim.EntityType, claim.EntityId, claim.Revision, claim.Digest);
+
+    private static Result<SettleRentalResponse> Replay(OperationReceipt receipt, string fingerprint)
+    {
+        if (receipt.OperationType != "SettleRentalItem" || receipt.PayloadFingerprint != fingerprint)
+            return Error.Conflict("DUPLICATE_OPERATION_KEY", "OperationKey was used with different content.");
+        try
         {
-            return Error.Conflict("Payment.SettlementIntegrityFailed",
-                $"Giao dịch thanh toán chưa được xác minh toàn vẹn hoặc không đủ điều kiện settle: {verifyRes.Value.Usability.Reason}");
+            var response = JsonSerializer.Deserialize<SettleRentalResponse>(receipt.ResultJson);
+            return response is null ? Error.Failure("Payment.CorruptedReceipt", "Stored response is missing.") : response with { IsReplay = true };
         }
+        catch (JsonException) { return Error.Failure("Payment.CorruptedReceipt", "Stored response is invalid."); }
+    }
 
-        if (DateTimeOffset.UtcNow > verifyRes.Value.Receipt!.ExpiresAt)
-        {
-            return Error.Conflict("Payment.ReceiptExpired", "Verification receipt đã hết hạn trước khi bắt đầu transaction ghi sổ.");
-        }
-
-        var claims = (verifyRes.Value.Receipt!.Body.EntityClaims ?? [])
-            .Select(c => new Dprental.PaymentService.Application.DTOs.Verification.VerifiedWriteClaim(c.EntityType, c.EntityId, c.Revision, c.Digest))
-            .ToList();
-
-        var invClaim = claims.FirstOrDefault(c => c.EntityType == "Invoice" && c.EntityId == invoice.InvoiceRef);
-        if (invClaim is null || invClaim.Revision != invoice.Revision)
-        {
-            return Error.Conflict("Payment.SettlementClaimMismatch", "Không tìm thấy claim hóa đơn đã xác thực hoặc revision không khớp.");
-        }
-
-        var itemClaim = claims.FirstOrDefault(c => c.EntityType == "InvoiceItem" && c.EntityId == item.RentalItemId.ToString("D"));
-        if (itemClaim is null || itemClaim.Revision != item.Revision)
-        {
-            return Error.Conflict("Payment.SettlementClaimMismatch", "Không tìm thấy claim item đã xác thực hoặc revision không khớp.");
-        }
-
-        var verifiedContext = new Dprental.PaymentService.Application.DTOs.Verification.VerifiedWriteContext(
-            verifyRes.Value.Receipt.ReceiptId,
-            verifyRes.Value.Receipt.KeyId,
-            verifyRes.Value.Receipt.ExpiresAt,
-            claims,
-            DateTimeOffset.UtcNow);
-
-        if (!string.Equals(invoice.PaymentRef, request.PaymentRef.Trim(), StringComparison.Ordinal))
-            return Error.Conflict("Payment.PaymentRefMismatch", "PaymentRef không khớp hóa đơn.");
-
-        if (!string.Equals(invoice.Currency, request.Currency.Trim(), StringComparison.OrdinalIgnoreCase))
-            return Error.Conflict("Payment.CurrencyMismatch", "Currency không khớp hóa đơn.");
-
-        if (item.SupplierId != request.SupplierId)
-            return Error.Conflict("Payment.SupplierMismatch", "SupplierId không khớp snapshot hóa đơn.");
-
-        if (item.DepositAmount != request.DepositAmount)
-            return Error.Conflict("Payment.DepositMismatch", "Tiền cọc không khớp snapshot hóa đơn.");
-
-        // Tiền thuê lấy từ snapshot Payment, không lấy từ request.
-        var calc = RentalItemSettlement.Create(
-            item, request.FinalDeductionAmount, request.DecisionRef, request.OperationKey);
-        if (calc.IsFailure) return calc.Error;
-
-        var settlement = calc.Value;
-
-        var written = await _ledger.RecordSettlementAsync(settlement, ct);
-        if (written.IsFailure) return written.Error;
-
-        var w = written.Value;
-
-        // COMPLETED chỉ khi không còn khoản cọc nào đang chờ chuyển khoản.
-        var status = w.State == SettlementState.Completed
-            ? SettlementStatus.Completed
-            : SettlementStatus.PendingManualRefund;
-
-        return Result.Success(new SettleRentalResponse(
-            w.SettlementRef,
-            settlement.OperationKey,
-            status,
-            settlement.FinalDeductionAmount,
-            settlement.DepositRefundDue,
-            invoice.Currency,
-            w.Outcome == SettlementWriteOutcome.Replayed));
+    public static Result<RentalItemSettlement> Calculate(InvoiceItem item, decimal deduction, string decisionRef, string operationKey)
+    {
+        if (string.IsNullOrWhiteSpace(decisionRef))
+            return Error.Validation("Payment.InvalidDecisionRef", "DecisionRef must contain 1 to 256 characters.");
+        if (decisionRef.Trim().Length > 256) return Error.Validation("Payment.DecisionRefTooLong", "DecisionRef is longer than 256 characters.");
+        if (string.IsNullOrWhiteSpace(operationKey) || operationKey.Trim().Length > 64)
+            return Error.Validation("Payment.InvalidOperationKey", "OperationKey must contain 1 to 64 characters.");
+        var valid = VndAmountValidator.ValidateVndAmount(deduction, "Deduction");
+        if (valid.IsFailure) return valid.Error;
+        if (deduction > item.DepositAmount) return Error.Validation("Payment.DeductionExceedsDeposit", "Deduction exceeds deposit.");
+        decimal fee = Math.Round(item.RentalAmount * 0.10m, 0, MidpointRounding.AwayFromZero);
+        return new RentalItemSettlement(operationKey.Trim(), item.InvoiceId, item.Id, item.RentalItemId,
+            item.SupplierId, decisionRef.Trim(), item.RentalAmount, item.DepositAmount, deduction,
+            item.DepositAmount - deduction, 0.10m, fee, item.RentalAmount - fee + deduction);
     }
 }

@@ -1,4 +1,5 @@
 using System.Net;
+using Dprental.PaymentService.Api.Tests.TestHelpers;
 using Dprental.PaymentService.Domain.Repositories;
 using Dprental.PaymentService.Domain.Repositories;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -53,20 +54,20 @@ public sealed class HealthEndpointTests
     [Fact]
     public void MissingPostgresConnection_FailsAtStartup()
     {
-        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
+        using WebApplicationFactory<Program> factory = new PaymentWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "");
-                builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
+                builder.UseSetting("InternalAuthentication:RentalApiKey", "dev-internal-api-key-dprental-2026");
             });
         Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
     }
 
     private static WebApplicationFactory<Program> CreateFactory() =>
-        new WebApplicationFactory<Program>()
+        new PaymentWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
-                builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
+                builder.UseSetting("InternalAuthentication:RentalApiKey", "dev-internal-api-key-dprental-2026");
             });
 }

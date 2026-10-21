@@ -197,18 +197,21 @@ public sealed class ManualRefundRequirementConfiguration : IEntityTypeConfigurat
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.RequirementRef).IsRequired().HasMaxLength(64);
-        builder.Property(x => x.SettlementId).IsRequired();
+        builder.Property(x => x.SettlementId);
         builder.Property(x => x.InvoiceId).IsRequired();
-        builder.Property(x => x.RentalItemId).IsRequired();
+        builder.Property(x => x.RentalItemId);
         builder.Property(x => x.RenterId).IsRequired();
         builder.Property(x => x.PaymentRef).IsRequired().HasMaxLength(64);
-        builder.Property(x => x.Reason).IsRequired().HasMaxLength(256);
+        builder.Property(x => x.Reason).IsRequired().HasMaxLength(500);
         builder.Property(x => x.Amount).IsRequired().HasColumnType("numeric(18,0)");
         builder.Property(x => x.Status).HasConversion<int>().IsRequired();
         builder.Property(x => x.CreatedAt).IsRequired();
         builder.Property(x => x.Revision).IsRequired().HasDefaultValue(1);
         builder.Property(x => x.ExternalTransferReference).HasMaxLength(256);
-        builder.HasIndex(x => x.RentalItemId).IsUnique();
+        builder.Property(x => x.Kind).HasConversion<int>().HasDefaultValue(ManualRefundKind.SettlementDeposit);
+        builder.Property(x => x.OperationKey).HasMaxLength(64).IsRequired();
+        builder.HasIndex(x => x.ExternalTransferReference).IsUnique();
+        builder.HasMany(x => x.Items).WithOne().HasForeignKey(x => x.RequirementId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => x.RequirementRef).IsUnique();
     }
 }
@@ -261,5 +264,16 @@ public sealed class TransactionJournalEntryConfiguration : IEntityTypeConfigurat
         builder.HasIndex(j => j.OutboxDigest);
         builder.HasIndex(j => new { j.IsConfirmed, j.TimestampUtc });
         builder.HasIndex(j => new { j.TimestampUtc, j.Id });
+    }
+}
+
+public sealed class ManualRefundItemConfiguration : IEntityTypeConfiguration<ManualRefundItem>
+{
+    public void Configure(EntityTypeBuilder<ManualRefundItem> builder)
+    {
+        builder.ToTable("manual_refund_items", t => t.HasCheckConstraint("ck_refund_item_amounts", "\"RentalAmount\" >= 0 AND \"DepositAmount\" >= 0"));
+        builder.HasKey(x => new { x.RequirementId, x.RentalItemId });
+        builder.Property(x => x.RentalAmount).HasColumnType("numeric(18,0)");
+        builder.Property(x => x.DepositAmount).HasColumnType("numeric(18,0)");
     }
 }

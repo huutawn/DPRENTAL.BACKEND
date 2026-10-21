@@ -121,6 +121,7 @@ public static class CanonicalJournalHasher
         sb.Append("amount=").Append(expectedAmount.HasValue ? Dprental.PaymentService.Common.Utils.VndAmountValidator.FormatVndAmount(expectedAmount.Value) : string.Empty).Append(';');
         sb.Append("callerIdentity=").Append(callerIdentity?.Trim() ?? string.Empty).Append(';');
         sb.Append("currency=").Append(expectedCurrency?.Trim().ToUpperInvariant() ?? string.Empty).Append(';');
+        sb.Append("expectedStatus=").Append(expectedStatus?.Trim().ToUpperInvariant() ?? string.Empty).Append(';');
         sb.Append("expectedOutboxDigest=").Append(expectedOutboxDigest?.Trim().ToLowerInvariant() ?? string.Empty).Append(';');
         sb.Append("invoiceRef=").Append(invoiceRef?.Trim() ?? string.Empty).Append(';');
         sb.Append("messageKey=").Append(messageKey?.Trim() ?? string.Empty).Append(';');

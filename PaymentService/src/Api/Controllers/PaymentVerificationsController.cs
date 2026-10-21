@@ -28,7 +28,7 @@ public sealed class PaymentVerificationsController : ControllerBase
     /// Kiểm tra tính toàn vẹn mật mã và điều kiện sử dụng của giao dịch thanh toán.
     /// </summary>
     [HttpPost("verifications")]
-    [AllowAnonymous]
+    [Authorize(Policy = "TransactionVerifyPolicy")]
     [ProducesResponseType(typeof(TransactionVerificationResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(TransactionVerificationResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(TransactionVerificationResponse), StatusCodes.Status409Conflict)]
@@ -48,8 +48,7 @@ public sealed class PaymentVerificationsController : ControllerBase
         string? callerIdentity = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
             ?? User.FindFirst("sub")?.Value
             ?? User.FindFirst("client_id")?.Value
-            ?? User.Identity?.Name
-            ?? (HttpContext.Items.ContainsKey("InternalApiKeyVerified") ? "internal-service" : null);
+            ?? User.Identity?.Name;
 
         if (string.IsNullOrWhiteSpace(callerIdentity))
         {

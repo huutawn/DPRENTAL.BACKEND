@@ -160,6 +160,28 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.ToTable("invoice_items", (string)null);
                 });
 
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.ManualRefundItem", b =>
+                {
+                    b.Property<Guid>("RequirementId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RentalItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("DepositAmount")
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<decimal>("RentalAmount")
+                        .HasColumnType("numeric(18,0)");
+
+                    b.HasKey("RequirementId", "RentalItemId");
+
+                    b.ToTable("manual_refund_items", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_refund_item_amounts", "\"RentalAmount\" >= 0 AND \"DepositAmount\" >= 0");
+                        });
+                });
+
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.ManualRefundRequirement", b =>
                 {
                     b.Property<Guid>("Id")
@@ -185,6 +207,16 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.Property<Guid>("InvoiceId")
                         .HasColumnType("uuid");
 
+                    b.Property<int>("Kind")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.Property<string>("OperationKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("PaymentRef")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -192,10 +224,10 @@ namespace Dprental.PaymentService.Domain.Migrations
 
                     b.Property<string>("Reason")
                         .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
-                    b.Property<Guid>("RentalItemId")
+                    b.Property<Guid?>("RentalItemId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("RenterId")
@@ -211,7 +243,7 @@ namespace Dprental.PaymentService.Domain.Migrations
                         .HasColumnType("bigint")
                         .HasDefaultValue(1L);
 
-                    b.Property<Guid>("SettlementId")
+                    b.Property<Guid?>("SettlementId")
                         .HasColumnType("uuid");
 
                     b.Property<int>("Status")
@@ -219,7 +251,7 @@ namespace Dprental.PaymentService.Domain.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("RentalItemId")
+                    b.HasIndex("ExternalTransferReference")
                         .IsUnique();
 
                     b.HasIndex("RequirementRef")
@@ -813,13 +845,21 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.Navigation("Invoice");
                 });
 
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.ManualRefundItem", b =>
+                {
+                    b.HasOne("Dprental.PaymentService.Domain.Entities.ManualRefundRequirement", null)
+                        .WithMany("Items")
+                        .HasForeignKey("RequirementId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.ManualRefundRequirement", b =>
                 {
                     b.HasOne("Dprental.PaymentService.Domain.Entities.RentalItemSettlementRecord", "Settlement")
                         .WithOne("RefundRequirement")
                         .HasForeignKey("Dprental.PaymentService.Domain.Entities.ManualRefundRequirement", "SettlementId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Settlement");
                 });
@@ -845,6 +885,11 @@ namespace Dprental.PaymentService.Domain.Migrations
                 });
 
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.Invoice", b =>
+                {
+                    b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.ManualRefundRequirement", b =>
                 {
                     b.Navigation("Items");
                 });

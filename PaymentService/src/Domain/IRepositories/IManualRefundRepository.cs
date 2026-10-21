@@ -1,23 +1,12 @@
-using Dprental.PaymentService.Common;
 using Dprental.PaymentService.Domain.Entities;
-
 namespace Dprental.PaymentService.Domain.IRepositories;
-
-public sealed record ManualRefundCompletion(
-    Guid RequirementId, string RequirementRef, Guid RentalItemId,
-    string SettlementRef, decimal Amount, string ExternalTransferReference,
-    DateTimeOffset CompletedAt, Guid CompletedBy, bool IsReplay);
 
 public interface IManualRefundRepository
 {
-    Task<Result<ManualRefundCompletion>> CompleteAsync(
-        Guid requirementId,
-        string externalTransferReference,
-        Guid adminId,
-        CancellationToken cancellationToken = default);
-
-    Task<ManualRefundCompletion?> GetCompletedReplayAsync(
-        Guid requirementId,
-        string externalTransferReference,
-        CancellationToken cancellationToken = default);
+    Task<ManualRefundRequirement?> FindAsync(Guid id, CancellationToken ct = default);
+    Task<ManualRefundRequirement?> FindWithRowLockAsync(Guid id, CancellationToken ct = default);
+    Task<IReadOnlyList<ManualRefundRequirement>> GetForInvoiceAsync(Guid invoiceId, CancellationToken ct = default);
+    Task<IReadOnlyList<ManualRefundRequirement>> ListAsync(ManualRefundStatus status, Guid? after, int limit, CancellationToken ct = default);
+    Task<bool> TransferReferenceExistsAsync(string reference, Guid exceptId, CancellationToken ct = default);
+    Task AddAsync(ManualRefundRequirement refund, CancellationToken ct = default);
 }

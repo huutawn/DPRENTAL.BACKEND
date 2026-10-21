@@ -4,12 +4,13 @@ using Dprental.PaymentService.Domain.Entities;
 
 namespace Dprental.PaymentService.Application.Services;
 
-internal static class PaymentOutboxFactory
+internal static partial class PaymentOutboxFactory
 {
     public static OutboxMessage CreateInvoicePaidOutboxMessage(
         Invoice invoice,
         DateTimeOffset occurredAt,
-        DateTimeOffset? paidAt = null)
+        DateTimeOffset? paidAt = null,
+        string paymentDisposition = InvoicePaidDispositions.OnTime)
     {
         ArgumentNullException.ThrowIfNull(invoice);
 
@@ -21,7 +22,9 @@ internal static class PaymentOutboxFactory
             invoice.PaymentRef!,
             (decimal)decimal.ToInt64(invoice.TotalAmount),
             invoice.Currency,
-            paidAt ?? invoice.PaidAt ?? occurredAt);
+            paidAt ?? invoice.PaidAt ?? occurredAt,
+            paymentDisposition,
+            occurredAt.ToUniversalTime());
 
         var envelope = new PaymentEventEnvelope<InvoicePaidPayload>(
             messageId,

@@ -81,7 +81,7 @@ Codebase tuân thủ cấu trúc phân tầng sạch (Clean Architecture) tươn
 - Mã thanh toán (`PaymentCode`) được trích xuất từ nội dung chuyển khoản theo tiền tố cấu hình (`DPR...`).
 - Xử lý hai nhánh giao dịch:
   - **Thanh toán đúng hạn** (thời điểm giao dịch ngân hàng < `PaymentDeadline`): Hóa đơn chuyển trạng thái `PAID`, gán `PaymentRef`, ghi nhận 1 journal `PaymentMatched`, phát 1 sự kiện Outbox `InvoicePaid`.
-  - **Thanh toán trễ** (thời điểm giao dịch >= `PaymentDeadline` hoặc hóa đơn đã ở trạng thái `EXPIRED`/`CANCELLED`): Không ghi nhận thanh toán thành công; hóa đơn chuyển `EXPIRED` (nếu đang `PENDING`), lưu transaction với trạng thái `MANUAL_REFUND_REQUIRED`, gán `PaymentRef`, phát sự kiện Outbox `InvoicePaid` kèm cờ chỉ định để hỗ trợ hoàn tiền thủ công.
+  - **Thanh toán trễ**: Giao dịch được phân loại trễ nếu webhook được xử lý từ deadline trở đi (sau khi lấy khóa hàng), giao dịch ngân hàng từ deadline trở đi, hoặc hóa đơn đã `EXPIRED`/`CANCELLED`. Thời gian webhook xử lý muộn không được bù bằng timestamp ngân hàng sớm hơn. Không mở lại hóa đơn đã đóng; ghi transaction `MANUAL_REFUND_REQUIRED`, gán `PaymentRef`, journal và Outbox `InvoicePaid` cùng transaction để Rental đăng ký refund.
 - Deduplication: Kiểm tra trùng lặp trên cặp `(Provider, ProviderTransactionId)` và unique index trên `PaymentRef`.
 
 ### 6.3. Snapshot Hóa Đơn & Quyết Định Settlement
@@ -97,7 +97,8 @@ Codebase tuân thủ cấu trúc phân tầng sạch (Clean Architecture) tươn
 ### 6.4. Hoàn Tiền Thủ Công (Manual Refund)
 - Nếu `DepositRefundDue > 0`: Trạng thái settlement là `PENDING_MANUAL_REFUND`. Hệ thống tạo một bản ghi `ManualRefundRequirement` với mã `MRF-{id:N}`, gắn `RentalItemId`, `RenterId`, `PaymentRef`, `Amount`.
 - Quá trình chuyển khoản hoàn tiền được thực hiện thủ công ngoài hệ thống bởi nhân viên quản trị (Admin).
-- Sau khi chuyển khoản, Admin xác nhận qua `POST /api/v1/refunds/{id}/confirm` kèm `ExternalTransferReference` và danh tính Admin (`CompletedBy`).
+- Rental đăng ký refund cần chuyển khoản thủ công qua `POST /api/v1/refunds` với `OperationKey`; endpoint không gọi dịch vụ chi tiền.
+- Admin tra cứu qua `GET /api/v1/manual-refunds` và `GET /api/v1/manual-refunds/{id}`; sau khi chuyển khoản ngoài hệ thống, xác nhận qua `POST /api/v1/manual-refunds/{id}/complete` kèm `ExternalTransferReference`, `OperationKey` và danh tính admin từ JWT.
 - Sự kiện Kafka `RentalSettled` **chỉ được phép phát** khi:
   - Settlement không có tiền hoàn cọc (`DepositRefundDue == 0`), HOẶC
   - Yêu cầu hoàn cọc thủ công đã được xác nhận hoàn tất thành công (`ManualRefundStatus.Completed`).
@@ -109,9 +110,9 @@ Codebase tuân thủ cấu trúc phân tầng sạch (Clean Architecture) tươn
 - Bản ghi sổ cái sau khi ghi nhận là **bất biến (append-only)**: Không bao giờ sửa đổi hoặc xóa; mọi cập nhật chỉ thông qua chữ ký chứng thực (`ProofSignature`, `ConfirmedAt`).
 
 ### 6.6. Sự Kiện Outbox Mang Bằng Chứng (Proof-Carrying Outbox)
-- Bản ghi `outbox_messages` được lưu trữ trong cùng transaction cơ sở dữ liệu với nghiệp vụ tài chính.
+- Bản ghi `outbox_messages` được lưu trữ trong cùng transaction cơ sở dữ liệu với nghiệp vụ tài chính; journal phải liên kết chính xác `MessageId`, `EventId`, `OperationId` và digest payload.
 - Outbox message mang các metadata liên kết bằng chứng: `attestation_event_id`, `attestation_operation_id`, `correlation_id`, `causation_id`.
-- Tiến trình `InvoicePaidOutboxPublisherWorker` chỉ thực hiện đọc, claim lease an toàn cạnh tranh, publish tới Kafka broker và xóa/đánh dấu đã phát. Không thực hiện tính toán nghiệp vụ trong outbox worker.
+- Tiến trình `InvoicePaidOutboxPublisherWorker` claim lease an toàn, yêu cầu xác minh publication từ IntegrityHost, publish tới Kafka và đánh dấu đã phát. Header `x-dprental-proof` chứa chữ ký ECDSA bền vững, ràng buộc payload, topic, key và các IDs; proof không dùng TTL của write receipt để tránh làm rơi Kafka backlog.
 
 ### 6.7. Ranh Giới Khóa Ký & Phân Tách Tiến Trình IntegrityHost
 - `IntegrityHost` là tiến trình riêng biệt, lắng nghe trên cổng nội bộ riêng (mặc định `8081`), kết nối database bằng chứng riêng (`IntegrityDbContext` trên database `integrity_evidence`).
@@ -142,9 +143,9 @@ Codebase tuân thủ cấu trúc phân tầng sạch (Clean Architecture) tươn
 - **Mã Hóa Cột Nhạy Cảm**: Số tài khoản ngân hàng (`AccountNumber`), tiểu tài khoản (`SubAccount`) và nội dung chuyển khoản (`Content`) của `PaymentTransaction` bắt buộc phải được mã hóa tại tầng lưu trữ thông qua `SensitiveFieldEncryptor` và `IPaymentDataEncryptor`.
 - **Bảo Vệ Log**: Tuyệt đối không ghi log số tài khoản ngân hàng đầy đủ, khóa bí mật, private key base64, API keys hoặc webhook raw payloads chứa thông tin tài chính nhạy cảm.
 - **Phân Quyền API**:
-  - Service-to-service endpoints (`CreateInvoice`, `CancelInvoice`, `Settlements`): Yêu cầu token định danh service (`u=svc`) kèm scopes tương ứng (`payment.invoice.write`, `payment.settlement.write`).
+  - Rental→Payment service-to-service endpoints (`CreateInvoice`, `CancelInvoice`, `Settlements`, `POST /api/v1/refunds`): Yêu cầu `X-Api-Key` riêng, so sánh constant-time và policy scope tương ứng. Không dùng chung key Rental→Inventory hoặc key Payment→IntegrityHost.
   - Customer endpoints (`GetInvoice`): Kiểm tra quyền sở hữu IDOR (`sub == RenterId`).
-  - Admin endpoints (`ConfirmManualRefund`): Yêu cầu token quản trị viên (`payment.refund.admin`).
+  - Admin endpoints (`GET /api/v1/manual-refunds`, `POST .../{id}/complete`): Yêu cầu JWT quản trị viên và scope `payment.refund.admin`.
 
 ---
 

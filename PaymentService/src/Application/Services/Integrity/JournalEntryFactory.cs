@@ -102,4 +102,26 @@ public static class JournalEntryFactory
             payloadTag: encResult.TagBase64,
             encryptionKeyId: encResult.KeyId);
     }
+    public static async Task<TransactionJournalEntry> CreateNextAsync(
+        Dprental.PaymentService.Domain.IRepositories.IInvoiceRepository repository,
+        Guid operationId, string streamId, string streamType, string eventType,
+        Invoice invoice, decimal amount, string status, string actor, DateTimeOffset now,
+        IReadOnlyList<CanonicalEntityClaim> claims, IPaymentDataEncryptor encryptor,
+        OutboxMessage? message, CancellationToken ct)
+    {
+        var previous = await repository.GetLatestJournalEntryAsync(streamId, ct);
+        Guid eventId = Guid.NewGuid();
+        message?.LinkAttestation(eventId, operationId);
+        return CreateEntry(operationId, streamId, streamType, (previous?.Version ?? 0) + 1,
+            eventId, eventType, amount, invoice.Currency, status, JournalConfirmationSources.System,
+            actor, now, previous?.EntryHash ?? CanonicalJournalHasher.GenesisHash, encryptor,
+            relatedEntities: new Dictionary<string, string?>
+            {
+                ["invoiceRef"] = invoice.InvoiceRef, ["paymentRef"] = invoice.PaymentRef,
+                ["rentalOrderId"] = invoice.RentalOrderId.ToString("D")
+            }, entityClaims: claims, outboxDigest: message is null ? null : CanonicalJournalHasher.ComputeOutboxDigest(message.Payload),
+            outboxMessageId: message?.MessageId, paymentRef: invoice.PaymentRef,
+            invoiceRef: invoice.InvoiceRef, rentalOrderId: invoice.RentalOrderId);
+    }
+
 }

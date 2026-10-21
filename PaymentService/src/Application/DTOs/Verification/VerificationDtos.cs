@@ -3,6 +3,7 @@ namespace Dprental.PaymentService.Application.DTOs.Verification;
 public static class VerificationPurposes
 {
     public const string PaymentConfirmation = "PAYMENT_CONFIRMATION";
+    public const string RefundRequest = "REFUND_REQUEST";
     public const string Settlement = "SETTLEMENT";
     public const string ManualRefundConfirmation = "MANUAL_REFUND_CONFIRMATION";
     public const string OutboxPublication = "OUTBOX_PUBLICATION";
@@ -91,7 +92,8 @@ public sealed record TransactionUsabilityResult(
 public sealed record TransactionVerificationResponse(
     TransactionIntegrityResult Integrity,
     TransactionUsabilityResult Usability,
-    VerificationReceipt? Receipt = null);
+    VerificationReceipt? Receipt = null,
+    Dprental.PaymentService.Common.Cryptography.PublicationProof? PublicationProof = null);
 
 public static class IntegrityStatuses
 {

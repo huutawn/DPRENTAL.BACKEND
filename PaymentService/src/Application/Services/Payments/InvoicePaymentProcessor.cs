@@ -1,6 +1,7 @@
 using Dprental.PaymentService.Common.Cryptography;
 using Dprental.PaymentService.Application.Services.Integrity;
 using System.Globalization;
+using Dprental.PaymentService.Application.DTOs.Events;
 using Dprental.PaymentService.Application.DTOs.SePay;
 using Dprental.PaymentService.Application.IServices;
 using Dprental.PaymentService.Application.Options;
@@ -394,7 +395,10 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
             }
 
             outbox = PaymentOutboxFactory.CreateInvoicePaidOutboxMessage(
-                invoice, occurredAt: processingTimeUtc, paidAt: bankTimeUtc);
+                invoice,
+                occurredAt: processingTimeUtc,
+                paidAt: bankTimeUtc,
+                paymentDisposition: InvoicePaidDispositions.LateRequiresRefund);
             invoiceToPersist = invoice;
             return Result.Success();
         }

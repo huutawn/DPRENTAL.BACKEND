@@ -446,7 +446,11 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
     {
         private int _readCount;
 
-        public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
+        public Task<Invoice?> GetInvoiceSnapshotByIdAsync(Guid id, CancellationToken cancellationToken = default) => inner.GetInvoiceSnapshotByIdAsync(id, cancellationToken);
+    public Task SaveFinancialOperationAsync(OperationReceipt receipt, IReadOnlyList<TransactionJournalEntry> journals,
+        IReadOnlyList<OutboxMessage> messages, CancellationToken cancellationToken = default) => inner.SaveFinancialOperationAsync(receipt, journals, messages, cancellationToken);
+
+    public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
             inner.BeginTransactionAsync(cancellationToken);
 
         public Task<OperationReceipt?> GetOperationReceiptAsync(string operationKey, CancellationToken cancellationToken = default) =>
@@ -916,7 +920,11 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
 
     private sealed class FaultyInvoiceRepository(IInvoiceRepository inner, bool shouldThrowOnSave) : IInvoiceRepository
     {
-        public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
+        public Task<Invoice?> GetInvoiceSnapshotByIdAsync(Guid id, CancellationToken cancellationToken = default) => inner.GetInvoiceSnapshotByIdAsync(id, cancellationToken);
+    public Task SaveFinancialOperationAsync(OperationReceipt receipt, IReadOnlyList<TransactionJournalEntry> journals,
+        IReadOnlyList<OutboxMessage> messages, CancellationToken cancellationToken = default) => inner.SaveFinancialOperationAsync(receipt, journals, messages, cancellationToken);
+
+    public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
             inner.BeginTransactionAsync(cancellationToken);
 
         public Task<OperationReceipt?> GetOperationReceiptAsync(string operationKey, CancellationToken cancellationToken = default) =>

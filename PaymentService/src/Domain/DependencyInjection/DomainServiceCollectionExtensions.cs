@@ -37,7 +37,6 @@ public static class DomainServiceCollectionExtensions
         services.AddScoped<IOutboxRepository, EfOutboxRepository>();
         services.AddScoped<ITransactionJournalRepository, EfTransactionJournalRepository>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
-
         return services;
     }
 

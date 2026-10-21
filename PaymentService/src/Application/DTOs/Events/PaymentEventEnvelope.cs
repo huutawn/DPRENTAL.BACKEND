@@ -20,4 +20,12 @@ public sealed record InvoicePaidPayload(
     [property: JsonPropertyName("paymentRef")] string PaymentRef,
     [property: JsonPropertyName("paidAmount")] decimal PaidAmount,
     [property: JsonPropertyName("currency")] string Currency,
-    [property: JsonPropertyName("paidAt")] DateTimeOffset PaidAt);
+    [property: JsonPropertyName("paidAt")] DateTimeOffset PaidAt,
+    [property: JsonPropertyName("paymentDisposition")] string PaymentDisposition,
+    [property: JsonPropertyName("processedAt")] DateTimeOffset ProcessedAt);
+
+public static class InvoicePaidDispositions
+{
+    public const string OnTime = "ON_TIME";
+    public const string LateRequiresRefund = "LATE_REQUIRES_REFUND";
+}

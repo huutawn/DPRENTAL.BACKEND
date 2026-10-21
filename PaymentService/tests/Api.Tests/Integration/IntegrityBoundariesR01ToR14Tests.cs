@@ -390,60 +390,19 @@ public sealed class IntegrityBoundariesR01ToR14Tests
     [Fact]
     public async Task R08_AlteredSnapshot_BetweenVerificationAndWrite_DetectedUnderRowLock()
     {
-        var (paymentConn, dbName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
-        try
+        await using var h = await FinancialWorkflowHarness.CreateAsync();
+        var invoice = await h.SeedAsync();
+        await using var db = new PaymentServiceDbContext(h.PaymentOptions);
+        void Mutate()
         {
-            var pOptions = PostgresTestDatabaseHelper.CreateOptions(paymentConn);
-            await using (var p = new PaymentServiceDbContext(pOptions)) await p.Database.MigrateAsync();
-
-            DateTimeOffset now = DateTimeOffset.UtcNow;
-            var item = InvoiceItem.Create(Guid.NewGuid(), Guid.NewGuid(), 200_000m, 50_000m).Value;
-            var invoice = Invoice.Create(Guid.NewGuid(), "ORD-R08", Guid.NewGuid(), "VND", now.AddMinutes(30), [item], "DPR-R08", "MBBank", "0383799632", now).Value;
-            invoice.MarkPaid("PAY-R08", 250_000m, "VND", now);
-
-            await using (var pCtx = new PaymentServiceDbContext(pOptions))
-            {
-                pCtx.Invoices.Add(invoice);
-                await pCtx.SaveChangesAsync();
-            }
-
-            // Verified context holds claim for revision 2 (from MarkPaid)
-            var verifiedClaims = new List<VerifiedWriteClaim>
-            {
-                new("Invoice", invoice.InvoiceRef, invoice.Revision, "digest-r08"),
-                new("InvoiceItem", item.RentalItemId.ToString("D"), item.Revision, "item-digest-r08")
-            };
-            var verifiedContext = new VerifiedWriteContext(
-                Guid.NewGuid(), "key-r08", now.AddSeconds(5), verifiedClaims, now);
-
-            // Concurrent mutation advances invoice revision directly in DB
-            await using (var pCtx = new PaymentServiceDbContext(pOptions))
-            {
-                await pCtx.Database.ExecuteSqlInterpolatedAsync(
-                    $"UPDATE invoices SET \"Revision\" = \"Revision\" + 1 WHERE \"InvoiceRef\" = {invoice.InvoiceRef}");
-            }
-
-            // SettlementService must detect the state change and return conflict
-            await using (var pCtx = new PaymentServiceDbContext(pOptions))
-            {
-                var repo = new EfInvoiceRepository(pCtx);
-                var ledger = new EfSettlementLedger(pCtx, TimeProvider.System);
-                var checkerMock = new IntegrityHostClient(
-                    new HttpClient(new MockHttpHandler(new HttpResponseMessage(HttpStatusCode.OK))),
-                    new TestOptionsMonitor<IntegrityVerificationOptions>(new IntegrityVerificationOptions()),
-                    NullLogger<IntegrityHostClient>.Instance);
-
-                var settleService = new Dprental.PaymentService.Application.Services.SettlementService(repo, ledger, checkerMock);
-                // Re-verifying under lock detects the revision discrepancy
-                var reloadedInv = await repo.GetInvoiceSnapshotAsync(invoice.InvoiceRef);
-                Assert.NotNull(reloadedInv);
-                Assert.NotEqual(verifiedClaims[0].Revision, reloadedInv.Revision);
-            }
+            using var concurrent = new PaymentServiceDbContext(h.PaymentOptions);
+            concurrent.Database.ExecuteSqlInterpolated($"UPDATE invoices SET \"Revision\" = \"Revision\" + 1 WHERE \"Id\" = {invoice.Id}");
         }
-        finally
-        {
-            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(dbName);
-        }
+        var result = await h.Settlement(db, Mutate).SettleAsync(FinancialWorkflowHarness.SettlementRequest(invoice), default);
+        Assert.True(result.IsFailure);
+        Assert.Equal("Payment.VerifiedSnapshotChanged", result.Error.Code);
+        Assert.Empty(await db.RentalItemSettlements.ToListAsync());
+        Assert.Empty(await db.SettlementLedgerEntries.ToListAsync());
     }
 
     [Fact]

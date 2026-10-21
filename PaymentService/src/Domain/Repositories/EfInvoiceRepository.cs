@@ -331,6 +331,18 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
         }
     }
 
+    public Task<Invoice?> GetInvoiceSnapshotByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+        _dbContext.Invoices.AsNoTracking().Include(x => x.Items).SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+    public async Task SaveFinancialOperationAsync(OperationReceipt receipt, IReadOnlyList<TransactionJournalEntry> journals,
+        IReadOnlyList<OutboxMessage> messages, CancellationToken cancellationToken = default)
+    {
+        _dbContext.OperationReceipts.Add(receipt);
+        _dbContext.TransactionJournals.AddRange(journals);
+        _dbContext.OutboxMessages.AddRange(messages);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         try

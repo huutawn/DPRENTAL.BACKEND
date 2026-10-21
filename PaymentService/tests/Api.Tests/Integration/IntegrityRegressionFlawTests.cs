@@ -175,7 +175,7 @@ public sealed class IntegrityRegressionFlawTests
 
                 Assert.True(verifyRes.IsSuccess);
                 Assert.False(verifyRes.Value.Usability.IsUsable);
-                Assert.Equal("INVOICE_NOT_PAID", verifyRes.Value.Usability.Reason);
+                Assert.Equal("PAYMENT_REF_MISMATCH", verifyRes.Value.Usability.Reason);
             }
         }
         finally

@@ -78,7 +78,7 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
             await iCtx.Database.MigrateAsync();
         }
 
-        _factory = new WebApplicationFactory<Program>()
+        _factory = new PaymentWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", _connString);
@@ -88,7 +88,7 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
                 builder.UseSetting("Authentication:Jwt:ServiceAudience", ServiceAudience);
                 builder.UseSetting("Authentication:Jwt:ClientAudience", ClientAudience);
                 builder.UseSetting("Authentication:Jwt:JwksUrl", "http://localhost/mock-jwks");
-                builder.UseSetting("InternalAuthentication:ApiKey", PaymentWebApplicationFactory.DefaultInternalApiKey);
+                builder.UseSetting("InternalAuthentication:RentalApiKey", PaymentWebApplicationFactory.DefaultInternalApiKey);
                 builder.UseSetting("IntegrityVerification:ActiveKeyId", _ecdsaKeyId);
                 builder.UseSetting($"IntegrityVerification:PublicKeys:{_ecdsaKeyId}", _publicKeyBase64);
 
@@ -235,7 +235,6 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
         }
 
         using var client = CreateClientWithKey();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken([VerifyScope]));
         var req = new TransactionVerificationRequest(invoiceRef, "SETTLEMENT", "nonce-202");
         using var response = await client.PostAsJsonAsync("/api/v1/payment/verifications", req);
 
@@ -247,7 +246,7 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Verify_ConfirmedValidTransaction_Returns200OK()
+    public async Task Verify_ConfirmedJournalWithUnmatchedPaymentRef_IsNotUsable()
     {
         var options = PostgresTestDatabaseHelper.CreateOptions(_connString);
         string invoiceRef;
@@ -281,12 +280,21 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
                 iCtx.Attestations.Add(att);
                 var manifest = StreamManifest.Create(entry.StreamId, entry.Version, entry.EntryHash, entry.EventId, now);
                 iCtx.Manifests.Add(manifest);
+                var invoice = await ctx.Invoices.Include(x => x.Items).SingleAsync(x => x.InvoiceRef == invoiceRef);
+                var invoiceClaim = OperationalSnapshotEngine.CreateInvoiceClaim(invoice);
+                iCtx.EntityHeads.Add(EntityHeadRecord.Create(invoiceClaim.EntityType, invoiceClaim.EntityId,
+                    att.Id, entry.Version, invoiceClaim.Revision, entry.EntryHash, invoiceClaim.Digest, now));
+                foreach (var item in invoice.Items)
+                {
+                    var itemClaim = OperationalSnapshotEngine.CreateInvoiceItemClaim(item);
+                    iCtx.EntityHeads.Add(EntityHeadRecord.Create(itemClaim.EntityType, itemClaim.EntityId,
+                        att.Id, entry.Version, itemClaim.Revision, entry.EntryHash, itemClaim.Digest, now));
+                }
                 await iCtx.SaveChangesAsync();
             }
         }
 
         using var client = CreateClientWithKey();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken([VerifyScope]));
         var req = new TransactionVerificationRequest(
             PaymentRef: invoiceRef,
             Purpose: VerificationPurposes.PaymentConfirmation,
@@ -301,8 +309,8 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
         var body = await response.Content.ReadFromJsonAsync<TransactionVerificationResponse>();
         Assert.NotNull(body);
         Assert.Equal(IntegrityStatuses.Valid, body.Integrity.Status);
-        Assert.True(body.Usability.IsUsable);
-        Assert.Equal("OK", body.Usability.Reason);
+        Assert.False(body.Usability.IsUsable);
+        Assert.Equal("PAYMENT_REF_MISMATCH", body.Usability.Reason);
         Assert.NotNull(body.Integrity.Proof);
     }
 

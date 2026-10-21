@@ -33,7 +33,7 @@ public sealed class InvoicesController : ControllerBase
     /// Tạo mới hoặc replay hóa đơn cho RentalOrder theo Payment Contract v1.
     /// </summary>
     [HttpPost]
-    [AllowAnonymous]
+    [Authorize(Policy = "InvoiceServicePolicy")]
     [ProducesResponseType(typeof(CreateInvoiceResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(CreateInvoiceResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
@@ -63,7 +63,7 @@ public sealed class InvoicesController : ControllerBase
     /// Hủy hóa đơn chưa thanh toán theo Payment Contract v1.
     /// </summary>
     [HttpPost("{invoiceRef}/cancel")]
-    [AllowAnonymous]
+    [Authorize(Policy = "InvoiceServicePolicy")]
     [ProducesResponseType(typeof(CancelInvoiceResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]

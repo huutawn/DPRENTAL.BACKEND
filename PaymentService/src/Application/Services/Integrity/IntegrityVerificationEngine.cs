@@ -20,6 +20,7 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
     private readonly TimeProvider _timeProvider;
     private readonly IOptionsMonitor<IntegrityVerificationOptions> _options;
     private readonly IPaymentDataEncryptor _encryptor;
+    private readonly IOptionsMonitor<PaymentKafkaOptions>? _kafkaOptions;
 
     public IntegrityVerificationEngine(
         IntegrityDbContext integrityDb,
@@ -27,7 +28,8 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
         Dprental.PaymentService.Application.IServices.IIntegritySigningAdapter keyManager,
         IPaymentDataEncryptor encryptor,
         IOptionsMonitor<IntegrityVerificationOptions> options,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IOptionsMonitor<PaymentKafkaOptions>? kafkaOptions = null)
     {
         _integrityDb = integrityDb ?? throw new ArgumentNullException(nameof(integrityDb));
         _paymentDb = paymentDb ?? throw new ArgumentNullException(nameof(paymentDb));
@@ -35,6 +37,7 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
         _encryptor = encryptor ?? throw new ArgumentNullException(nameof(encryptor));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _kafkaOptions = kafkaOptions;
     }
 
     public async Task<Result<TransactionVerificationResponse>> VerifyAsync(
@@ -59,7 +62,7 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
         }
 
         string purpose = request.Purpose.Trim().ToUpperInvariant();
-        if (purpose is not (VerificationPurposes.PaymentConfirmation or VerificationPurposes.Settlement or VerificationPurposes.ManualRefundConfirmation or VerificationPurposes.OutboxPublication))
+        if (purpose is not (VerificationPurposes.PaymentConfirmation or VerificationPurposes.RefundRequest or VerificationPurposes.Settlement or VerificationPurposes.ManualRefundConfirmation or VerificationPurposes.OutboxPublication))
         {
             return Error.Validation("Payment.Verification.UnsupportedPurpose", $"Purpose '{request.Purpose}' không được hỗ trợ.");
         }
@@ -76,10 +79,12 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
             // 1. Resolve exact StreamManifest & JournalEntry by Purpose (no loose OR queries)
             TransactionJournalEntry? entry = null;
             StreamManifest? manifest = null;
+            OutboxMessage? publicationMessage = null;
             if (purpose == VerificationPurposes.OutboxPublication)
             {
                 Guid msgId = request.OutboxMessageId ?? (Guid.TryParse(paymentRef, out var parsedGuid) ? parsedGuid : Guid.Empty);
                 var outboxMsg = await _paymentDb.OutboxMessages.AsNoTracking().FirstOrDefaultAsync(m => m.MessageId == msgId, cts.Token);
+                publicationMessage = outboxMsg;
                 if (outboxMsg is null)
                 {
                     return CreateResponse(
@@ -139,6 +144,18 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                         .FirstOrDefaultAsync(j => j.OutboxDigest == computedDigest || j.OutboxMessageId == outboxMsg.MessageId, cts.Token);
                 }
 
+                if (entry is not null &&
+                    (entry.OutboxMessageId != outboxMsg.MessageId ||
+                     !string.Equals(entry.OutboxDigest, computedDigest, StringComparison.OrdinalIgnoreCase) ||
+                     outboxMsg.EventId != entry.EventId || outboxMsg.OperationId != entry.OperationId ||
+                     string.IsNullOrWhiteSpace(request.Topic) ||
+                     !string.Equals(request.MessageKey, outboxMsg.AggregateId, StringComparison.Ordinal)))
+                {
+                    return CreateResponse(request, IntegrityStatuses.Tampered, entry.Version,
+                        entry.ConfirmationSource, false, "OUTBOX_LINK_MISMATCH", entry.Amount,
+                        entry.Currency, entry.Status, now);
+                }
+
                 if (entry is not null)
                 {
                     manifest = await _integrityDb.Manifests.AsNoTracking()
@@ -158,7 +175,7 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                     .OrderByDescending(j => j.Version)
                     .FirstOrDefaultAsync(cts.Token);
             }
-            else if (purpose == VerificationPurposes.Settlement)
+            else if (purpose is VerificationPurposes.Settlement or VerificationPurposes.RefundRequest)
             {
                 string invRef = !string.IsNullOrWhiteSpace(request.InvoiceRef) ? request.InvoiceRef.Trim() : paymentRef;
                 manifest = await _integrityDb.Manifests
@@ -316,7 +333,7 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
             // 6. Verify signature against public key (V2 first, fallback to V1)
             string signingKeyId = entry.SigningKeyId ?? _keyManager.KeyId;
             string? pubKeyB64 = _keyManager.GetPublicKey(signingKeyId) ?? _keyManager.PublicKeyBase64;
-            var publicKey = EcdsaAttestation.ImportPublicKeyBase64(pubKeyB64);
+            using var publicKey = EcdsaAttestation.ImportPublicKeyBase64(pubKeyB64);
 
             string attestationMessageV2 = EcdsaAttestation.BuildAttestationMessageV2(
                 signingKeyId,
@@ -364,7 +381,7 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
             {
                 string reqRef = !string.IsNullOrWhiteSpace(request.RequirementRef) ? request.RequirementRef.Trim() : paymentRef;
                 var refund = await _paymentDb.ManualRefundRequirements
-                    .AsNoTracking()
+                    .AsNoTracking().Include(x => x.Items)
                     .FirstOrDefaultAsync(r => r.RequirementRef == reqRef, cts.Token);
 
                 if (refund is null)
@@ -398,47 +415,11 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                     }
                     else
                     {
-                        var refundHead = await _integrityDb.EntityHeads
-                            .AsNoTracking()
-                            .FirstOrDefaultAsync(h => h.EntityType == "ManualRefundRequirement" && h.EntityId == refund.RequirementRef, cts.Token);
 
-                        if (refundHead is not null)
-                        {
-                            if (refund.Revision < refundHead.LatestRevision)
-                            {
-                                return CreateResponse(
-                                    request,
-                                    IntegrityStatuses.Tampered,
-                                    entry.Version,
-                                    entry.ConfirmationSource,
-                                    isUsable: false,
-                                    reason: "ROLLBACK_DETECTED",
-                                    actualAmount: entry.Amount,
-                                    actualCurrency: entry.Currency,
-                                    actualStatus: entry.Status,
-                                    now: now,
-                                    entityClaims: claimsList);
-                            }
-                            if (refund.Revision == refundHead.LatestRevision && !string.Equals(d, refundHead.LatestDigest, StringComparison.OrdinalIgnoreCase))
-                            {
-                                return CreateResponse(
-                                    request,
-                                    IntegrityStatuses.Tampered,
-                                    entry.Version,
-                                    entry.ConfirmationSource,
-                                    isUsable: false,
-                                    reason: "OPERATIONAL_SNAPSHOT_TAMPERED",
-                                    actualAmount: entry.Amount,
-                                    actualCurrency: entry.Currency,
-                                    actualStatus: entry.Status,
-                                    now: now,
-                                    entityClaims: claimsList);
-                            }
-                        }
                     }
                 }
             }
-            else if (purpose is VerificationPurposes.PaymentConfirmation or VerificationPurposes.Settlement)
+            else if (purpose is VerificationPurposes.PaymentConfirmation or VerificationPurposes.Settlement or VerificationPurposes.RefundRequest)
             {
                 Invoice? invoice = null;
                 if (!string.IsNullOrWhiteSpace(request.InvoiceRef))
@@ -462,7 +443,13 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                     claimsList.Add(new VerificationEntityClaim("Invoice", invoice.InvoiceRef, invoice.Revision, d));
 
                     // Invoice must be PAID
-                    if (!string.Equals(invoice.Status, InvoiceStatus.Paid, StringComparison.Ordinal))
+                    if (!string.Equals(invoice.PaymentRef, request.PaymentRef.Trim(), StringComparison.Ordinal))
+                    {
+                        isUsable = false;
+                        usabilityReason = "PAYMENT_REF_MISMATCH";
+                    }
+                    else if (invoice.Status != InvoiceStatus.Paid && !(purpose == VerificationPurposes.RefundRequest &&
+                        invoice.Status is InvoiceStatus.Expired or InvoiceStatus.Cancelled && !string.IsNullOrWhiteSpace(invoice.PaymentRef)))
                     {
                         isUsable = false;
                         usabilityReason = "INVOICE_NOT_PAID";
@@ -490,43 +477,7 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                     }
                     else
                     {
-                        var invHead = await _integrityDb.EntityHeads
-                            .AsNoTracking()
-                            .FirstOrDefaultAsync(h => h.EntityType == "Invoice" && h.EntityId == invoice.InvoiceRef, cts.Token);
 
-                        if (invHead is not null)
-                        {
-                            if (invoice.Revision < invHead.LatestRevision)
-                            {
-                                return CreateResponse(
-                                    request,
-                                    IntegrityStatuses.Tampered,
-                                    entry.Version,
-                                    entry.ConfirmationSource,
-                                    isUsable: false,
-                                    reason: "ROLLBACK_DETECTED",
-                                    actualAmount: entry.Amount,
-                                    actualCurrency: entry.Currency,
-                                    actualStatus: entry.Status,
-                                    now: now,
-                                    entityClaims: claimsList);
-                            }
-                            if (invoice.Revision == invHead.LatestRevision && !string.Equals(d, invHead.LatestDigest, StringComparison.OrdinalIgnoreCase))
-                            {
-                                return CreateResponse(
-                                    request,
-                                    IntegrityStatuses.Tampered,
-                                    entry.Version,
-                                    entry.ConfirmationSource,
-                                    isUsable: false,
-                                    reason: "OPERATIONAL_SNAPSHOT_TAMPERED",
-                                    actualAmount: entry.Amount,
-                                    actualCurrency: entry.Currency,
-                                    actualStatus: entry.Status,
-                                    now: now,
-                                    entityClaims: claimsList);
-                            }
-                        }
 
                         if (request.RentalItemId.HasValue)
                         {
@@ -539,32 +490,16 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                             }
                             else
                             {
+                                if (request.SupplierId.HasValue && item.SupplierId != request.SupplierId.Value)
+                                {
+                                    isUsable = false;
+                                    usabilityReason = "SUPPLIER_MISMATCH";
+                                }
                                 var itemSnap = OperationalSnapshotEngine.CreateInvoiceItemSnapshot(item, item.Revision);
                                 string itemDigest = OperationalSnapshotEngine.ComputeSnapshotDigest(itemSnap);
                                 claimsList.Add(new VerificationEntityClaim("InvoiceItem", item.RentalItemId.ToString("D"), item.Revision, itemDigest));
 
-                                var itemHead = await _integrityDb.EntityHeads
-                                    .AsNoTracking()
-                                    .FirstOrDefaultAsync(h => h.EntityType == "InvoiceItem" && h.EntityId == item.RentalItemId.ToString("D"), cts.Token);
 
-                                if (itemHead is not null)
-                                {
-                                    if (item.Revision == itemHead.LatestRevision && !string.Equals(itemDigest, itemHead.LatestDigest, StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        return CreateResponse(
-                                            request,
-                                            IntegrityStatuses.Tampered,
-                                            entry.Version,
-                                            entry.ConfirmationSource,
-                                            isUsable: false,
-                                            reason: "OPERATIONAL_SNAPSHOT_TAMPERED",
-                                            actualAmount: entry.Amount,
-                                            actualCurrency: entry.Currency,
-                                            actualStatus: entry.Status,
-                                            now: now,
-                                            entityClaims: claimsList);
-                                    }
-                                }
                             }
                         }
 
@@ -578,28 +513,7 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                                 string ptDigest = OperationalSnapshotEngine.ComputeSnapshotDigest(ptSnap);
                                 claimsList.Add(new VerificationEntityClaim("PaymentTransaction", pt.PaymentRef, pt.Revision, ptDigest));
 
-                                var ptHead = await _integrityDb.EntityHeads
-                                    .AsNoTracking()
-                                    .FirstOrDefaultAsync(h => h.EntityType == "PaymentTransaction" && h.EntityId == pt.PaymentRef, cts.Token);
 
-                                if (ptHead is not null)
-                                {
-                                    if (pt.Revision == ptHead.LatestRevision && !string.Equals(ptDigest, ptHead.LatestDigest, StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        return CreateResponse(
-                                            request,
-                                            IntegrityStatuses.Tampered,
-                                            entry.Version,
-                                            entry.ConfirmationSource,
-                                            isUsable: false,
-                                            reason: "OPERATIONAL_SNAPSHOT_TAMPERED",
-                                            actualAmount: entry.Amount,
-                                            actualCurrency: entry.Currency,
-                                            actualStatus: entry.Status,
-                                            now: now,
-                                            entityClaims: claimsList);
-                                    }
-                                }
                             }
                         }
                     }
@@ -618,6 +532,61 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                     }
                 }
             }
+            if (purpose == VerificationPurposes.RefundRequest && isUsable)
+            {
+                var refundInvoice = await _paymentDb.Invoices.AsNoTracking()
+                    .FirstAsync(x => x.InvoiceRef == request.InvoiceRef, cts.Token);
+                var transaction = await _paymentDb.PaymentTransactions.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.PaymentRef == request.PaymentRef, cts.Token);
+                if (transaction is null || transaction.TransferAmount != refundInvoice.TotalAmount ||
+                    transaction.Status is not (PaymentTransactionStatus.Matched or PaymentTransactionStatus.ManualRefundRequired))
+                    return CreateResponse(request, IntegrityStatuses.NotFound, entry.Version, entry.ConfirmationSource,
+                        false, "RECEIVED_PAYMENT_NOT_CONFIRMED", entry.Amount, entry.Currency, entry.Status, now);
+                foreach (var item in await _paymentDb.InvoiceItems.AsNoTracking().Where(x => x.InvoiceId == refundInvoice.Id).ToListAsync(cts.Token))
+                {
+                    var claim = OperationalSnapshotEngine.CreateInvoiceItemClaim(item);
+                    claimsList.Add(new VerificationEntityClaim(claim.EntityType, claim.EntityId, claim.Revision, claim.Digest));
+                }
+            }
+            if (isUsable && !string.IsNullOrWhiteSpace(request.ExpectedStatus) &&
+                !string.Equals(entry.Status, request.ExpectedStatus.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                isUsable = false;
+                usabilityReason = "STATUS_MISMATCH";
+            }
+            foreach (var claim in claimsList)
+            {
+                var head = await _integrityDb.EntityHeads.AsNoTracking().FirstOrDefaultAsync(
+                    h => h.EntityType == claim.EntityType && h.EntityId == claim.EntityId, cts.Token);
+                if (head is null || claim.Revision > head.LatestRevision)
+                    return CreateResponse(request, IntegrityStatuses.PendingConfirmation, entry.Version,
+                        entry.ConfirmationSource, false, "AWAITING_ENTITY_CONFIRMATION", entry.Amount,
+                        entry.Currency, entry.Status, now);
+                if (claim.Revision < head.LatestRevision || !string.Equals(claim.Digest, head.LatestDigest, StringComparison.OrdinalIgnoreCase))
+                    return CreateResponse(request, IntegrityStatuses.Tampered, entry.Version,
+                        entry.ConfirmationSource, false, claim.Revision < head.LatestRevision ? "ROLLBACK_DETECTED" : "OPERATIONAL_SNAPSHOT_TAMPERED",
+                        entry.Amount, entry.Currency, entry.Status, now);
+            }
+            PublicationProof? publicationProof = null;
+            if (isUsable && publicationMessage is not null)
+            {
+                using var envelope = System.Text.Json.JsonDocument.Parse(publicationMessage.Payload);
+                var body = envelope.RootElement;
+                if (!body.TryGetProperty("aggregateId", out var aggregate) || aggregate.GetString() != publicationMessage.AggregateId ||
+                    !body.TryGetProperty("messageType", out var type) || type.GetString() != publicationMessage.MessageType ||
+                    !body.TryGetProperty("messageId", out var id) || id.GetGuid() != publicationMessage.MessageId ||
+                    request.Topic != (_kafkaOptions?.CurrentValue.Topic ?? "payment.events.v1"))
+                    return CreateResponse(request, IntegrityStatuses.Tampered, entry.Version,
+                        entry.ConfirmationSource, false, "OUTBOX_ROUTING_MISMATCH", entry.Amount,
+                        entry.Currency, entry.Status, now);
+                var proofBody = new PublicationProofBody(1, _keyManager.Issuer, "rental-service",
+                    _keyManager.Environment, _keyManager.KeyId, publicationMessage.MessageId,
+                    entry.EventId, entry.OperationId, request.Topic, request.MessageKey!,
+                    publicationMessage.MessageType, entry.OutboxDigest!, now);
+                string proofPayload = proofBody.Serialize();
+                publicationProof = new PublicationProof(proofPayload,
+                    _keyManager.Sign(PublicationProof.DomainSeparator + proofPayload));
+            }
             return CreateResponse(
                 request,
                 IntegrityStatuses.Valid,
@@ -633,7 +602,8 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                 signingKeyId: entry.SigningKeyId,
                 proofSignature: entry.ProofSignature,
                 entryHash: entry.EntryHash,
-                entityClaims: claimsList);
+                entityClaims: claimsList,
+                publicationProof: publicationProof);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
@@ -656,9 +626,10 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
         string? signingKeyId = null,
         string? proofSignature = null,
         string? entryHash = null,
-        IReadOnlyList<VerificationEntityClaim>? entityClaims = null)
+        IReadOnlyList<VerificationEntityClaim>? entityClaims = null,
+        PublicationProof? publicationProof = null)
     {
-        string keyId = signingKeyId ?? _keyManager.KeyId;
+        string keyId = _keyManager.KeyId;
         string requestHash = CanonicalJournalHasher.ComputeRequestHash(
             paymentRef: request.PaymentRef,
             purpose: request.Purpose,
@@ -748,6 +719,6 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                 ActualAmount: actualAmount,
                 ActualCurrency: actualCurrency,
                 ActualStatus: actualStatus),
-            Receipt: receipt));
+            Receipt: receipt, PublicationProof: publicationProof));
     }
 }
