@@ -150,4 +150,11 @@ public sealed class PaymentTransaction
                string.Equals(Content, content, StringComparison.Ordinal) &&
                string.Equals(ProviderCode, providerCode, StringComparison.Ordinal);
     }
+
+    public void AcceptLatePayment(string reasonCode = PaymentTransactionReason.LatePaymentAccepted)
+    {
+        Status = PaymentTransactionStatus.Matched;
+        ReasonCode = reasonCode;
+        Revision++;
+    }
 }

@@ -23,7 +23,8 @@ builder.Services.AddHttpClient<ITransactionIntegrityChecker, IntegrityHostClient
     string hostUrl = builder.Configuration["IntegrityHost:BaseUrl"]
         ?? throw new InvalidOperationException("Missing required configuration: 'IntegrityHost:BaseUrl'.");
     client.BaseAddress = new Uri(hostUrl);
-    client.Timeout = TimeSpan.FromMilliseconds(900);
+    int timeoutMs = builder.Configuration.GetValue<int>("IntegrityVerification:ServerBudgetMilliseconds", 3000);
+    client.Timeout = TimeSpan.FromMilliseconds(Math.Max(3000, timeoutMs));
     string internalKey = builder.Configuration["IntegrityHost:InternalApiKey"]
         ?? throw new InvalidOperationException("Missing required configuration: 'IntegrityHost:InternalApiKey'.");
     client.DefaultRequestHeaders.Add("X-Api-Key", internalKey);

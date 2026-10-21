@@ -11,7 +11,6 @@ public sealed class PaymentKafkaOptions
     public int DeliveryTimeoutSeconds { get; set; } = 10;
     public int LeaseDurationSeconds { get; set; } = 30;
     public int PollingIntervalSeconds { get; set; } = 15;
-    public int MaxRetries { get; set; } = 10;
     public int MaxBackoffSeconds { get; set; } = 60;
     public int BatchSize { get; set; } = 20;
     public bool Enabled { get; set; } = true;

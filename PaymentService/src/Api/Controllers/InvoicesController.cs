@@ -88,6 +88,28 @@ public sealed class InvoicesController : ControllerBase
         return Ok(result.Value);
     }
 
+    [HttpPost("{invoiceRef}/accept-late-payment")]
+    [Authorize(Policy = "InvoiceServicePolicy")]
+    [ProducesResponseType(typeof(AcceptLatePaymentResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> AcceptLatePayment(
+        [FromRoute] string invoiceRef,
+        [FromBody] AcceptLatePaymentRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _lifecycleService.AcceptLatePaymentAsync(invoiceRef, request, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
+    }
+
     /// <summary>
     /// Đọc thông tin thanh toán và QR chuyển khoản của hóa đơn dành cho Renter.
     /// </summary>

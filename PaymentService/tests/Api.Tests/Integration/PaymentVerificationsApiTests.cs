@@ -201,7 +201,7 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
         await using (var ctx = new PaymentServiceDbContext(options))
         {
             var repo = new EfInvoiceRepository(ctx);
-            var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor);
+            var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor, new ManualRefundRepository(ctx), FakeTransactionIntegrityChecker.Instance);
             var creation = new InvoiceCreationService(repo, Microsoft.Extensions.Options.Options.Create(new PaymentMerchantOptions { Bank = "MBBank", Account = "0383799632" }), lifecycle, TestEncryptor);
 
             var createRes = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
@@ -224,7 +224,7 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
         await using (var ctx = new PaymentServiceDbContext(options))
         {
             var repo = new EfInvoiceRepository(ctx);
-            var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor);
+            var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor, new ManualRefundRepository(ctx), FakeTransactionIntegrityChecker.Instance);
             var creation = new InvoiceCreationService(repo, Microsoft.Extensions.Options.Options.Create(new PaymentMerchantOptions { Bank = "MBBank", Account = "0383799632" }), lifecycle, TestEncryptor);
 
             var createRes = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
@@ -256,7 +256,7 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
         await using (var ctx = new PaymentServiceDbContext(options))
         {
             var repo = new EfInvoiceRepository(ctx);
-            var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor);
+            var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor, new ManualRefundRepository(ctx), FakeTransactionIntegrityChecker.Instance);
             var creation = new InvoiceCreationService(repo, Microsoft.Extensions.Options.Options.Create(new PaymentMerchantOptions { Bank = "MBBank", Account = "0383799632" }), lifecycle, TestEncryptor);
 
             var createRes = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
@@ -321,7 +321,7 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
         await using (var ctx = new PaymentServiceDbContext(options))
         {
             var repo = new EfInvoiceRepository(ctx);
-            var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor);
+            var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor, new ManualRefundRepository(ctx), FakeTransactionIntegrityChecker.Instance);
             var creation = new InvoiceCreationService(repo, Microsoft.Extensions.Options.Options.Create(new PaymentMerchantOptions { Bank = "MBBank", Account = "0383799632" }), lifecycle, TestEncryptor);
 
             for (int i = 0; i < 5; i++)

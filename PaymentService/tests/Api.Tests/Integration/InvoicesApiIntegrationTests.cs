@@ -11,6 +11,12 @@ using Dprental.PaymentService.Application.DTOs.Invoice;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Domain.Repositories;
+using Dprental.PaymentService.Application.Clients;
+using Dprental.PaymentService.Application.DTOs.Verification;
+using Dprental.PaymentService.Application.IServices;
+using Dprental.PaymentService.Application.Services.Integrity;
+using Dprental.PaymentService.Common.Cryptography;
+using Dprental.PaymentService.IntegrityHost.Services;
 using Dprental.PaymentService.Domain.Repositories;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -40,19 +46,27 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
     private const string WriteScope = "payment.invoice.write";
 
     private readonly RSA _rsa = RSA.Create(2048);
+    private readonly ECDsa _ecdsa = EcdsaAttestation.CreateEphemeralP256KeyPair();
+    private const string SigningKeyId = "dpr-ecdsa-2026-v1";
     private string _connString = string.Empty;
     private string _dbName = string.Empty;
+    private string _integrityConn = string.Empty;
+    private string _integrityDbName = string.Empty;
     private WebApplicationFactory<Program> _factory = null!;
-
     public async Task InitializeAsync()
     {
         (_connString, _dbName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        (_integrityConn, _integrityDbName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
         var options = PostgresTestDatabaseHelper.CreateOptions(_connString);
         await using (var ctx = new PaymentServiceDbContext(options))
         {
             await ctx.Database.MigrateAsync();
         }
-
+        var iOptions = new DbContextOptionsBuilder<IntegrityDbContext>().UseNpgsql(_integrityConn).Options;
+        await using (var iCtx = new IntegrityDbContext(iOptions))
+        {
+            await iCtx.Database.MigrateAsync();
+        }
         _factory = new PaymentWebApplicationFactory()
             .WithWebHostBuilder(builder =>
             {
@@ -64,6 +78,8 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
                 builder.UseSetting("Authentication:Jwt:ClientAudience", ClientAudience);
                 builder.UseSetting("Authentication:Jwt:JwksUri", "http://localhost/jwks");
                 builder.UseSetting("InternalAuthentication:RentalApiKey", PaymentWebApplicationFactory.DefaultInternalApiKey);
+                builder.UseSetting("IntegrityVerification:ActiveKeyId", SigningKeyId);
+                builder.UseSetting($"IntegrityVerification:PublicKeys:{SigningKeyId}", EcdsaAttestation.ExportPublicKeyBase64(_ecdsa));
                 builder.ConfigureLogging(logging => logging.ClearProviders());
 
                 builder.ConfigureTestServices(services =>
@@ -75,6 +91,29 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
                         opt.TokenValidationParameters.ValidAudiences = [ServiceAudience, ClientAudience];
                         opt.ConfigurationManager = new TestJwksManager(_rsa, KeyId);
                     });
+
+                    var keyManager = new IntegrityKeyManager(Microsoft.Extensions.Options.Options.Create(new IntegrityHostOptions
+                    {
+                        SigningKeyId = SigningKeyId,
+                        PrivateKeyBase64 = EcdsaAttestation.ExportPrivateKeyBase64(_ecdsa)
+                    }));
+
+                    var verifyOptions = new TestOptionsMonitor<IntegrityVerificationOptions>(new IntegrityVerificationOptions
+                    {
+                        ActiveKeyId = SigningKeyId,
+                        PublicKeys = new Dictionary<string, string> { [SigningKeyId] = EcdsaAttestation.ExportPublicKeyBase64(_ecdsa) }
+                    });
+
+                    services.AddHttpClient<ITransactionIntegrityChecker, IntegrityHostClient>()
+                        .ConfigurePrimaryHttpMessageHandler(() =>
+                        {
+                            return new MockIntegrityHandler(() =>
+                            {
+                                var iCtx = new IntegrityDbContext(new DbContextOptionsBuilder<IntegrityDbContext>().UseNpgsql(_integrityConn).Options);
+                                var pCtx = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connString));
+                                return new IntegrityVerificationEngine(iCtx, pCtx, keyManager, new PaymentDataEncryptor(new byte[32]), verifyOptions);
+                            });
+                        });
                 });
             });
     }
@@ -82,10 +121,15 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         _factory.Dispose();
+        _ecdsa.Dispose();
         _rsa.Dispose();
         if (!string.IsNullOrEmpty(_dbName) && await PostgresTestDatabaseHelper.IsPostgreSqlAvailableAsync())
         {
             await PostgresTestDatabaseHelper.DropTestDatabaseAsync(_dbName);
+        }
+        if (!string.IsNullOrEmpty(_integrityDbName) && await PostgresTestDatabaseHelper.IsPostgreSqlAvailableAsync())
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(_integrityDbName);
         }
     }
 
@@ -474,6 +518,137 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task AcceptLatePayment_ValidLateInvoice_SucceedsAndReplays()
+    {
+        await using var h = FinancialWorkflowHarness.Attach(_connString, _integrityConn, _ecdsa);
+        var invoice = await h.SeedAsync(paid: true, count: 1, late: true);
+        string invoiceRef = invoice.InvoiceRef;
+        string paymentRef = invoice.PaymentRef!;
+        Guid orderId = invoice.RentalOrderId;
+
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
+
+        // 1. Accept late payment
+        var acceptReq = new AcceptLatePaymentRequest(
+            "op-accept-late-1",
+            orderId,
+            paymentRef,
+            "rec-order-1");
+
+        var acceptResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/accept-late-payment", acceptReq);
+        Assert.Equal(HttpStatusCode.OK, acceptResp.StatusCode);
+        var acceptBody = await acceptResp.Content.ReadFromJsonAsync<AcceptLatePaymentResponse>();
+        Assert.NotNull(acceptBody);
+        Assert.Equal(invoiceRef, acceptBody.InvoiceRef);
+        Assert.Equal(InvoiceStatus.Paid, acceptBody.Status);
+        Assert.False(acceptBody.IsReplay);
+        Assert.Equal(orderId, acceptBody.RentalOrderId);
+        Assert.Equal(paymentRef, acceptBody.PaymentRef);
+        Assert.Equal("rec-order-1", acceptBody.RecoveryId);
+
+        // 2. Replay with same operation key
+        var replayResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/accept-late-payment", acceptReq);
+        Assert.Equal(HttpStatusCode.OK, replayResp.StatusCode);
+        var replayBody = await replayResp.Content.ReadFromJsonAsync<AcceptLatePaymentResponse>();
+        Assert.NotNull(replayBody);
+        Assert.True(replayBody.IsReplay);
+        Assert.Equal(invoiceRef, replayBody.InvoiceRef);
+
+        // 3. Conflict when replaying with same key and different payload
+        var conflictReq = acceptReq with { RecoveryId = "rec-order-different" };
+        var conflictResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/accept-late-payment", conflictReq);
+        Assert.Equal(HttpStatusCode.Conflict, conflictResp.StatusCode);
+
+        // 4. Verify in DB: invoice status is Paid
+        var dbOptions = PostgresTestDatabaseHelper.CreateOptions(_connString);
+        await using (var ctx = new PaymentServiceDbContext(dbOptions))
+        {
+            var inv = await ctx.Invoices.SingleAsync(i => i.InvoiceRef == invoiceRef);
+            Assert.Equal(InvoiceStatus.Paid, inv.Status);
+
+            var journal = await ctx.TransactionJournals
+                .Where(j => j.StreamId == invoiceRef && j.EventType == JournalEventTypes.PaymentMatched)
+                .OrderByDescending(j => j.Version)
+                .FirstOrDefaultAsync();
+            Assert.NotNull(journal);
+            Assert.Equal(InvoiceStatus.Paid, journal.Status);
+        }
+    }
+
+    [Fact]
+    public async Task AcceptLatePayment_CustomerCancelled_ReturnsConflict()
+    {
+        Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
+        string invoiceRef;
+        string paymentRef = "PAY-CUST-" + Guid.NewGuid().ToString("N")[..8];
+
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
+
+        var createResp = await client.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
+            orderId, "ORD-CUST-001", renterId, "VND", DateTimeOffset.UtcNow.AddMinutes(20),
+            [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 100_000m)],
+            "op-cust-create"));
+        invoiceRef = (await createResp.Content.ReadFromJsonAsync<CreateInvoiceResponse>())!.InvoiceRef;
+
+        // Cancel invoice with CustomerRequested origin
+        var cancelResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/cancel", new CancelInvoiceRequest(
+            orderId, invoiceRef, "Customer decided not to rent", "op-cust-cancel", InvoiceCancellationOrigins.CustomerRequested));
+        Assert.Equal(HttpStatusCode.OK, cancelResp.StatusCode);
+
+        // Simulate payment ref attached
+        var dbOptions = PostgresTestDatabaseHelper.CreateOptions(_connString);
+        await using (var ctx = new PaymentServiceDbContext(dbOptions))
+        {
+            var inv = await ctx.Invoices.SingleAsync(i => i.InvoiceRef == invoiceRef);
+            inv.RecordLatePayment(paymentRef, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            await ctx.SaveChangesAsync();
+        }
+
+        // Attempt accept late payment -> must fail
+        var acceptReq = new AcceptLatePaymentRequest("op-cust-accept", orderId, paymentRef, "rec-cust-1");
+        var acceptResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/accept-late-payment", acceptReq);
+        Assert.Equal(HttpStatusCode.Conflict, acceptResp.StatusCode);
+    }
+
+    [Fact]
+    public async Task AcceptLatePayment_Past15MinuteWindow_ReturnsConflict()
+    {
+        Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
+        string invoiceRef;
+        string paymentRef = "PAY-EXPW-" + Guid.NewGuid().ToString("N")[..8];
+
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
+
+        // 1. Create invoice with valid deadline
+        var createResp = await client.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
+            orderId, "ORD-EXPW-001", renterId, "VND", DateTimeOffset.UtcNow.AddMinutes(30),
+            [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 100_000m)],
+            "op-expw-create"));
+        Assert.Equal(HttpStatusCode.Created, createResp.StatusCode);
+        invoiceRef = (await createResp.Content.ReadFromJsonAsync<CreateInvoiceResponse>())!.InvoiceRef;
+
+        // Update deadline to 20 minutes ago (past 15-minute window)
+        DateTimeOffset pastDeadline = DateTimeOffset.UtcNow.AddMinutes(-20);
+        var dbOptions = PostgresTestDatabaseHelper.CreateOptions(_connString);
+        await using (var ctx = new PaymentServiceDbContext(dbOptions))
+        {
+            var inv = await ctx.Invoices.SingleAsync(i => i.InvoiceRef == invoiceRef);
+            typeof(Invoice).GetProperty(nameof(Invoice.PaymentDeadline))!.SetValue(inv, pastDeadline);
+            inv.RecordLatePayment(paymentRef, pastDeadline.AddMinutes(2), DateTimeOffset.UtcNow);
+            await ctx.SaveChangesAsync();
+        }
+
+        var acceptReq = new AcceptLatePaymentRequest("op-expw-accept", orderId, paymentRef, "rec-expw-1");
+        var acceptResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/accept-late-payment", acceptReq);
+        Assert.Equal(HttpStatusCode.Conflict, acceptResp.StatusCode);
+    }
+
     private string CreateServiceToken(string scope = WriteScope)
     {
         var key = new RsaSecurityKey(_rsa) { KeyId = KeyId };
@@ -523,5 +698,26 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         }
 
         public void RequestRefresh() { }
+    }
+
+    private sealed class MockIntegrityHandler(Func<IntegrityVerificationEngine> engineFactory) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var req = await request.Content!.ReadFromJsonAsync<TransactionVerificationRequest>(cancellationToken);
+            var engine = engineFactory();
+            var res = await engine.VerifyAsync(req!, cancellationToken);
+            var response = new HttpResponseMessage(res.IsSuccess ? HttpStatusCode.OK : HttpStatusCode.BadRequest)
+            {
+                Content = JsonContent.Create(res.IsSuccess ? res.Value : (object)res.Error)
+            };
+            return response;
+        }
+    }
+    private sealed class TestOptionsMonitor<T>(T value) : IOptionsMonitor<T>
+    {
+        public T CurrentValue => value;
+        public T Get(string? name) => value;
+        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }

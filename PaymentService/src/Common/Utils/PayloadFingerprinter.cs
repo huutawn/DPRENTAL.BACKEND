@@ -52,7 +52,8 @@ public static class PayloadFingerprinter
     public static string ComputeCancelFingerprint(
         Guid rentalOrderId,
         string invoiceRef,
-        string reason)
+        string reason,
+        string? origin = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(invoiceRef);
         ArgumentNullException.ThrowIfNull(reason);
@@ -62,6 +63,10 @@ public static class PayloadFingerprinter
         sb.Append(rentalOrderId.ToString("D")).Append('|');
         sb.Append(invoiceRef.Trim()).Append('|');
         sb.Append(reason.Trim());
+        if (!string.IsNullOrWhiteSpace(origin))
+        {
+            sb.Append('|').Append(origin.Trim().ToUpperInvariant());
+        }
 
         return ComputeSha256Hex(sb.ToString());
     }
@@ -69,9 +74,29 @@ public static class PayloadFingerprinter
     public static string ComputeFingerprint(
         Guid rentalOrderId,
         string invoiceRef,
-        string reason)
-        => ComputeCancelFingerprint(rentalOrderId, invoiceRef, reason);
+        string reason,
+        string? origin = null)
+        => ComputeCancelFingerprint(rentalOrderId, invoiceRef, reason, origin);
 
+    public static string ComputeAcceptLatePaymentFingerprint(
+        Guid rentalOrderId,
+        string invoiceRef,
+        string paymentRef,
+        string recoveryId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(invoiceRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(paymentRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(recoveryId);
+
+        StringBuilder sb = new();
+        sb.Append("ACCEPT_LATE_PAYMENT:");
+        sb.Append(rentalOrderId.ToString("D")).Append('|');
+        sb.Append(invoiceRef.Trim()).Append('|');
+        sb.Append(paymentRef.Trim()).Append('|');
+        sb.Append(recoveryId.Trim());
+
+        return ComputeSha256Hex(sb.ToString());
+    }
     private static string ComputeSha256Hex(string input)
     {
         byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));

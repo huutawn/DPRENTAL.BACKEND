@@ -42,22 +42,25 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
     private static InvoiceCreationService CreateCreationService(
         IInvoiceRepository repo,
         IOptions<PaymentMerchantOptions> merchantOptions,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IManualRefundRepository? refundRepo = null)
     {
         var tp = timeProvider ?? TimeProvider.System;
-        var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor, tp);
+        var rRepo = refundRepo ?? new FakeManualRefundRepository();
+        var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor, rRepo, FakeTransactionIntegrityChecker.Instance, timeProvider: tp);
         return new InvoiceCreationService(repo, merchantOptions, lifecycle, TestEncryptor, tp);
     }
 
     private static InvoiceLifecycleService CreateLifecycleService(
         PaymentServiceDbContext ctx,
         TimeProvider? timeProvider = null) =>
-        CreateLifecycleService(new EfInvoiceRepository(ctx), timeProvider);
+        new(new EfInvoiceRepository(ctx), null, TestEncryptor, new ManualRefundRepository(ctx), FakeTransactionIntegrityChecker.Instance, timeProvider: timeProvider ?? TimeProvider.System);
 
     private static InvoiceLifecycleService CreateLifecycleService(
         IInvoiceRepository repo,
-        TimeProvider? timeProvider = null) =>
-        new(repo, null, TestEncryptor, timeProvider ?? TimeProvider.System);
+        TimeProvider? timeProvider = null,
+        IManualRefundRepository? refundRepo = null) =>
+        new(repo, null, TestEncryptor, refundRepo ?? new FakeManualRefundRepository(), FakeTransactionIntegrityChecker.Instance, timeProvider: timeProvider ?? TimeProvider.System);
 
     private static InvoicePaymentProcessor CreatePaymentProcessor(
         IInvoiceRepository repo,

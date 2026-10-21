@@ -28,8 +28,10 @@ public sealed class Invoice
     public DateTimeOffset? CancelledAt { get; private set; }
     public DateTimeOffset? ExpiredAt { get; private set; }
     public string? CancelReason { get; private set; }
+    public string? CancellationOrigin { get; private set; }
     public string? PaymentRef { get; private set; }
     public long Revision { get; private set; } = 1;
+    public int IntegritySnapshotVersion { get; private set; } = 2;
 
     public IReadOnlyList<InvoiceItem> Items => _items.AsReadOnly();
     public IReadOnlyList<IFinancialDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
@@ -247,18 +249,22 @@ public sealed class Invoice
         {
             Status = InvoiceStatus.Expired;
             ExpiredAt = utcProcessedAt;
+            CancellationOrigin = InvoiceCancellationOrigins.Timeout;
             Revision++;
+            IntegritySnapshotVersion = 2;
             AddDomainEvent(new InvoiceExpiredDomainEvent(Id, InvoiceRef, RentalOrderId, utcProcessedAt));
+        }
+        else
+        {
+            IntegritySnapshotVersion = 2;
         }
 
         PaymentRef = normalizedPaymentRef;
         PaidAt = utcPaidAt;
         Revision++;
-
         return Result.Success();
     }
-
-    public Result Cancel(string reason, DateTimeOffset cancelledAt)
+    public Result Cancel(string reason, DateTimeOffset cancelledAt, string? origin = null)
     {
         if (Status == InvoiceStatus.Paid)
         {
@@ -270,23 +276,37 @@ public sealed class Invoice
             return Result.Success();
         }
 
+        DateTimeOffset utcCancelledAt = cancelledAt.ToUniversalTime();
+        string resolvedOrigin = InvoiceCancellationOrigins.Normalize(origin);
+
         if (Status == InvoiceStatus.Expired)
         {
-            // Invoice is already expired; confirmation acknowledges closure without overwriting status
+            // Khách hủy invoice đã EXPIRED vẫn phải ghi nhận ý định hủy và origin bằng journal mới
+            // Timeout/unknown đến sau khách hủy không được ghi đè CUSTOMER_REQUESTED
+            if (CancellationOrigin != InvoiceCancellationOrigins.CustomerRequested)
+            {
+                CancellationOrigin = resolvedOrigin;
+            }
+            Revision++;
+            IntegritySnapshotVersion = 2;
+            AddDomainEvent(new InvoiceCancelledDomainEvent(Id, InvoiceRef, RentalOrderId, reason, utcCancelledAt));
             return Result.Success();
         }
 
-        DateTimeOffset utcCancelledAt = cancelledAt.ToUniversalTime();
         Status = InvoiceStatus.Cancelled;
         CancelledAt = utcCancelledAt;
         CancelReason = reason;
+        if (CancellationOrigin != InvoiceCancellationOrigins.CustomerRequested)
+        {
+            CancellationOrigin = resolvedOrigin;
+        }
         Revision++;
+        IntegritySnapshotVersion = 2;
 
         AddDomainEvent(new InvoiceCancelledDomainEvent(Id, InvoiceRef, RentalOrderId, reason, utcCancelledAt));
 
         return Result.Success();
     }
-
     public Result Expire(DateTimeOffset expiredAt)
     {
         if (Status == InvoiceStatus.Paid)
@@ -302,9 +322,31 @@ public sealed class Invoice
         DateTimeOffset utcExpiredAt = expiredAt.ToUniversalTime();
         Status = InvoiceStatus.Expired;
         ExpiredAt = utcExpiredAt;
+        if (CancellationOrigin != InvoiceCancellationOrigins.CustomerRequested)
+        {
+            CancellationOrigin = InvoiceCancellationOrigins.Timeout;
+        }
         Revision++;
-
+        IntegritySnapshotVersion = 2;
         AddDomainEvent(new InvoiceExpiredDomainEvent(Id, InvoiceRef, RentalOrderId, utcExpiredAt));
+
+        return Result.Success();
+    }
+
+    public Result MarkLatePaymentAccepted(DateTimeOffset utcNow)
+    {
+        if (Status == InvoiceStatus.Paid)
+        {
+            return Error.Conflict("INVOICE_ALREADY_PAID", "Hóa đơn đã được thanh toán.");
+        }
+
+        Status = InvoiceStatus.Paid;
+        PaidAt ??= utcNow.ToUniversalTime();
+        Revision++;
+        IntegritySnapshotVersion = 2;
+
+        AddDomainEvent(new InvoicePaidDomainEvent(
+            Id, InvoiceRef, RentalOrderId, PaymentRef ?? string.Empty, TotalAmount, Currency, PaidAt.Value, utcNow.ToUniversalTime()));
 
         return Result.Success();
     }

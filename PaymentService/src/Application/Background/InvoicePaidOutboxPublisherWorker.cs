@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Common.Cryptography;
+using Dprental.PaymentService.Common;
 
 namespace Dprental.PaymentService.Application.Background;
 
@@ -99,32 +100,34 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
         var producer = scope.ServiceProvider.GetRequiredService<IInvoicePaidKafkaProducer>();
         var journalRepo = scope.ServiceProvider.GetRequiredService<ITransactionJournalRepository>();
 
-        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         var leaseDuration = TimeSpan.FromSeconds(Math.Max(5, config.LeaseDurationSeconds));
-
-        var claimedMessages = await outboxRepo.ClaimPendingBatchAsync(
-            _workerId,
-            utcNow,
-            leaseDuration,
-            config.BatchSize,
-            config.MaxRetries,
-            cancellationToken);
-
-        if (claimedMessages.Count == 0)
-        {
-            return 0;
-        }
-
         int publishedCount = 0;
-        foreach (var message in claimedMessages)
+
+        for (int i = 0; i < config.BatchSize; i++)
         {
             if (cancellationToken.IsCancellationRequested)
             {
                 break;
             }
 
+            DateTimeOffset utcNow = _timeProvider.GetUtcNow();
+            var claimedMessages = await outboxRepo.ClaimPendingBatchAsync(
+                _workerId,
+                utcNow,
+                leaseDuration,
+                batchSize: 1,
+                cancellationToken);
+
+            if (claimedMessages.Count == 0)
+            {
+                break;
+            }
+
+            var message = claimedMessages[0];
+            var backlogAge = utcNow - message.CreatedAt;
+            _logger.LogInformation("Claimed outbox message {MessageId} for order {AggregateId} (backlog age: {Age}s, retries: {Retries})",
+                message.MessageId, message.AggregateId, Math.Round(backlogAge.TotalSeconds, 1), message.RetryCount);
             string topic = !string.IsNullOrWhiteSpace(config.Topic) ? config.Topic : "payment.events.v1";
-            // AggregateId holds the RentalOrderId
             string key = message.AggregateId;
 
             TransactionJournalEntry? journalEntry = null;
@@ -165,12 +168,39 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
                 publicationEvidence.Value.Integrity.Status != IntegrityStatuses.Valid || !publicationEvidence.Value.Usability.IsUsable)
             {
                 if (publicationEvidence.IsSuccess && publicationEvidence.Value.Integrity.Status == IntegrityStatuses.Tampered)
+                {
                     await outboxRepo.QuarantineMessageAsync(message.Id, _workerId, publicationEvidence.Value.Usability.Reason, utcNow, cancellationToken);
-                else if (publicationEvidence.IsFailure && publicationEvidence.Error.Code != "Payment.Verification.Timeout" &&
-                    !publicationEvidence.Error.Code.StartsWith("IntegrityHost.Unavailable", StringComparison.Ordinal))
-                    await outboxRepo.QuarantineMessageAsync(message.Id, _workerId, publicationEvidence.Error.Code, utcNow, cancellationToken);
+                }
+                else if (publicationEvidence.IsFailure)
+                {
+                    var err = publicationEvidence.Error;
+                    bool isTransient = err.Code is "Payment.Verification.Timeout"
+                                       or "IntegrityHost.Unavailable"
+                                       or "IntegrityHost.Error"
+                                       or "IntegrityHost.EmptyResponse"
+                                       or "IntegrityHost.KeyNotReady"
+                                       or "IntegrityHost.UnknownKey"
+                                       or "IntegrityHost.KeyNotSynchronized";
+
+                    if (isTransient)
+                    {
+                        await outboxRepo.DeferMessageAsync(message.Id, _workerId, utcNow.AddSeconds(5), err.Code, cancellationToken);
+                    }
+                    else if (err.Code is "IntegrityHost.Unauthorized" or "IntegrityHost.Forbidden" or "IntegrityHost.InvalidConfiguration")
+                    {
+                        _logger.LogError("Configuration or access error verifying outbox message {MessageId}: {ErrorCode} - {ErrorMessage}",
+                            message.MessageId, err.Code, err.Message);
+                        await outboxRepo.DeferMessageAsync(message.Id, _workerId, utcNow.AddSeconds(15), err.Code, cancellationToken);
+                    }
+                    else
+                    {
+                        await outboxRepo.QuarantineMessageAsync(message.Id, _workerId, err.Code, utcNow, cancellationToken);
+                    }
+                }
                 else
+                {
                     await outboxRepo.DeferMessageAsync(message.Id, _workerId, utcNow.AddSeconds(5), "PUBLICATION_PROOF_UNAVAILABLE", cancellationToken);
+                }
                 continue;
             }
             var proof = publicationEvidence.Value.PublicationProof;
@@ -200,25 +230,23 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
                     _logger.LogWarning("Lease expired or lost before marking published for outbox message {MessageId}", message.MessageId);
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
             catch (Exception ex)
             {
                 DateTimeOffset failNow = _timeProvider.GetUtcNow();
-                int baseDelay = Math.Min(config.MaxBackoffSeconds, (int)Math.Pow(2, Math.Min(attempt, 6)));
-                int jitter = Random.Shared.Next(0, Math.Max(1, baseDelay / 4));
-                var nextRetryAt = failNow.AddSeconds(baseDelay + jitter);
-                bool isExhausted = attempt >= config.MaxRetries;
-                if (isExhausted)
-                {
-                    _logger.LogError(ex, "Outbox message {MessageId} for order {AggregateId} exceeded max retries {MaxRetries}. Retained for investigation/replay. Error: {Error}",
-                        message.MessageId, message.AggregateId, config.MaxRetries, ex.Message);
-                }
-                else
-                {
-                    _logger.LogWarning(ex, "Failed to publish Outbox message {MessageId} (attempt {Attempt}/{MaxRetries}). Next retry at {NextRetryAt}",
-                        message.MessageId, attempt, config.MaxRetries, nextRetryAt);
-                }
+                int baseDelay = Math.Min(60, Math.Min(config.MaxBackoffSeconds, (int)Math.Pow(2, Math.Min(attempt, 6))));
+                int maxJitter = Math.Max(1, baseDelay / 4);
+                int jitter = Random.Shared.Next(0, maxJitter);
+                int totalDelay = Math.Min(60, baseDelay + jitter);
+                var nextRetryAt = failNow.AddSeconds(totalDelay);
 
-                await outboxRepo.RecordFailureAsync(message.Id, _workerId, ex.Message, failNow, nextRetryAt, isExhausted, cancellationToken);
+                _logger.LogWarning(ex, "Failed to publish Outbox message {MessageId} (attempt {Attempt}). Next retry at {NextRetryAt}",
+                    message.MessageId, attempt, nextRetryAt);
+
+                await outboxRepo.RecordFailureAsync(message.Id, _workerId, ex.Message, failNow, nextRetryAt, cancellationToken);
             }
         }
 

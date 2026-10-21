@@ -10,6 +10,11 @@ public interface IInvoiceLifecycleService
         CancelInvoiceRequest request,
         CancellationToken ct = default);
 
+    Task<Result<AcceptLatePaymentResponse>> AcceptLatePaymentAsync(
+        string? routeInvoiceRef,
+        AcceptLatePaymentRequest request,
+        CancellationToken ct = default);
+
     Task<Result<GetInvoiceResponse>> GetInvoiceAsync(
         string invoiceRef,
         Guid callerRenterId,

@@ -68,7 +68,7 @@ public sealed class IntegrityRegressionFlawTests
             await using (var ctx = new PaymentServiceDbContext(options))
             {
                 var repo = new EfInvoiceRepository(ctx);
-                var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor);
+                var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor, new ManualRefundRepository(ctx), FakeTransactionIntegrityChecker.Instance);
                 var creation = new InvoiceCreationService(repo, MerchantOptions, lifecycle, TestEncryptor);
 
                 var res = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
@@ -83,7 +83,7 @@ public sealed class IntegrityRegressionFlawTests
             {
                 var repo = new EfInvoiceRepository(ctx);
                 var journalRepo = new EfTransactionJournalRepository(ctx);
-                var lifecycle = new InvoiceLifecycleService(repo, journalRepo, TestEncryptor);
+                var lifecycle = new InvoiceLifecycleService(repo, journalRepo, TestEncryptor, new ManualRefundRepository(ctx), FakeTransactionIntegrityChecker.Instance);
 
                 await lifecycle.EnsureExpiredIfPastDeadlineAsync(invoiceRef, pastDeadline, CancellationToken.None);
 
@@ -143,7 +143,7 @@ public sealed class IntegrityRegressionFlawTests
             await using (var ctx = new PaymentServiceDbContext(paymentOptions))
             {
                 var repo = new EfInvoiceRepository(ctx);
-                var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor);
+                var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor, new ManualRefundRepository(ctx), FakeTransactionIntegrityChecker.Instance);
                 var creation = new InvoiceCreationService(repo, MerchantOptions, lifecycle, TestEncryptor);
 
                 var res = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(

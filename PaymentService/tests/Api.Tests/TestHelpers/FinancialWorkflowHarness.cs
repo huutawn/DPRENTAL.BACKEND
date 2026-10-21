@@ -121,7 +121,7 @@ public sealed class FinancialWorkflowHarness : IAsyncDisposable
     {
         await using var db = new PaymentServiceDbContext(PaymentOptions);
         var repo = new EfInvoiceRepository(db, Encryptor);
-        var lifecycle = new InvoiceLifecycleService(repo, null, Encryptor);
+        var lifecycle = new InvoiceLifecycleService(repo, null, Encryptor, new ManualRefundRepository(db), Checker());
         var creation = new InvoiceCreationService(repo, Options.Create(new PaymentMerchantOptions { Bank = "MBBank", Account = "123456789" }), lifecycle, Encryptor);
         var request = new CreateInvoiceRequest(Guid.NewGuid(), "ORD-TEST", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(20),
             Enumerable.Range(0, count).Select(_ => new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 100_000, 90_000)).ToArray(), Guid.NewGuid().ToString("N"));
@@ -131,7 +131,7 @@ public sealed class FinancialWorkflowHarness : IAsyncDisposable
         if (late)
         {
             var cancelled = await lifecycle.CancelInvoiceAsync(invoice.InvoiceRef,
-                new CancelInvoiceRequest(invoice.RentalOrderId, invoice.InvoiceRef, "Expired checkout", Guid.NewGuid().ToString("N")));
+                new CancelInvoiceRequest(invoice.RentalOrderId, invoice.InvoiceRef, "Expired checkout", Guid.NewGuid().ToString("N"), InvoiceCancellationOrigins.Timeout));
             Assert.True(cancelled.IsSuccess, cancelled.Error.Message);
         }
         if (paid)

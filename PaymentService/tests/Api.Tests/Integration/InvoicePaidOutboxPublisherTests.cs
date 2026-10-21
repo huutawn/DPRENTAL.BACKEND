@@ -51,7 +51,7 @@ public class InvoicePaidOutboxPublisherTests
 
     private sealed class FakeKafkaProducer : IInvoicePaidKafkaProducer
     {
-        public ConcurrentBag<(string Topic, string Key, string Payload)> ProducedMessages { get; } = new();
+        public ConcurrentQueue<(string Topic, string Key, string Payload)> ProducedMessages { get; } = new();
         public Func<string, string, string, Task>? OnProduce { get; set; }
 
         public async Task ProduceAsync(string topic, string key, string payload, IReadOnlyDictionary<string, string> headers, CancellationToken cancellationToken)
@@ -60,7 +60,7 @@ public class InvoicePaidOutboxPublisherTests
             {
                 await OnProduce(topic, key, payload);
             }
-            ProducedMessages.Add((topic, key, payload));
+            ProducedMessages.Enqueue((topic, key, payload));
         }
     }
 
@@ -87,7 +87,6 @@ public class InvoicePaidOutboxPublisherTests
             DeliveryTimeoutSeconds = 10,
             LeaseDurationSeconds = 30,
             PollingIntervalSeconds = 15,
-            MaxRetries = 10,
             MaxBackoffSeconds = 60,
             BatchSize = 10,
             Enabled = true
@@ -164,13 +163,17 @@ public class InvoicePaidOutboxPublisherTests
                     provider.GetRequiredService<IOptionsMonitor<PaymentKafkaOptions>>(),
                     NullLogger<InvoicePaidOutboxPublisherWorker>.Instance, clock);
 
-                Assert.Equal(1, await worker.ProcessPendingMessagesAsync(CancellationToken.None));
-                Assert.Single(producer.ProducedMessages);
-                Assert.Contains("InvoicePaid", producer.ProducedMessages.Single().Payload, StringComparison.Ordinal);
-                Assert.Equal(1, await worker.ProcessPendingMessagesAsync(CancellationToken.None));
+                Assert.Equal(2, await worker.ProcessPendingMessagesAsync(CancellationToken.None));
                 Assert.Equal(2, producer.ProducedMessages.Count);
+                Assert.Contains("InvoicePaid", producer.ProducedMessages.ElementAt(0).Payload, StringComparison.Ordinal);
+                Assert.Contains("RentalSettled", producer.ProducedMessages.ElementAt(1).Payload, StringComparison.Ordinal);
                 Assert.All(producer.ProducedMessages, produced =>
                     Assert.Equal(orderId.ToString("D"), produced.Key));
+
+                // Re-running produces no duplicates
+                Assert.Equal(0, await worker.ProcessPendingMessagesAsync(CancellationToken.None));
+                Assert.Equal(2, producer.ProducedMessages.Count);
+
                 await using var verify = new PaymentServiceDbContext(options);
                 Assert.Equal(2, await verify.OutboxMessages.CountAsync(x => x.PublishedAt != null));
             }
@@ -368,16 +371,35 @@ public class InvoicePaidOutboxPublisherTests
                 await worker.ProcessPendingMessagesAsync(CancellationToken.None);
             }
 
-            // Verify final state: RetryCount == 10, NOT deleted, NOT published, NextRetryAt is null (exhausted)
+            // Verify state after 10 attempts: RetryCount == 10, NOT deleted, NOT published, NextRetryAt is still set (continuous resilient retry)
             await using (var verifyCtx = new PaymentServiceDbContext(options))
             {
                 var finalRow = await verifyCtx.OutboxMessages.SingleAsync(m => m.Id == outbox.Id);
                 Assert.Equal(10, finalRow.RetryCount);
                 Assert.Null(finalRow.PublishedAt);
                 Assert.Null(finalRow.LockedBy);
-                Assert.Null(finalRow.NextRetryAt);
+                Assert.NotNull(finalRow.NextRetryAt);
+                Assert.Null(finalRow.QuarantinedAt);
                 Assert.Contains("Broker unreachable", finalRow.LastErrorMessage);
             }
+
+            // Recover broker: next retry publishes without losing message or processing twice
+            fakeProducer.OnProduce = null;
+            timeProvider.Advance(TimeSpan.FromSeconds(120));
+            int countRecovered = await worker.ProcessPendingMessagesAsync(CancellationToken.None);
+            Assert.Equal(1, countRecovered);
+            Assert.Single(fakeProducer.ProducedMessages);
+            await using (var verifyCtx = new PaymentServiceDbContext(options))
+            {
+                var publishedRow = await verifyCtx.OutboxMessages.SingleAsync(m => m.Id == outbox.Id);
+                Assert.NotNull(publishedRow.PublishedAt);
+                Assert.Equal(11, publishedRow.RetryCount);
+            }
+
+            // Subsequent pass does not re-publish
+            int countSubsequent = await worker.ProcessPendingMessagesAsync(CancellationToken.None);
+            Assert.Equal(0, countSubsequent);
+            Assert.Single(fakeProducer.ProducedMessages);
         }
         finally
         {

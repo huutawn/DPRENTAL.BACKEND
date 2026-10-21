@@ -9,7 +9,6 @@ public interface IOutboxRepository
         DateTimeOffset utcNow,
         TimeSpan leaseDuration,
         int batchSize,
-        int maxRetries = 10,
         CancellationToken cancellationToken = default);
 
     Task<bool> MarkPublishedAsync(
@@ -24,7 +23,6 @@ public interface IOutboxRepository
         string errorMessage,
         DateTimeOffset attemptedAt,
         DateTimeOffset nextRetryAt,
-        bool isExhausted,
         CancellationToken cancellationToken = default);
 
     Task<bool> DeferMessageAsync(

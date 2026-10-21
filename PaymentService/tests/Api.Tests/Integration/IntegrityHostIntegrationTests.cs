@@ -97,7 +97,7 @@ public sealed class IntegrityHostIntegrationTests
         await using (var payCtx = new PaymentServiceDbContext(paymentOptions))
         {
             var invoiceRepo = new EfInvoiceRepository(payCtx);
-            var lifecycle = new InvoiceLifecycleService(invoiceRepo, null, TestEncryptor);
+            var lifecycle = new InvoiceLifecycleService(invoiceRepo, null, TestEncryptor, new ManualRefundRepository(payCtx), FakeTransactionIntegrityChecker.Instance);
             var creation = new InvoiceCreationService(invoiceRepo, MerchantOptions, lifecycle, TestEncryptor);
 
             var createRes = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
@@ -208,7 +208,7 @@ public sealed class IntegrityHostIntegrationTests
         await using (var payCtx = new PaymentServiceDbContext(paymentOptions))
         {
             var invoiceRepo = new EfInvoiceRepository(payCtx);
-            var lifecycle = new InvoiceLifecycleService(invoiceRepo, null, TestEncryptor);
+            var lifecycle = new InvoiceLifecycleService(invoiceRepo, null, TestEncryptor, new ManualRefundRepository(payCtx), FakeTransactionIntegrityChecker.Instance);
             var creation = new InvoiceCreationService(invoiceRepo, MerchantOptions, lifecycle, TestEncryptor);
 
             var createRes = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(
@@ -333,7 +333,7 @@ public sealed class IntegrityHostIntegrationTests
         await using (var payCtx = new PaymentServiceDbContext(paymentOptions))
         {
             var invoiceRepo = new EfInvoiceRepository(payCtx);
-            var lifecycle = new InvoiceLifecycleService(invoiceRepo, null, TestEncryptor);
+            var lifecycle = new InvoiceLifecycleService(invoiceRepo, null, TestEncryptor, new ManualRefundRepository(payCtx), FakeTransactionIntegrityChecker.Instance);
             var creation = new InvoiceCreationService(invoiceRepo, MerchantOptions, lifecycle, TestEncryptor);
 
             var createRes = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(

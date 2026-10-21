@@ -9,6 +9,7 @@ using Dprental.PaymentService.Domain.Repositories;
 using Dprental.PaymentService.Domain.Entities.Integrity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Dprental.PaymentService.Application.Policies;
 
 namespace Dprental.PaymentService.Application.Services.Integrity;
 
@@ -62,7 +63,7 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
         }
 
         string purpose = request.Purpose.Trim().ToUpperInvariant();
-        if (purpose is not (VerificationPurposes.PaymentConfirmation or VerificationPurposes.RefundRequest or VerificationPurposes.Settlement or VerificationPurposes.ManualRefundConfirmation or VerificationPurposes.OutboxPublication))
+        if (purpose is not (VerificationPurposes.PaymentConfirmation or VerificationPurposes.RefundRequest or VerificationPurposes.Settlement or VerificationPurposes.ManualRefundConfirmation or VerificationPurposes.OutboxPublication or VerificationPurposes.LatePaymentAcceptance))
         {
             return Error.Validation("Payment.Verification.UnsupportedPurpose", $"Purpose '{request.Purpose}' không được hỗ trợ.");
         }
@@ -175,7 +176,7 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                     .OrderByDescending(j => j.Version)
                     .FirstOrDefaultAsync(cts.Token);
             }
-            else if (purpose is VerificationPurposes.Settlement or VerificationPurposes.RefundRequest)
+            else if (purpose is VerificationPurposes.Settlement or VerificationPurposes.RefundRequest or VerificationPurposes.LatePaymentAcceptance)
             {
                 string invRef = !string.IsNullOrWhiteSpace(request.InvoiceRef) ? request.InvoiceRef.Trim() : paymentRef;
                 manifest = await _integrityDb.Manifests
@@ -419,7 +420,7 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                     }
                 }
             }
-            else if (purpose is VerificationPurposes.PaymentConfirmation or VerificationPurposes.Settlement or VerificationPurposes.RefundRequest)
+            else if (purpose is VerificationPurposes.PaymentConfirmation or VerificationPurposes.Settlement or VerificationPurposes.RefundRequest or VerificationPurposes.LatePaymentAcceptance)
             {
                 Invoice? invoice = null;
                 if (!string.IsNullOrWhiteSpace(request.InvoiceRef))
@@ -438,18 +439,76 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                 }
                 else
                 {
-                    var snap = OperationalSnapshotEngine.CreateInvoiceSnapshot(invoice, invoice.Revision);
+                    var snap = OperationalSnapshotEngine.CreateInvoiceSnapshot(invoice, invoice.Revision, invoice.IntegritySnapshotVersion);
                     string d = OperationalSnapshotEngine.ComputeSnapshotDigest(snap);
                     claimsList.Add(new VerificationEntityClaim("Invoice", invoice.InvoiceRef, invoice.Revision, d));
 
-                    // Invoice must be PAID
+                    if (request.RentalItemId.HasValue)
+                    {
+                        var item = await _paymentDb.InvoiceItems.AsNoTracking()
+                            .FirstOrDefaultAsync(ii => ii.InvoiceId == invoice.Id && ii.RentalItemId == request.RentalItemId.Value, cts.Token);
+                        if (item is null)
+                        {
+                            isUsable = false;
+                            usabilityReason = "INVOICE_ITEM_NOT_FOUND";
+                        }
+                        else
+                        {
+                            if (request.SupplierId.HasValue && item.SupplierId != request.SupplierId.Value)
+                            {
+                                isUsable = false;
+                                usabilityReason = "SUPPLIER_MISMATCH";
+                            }
+                            var itemSnap = OperationalSnapshotEngine.CreateInvoiceItemSnapshot(item, item.Revision);
+                            string itemDigest = OperationalSnapshotEngine.ComputeSnapshotDigest(itemSnap);
+                            claimsList.Add(new VerificationEntityClaim("InvoiceItem", item.RentalItemId.ToString("D"), item.Revision, itemDigest));
+                        }
+                    }
+
+                    PaymentTransaction? pt = null;
+                    if (!string.IsNullOrWhiteSpace(invoice.PaymentRef))
+                    {
+                        pt = await _paymentDb.PaymentTransactions.AsNoTracking()
+                            .FirstOrDefaultAsync(t => t.PaymentRef == invoice.PaymentRef, cts.Token);
+                        if (pt is not null)
+                        {
+                            var ptSnap = OperationalSnapshotEngine.CreatePaymentTransactionSnapshot(pt, pt.Revision);
+                            string ptDigest = OperationalSnapshotEngine.ComputeSnapshotDigest(ptSnap);
+                            claimsList.Add(new VerificationEntityClaim("PaymentTransaction", pt.PaymentRef, pt.Revision, ptDigest));
+                        }
+                    }
+
+                    // Validate invariants
                     if (!string.Equals(invoice.PaymentRef, request.PaymentRef.Trim(), StringComparison.Ordinal))
                     {
                         isUsable = false;
                         usabilityReason = "PAYMENT_REF_MISMATCH";
                     }
-                    else if (invoice.Status != InvoiceStatus.Paid && !(purpose == VerificationPurposes.RefundRequest &&
-                        invoice.Status is InvoiceStatus.Expired or InvoiceStatus.Cancelled && !string.IsNullOrWhiteSpace(invoice.PaymentRef)))
+                    else if (purpose == VerificationPurposes.LatePaymentAcceptance)
+                    {
+                        var eligResult = LatePaymentAcceptancePolicy.ValidateEligibility(
+                            invoice,
+                            request.ExpectedOrderId ?? invoice.RentalOrderId,
+                            request.PaymentRef,
+                            now);
+                        if (eligResult.IsFailure)
+                        {
+                            isUsable = false;
+                            usabilityReason = eligResult.Error.Code;
+                        }
+                        else
+                        {
+                            var ptResult = LatePaymentAcceptancePolicy.ValidatePaymentTransaction(invoice, pt);
+                            if (ptResult.IsFailure)
+                            {
+                                isUsable = false;
+                                usabilityReason = ptResult.Error.Code;
+                            }
+                        }
+                    }
+                    else if (invoice.Status != InvoiceStatus.Paid &&
+                        !(purpose == VerificationPurposes.RefundRequest &&
+                          invoice.Status is InvoiceStatus.Expired or InvoiceStatus.Cancelled && !string.IsNullOrWhiteSpace(invoice.PaymentRef)))
                     {
                         isUsable = false;
                         usabilityReason = "INVOICE_NOT_PAID";
@@ -474,48 +533,6 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                     {
                         isUsable = false;
                         usabilityReason = "RENTER_MISMATCH";
-                    }
-                    else
-                    {
-
-
-                        if (request.RentalItemId.HasValue)
-                        {
-                            var item = await _paymentDb.InvoiceItems.AsNoTracking()
-                                .FirstOrDefaultAsync(ii => ii.InvoiceId == invoice.Id && ii.RentalItemId == request.RentalItemId.Value, cts.Token);
-                            if (item is null)
-                            {
-                                isUsable = false;
-                                usabilityReason = "INVOICE_ITEM_NOT_FOUND";
-                            }
-                            else
-                            {
-                                if (request.SupplierId.HasValue && item.SupplierId != request.SupplierId.Value)
-                                {
-                                    isUsable = false;
-                                    usabilityReason = "SUPPLIER_MISMATCH";
-                                }
-                                var itemSnap = OperationalSnapshotEngine.CreateInvoiceItemSnapshot(item, item.Revision);
-                                string itemDigest = OperationalSnapshotEngine.ComputeSnapshotDigest(itemSnap);
-                                claimsList.Add(new VerificationEntityClaim("InvoiceItem", item.RentalItemId.ToString("D"), item.Revision, itemDigest));
-
-
-                            }
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(invoice.PaymentRef))
-                        {
-                            var pt = await _paymentDb.PaymentTransactions.AsNoTracking()
-                                .FirstOrDefaultAsync(t => t.PaymentRef == invoice.PaymentRef, cts.Token);
-                            if (pt is not null)
-                            {
-                                var ptSnap = OperationalSnapshotEngine.CreatePaymentTransactionSnapshot(pt, pt.Revision);
-                                string ptDigest = OperationalSnapshotEngine.ComputeSnapshotDigest(ptSnap);
-                                claimsList.Add(new VerificationEntityClaim("PaymentTransaction", pt.PaymentRef, pt.Revision, ptDigest));
-
-
-                            }
-                        }
                     }
                 }
             }
@@ -546,6 +563,21 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
                 {
                     var claim = OperationalSnapshotEngine.CreateInvoiceItemClaim(item);
                     claimsList.Add(new VerificationEntityClaim(claim.EntityType, claim.EntityId, claim.Revision, claim.Digest));
+                }
+            }
+            if (purpose == VerificationPurposes.LatePaymentAcceptance && isUsable)
+            {
+                var lateInvoice = await _paymentDb.Invoices.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.InvoiceRef == request.InvoiceRef, cts.Token);
+                if (lateInvoice is not null)
+                {
+                    bool hasRefunds = await _paymentDb.ManualRefundRequirements.AsNoTracking()
+                        .AnyAsync(r => r.InvoiceId == lateInvoice.Id, cts.Token);
+                    if (hasRefunds)
+                    {
+                        isUsable = false;
+                        usabilityReason = "REFUND_ALREADY_RESERVED";
+                    }
                 }
             }
             if (isUsable && !string.IsNullOrWhiteSpace(request.ExpectedStatus) &&

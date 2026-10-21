@@ -146,6 +146,50 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
 
         return locked;
     }
+    public async Task<PaymentTransaction?> FindPaymentTransactionByPaymentRefWithRowLockAsync(
+        string paymentRef,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(paymentRef))
+        {
+            return null;
+        }
+
+        string normalized = paymentRef.Trim();
+        PaymentTransaction? locked;
+        if (_dbContext.Database.IsNpgsql())
+        {
+            locked = await _dbContext.PaymentTransactions
+                .FromSqlInterpolated($"SELECT * FROM payment_transactions WHERE \"PaymentRef\" = {normalized} FOR UPDATE")
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+        else
+        {
+            locked = await _dbContext.PaymentTransactions
+                .FirstOrDefaultAsync(t => t.PaymentRef == normalized, cancellationToken);
+        }
+
+        if (locked is not null)
+        {
+            await _dbContext.Entry(locked).ReloadAsync(cancellationToken);
+            if (_encryptor is not null)
+            {
+                locked.EnsureDecrypted(_encryptor);
+            }
+        }
+
+        return locked;
+    }
+
+    public async Task ExecuteStreamLockAsync(string streamId, CancellationToken cancellationToken = default)
+    {
+        if (_dbContext.Database.IsNpgsql())
+        {
+            await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtext({streamId}))",
+                cancellationToken);
+        }
+    }
 
     public async Task<Invoice?> FindInvoiceByPaymentCodeWithRowLockAsync(
         string paymentCode,
@@ -317,6 +361,48 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
             }
 
             _dbContext.TransactionJournals.Add(journalEntry);
+
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex)
+        {
+            _dbContext.ChangeTracker.Clear();
+            if (DbExceptionTranslator.TryTranslate(ex, out var constraintEx))
+            {
+                throw constraintEx;
+            }
+            throw;
+        }
+    }
+    public async Task SaveLatePaymentAcceptanceAsync(
+        Invoice invoice,
+        PaymentTransaction transaction,
+        OperationReceipt receipt,
+        TransactionJournalEntry invoiceJournal,
+        TransactionJournalEntry paymentTransactionJournal,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(invoice);
+        ArgumentNullException.ThrowIfNull(transaction);
+        ArgumentNullException.ThrowIfNull(receipt);
+        ArgumentNullException.ThrowIfNull(invoiceJournal);
+        ArgumentNullException.ThrowIfNull(paymentTransactionJournal);
+
+        try
+        {
+            if (_dbContext.Entry(invoice).State == EntityState.Detached)
+            {
+                _dbContext.Invoices.Update(invoice);
+            }
+
+            if (_dbContext.Entry(transaction).State == EntityState.Detached)
+            {
+                _dbContext.PaymentTransactions.Update(transaction);
+            }
+
+            _dbContext.OperationReceipts.Add(receipt);
+            _dbContext.TransactionJournals.Add(invoiceJournal);
+            _dbContext.TransactionJournals.Add(paymentTransactionJournal);
 
             await _dbContext.SaveChangesAsync(cancellationToken);
         }

@@ -487,7 +487,7 @@ public sealed class IntegrityBoundariesR01ToR14Tests
             await using (var ctx = new PaymentServiceDbContext(options))
             {
                 var repo = new EfOutboxRepository(ctx);
-                var claimed = await repo.ClaimPendingBatchAsync("worker-r11", now, TimeSpan.FromSeconds(30), 10, 5);
+                var claimed = await repo.ClaimPendingBatchAsync("worker-r11", now, TimeSpan.FromSeconds(30), 10);
                 Assert.Single(claimed);
 
                 // Claiming only acquires lease, MUST NOT increment RetryCount!

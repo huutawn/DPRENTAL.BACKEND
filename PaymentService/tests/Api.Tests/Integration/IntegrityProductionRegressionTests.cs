@@ -104,7 +104,7 @@ public sealed class IntegrityProductionRegressionTests
             await using (var ctx = new PaymentServiceDbContext(pOptions))
             {
                 var repo = new EfInvoiceRepository(ctx);
-                var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor);
+                var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor, new ManualRefundRepository(ctx), FakeTransactionIntegrityChecker.Instance);
                 var creation = new InvoiceCreationService(repo, MerchantOptions, lifecycle, TestEncryptor);
 
                 var createRes = await creation.CreateInvoiceAsync(new CreateInvoiceRequest(

@@ -18,9 +18,18 @@ public sealed record VerifiedWriteContext(
     public static Result<VerifiedWriteContext> FromResponse(TransactionVerificationResponse response, string purpose, DateTimeOffset now)
     {
         var body = response.Receipt?.Body;
-        if (body is null || !body.IsUsable || body.IntegrityStatus != IntegrityStatuses.Valid ||
+        if (body is null || body.IntegrityStatus != IntegrityStatuses.Valid ||
             !string.Equals(body.Purpose, purpose, StringComparison.Ordinal) || body.ExpiresAt <= now)
+        {
             return Error.Conflict("Payment.EvidenceNotUsable", "Confirmed, unexpired evidence is required before writing.");
+        }
+
+        if (!body.IsUsable)
+        {
+            string errorCode = !string.IsNullOrWhiteSpace(body.Reason) ? body.Reason : "Payment.EvidenceNotUsable";
+            return Error.Conflict(errorCode, $"Confirmed evidence is unusable: {body.Reason}");
+        }
+
         return new VerifiedWriteContext(body.ReceiptId, body.KeyId, body.ExpiresAt,
             body.EntityClaims.Select(x => new VerifiedWriteClaim(x.EntityType, x.EntityId, x.Revision, x.Digest)).ToArray(), now);
     }

@@ -47,14 +47,14 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
         TimeProvider? timeProvider = null)
     {
         var tp = timeProvider ?? TimeProvider.System;
-        var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor, tp);
+        var lifecycle = new InvoiceLifecycleService(repo, null, TestEncryptor, new FakeManualRefundRepository(), FakeTransactionIntegrityChecker.Instance, timeProvider: tp);
         return new InvoiceCreationService(repo, MerchantOptions, lifecycle, TestEncryptor, tp);
     }
 
     private static InvoiceLifecycleService CreateLifecycleService(
         IInvoiceRepository repo,
         TimeProvider? timeProvider = null) =>
-        new(repo, null, TestEncryptor, timeProvider ?? TimeProvider.System);
+        new(repo, null, TestEncryptor, new FakeManualRefundRepository(), FakeTransactionIntegrityChecker.Instance, timeProvider: timeProvider ?? TimeProvider.System);
 
     private static InvoicePaymentProcessor CreateProcessor(
         IInvoiceRepository repo,
@@ -471,6 +471,12 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
         public Task<Invoice?> FindInvoiceWithRowLockAsync(string invoiceRef, CancellationToken cancellationToken = default) =>
             inner.FindInvoiceWithRowLockAsync(invoiceRef, cancellationToken);
 
+        public Task<PaymentTransaction?> FindPaymentTransactionByPaymentRefWithRowLockAsync(string paymentRef, CancellationToken cancellationToken = default) =>
+            inner.FindPaymentTransactionByPaymentRefWithRowLockAsync(paymentRef, cancellationToken);
+        public Task ExecuteStreamLockAsync(string streamId, CancellationToken cancellationToken = default) =>
+            inner.ExecuteStreamLockAsync(streamId, cancellationToken);
+        public Task SaveLatePaymentAcceptanceAsync(Invoice invoice, PaymentTransaction transaction, OperationReceipt receipt, TransactionJournalEntry invoiceJournal, TransactionJournalEntry paymentTransactionJournal, CancellationToken cancellationToken = default) =>
+            inner.SaveLatePaymentAcceptanceAsync(invoice, transaction, receipt, invoiceJournal, paymentTransactionJournal, cancellationToken);
         public async Task<PaymentTransaction?> FindPaymentTransactionWithRowLockAsync(string provider, string providerTransactionId, CancellationToken cancellationToken = default)
         {
             var result = await inner.FindPaymentTransactionWithRowLockAsync(provider, providerTransactionId, cancellationToken);
@@ -947,7 +953,12 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
 
         public Task<PaymentTransaction?> FindPaymentTransactionWithRowLockAsync(string provider, string providerTransactionId, CancellationToken cancellationToken = default) =>
             inner.FindPaymentTransactionWithRowLockAsync(provider, providerTransactionId, cancellationToken);
-
+        public Task<PaymentTransaction?> FindPaymentTransactionByPaymentRefWithRowLockAsync(string paymentRef, CancellationToken cancellationToken = default) =>
+            inner.FindPaymentTransactionByPaymentRefWithRowLockAsync(paymentRef, cancellationToken);
+        public Task ExecuteStreamLockAsync(string streamId, CancellationToken cancellationToken = default) =>
+            inner.ExecuteStreamLockAsync(streamId, cancellationToken);
+        public Task SaveLatePaymentAcceptanceAsync(Invoice invoice, PaymentTransaction transaction, OperationReceipt receipt, TransactionJournalEntry invoiceJournal, TransactionJournalEntry paymentTransactionJournal, CancellationToken cancellationToken = default) =>
+            inner.SaveLatePaymentAcceptanceAsync(invoice, transaction, receipt, invoiceJournal, paymentTransactionJournal, cancellationToken);
         public Task<Invoice?> FindInvoiceByPaymentCodeWithRowLockAsync(string paymentCode, CancellationToken cancellationToken = default) =>
             inner.FindInvoiceByPaymentCodeWithRowLockAsync(paymentCode, cancellationToken);
 

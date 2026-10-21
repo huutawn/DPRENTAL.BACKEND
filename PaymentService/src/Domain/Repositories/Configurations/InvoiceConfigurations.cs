@@ -29,6 +29,8 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         builder.Property(i => i.Revision).IsRequired().HasDefaultValue(1);
         builder.Property(i => i.PaymentRef).HasMaxLength(64);
         builder.Property(i => i.CancelReason).HasMaxLength(256);
+        builder.Property(i => i.CancellationOrigin).HasMaxLength(32);
+        builder.Property(i => i.IntegritySnapshotVersion).IsRequired().HasDefaultValue(1);
         builder.HasIndex(i => i.InvoiceRef).IsUnique();
         builder.HasIndex(i => i.RentalOrderId).IsUnique();
         builder.HasIndex(i => i.PaymentCode).IsUnique();

@@ -8,9 +8,29 @@ namespace Dprental.PaymentService.Application.Services.Integrity;
 
 public static class OperationalSnapshotEngine
 {
-    public static IReadOnlyDictionary<string, object?> CreateInvoiceSnapshot(Invoice invoice, long revision)
+    public static IReadOnlyDictionary<string, object?> CreateInvoiceSnapshot(Invoice invoice, long revision, int? snapshotVersion = null)
     {
         ArgumentNullException.ThrowIfNull(invoice);
+        int version = snapshotVersion ?? invoice.IntegritySnapshotVersion;
+        if (version <= 1)
+        {
+            return new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["entityType"] = "Invoice",
+                ["entityId"] = invoice.InvoiceRef,
+                ["revision"] = revision,
+                ["orderId"] = invoice.RentalOrderId.ToString("D"),
+                ["renterId"] = invoice.RenterId.ToString("D"),
+                ["totalAmount"] = CanonicalJournalCodec.FormatVndAmount(invoice.TotalAmount),
+                ["depositAmount"] = CanonicalJournalCodec.FormatVndAmount(invoice.TotalDepositAmount),
+                ["rentalAmount"] = CanonicalJournalCodec.FormatVndAmount(invoice.TotalRentalAmount),
+                ["currency"] = invoice.Currency.Trim().ToUpperInvariant(),
+                ["status"] = invoice.Status.ToString(),
+                ["paymentDeadline"] = CanonicalJournalCodec.NormalizeTimestamp(invoice.PaymentDeadline),
+                ["paymentCode"] = invoice.PaymentCode.Trim()
+            };
+        }
+
         return new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["entityType"] = "Invoice",
@@ -24,7 +44,8 @@ public static class OperationalSnapshotEngine
             ["currency"] = invoice.Currency.Trim().ToUpperInvariant(),
             ["status"] = invoice.Status.ToString(),
             ["paymentDeadline"] = CanonicalJournalCodec.NormalizeTimestamp(invoice.PaymentDeadline),
-            ["paymentCode"] = invoice.PaymentCode.Trim()
+            ["paymentCode"] = invoice.PaymentCode.Trim(),
+            ["cancellationOrigin"] = invoice.CancellationOrigin ?? string.Empty
         };
     }
 
@@ -210,10 +231,10 @@ public static class OperationalSnapshotEngine
         return Convert.ToHexStringLower(SHA256.HashData(bytes));
     }
 
-    public static CanonicalEntityClaim CreateInvoiceClaim(Invoice invoice)
+    public static CanonicalEntityClaim CreateInvoiceClaim(Invoice invoice, int? snapshotVersion = null)
     {
         ArgumentNullException.ThrowIfNull(invoice);
-        var snap = CreateInvoiceSnapshot(invoice, invoice.Revision);
+        var snap = CreateInvoiceSnapshot(invoice, invoice.Revision, snapshotVersion);
         string digest = ComputeSnapshotDigest(snap);
         return new CanonicalEntityClaim("Invoice", invoice.InvoiceRef, invoice.Revision, digest);
     }

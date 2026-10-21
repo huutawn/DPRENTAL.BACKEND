@@ -48,6 +48,20 @@ public sealed class TestInvoiceRepositoryDecorator : IInvoiceRepository
     public Task<PaymentTransaction?> FindPaymentTransactionWithRowLockAsync(string provider, string providerTransactionId, CancellationToken cancellationToken = default) =>
         _inner.FindPaymentTransactionWithRowLockAsync(provider, providerTransactionId, cancellationToken);
 
+    public Task<PaymentTransaction?> FindPaymentTransactionByPaymentRefWithRowLockAsync(string paymentRef, CancellationToken cancellationToken = default) =>
+        _inner.FindPaymentTransactionByPaymentRefWithRowLockAsync(paymentRef, cancellationToken);
+
+    public Task ExecuteStreamLockAsync(string streamId, CancellationToken cancellationToken = default) =>
+        _inner.ExecuteStreamLockAsync(streamId, cancellationToken);
+
+    public Task SaveLatePaymentAcceptanceAsync(
+        Invoice invoice,
+        PaymentTransaction transaction,
+        OperationReceipt receipt,
+        TransactionJournalEntry invoiceJournal,
+        TransactionJournalEntry paymentTransactionJournal,
+        CancellationToken cancellationToken = default) =>
+        _inner.SaveLatePaymentAcceptanceAsync(invoice, transaction, receipt, invoiceJournal, paymentTransactionJournal, cancellationToken);
     public Task<Invoice?> FindInvoiceByPaymentCodeWithRowLockAsync(string paymentCode, CancellationToken cancellationToken = default) =>
         _inner.FindInvoiceByPaymentCodeWithRowLockAsync(paymentCode, cancellationToken);
 

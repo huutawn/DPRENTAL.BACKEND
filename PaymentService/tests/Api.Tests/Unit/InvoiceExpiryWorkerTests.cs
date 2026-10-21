@@ -134,6 +134,8 @@ public sealed class InvoiceExpiryWorkerTests
 
         public Task<Result<CancelInvoiceResponse>> CancelInvoiceAsync(string? routeInvoiceRef, CancelInvoiceRequest request, CancellationToken ct = default) =>
             throw new NotImplementedException();
+        public Task<Result<AcceptLatePaymentResponse>> AcceptLatePaymentAsync(string? routeInvoiceRef, AcceptLatePaymentRequest request, CancellationToken ct = default) =>
+            throw new NotImplementedException();
         public Task<Result<GetInvoiceResponse>> GetInvoiceAsync(string invoiceRef, Guid callerRenterId, CancellationToken ct = default) =>
             throw new NotImplementedException();
         public Task EnsureExpiredIfPastDeadlineAsync(string invoiceRef, DateTimeOffset utcNow, CancellationToken ct = default) =>

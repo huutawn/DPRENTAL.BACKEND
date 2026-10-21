@@ -222,9 +222,9 @@ public sealed class IntegrityHostClient : ITransactionIntegrityChecker
 
             return Result.Success(boundResponse);
         }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return Error.Failure("Payment.Verification.Timeout", "Quá thời gian xử lý kiểm chứng trong ngân sách 900ms.");
+            return Error.Failure("Payment.Verification.Timeout", "Quá thời gian xử lý kiểm chứng.");
         }
         catch (HttpRequestException ex)
         {

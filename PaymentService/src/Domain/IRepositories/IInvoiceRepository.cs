@@ -21,6 +21,8 @@ public interface IInvoiceRepository
 
     Task<Invoice?> FindInvoiceWithRowLockAsync(string invoiceRef, CancellationToken cancellationToken = default);
     Task<PaymentTransaction?> FindPaymentTransactionWithRowLockAsync(string provider, string providerTransactionId, CancellationToken cancellationToken = default);
+    Task<PaymentTransaction?> FindPaymentTransactionByPaymentRefWithRowLockAsync(string paymentRef, CancellationToken cancellationToken = default);
+    Task ExecuteStreamLockAsync(string streamId, CancellationToken cancellationToken = default);
 
     Task<Invoice?> FindInvoiceByPaymentCodeWithRowLockAsync(string paymentCode, CancellationToken cancellationToken = default);
 
@@ -48,6 +50,13 @@ public interface IInvoiceRepository
         OperationReceipt? receipt,
         OutboxMessage? outboxMessage,
         TransactionJournalEntry journalEntry,
+        CancellationToken cancellationToken = default);
+    Task SaveLatePaymentAcceptanceAsync(
+        Invoice invoice,
+        PaymentTransaction transaction,
+        OperationReceipt receipt,
+        TransactionJournalEntry invoiceJournal,
+        TransactionJournalEntry paymentTransactionJournal,
         CancellationToken cancellationToken = default);
 
     Task<Invoice?> GetInvoiceSnapshotByIdAsync(Guid id, CancellationToken cancellationToken = default);

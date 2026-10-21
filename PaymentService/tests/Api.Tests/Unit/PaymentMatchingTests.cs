@@ -625,6 +625,11 @@ public sealed class PaymentMatchingTests
 
         public Task<Invoice?> FindInvoiceByPaymentCodeWithRowLockAsync(string paymentCode, CancellationToken cancellationToken = default) =>
             Task.FromResult(_invoice is not null && string.Equals(_invoice.PaymentCode, paymentCode, StringComparison.Ordinal) ? _invoice : null);
+        public Task<PaymentTransaction?> FindPaymentTransactionByPaymentRefWithRowLockAsync(string paymentRef, CancellationToken cancellationToken = default) =>
+            Task.FromResult<PaymentTransaction?>(null);
+        public Task ExecuteStreamLockAsync(string streamId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task SaveLatePaymentAcceptanceAsync(Invoice invoice, PaymentTransaction transaction, OperationReceipt receipt, TransactionJournalEntry invoiceJournal, TransactionJournalEntry paymentTransactionJournal, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
 
         public Task SavePaymentTransactionAsync(
             PaymentTransaction transaction,

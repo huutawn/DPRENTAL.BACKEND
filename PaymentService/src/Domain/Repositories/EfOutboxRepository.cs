@@ -24,7 +24,6 @@ public sealed class EfOutboxRepository : IOutboxRepository
         DateTimeOffset utcNow,
         TimeSpan leaseDuration,
         int batchSize,
-        int maxRetries = 10,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workerId);
@@ -39,7 +38,6 @@ public sealed class EfOutboxRepository : IOutboxRepository
                   AND m."QuarantinedAt" IS NULL
                   AND (m."LockedUntilUtc" IS NULL OR m."LockedUntilUtc" < {utcNow})
                   AND (m."NextRetryAt" IS NULL OR m."NextRetryAt" <= {utcNow})
-                  AND m."RetryCount" < {maxRetries}
                   AND NOT EXISTS (
                       SELECT 1 FROM outbox_messages earlier
                       WHERE earlier."AggregateId" = m."AggregateId"
@@ -101,39 +99,21 @@ public sealed class EfOutboxRepository : IOutboxRepository
         string errorMessage,
         DateTimeOffset attemptedAt,
         DateTimeOffset nextRetryAt,
-        bool isExhausted,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workerId);
 
-        if (isExhausted)
-        {
-            await _dbContext.Database.ExecuteSqlAsync(
-                $"""
-                UPDATE outbox_messages
-                SET "LastErrorMessage" = {errorMessage},
-                    "NextRetryAt" = NULL,
-                    "LockedBy" = NULL,
-                    "LockedUntilUtc" = NULL,
-                    "RetryCount" = "RetryCount" + 1
-                WHERE "Id" = {id} AND "LockedBy" = {workerId}
-                """,
-                cancellationToken);
-        }
-        else
-        {
-            await _dbContext.Database.ExecuteSqlAsync(
-                $"""
-                UPDATE outbox_messages
-                SET "LastErrorMessage" = {errorMessage},
-                    "NextRetryAt" = {nextRetryAt},
-                    "LockedBy" = NULL,
-                    "LockedUntilUtc" = NULL,
-                    "RetryCount" = "RetryCount" + 1
-                WHERE "Id" = {id} AND "LockedBy" = {workerId}
-                """,
-                cancellationToken);
-        }
+        await _dbContext.Database.ExecuteSqlAsync(
+            $"""
+            UPDATE outbox_messages
+            SET "LastErrorMessage" = {errorMessage},
+                "NextRetryAt" = {nextRetryAt},
+                "LockedBy" = NULL,
+                "LockedUntilUtc" = NULL,
+                "RetryCount" = "RetryCount" + 1
+            WHERE "Id" = {id} AND "LockedBy" = {workerId}
+            """,
+            cancellationToken);
     }
 
     public async Task<bool> DeferMessageAsync(

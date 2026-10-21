@@ -7,6 +7,7 @@ public static class VerificationPurposes
     public const string Settlement = "SETTLEMENT";
     public const string ManualRefundConfirmation = "MANUAL_REFUND_CONFIRMATION";
     public const string OutboxPublication = "OUTBOX_PUBLICATION";
+    public const string LatePaymentAcceptance = "LATE_PAYMENT_ACCEPTANCE";
 }
 
 public sealed record VerificationEntityClaim(

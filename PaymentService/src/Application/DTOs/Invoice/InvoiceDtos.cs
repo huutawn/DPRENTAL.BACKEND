@@ -101,7 +101,8 @@ public sealed record CancelInvoiceRequest(
     [Required] Guid RentalOrderId,
     [Required][MaxLength(256)] string InvoiceRef,
     [Required][MaxLength(500)] string Reason,
-    [Required][MaxLength(64)] string OperationKey)
+    [Required][MaxLength(64)] string OperationKey,
+    string? CancellationOrigin = null)
 {
     public Result Validate()
     {
@@ -125,6 +126,12 @@ public sealed record CancelInvoiceRequest(
             return Error.Validation("Payment.InvalidOperationKey", "OperationKey không được rỗng và tối đa 64 ký tự.");
         }
 
+        if (!string.IsNullOrWhiteSpace(CancellationOrigin) &&
+            !Domain.Entities.InvoiceCancellationOrigins.IsValid(CancellationOrigin))
+        {
+            return Error.Validation("Payment.InvalidCancellationOrigin",
+                $"CancellationOrigin '{CancellationOrigin}' không hợp lệ. Giá trị hợp lệ: TIMEOUT, CUSTOMER_REQUESTED.");
+        }
         return Result.Success();
     }
 }
@@ -134,6 +141,47 @@ public sealed record CancelInvoiceResponse(
     bool Cancelled,
     DateTimeOffset CancelledAt,
     bool IsReplay);
+
+public sealed record AcceptLatePaymentRequest(
+    [Required][MaxLength(64)] string OperationKey,
+    [Required] Guid RentalOrderId,
+    [Required][MaxLength(64)] string PaymentRef,
+    [Required][MaxLength(128)] string RecoveryId)
+{
+    public Result Validate()
+    {
+        if (string.IsNullOrWhiteSpace(OperationKey) || OperationKey.Trim().Length > 64)
+        {
+            return Error.Validation("Payment.InvalidOperationKey", "OperationKey không được rỗng và tối đa 64 ký tự.");
+        }
+
+        if (RentalOrderId == Guid.Empty)
+        {
+            return Error.Validation("Payment.InvalidId", "RentalOrderId phải là GUID hợp lệ.");
+        }
+
+        if (string.IsNullOrWhiteSpace(PaymentRef) || PaymentRef.Trim().Length > 64)
+        {
+            return Error.Validation("Payment.InvalidPaymentRef", "PaymentRef không được rỗng và tối đa 64 ký tự.");
+        }
+
+        if (string.IsNullOrWhiteSpace(RecoveryId) || RecoveryId.Trim().Length > 128)
+        {
+            return Error.Validation("Payment.InvalidRecoveryId", "RecoveryId không được rỗng và tối đa 128 ký tự.");
+        }
+
+        return Result.Success();
+    }
+}
+
+public sealed record AcceptLatePaymentResponse(
+    [Required] string InvoiceRef,
+    [Required] string Status,
+    bool IsReplay,
+    DateTimeOffset AcceptedAt,
+    Guid RentalOrderId = default,
+    string? PaymentRef = null,
+    string? RecoveryId = null);
 
 public sealed record GetInvoiceResponse(
     string InvoiceRef,
