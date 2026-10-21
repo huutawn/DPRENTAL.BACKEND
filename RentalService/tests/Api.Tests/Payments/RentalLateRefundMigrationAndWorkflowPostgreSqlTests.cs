@@ -692,7 +692,10 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
 
         return new PaymentWorkflowService(
             orderRepo, inboxRepo, outboxRepo, receiptRepo, lockMgr,
-            executor, db, config, NullLogger<PaymentWorkflowService>.Instance, tp);
+            executor, db,
+            new InventoryCommandProducer(new KafkaOutboxWriter(outboxRepo), Microsoft.Extensions.Options.Options.Create(new Dprental.RentalService.Application.Kafka.Configuration.KafkaOptions()), tp),
+            config, NullLogger<PaymentWorkflowService>.Instance,
+            new RentalEventProducer(new KafkaOutboxWriter(outboxRepo), Microsoft.Extensions.Options.Options.Create(new Dprental.RentalService.Application.Kafka.Configuration.KafkaOptions()), tp), tp);
     }
 
     private sealed class SpyPaymentClient : IPaymentRentalClient
@@ -812,6 +815,8 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
 
         public Task<Result<ProducerEnqueueResult>> EnqueueMarkAssetsHandedOverAsync(MarkAssetsHandedOverCommandPayload command, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "Handover", "topic", "key")));
+        public Task<Result<ProducerEnqueueResult>> EnqueueMarkAssetsOverdueAsync(MarkAssetsOverdueCommandPayload command, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "MarkAssetsOverdue", "topic", "key")));
         public Task<Result<ProducerEnqueueResult>> EnqueueApplyReturnedUnitsAsync(ApplyReturnedUnitsCommandPayload command, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "ApplyReturnedUnits", "topic", "key")));
     }

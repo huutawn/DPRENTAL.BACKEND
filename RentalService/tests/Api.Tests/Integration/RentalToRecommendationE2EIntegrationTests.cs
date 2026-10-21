@@ -308,22 +308,35 @@ public sealed class RentalToRecommendationE2EIntegrationTests
                 lockManager,
                 new Mock<IRentalOperationExecutor>().Object,
                 rDbWorkflow,
-                null!,
+                new InventoryCommandProducer(new KafkaOutboxWriter(workflowOutboxRepo), Options.Create(kafkaOptions), timeProvider),
                 workflowConfig,
                 NullLogger<PaymentWorkflowService>.Instance,
-                timeProvider,
-                workflowEventProducer);
-            var paidStagedResult = await paymentWorkflow.ApplyInvoicePaidStagedAsync(order, invoiceEnvelope, inboxMsg, CancellationToken.None);
-            Assert.True(paidStagedResult.IsSuccess, paidStagedResult.Error.Message);
-            await rDbWorkflow.SaveChangesAsync();
+                workflowEventProducer,
+                timeProvider);
+            await using (var paymentTx = await rDbWorkflow.Database.BeginTransactionAsync())
+            {
+                var paidStagedResult = await paymentWorkflow.ApplyInvoicePaidStagedAsync(order, invoiceEnvelope, inboxMsg, CancellationToken.None);
+                Assert.True(paidStagedResult.IsSuccess, paidStagedResult.Error.Message);
+                await rDbWorkflow.SaveChangesAsync();
+                await paymentTx.CommitAsync();
+            }
 
             // Publish Outbox
             int published2 = await publisherWorker.ProcessBatchAsync(CancellationToken.None);
             Assert.True(published2 >= 1);
 
+            var orderPaidEvent = consumer.Consume(TimeSpan.FromSeconds(8));
+            Assert.NotNull(orderPaidEvent);
+            Assert.Equal(KafkaContractSpec.EventTypes.RentalOrderPaid,
+                JsonDocument.Parse(orderPaidEvent.Message.Value).RootElement.GetProperty("messageType").GetString());
+            Assert.Equal(EventProcessOutcome.SkippedUnrelated,
+                (await ingestionService.ProcessEventAsync(orderPaidEvent.Message.Value, InteractionEventSource.Rental,
+                    CancellationToken.None)).Outcome);
+
             var cr2 = consumer.Consume(TimeSpan.FromSeconds(8));
             Assert.NotNull(cr2);
-            Assert.Equal(KafkaContractSpec.EventTypes.RentalItemPaid, JsonDocument.Parse(cr2.Message.Value).RootElement.GetProperty("messageType").GetString());
+            Assert.Equal(KafkaContractSpec.EventTypes.RentalItemPaid,
+                JsonDocument.Parse(cr2.Message.Value).RootElement.GetProperty("messageType").GetString());
 
             var ingestRes2 = await ingestionService.ProcessEventAsync(cr2.Message.Value, InteractionEventSource.Rental, CancellationToken.None);
             Assert.Equal(EventProcessOutcome.Processed, ingestRes2.Outcome);
@@ -373,9 +386,13 @@ public sealed class RentalToRecommendationE2EIntegrationTests
                 orderId.ToString("D"), now, "corr-002", null, settledPayload);
 
             var settledConsumer = new RentalSettledConsumer(workflowEventProducer, timeProvider);
-            var settledResult = await settledConsumer.ApplyRentalSettledStagedAsync(order, settledEnvelope, inboxMsg, CancellationToken.None);
-            Assert.True(settledResult.IsSuccess, settledResult.Error.Message);
-            await rDbWorkflow.SaveChangesAsync();
+            await using (var settlementTx = await rDbWorkflow.Database.BeginTransactionAsync())
+            {
+                var settledResult = await settledConsumer.ApplyRentalSettledStagedAsync(order, settledEnvelope, inboxMsg, CancellationToken.None);
+                Assert.True(settledResult.IsSuccess, settledResult.Error.Message);
+                await rDbWorkflow.SaveChangesAsync();
+                await settlementTx.CommitAsync();
+            }
 
             // Publish Outbox
             int published3 = await publisherWorker.ProcessBatchAsync(CancellationToken.None);

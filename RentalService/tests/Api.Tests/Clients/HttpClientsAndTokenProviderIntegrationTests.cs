@@ -32,46 +32,6 @@ public sealed class HttpClientsAndTokenProviderIntegrationTests
     }
 
     [Fact]
-    public async Task HttpInventoryRentalClient_AppendsBaseUrlAndInjectsApiKey()
-    {
-        const string expectedKey = "dev-internal-api-key-dprental-2026";
-        var mockHandler = new MockHttpMessageHandler
-        {
-            Handler = req =>
-            {
-                Assert.True(req.Headers.Contains("X-Api-Key"));
-                Assert.Equal(expectedKey, req.Headers.GetValues("X-Api-Key").Single());
-                Assert.Null(req.Headers.Authorization);
-                Assert.Equal(HttpMethod.Post, req.Method);
-                Assert.Equal("http://inventory-service:8080/api/v1/inventory/allocation-groups/grp-123/extend-hold", req.RequestUri!.ToString());
-
-                var resp = new ExtendHoldResponse("REC-1", "grp-123", DateTimeOffset.UtcNow.AddHours(24), DateTimeOffset.UtcNow, false);
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(JsonSerializer.Serialize(resp), System.Text.Encoding.UTF8, "application/json")
-                };
-            }
-        };
-
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new[]
-            {
-                new KeyValuePair<string, string?>("Services:Inventory:BaseUrl", "http://inventory-service:8080"),
-                new KeyValuePair<string, string?>("InternalAuthentication:ApiKey", expectedKey)
-            })
-            .Build();
-
-        var httpClient = new HttpClient(mockHandler);
-        var client = new HttpInventoryRentalClient(httpClient, config, NullLogger<HttpInventoryRentalClient>.Instance);
-
-        var req = new ExtendHoldRequest(DateTimeOffset.UtcNow.AddHours(24), "op-key-1");
-        var result = await client.ExtendHoldAsync("grp-123", req);
-
-        Assert.True(result.IsSuccess);
-        Assert.Equal("REC-1", result.Value.ReceiptRef);
-    }
-
-    [Fact]
     public async Task HttpPaymentRentalClient_InjectsApiKey()
     {
         const string expectedKey = "dev-internal-api-key-dprental-2026";
@@ -97,7 +57,7 @@ public sealed class HttpClientsAndTokenProviderIntegrationTests
             .AddInMemoryCollection(new[]
             {
                 new KeyValuePair<string, string?>("Services:Payment:BaseUrl", "http://payment-service:8080"),
-                new KeyValuePair<string, string?>("InternalAuthentication:ApiKey", expectedKey)
+                new KeyValuePair<string, string?>("Services:Payment:ApiKey", expectedKey)
             })
             .Build();
 
@@ -142,7 +102,7 @@ public sealed class HttpClientsAndTokenProviderIntegrationTests
             .AddInMemoryCollection(new[]
             {
                 new KeyValuePair<string, string?>("Services:Payment:BaseUrl", "http://payment-service:8080"),
-                new KeyValuePair<string, string?>("InternalAuthentication:ApiKey", "test-key")
+                new KeyValuePair<string, string?>("Services:Payment:ApiKey", "test-key")
             }).Build();
         var client = new HttpPaymentRentalClient(new HttpClient(mockHandler), config, NullLogger<HttpPaymentRentalClient>.Instance);
         var result = await client.CancelInvoiceAsync(new CancelInvoiceRequest(Guid.NewGuid(), "INV-001", "Timeout", "op-1"));

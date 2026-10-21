@@ -34,11 +34,11 @@ public sealed class PaymentEventsDispatcherAndDlqTests
         IRefundCompletedConsumer refundConsumer)
     {
         var outboxRepo = new OutboxRepository(db);
-        var options = Options.Create(new KafkaOptions
+        var options = Options.Create(Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Configure(new KafkaOptions
         {
             PaymentEventsTopic = "payment.events.v1",
             PaymentDlqTopic = "payment.events.v1.dlq"
-        });
+        }));
         return new PaymentEventsDispatcher(
             new InboxRepository(db),
             new RentalOrderRepository(db),
@@ -163,13 +163,14 @@ public sealed class PaymentEventsDispatcherAndDlqTests
             }
         }
         """;
-        var intakeResult = await dispatcher.ReceiveMessageAsync(validJson);
+        var intakeResult = await dispatcher.ReceiveMessageAsync(validJson,
+            publicationProof: Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Create(validJson));
         Assert.True(intakeResult.IsSuccess);
         Assert.Equal(KafkaIntakeDisposition.InboxStored, intakeResult.Value);
 
         var inboxMsg = await db.RentalInboxMessages.FirstAsync(m => m.AggregateId == orderId.ToString("D"));
         var result = await dispatcher.ProcessInboxMessageAsync(inboxMsg.Id);
-        Assert.True(result.IsSuccess);
+        Assert.True(result.IsSuccess, result.Error.Message);
         Assert.True(paymentWorkflow.ProcessCalled);
     }
 
@@ -219,13 +220,14 @@ public sealed class PaymentEventsDispatcherAndDlqTests
             }
         }
         """;
-        var intakeResult = await dispatcher.ReceiveMessageAsync(validJson);
+        var intakeResult = await dispatcher.ReceiveMessageAsync(validJson,
+            publicationProof: Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Create(validJson));
         Assert.True(intakeResult.IsSuccess);
         Assert.Equal(KafkaIntakeDisposition.InboxStored, intakeResult.Value);
 
         var inboxMsg = await db.RentalInboxMessages.FirstAsync(m => m.AggregateId == orderId.ToString("D"));
         var result = await dispatcher.ProcessInboxMessageAsync(inboxMsg.Id);
-        Assert.True(result.IsSuccess);
+        Assert.True(result.IsSuccess, result.Error.Message);
         Assert.True(refundConsumer.ProcessCalled);
     }
 

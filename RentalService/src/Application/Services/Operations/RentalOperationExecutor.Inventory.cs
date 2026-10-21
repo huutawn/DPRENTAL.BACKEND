@@ -78,23 +78,22 @@ public sealed partial class RentalOperationExecutor
             return Error.Failure("MISSING_REQUEST_PAYLOAD", "Thiếu request payload JSON cho ExtendHold.");
         }
 
+        await using var transaction = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         receipt.BeginProviderAttempt(utcNow);
-        await CommitLocalChangesAsync(order, cancellationToken);
-
-        if (_inventoryCommands != null)
         {
             var extendCmd = new ExtendHoldCommandPayload(order.Id, item.Id, receipt.OperationId, request.NewHoldExpiresAt);
             var enqueueResult = await _inventoryCommands.EnqueueExtendHoldAsync(extendCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
             if (enqueueResult.IsFailure)
             {
-                RecordExecutionFailure(receipt, enqueueResult.Error, utcNow, forceUncertain: false);
-                await CommitLocalChangesAsync(order, cancellationToken);
+                await transaction.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
                 return enqueueResult.Error;
             }
         }
 
         receipt.MarkProcessing(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return Result.Success();
     }
 
@@ -138,8 +137,8 @@ public sealed partial class RentalOperationExecutor
         if (receipt.IsSuccess && receipt.Status == RentalOperationReceipt.StatusSucceeded) return Result.Success();
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
+        await using var transaction = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         receipt.BeginProviderAttempt(utcNow);
-        await CommitLocalChangesAsync(order, cancellationToken);
 
         ReleaseAllocationRequest request;
         if (!string.IsNullOrWhiteSpace(receipt.PayloadJson))
@@ -166,20 +165,21 @@ public sealed partial class RentalOperationExecutor
             return Error.Failure("MISSING_REQUEST_PAYLOAD", "Thiếu request payload JSON cho ReleaseAllocation.");
         }
 
-        if (_inventoryCommands != null)
         {
-            var releaseCmd = new ReleaseAllocationCommandPayload(order.Id, item.Id, receipt.OperationId, request.Reason);
+            var releaseCmd = new ReleaseAllocationCommandPayload(order.Id, item.Id,
+                receipt.InventoryOperationKey ?? receipt.OperationId, request.Reason);
             var enqueueResult = await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
             if (enqueueResult.IsFailure)
             {
-                RecordExecutionFailure(receipt, enqueueResult.Error, utcNow, forceUncertain: false);
-                await CommitLocalChangesAsync(order, cancellationToken);
+                await transaction.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
                 return enqueueResult.Error;
             }
         }
 
         receipt.MarkProcessing(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return Result.Success();
     }
 
@@ -211,6 +211,7 @@ public sealed partial class RentalOperationExecutor
                 status: RentalOperationReceipt.StatusPending,
                 targetItemId: item.Id,
                 payloadJson: JsonSerializer.Serialize(new ReleaseAllocationRequest(releaseKey, reason), JsonOptions));
+            releaseReceipt.SetInventoryOperationKey(ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.AllocationGroupId}"));
             order.AddOperationReceipt(releaseReceipt);
         }
 

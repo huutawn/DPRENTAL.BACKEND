@@ -98,25 +98,13 @@ public sealed class OutboxRepository : IOutboxRepository
 
         if (_dbContext.Database.IsRelational())
         {
-            bool hasCallerTx = _dbContext.Database.CurrentTransaction != null;
-            if (hasCallerTx)
+            if (_dbContext.Database.CurrentTransaction is null)
             {
-                return await ExecuteInsertOnConflictAsync(message, cancellationToken);
+                return Error.Failure("OUTBOX_TRANSACTION_REQUIRED",
+                    "Outbox message must be enqueued inside the state mutation transaction.");
             }
-            else
-            {
-                await using var tx = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
-                var result = await ExecuteInsertOnConflictAsync(message, cancellationToken);
-                if (result.IsSuccess)
-                {
-                    await tx.CommitAsync(cancellationToken);
-                }
-                else
-                {
-                    await tx.RollbackAsync(cancellationToken);
-                }
-                return result;
-            }
+
+            return await ExecuteInsertOnConflictAsync(message, cancellationToken);
         }
         else
         {

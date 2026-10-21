@@ -65,7 +65,9 @@ public sealed partial class RentalOperationExecutor
         if (result.IsSuccess)
         {
             var ack = result.Value;
-            if (!string.Equals(ack.Status, "Accepted", StringComparison.OrdinalIgnoreCase) ||
+            if (!(string.Equals(ack.Status, "Accepted", StringComparison.OrdinalIgnoreCase) ||
+                  string.Equals(ack.Status, "COMPLETED", StringComparison.OrdinalIgnoreCase) ||
+                  string.Equals(ack.Status, "PENDING_MANUAL_REFUND", StringComparison.OrdinalIgnoreCase)) ||
                 !string.Equals(ack.OperationKey, receipt.OperationId, StringComparison.OrdinalIgnoreCase) ||
                 ack.FinalDeductionAmount != request.FinalDeductionAmount ||
                 ack.RefundedDepositAmount != request.RefundedDepositAmount ||

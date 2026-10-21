@@ -37,7 +37,6 @@ public static class KafkaServiceCollectionExtensions
 
         // Register business producers
         services.AddScoped<IInventoryCommandProducer, InventoryCommandProducer>();
-        services.AddScoped<IPaymentCommandProducer, PaymentCommandProducer>();
         services.AddScoped<IRentalEventProducer, RentalEventProducer>();
 
         // Register consumers / dispatchers
@@ -48,7 +47,6 @@ public static class KafkaServiceCollectionExtensions
         // Register hosted workers
         services.AddHostedService<OutboxPublisherWorker>();
         services.AddHostedService<KafkaPaymentEventsConsumerWorker>();
-        services.AddHostedService<KafkaInventoryReturnConsumerWorker>();
         services.AddHostedService<InboxProcessingWorker>();
 
         return services;

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Events;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.DTOs.Supplier;
@@ -121,10 +122,11 @@ public sealed partial class RentalOperationExecutor
         {
             receipt.MarkProcessing(utcNow);
         }
-        await CommitLocalChangesAsync(order, cancellationToken);
-
         // 6. Execute ConfirmAllocation core
-        return await ConfirmAllocationCoreAsync(order, item, receipt, normalizedKey, supplierId, isReconciliation: false, cancellationToken);
+        string providerKey = receipt.InventoryOperationKey ?? ReadConfirmProviderKey(receipt) ??
+            ComputeOperationKey("ConfirmAllocation", $"{order.Id}:{item.Id}:{normalizedKey}");
+        receipt.SetInventoryOperationKey(providerKey);
+        return await ConfirmAllocationCoreAsync(order, item, receipt, providerKey, supplierId, isReconciliation: false, cancellationToken);
     }
 
     /// <summary>
@@ -137,18 +139,19 @@ public sealed partial class RentalOperationExecutor
         string operationKey,
         DateTimeOffset utcNow)
     {
-        var confirmReq = new ConfirmAllocationRequest(operationKey);
+        string providerKey = ComputeOperationKey("ConfirmAllocation", $"{order.Id}:{item.Id}:{operationKey}");
+        var confirmReq = new ConfirmAllocationRequest(providerKey);
         var command = new RentalOperationCommand(
             1,
             "SupplierAccept",
             order.Id,
             item.Id,
-            operationKey,
+            providerKey,
             item.AllocationGroupId,
             supplierId,
             JsonSerializer.Serialize(confirmReq, JsonOptions));
 
-        return new RentalOperationReceipt(
+        var receipt = new RentalOperationReceipt(
             Guid.NewGuid(),
             order.Id,
             operationKey,
@@ -161,6 +164,19 @@ public sealed partial class RentalOperationExecutor
             status: RentalOperationReceipt.StatusProcessing,
             targetItemId: item.Id,
             payloadJson: JsonSerializer.Serialize(command, JsonOptions));
+        receipt.SetInventoryOperationKey(providerKey);
+        return receipt;
+    }
+
+    private static string? ReadConfirmProviderKey(RentalOperationReceipt receipt)
+    {
+        try
+        {
+            var command = JsonSerializer.Deserialize<RentalOperationCommand>(receipt.PayloadJson ?? "", JsonOptions);
+            var request = JsonSerializer.Deserialize<ConfirmAllocationRequest>(command?.ProviderRequestJson ?? "", JsonOptions);
+            return request?.OperationKey;
+        }
+        catch (JsonException) { return null; }
     }
 
     public async Task<Result<SupplierDecisionResponse>> ExecuteSupplierRejectAsync(
@@ -288,10 +304,13 @@ public sealed partial class RentalOperationExecutor
         await ScheduleReleaseAndRefundAsync(order, item, supplierId, reason, utcNow, cancellationToken);
 
         var notifyEnvelope = new KafkaMessageEnvelope<RentalItemRejectedPayload>(
-            Guid.NewGuid(),
+            OutboxMessageIdGenerator.ComputeDeterministicId(
+                KafkaContractSpec.Producers.RentalService,
+                KafkaContractSpec.EventTypes.RentalItemRejected,
+                normalizedKey),
             KafkaContractSpec.EventTypes.RentalItemRejected,
             1,
-            "rental-service",
+            KafkaContractSpec.Producers.RentalService,
             order.Id.ToString("D"),
             utcNow,
             normalizedKey,
@@ -350,23 +369,22 @@ public sealed partial class RentalOperationExecutor
         CancellationToken cancellationToken)
     {
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
+        await using var transaction = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         receipt.BeginProviderAttempt(utcNow);
-        await CommitLocalChangesAsync(order, cancellationToken);
-
-        if (_inventoryCommands != null)
         {
             var confirmCmd = new ConfirmAllocationCommandPayload(order.Id, item.Id, operationKey);
             var enqueueResult = await _inventoryCommands.EnqueueConfirmAllocationAsync(confirmCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
             if (enqueueResult.IsFailure)
             {
-                RecordExecutionFailure(receipt, enqueueResult.Error, utcNow, forceUncertain: false);
-                await CommitLocalChangesAsync(order, cancellationToken);
+                await transaction.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
                 return enqueueResult.Error;
             }
         }
 
         receipt.MarkProcessing(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return BuildSupplierResponse(order, item);
     }
 

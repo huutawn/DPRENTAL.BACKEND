@@ -331,12 +331,17 @@ public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
         {
             using var scope = _scopeFactory.CreateScope();
             var dispatcher = scope.ServiceProvider.GetRequiredService<IPaymentEventsDispatcher>();
+            var proofHeader = consumeResult.Message.Headers?.FirstOrDefault(header =>
+                string.Equals(header.Key, "x-dprental-proof", StringComparison.Ordinal));
             receiveResult = await dispatcher.ReceiveMessageAsync(
                 consumeResult.Message.Value,
                 consumeResult.Topic,
                 consumeResult.Partition.Value,
                 consumeResult.Offset.Value,
-                intakeCts.Token);
+                publicationProof: proofHeader?.GetValueBytes() is byte[] proofBytes
+                    ? System.Text.Encoding.UTF8.GetString(proofBytes) : null,
+                messageKey: consumeResult.Message.Key,
+                cancellationToken: intakeCts.Token);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

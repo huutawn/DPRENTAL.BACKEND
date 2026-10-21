@@ -90,7 +90,7 @@ public sealed class KafkaClientProtocolAndSerializationTests
             Guid.NewGuid(),
             "rental.events.v1",
             orderId.ToString("D"),
-            KafkaContractSpec.EventTypes.RentalOrderPaid,
+            KafkaContractSpec.EventTypes.RentalItemPaid,
             "{}",
             DateTimeOffset.UtcNow);
 

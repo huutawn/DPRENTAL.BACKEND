@@ -187,7 +187,6 @@ internal sealed class InventoryReplySimulator(
 
         var allocationHandler = new InventoryAllocationResultHandler(
             orders,
-            outbox,
             context,
             _locks,
             clock,
@@ -198,8 +197,8 @@ internal sealed class InventoryReplySimulator(
                 new RentalCartRepository(context),
                 orderCodes?.Invoke(context) ?? _defaultOrderCodes,
                 NullLogger<CheckoutOrderWriter>.Instance),
-            executor,
-            NullLogger<InventoryAllocationResultHandler>.Instance);
+            NullLogger<InventoryAllocationResultHandler>.Instance,
+            new RentalEventProducer(new KafkaOutboxWriter(outbox), options, clock));
 
         return new PaymentEventsDispatcher(
             new InboxRepository(context),
