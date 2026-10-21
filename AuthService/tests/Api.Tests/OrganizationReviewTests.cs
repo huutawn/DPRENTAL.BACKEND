@@ -81,7 +81,7 @@ public sealed class OrganizationReviewTests
         Assert.Empty(pending.Items);
         User before = (await users.GetByIdWithAccessAsync(f.OwnerId))!;
         Assert.DoesNotContain(SystemRoleCode.Owner,
-            Dprental.AuthService.Application.Security.UserAccessResolver.EffectiveRoles(before));
+            Dprental.AuthService.Domain.Security.UserAccessResolver.EffectiveRoles(before));
 
         Assert.True((await f.Review.ApproveAsync(f.AdminId, f.OrgId)).IsSuccess);
 
@@ -90,12 +90,12 @@ public sealed class OrganizationReviewTests
         Assert.Equal(f.OwnerId, owner.Id);
         Assert.Equal(1, approved.TotalCount);
         Assert.Equal([SystemRoleCode.Owner],
-            Dprental.AuthService.Application.Security.UserAccessResolver.EffectiveRoles(owner));
+            Dprental.AuthService.Domain.Security.UserAccessResolver.EffectiveRoles(owner));
         Assert.Empty(owner.UserRoles);
 
         User detail = (await users.GetByIdWithAccessAsync(f.OwnerId))!;
         Assert.Contains(SystemRoleCode.Owner,
-            Dprental.AuthService.Application.Security.UserAccessResolver.EffectiveRoles(detail));
+            Dprental.AuthService.Domain.Security.UserAccessResolver.EffectiveRoles(detail));
     }
 
     [Fact]

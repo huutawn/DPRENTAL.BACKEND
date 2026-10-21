@@ -12,6 +12,7 @@ using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.ValueObjects;
 using Dprental.AuthService.Domain.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Domain.Security;
 
 using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Application.DTOs.Auth;

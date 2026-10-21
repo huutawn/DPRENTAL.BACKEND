@@ -1,7 +1,7 @@
 using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Application.DTOs.User;
 using Dprental.AuthService.Domain.Entities;
-using Dprental.AuthService.Application.Security;
+using Dprental.AuthService.Domain.Security;
 using Dprental.AuthService.Common.Utils;
 
 namespace Dprental.AuthService.Application.Mapping;
