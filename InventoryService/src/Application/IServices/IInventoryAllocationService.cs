@@ -87,6 +87,13 @@ public interface IInventoryAllocationService
         CancellationToken cancellationToken = default) =>
         Task.FromResult(Result.Failure<AllocationCommandOutcome>(Error.Failure("NOT_IMPLEMENTED", "Not implemented")));
 
+    Task<Result<AllocationCommandOutcome>> ProcessMarkAssetsOverdueCommandAsync(
+        MessageEnvelope<MarkAssetsOverduePayload> envelope,
+        IInventoryCallerContext caller,
+        string handlerName,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Result.Failure<AllocationCommandOutcome>(Error.Failure("NOT_IMPLEMENTED", "Not implemented")));
+
     /// <summary>
     /// Xử lý lệnh ApplyReturnedUnits bất đồng bộ từ Kafka hoặc orchestration.
     /// </summary>

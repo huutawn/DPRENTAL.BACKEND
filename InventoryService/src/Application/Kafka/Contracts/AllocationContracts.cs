@@ -10,6 +10,7 @@ public static class AllocationMessageTypes
     public const string ConfirmAllocation = "ConfirmAllocation";
     public const string ReleaseAllocation = "ReleaseAllocation";
     public const string MarkAssetsHandedOver = "MarkAssetsHandedOver";
+    public const string MarkAssetsOverdue = "MarkAssetsOverdue";
     public const string ApplyReturnedUnits = "ApplyReturnedUnits";
 
     public const string Succeeded = "InventoryAllocationCommandSucceeded";
@@ -65,6 +66,13 @@ public sealed record MarkAssetsHandedOverPayload(
     [property: JsonRequired] Guid RentalItemId,
     [property: JsonRequired] string OperationKey,
     [property: JsonRequired] DateTimeOffset HandedOverAt);
+
+public sealed record MarkAssetsOverduePayload(
+    [property: JsonRequired] Guid RentalOrderId,
+    [property: JsonRequired] Guid RentalItemId,
+    [property: JsonRequired] string AllocationGroupId,
+    [property: JsonRequired] string OperationKey,
+    [property: JsonRequired] IReadOnlyList<Guid> AllocationIds);
 
 public sealed record ApplyReturnedUnitPayload(
     [property: JsonRequired] Guid AllocationId,

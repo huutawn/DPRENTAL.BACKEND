@@ -571,6 +571,58 @@ public sealed partial class InventoryAllocationService
             cancellationToken);
     }
 
+    public async Task<Result<AllocationCommandOutcome>> ProcessMarkAssetsOverdueCommandAsync(
+        MessageEnvelope<MarkAssetsOverduePayload> envelope,
+        IInventoryCallerContext caller,
+        string handlerName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(caller);
+        if (!caller.IsAuthenticated) return Error.Unauthorized("UNAUTHORIZED", "Authentication is required.");
+        var command = envelope.Payload;
+        if (command.RentalOrderId == Guid.Empty || command.RentalItemId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(command.AllocationGroupId) || string.IsNullOrWhiteSpace(command.OperationKey) ||
+            command.AllocationIds is not { Count: > 0 } || command.AllocationIds.Any(id => id == Guid.Empty) ||
+            command.AllocationIds.Distinct().Count() != command.AllocationIds.Count)
+            return Error.Validation("INVALID_OVERDUE_COMMAND", "Overdue command is incomplete or has duplicate allocations.");
+
+        var hashPayload = new { command.RentalOrderId, command.RentalItemId, command.AllocationGroupId, AllocationIds = command.AllocationIds.Order().ToArray() };
+        return await _coordinator.CoordinateAsync<MarkAssetsOverduePayload>(
+            AllocationMessageTypes.MarkAssetsOverdue, envelope.MessageId, envelope.CorrelationId,
+            command.RentalOrderId, command.RentalItemId, command.OperationKey, hashPayload, handlerName,
+            async (ctx, nowUtc, ct) =>
+            {
+                var allocations = await ctx.Allocations.GetByGroupReferenceAsync(
+                    RentalSourceSystem, $"rental-item:{command.RentalItemId}", ct);
+                if (!string.Equals(command.AllocationGroupId, $"rental-item:{command.RentalItemId}", StringComparison.Ordinal) ||
+                    allocations.Count != command.AllocationIds.Count ||
+                    !command.AllocationIds.Order().SequenceEqual(allocations.Select(a => a.Id).Order()))
+                    return Error.Validation("ALLOCATION_GROUP_MISMATCH", "Overdue command allocations do not match the rental item group.");
+
+                await ctx.AcquireAssetLocksAsync(allocations.Select(a => a.AssetId), ct);
+                DateOnly vietnamToday = BusinessDateTime.ToVietnamDate(nowUtc);
+                foreach (var allocation in allocations)
+                {
+                    if (allocation.Status != AllocationStatus.Allocated || !allocation.HandedOverAt.HasValue ||
+                        allocation.ReturnedAt.HasValue || allocation.RentalPeriod.EndDate >= vietnamToday)
+                        return Error.Conflict("ALLOCATION_NOT_OVERDUE", "Allocation is not an active overdue handover.");
+                }
+
+                var success = new InventoryAllocationCommandSucceededPayload(
+                    command.RentalOrderId, command.RentalItemId, command.OperationKey,
+                    AllocationMessageTypes.MarkAssetsOverdue, "PROTECTED", null,
+                    allocations.Select(a => new AllocationAssetMappingPayload(a.Id, a.AssetId, a.Asset.AssetCode)).ToArray(), nowUtc);
+                return Result.Success(AllocationCommandOutcome.Succeeded(
+                    AllocationMessageTypes.MarkAssetsOverdue, command.OperationKey,
+                    command.RentalOrderId, command.RentalItemId, success));
+            },
+            (code, message, occurredAt) => AllocationCommandOutcome.Rejected(
+                AllocationMessageTypes.MarkAssetsOverdue, command.OperationKey,
+                command.RentalOrderId, command.RentalItemId, code, message, occurredAt),
+            cancellationToken);
+    }
+
     /// <inheritdoc />
     public async Task<Result<AllocationCommandOutcome>> ProcessApplyReturnedUnitsCommandAsync(
         MessageEnvelope<ApplyReturnedUnitsCommandPayload> envelope,
