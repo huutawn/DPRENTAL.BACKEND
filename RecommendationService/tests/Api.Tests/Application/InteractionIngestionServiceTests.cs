@@ -1,4 +1,5 @@
 using Dprental.RecommendationService.Application.DTOs;
+using Dprental.RecommendationService.Application.IServices;
 using Dprental.RecommendationService.Application.Services;
 using Dprental.RecommendationService.Application.Validation;
 using Dprental.RecommendationService.Domain.Entities;
@@ -15,6 +16,7 @@ public sealed class InteractionIngestionServiceTests
     private readonly Mock<IUserEquipmentTypeInterestRepository> _userInterestRepoMock = new();
     private readonly Mock<IListingPopularityRepository> _listingPopularityRepoMock = new();
     private readonly Mock<IInteractionUnitOfWork> _unitOfWorkMock = new();
+    private readonly Mock<ISnapshotPublishingService> _publishingServiceMock = new();
     private readonly EventSchemaValidator _validator = new();
 
     private readonly InteractionIngestionService _service;
@@ -25,12 +27,21 @@ public sealed class InteractionIngestionServiceTests
             .Setup(u => u.ExecuteInTransactionAsync(It.IsAny<Func<CancellationToken, Task<EventProcessResult>>>(), It.IsAny<CancellationToken>()))
             .Returns<Func<CancellationToken, Task<EventProcessResult>>, CancellationToken>((func, ct) => func(ct));
 
+        _publishingServiceMock
+            .Setup(p => p.PublishUserAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PublishResult(PublishOutcome.Published));
+
+        _publishingServiceMock
+            .Setup(p => p.PublishGlobalAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PublishResult(PublishOutcome.Published));
+
         _service = new InteractionIngestionService(
             _validator,
             _eventRepoMock.Object,
             _userInterestRepoMock.Object,
             _listingPopularityRepoMock.Object,
             _unitOfWorkMock.Object,
+            _publishingServiceMock.Object,
             NullLogger<InteractionIngestionService>.Instance);
     }
 
@@ -599,5 +610,247 @@ public sealed class InteractionIngestionServiceTests
         Assert.Equal(EventProcessOutcome.DuplicateIgnored, result.Outcome);
         _userInterestRepoMock.Verify(r => r.UpsertAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<short>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
         _listingPopularityRepoMock.Verify(r => r.UpsertAsync(It.IsAny<Guid>(), It.IsAny<short>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessEvent_PostCommitPublish_PublishesUserAndGlobalOnSuccess()
+    {
+        var msgId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var listingId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+
+        string json = $$"""
+        {
+            "messageId": "{{msgId}}",
+            "messageType": "ListingViewed",
+            "version": 1,
+            "producer": "InventoryService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "userId": "{{userId}}",
+                "equipmentListingId": "{{listingId}}",
+                "equipmentTypeId": "{{typeId}}"
+            }
+        }
+        """;
+
+        _eventRepoMock
+            .Setup(r => r.IngestAsync(It.IsAny<InteractionEvent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InteractionIngestResult(InteractionIngestStatus.Inserted));
+
+        var result = await _service.ProcessEventAsync(json, InteractionEventSource.Inventory, CancellationToken.None);
+
+        Assert.Equal(EventProcessOutcome.Processed, result.Outcome);
+        _publishingServiceMock.Verify(p => p.PublishUserAsync(userId, It.IsAny<CancellationToken>()), Times.Once);
+        _publishingServiceMock.Verify(p => p.PublishGlobalAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessEvent_TransactionFailure_DoesNotCallPublish()
+    {
+        var unitOfWorkMock = new Mock<IInteractionUnitOfWork>();
+        unitOfWorkMock
+            .Setup(u => u.ExecuteInTransactionAsync(It.IsAny<Func<CancellationToken, Task<EventProcessResult>>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("DB error"));
+
+        var service = new InteractionIngestionService(
+            _validator,
+            _eventRepoMock.Object,
+            _userInterestRepoMock.Object,
+            _listingPopularityRepoMock.Object,
+            unitOfWorkMock.Object,
+            _publishingServiceMock.Object,
+            NullLogger<InteractionIngestionService>.Instance);
+
+        var msgId = Guid.NewGuid();
+        string json = $$"""
+        {
+            "messageId": "{{msgId}}",
+            "messageType": "ListingViewed",
+            "version": 1,
+            "producer": "InventoryService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "userId": "{{Guid.NewGuid()}}",
+                "equipmentListingId": "{{Guid.NewGuid()}}",
+                "equipmentTypeId": "{{Guid.NewGuid()}}"
+            }
+        }
+        """;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ProcessEventAsync(json, InteractionEventSource.Inventory, CancellationToken.None));
+
+        _publishingServiceMock.Verify(p => p.PublishUserAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _publishingServiceMock.Verify(p => p.PublishGlobalAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessEvent_AnonymousListing_OnlyPublishesGlobal()
+    {
+        var msgId = Guid.NewGuid();
+        var listingId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+
+        string json = $$"""
+        {
+            "messageId": "{{msgId}}",
+            "messageType": "ListingViewed",
+            "version": 1,
+            "producer": "InventoryService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "userId": null,
+                "equipmentListingId": "{{listingId}}",
+                "equipmentTypeId": "{{typeId}}"
+            }
+        }
+        """;
+
+        _eventRepoMock
+            .Setup(r => r.IngestAsync(It.IsAny<InteractionEvent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InteractionIngestResult(InteractionIngestStatus.Inserted));
+
+        var result = await _service.ProcessEventAsync(json, InteractionEventSource.Inventory, CancellationToken.None);
+
+        Assert.Equal(EventProcessOutcome.Processed, result.Outcome);
+        _publishingServiceMock.Verify(p => p.PublishUserAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _publishingServiceMock.Verify(p => p.PublishGlobalAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessEvent_SearchWithoutType_DoesNotPublish()
+    {
+        var msgId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+
+        string json = $$"""
+        {
+            "messageId": "{{msgId}}",
+            "messageType": "SearchPerformed",
+            "version": 1,
+            "producer": "InventoryService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "userId": "{{userId}}",
+                "equipmentTypeId": null
+            }
+        }
+        """;
+
+        _eventRepoMock
+            .Setup(r => r.IngestAsync(It.IsAny<InteractionEvent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InteractionIngestResult(InteractionIngestStatus.Inserted));
+
+        var result = await _service.ProcessEventAsync(json, InteractionEventSource.Inventory, CancellationToken.None);
+
+        Assert.Equal(EventProcessOutcome.Processed, result.Outcome);
+        _publishingServiceMock.Verify(p => p.PublishUserAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _publishingServiceMock.Verify(p => p.PublishGlobalAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessEvent_DuplicateIgnored_RepublishesRankings()
+    {
+        var msgId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var listingId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+
+        string json = $$"""
+        {
+            "messageId": "{{msgId}}",
+            "messageType": "ListingViewed",
+            "version": 1,
+            "producer": "InventoryService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "userId": "{{userId}}",
+                "equipmentListingId": "{{listingId}}",
+                "equipmentTypeId": "{{typeId}}"
+            }
+        }
+        """;
+
+        _eventRepoMock
+            .Setup(r => r.IngestAsync(It.IsAny<InteractionEvent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InteractionIngestResult(InteractionIngestStatus.DuplicateIgnored));
+
+        var result = await _service.ProcessEventAsync(json, InteractionEventSource.Inventory, CancellationToken.None);
+
+        Assert.Equal(EventProcessOutcome.DuplicateIgnored, result.Outcome);
+        _publishingServiceMock.Verify(p => p.PublishUserAsync(userId, It.IsAny<CancellationToken>()), Times.Once);
+        _publishingServiceMock.Verify(p => p.PublishGlobalAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessEvent_PublishFailureOrTimeout_IngestionRemainsSuccessful()
+    {
+        var msgId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var listingId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+
+        string json = $$"""
+        {
+            "messageId": "{{msgId}}",
+            "messageType": "ListingViewed",
+            "version": 1,
+            "producer": "InventoryService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "userId": "{{userId}}",
+                "equipmentListingId": "{{listingId}}",
+                "equipmentTypeId": "{{typeId}}"
+            }
+        }
+        """;
+
+        _eventRepoMock
+            .Setup(r => r.IngestAsync(It.IsAny<InteractionEvent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InteractionIngestResult(InteractionIngestStatus.Inserted));
+
+        _publishingServiceMock
+            .Setup(p => p.PublishUserAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PublishResult(PublishOutcome.Unavailable, "Valkey timeout"));
+
+        _publishingServiceMock
+            .Setup(p => p.PublishGlobalAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PublishResult(PublishOutcome.Failed, "Valkey error"));
+
+        var result = await _service.ProcessEventAsync(json, InteractionEventSource.Inventory, CancellationToken.None);
+
+        Assert.Equal(EventProcessOutcome.Processed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task ProcessEvent_CallerCancellation_PropagatesException()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var msgId = Guid.NewGuid();
+        string json = $$"""
+        {
+            "messageId": "{{msgId}}",
+            "messageType": "ListingViewed",
+            "version": 1,
+            "producer": "InventoryService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "userId": "{{Guid.NewGuid()}}",
+                "equipmentListingId": "{{Guid.NewGuid()}}",
+                "equipmentTypeId": "{{Guid.NewGuid()}}"
+            }
+        }
+        """;
+        _eventRepoMock
+            .Setup(r => r.IngestAsync(It.IsAny<InteractionEvent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InteractionIngestResult(InteractionIngestStatus.Inserted));
+
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _service.ProcessEventAsync(json, InteractionEventSource.Inventory, cts.Token));
     }
 }

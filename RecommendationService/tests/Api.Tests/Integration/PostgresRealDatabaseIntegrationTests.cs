@@ -1,4 +1,5 @@
 using Dprental.RecommendationService.Api.Tests.TestHelpers;
+using Dprental.RecommendationService.Application.IServices;
 using Dprental.RecommendationService.Application.DTOs;
 using Dprental.RecommendationService.Application.Services;
 using Dprental.RecommendationService.Application.Validation;
@@ -36,6 +37,7 @@ public sealed class PostgresRealDatabaseIntegrationTests : IClassFixture<Postgre
             userInterestRepo,
             listingPopularityRepo,
             uow,
+            Mock.Of<ISnapshotPublishingService>(),
             NullLogger<InteractionIngestionService>.Instance);
 
         return (service, uow, db);
@@ -200,6 +202,7 @@ public sealed class PostgresRealDatabaseIntegrationTests : IClassFixture<Postgre
                 failingUserRepoMock.Object,
                 listingPopularityRepo,
                 uow,
+                Mock.Of<ISnapshotPublishingService>(),
                 NullLogger<InteractionIngestionService>.Instance);
 
             var msgId = Guid.NewGuid();
@@ -329,6 +332,69 @@ public sealed class PostgresRealDatabaseIntegrationTests : IClassFixture<Postgre
             var pop = await db.ListingPopularities.FindAsync(listingId);
             Assert.NotNull(pop);
             Assert.Equal(concurrency * 2, pop.Score);
+        }
+    }
+
+    [Fact]
+    public async Task RealPostgres_CursorPagination_And_TieBreakDescending_Verified()
+    {
+        var db = _fixture.CreateDbContext();
+        await using (db)
+        {
+            await db.Database.MigrateAsync();
+
+            var userRepo = new UserEquipmentTypeInterestRepository(db);
+            var listingRepo = new ListingPopularityRepository(db);
+
+            // 1. Verify tie-break for ListingPopularity (score DESC, listingId DESC)
+            var listingA = Guid.Parse("11111111-1111-1111-1111-111111111111");
+            var listingB = Guid.Parse("22222222-2222-2222-2222-222222222222");
+            var now = DateTimeOffset.UtcNow;
+
+            await listingRepo.UpsertAsync(listingA, 10, now, CancellationToken.None);
+            await listingRepo.UpsertAsync(listingB, 10, now, CancellationToken.None);
+
+            var topListings = await listingRepo.GetTopPopularListingsAsync(10, CancellationToken.None);
+            var targetListings = topListings.Where(x => x.EquipmentListingId == listingA || x.EquipmentListingId == listingB).ToList();
+            Assert.Equal(2, targetListings.Count);
+            // Both have score 10; tie-break DESC puts listingB before listingA
+            Assert.Equal(listingB, targetListings[0].EquipmentListingId);
+            Assert.Equal(listingA, targetListings[1].EquipmentListingId);
+
+            // 2. Verify tie-break for UserEquipmentTypeInterest (score DESC, typeId DESC)
+            var userId = Guid.NewGuid();
+            var typeA = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+            var typeB = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+
+            await userRepo.UpsertAsync(userId, typeA, 5, now, CancellationToken.None);
+            await userRepo.UpsertAsync(userId, typeB, 5, now, CancellationToken.None);
+
+            var topTypes = await userRepo.GetTopInterestsAsync(userId, 10, CancellationToken.None);
+            Assert.Equal(2, topTypes.Count);
+            // Both have score 5; tie-break DESC puts typeB before typeA
+            Assert.Equal(typeB, topTypes[0].EquipmentTypeId);
+            Assert.Equal(typeA, topTypes[1].EquipmentTypeId);
+
+            // 3. Verify cursor pagination with afterUserId
+            var userIds = new List<Guid>();
+            for (int i = 0; i < 5; i++)
+            {
+                var u = Guid.NewGuid();
+                userIds.Add(u);
+                await userRepo.UpsertAsync(u, Guid.NewGuid(), 1, now, CancellationToken.None);
+            }
+
+            userIds.Sort();
+
+            // Page 1: take 2
+            var page1 = await userRepo.GetDistinctUserIdsAsync(null, 2, CancellationToken.None);
+            Assert.True(page1.Count <= 2);
+            Assert.True(page1.SequenceEqual(page1.OrderBy(id => id)));
+
+            // Page 2: after page1.Last()
+            var cursor = page1[^1];
+            var page2 = await userRepo.GetDistinctUserIdsAsync(cursor, 2, CancellationToken.None);
+            Assert.All(page2, id => Assert.True(id.CompareTo(cursor) > 0));
         }
     }
 }

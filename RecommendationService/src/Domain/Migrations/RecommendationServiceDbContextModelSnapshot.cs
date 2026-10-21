@@ -147,7 +147,7 @@ namespace RecommendationService.Domain.Migrations
                         .HasDatabaseName("idx_listing_popularity_updated_at");
 
                     b.HasIndex("Score", "EquipmentListingId")
-                        .IsDescending(true, false)
+                        .IsDescending(true, true)
                         .HasDatabaseName("idx_listing_popularity_ranking");
 
                     b.ToTable("listing_popularity", "recommendation", t =>
@@ -190,7 +190,7 @@ namespace RecommendationService.Domain.Migrations
                         .HasDatabaseName("idx_user_interest_updated_at");
 
                     b.HasIndex("UserId", "Score", "EquipmentTypeId")
-                        .IsDescending(false, true, false)
+                        .IsDescending(false, true, true)
                         .HasDatabaseName("idx_user_interest_ranking");
 
                     b.ToTable("user_equipment_type_interest", "recommendation", t =>

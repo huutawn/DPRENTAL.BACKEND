@@ -1,4 +1,5 @@
 using System.Text;
+using Moq;
 using Confluent.Kafka;
 using Dprental.RecommendationService.Api.Tests.TestHelpers;
 using Dprental.RecommendationService.Application.Kafka;
@@ -143,6 +144,7 @@ public sealed class KafkaRealBrokerIntegrationTests : IClassFixture<PostgreSqlTe
                 userInterestRepo,
                 listingPopularityRepo,
                 uow,
+                Mock.Of<ISnapshotPublishingService>(),
                 NullLogger<InteractionIngestionService>.Instance);
 
             var services = new ServiceCollection();

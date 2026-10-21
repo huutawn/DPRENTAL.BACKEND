@@ -146,13 +146,12 @@ CREATE INDEX IF NOT EXISTS idx_interaction_events_listing_occurred
     ON recommendation.interaction_events (equipment_listing_id, occurred_at DESC)
     WHERE equipment_listing_id IS NOT NULL;
 
--- Ranking queries (score DESC, tie-break UUID ASC)
+-- Ranking queries (score DESC, tie-break UUID DESC)
 CREATE INDEX IF NOT EXISTS idx_user_interest_ranking
-    ON recommendation.user_equipment_type_interest (user_id, score DESC, equipment_type_id ASC);
+    ON recommendation.user_equipment_type_interest (user_id ASC, score DESC, equipment_type_id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_listing_popularity_ranking
-    ON recommendation.listing_popularity (score DESC, equipment_listing_id ASC);
-
+    ON recommendation.listing_popularity (score DESC, equipment_listing_id DESC);
 -- Cache refresh and change tracking
 CREATE INDEX IF NOT EXISTS idx_user_interest_updated_at
     ON recommendation.user_equipment_type_interest (updated_at DESC);

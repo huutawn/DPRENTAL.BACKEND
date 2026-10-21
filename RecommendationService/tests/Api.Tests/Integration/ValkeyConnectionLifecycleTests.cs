@@ -50,10 +50,10 @@ public sealed class ValkeyConnectionLifecycleTests
         var repo = new ValkeyProjectionRepository(provider, NullLogger<ValkeyProjectionRepository>.Instance);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-            await repo.SetGlobalPopularListingsSnapshotAsync("{}", "2026-10-19T10:00:00Z", TimeSpan.FromSeconds(300), cts.Token));
+            await repo.TryAcquireGlobalLeaseAsync(cts.Token));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-            await repo.GetGlobalPopularListingsSnapshotAsync(cts.Token));
+            await repo.TryAcquireUserLeaseAsync(Guid.NewGuid(), cts.Token));
     }
 
     [Fact]
@@ -66,10 +66,10 @@ public sealed class ValkeyConnectionLifecycleTests
         Assert.Null(mux);
 
         var repo = new ValkeyProjectionRepository(provider, NullLogger<ValkeyProjectionRepository>.Instance);
-        bool writeSuccess = await repo.SetGlobalPopularListingsSnapshotAsync("{}", "2026-10-19T10:00:00Z", TimeSpan.FromSeconds(300), CancellationToken.None);
-        Assert.False(writeSuccess);
+        var acquireGlobal = await repo.TryAcquireGlobalLeaseAsync(CancellationToken.None);
+        Assert.Equal(LeaseAcquireStatus.Unavailable, acquireGlobal.Status);
 
-        string? read = await repo.GetGlobalPopularListingsSnapshotAsync(CancellationToken.None);
-        Assert.Null(read);
+        var acquireUser = await repo.TryAcquireUserLeaseAsync(Guid.NewGuid(), CancellationToken.None);
+        Assert.Equal(LeaseAcquireStatus.Unavailable, acquireUser.Status);
     }
 }

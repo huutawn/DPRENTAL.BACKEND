@@ -1,4 +1,5 @@
 using System.IO;
+using Dprental.RecommendationService.Application.IServices;
 using Dprental.RecommendationService.Api.Exceptions;
 using Dprental.RecommendationService.Application.Background;
 using Dprental.RecommendationService.Application.DependencyInjection;
@@ -50,6 +51,77 @@ if (args.Contains("--rebuild-projections", StringComparer.OrdinalIgnoreCase))
     catch (Exception ex)
     {
         Console.Error.WriteLine($"Rebuild failed: {ex.Message}");
+        return 1;
+    }
+}
+
+// CLI Flag: --rebuild-cache
+if (args.Contains("--rebuild-cache", StringComparer.OrdinalIgnoreCase))
+{
+    var rebuildCacheBuilder = WebApplication.CreateBuilder(args);
+    var postgresConn = rebuildCacheBuilder.Configuration.GetConnectionString("Postgres");
+    var redisConn = rebuildCacheBuilder.Configuration.GetConnectionString("Redis");
+    var vOptions = rebuildCacheBuilder.Configuration.GetSection(ValkeyOptions.SectionName).Get<ValkeyOptions>() ?? new ValkeyOptions();
+
+    if (string.IsNullOrWhiteSpace(postgresConn))
+    {
+        Console.Error.WriteLine("PostgreSQL connection string (ConnectionStrings:Postgres) is missing or empty.");
+        return 1;
+    }
+    if (!vOptions.Enabled)
+    {
+        Console.Error.WriteLine("Valkey is disabled in configuration (Valkey:Enabled is false).");
+        return 1;
+    }
+    if (string.IsNullOrWhiteSpace(redisConn))
+    {
+        Console.Error.WriteLine("Valkey is enabled but ConnectionStrings:Redis is missing or empty.");
+        return 1;
+    }
+
+    rebuildCacheBuilder.Services.AddRecommendationServiceDomainRepositories(postgresConn);
+    rebuildCacheBuilder.Services.AddRecommendationServiceValkey(redisConn);
+    rebuildCacheBuilder.Services.Configure<ValkeyOptions>(rebuildCacheBuilder.Configuration.GetSection(ValkeyOptions.SectionName));
+    rebuildCacheBuilder.Services.AddRecommendationServiceApplication(enableKafka: false, enableValkey: false);
+
+    var rebuildCacheApp = rebuildCacheBuilder.Build();
+    using var scope = rebuildCacheApp.Services.CreateScope();
+    var publishingService = scope.ServiceProvider.GetRequiredService<ISnapshotPublishingService>();
+
+    using var cts = new CancellationTokenSource();
+    Console.CancelKeyPress += (s, e) =>
+    {
+        e.Cancel = true;
+        cts.Cancel();
+    };
+
+    try
+    {
+        Console.WriteLine("Rebuilding Valkey serving cache projections from PostgreSQL...");
+        var result = await publishingService.RebuildCacheAsync(cts.Token);
+        Console.WriteLine($"Cache rebuild summary: Total={result.TotalEvaluated}, Published={result.PublishedCount}, Busy={result.BusyCount}, LeaseLost={result.LeaseLostCount}, Failed={result.FailedCount}, Errors={result.Errors.Count}.");
+
+        if (!result.IsSuccessful)
+        {
+            Console.Error.WriteLine($"Cache rebuild failed. Errors encountered: {result.Errors.Count}.");
+            foreach (var err in result.Errors)
+            {
+                Console.Error.WriteLine($" - [{err.Target}] {err.ErrorCode}: {err.Message}");
+            }
+            return 1;
+        }
+
+        Console.WriteLine("Cache rebuild completed successfully.");
+        return 0;
+    }
+    catch (OperationCanceledException)
+    {
+        Console.Error.WriteLine("Cache rebuild cancelled by operator.");
+        return 1;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Cache rebuild failed: {ex.Message}");
         return 1;
     }
 }

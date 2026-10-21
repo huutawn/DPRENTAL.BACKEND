@@ -46,21 +46,23 @@ public sealed class UserEquipmentTypeInterestRepository : IUserEquipmentTypeInte
             .AsNoTracking()
             .Where(x => x.UserId == userId)
             .OrderByDescending(x => x.Score)
-            .ThenBy(x => x.EquipmentTypeId)
+            .ThenByDescending(x => x.EquipmentTypeId)
             .Take(limit)
             .Select(x => new UserEquipmentTypeInterestItem(x.EquipmentTypeId, x.Score))
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyList<Guid>> GetDistinctUserIdsPagedAsync(int skip, int take, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<Guid>> GetDistinctUserIdsAsync(Guid? afterUserId, int take, CancellationToken cancellationToken)
     {
-        return await _dbContext.UserEquipmentTypeInterests
-            .AsNoTracking()
-            .Select(x => x.UserId)
-            .Distinct()
-            .OrderBy(id => id)
-            .Skip(skip)
-            .Take(take)
+        if (afterUserId.HasValue)
+        {
+            return await _dbContext.Database
+                .SqlQuery<Guid>($"SELECT DISTINCT user_id AS \"Value\" FROM recommendation.user_equipment_type_interest WHERE user_id > {afterUserId.Value} ORDER BY user_id ASC LIMIT {take}")
+                .ToListAsync(cancellationToken);
+        }
+
+        return await _dbContext.Database
+            .SqlQuery<Guid>($"SELECT DISTINCT user_id AS \"Value\" FROM recommendation.user_equipment_type_interest ORDER BY user_id ASC LIMIT {take}")
             .ToListAsync(cancellationToken);
     }
 }
