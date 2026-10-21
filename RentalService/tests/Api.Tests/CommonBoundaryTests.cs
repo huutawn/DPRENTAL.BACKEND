@@ -2,10 +2,12 @@ using System.Net;
 using System.Diagnostics.CodeAnalysis;
 using Dprental.RentalService.Api.Filters;
 using Dprental.RentalService.Common;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Dprental.RentalService.Api.Tests;
@@ -58,6 +60,7 @@ public sealed class CommonBoundaryTests
                 builder.UseSetting("ConnectionStrings:Postgres",
                     "Host=localhost;Database=test;Username=test;Password=test");
                 builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
+                builder.ConfigureLogging(logging => logging.ClearProviders());
                 builder.ConfigureTestServices(services => services.AddControllers()
                     .AddApplicationPart(typeof(BoundaryTestController).Assembly));
             });

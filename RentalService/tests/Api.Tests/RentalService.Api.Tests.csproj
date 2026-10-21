@@ -20,7 +20,10 @@
     <ProjectReference Include="../../src/Api/RentalService.Api.csproj" />
     <ProjectReference Include="../../src/Application/RentalService.Application.csproj" />
     <ProjectReference Include="../../src/Domain/RentalService.Domain.csproj" />
-    <ProjectReference Include="../../../../RecommendationService/RecommendationService/src/Application/RecommendationService.Application.csproj" />
-    <ProjectReference Include="../../../../RecommendationService/RecommendationService/src/Domain/RecommendationService.Domain.csproj" />
+    <ProjectReference Include="../../../../RecommendationService/RecommendationService/src/Application/RecommendationService.Application.csproj" Condition="Exists('../../../../RecommendationService/RecommendationService/src/Application/RecommendationService.Application.csproj')" />
+    <ProjectReference Include="../../../../RecommendationService/RecommendationService/src/Domain/RecommendationService.Domain.csproj" Condition="Exists('../../../../RecommendationService/RecommendationService/src/Domain/RecommendationService.Domain.csproj')" />
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('../../../../RecommendationService/RecommendationService/src/Application/RecommendationService.Application.csproj') Or !Exists('../../../../RecommendationService/RecommendationService/src/Domain/RecommendationService.Domain.csproj')">
+    <Compile Remove="Integration/RentalToRecommendationE2EIntegrationTests.cs" />
   </ItemGroup>
 </Project>

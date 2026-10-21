@@ -82,12 +82,19 @@ public sealed class ReturnTests : IAsyncLifetime
     private ReturnService Service(RentalServiceDbContext db, IRentalMediaClient? media = null, IConfiguration? configuration = null)
     {
         var outbox = new OutboxRepository(db);
+        IConfiguration settings = configuration ?? Configuration();
         // Producer thật ghi lệnh ApplyReturnedUnits vào Outbox cùng transaction với biên bản trả máy.
         var inventoryCommands = new InventoryCommandProducer(
             outbox, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), _clock);
         return new(
             new RentalOrderRepository(db), new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
-            db, media ?? Mock.Of<IRentalMediaClient>(), _clock, new FakeRentalEventProducer(), configuration ?? Configuration(), inventoryCommands);
+            db, media ?? Mock.Of<IRentalMediaClient>(), _clock,
+            new RentalEventProducer(new KafkaOutboxWriter(outbox), Options.Create(new KafkaOptions
+            {
+                Enabled = true,
+                RentalEventsTopic = settings["Kafka:RentalEventsTopic"] ?? KafkaContractSpec.Topics.RentalEvents
+            }), _clock),
+            settings, inventoryCommands);
     }
     private async Task<RentalItem> SeedAsync(int quantity = 2)
     {
@@ -251,8 +258,9 @@ public sealed class ReturnTests : IAsyncLifetime
         }).Build();
         await using (var db = NewDb())
         {
-            await Assert.ThrowsAsync<DbUpdateException>(() => Service(db, configuration: configuration)
+            var error = await Assert.ThrowsAsync<PostgresException>(() => Service(db, configuration: configuration)
                 .RecordReturnAsync(item.Id, Caller(item.SupplierId), request, "rollback"));
+            Assert.Equal("22001", error.SqlState);
         }
         await using (var db = NewDb())
         {

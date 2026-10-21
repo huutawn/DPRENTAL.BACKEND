@@ -737,6 +737,10 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 RentalOrderStatusPolicy.Apply(order, utcNow, operationKey);
                 order.RecordReadModelUpdate(utcNow);
 
+                // Register the new handover record as Added before the outbox writer
+                // can flush the same unit of work.
+                await _orderRepository.UpdateAsync(order, cancellationToken);
+
                 if (item.HandoverRecord is { } handover)
                 {
                     var handoverPayload = new RentalItemHandoverCompletedPayload(

@@ -7,4 +7,5 @@ public sealed class HandoverOverdueOptions
     public bool Enabled { get; set; } = true;
     public int ScanIntervalSeconds { get; set; } = 60;
     public int BatchSize { get; set; } = 50;
+    public int AutoExpireGraceHours { get; set; } = 24;
 }
