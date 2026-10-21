@@ -13,13 +13,6 @@ namespace Dprental.RentalService.Api.Controllers;
 public sealed class RentalReturnsController(IReturnService returns, IRentalCallerContext caller) : ControllerBase
 {
     /// <summary>Supplier ghi nhận thu hồi một hoặc nhiều máy đã bàn giao.</summary>
-    /// <remarks>
-    /// Gửi Idempotency-Key (tối đa 64 ký tự). Cùng khóa và nội dung trả lại kết quả đã lưu;
-    /// đổi nội dung với cùng khóa trả 409. Chỉ supplier sở hữu item được ghi nhận.
-    /// ActualReturnAt là giờ thực tế; SubmittedAt là giờ server. Còn máy chưa trả thì item giữ IN_RENTAL.
-    /// Khi trả đủ và có máy hỏng, hạn gửi khấu trừ là SubmittedAt của lần cuối cộng 48 giờ.
-    /// Thành công chỉ xác nhận lưu bằng chứng, chưa xác nhận Inventory đã giải phóng máy hoặc Payment đã quyết toán.
-    /// </remarks>
     [HttpPost]
     [ProducesResponseType(typeof(RecordReturnResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]

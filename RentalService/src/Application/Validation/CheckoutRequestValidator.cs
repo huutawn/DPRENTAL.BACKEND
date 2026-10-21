@@ -27,7 +27,7 @@ public static partial class CheckoutRequestValidator
         List<CheckoutFieldError> errors = [];
 
         ValidateSelection(request, errors);
-        ValidateDelivery(request.Delivery, errors);
+        ValidateDeliverySource(request, errors);
         ValidateRefundAccount(request.RefundAccount, errors);
 
         if (string.IsNullOrWhiteSpace(request.TermsVersion))
@@ -102,6 +102,36 @@ public static partial class CheckoutRequestValidator
         if (cartItemIds.Distinct().Count() != cartItemIds.Count)
         {
             errors.Add(new("cartItemIds", Duplicate, "Một dòng giỏ thuê được chọn nhiều lần."));
+        }
+    }
+
+    private static void ValidateDeliverySource(CheckoutRequest request, List<CheckoutFieldError> errors)
+    {
+        if (request.AddressId is not { } addressId)
+        {
+            if (request.DeliveryNote is not null)
+            {
+                errors.Add(new("deliveryNote", Conflicting, "deliveryNote chỉ dùng với addressId; nhập tay thì dùng delivery.note."));
+            }
+
+            ValidateDelivery(request.Delivery, errors);
+            return;
+        }
+
+        if (request.Delivery is not null)
+        {
+            errors.Add(new("addressId", Conflicting, "Chỉ gửi một trong hai: addressId hoặc delivery."));
+            return;
+        }
+
+        if (addressId == Guid.Empty)
+        {
+            errors.Add(new("addressId", InvalidFormat, "Mã địa chỉ không hợp lệ."));
+        }
+
+        if (request.DeliveryNote is not null && request.DeliveryNote.Trim().Length > 500)
+        {
+            errors.Add(new("deliveryNote", InvalidLength, "Ghi chú tối đa 500 ký tự."));
         }
     }
 

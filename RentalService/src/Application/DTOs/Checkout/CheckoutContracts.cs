@@ -10,12 +10,14 @@ public sealed record CheckoutRenterContext(Guid RenterId, bool IsProfileComplete
 /// DTO yêu cầu gửi đơn hàng từ giỏ thuê.
 /// </summary>
 /// <param name="CartItemIds">Mã các dòng giỏ muốn đặt. Gửi cái này hoặc BuyNow, không gửi cả hai.</param>
-/// <param name="Delivery">Nơi giao thiết bị, dùng chung cho mọi dòng trong đơn (bắt buộc).</param>
+/// <param name="Delivery">Nơi giao nhập tay, dùng chung cho mọi dòng trong đơn. Gửi cái này hoặc AddressId, không gửi cả hai.</param>
 /// <param name="RefundAccount">Tài khoản nhận mọi khoản hoàn của đơn, kể cả hoàn cọc (bắt buộc).</param>
 /// <param name="TermsVersion">Phiên bản Điều khoản thuê người thuê đã đọc; phải là phiên bản đang có hiệu lực.</param>
 /// <param name="TermsAccepted">Người thuê đã đồng ý Điều khoản thuê (phải là true).</param>
 /// <param name="ExpectedTotalAmount">Tổng tiền thuê và tiền cọc người thuê đã thấy; khác số hệ thống tính lại thì trả 409 Checkout.PriceChanged.</param>
 /// <param name="BuyNow">Thuê ngay một máy từ trang chi tiết, không qua giỏ. Gửi cái này hoặc CartItemIds, không gửi cả hai.</param>
+/// <param name="AddressId">Mã địa chỉ trong sổ địa chỉ của người thuê, dùng thay cho Delivery. Gửi cái này hoặc Delivery, không gửi cả hai.</param>
+/// <param name="DeliveryNote">Ghi chú cho nhà cung cấp khi giao theo AddressId (tùy chọn, tối đa 500 ký tự). Nhập tay thì dùng Delivery.Note.</param>
 public sealed record CheckoutRequest(
     IReadOnlyList<Guid>? CartItemIds,
     CheckoutDeliveryDto? Delivery,
@@ -24,7 +26,11 @@ public sealed record CheckoutRequest(
     bool TermsAccepted,
     decimal ExpectedTotalAmount,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    CheckoutBuyNowDto? BuyNow = null);
+    CheckoutBuyNowDto? BuyNow = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    Guid? AddressId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? DeliveryNote = null);
 
 /// <summary>
 /// Nơi giao thiết bị của đơn hàng.

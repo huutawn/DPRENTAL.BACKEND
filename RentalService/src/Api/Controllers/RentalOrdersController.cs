@@ -13,10 +13,6 @@ namespace Dprental.RentalService.Api.Controllers;
 /// <summary>
 /// Người thuê (Renter) xem các đơn hàng của mình.
 /// </summary>
-/// <remarks>
-/// Người thuê xem đơn cha: toàn bộ đơn con (mỗi nhà cung cấp một đơn con) và mọi thiết bị trong đơn.
-/// Người thuê được định danh qua token JWT (claim sub / Renter policy) và chỉ xem được đơn của chính mình.
-/// </remarks>
 [ApiController]
 [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
 [Authorize(Policy = "Renter")]
@@ -29,12 +25,6 @@ public sealed class RentalOrdersController(
     /// <summary>
     /// Danh sách đơn hàng của người thuê.
     /// </summary>
-    /// <remarks>
-    /// - Chỉ gồm đơn của người gọi, sắp xếp mới nhất trước.
-    /// - Mỗi đơn có tổng tiền thuê, tổng tiền cọc, số dòng thiết bị và số đơn con.
-    /// - Lọc theo <c>status</c> với giá trị như API trả ra, ví dụ <c>PENDING_PAYMENT</c>; bỏ trống là mọi trạng thái.
-    /// - page nhỏ hơn 1 được đổi thành 1; pageSize được giới hạn trong 1–100. Không có đơn vẫn trả 200 với items rỗng.
-    /// </remarks>
     /// <param name="page">Số thứ tự trang (mặc định 1).</param>
     /// <param name="pageSize">Số đơn mỗi trang (mặc định 20, tối đa 100).</param>
     /// <param name="status">Trạng thái đơn cần lọc, tùy chọn.</param>
@@ -63,16 +53,6 @@ public sealed class RentalOrdersController(
     /// <summary>
     /// Người thuê hủy cả đơn khi đang chờ thanh toán.
     /// </summary>
-    /// <remarks>
-    /// - Chỉ hủy được đơn của chính người gọi đang ở <c>PendingPayment</c>; đơn của người khác hoặc không tồn tại trả 404 <c>Order.NotFound</c>.
-    /// - Header <c>Idempotency-Key</c> bắt buộc (tối đa 64 ký tự). Gửi lại cùng khóa và cùng nội dung trả lại kết quả đã lưu;
-    ///   khóa đã dùng với nội dung khác trả 409 <c>IDEMPOTENCY_CONFLICT</c>.
-    /// - Hủy hóa đơn (nếu có) rồi giải phóng từng phân bổ tại Inventory trước khi lưu trạng thái <c>Cancelled</c>.
-    /// - Hóa đơn đã được thanh toán trả 409 <c>INVOICE_ALREADY_PAID</c> và đơn không bị hủy; luồng đối soát thanh toán xử lý tiếp.
-    /// - Hóa đơn đang được tạo hoặc chưa rõ kết quả trả 503 <c>Order.InvoiceCreationInProgress</c>; thử lại cùng khóa sau ít phút.
-    /// - Giải phóng phân bổ chưa xong trả 503 <c>RELEASE_PENDING</c>; thử lại cùng khóa.
-    /// - Body tùy chọn: <c>{"reason":"..."}</c>, tối đa 500 ký tự.
-    /// </remarks>
     /// <param name="orderId">Mã định danh đơn hàng.</param>
     /// <param name="idempotencyKey">Khóa chống trùng lặp gửi qua header HTTP (bắt buộc, tối đa 64 ký tự).</param>
     /// <param name="request">Lý do hủy, tùy chọn.</param>
@@ -112,18 +92,6 @@ public sealed class RentalOrdersController(
     /// <summary>
     /// Chi tiết một đơn hàng của người thuê.
     /// </summary>
-    /// <remarks>
-    /// - Trả đơn cha kèm thông tin nhận máy, tài khoản nhận hoàn tiền, mã hóa đơn, tình trạng thanh toán, tổng tiền và các đơn con.
-    /// - Mỗi đơn con là phần của một nhà cung cấp, có trạng thái tính từ các dòng.
-    /// - Mỗi dòng có thông tin thiết bị và giá đã chụp lúc đặt hàng (không đọc lại Listing hiện tại), trạng thái,
-    ///   tình trạng hoàn tiền, biên bản bàn giao, các lần trả máy và quyết toán tiền cọc.
-    /// - <c>paymentState</c>: <c>PENDING</c>, <c>PAID</c>, <c>EXPIRED</c> (đóng mà không thanh toán) hoặc
-    ///   <c>LATE_PAYMENT_REFUND</c> (trả sau hạn, đang hoàn toàn bộ).
-    /// - <c>refund.state</c> của dòng: <c>NONE</c>, <c>PROCESSING</c> (đã yêu cầu hoàn) hoặc <c>COMPLETED</c>.
-    /// - Ngày thuê trả ra gồm ngày đầu và ngày dùng cuối (có tính), giống giỏ hàng.
-    /// - Đơn không tồn tại hoặc của người khác đều trả 404 <c>Order.NotFound</c>.
-    /// - Không trả máy cụ thể (AssetId), mã giữ lịch hay mã xác nhận nội bộ của Inventory.
-    /// </remarks>
     /// <param name="orderId">Mã định danh đơn hàng.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <response code="200">Lấy chi tiết đơn thành công.</response>

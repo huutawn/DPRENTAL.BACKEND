@@ -12,10 +12,6 @@ namespace Dprental.RentalService.Api.Controllers;
 /// <summary>
 /// Sổ địa chỉ giao của người thuê.
 /// </summary>
-/// <remarks>
-/// Người thuê lưu sẵn các địa chỉ giao (tối đa 10) để điền nhanh ô <c>delivery</c> lúc checkout.
-/// Mỗi người thuê chỉ thấy và sửa được địa chỉ của chính mình; mã địa chỉ của người khác trả 404.
-/// </remarks>
 [ApiController]
 [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
 [Authorize(Policy = "Renter")]
@@ -27,10 +23,6 @@ public sealed class RenterAddressesController(
     /// <summary>
     /// Lấy sổ địa chỉ giao của người thuê.
     /// </summary>
-    /// <remarks>
-    /// Địa chỉ mặc định đứng đầu, sau đó tới địa chỉ mới thêm nhất. Chưa lưu địa chỉ nào thì trả danh sách rỗng.
-    /// FE dùng địa chỉ mặc định để điền sẵn ô <c>delivery</c> của checkout.
-    /// </remarks>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <response code="200">Danh sách địa chỉ của người thuê.</response>
     /// <response code="401">Người dùng chưa được xác thực.</response>
@@ -44,13 +36,33 @@ public sealed class RenterAddressesController(
         Ok(await addressService.ListAsync(currentRenter.RenterId, cancellationToken));
 
     /// <summary>
+    /// Xem một địa chỉ trong sổ địa chỉ.
+    /// </summary>
+    /// <param name="addressId">Mã địa chỉ.</param>
+    /// <param name="cancellationToken">Token hủy yêu cầu.</param>
+    /// <response code="200">Thông tin địa chỉ.</response>
+    /// <response code="401">Người dùng chưa được xác thực.</response>
+    /// <response code="403">Người dùng không có quyền Renter.</response>
+    /// <response code="404">Không tìm thấy địa chỉ trong sổ của người thuê (Address.NotFound).</response>
+    /// <returns>Địa chỉ giao.</returns>
+    [HttpGet("{addressId:guid}")]
+    [ProducesResponseType(typeof(RenterAddressResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Get(
+        [FromRoute] Guid addressId,
+        CancellationToken cancellationToken)
+    {
+        Result<RenterAddressResponse> result = await addressService.GetAsync(
+            currentRenter.RenterId, addressId, cancellationToken);
+
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>
     /// Thêm một địa chỉ giao vào sổ địa chỉ.
     /// </summary>
-    /// <remarks>
-    /// Luật dữ liệu giống ô <c>delivery</c> của checkout. Địa chỉ đầu tiên tự thành mặc định.
-    /// Sổ đã đủ 10 địa chỉ thì trả 409 <c>Address.LimitReached</c>.
-    /// <para>Ví dụ body: {"province":"Bình Dương","addressDetail":"Công trường KCN VSIP 2, Thủ Dầu Một","recipientName":"Nguyễn Văn A","recipientPhone":"0901234567"}.</para>
-    /// </remarks>
     /// <param name="request">Thông tin địa chỉ giao.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <response code="201">Đã thêm địa chỉ.</response>
@@ -81,10 +93,6 @@ public sealed class RenterAddressesController(
     /// <summary>
     /// Sửa một địa chỉ giao trong sổ địa chỉ.
     /// </summary>
-    /// <remarks>
-    /// Gửi lại đủ 4 ô của địa chỉ. Các đơn đã đặt giữ nguyên địa chỉ lúc đặt, không bị đổi theo.
-    /// <para>Ví dụ body: {"province":"Bình Dương","addressDetail":"Cổng số 3, KCN VSIP 2, Thủ Dầu Một","recipientName":"Nguyễn Văn A","recipientPhone":"0901234567"}.</para>
-    /// </remarks>
     /// <param name="addressId">Mã địa chỉ cần sửa.</param>
     /// <param name="request">Thông tin địa chỉ mới.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
@@ -117,9 +125,6 @@ public sealed class RenterAddressesController(
     /// <summary>
     /// Xóa một địa chỉ giao khỏi sổ địa chỉ.
     /// </summary>
-    /// <remarks>
-    /// Xóa địa chỉ mặc định thì địa chỉ mới thêm nhất còn lại tự thành mặc định.
-    /// </remarks>
     /// <param name="addressId">Mã địa chỉ cần xóa.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <response code="204">Đã xóa địa chỉ.</response>
@@ -144,9 +149,6 @@ public sealed class RenterAddressesController(
     /// <summary>
     /// Đặt một địa chỉ làm địa chỉ mặc định.
     /// </summary>
-    /// <remarks>
-    /// Địa chỉ mặc định cũ (nếu có) không còn là mặc định. Gọi lại với địa chỉ đang là mặc định vẫn trả 200.
-    /// </remarks>
     /// <param name="addressId">Mã địa chỉ muốn đặt làm mặc định.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <response code="200">Địa chỉ đã là mặc định.</response>

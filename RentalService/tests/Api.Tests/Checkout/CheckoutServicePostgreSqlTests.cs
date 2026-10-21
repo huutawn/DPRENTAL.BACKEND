@@ -755,6 +755,7 @@ public sealed class CheckoutServicePostgreSqlTests
             new CheckoutPreparationService(
                 carts,
                 orders,
+                new RenterAddressRepository(context),
                 _listings,
                 Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
                 {
