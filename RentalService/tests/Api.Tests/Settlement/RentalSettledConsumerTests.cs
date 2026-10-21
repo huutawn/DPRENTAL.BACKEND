@@ -4,6 +4,7 @@ using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.Services.Integration;
 using Dprental.RentalService.Application.Services.Operations;
+using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Xunit;
@@ -39,7 +40,7 @@ public sealed class RentalSettledConsumerTests
             "payment-service", order.Id.ToString("D"), Now.AddHours(2), null, null, payload);
         var inbox = new RentalInboxMessage(Guid.NewGuid(), envelope.MessageId, "RentalSettled", "payment-service",
             order.Id.ToString("D"), null, null, JsonSerializer.Serialize(envelope), Now.AddHours(2));
-        var consumer = new RentalSettledConsumer(TimeProvider.System);
+        var consumer = new RentalSettledConsumer(new FakeRentalEventProducer(), TimeProvider.System);
 
         var early = await consumer.ApplyRentalSettledStagedAsync(order, envelope, inbox);
         Assert.True(early.IsFailure);

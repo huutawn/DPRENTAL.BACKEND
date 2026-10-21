@@ -1,4 +1,5 @@
 using Confluent.Kafka;
+using System.Security.Cryptography;
 using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Kafka.Configuration;
@@ -42,23 +43,37 @@ public sealed class KafkaOptionsValidator : IValidateOptions<KafkaOptions>
             failures.Add("PaymentDlqTopic cannot be empty.");
         }
 
+        if (string.IsNullOrWhiteSpace(options.PaymentProofIssuer) || string.IsNullOrWhiteSpace(options.PaymentProofEnvironment))
+        {
+            failures.Add("PaymentProofIssuer and PaymentProofEnvironment are required when Kafka is enabled.");
+        }
+
+        if (options.PaymentProofPublicKeys is null || options.PaymentProofPublicKeys.Count == 0)
+        {
+            failures.Add("At least one PaymentProofPublicKeys entry is required when Kafka is enabled.");
+        }
+        else
+        {
+            foreach (var (keyId, encodedKey) in options.PaymentProofPublicKeys)
+            {
+                try
+                {
+                    using var key = ECDsa.Create();
+                    key.ImportSubjectPublicKeyInfo(Convert.FromBase64String(encodedKey), out _);
+                    if (string.IsNullOrWhiteSpace(keyId) || key.KeySize != 256)
+                        failures.Add($"PaymentProofPublicKeys entry '{keyId}' must identify a P-256 public key.");
+                }
+                catch (Exception ex) when (ex is FormatException or CryptographicException or ArgumentException)
+                {
+                    failures.Add($"PaymentProofPublicKeys entry '{keyId}' must be a valid base64 P-256 SubjectPublicKeyInfo.");
+                }
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(options.InventoryCommandsTopic))
         {
             failures.Add("InventoryCommandsTopic cannot be empty.");
         }
-        if (string.IsNullOrWhiteSpace(options.InventoryReturnCommandsTopic) ||
-            string.IsNullOrWhiteSpace(options.InventoryReturnEventsTopic) ||
-            string.IsNullOrWhiteSpace(options.InventoryReturnDlqTopic) ||
-            string.IsNullOrWhiteSpace(options.InventoryReturnConsumerGroupId))
-        {
-            failures.Add("Inventory return Kafka topics and consumer group cannot be empty.");
-        }
-
-        if (string.IsNullOrWhiteSpace(options.PaymentCommandsTopic))
-        {
-            failures.Add("PaymentCommandsTopic cannot be empty.");
-        }
-
         if (options.DeliveryTimeoutSeconds <= 0)
         {
             failures.Add("DeliveryTimeoutSeconds must be greater than zero.");

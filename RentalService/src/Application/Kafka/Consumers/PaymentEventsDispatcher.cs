@@ -46,6 +46,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
     private readonly KafkaOptions _kafkaOptions;
     private readonly IRentalCheckoutOperationRepository? _checkoutOperationRepo;
     private readonly IInventoryAllocationResultHandler _allocationResultHandler;
+    private readonly InventoryReturnResultHandler? _inventoryReturnResultHandler;
     [ActivatorUtilitiesConstructor]
     public PaymentEventsDispatcher(
         IInboxRepository inboxRepository,
@@ -60,7 +61,8 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         IRentalCheckoutOperationRepository? checkoutOperationRepo = null,
         ILogger<PaymentEventsDispatcher>? logger = null,
         TimeProvider? timeProvider = null,
-        IRentalSettledConsumer? rentalSettledConsumer = null)
+        IRentalSettledConsumer? rentalSettledConsumer = null,
+        InventoryReturnResultHandler? inventoryReturnResultHandler = null)
     {
         _inboxRepository = inboxRepository ?? throw new ArgumentNullException(nameof(inboxRepository));
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
@@ -74,7 +76,9 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         _kafkaOptions = kafkaOptions?.Value ?? new KafkaOptions();
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PaymentEventsDispatcher>.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _rentalSettledConsumer = rentalSettledConsumer ?? new Dprental.RentalService.Application.Services.Integration.RentalSettledConsumer(_timeProvider);
+        _rentalSettledConsumer = rentalSettledConsumer ?? new Dprental.RentalService.Application.Services.Integration.RentalSettledConsumer(
+            new RentalEventProducer(outboxWriter, Microsoft.Extensions.Options.Options.Create(_kafkaOptions), _timeProvider), _timeProvider);
+        _inventoryReturnResultHandler = inventoryReturnResultHandler;
     }
 
     internal PaymentEventsDispatcher(
@@ -96,7 +100,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             refundCompletedConsumer,
             outboxWriter,
             unitOfWork,
-            new InventoryAllocationResultHandler(orderRepository, new Domain.Repositories.OutboxRepository((Domain.Repositories.RentalServiceDbContext)unitOfWork), unitOfWork, lockManager, timeProvider),
+            new InventoryAllocationResultHandler(orderRepository, unitOfWork, lockManager, timeProvider),
             kafkaOptions,
             null,
             logger,
@@ -129,7 +133,6 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             unitOfWork,
             new InventoryAllocationResultHandler(
                 orderRepository,
-                new Domain.Repositories.OutboxRepository((Domain.Repositories.RentalServiceDbContext)unitOfWork),
                 unitOfWork,
                 lockManager,
                 timeProvider,
@@ -162,7 +165,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             refundCompletedConsumer,
             new KafkaOutboxWriter(outboxRepository),
             unitOfWork,
-            new InventoryAllocationResultHandler(orderRepository, outboxRepository, unitOfWork, lockManager, timeProvider),
+            new InventoryAllocationResultHandler(orderRepository, unitOfWork, lockManager, timeProvider),
             kafkaOptions,
             null,
             logger,
@@ -177,6 +180,8 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         string? topic = null,
         int? partition = null,
         long? offset = null,
+        string? publicationProof = null,
+        string? messageKey = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(messageJson))
@@ -280,9 +285,27 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
 
             string aggregateId = aggProp.GetString()!;
 
+            if (!root.TryGetProperty("occurredAt", out var occurredAtProp) ||
+                occurredAtProp.ValueKind != JsonValueKind.String ||
+                !DateTimeOffset.TryParse(occurredAtProp.GetString(), out var occurredAt) || occurredAt == default)
+            {
+                var dlqRes = await RouteToDlqAsync(messageJson, "INVALID_OCCURRED_AT", "OccurredAt must be a valid timestamp.", topic, partition, offset, null, cancellationToken);
+                if (dlqRes.IsFailure) return dlqRes.Error;
+                return KafkaIntakeDisposition.DlqStored;
+            }
+
             if (!root.TryGetProperty("payload", out var payloadProp) || payloadProp.ValueKind != JsonValueKind.Object)
             {
                 var dlqRes = await RouteToDlqAsync(messageJson, "INVALID_PAYLOAD", "Payload phải là JSON object.", topic, partition, offset, null, cancellationToken);
+                if (dlqRes.IsFailure) return dlqRes.Error;
+                return KafkaIntakeDisposition.DlqStored;
+            }
+            if (!payloadProp.TryGetProperty("rentalOrderId", out var payloadOrderProp) ||
+                !payloadOrderProp.TryGetGuid(out var payloadOrderId) ||
+                !Guid.TryParse(aggregateId, out Guid aggregateGuid) || aggregateGuid != payloadOrderId)
+            {
+                var dlqRes = await RouteToDlqAsync(messageJson, "AGGREGATE_PAYLOAD_MISMATCH",
+                    "AggregateId must equal payload RentalOrderId.", topic, partition, offset, null, cancellationToken);
                 if (dlqRes.IsFailure) return dlqRes.Error;
                 return KafkaIntakeDisposition.DlqStored;
             }
@@ -294,12 +317,34 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                                   string.Equals(messageType, KafkaContractSpec.EventTypes.RefundCompleted, StringComparison.OrdinalIgnoreCase) ||
                                   string.Equals(messageType, KafkaContractSpec.EventTypes.RentalSettled, StringComparison.OrdinalIgnoreCase);
             bool isAllocationEvent = string.Equals(messageType, KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded, StringComparison.OrdinalIgnoreCase) ||
-                                     string.Equals(messageType, KafkaContractSpec.EventTypes.InventoryAllocationCommandRejected, StringComparison.OrdinalIgnoreCase);
+                                     string.Equals(messageType, KafkaContractSpec.EventTypes.InventoryAllocationCommandRejected, StringComparison.OrdinalIgnoreCase) ||
+                                     string.Equals(messageType, KafkaContractSpec.EventTypes.ReturnedUnitsApplied, StringComparison.OrdinalIgnoreCase) ||
+                                     string.Equals(messageType, KafkaContractSpec.EventTypes.ReturnedUnitsRejected, StringComparison.OrdinalIgnoreCase);
+
+            if ((isPaymentEvent && (!isPaymentProducer || topic is not null && !string.Equals(topic, _kafkaOptions.PaymentEventsTopic, StringComparison.Ordinal))) ||
+                (isAllocationEvent && (!isInventoryProducer || topic is not null && !string.Equals(topic, _kafkaOptions.InventoryAllocationEventsTopic, StringComparison.Ordinal))))
+            {
+                var dlqRes = await RouteToDlqAsync(messageJson, "PRODUCER_TOPIC_MISMATCH",
+                    "MessageType, producer và topic không khớp contract.", topic, partition, offset, null, cancellationToken);
+                if (dlqRes.IsFailure) return dlqRes.Error;
+                return KafkaIntakeDisposition.DlqStored;
+            }
 
             if (!isPaymentEvent && !isAllocationEvent)
             {
                 _logger.LogInformation("Ignored unhandled event type: {Type}", messageType);
                 return Result.Success(KafkaIntakeDisposition.Ignored);
+            }
+
+            if (isPaymentEvent)
+            {
+                var proofResult = PaymentPublicationProofVerifier.Verify(messageJson, publicationProof, topic, messageKey, _kafkaOptions, utcNow);
+                if (proofResult.IsFailure && proofResult.Error.Code != "PAYMENT_PROOF_KEY_UNAVAILABLE")
+                {
+                    var dlqResult = await RouteToDlqAsync(messageJson, proofResult.Error.Code, proofResult.Error.Message,
+                        topic, partition, offset, null, cancellationToken);
+                    return dlqResult.IsFailure ? dlqResult.Error : KafkaIntakeDisposition.DlqStored;
+                }
             }
 
             string canonicalNew = CanonicalJson.Normalize(messageJson);
@@ -337,6 +382,8 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                 topic,
                 partition,
                 offset);
+
+            if (isPaymentEvent) inboxMessage.AssignPublicationProof(publicationProof, messageKey ?? aggregateId);
 
             try
             {
@@ -421,6 +468,13 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             return Error.Validation("INVALID_AGGREGATE_ID", "AggregateId không phải Guid.");
         }
 
+        string? identityPayload = await _inboxRepository.GetPayloadByIdAsync(inboxMessageId, cancellationToken);
+        if (identityPayload is null) return Error.NotFound("INBOX_MESSAGE_NOT_FOUND", "Inbox message was not found.");
+        Guid payloadOrderId = ReadPayloadOrderId(identityPayload);
+        if (payloadOrderId == Guid.Empty || payloadOrderId != orderId)
+            return await DeadLetterInboxAsync(inboxMessageId, "AGGREGATE_PAYLOAD_MISMATCH",
+                "AggregateId must equal payload RentalOrderId.", cancellationToken);
+
         Guid? renterUserId = null;
         if (descriptor.MessageType.Contains("Allocation", StringComparison.OrdinalIgnoreCase))
         {
@@ -432,8 +486,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         }
         else
         {
-            var orderDesc = await _orderRepository.GetByIdAsync(orderId, cancellationToken);
-            if (orderDesc != null) renterUserId = orderDesc.RenterId;
+            renterUserId = await _orderRepository.GetRenterIdByOrderIdAsync(orderId, cancellationToken);
         }
 
         IAsyncDisposable? renterLock = null;
@@ -468,7 +521,9 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         }
 
         bool isAllocationEvent = string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded, StringComparison.OrdinalIgnoreCase) ||
-                                 string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.InventoryAllocationCommandRejected, StringComparison.OrdinalIgnoreCase);
+                                 string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.InventoryAllocationCommandRejected, StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.ReturnedUnitsApplied, StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.ReturnedUnitsRejected, StringComparison.OrdinalIgnoreCase);
 
         var order = await _orderRepository.GetByIdWithDetailsAsync(orderId, cancellationToken);
         if (order == null && !isAllocationEvent)
@@ -513,18 +568,76 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
 
         if (isAllocationEvent)
         {
-            var allocResult = await _allocationResultHandler.HandleAllocationEventAsync(orderId, msg, order, cancellationToken);
-            if (allocResult.IsSuccess)
+            await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+            try
             {
+                Result allocResult;
+                if (msg.MessageType is KafkaContractSpec.EventTypes.ReturnedUnitsApplied or KafkaContractSpec.EventTypes.ReturnedUnitsRejected)
+                {
+                    if (_inventoryReturnResultHandler is null)
+                    {
+                        await tx.RollbackAsync(cancellationToken);
+                        _unitOfWork.DiscardChanges();
+                        return Error.Failure("RETURN_RESULT_HANDLER_NOT_CONFIGURED", "Inventory return result handler is required.");
+                    }
+                    allocResult = msg.MessageType == KafkaContractSpec.EventTypes.ReturnedUnitsApplied
+                        ? await _inventoryReturnResultHandler.ApplyStagedAsync(msg.Payload, cancellationToken)
+                        : await _inventoryReturnResultHandler.RejectStagedAsync(msg.Payload, cancellationToken);
+                }
+                else
+                {
+                    allocResult = await _allocationResultHandler.HandleAllocationEventAsync(orderId, msg, order, cancellationToken);
+                }
+                if (allocResult.IsFailure)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    _unitOfWork.DiscardChanges();
+                    return await RecordProcessingFailureAsync(inboxMessageId, allocResult.Error, cancellationToken);
+                }
+
                 msg.MarkProcessed(utcNow);
                 _inboxRepository.Update(msg);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
                 _logger.LogInformation("Successfully processed allocation inbox message {Id} ({Type}) for Order {OrderId}",
                     msg.Id, msg.MessageType, orderId);
                 return Result.Success();
             }
+            catch
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                throw;
+            }
+        }
 
-            return allocResult;
+        if (msg.MessageType is "InvoicePaid" or "RefundCompleted" or "RentalSettled")
+        {
+            var proofResult = PaymentPublicationProofVerifier.Verify(msg.Payload, msg.PublicationProofJson,
+                msg.KafkaTopic, msg.KafkaMessageKey, _kafkaOptions, utcNow);
+            if (proofResult.IsSuccess)
+            {
+                using var envelope = JsonDocument.Parse(msg.Payload);
+                var root = envelope.RootElement;
+                bool inboxBindingMatches = root.GetProperty("messageId").GetGuid() == msg.MessageId &&
+                    string.Equals(root.GetProperty("messageType").GetString(), msg.MessageType, StringComparison.Ordinal) &&
+                    string.Equals(root.GetProperty("aggregateId").GetString(), msg.AggregateId, StringComparison.Ordinal) &&
+                    (string.Equals(root.GetProperty("producer").GetString(), KafkaContractSpec.Producers.PaymentService, StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(root.GetProperty("producer").GetString(), "payment-service", StringComparison.OrdinalIgnoreCase));
+                if (!inboxBindingMatches)
+                    proofResult = Error.Validation("PAYMENT_PROOF_INBOX_METADATA_MISMATCH", "Stored inbox metadata differs from signed event envelope.");
+            }
+            if (proofResult.IsFailure)
+            {
+                if (proofResult.Error.Code == "PAYMENT_PROOF_KEY_UNAVAILABLE" && msg.RetryCount < 9)
+                {
+                    msg.MarkFailed(proofResult.Error.Message, utcNow.AddSeconds(Math.Min(60, Math.Pow(2, msg.RetryCount))));
+                    _inboxRepository.Update(msg);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    return proofResult;
+                }
+                return await DeadLetterInboxAsync(msg.Id, proofResult.Error.Code, proofResult.Error.Message, cancellationToken);
+            }
         }
 
         Result<bool> result;
@@ -588,7 +701,10 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                 }
             }
 
-            result = await _paymentWorkflowService.ApplyInvoicePaidStagedAsync(order!, envelope!, msg, cancellationToken);
+            var applyResult = await ApplyStagedEventAsync(msg, order!,
+                () => _paymentWorkflowService.ApplyInvoicePaidStagedAsync(order!, envelope!, msg, cancellationToken), cancellationToken);
+            if (applyResult.IsSuccess) return applyResult;
+            result = applyResult.Error;
         }
         else if (string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.RefundCompleted, StringComparison.OrdinalIgnoreCase))
         {
@@ -650,16 +766,27 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                 }
             }
 
-            result = await _refundCompletedConsumer.ApplyRefundCompletedStagedAsync(order!, envelope!, msg, cancellationToken);
+            var applyResult = await ApplyStagedEventAsync(msg, order!,
+                () => _refundCompletedConsumer.ApplyRefundCompletedStagedAsync(order!, envelope!, msg, cancellationToken), cancellationToken);
+            if (applyResult.IsSuccess) return applyResult;
+            result = applyResult.Error;
         }
         else if (string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.RentalSettled, StringComparison.OrdinalIgnoreCase))
         {
             KafkaMessageEnvelope<RentalSettledPayload>? envelope = null;
             try { envelope = JsonSerializer.Deserialize<KafkaMessageEnvelope<RentalSettledPayload>>(msg.Payload, JsonOptions); }
             catch (JsonException) { /* The shared failure path writes a DLQ record. */ }
-            result = envelope?.Payload is null
-                ? Error.Validation("DESERIALIZATION_FAILED", "Invalid RentalSettled event payload.")
-                : await _rentalSettledConsumer.ApplyRentalSettledStagedAsync(order!, envelope, msg, cancellationToken);
+            if (envelope?.Payload is null)
+            {
+                result = Error.Validation("DESERIALIZATION_FAILED", "Invalid RentalSettled event payload.");
+            }
+            else
+            {
+                var applyResult = await ApplyStagedEventAsync(msg, order!,
+                    () => _rentalSettledConsumer.ApplyRentalSettledStagedAsync(order!, envelope, msg, cancellationToken), cancellationToken);
+                if (applyResult.IsSuccess) return applyResult;
+                result = applyResult.Error;
+            }
         }
         else
         {
@@ -740,6 +867,130 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         }
     }
 
+    private static Guid ReadPayloadOrderId(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.TryGetProperty("payload", out var payload) &&
+                   payload.TryGetProperty("rentalOrderId", out var orderId) && orderId.TryGetGuid(out Guid value)
+                ? value : Guid.Empty;
+        }
+        catch (JsonException) { return Guid.Empty; }
+    }
+
+    private async Task<Result> DeadLetterInboxAsync(Guid inboxMessageId, string code, string reason, CancellationToken ct)
+    {
+        var message = await _inboxRepository.GetByIdForProcessingAsync(inboxMessageId, ct);
+        if (message is null || message.Status is RentalInboxMessage.StatusProcessed or RentalInboxMessage.StatusDeadLettered)
+            return Result.Success();
+        await using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        try
+        {
+            message.MarkDeadLettered($"{code}: {reason}");
+            _inboxRepository.Update(message);
+            var dlq = await RouteToDlqAsync(message.Payload, code, reason,
+                message.KafkaTopic, message.KafkaPartition, message.KafkaOffset, message.Id, ct);
+            if (dlq.IsFailure)
+            {
+                await tx.RollbackAsync(ct);
+                _unitOfWork.DiscardChanges();
+                return dlq.Error;
+            }
+            await _unitOfWork.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            return Result.Success();
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            _unitOfWork.DiscardChanges();
+            throw;
+        }
+    }
+
+    private async Task<Result> RecordProcessingFailureAsync(Guid inboxMessageId, Error error, CancellationToken ct)
+    {
+        var message = await _inboxRepository.GetByIdForProcessingAsync(inboxMessageId, ct);
+        if (message is null || message.Status is RentalInboxMessage.StatusProcessed or RentalInboxMessage.StatusDeadLettered)
+            return Result.Success();
+
+        await using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        try
+        {
+            DateTimeOffset now = _timeProvider.GetUtcNow();
+            bool permanent = error.Code.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase) ||
+                             error.Code.StartsWith("INVALID", StringComparison.OrdinalIgnoreCase) ||
+                             error.Code.Contains("MISMATCH", StringComparison.OrdinalIgnoreCase);
+            if (message.RetryCount < 9 && !permanent)
+            {
+                TimeSpan delay = TimeSpan.FromSeconds(Math.Min(60, Math.Pow(2, message.RetryCount)));
+                message.MarkFailed($"{error.Code}: {error.Message}", now.Add(delay));
+                _inboxRepository.Update(message);
+                await _unitOfWork.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+                return error;
+            }
+
+            message.MarkDeadLettered($"{error.Code}: {error.Message}");
+            _inboxRepository.Update(message);
+            var dlq = await RouteToDlqAsync(message.Payload, error.Code, error.Message,
+                message.KafkaTopic, message.KafkaPartition, message.KafkaOffset, message.Id, ct);
+            if (dlq.IsFailure)
+            {
+                await tx.RollbackAsync(ct);
+                _unitOfWork.DiscardChanges();
+                return dlq.Error;
+            }
+            await _unitOfWork.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            return Result.Success();
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            _unitOfWork.DiscardChanges();
+            throw;
+        }
+    }
+
+    private async Task<Result> ApplyStagedEventAsync(
+        RentalInboxMessage message,
+        RentalOrder order,
+        Func<Task<Result<bool>>> apply,
+        CancellationToken cancellationToken)
+    {
+        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            Result<bool> result = await apply();
+            if (result.IsFailure)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return result.Error;
+            }
+
+            DateTimeOffset now = _timeProvider.GetUtcNow();
+            message.MarkProcessed(now);
+            _inboxRepository.Update(message);
+            if (result.Value)
+            {
+                order.RecordReadModelUpdate(now);
+                await _orderRepository.UpdateAsync(order, cancellationToken);
+            }
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+            return Result.Success();
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            _unitOfWork.DiscardChanges();
+            throw;
+        }
+    }
+
     private static string ComputeSha256Hex(string input)
     {
         byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));
@@ -784,12 +1035,27 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         Guid? inboxMessageId,
         CancellationToken ct)
     {
+        IUnitOfWorkTransaction? intakeTransaction = null;
+        if (!_unitOfWork.HasActiveTransaction)
+            intakeTransaction = await _unitOfWork.BeginTransactionAsync(ct);
+        try
+        {
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         Guid dlqId = inboxMessageId.HasValue
             ? ComputeProcessingDlqId(inboxMessageId.Value)
             : ComputeIntakeDlqId(rawMessage, topic, partition, offset);
 
-        var dlqPayload = new DeadLetterPayload("PaymentEvent", rawMessage ?? string.Empty, $"{errorCode}: {errorDetail}", utcNow);
+        string originalType = "UnknownEvent";
+        try
+        {
+            using var original = JsonDocument.Parse(rawMessage ?? string.Empty);
+            if (original.RootElement.ValueKind == JsonValueKind.Object &&
+                original.RootElement.TryGetProperty("messageType", out var typeElement) &&
+                typeElement.ValueKind == JsonValueKind.String)
+                originalType = typeElement.GetString() ?? originalType;
+        }
+        catch (JsonException) { }
+        var dlqPayload = new DeadLetterPayload(originalType, rawMessage ?? string.Empty, $"{errorCode}: {errorDetail}", utcNow);
         var dlqEnvelope = new KafkaMessageEnvelope<DeadLetterPayload>(
             dlqId,
             KafkaContractSpec.EventTypes.DeadLetter,
@@ -801,16 +1067,44 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             null,
             dlqPayload);
 
-        var enqueueResult = await _outboxWriter.EnqueueAsync(_kafkaOptions.PaymentDlqTopic, dlqId.ToString("D"), dlqEnvelope, ct);
+        string dlqTopic = topic is not null && string.Equals(topic, _kafkaOptions.InventoryAllocationEventsTopic, StringComparison.Ordinal)
+            ? _kafkaOptions.InventoryAllocationEventsDlqTopic
+            : _kafkaOptions.PaymentDlqTopic;
+        var enqueueResult = await _outboxWriter.EnqueueAsync(dlqTopic, dlqId.ToString("D"), dlqEnvelope, ct);
         if (enqueueResult.IsFailure)
         {
+            if (intakeTransaction is not null)
+            {
+                await intakeTransaction.RollbackAsync(ct);
+                _unitOfWork.DiscardChanges();
+            }
             _logger.LogError("Failed to persist DLQ outbox record {DlqId}: {Error}", dlqId, enqueueResult.Error.Message);
             return enqueueResult.Error;
         }
 
+        if (intakeTransaction is not null)
+        {
+            await _unitOfWork.SaveChangesAsync(ct);
+            await intakeTransaction.CommitAsync(ct);
+        }
+
         _logger.LogWarning("Routed invalid payment event to DLQ ({Topic}) [DlqId: {DlqId}, Replay: {Replay}]: {ErrorCode} - {Detail}",
-            _kafkaOptions.PaymentDlqTopic, dlqId, enqueueResult.Value.IsReplay, errorCode, errorDetail);
+            dlqTopic, dlqId, enqueueResult.Value.IsReplay, errorCode, errorDetail);
         return Result.Success();
+        }
+        catch
+        {
+            if (intakeTransaction is not null)
+            {
+                await intakeTransaction.RollbackAsync(ct);
+                _unitOfWork.DiscardChanges();
+            }
+            throw;
+        }
+        finally
+        {
+            if (intakeTransaction is not null) await intakeTransaction.DisposeAsync();
+        }
     }
 
     private static bool IsUniqueConstraintViolation(DbUpdateException ex)

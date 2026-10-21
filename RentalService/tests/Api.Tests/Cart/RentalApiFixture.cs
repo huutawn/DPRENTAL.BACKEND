@@ -5,6 +5,7 @@ using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Api.Security;
+using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
@@ -25,6 +26,7 @@ using System.Security.Claims;
 using System.Text.Encodings.Web;
 using System.Threading;
 using System.Threading.Tasks;
+using Dprental.RentalService.Application.Kafka.Producers;
 
 namespace Dprental.RentalService.Api.Tests.Cart;
 
@@ -41,14 +43,27 @@ public class RentalApiFixture : WebApplicationFactory<Program>
         return client;
     }
 
+    protected override void ConfigureClient(HttpClient client)
+    {
+        base.ConfigureClient(client);
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", "dev-internal-api-key-dprental-2026");
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("ConnectionStrings:Postgres", PostgresTestDatabaseHelper.BaseConnectionString);
+        builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
         builder.ConfigureTestServices(services =>
         {
             // 1. Vượt qua [Authorize] bằng TestAuthHandler
             services.AddAuthentication("TestAuth")
                     .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("TestAuth", options => { });
+            services.PostConfigure<AuthenticationOptions>(options =>
+            {
+                options.DefaultScheme = "TestAuth";
+                options.DefaultAuthenticateScheme = "TestAuth";
+                options.DefaultChallengeScheme = "TestAuth";
+            });
 
             // 2. Mock CurrentRenter lấy từ Header
             services.AddHttpContextAccessor();
@@ -59,9 +74,11 @@ public class RentalApiFixture : WebApplicationFactory<Program>
 
             // 4. Mock Inventory Providers (Trả về dữ liệu dummy)
             var fakeDeps = new FakeDependencies();
-            services.AddSingleton<IRentalListingOwnerProvider>(fakeDeps);
             services.AddSingleton<IRentalListingReader>(fakeDeps);
             services.AddSingleton<IRentalAvailabilityReader>(fakeDeps);
+            services.AddSingleton<IOrderLockManager, FakeOrderLockManager>();
+            services.AddSingleton<IUnitOfWork, FakeUnitOfWork>();
+            services.AddSingleton<IRentalEventProducer, FakeRentalEventProducer>();
             services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
 
             services.AddSingleton<TimeProvider>(TimeProvider.System);
@@ -153,16 +170,13 @@ public class RentalApiFixture : WebApplicationFactory<Program>
         }
     }
 
-    private sealed class FakeDependencies : IRentalListingOwnerProvider, IRentalListingReader, IRentalAvailabilityReader
+    private sealed class FakeDependencies : IRentalListingReader, IRentalAvailabilityReader
     {
-        public Task<Guid?> GetOwnerIdAsync(Guid listingId, CancellationToken token = default)
-            => Task.FromResult<Guid?>(Guid.NewGuid()); // Owner ID fake luôn khác RenterId
+        public Task<Result<RentalListingSnapshot>> GetListingAsync(Guid listingId, CancellationToken token = default)
+            => Task.FromResult(Result.Success(new RentalListingSnapshot(
+                listingId, Guid.NewGuid(), Guid.NewGuid(), true, true, 100m, 50m, "v1")));
 
-        public Task<RentalListingSnapshot?> GetListingAsync(Guid listingId, CancellationToken token = default)
-            => Task.FromResult<RentalListingSnapshot?>(new RentalListingSnapshot(
-                listingId, Guid.NewGuid(), true, true, 100m, 50m, "v1"));
-
-        public Task<int?> GetAvailableQuantityAsync(Guid listingId, DateOnly start, DateOnly end, CancellationToken token = default)
-            => Task.FromResult<int?>(999); // Luôn dồi dào số lượng
+        public Task<Result<int>> GetAvailableQuantityAsync(Guid listingId, DateOnly start, DateOnly end, CancellationToken token = default)
+            => Task.FromResult(Result.Success(999)); // Luôn dồi dào số lượng
     }
 }

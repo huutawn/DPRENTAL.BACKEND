@@ -335,17 +335,19 @@ public sealed class VersionPersistenceRegressionTests
 
             var returnHandler = new InventoryReturnResultHandler(
                 new RentalOrderRepository(rejectDb),
-                new FakeOrderLockManager(),
-                rejectDb,
-                TimeProvider.System);
+                TimeProvider.System,
+                new FakeRentalEventProducer());
 
             string returnOpKey = RentalOperationExecutor.ComputeOperationKey(RentalItem.ApplyReturnedUnitsAction, returnOpId);
             var rejectPayload = new ReturnedUnitsRejectedPayload(orderId, itemId, allocGroupId, returnRecId, returnOpKey, "INVENTORY_ERROR", "Unit damaged in transit");
             var rejectEnvelope = new KafkaMessageEnvelope<ReturnedUnitsRejectedPayload>(
                 Guid.NewGuid(), KafkaContractSpec.EventTypes.ReturnedUnitsRejected, 1,
                 KafkaContractSpec.Producers.InventoryService, orderId.ToString("D"), FixedNow, returnOpId, null, rejectPayload);
-            var rejResult = await returnHandler.RejectAsync(JsonSerializer.Serialize(rejectEnvelope, JsonOptions));
+            await using var tx = await rejectDb.BeginTransactionAsync();
+            var rejResult = await returnHandler.RejectStagedAsync(JsonSerializer.Serialize(rejectEnvelope, JsonOptions));
             Assert.True(rejResult.IsSuccess, $"{rejResult.Error.Code}: {rejResult.Error.Message}");
+            await rejectDb.SaveChangesAsync();
+            await tx.CommitAsync();
         }
 
         await using (var verifyDb = CreateDbContext(dbName))
@@ -492,9 +494,6 @@ public sealed class VersionPersistenceRegressionTests
                 Result.Success(new CancelInvoiceResponse("INV-EXP-001", true, FixedNow, false)));
 
         var mockInventory = new Mock<IInventoryRentalClient>();
-        mockInventory.Setup(i => i.ReleaseAllocationAsync(It.IsAny<string>(), It.IsAny<ReleaseAllocationRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string grp, ReleaseAllocationRequest req, CancellationToken _) =>
-                Result.Success(new ReleaseAllocationResponse("REC-REL", req.OperationKey, grp, FixedNow, false)));
 
         long versionAfterExpiry;
         DateTimeOffset updatedAfterExpiry;
@@ -640,7 +639,6 @@ public sealed class VersionPersistenceRegressionTests
         {
             var handler = new InventoryAllocationResultHandler(
                 new RentalOrderRepository(db),
-                new OutboxRepository(db),
                 db,
                 new FakeOrderLockManager(),
                 testTimeProvider);
@@ -648,7 +646,7 @@ public sealed class VersionPersistenceRegressionTests
             var inbox = new RentalInboxMessage(
                 Guid.NewGuid(), Guid.NewGuid(), KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded,
                 KafkaContractSpec.Producers.InventoryService, orderId.ToString("D"), null, null,
-                JsonSerializer.Serialize(new { payload = new { commandType = "ReleaseAllocation", operationKey = releaseOpKey, rentalItemId = itemId } }),
+                JsonSerializer.Serialize(new { payload = new { commandType = "ReleaseAllocation", operationKey = releaseOpKey, rentalOrderId = orderId, rentalItemId = itemId } }),
                 closureTime);
 
             var currentOrder = await db.RentalOrders.Include(x => x.Items).ThenInclude(i => i.UnitAssignments).Include(x => x.OperationReceipts).FirstAsync(x => x.Id == orderId);
@@ -684,7 +682,6 @@ public sealed class VersionPersistenceRegressionTests
         {
             var handler = new InventoryAllocationResultHandler(
                 new RentalOrderRepository(db),
-                new OutboxRepository(db),
                 db,
                 new FakeOrderLockManager(),
                 replayTimeProvider);
@@ -727,7 +724,6 @@ public sealed class VersionPersistenceRegressionTests
         {
             var handler = new InventoryAllocationResultHandler(
                 new RentalOrderRepository(db),
-                new OutboxRepository(db),
                 db,
                 new FakeOrderLockManager(),
                 replayTimeProvider);

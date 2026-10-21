@@ -26,7 +26,6 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
     private readonly IRentalOrderRepository _orders;
     private readonly IRentalCartRepository _carts;
     private readonly IOrderCodeGenerator _orderCodes;
-    private readonly ICheckoutHoldOrchestrator? _holds;
     private readonly IUnitOfWork? _unitOfWork;
     private readonly ILogger<CheckoutOrderWriter> _logger;
 
@@ -35,8 +34,11 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         IRentalCartRepository carts,
         IOrderCodeGenerator orderCodes,
         ILogger<CheckoutOrderWriter> logger)
-        : this(orders, carts, orderCodes, null!, null!, logger)
     {
+        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
+        _carts = carts ?? throw new ArgumentNullException(nameof(carts));
+        _orderCodes = orderCodes ?? throw new ArgumentNullException(nameof(orderCodes));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public CheckoutOrderWriter(
@@ -45,21 +47,10 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         IOrderCodeGenerator orderCodes,
         IUnitOfWork unitOfWork,
         ILogger<CheckoutOrderWriter> logger)
-        : this(orders, carts, orderCodes, null!, unitOfWork, logger)
-    {
-    }
-    public CheckoutOrderWriter(
-        IRentalOrderRepository orders,
-        IRentalCartRepository carts,
-        IOrderCodeGenerator orderCodes,
-        ICheckoutHoldOrchestrator holds,
-        IUnitOfWork unitOfWork,
-        ILogger<CheckoutOrderWriter> logger)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _carts = carts ?? throw new ArgumentNullException(nameof(carts));
         _orderCodes = orderCodes ?? throw new ArgumentNullException(nameof(orderCodes));
-        _holds = holds;
         _unitOfWork = unitOfWork;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -76,7 +67,7 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
             heldLines,
             checkoutOperationId,
             Guid.NewGuid(),
-            utcNow.AddMinutes(30),
+            utcNow.Add(CheckoutRules.PaymentWindow),
             utcNow,
             cancellationToken);
     }
@@ -109,11 +100,6 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         {
             _logger.LogWarning(ex, "Checkout {CheckoutOperationId} hỏng trong lúc lưu đơn hàng.", checkoutOperationId);
             _unitOfWork?.DiscardChanges();
-            if (_holds is not null && await IsConfirmedNotSavedAsync(checkoutOperationId))
-            {
-                await _holds.ReleaseAllLinesAsync(heldLines);
-            }
-
             throw;
         }
     }
@@ -196,30 +182,8 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         return order;
     }
 
-    private async Task<Result<RentalOrder>> FailAsync(IReadOnlyList<CheckoutHeldLine> heldLines, Error error)
-    {
-        if (_holds is not null)
-        {
-            await _holds.ReleaseAllLinesAsync(heldLines);
-        }
-        return error;
-    }
-
-    private async Task<bool> IsConfirmedNotSavedAsync(string checkoutOperationId)
-    {
-        try
-        {
-            return await _orders.GetByCheckoutOperationIdAsync(checkoutOperationId, CancellationToken.None) is null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Không kiểm tra được đơn của checkout {CheckoutOperationId}; hold được giữ nguyên cho đến khi tự hết hạn.",
-                checkoutOperationId);
-            return false;
-        }
-    }
+    private static Task<Result<RentalOrder>> FailAsync(IReadOnlyList<CheckoutHeldLine> heldLines, Error error) =>
+        Task.FromResult<Result<RentalOrder>>(error);
 
     private static InitialRentalItemDto ToInitialItem(CheckoutHeldLine held) => new(
         held.RentalItemId,

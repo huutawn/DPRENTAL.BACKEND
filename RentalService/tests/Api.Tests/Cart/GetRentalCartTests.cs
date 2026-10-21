@@ -2,6 +2,8 @@ using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.Services.Cart;
+using Dprental.RentalService.Common;
+using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Domain.Policies;
@@ -49,7 +51,7 @@ public sealed class GetRentalCartTests
     public async Task ExecuteAsync_EmptyCart_ReturnsEmptyLines()
     {
         _cartRepoMock.Setup(x => x.GetActiveByRenterIdAsync(_renterId, default)).ReturnsAsync((RentalCart?)null);
-        var result = await _sut.ExecuteAsync(_renterId, null);
+        var result = await _sut.ExecuteAsync(_renterId);
         Assert.Empty(result.Value.Items);
     }
 
@@ -58,7 +60,7 @@ public sealed class GetRentalCartTests
     {
         SetupCartWithOneItem(_todayVn, _todayVn.AddDays(1)); // Start là hôm nay (đã qua)
 
-        var result = await _sut.ExecuteAsync(_renterId, null);
+        var result = await _sut.ExecuteAsync(_renterId);
 
         var item = result.Value.Items.Single();
         Assert.Equal(RentalCartLineStatus.DatePassed, item.Status);
@@ -70,7 +72,7 @@ public sealed class GetRentalCartTests
         // Hôm nay 15/10: ngày 17/10 chỉ còn 2 ngày, sớm nhất phải là 18/10.
         SetupCartWithOneItem(_todayVn.AddDays(2), _todayVn.AddDays(4));
 
-        var result = await _sut.ExecuteAsync(_renterId, null);
+        var result = await _sut.ExecuteAsync(_renterId);
 
         var item = result.Value.Items.Single();
         Assert.Equal(RentalCartLineStatus.DatePassed, item.Status);
@@ -83,12 +85,12 @@ public sealed class GetRentalCartTests
     {
         var start = RentalBookingPolicy.EarliestStartDate(_todayVn);
         var cart = SetupCartWithOneItem(start, start, qty: 2); // Cùng 1 ngày, số lượng 2
-        var listing = new RentalListingSnapshot(_listingId, Guid.NewGuid(), true, true, 100m, 50m, "v1");
+        var listing = new RentalListingSnapshot(_listingId, Guid.NewGuid(), Guid.NewGuid(), true, true, 100m, 50m, "v1");
 
-        _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, default)).ReturnsAsync(listing);
-        _availabilityReaderMock.Setup(x => x.GetAvailableQuantityAsync(_listingId, start, start, default)).ReturnsAsync(10);
+        _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, default)).ReturnsAsync(Result.Success(listing));
+        _availabilityReaderMock.Setup(x => x.GetAvailableQuantityAsync(_listingId, start, start, default)).ReturnsAsync(Result.Success(10));
 
-        var result = await _sut.ExecuteAsync(_renterId, null);
+        var result = await _sut.ExecuteAsync(_renterId);
 
         var item = result.Value.Items.Single();
         Assert.Equal(RentalCartLineStatus.Available, item.Status);
@@ -100,27 +102,25 @@ public sealed class GetRentalCartTests
     {
         _policyMock.Setup(x => x.MaximumRentalDays).Returns(4);
         SetupCartWithOneItem(_todayVn.AddDays(1), _todayVn.AddDays(5)); // 5 inclusive days; policy allows 4
-        var result = await _sut.ExecuteAsync(_renterId, null);
+        var result = await _sut.ExecuteAsync(_renterId);
         Assert.Equal(RentalCartLineStatus.ValidationFailed, result.Value.Items.Single().Status);
     }
 
     [Fact]
-    public async Task ExecuteAsync_PriceVersionMismatched_ReturnsPriceChanged()
+    public async Task ExecuteAsync_ReturnsLatestPriceFromInventory()
     {
         var start = RentalBookingPolicy.EarliestStartDate(_todayVn);
         var cart = SetupCartWithOneItem(start, start.AddDays(2));
-        var cartItemId = cart.Items.Single().Id;
+        var listing = new RentalListingSnapshot(_listingId, Guid.NewGuid(), Guid.NewGuid(), true, true, 100m, 50m, "v2");
+        _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, default)).ReturnsAsync(Result.Success(listing));
+        _availabilityReaderMock.Setup(x => x.GetAvailableQuantityAsync(_listingId, start, start.AddDays(2), default))
+            .ReturnsAsync(Result.Success(10));
 
-        // Listing trên DB đang là "v2"
-        var listing = new RentalListingSnapshot(_listingId, Guid.NewGuid(), true, true, 100m, 50m, "v2");
-        _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, default)).ReturnsAsync(listing);
+        var result = await _sut.ExecuteAsync(_renterId);
 
-        // Client truyền lên "v1"
-        var clientVersions = new Dictionary<Guid, string> { { cartItemId, "v1" } };
-
-        var result = await _sut.ExecuteAsync(_renterId, clientVersions);
-
-        Assert.Equal(RentalCartLineStatus.PriceChanged, result.Value.Items.Single().Status);
+        var line = Assert.Single(result.Value.Items);
+        Assert.Equal(RentalCartLineStatus.Available, line.Status);
+        Assert.Equal("v2", line.CurrentPriceVersion);
     }
 
     [Fact]
@@ -130,10 +130,10 @@ public sealed class GetRentalCartTests
         SetupCartWithOneItem(start, start.AddDays(2));
 
         // Owner của Listing lại chính là người đang thuê (_renterId)
-        var listing = new RentalListingSnapshot(_listingId, _renterId, true, true, 100m, 50m, "v1");
-        _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, default)).ReturnsAsync(listing);
+        var listing = new RentalListingSnapshot(_listingId, _renterId, Guid.NewGuid(), true, true, 100m, 50m, "v1");
+        _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, default)).ReturnsAsync(Result.Success(listing));
 
-        var result = await _sut.ExecuteAsync(_renterId, null);
+        var result = await _sut.ExecuteAsync(_renterId);
         Assert.Equal(RentalCartLineStatus.ValidationFailed, result.Value.Items.Single().Status);
     }
 
@@ -143,14 +143,40 @@ public sealed class GetRentalCartTests
         var start = RentalBookingPolicy.EarliestStartDate(_todayVn);
         SetupCartWithOneItem(start, start.AddDays(2), qty: 5); // Khách muốn thuê 5
 
-        var listing = new RentalListingSnapshot(_listingId, Guid.NewGuid(), true, true, 100m, 50m, "v1");
-        _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, default)).ReturnsAsync(listing);
+        var listing = new RentalListingSnapshot(_listingId, Guid.NewGuid(), Guid.NewGuid(), true, true, 100m, 50m, "v1");
+        _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, default)).ReturnsAsync(Result.Success(listing));
 
         // Hệ thống inventory báo chỉ còn 3
         _availabilityReaderMock.Setup(x => x.GetAvailableQuantityAsync(_listingId, start, start.AddDays(2), default))
-            .ReturnsAsync(3);
+            .ReturnsAsync(Result.Success(3));
 
-        var result = await _sut.ExecuteAsync(_renterId, null);
+        var result = await _sut.ExecuteAsync(_renterId);
         Assert.Equal(RentalCartLineStatus.InsufficientQuantity, result.Value.Items.Single().Status);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenListingLookupFailsWith503_ReturnsServiceUnavailable()
+    {
+        var start = RentalBookingPolicy.EarliestStartDate(_todayVn);
+        SetupCartWithOneItem(start, start.AddDays(2));
+        _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, default))
+            .ReturnsAsync(Error.ServiceUnavailable("INVENTORY_UNAVAILABLE", "Unavailable"));
+        var result = await _sut.ExecuteAsync(_renterId);
+        Assert.Equal(ErrorType.ServiceUnavailable, result.Error.Type);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenAvailabilityLookupFailsWith503_ReturnsServiceUnavailable()
+    {
+        var start = RentalBookingPolicy.EarliestStartDate(_todayVn);
+        SetupCartWithOneItem(start, start.AddDays(2));
+        var listing = new RentalListingSnapshot(_listingId, Guid.NewGuid(), Guid.NewGuid(), true, true, 100m, 50m, "v1");
+        _listingReaderMock.Setup(x => x.GetListingAsync(_listingId, default)).ReturnsAsync(Result.Success(listing));
+        _availabilityReaderMock.Setup(x => x.GetAvailableQuantityAsync(_listingId, start, start.AddDays(2), default))
+            .ReturnsAsync(Error.ServiceUnavailable("INVENTORY_UNAVAILABLE", "Unavailable"));
+
+        var result = await _sut.ExecuteAsync(_renterId);
+
+        Assert.Equal(ErrorType.ServiceUnavailable, result.Error.Type);
     }
 }

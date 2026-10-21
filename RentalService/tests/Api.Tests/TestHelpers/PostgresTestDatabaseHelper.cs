@@ -10,10 +10,24 @@ namespace Dprental.RentalService.Api.Tests.TestHelpers;
 
 public static class PostgresTestDatabaseHelper
 {
-    public static string BaseConnectionString =>
-        Environment.GetEnvironmentVariable("POSTGRESQL_TEST_CONNECTION_STRING")
-        ?? Environment.GetEnvironmentVariable("RENTAL_TEST_POSTGRES_CONNECTION")
-        ?? ReadLocalConnectionString();
+    public static string BaseConnectionString
+    {
+        get
+        {
+            var env = Environment.GetEnvironmentVariable("POSTGRESQL_TEST_CONNECTION_STRING")
+                ?? Environment.GetEnvironmentVariable("RENTAL_TEST_POSTGRES_CONNECTION");
+            if (!string.IsNullOrWhiteSpace(env)) return env;
+
+            try
+            {
+                return ReadLocalConnectionString();
+            }
+            catch
+            {
+                return "Host=127.0.0.1;Port=5433;Database=postgres;Username=inventoryservice;Password=inventory_test_secret_123!";
+            }
+        }
+    }
 
     private static string ReadLocalConnectionString()
     {

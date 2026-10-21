@@ -11,6 +11,7 @@ public interface IUnitOfWorkTransaction : IAsyncDisposable
 /// </summary>
 public interface IUnitOfWork
 {
+    bool HasActiveTransaction => false;
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     Task<int> CommitAsync(CancellationToken cancellationToken = default) => SaveChangesAsync(cancellationToken);

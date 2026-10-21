@@ -14,7 +14,7 @@ RentalService/src/Application/Kafka/
 ├── Contracts/
 │   ├── KafkaMessageEnvelope.cs    # Unified Envelope v1 chung cho toàn bộ events & commands
 │   ├── KafkaContractSpec.cs       # Hằng số topics, event types, command types, producer IDs
-│   └── ProposedCommands.cs        # PROPOSED: CreateHold, ReleaseAllocation, CreateInvoice
+│   └── AllocationCommandPayloads.cs # Inventory allocation command payloads
 ├── Events/
 │   ├── RentalEvents.cs            # RentalOrderCreated, RentalItemConfirmed, DeadLetter, ...
 │   └── PaymentEvents.cs           # InvoicePaid, RefundCompleted, RentalSettled
@@ -25,10 +25,8 @@ RentalService/src/Application/Kafka/
 │   ├── ProducerEnqueueResult.cs   # Result DTO trả về MessageId và IsReplay
 │   ├── IInventoryCommandProducer.cs
 │   ├── InventoryCommandProducer.cs# Enqueue CreateHold, ReleaseAllocation vào Outbox
-│   ├── IPaymentCommandProducer.cs
-│   ├── PaymentCommandProducer.cs  # Enqueue CreateInvoice vào Outbox
 │   ├── IRentalEventProducer.cs
-│   └── RentalEventProducer.cs     # Enqueue RentalOrderCreated vào Outbox
+│   └── RentalEventProducer.cs     # Canonical typed and domain event enqueue path
 ├── Consumers/
 │   ├── IPaymentEventsDispatcher.cs# Entrypoint xử lý Intake & Inbox Processing
 │   └── PaymentEventsDispatcher.cs # Canonical JSON deduplication, non-swallowing DLQ
@@ -64,9 +62,9 @@ RentalService/src/Application/Kafka/
 - Trạng thái thiết bị chỉ chuyển sang `HandedOver` và mục thuê chuyển sang `InRental` khi nhận được sự kiện xác nhận thành công từ Inventory.
 
 ### 2.4. Return, Overdue & Runbook Đối soát
-- Trả thiết bị: Phát lệnh `ApplyReturnedUnits` qua Kafka, xử lý kết quả qua consumer chuyên trách `InventoryReturnResultHandler` (`ReturnedUnitsApplied` / `ReturnedUnitsRejected`), đảm bảo thiết bị hỏng phải được bảo vệ/khóa trước khi đóng allocation.
+- Trả thiết bị: Phát lệnh `ApplyReturnedUnits` qua topic `inventory.allocation.commands.v1`; kết quả `ReturnedUnitsApplied` / `ReturnedUnitsRejected` được ghi Inbox và xử lý bởi cùng `PaymentEventsDispatcher` cùng consumer group với allocation result. State, Inbox, và `RentalItemReturned` outbox commit cùng transaction.
 - Các receipt return cũ còn pending qua HTTP được chuyển sang trạng thái `MANUAL_RECONCILIATION_REQUIRED` bằng migration dữ liệu riêng.
-- Lệnh bảo vệ quá hạn (Overdue) duy trì qua HTTP với InventoryService do Inventory chưa hỗ trợ command Kafka tương ứng.
+- MarkAssetsOverdue dùng Kafka command `MarkAssetsOverdue`; Inventory giữ nguyên allocation occupancy để ngăn tái cấp phát trong khi thiết bị quá hạn. Kết quả `InventoryAllocationCommandSucceeded`/`Rejected` đi qua Inbox cùng dispatcher với allocation result.
 - Mọi tác vụ bàn giao hoặc trả thiết bị quá 30 phút chưa nhận được kết quả acknowledgement sẽ được chuyển sang `MANUAL_RECONCILIATION_REQUIRED` để đối soát thủ công qua runbook của Rental, không tự suy diễn thành công.
 ---
 
@@ -79,7 +77,7 @@ Mọi message (cả Event và Command) đều được bao gói bằng một đ�
   "messageId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "messageType": "RentalOrderCreated",
   "version": 1,
-  "producer": "rental-service",
+  "producer": "RentalService",
   "aggregateId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "occurredAt": "2026-10-14T08:00:00+07:00",
   "correlationId": "corr-uuid-optional",
@@ -101,9 +99,20 @@ Mọi message (cả Event và Command) đều được bao gói bằng một đ�
   - Nếu `MessageId` chưa tồn tại: lưu mới vào Outbox.
   - Nếu `MessageId` đã tồn tại và cùng nội dung (canonical JSON): trả về message cũ với cờ `IsReplay = true`.
   - Nếu `MessageId` đã tồn tại nhưng khác nội dung: trả về lỗi `Conflict` (`OUTBOX_MESSAGE_CONFLICT`).
-- **Transaction**: Nếu caller đã có transaction đang mở (`Database.CurrentTransaction != null`), Outbox lưu trong transaction đó và **không tự commit** transaction của caller. Nếu caller không có transaction, Outbox tự mở và commit transaction riêng.
+- **Transaction**: Relational enqueue yêu cầu caller mở transaction; nếu chưa có thì trả `OUTBOX_TRANSACTION_REQUIRED`. Outbox không tự mở hoặc commit transaction riêng. Non-relational test providers chỉ hỗ trợ test hành vi producer, không chứng minh tính nguyên tử.
 
-### 4.2. Xuất bản tin (Outbox Publisher Worker)
+### 4.2. Service command ownership
+
+| Direction | Read/query | Command/mutation | Canonical transport |
+|---|---|---|---|
+| Rental → Inventory | Listing snapshot, availability | CreateHold, ExtendHold, ConfirmAllocation, ReleaseAllocation, MarkAssetsHandedOver, ApplyReturnedUnits | HTTP read; Kafka command |
+| Inventory → Rental | Allocation command result; returned units applied/rejected | Result events | Kafka |
+| Rental → Payment | CreateInvoice, CancelInvoice, RequestRefund, SettleRental | HTTP command |
+| Payment → Rental | InvoicePaid, RefundCompleted, RentalSettled | Kafka event |
+
+`PaymentCommandProducer` and `payment.commands.v1` were removed. `RentalService` is the only Rental producer identity. Paid and completed recommendation signals use `renterId`, `quantity`, and payload `occurredAt`; schemas accept either the historical `userId` shape or current `renterId` shape, never both. Drain the old consumer group and audit pending messages before switching it; preserve current offsets, do not reset offsets, and do not replay historical events for Recommendation. These messages must not contain `SerialNumber`, `AssetCode`, `DeliveryAddress`, or `RefundAccount`.
+
+### 4.3. Xuất bản tin (Outbox Publisher Worker)
 - **Cấu hình Confluent**: `EnableIdempotence = true`, `Acks = Acks.All`, `MessageSendMaxRetries = 3`, `RetryBackoffMs = 100`.
 - **Claim từng message**: Thay vì batch claim 50 message cùng lúc (dễ hết hạn lease), worker claim từng message ngay trước khi gửi (`ClaimNextPendingAsync` sử dụng `FOR UPDATE SKIP LOCKED` trên PostgreSQL), tối đa 50 message mỗi vòng.
 - **Lease Duration**: 30 giây mặc định. Kiểm tra lại hạn lease ngay trước khi publish.
@@ -111,7 +120,7 @@ Mọi message (cả Event và Command) đều được bao gói bằng một đ�
 - **Acknowledgement**: Chỉ đánh dấu `Published` sau khi nhận được `PersistenceStatus.Persisted` từ broker.
 - **Shutdown**: Flush có thời hạn (15s mặc định), không drop message đang gửi dở.
 
-### 4.3. Tiêu thụ bản tin (Payment Events Consumer Worker)
+### 4.4. Tiêu thụ bản tin (Payment Events Consumer Worker)
 - **Tắt auto commit**: `EnableAutoCommit = false`, `EnableAutoOffsetStore = false`.
 - **Chỉ commit khi an toàn**: Offset chỉ được commit sau khi `RentalInboxMessage` hoặc DLQ đã được lưu bền vững vào PostgreSQL, hoặc khi xác nhận duplicate thành công.
 - **Không skip lỗi**: Nếu xảy ra lỗi lưu trữ database (kết nối, deadlock), worker thử lại bản ghi đang giữ; tuyệt đối không đọc tiếp và không commit vượt qua bản ghi lỗi.
@@ -141,7 +150,6 @@ Khi bật (`Enabled = true`), nếu thiếu `BootstrapServers` hoặc các thôn
     "InventoryCommandsTopic": "inventory.allocation.commands.v1",
     "InventoryAllocationEventsTopic": "inventory.allocation.events.v1",
     "InventoryAllocationEventsDlqTopic": "inventory.allocation.events.v1.dlq",
-    "PaymentCommandsTopic": "payment.commands.v1",
     "DeliveryTimeoutSeconds": 10,
     "LeaseDurationSeconds": 30,
     "MaxBatchPerRound": 50,

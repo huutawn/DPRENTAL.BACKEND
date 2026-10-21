@@ -203,6 +203,12 @@ public partial class RentalItem
         }
     }
 
+    public void SetEquipmentTypeId(Guid equipmentTypeId)
+    {
+        if (equipmentTypeId == Guid.Empty) throw new ArgumentException("EquipmentTypeId cannot be empty.", nameof(equipmentTypeId));
+        EquipmentTypeId = equipmentTypeId;
+    }
+
     public void SetHandoverRecord(HandoverRecord handoverRecord)
     {
         ArgumentNullException.ThrowIfNull(handoverRecord);

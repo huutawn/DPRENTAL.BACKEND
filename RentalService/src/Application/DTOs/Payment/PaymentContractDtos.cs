@@ -173,7 +173,7 @@ public sealed record RequestRefundRequest(
     [Required][MaxLength(64)] string OperationKey)
 {
     [JsonIgnore]
-    public decimal TotalRefundAmount => Items.Sum(i => i.TotalRefundAmount);
+    public decimal TotalRefundAmount => Items?.Sum(i => i.TotalRefundAmount) ?? 0m;
 
     public Result Validate()
     {

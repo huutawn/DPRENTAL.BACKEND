@@ -1,6 +1,8 @@
 using Dprental.RentalService.Api.Tests.Checkout;
 using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.Services.Cart;
+using Dprental.RentalService.Common;
+using Dprental.RentalService.Common.Enums;
 using Xunit;
 
 namespace Dprental.RentalService.Api.Tests.Cart;
@@ -17,58 +19,54 @@ public sealed class InventoryRentalCartReaderTests
 
     public InventoryRentalCartReaderTests()
     {
-        _inventory.Listings[_listingId] = TestListings.Create(_listingId, _ownerId, "Máy xúc Komatsu PC200", 3_000_000m);
+        _inventory.Listings[_listingId] = TestListings.Create(
+            _listingId, _ownerId, "Máy xúc Komatsu PC200", 3_000_000m, depositPerUnit: 20_000_000m);
         _reader = new InventoryRentalCartReader(_inventory);
     }
 
     [Fact]
-    public async Task GetOwnerId_AsksTheBatchApiForExactlyThatListing()
+    public async Task GetListing_AsksTheBatchApiForExactlyThatListing()
     {
-        Guid? ownerId = await _reader.GetOwnerIdAsync(_listingId);
+        Result<RentalListingSnapshot> listing = await _reader.GetListingAsync(_listingId);
 
-        Assert.Equal(_ownerId, ownerId);
+        Assert.True(listing.IsSuccess);
+        Assert.Equal(_ownerId, listing.Value.OwnerId);
         Assert.Equal(1, _inventory.ListingReadCount);
         Assert.Equal([_listingId], _inventory.RequestedListingIds);
     }
 
     [Fact]
-    public async Task GetListing_MapsPriceStatusAndZeroDeposit()
+    public async Task GetListing_MapsPriceStatusAndDeposit()
     {
-        RentalListingSnapshot? listing = await _reader.GetListingAsync(_listingId);
+        RentalListingSnapshot listing = (await _reader.GetListingAsync(_listingId)).Value;
 
-        Assert.NotNull(listing);
         Assert.Equal(_listingId, listing.ListingId);
-        Assert.Equal(_ownerId, listing.OwnerId);
+        Assert.Equal(TestListings.EquipmentTypeId, listing.EquipmentTypeId);
         Assert.True(listing.IsPublished);
         Assert.True(listing.AcceptsBookings);
         Assert.Equal(3_000_000m, listing.DailyRate);
-        // Inventory chưa có tiền cọc; phiên bản giá là chính giá thuê.
-        Assert.Equal(0m, listing.Deposit);
-        Assert.Equal("3000000", listing.PriceVersion);
+        Assert.Equal(20_000_000m, listing.Deposit);
+        // Phiên bản giá gồm giá thuê và tiền cọc: một trong hai đổi thì phiên bản đổi.
+        Assert.Equal("3000000:20000000", listing.PriceVersion);
     }
 
     [Fact]
-    public async Task ListingInMissingIds_IsTreatedAsNotFound()
+    public async Task ListingInMissingIds_IsNotFound()
     {
-        Guid unknown = Guid.NewGuid();
+        Result<RentalListingSnapshot> listing = await _reader.GetListingAsync(Guid.NewGuid());
 
-        Assert.Null(await _reader.GetOwnerIdAsync(unknown));
-        Assert.Null(await _reader.GetListingAsync(unknown));
+        Assert.True(listing.IsFailure);
+        Assert.Equal(ErrorType.NotFound, listing.Error.Type);
     }
 
     [Fact]
-    public async Task EmptyListingId_IsNotFound_WithoutCallingInventory()
-    {
-        Assert.Null(await _reader.GetOwnerIdAsync(Guid.Empty));
-        Assert.Null(await _reader.GetListingAsync(Guid.Empty));
-        Assert.Equal(0, _inventory.ListingReadCount);
-    }
-
-    [Fact]
-    public async Task InventoryDown_ThrowsDependencyFailure()
+    public async Task InventoryDown_ReturnsServiceUnavailable()
     {
         _inventory.FailListingRead = true;
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _reader.GetListingAsync(_listingId));
+        Result<RentalListingSnapshot> listing = await _reader.GetListingAsync(_listingId);
+
+        Assert.True(listing.IsFailure);
+        Assert.Equal(ErrorType.ServiceUnavailable, listing.Error.Type);
     }
 }

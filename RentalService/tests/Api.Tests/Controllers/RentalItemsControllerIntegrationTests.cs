@@ -71,13 +71,13 @@ public sealed class RentalItemsControllerIntegrationTests
                 ? ConfirmHandler(allocationGroupId, request)
                 : Task.FromResult(Result.Success(new ConfirmAllocationResponse("REC-CONF", allocationGroupId, FixedNow, false, [])));
 
-        public Task<Result<ReleaseAllocationResponse>> ReleaseAllocationAsync(string allocationGroupId, ReleaseAllocationRequest request, CancellationToken ct = default) =>
+        public static Task<Result<ReleaseAllocationResponse>> ReleaseAllocationAsync(string allocationGroupId, ReleaseAllocationRequest request, CancellationToken ct = default) =>
             Task.FromResult(Result.Success(new ReleaseAllocationResponse("REC-REL", request.OperationKey, allocationGroupId, FixedNow, false)));
 
         public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) => throw new NotImplementedException();
+        public static Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<CancelAllocationResponse>> CancelAllocationAsync(string allocationGroupId, CancelAllocationRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<MarkAssetsOverdueResponse>> MarkAssetsOverdueAsync(string allocationGroupId, MarkAssetsOverdueRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<MarkAssetsReturnedResponse>> MarkAssetsReturnedAsync(string allocationGroupId, MarkAssetsReturnedRequest request, CancellationToken ct = default) => throw new NotImplementedException();
@@ -173,6 +173,7 @@ public sealed class RentalItemsControllerIntegrationTests
             });
 
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         var response = await client.PostAsync($"/api/v1/rental/supplier/sub-orders/{Guid.NewGuid()}/accept", null);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -208,6 +209,7 @@ public sealed class RentalItemsControllerIntegrationTests
             });
 
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
         // No Idempotency-Key header
         var response = await client.PostAsync($"/api/v1/rental/supplier/sub-orders/{Guid.NewGuid()}/accept", null);
@@ -259,6 +261,7 @@ public sealed class RentalItemsControllerIntegrationTests
         }
 
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
         client.DefaultRequestHeaders.Add("Idempotency-Key", "idemp-ctrl-accept-1");
 
@@ -321,6 +324,7 @@ public sealed class RentalItemsControllerIntegrationTests
         }
 
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
         client.DefaultRequestHeaders.Add("Idempotency-Key", "idemp-ctrl-rej-1");
 

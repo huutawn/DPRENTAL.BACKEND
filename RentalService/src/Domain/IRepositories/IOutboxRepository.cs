@@ -33,5 +33,6 @@ public interface IOutboxRepository
         string errorMessage,
         DateTimeOffset attemptedAt,
         DateTimeOffset? nextScheduledAt = null,
+        string? targetStatus = null,
         CancellationToken cancellationToken = default);
 }

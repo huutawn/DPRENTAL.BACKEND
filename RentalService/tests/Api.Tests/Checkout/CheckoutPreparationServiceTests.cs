@@ -47,7 +47,7 @@ public sealed class CheckoutPreparationServiceTests
     private ListingRentalSnapshotDto Listing(Guid id) =>
         TestListings.Create(id, _supplierId, " Sony A7 IV ", 500_000m, thumbnailMediaId: _thumbnailMediaId);
 
-    // 2 máy x 500.000 x 3 ngày; Inventory chưa có tiền cọc nên cọc = 0.
+    // Fixture này dùng cọc = 0; test riêng xác nhận cọc khác 0 từ Inventory.
     private CheckoutRequest Request(decimal expectedTotal = 3_000_000m, params Guid[] cartItemIds) => new(
         cartItemIds.Length == 0 ? [_cartItemId] : cartItemIds,
         new(" Hồ Chí Minh ", "123 Nguyễn Huệ, Quận 1", "Nguyễn Văn A", "0901234567", "  "),
@@ -137,12 +137,29 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(0m, line.DepositPerUnit);
         Assert.Equal(3_000_000m, line.RentalAmount);
         Assert.Equal(0m, line.DepositAmount);
-        // Inventory chỉ trả tên, giá và ảnh: snapshot chỉ còn ảnh, các thông tin khác để trống.
-        Assert.Equal(RentalItemListingSnapshotDto.ThumbnailOnly(_thumbnailMediaId), line.ListingSnapshot);
+        Assert.Equal(TestListings.EquipmentTypeId, line.ListingSnapshot.EquipmentTypeId);
+        Assert.Equal(TestListings.BrandId, line.ListingSnapshot.BrandId);
+        Assert.Equal("A7 IV", line.ListingSnapshot.Model);
+        Assert.Equal("{\"resolutionMp\":33}", line.ListingSnapshot.SpecValuesJson);
+        Assert.Equal(_thumbnailMediaId, line.ListingSnapshot.ThumbnailMediaId);
 
         Assert.Equal(3_000_000m, plan.TotalRentalAmount);
         Assert.Equal(0m, plan.TotalDepositAmount);
         Assert.Equal(3_000_000m, plan.TotalAmount);
+    }
+
+    [Fact]
+    public async Task Prepare_IncludesInventoryDepositInCheckoutQuote()
+    {
+        _inventory.Listings[_listingId] = Listing(_listingId) with { DepositPerUnit = 2_000_000m };
+
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(7_000_000m));
+
+        Assert.True(result.IsSuccess);
+        CheckoutPlanLine line = Assert.Single(result.Plan.Lines);
+        Assert.Equal(2_000_000m, line.DepositPerUnit);
+        Assert.Equal(4_000_000m, line.DepositAmount);
+        Assert.Equal(7_000_000m, result.Plan.TotalAmount);
     }
 
     [Fact]
@@ -410,7 +427,7 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(CheckoutLineIssueCode.ListingUnavailable, Assert.Single(result.LineIssues).Code);
     }
 
-    public static TheoryData<string> IncompleteSnapshotFields => ["OwnerUserId", "Name", "Status", "Currency"];
+    public static TheoryData<string> IncompleteSnapshotFields => ["OwnerUserId", "Name", "Status", "Currency", "BrandId", "Model", "DepositPerUnit", "SpecSchemaVersion", "SpecValues"];
 
     [Theory]
     [MemberData(nameof(IncompleteSnapshotFields))]
@@ -422,6 +439,12 @@ public sealed class CheckoutPreparationServiceTests
             "OwnerUserId" => listing with { OwnerUserId = Guid.Empty },
             "Name" => listing with { Name = " " },
             "Status" => listing with { Status = null! },
+            "EquipmentTypeId" => listing with { EquipmentTypeId = Guid.Empty },
+            "BrandId" => listing with { BrandId = null },
+            "Model" => listing with { Model = null },
+            "DepositPerUnit" => listing with { DepositPerUnit = null },
+            "SpecSchemaVersion" => listing with { SpecSchemaVersion = null },
+            "SpecValues" => listing with { SpecValues = null },
             _ => listing with { Currency = null! }
         };
 

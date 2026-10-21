@@ -7,8 +7,6 @@ public enum RentalCartLineStatus
 {
     /// <summary>Thiết bị hoàn toàn khả dụng với giá và số lượng yêu cầu.</summary>
     Available,
-    /// <summary>Giá thuê hoặc tiền cọc đã thay đổi so với phiên bản client đang giữ.</summary>
-    PriceChanged,
     /// <summary>Không đủ số lượng thiết bị khả dụng trong toàn bộ khoảng thời gian yêu cầu.</summary>
     InsufficientQuantity,
     /// <summary>Thiết bị không khả dụng trong khoảng thời gian yêu cầu.</summary>

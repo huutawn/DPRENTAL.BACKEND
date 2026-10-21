@@ -20,31 +20,23 @@ public sealed class HttpPaymentRentalClient : IPaymentRentalClient
     };
 
     private readonly HttpClient _httpClient;
-    private readonly IServiceTokenProvider _tokenProvider;
     private readonly ILogger<HttpPaymentRentalClient> _logger;
-    private readonly string _audience;
+    private readonly string _apiKey;
 
     public HttpPaymentRentalClient(
         HttpClient httpClient,
-        IServiceTokenProvider tokenProvider,
         IConfiguration configuration,
         ILogger<HttpPaymentRentalClient> logger)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        _tokenProvider = tokenProvider ?? throw new ArgumentNullException(nameof(tokenProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
-        string? audience = configuration["Services:Payment:Audience"] ?? configuration["Authentication:PaymentAudience"];
-        if (string.IsNullOrWhiteSpace(audience))
-        {
-            audience = "payment-api"; // standard default or required config
-        }
-        _audience = audience;
 
         string baseUrl = configuration["Services:Payment:BaseUrl"] ?? "http://payment-service:8080";
         if (!baseUrl.EndsWith('/')) baseUrl += "/";
         _httpClient.BaseAddress = new Uri(baseUrl);
         _httpClient.Timeout = TimeSpan.FromSeconds(10);
+
+        _apiKey = configuration["Services:Payment:ApiKey"] ?? string.Empty;
     }
 
     public async Task<Result<CreateInvoiceResponse>> CreateInvoiceAsync(
@@ -103,19 +95,13 @@ public sealed class HttpPaymentRentalClient : IPaymentRentalClient
         string scope,
         CancellationToken ct)
     {
-        // 1. Obtain service token
-        var tokenResult = await _tokenProvider.GetServiceTokenAsync(_audience, scope, ct);
-        if (tokenResult.IsFailure)
-        {
-            _logger.LogError("Không thể lấy token cho PaymentService (Audience: {Audience}, Scope: {Scope}): {Error}",
-                _audience, scope, tokenResult.Error.Message);
-            return tokenResult.Error;
-        }
-
         try
         {
             using var httpRequest = new HttpRequestMessage(method, route);
-            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenResult.Value);
+            if (!string.IsNullOrWhiteSpace(_apiKey))
+            {
+                httpRequest.Headers.TryAddWithoutValidation("X-Api-Key", _apiKey);
+            }
 
             string json = JsonSerializer.Serialize(requestBody, JsonOptions);
             httpRequest.Content = new StringContent(json, Encoding.UTF8, "application/json");
@@ -133,6 +119,11 @@ public sealed class HttpPaymentRentalClient : IPaymentRentalClient
                     return Result.Success(data);
                 }
                 return Error.Failure("PAYMENT_DESERIALIZATION_FAILED", "Không thể deserialize phản hồi từ PaymentService.");
+            }
+            if (httpResponse.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+            {
+                _logger.LogWarning("PaymentService authentication failed with status {StatusCode}", httpResponse.StatusCode);
+                return Error.ServiceUnavailable("PAYMENT_UNAVAILABLE", "Không thể xác thực hoặc kết nối tới PaymentService (503).");
             }
 
             string errorCode = $"Payment.Http{(int)httpResponse.StatusCode}";

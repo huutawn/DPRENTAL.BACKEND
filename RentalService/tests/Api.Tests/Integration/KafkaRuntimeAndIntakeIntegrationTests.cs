@@ -120,11 +120,11 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
         IRefundCompletedConsumer refundConsumer)
     {
         var outboxRepo = new OutboxRepository(db);
-        var options = Options.Create(new KafkaOptions
+        var options = Options.Create(Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Configure(new KafkaOptions
         {
             PaymentEventsTopic = "payment.events.v1",
             PaymentDlqTopic = "payment.events.v1.dlq"
-        });
+        }));
         return new PaymentEventsDispatcher(
             new InboxRepository(db),
             new RentalOrderRepository(db),
@@ -201,7 +201,8 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
         }
         """;
 
-        var result = await dispatcher.ReceiveMessageAsync(validJson, "payment.events.v1", 0, 105, CancellationToken.None);
+        var result = await dispatcher.ReceiveMessageAsync(validJson, "payment.events.v1", 0, 105,
+            publicationProof: Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Create(validJson), cancellationToken: CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         // Workflow MUST NOT run synchronously on intake!
@@ -247,7 +248,8 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
         }
         """;
 
-        var firstResult = await dispatcher.ReceiveMessageAsync(firstJson, "payment.events.v1", 0, 1, CancellationToken.None);
+        var firstResult = await dispatcher.ReceiveMessageAsync(firstJson, "payment.events.v1", 0, 1,
+            publicationProof: Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Create(firstJson), cancellationToken: CancellationToken.None);
         Assert.True(firstResult.IsSuccess);
 
         // Second message has SAME messageId but DIFFERENT paid amount -> conflict!
@@ -271,7 +273,8 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
         }
         """;
 
-        var secondResult = await dispatcher.ReceiveMessageAsync(conflictingJson, "payment.events.v1", 0, 2, CancellationToken.None);
+        var secondResult = await dispatcher.ReceiveMessageAsync(conflictingJson, "payment.events.v1", 0, 2,
+            publicationProof: Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Create(conflictingJson), cancellationToken: CancellationToken.None);
         Assert.True(secondResult.IsSuccess);
         Assert.Equal(KafkaIntakeDisposition.DlqStored, secondResult.Value);
 
@@ -292,7 +295,7 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
 
         string malformed = "this is malformed non-json record";
 
-        var res1 = await dispatcher.ReceiveMessageAsync(malformed, "payment.events.v1", 1, 42, CancellationToken.None);
+        var res1 = await dispatcher.ReceiveMessageAsync(malformed, "payment.events.v1", 1, 42, cancellationToken: CancellationToken.None);
         Assert.True(res1.IsSuccess);
         Assert.Equal(KafkaIntakeDisposition.DlqStored, res1.Value);
 
@@ -300,7 +303,7 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
         Assert.Equal(1, dlqCountAfterFirst);
 
         // Redelivery of SAME record with SAME topic, partition, offset -> should not create duplicate DLQ outbox message
-        var res2 = await dispatcher.ReceiveMessageAsync(malformed, "payment.events.v1", 1, 42, CancellationToken.None);
+        var res2 = await dispatcher.ReceiveMessageAsync(malformed, "payment.events.v1", 1, 42, cancellationToken: CancellationToken.None);
         Assert.True(res2.IsSuccess);
         Assert.Equal(KafkaIntakeDisposition.DlqStored, res2.Value);
         int dlqCountAfterSecond = await db.RentalOutboxMessages.CountAsync(m => m.MessageType == "DeadLetter");
@@ -446,7 +449,8 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
         // Dispatcher that returns a failure (e.g. database error)
         var mockDispatcher = new Mock<IPaymentEventsDispatcher>();
         mockDispatcher.Setup(d => d.ReceiveMessageAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<long?>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Failure<KafkaIntakeDisposition>(CommonError.Failure("DB_ERROR", "Simulated DB failure")));
 
         var services = new ServiceCollection();
@@ -537,7 +541,8 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
 
         Assert.True(result.IsFailure);
         mockConsumer.Verify(c => c.Commit(It.IsAny<ConsumeResult<string, string>>()), Times.Never);
-        mockDispatcher.Verify(d => d.ReceiveMessageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Never);
+        mockDispatcher.Verify(d => d.ReceiveMessageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<long?>(),
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

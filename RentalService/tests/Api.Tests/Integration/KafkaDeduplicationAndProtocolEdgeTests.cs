@@ -97,7 +97,7 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
             new StubRefundConsumer(),
             new OutboxRepository(db),
             db,
-            Options.Create(new KafkaOptions { PaymentEventsTopic = "payment.events.v1" }));
+            Options.Create(Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Configure(new KafkaOptions { PaymentEventsTopic = "payment.events.v1" })));
 
         Guid messageId = Guid.NewGuid();
         Guid orderId = Guid.NewGuid();
@@ -146,12 +146,14 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
         }
         """;
 
-        var res1 = await dispatcher.ReceiveMessageAsync(json1);
+        var res1 = await dispatcher.ReceiveMessageAsync(json1,
+            publicationProof: Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Create(json1));
         Assert.True(res1.IsSuccess);
         Assert.Equal(KafkaIntakeDisposition.InboxStored, res1.Value);
 
         // Deduplication using canonical JSON: matches existing inbox payload even when reversed
-        var res2 = await dispatcher.ReceiveMessageAsync(json2);
+        var res2 = await dispatcher.ReceiveMessageAsync(json2,
+            publicationProof: Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Create(json2));
         Assert.True(res2.IsSuccess);
         Assert.Equal(KafkaIntakeDisposition.Duplicate, res2.Value);
 
@@ -173,7 +175,7 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
             new StubRefundConsumer(),
             new OutboxRepository(db),
             db,
-            Options.Create(new KafkaOptions { PaymentEventsTopic = "payment.events.v1", PaymentDlqTopic = "payment.events.v1.dlq" }));
+            Options.Create(Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Configure(new KafkaOptions { PaymentEventsTopic = "payment.events.v1", PaymentDlqTopic = "payment.events.v1.dlq" })));
 
         Guid messageId = Guid.NewGuid();
         Guid orderId = Guid.NewGuid();
@@ -218,10 +220,12 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
         }
         """;
 
-        var res1 = await dispatcher.ReceiveMessageAsync(jsonOriginal);
+        var res1 = await dispatcher.ReceiveMessageAsync(jsonOriginal,
+            publicationProof: Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Create(jsonOriginal));
         Assert.True(res1.IsSuccess);
 
-        var res2 = await dispatcher.ReceiveMessageAsync(jsonConflicting);
+        var res2 = await dispatcher.ReceiveMessageAsync(jsonConflicting,
+            publicationProof: Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Create(jsonConflicting));
         Assert.True(res2.IsSuccess);
         Assert.Equal(KafkaIntakeDisposition.DlqStored, res2.Value);
         // Verify routed to DLQ Outbox
@@ -251,6 +255,7 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
         var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
             msgId, "InvoicePaid", 1, "payment-service", orderId.ToString("D"), fixedNow, "corr", null, payload);
 
+        string inboxPayload = JsonSerializer.Serialize(envelope, JsonSerializerOptions.Web);
         var inboxMsg = new RentalInboxMessage(
             Guid.NewGuid(),
             msgId,
@@ -259,11 +264,18 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
             orderId.ToString("D"),
             null,
             null,
-            JsonSerializer.Serialize(envelope),
+            inboxPayload,
             fixedNow);
+        inboxMsg.AssignPublicationProof(
+            Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Create(inboxPayload),
+            orderId.ToString("D"));
 
         initDb.RentalInboxMessages.Add(inboxMsg);
         await initDb.SaveChangesAsync();
+        var proofValidation = Dprental.RentalService.Application.Kafka.Consumers.PaymentPublicationProofVerifier.Verify(
+            inboxMsg.Payload, inboxMsg.PublicationProofJson, null, orderId.ToString("D"),
+            Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Configure(new KafkaOptions()), DateTimeOffset.UtcNow);
+        Assert.True(proofValidation.IsSuccess, proofValidation.Error.Message);
 
         int executionCount = 0;
         var workflow = new StubPaymentWorkflow
@@ -287,7 +299,7 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
             new StubRefundConsumer(),
             new OutboxRepository(db1),
             db1,
-            Options.Create(new KafkaOptions()));
+            Options.Create(Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Configure(new KafkaOptions())));
 
         await using var db2 = CreateDbContext(dbName);
         var dispatcher2 = new PaymentEventsDispatcher(
@@ -298,7 +310,7 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
             new StubRefundConsumer(),
             new OutboxRepository(db2),
             db2,
-            Options.Create(new KafkaOptions()));
+            Options.Create(Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Configure(new KafkaOptions())));
 
         var task1 = Task.Run(() => dispatcher1.ProcessInboxMessageAsync(inboxMsg.Id));
         var task2 = Task.Run(() => dispatcher2.ProcessInboxMessageAsync(inboxMsg.Id));
@@ -440,7 +452,7 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
 
         public Task AddAsync(RentalOutboxMessage message, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<bool> MarkPublishedAsync(Guid id, string claimToken, DateTimeOffset publishedAt, CancellationToken cancellationToken = default) => Task.FromResult(true);
-        public Task<bool> RecordFailureAsync(Guid id, string claimToken, string errorMessage, DateTimeOffset attemptedAt, DateTimeOffset? nextScheduledAt = null, CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> RecordFailureAsync(Guid id, string claimToken, string errorMessage, DateTimeOffset attemptedAt, DateTimeOffset? nextScheduledAt = null, string? targetStatus = null, CancellationToken cancellationToken = default) => Task.FromResult(true);
     }
 
     private sealed class StubPaymentWorkflow : IPaymentWorkflowService

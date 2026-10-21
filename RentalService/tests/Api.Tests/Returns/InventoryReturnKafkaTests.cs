@@ -6,6 +6,7 @@ using Dprental.RentalService.Application.Kafka.Configuration;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Services.Returns;
+using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
@@ -20,6 +21,11 @@ namespace Dprental.RentalService.Api.Tests.Returns;
 
 public sealed class InventoryReturnKafkaTests
 {
+    private sealed class NoopLock : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private static readonly DateTimeOffset Now = new(2026, 10, 15, 8, 0, 0, TimeSpan.Zero);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -52,7 +58,7 @@ public sealed class InventoryReturnKafkaTests
             .Callback((ApplyReturnedUnitsCommandPayload c, CancellationToken _) => sent = c)
             .ReturnsAsync(new ProducerEnqueueResult(Guid.NewGuid(), false,
                 KafkaContractSpec.CommandTypes.ApplyReturnedUnits,
-                KafkaContractSpec.Topics.InventoryAllocationCommands, order.Id.ToString("D")));
+                KafkaContractSpec.Topics.InventoryCommands, order.Id.ToString("D")));
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Kafka:Enabled"] = "true",
@@ -60,7 +66,7 @@ public sealed class InventoryReturnKafkaTests
             ["Rental:InventoryReturn:Transport"] = "Kafka"
         }).Build();
         var service = new ReturnService(repository.Object, locks.Object, uow.Object,
-            Mock.Of<IRentalMediaClient>(), new FakeTimeProvider(Now), outbox.Object,
+            Mock.Of<IRentalMediaClient>(), new FakeTimeProvider(Now), new FakeRentalEventProducer(),
             config, producer.Object);
         var caller = RentalCallerContext.FromClaims(
             [new KeyValuePair<string, string>("sub", item.SupplierId.ToString("D"))]);
@@ -101,12 +107,12 @@ public sealed class InventoryReturnKafkaTests
             })
             .ReturnsAsync(new ProducerEnqueueResult(Guid.NewGuid(), false,
                 KafkaContractSpec.CommandTypes.ApplyReturnedUnits,
-                KafkaContractSpec.Topics.InventoryAllocationCommands, order.Id.ToString("D")));
+                KafkaContractSpec.Topics.InventoryCommands, order.Id.ToString("D")));
         var producer = new InventoryCommandProducer(writer.Object,
             Options.Create(new KafkaOptions()), new FakeTimeProvider(Now));
 
         Assert.True((await producer.EnqueueApplyReturnedUnitsAsync(command)).IsSuccess);
-        Assert.Equal(KafkaContractSpec.Topics.InventoryAllocationCommands, topic);
+        Assert.Equal(KafkaContractSpec.Topics.InventoryCommands, topic);
         Assert.Equal(order.Id.ToString("D"), partition);
     }
 
@@ -132,12 +138,12 @@ public sealed class InventoryReturnKafkaTests
             new AppliedReturnedUnitPayload(damaged.AllocationId, damaged.AssetId, "MAINTENANCE", Now, "block-ref")
         };
         var envelope = Envelope(order, item, record.Value.Id, command.OperationKey, units);
-        var (handler, save) = Handler(order);
+        var (handler, save, _) = Handler(order);
         var json = JsonSerializer.Serialize(envelope, JsonOptions);
 
-        Assert.True((await handler.ApplyAsync(json)).IsSuccess);
-        Assert.True((await handler.ApplyAsync(json)).IsSuccess);
-        Assert.Equal(1, save());
+        Assert.True((await handler.ApplyStagedAsync(json)).IsSuccess);
+        Assert.True((await handler.ApplyStagedAsync(json)).IsSuccess);
+        Assert.Equal(0, save());
         Assert.NotNull(normal.AllocationClosedAt);
         Assert.NotNull(damaged.AllocationClosedAt);
         Assert.Equal("block-ref", damaged.InventoryDispositionRef);
@@ -157,12 +163,35 @@ public sealed class InventoryReturnKafkaTests
         var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record.Value, Now);
         var envelope = Envelope(order, item, record.Value.Id, command.OperationKey,
             [new AppliedReturnedUnitPayload(unit.AllocationId, unit.AssetId, "AVAILABLE", Now, null)]);
-        var (handler, save) = Handler(order);
+        var (handler, save, _) = Handler(order);
 
-        Assert.True((await handler.ApplyAsync(JsonSerializer.Serialize(envelope, JsonOptions))).IsFailure);
+        Assert.True((await handler.ApplyStagedAsync(JsonSerializer.Serialize(envelope, JsonOptions))).IsFailure);
         Assert.Equal(0, save());
         Assert.Null(unit.AllocationClosedAt);
         Assert.Null(unit.InventoryDispositionRef);
+    }
+
+    [Fact]
+    public async Task FullReturn_EmitsRentalItemReturnedWhenInventoryClosureIsConfirmed()
+    {
+        var order = ReturnTests.NewOrder(quantity: 1);
+        var item = order.Items.Single();
+        var unit = item.UnitAssignments.Single();
+        var record = item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
+            [new ReturnUnitData(unit.Id, UnitCondition.Normal, null, [])], Now, item.SupplierId);
+        Assert.True(record.IsSuccess);
+        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record.Value, Now);
+        var envelope = Envelope(order, item, record.Value.Id, command.OperationKey,
+            [new AppliedReturnedUnitPayload(unit.AllocationId, unit.AssetId, "RELEASED", Now, null)]);
+        var (handler, _, events) = Handler(order);
+
+        Assert.True((await handler.ApplyStagedAsync(JsonSerializer.Serialize(envelope, JsonOptions))).IsSuccess);
+        Assert.NotNull(item.InventoryClosureConfirmedAt);
+        Assert.Single(events.ReturnedEvents);
+        Assert.Equal(item.ReturnsCompletedAt, events.ReturnedEvents[0].ReturnsCompletedAt);
+
+        Assert.True((await handler.ApplyStagedAsync(JsonSerializer.Serialize(envelope, JsonOptions))).IsSuccess);
+        Assert.Single(events.ReturnedEvents);
     }
 
     private static KafkaMessageEnvelope<ReturnedUnitsAppliedPayload> Envelope(RentalOrder order,
@@ -173,25 +202,13 @@ public sealed class InventoryReturnKafkaTests
             new ReturnedUnitsAppliedPayload(order.Id, item.Id, item.AllocationGroupId,
                 returnRecordId, key, "return-ref", Now, units));
 
-    private static (InventoryReturnResultHandler Handler, Func<int> Saves) Handler(RentalOrder order)
+    private static (InventoryReturnResultHandler Handler, Func<int> Saves, FakeRentalEventProducer Events) Handler(RentalOrder order)
     {
         var repository = new Mock<IRentalOrderRepository>();
         repository.Setup(r => r.GetByIdWithDetailsAsync(order.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(order);
         repository.Setup(r => r.UpdateAsync(order, It.IsAny<CancellationToken>())).ReturnsAsync(true);
-        var locks = new Mock<IOrderLockManager>();
-        locks.Setup(l => l.AcquireOrderLockAsync(order.Id, It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new NoopLock());
-        int saves = 0;
-        var uow = new Mock<IUnitOfWork>();
-        uow.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => { saves++; return 1; });
-        return (new InventoryReturnResultHandler(repository.Object, locks.Object,
-            uow.Object, new FakeTimeProvider(Now)), () => saves);
-    }
-
-    private sealed class NoopLock : IAsyncDisposable
-    {
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        var events = new FakeRentalEventProducer();
+        return (new InventoryReturnResultHandler(repository.Object, new FakeTimeProvider(Now), events), () => 0, events);
     }
 }

@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Events;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.IServices.Expiry;
@@ -201,10 +202,13 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
                     order.AddOperationReceipt(refundReceipt);
                 }
                 var outboxEnvelope = new KafkaMessageEnvelope<RentalItemExpiredPayload>(
-                    Guid.NewGuid(),
+                    OutboxMessageIdGenerator.ComputeDeterministicId(
+                        KafkaContractSpec.Producers.RentalService,
+                        KafkaContractSpec.EventTypes.RentalItemExpired,
+                        timeoutOpKey),
                     KafkaContractSpec.EventTypes.RentalItemExpired,
                     1,
-                    "rental-service",
+                    KafkaContractSpec.Producers.RentalService,
                     order.Id.ToString("D"),
                     utcNow,
                     timeoutOpKey,

@@ -1,5 +1,7 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using Dprental.RentalService.Common.Utils;
+using Dprental.RentalService.Application.Kafka.Contracts;
 
 namespace Dprental.RentalService.Application.Kafka.Events;
 
@@ -104,3 +106,43 @@ public sealed record RentalHandoverOverduePayload(
     Guid RenterId,
     DateOnly ExpectedStartDate,
     DateTimeOffset OverdueAt);
+
+public sealed record CartItemAddedPayload(
+    [property: JsonPropertyName("userId")] Guid UserId,
+    [property: JsonPropertyName("equipmentListingId")] Guid EquipmentListingId,
+    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
+    [property: JsonPropertyName("cartId")] Guid CartId,
+    [property: JsonPropertyName("cartItemId")] Guid CartItemId);
+
+public sealed record RentalItemPaidPayload(
+    [property: JsonPropertyName("renterId")] Guid RenterId,
+    [property: JsonPropertyName("equipmentListingId")] Guid EquipmentListingId,
+    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
+    [property: JsonPropertyName("rentalOrderId")] Guid RentalOrderId,
+    [property: JsonPropertyName("rentalItemId")] Guid RentalItemId,
+    [property: JsonPropertyName("quantity")] int Quantity,
+    [property: JsonPropertyName("occurredAt"), JsonConverter(typeof(UtcIsoDateTimeOffsetConverter))] DateTimeOffset OccurredAt);
+
+public sealed record RentalItemCompletedPayload(
+    [property: JsonPropertyName("renterId")] Guid RenterId,
+    [property: JsonPropertyName("equipmentListingId")] Guid EquipmentListingId,
+    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
+    [property: JsonPropertyName("rentalOrderId")] Guid RentalOrderId,
+    [property: JsonPropertyName("rentalItemId")] Guid RentalItemId,
+    [property: JsonPropertyName("quantity")] int Quantity,
+    [property: JsonPropertyName("occurredAt"), JsonConverter(typeof(UtcIsoDateTimeOffsetConverter))] DateTimeOffset OccurredAt);
+
+public sealed record RentalItemHandoverCompletedPayload(
+    Guid RentalOrderId, Guid RentalItemId, Guid RenterId, Guid SupplierId,
+    Guid EquipmentListingId, int Quantity, Guid HandoverRecordId,
+    DateTimeOffset ActualHandoverAt, DateTimeOffset CompletedAt);
+
+public sealed record RentalItemReturnedPayload(
+    Guid RentalOrderId, Guid RentalItemId, Guid RenterId, Guid SupplierId,
+    Guid EquipmentListingId, int Quantity, DateTimeOffset ReturnsCompletedAt);
+
+public sealed record RentalOrderCancelledPayload(
+    Guid RentalOrderId, Guid RenterId, DateTimeOffset CancelledAt, string Reason);
+
+public sealed record RentalOrderCompletedPayload(
+    Guid RentalOrderId, Guid RenterId, DateTimeOffset CompletedAt);

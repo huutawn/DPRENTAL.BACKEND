@@ -114,6 +114,7 @@ public sealed class CheckoutTimeoutScannerWorker : BackgroundService
                     continue;
                 }
 
+                await using var transaction = await unitOfWork.BeginTransactionAsync(cancellationToken);
                 current.MarkTimedOut(utcNow);
 
                 var lineStatuses = JsonSerializer.Deserialize<List<CheckoutItemHoldDescriptor>>(current.ItemHoldStatusesJson, JsonOptions);
@@ -124,17 +125,24 @@ public sealed class CheckoutTimeoutScannerWorker : BackgroundService
                         var releaseCmd = new ReleaseAllocationCommandPayload(
                             RentalOrderId: current.ExpectedRentalOrderId,
                             RentalItemId: line.RentalItemId,
-                            OperationKey: $"checkout:timeout:{current.ExpectedRentalOrderId:N}:{line.RentalItemId:N}:release",
-                            Reason: "Checkout hold window expired (30 minutes)");
+                            OperationKey: $"checkout:compensation:{current.ExpectedRentalOrderId:N}:{line.RentalItemId:N}:release",
+                            Reason: "Checkout did not complete");
 
-                        await inventoryCommands.EnqueueReleaseAllocationAsync(
+                        var enqueue = await inventoryCommands.EnqueueReleaseAllocationAsync(
                             releaseCmd,
                             correlationId: current.ExpectedRentalOrderId.ToString("D"),
                             cancellationToken: cancellationToken);
+                        if (enqueue.IsFailure)
+                        {
+                            await transaction.RollbackAsync(cancellationToken);
+                            unitOfWork.DiscardChanges();
+                            throw new InvalidOperationException($"Could not stage checkout compensation: {enqueue.Error.Code}");
+                        }
                     }
                 }
 
                 await unitOfWork.CommitAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
                 _logger.LogInformation("Checkout operation {OperationId} timed out and compensated", current.OperationId);
             }
         }

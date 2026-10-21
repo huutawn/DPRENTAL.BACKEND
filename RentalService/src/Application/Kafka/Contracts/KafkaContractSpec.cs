@@ -17,10 +17,8 @@ public static class KafkaContractSpec
         public const string PaymentEvents = "payment.events.v1";
         public const string PaymentDlq = "payment.events.v1.dlq";
         public const string InventoryCommands = "inventory.allocation.commands.v1";
-        public const string InventoryAllocationCommands = "inventory.allocation.commands.v1";
         public const string InventoryAllocationEvents = "inventory.allocation.events.v1";
         public const string InventoryAllocationEventsDlq = "inventory.allocation.events.v1.dlq";
-        public const string PaymentCommands = "payment.commands.v1";
     }
 
     public static class EventTypes
@@ -32,6 +30,8 @@ public static class KafkaContractSpec
         public const string RentalItemRejected = "RentalItemRejected";
         public const string RentalItemExpired = "RentalItemExpired";
         public const string RentalOrderExpired = "RentalOrderExpired";
+        public const string RentalOrderCancelled = "RentalOrderCancelled";
+        public const string RentalOrderCompleted = "RentalOrderCompleted";
         public const string LatePaymentRefundRequested = "LatePaymentRefundRequested";
         public const string InvoicePaid = "InvoicePaid";
         public const string RefundCompleted = "RefundCompleted";
@@ -42,7 +42,13 @@ public static class KafkaContractSpec
         public const string InventoryAllocationCommandSucceeded = "InventoryAllocationCommandSucceeded";
         public const string InventoryAllocationCommandRejected = "InventoryAllocationCommandRejected";
         public const string RentalItemCancelled = "RentalItemCancelled";
+        public const string RentalItemHandoverCompleted = "RentalItemHandoverCompleted";
+        public const string RentalItemReturned = "RentalItemReturned";
+        public const string RentalUnitsReturned = "RentalUnitsReturned";
         public const string RentalHandoverOverdue = "RentalHandoverOverdue";
+        public const string CartItemAdded = "CartItemAdded";
+        public const string RentalItemPaid = "RentalItemPaid";
+        public const string RentalItemCompleted = "RentalItemCompleted";
     }
 
     public static class CommandTypes
@@ -54,6 +60,6 @@ public static class KafkaContractSpec
         public const string CreateInvoice = "CreateInvoice";
         public const string ApplyReturnedUnits = "ApplyReturnedUnits";
         public const string MarkAssetsHandedOver = "MarkAssetsHandedOver";
-        public const string MarkAssetsReturned = "MarkAssetsReturned";
+        public const string MarkAssetsOverdue = "MarkAssetsOverdue";
     }
 }

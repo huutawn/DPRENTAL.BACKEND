@@ -29,7 +29,6 @@ public sealed class RentalCartRepository(RentalServiceDbContext dbContext) : IRe
             .FirstOrDefaultAsync(cart => cart.Id == id, cancellationToken);
     }
 
-    // ĐÃ SỬA: Trả về Task<RentalCart>
     public async Task<RentalCart> CreateAsync(RentalCart cart, CancellationToken cancellationToken = default)
     {
         dbContext.RentalCarts.Add(cart);
@@ -39,9 +38,27 @@ public sealed class RentalCartRepository(RentalServiceDbContext dbContext) : IRe
 
     public async Task<bool> UpdateAsync(RentalCart cart, CancellationToken cancellationToken = default)
     {
+        if (dbContext.Entry(cart).State == EntityState.Detached)
+        {
+            return false;
+        }
+
+        HashSet<Guid> persistedItemIds = await dbContext.RentalCartItems
+            .AsNoTracking()
+            .Where(item => item.RentalCartId == cart.Id)
+            .Select(item => item.Id)
+            .ToHashSetAsync(cancellationToken);
+
+        foreach (RentalCartItem item in cart.Items)
+        {
+            if (!persistedItemIds.Contains(item.Id))
+            {
+                dbContext.Entry(item).State = EntityState.Added;
+            }
+        }
+
         try
         {
-            dbContext.RentalCarts.Update(cart);
             await dbContext.SaveChangesAsync(cancellationToken);
             return true;
         }
@@ -51,7 +68,6 @@ public sealed class RentalCartRepository(RentalServiceDbContext dbContext) : IRe
         }
     }
 
-    // ĐÃ THÊM: Bổ sung hàm DeleteAsync bị thiếu
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var cart = await dbContext.RentalCarts.FindAsync(new object[] { id }, cancellationToken);

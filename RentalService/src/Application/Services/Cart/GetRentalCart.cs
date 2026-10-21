@@ -21,7 +21,6 @@ public sealed class GetRentalCart(
 {
     public async Task<Result<RentalCartReadModel>> ExecuteAsync(
         Guid renterId,
-        IReadOnlyDictionary<Guid, string>? clientPriceVersions,
         CancellationToken cancellationToken = default)
     {
         if (renterId == Guid.Empty) return Result.Success(new RentalCartReadModel(Guid.Empty, []));
@@ -63,12 +62,21 @@ public sealed class GetRentalCart(
                 continue;
             }
 
-            RentalListingSnapshot? listing = await listingReader.GetListingAsync(item.EquipmentListingId, cancellationToken);
-            if (listing is null)
+            Result<RentalListingSnapshot> listingResult = await listingReader.GetListingAsync(item.EquipmentListingId, cancellationToken);
+            if (listingResult.IsFailure)
             {
-                lines.Add(CreateFailedLine(item, RentalCartLineStatus.Unavailable, "Sản phẩm không tồn tại hoặc đã bị xóa."));
+                if (listingResult.Error.Type == ErrorType.NotFound)
+                {
+                    lines.Add(CreateFailedLine(item, RentalCartLineStatus.Unavailable, "Sản phẩm không tồn tại hoặc đã bị xóa."));
+                }
+                else
+                {
+                    return Error.ServiceUnavailable("INVENTORY_UNAVAILABLE", "Không thể kiểm tra thông tin thiết bị lúc này.");
+                }
                 continue;
             }
+
+            RentalListingSnapshot listing = listingResult.Value;
 
             // MỚI: Check listing do chính mình sở hữu
             if (listing.OwnerId == renterId)
@@ -83,23 +91,15 @@ public sealed class GetRentalCart(
                 continue;
             }
 
-            // MỚI: Kiểm tra PriceVersion từ Client gửi lên so với bản Snapshot hiện tại
-            string? clientVersion = clientPriceVersions != null && clientPriceVersions.TryGetValue(item.Id, out var v) ? v : null;
-            if (clientVersion != null && clientVersion != listing.PriceVersion)
-            {
-                lines.Add(CreateLine(item, listing, duration, RentalCartLineStatus.PriceChanged, "Giá hoặc cọc đã thay đổi, vui lòng xác nhận lại."));
-                continue;
-            }
-
-            int? availableQty = await availabilityReader.GetAvailableQuantityAsync(
+            Result<int> availResult = await availabilityReader.GetAvailableQuantityAsync(
                 item.EquipmentListingId, item.ExpectedStartDate, item.ExpectedEndDate, cancellationToken);
 
-            // Phân biệt Null (Lỗi hệ thống) và 0 (hết hàng)
-            if (availableQty is null)
+            if (availResult.IsFailure)
             {
-                lines.Add(CreateLine(item, listing, duration, RentalCartLineStatus.ValidationFailed, "Không thể kiểm tra tồn kho tại thời điểm này."));
-                continue;
+                return Error.ServiceUnavailable("INVENTORY_UNAVAILABLE", "Không thể kiểm tra tồn kho lúc này.");
             }
+
+            int availableQty = availResult.Value;
 
             if (availableQty < item.Quantity)
             {

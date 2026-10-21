@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Cart;
 using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Xunit;
@@ -77,26 +79,88 @@ public sealed class InventoryRentalConsumerContractTests
         Assert.Equal([listingId], snapshots!.MissingIds);
     }
 
-    // 2. Một Listing trong kết quả batch: đúng dạng Inventory đưa ngày 15/10/2026, không thêm ô nào khác.
+    // 2. Một Listing trong kết quả batch: đúng tên ô Inventory dùng, không lộ mã máy nội bộ.
     [Fact]
     public void ListingSnapshot_UsesInventoryJsonShape_WithoutInternalAssetCodes()
     {
         ListingRentalSnapshotDto fixture = new(
             Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
             Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"),
             "Komatsu PC200 excavator",
             Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
             3_000_000m,
             "VND",
-            "Active");
+            "Active",
+            BrandId: Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+            Model: "PC200",
+            DepositPerUnit: 20_000_000m,
+            SpecSchemaVersion: 1,
+            SpecValues: JsonSerializer.Deserialize<JsonElement>("{\"bucketCapacity\":\"0.8\"}"));
 
         string json = JsonSerializer.Serialize(fixture, JsonOptions);
-        Assert.Equal(
-            """{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","ownerUserId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","name":"Komatsu PC200 excavator","thumbnailMediaId":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","dailyRate":3000000,"currency":"VND","status":"Active"}""",
-            json);
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+        Assert.Equal(20_000_000m, root.GetProperty("depositAmount").GetDecimal());
+        Assert.Equal(fixture.EquipmentTypeId, root.GetProperty("equipmentTypeId").GetGuid());
+        Assert.Equal(fixture.BrandId, root.GetProperty("brandId").GetGuid());
+        Assert.Equal("PC200", root.GetProperty("model").GetString());
+        Assert.Equal(1, root.GetProperty("specSchemaVersion").GetInt32());
+        Assert.Equal("0.8", root.GetProperty("specValues").GetProperty("bucketCapacity").GetString());
         Assert.DoesNotContain("serialNumber", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("assetCode", json, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(fixture, JsonSerializer.Deserialize<ListingRentalSnapshotDto>(json, JsonOptions));
+
+        ListingRentalSnapshotDto? deserialized = JsonSerializer.Deserialize<ListingRentalSnapshotDto>(
+            """{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","ownerUserId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","equipmentTypeId":"cccccccc-cccc-cccc-cccc-cccccccccccc","name":"Komatsu PC200 excavator","dailyRate":3000000,"currency":"VND","status":"Active","depositAmount":20000000,"brandId":"dddddddd-dddd-dddd-dddd-dddddddddddd","model":"PC200","specSchemaVersion":1,"specValues":{"bucketCapacity":"0.8"}}""",
+            JsonOptions);
+        Assert.NotNull(deserialized);
+        Assert.Equal(fixture.Id, deserialized.Id);
+        Assert.Equal(fixture.DepositPerUnit, deserialized.DepositPerUnit);
+        Assert.Equal(fixture.EquipmentTypeId, deserialized.EquipmentTypeId);
+        Assert.Equal(fixture.BrandId, deserialized.BrandId);
+        Assert.Equal(fixture.SpecValues?.GetRawText(), deserialized.SpecValues?.GetRawText());
+    }
+
+    [Fact]
+    public async Task CartReader_UsesInventoryDepositAndChangesPriceVersionWhenDepositChanges()
+    {
+        Guid listingId = Guid.NewGuid();
+        decimal deposit = 1_000_000m;
+        _stub.GetSnapshotsHandler = _ => Task.FromResult(Result.Success(
+            new ListingRentalSnapshotsResponse([
+                new ListingRentalSnapshotDto(
+                    listingId, Guid.NewGuid(), Guid.NewGuid(), "Camera", null, 500_000m, "VND", "Active",
+                    DepositPerUnit: deposit)], [])));
+        InventoryRentalCartReader reader = new(_stub);
+
+        var before = await reader.GetListingAsync(listingId);
+        deposit = 2_000_000m;
+        var after = await reader.GetListingAsync(listingId);
+
+        Assert.True(before.IsSuccess);
+        Assert.True(after.IsSuccess);
+        Assert.Equal(1_000_000m, before.Value.Deposit);
+        Assert.Equal(2_000_000m, after.Value.Deposit);
+        Assert.NotEqual(before.Value.PriceVersion, after.Value.PriceVersion);
+    }
+
+    [Fact]
+    public async Task CartReader_MapsInventoryDepositAmountAndAcceptsZeroDeposit()
+    {
+        Guid listingId = Guid.NewGuid();
+        ListingRentalSnapshotDto? inventoryPayload = JsonSerializer.Deserialize<ListingRentalSnapshotDto>(
+            $$"""{"id":"{{listingId}}","ownerUserId":"{{Guid.NewGuid()}}","equipmentTypeId":"{{Guid.NewGuid()}}","name":"Camera","dailyRate":120000,"currency":"VND","status":"Active","depositAmount":0}""",
+            JsonOptions);
+        Assert.NotNull(inventoryPayload);
+
+        _stub.GetSnapshotsHandler = _ => Task.FromResult(Result.Success(
+            new ListingRentalSnapshotsResponse([inventoryPayload], [])));
+
+        InventoryRentalCartReader reader = new(_stub);
+        Result<RentalListingSnapshot> result = await reader.GetListingAsync(listingId);
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal(0m, result.Value.Deposit);
     }
 
     // 3. Availability Check Fixture & Serialization
@@ -288,6 +352,7 @@ public sealed class InventoryRentalConsumerContractTests
     // Stub Implementation
     private sealed class StubInventoryRentalClient : IInventoryRentalClient
     {
+        public Func<ListingRentalSnapshotsRequest, Task<Result<ListingRentalSnapshotsResponse>>>? GetSnapshotsHandler { get; set; }
         public Func<ListingAvailabilityCheckRequest, Task<Result<ListingAvailabilityCheckResponse>>>? CheckAvailabilityHandler { get; set; }
         public Func<CreateHoldRequest, Task<Result<CreateHoldResponse>>>? CreateHoldHandler { get; set; }
         public Func<string, ExtendHoldRequest, Task<Result<ExtendHoldResponse>>>? ExtendHoldHandler { get; set; }
@@ -298,7 +363,8 @@ public sealed class InventoryRentalConsumerContractTests
         public Func<string, MarkAssetsReturnedRequest, Task<Result<MarkAssetsReturnedResponse>>>? MarkReturnedHandler { get; set; }
         public Func<string, BlockDamagedAssetsRequest, Task<Result<BlockDamagedAssetsResponse>>>? BlockDamagedHandler { get; set; }
 
-        public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) =>
+            GetSnapshotsHandler?.Invoke(request) ?? Task.FromResult(Result.Failure<ListingRentalSnapshotsResponse>(Error.NotFound("NotConfigured", "Stub not configured.")));
 
         public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) =>
             CheckAvailabilityHandler?.Invoke(request) ?? Task.FromResult(Result.Failure<ListingAvailabilityCheckResponse>(Error.NotFound("NotConfigured", "Stub not configured.")));

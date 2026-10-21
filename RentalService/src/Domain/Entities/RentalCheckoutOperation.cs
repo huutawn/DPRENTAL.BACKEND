@@ -105,4 +105,10 @@ public class RentalCheckoutOperation
         InvoiceStatus = invoiceStatus;
         UpdatedAt = updatedAt;
     }
+
+    public void UpdatePreparationSnapshot(string preparationSnapshotJson, DateTimeOffset updatedAt)
+    {
+        PreparationSnapshotJson = preparationSnapshotJson ?? throw new ArgumentNullException(nameof(preparationSnapshotJson));
+        UpdatedAt = updatedAt;
+    }
 }

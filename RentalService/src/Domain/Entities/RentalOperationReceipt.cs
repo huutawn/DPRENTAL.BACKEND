@@ -10,6 +10,7 @@ namespace Dprental.RentalService.Domain.Entities;
 [Index(nameof(Action), nameof(Status))]
 [Index(nameof(TargetItemId))]
 [Index(nameof(PrerequisiteOperationId))]
+[Index(nameof(RentalOrderId), nameof(InventoryOperationKey))]
 public class RentalOperationReceipt
 {
     public const string StatusPending = "Pending";
@@ -31,6 +32,9 @@ public class RentalOperationReceipt
     [Required]
     [MaxLength(64)]
     public string OperationId { get; private set; } = string.Empty;
+
+    [MaxLength(100)]
+    public string? InventoryOperationKey { get; private set; }
 
     [Required]
     [MaxLength(64)]
@@ -84,6 +88,13 @@ public class RentalOperationReceipt
 
     private RentalOperationReceipt()
     {
+    }
+
+    public void SetInventoryOperationKey(string operationKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationKey);
+        if (operationKey.Length > 100) throw new ArgumentOutOfRangeException(nameof(operationKey));
+        InventoryOperationKey = operationKey;
     }
 
     internal RentalOperationReceipt(
@@ -283,6 +294,14 @@ public class RentalOperationReceipt
         LastAttemptedAt = requestedAt;
         IsTransient = true;
     }
+    internal void ResumeRetry(DateTimeOffset attemptedAt, DateTimeOffset? nextRetryAt = null)
+    {
+        Status = StatusPending;
+        LastAttemptedAt = attemptedAt;
+        NextRetryAt = nextRetryAt;
+        IsTransient = true;
+    }
+
 
     internal void MarkManualReconciliationRequired(DateTimeOffset utcNow, string? reason = null)
     {

@@ -152,7 +152,7 @@ internal sealed class CheckoutCompletion
     {
         await using RentalServiceDbContext context = _newContext();
         OperationReceiptRepository receipts = new(context);
-        OperationReceiptDescriptor? invoice = (await receipts.GetPendingOperationDescriptorsAsync(_clock.GetUtcNow(), 50, cancellationToken))
+        OperationReceiptDescriptor? invoice = (await receipts.GetPendingOperationDescriptorsAsync(_clock.GetUtcNow(), 50, excludedActions: [], unlimitedAttemptActions: ["CreateInvoice"], cancellationToken: cancellationToken))
             .FirstOrDefault(d => d.RentalOrderId == orderId && d.Action == "CreateInvoice");
         if (invoice is null)
         {
@@ -175,7 +175,7 @@ internal sealed class CheckoutCompletion
             context,
             new ConfigurationBuilder().Build(),
             NullLogger<RentalOperationExecutor>.Instance,
-            new CheckoutInvoiceIssuer(_payment, orders, context, _clock, NullLogger<CheckoutInvoiceIssuer>.Instance),
+            new CheckoutInvoiceIssuer(_payment, orders, new RentalCheckoutOperationRepository(context), context, _clock, NullLogger<CheckoutInvoiceIssuer>.Instance),
             new RentalCheckoutOperationRepository(context),
             _clock);
 

@@ -12,6 +12,7 @@ using Dprental.RentalService.Application.DTOs.Supplier;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Application.DTOs.Operations;
@@ -125,7 +126,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         CancellationToken cancellationToken = default)
     {
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-        if (descriptor.RetryCount >= 10)
+        if (descriptor.RetryCount >= 10 && descriptor.Action != "CreateInvoice")
         {
             return Result.Success();
         }
@@ -136,6 +137,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         }
 
         await using var orderLock = await _lockManager.AcquireOrderLockAsync(descriptor.RentalOrderId, TimeSpan.FromSeconds(5), cancellationToken);
+        utcNow = _timeProvider.GetUtcNow();
 
         var order = await _orderRepository.GetByIdWithDetailsAsync(descriptor.RentalOrderId, cancellationToken);
         if (order == null) return Error.NotFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng.");
@@ -144,10 +146,49 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         if (receipt == null) return Error.NotFound("RECEIPT_NOT_FOUND", "Không tìm thấy operation receipt.");
 
         if (receipt.IsSuccess && receipt.Status == RentalOperationReceipt.StatusSucceeded) return Result.Success();
-        if (receipt.Status == RentalOperationReceipt.StatusFailed &&
-            receipt.ErrorClassification is RentalOperationReceipt.ClassificationBusiness or RentalOperationReceipt.ClassificationUncertainExhausted or RentalOperationReceipt.ClassificationTransientExhausted)
+
+
+        if (receipt.Status == RentalOperationReceipt.StatusFailed)
         {
-            return Result.Success();
+            if (receipt.Action == "CreateInvoice" &&
+                receipt.ErrorClassification is RentalOperationReceipt.ClassificationTransientExhausted or RentalOperationReceipt.ClassificationUncertainExhausted)
+            {
+                if (!string.IsNullOrWhiteSpace(order.InvoiceRef))
+                {
+                    if (_invoiceIssuer == null)
+                    {
+                        return Error.Failure("INVOICE_ISSUER_UNAVAILABLE", "Invoice issuer is not configured.");
+                    }
+                    return await _invoiceIssuer.EnsureInvoiceAsync(order, cancellationToken);
+                }
+
+                if (utcNow >= order.PaymentDeadline || order.Status != RentalOrderStatus.PendingPayment)
+                {
+                    string closeCode = utcNow >= order.PaymentDeadline ? "ORDER_EXPIRED" : "ORDER_NOT_PENDING";
+                    string closeMsg = utcNow >= order.PaymentDeadline
+                        ? "Payment deadline has passed; halting invoice creation."
+                        : "Order is no longer pending payment; halting invoice creation.";
+                    receipt.MarkFailed(closeCode, closeMsg, utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+                    if (_checkoutOperationRepo != null)
+                    {
+                        var op = await _checkoutOperationRepo.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
+                        if (op != null && op.InvoiceStatus != "Failed")
+                        {
+                            op.SetInvoiceStatus("Failed", utcNow);
+                            await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
+                        }
+                    }
+                    await CommitLocalChangesAsync(order, cancellationToken);
+                    return Result.Success();
+                }
+
+                receipt.ResumeRetry(utcNow);
+                await CommitLocalChangesAsync(order, cancellationToken);
+            }
+            else
+            {
+                return Result.Success();
+            }
         }
 
         if (receipt.NextRetryAt.HasValue && receipt.NextRetryAt.Value > utcNow)
@@ -168,15 +209,6 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
 
         switch (receipt.Action)
         {
-            case RentalItem.BlockDamagedAction:
-            case RentalItem.MarkReturnedAction:
-                {
-                    var item = order.Items.FirstOrDefault(i => i.Id == receipt.TargetItemId);
-                    if (item is null) return Error.NotFound("ITEM_NOT_FOUND", "Rental item was not found.");
-                    return receipt.Action == RentalItem.BlockDamagedAction
-                        ? await BlockDamagedUnitsCoreAsync(order, item, receipt, cancellationToken)
-                        : await MarkReturnedUnitsCoreAsync(order, item, receipt, cancellationToken);
-                }
             case RentalItem.OverdueProtectionAction:
                 {
                     var item = order.Items.FirstOrDefault(i => i.Id == receipt.TargetItemId);
@@ -271,15 +303,14 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == operationId);
         if (receipt == null) return Error.NotFound("OPERATION_NOT_FOUND", $"Không tìm thấy operation '{operationId}'.");
 
+        if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired)
+        {
+            return Error.Conflict("MANUAL_REFUND_REQUIRED", "Refund receipt is reserved for manual reconciliation and cannot be replayed automatically.");
+        }
+
         if (receipt.IsSuccess && receipt.Status == RentalOperationReceipt.StatusSucceeded)
         {
             return Error.Conflict("OPERATION_ALREADY_SUCCEEDED", "Operation đã hoàn thành thành công (Succeeded); không thể replay.");
-        }
-
-        if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired ||
-            (receipt.Action == "RequestRefund" && order.LatePaymentRefundRequired))
-        {
-            return Error.Conflict("MANUAL_REFUND_REQUIRED", "Tác vụ hoàn tiền late payment yêu cầu xử lý thủ công, không hỗ trợ Admin replay tự động.");
         }
 
         // Validate journal command payload
@@ -355,10 +386,9 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
             var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == operationId);
             if (receipt == null) return Error.NotFound("RECEIPT_NOT_FOUND", "Không tìm thấy operation receipt.");
 
-            if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired ||
-                (receipt.Action == "RequestRefund" && order.LatePaymentRefundRequired))
+            if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired)
             {
-                return Error.Conflict("MANUAL_REFUND_REQUIRED", "Tác vụ hoàn tiền late payment yêu cầu xử lý thủ công, không hỗ trợ replay tự động.");
+                return Error.Conflict("MANUAL_REFUND_REQUIRED", "Refund receipt is reserved for manual reconciliation and cannot be replayed automatically.");
             }
 
             receipt.ReopenForManualReplay(utcNow);
@@ -380,19 +410,40 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
 
         return await ExecuteScheduledOperationAsync(desc!, cancellationToken);
     }
-    private static void RecordExecutionFailure(RentalOperationReceipt receipt, Error error, DateTimeOffset utcNow, bool forceUncertain = false)
+    private static void RecordExecutionFailure(
+        RentalOperationReceipt receipt,
+        Error error,
+        DateTimeOffset utcNow,
+        bool forceUncertain = false,
+        DateTimeOffset? deadline = null)
     {
+        bool isCreateInvoice = receipt.Action == "CreateInvoice";
+
+        if (isCreateInvoice && IsDeterministicInvoiceRejection(error))
+        {
+            receipt.MarkFailed(error.Code, error.Message, utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+            return;
+        }
         bool isUncertain = forceUncertain ||
                            receipt.IsOutcomeUncertain ||
                            error.Type == ErrorType.ServiceUnavailable ||
                            error.Code.Contains("Timeout", StringComparison.OrdinalIgnoreCase) ||
                            error.Code.Contains("Unavailable", StringComparison.OrdinalIgnoreCase);
 
-        bool isExhausted = receipt.RetryCount >= 10;
+        bool isExhausted = !isCreateInvoice && receipt.RetryCount >= 10;
 
         double baseDelay = Math.Min(60, Math.Pow(2, receipt.RetryCount));
         int jitterMs = Random.Shared.Next(0, 1000);
-        DateTimeOffset? nextRetry = isExhausted ? null : utcNow.AddSeconds(baseDelay).AddMilliseconds(jitterMs);
+        DateTimeOffset? nextRetry = null;
+        if (!isExhausted)
+        {
+            var scheduled = utcNow.AddSeconds(baseDelay).AddMilliseconds(jitterMs);
+            if (isCreateInvoice && deadline.HasValue && scheduled > deadline.Value)
+            {
+                scheduled = deadline.Value;
+            }
+            nextRetry = scheduled;
+        }
 
         if (isUncertain)
         {
@@ -409,6 +460,13 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         // Deterministic Business/Validation errors without prior uncertainty do not retry
         receipt.MarkFailed(error.Code, error.Message, utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
     }
+    private static bool IsDeterministicInvoiceRejection(Error error) =>
+        string.Equals(error.Code, CheckoutErrors.InvoiceRejected.Code, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(error.Code, CheckoutErrors.OrderExpired.Code, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(error.Code, "ORDER_NOT_PENDING", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(error.Code, "ORDER_EXPIRED", StringComparison.OrdinalIgnoreCase) ||
+        error.Type is ErrorType.Validation or ErrorType.Conflict;
+
 
     private async Task CommitLocalChangesAsync(RentalOrder order, CancellationToken cancellationToken)
     {

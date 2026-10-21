@@ -62,6 +62,16 @@ public class RentalInboxMessage
     [MaxLength(256)]
     public string? KafkaTopic { get; private set; }
 
+    public string? PublicationProofJson { get; private set; }
+    [MaxLength(256)]
+    public string? KafkaMessageKey { get; private set; }
+
+    public void AssignPublicationProof(string? proof, string? key)
+    {
+        PublicationProofJson = proof;
+        KafkaMessageKey = key;
+    }
+
     public int? KafkaPartition { get; private set; }
     public long? KafkaOffset { get; private set; }
 

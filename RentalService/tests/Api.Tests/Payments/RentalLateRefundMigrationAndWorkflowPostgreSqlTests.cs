@@ -205,19 +205,21 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
                     .OrderBy(r => r.Fingerprint)
                     .ToListAsync();
 
-                // Receipts 1, 2, 3 on late order -> MANUAL_REFUND_REQUIRED
+                // The legacy migration marks incomplete late refunds for manual review;
+                // the current migration reopens only late-payment refunds as retryable.
                 var migrated1 = receipts.Single(r => r.Fingerprint == "fp-refund-pending");
-                Assert.Equal(RentalOperationReceipt.StatusManualRefundRequired, migrated1.Status);
+                Assert.Equal(RentalOperationReceipt.StatusPending, migrated1.Status);
                 Assert.False(migrated1.IsSuccess);
                 Assert.Equal("{\"amount\":500000}", migrated1.PayloadJson);
 
                 var migrated2 = receipts.Single(r => r.Fingerprint == "fp-refund-proc");
-                Assert.Equal(RentalOperationReceipt.StatusManualRefundRequired, migrated2.Status);
+                Assert.Equal(RentalOperationReceipt.StatusPending, migrated2.Status);
                 Assert.Equal(1, migrated2.RetryCount); // Retry history preserved
 
                 var migrated3 = receipts.Single(r => r.Fingerprint == "fp-refund-failed");
-                Assert.Equal(RentalOperationReceipt.StatusManualRefundRequired, migrated3.Status);
-                Assert.Equal("TIMEOUT", migrated3.ErrorCode); // Audit and error preserved
+                Assert.Equal(RentalOperationReceipt.StatusPending, migrated3.Status);
+                Assert.Null(migrated3.ErrorCode);
+                Assert.Null(migrated3.ErrorMessage);
 
                 // Receipt 4 (Succeeded) -> stays Succeeded
                 var succ = receipts.Single(r => r.Fingerprint == "fp-refund-succ");
@@ -242,7 +244,7 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
             await using (var verifyCtx2 = new RentalServiceDbContext(options))
             {
                 var receipt = await verifyCtx2.RentalOperationReceipts.SingleAsync(r => r.Fingerprint == "fp-refund-pending");
-                Assert.Equal(RentalOperationReceipt.StatusManualRefundRequired, receipt.Status);
+                Assert.Equal(RentalOperationReceipt.StatusPending, receipt.Status);
             }
         }
         finally
@@ -419,7 +421,6 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
             {
                 var order = CreateLateOrder(orderId, renterId, itemId);
                 order.MarkPaymentExpired(FixedNow.AddMinutes(-10), "op-exp");
-                order.MarkAsLatePayment("INV-001", "PAY-LATE", FixedNow.AddMinutes(-15), FixedNow.AddMinutes(-5));
 
                 var refundReceipt = new RentalOperationReceipt(
                     Guid.NewGuid(), orderId, refundOpKey, "RequestRefund",
@@ -479,7 +480,7 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
                 Assert.Equal(0, spyPayment.RequestRefundCalls);
             }
 
-            // Assert database state was NOT reset to Pending, retries not reset, no audit of successful replay
+            // Explicit manual-refund receipts stay manual and cannot be replayed by the worker.
             await using (var verifyCtx = new RentalServiceDbContext(options))
             {
                 var receipt = await verifyCtx.RentalOperationReceipts.SingleAsync(r => r.OperationId == refundOpKey);
@@ -578,7 +579,7 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
                     .Where(r => r.Action == "RequestRefund")
                     .ToListAsync();
                 Assert.Single(receipts);
-                Assert.Equal(RentalOperationReceipt.StatusManualRefundRequired, receipts[0].Status);
+                Assert.Equal(RentalOperationReceipt.StatusPending, receipts[0].Status);
 
                 var outbox = await verifyCtx.RentalOutboxMessages
                     .Where(m => m.MessageType == KafkaContractSpec.EventTypes.LatePaymentRefundRequested)
@@ -591,6 +592,82 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
             await PostgresTestDatabaseHelper.DropTestDatabaseAsync(dbName);
         }
     }
+    [Fact]
+    public async Task ConcurrentDuplicatePayment_OnSeparateDbContexts_ResultsInSingleSetOfSideEffects()
+    {
+        var (connString, dbName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connString);
+            await using (var initCtx = new RentalServiceDbContext(options))
+            {
+                await initCtx.Database.MigrateAsync();
+            }
+
+            Guid orderId = Guid.NewGuid();
+            Guid renterId = Guid.NewGuid();
+            Guid itemId = Guid.NewGuid();
+
+            RentalOrder order;
+            await using (var ctx = new RentalServiceDbContext(options))
+            {
+                order = CreateLateOrder(orderId, renterId, itemId);
+                ctx.RentalOrders.Add(order);
+                await ctx.SaveChangesAsync();
+            }
+
+            var spyPayment = new SpyPaymentClient();
+            var stubInventory = new StubInventoryClient();
+            var time = new TestTimeProvider(FixedNow.AddMinutes(40));
+
+            var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
+                Guid.NewGuid(), "InvoicePaid", 1, "payment-service", orderId.ToString("D"),
+                FixedNow.AddMinutes(40), "corr-concurrent", null,
+                new InvoicePaidPayload(orderId, renterId, "INV-001", "PAY-CONCURRENT", order.TotalPayableAmount, "VND", FixedNow.AddMinutes(10)));
+
+            // Run two workers concurrently with separate DbContexts
+            var task1 = Task.Run(async () =>
+            {
+                await using var ctx1 = new RentalServiceDbContext(options);
+                var wf1 = CreateWorkflowService(ctx1, stubInventory, spyPayment, time);
+                return await wf1.ProcessInvoicePaidAsync(envelope);
+            });
+
+            var task2 = Task.Run(async () =>
+            {
+                await using var ctx2 = new RentalServiceDbContext(options);
+                var wf2 = CreateWorkflowService(ctx2, stubInventory, spyPayment, time);
+                return await wf2.ProcessInvoicePaidAsync(envelope);
+            });
+
+            var results = await Task.WhenAll(task1, task2);
+            Assert.All(results, r => Assert.True(r.IsSuccess));
+
+            // Assert: exactly 1 refund receipt, exactly 1 Outbox message, exactly 1 inbox message
+            await using (var verifyCtx = new RentalServiceDbContext(options))
+            {
+                var receipts = await verifyCtx.RentalOperationReceipts
+                    .Where(r => r.Action == "RequestRefund")
+                    .ToListAsync();
+                Assert.Single(receipts);
+
+                var outbox = await verifyCtx.RentalOutboxMessages
+                    .Where(m => m.MessageType == KafkaContractSpec.EventTypes.LatePaymentRefundRequested)
+                    .ToListAsync();
+                Assert.Single(outbox);
+
+                var inbox = await verifyCtx.RentalInboxMessages
+                    .Where(m => m.MessageId == envelope.MessageId)
+                    .ToListAsync();
+                Assert.Single(inbox);
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(dbName);
+        }
+    }
+
 
     private static PaymentWorkflowService CreateWorkflowService(
         RentalServiceDbContext db,
@@ -616,7 +693,10 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
 
         return new PaymentWorkflowService(
             orderRepo, inboxRepo, outboxRepo, receiptRepo, lockMgr,
-            executor, db, config, NullLogger<PaymentWorkflowService>.Instance, tp);
+            executor, db,
+            new InventoryCommandProducer(new KafkaOutboxWriter(outboxRepo), Microsoft.Extensions.Options.Options.Create(new Dprental.RentalService.Application.Kafka.Configuration.KafkaOptions()), tp),
+            config, NullLogger<PaymentWorkflowService>.Instance,
+            new RentalEventProducer(new KafkaOutboxWriter(outboxRepo), Microsoft.Extensions.Options.Options.Create(new Dprental.RentalService.Application.Kafka.Configuration.KafkaOptions()), tp), tp);
     }
 
     private sealed class SpyPaymentClient : IPaymentRentalClient
@@ -692,6 +772,8 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
         public Task<RentalOrder> CreateAsync(RentalOrder order, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<bool> UpdateAsync(RentalOrder order, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<RentalOrder?> GetByIdWithDetailsAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<RentalOrder?> GetForCheckoutPollingAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<Guid?> GetRenterIdByOrderIdAsync(Guid orderId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<RentalOrder?> GetByItemIdWithDetailsAsync(Guid itemId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Guid?> GetOrderIdByItemIdAsync(Guid itemId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Guid>> GetPendingPaymentExpiredOrderIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) => throw new NotImplementedException();
@@ -733,6 +815,8 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
 
         public Task<Result<ProducerEnqueueResult>> EnqueueMarkAssetsHandedOverAsync(MarkAssetsHandedOverCommandPayload command, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "Handover", "topic", "key")));
+        public Task<Result<ProducerEnqueueResult>> EnqueueMarkAssetsOverdueAsync(MarkAssetsOverdueCommandPayload command, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "MarkAssetsOverdue", "topic", "key")));
         public Task<Result<ProducerEnqueueResult>> EnqueueApplyReturnedUnitsAsync(ApplyReturnedUnitsCommandPayload command, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "ApplyReturnedUnits", "topic", "key")));
     }

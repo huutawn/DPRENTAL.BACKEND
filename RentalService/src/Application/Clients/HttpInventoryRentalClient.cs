@@ -22,18 +22,16 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
     };
 
     private readonly HttpClient _httpClient;
-    private readonly IServiceTokenProvider _tokenProvider;
     private readonly ILogger<HttpInventoryRentalClient> _logger;
     private readonly string _baseUrl;
+    private readonly string _apiKey;
 
     public HttpInventoryRentalClient(
         HttpClient httpClient,
-        IServiceTokenProvider tokenProvider,
         IConfiguration configuration,
         ILogger<HttpInventoryRentalClient> logger)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        _tokenProvider = tokenProvider ?? throw new ArgumentNullException(nameof(tokenProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         string configuredBase = configuration["Services:Inventory:BaseUrl"] ?? "http://inventory-service:8080";
@@ -42,6 +40,10 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
         {
             _baseUrl += "/api/v1/inventory";
         }
+
+        _apiKey = configuration["InternalAuthentication:ApiKey"]
+            ?? configuration["INTERNAL_API_KEY"]
+            ?? string.Empty;
 
         _httpClient.Timeout = TimeSpan.FromSeconds(10);
     }
@@ -75,117 +77,6 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
             ct);
     }
 
-    public async Task<Result<CreateHoldResponse>> CreateHoldAsync(
-        CreateHoldRequest request,
-        CancellationToken ct = default)
-    {
-        string route = InventoryContractSpec.Routes.CreateHold(request.ListingId);
-        return await SendAsync<CreateHoldRequest, CreateHoldResponse>(
-            HttpMethod.Post,
-            route,
-            request,
-            InventoryContractSpec.Scopes.WriteAllocation,
-            ct);
-    }
-
-    public async Task<Result<ExtendHoldResponse>> ExtendHoldAsync(
-        string allocationGroupId,
-        ExtendHoldRequest request,
-        CancellationToken ct = default)
-    {
-        string route = InventoryContractSpec.Routes.ExtendHold(allocationGroupId);
-        return await SendAsync<ExtendHoldRequest, ExtendHoldResponse>(
-            HttpMethod.Post,
-            route,
-            request,
-            InventoryContractSpec.Scopes.WriteAllocation,
-            ct);
-    }
-
-    public async Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(
-        string allocationGroupId,
-        ConfirmAllocationRequest request,
-        CancellationToken ct = default)
-    {
-        string route = InventoryContractSpec.Routes.ConfirmAllocation(allocationGroupId);
-        return await SendAsync<ConfirmAllocationRequest, ConfirmAllocationResponse>(
-            HttpMethod.Post,
-            route,
-            request,
-            InventoryContractSpec.Scopes.WriteAllocation,
-            ct);
-    }
-
-    public async Task<Result<ReleaseAllocationResponse>> ReleaseAllocationAsync(
-        string allocationGroupId,
-        ReleaseAllocationRequest request,
-        CancellationToken ct = default)
-    {
-        string route = InventoryContractSpec.Routes.ReleaseAllocation(allocationGroupId);
-        return await SendAsync<ReleaseAllocationRequest, ReleaseAllocationResponse>(
-            HttpMethod.Post,
-            route,
-            request,
-            InventoryContractSpec.Scopes.WriteAllocation,
-            ct);
-    }
-
-    public async Task<Result<CancelAllocationResponse>> CancelAllocationAsync(
-        string allocationGroupId,
-        CancelAllocationRequest request,
-        CancellationToken ct = default)
-    {
-        string route = InventoryContractSpec.Routes.CancelAllocation(allocationGroupId);
-        return await SendAsync<CancelAllocationRequest, CancelAllocationResponse>(
-            HttpMethod.Post,
-            route,
-            request,
-            InventoryContractSpec.Scopes.WriteAllocation,
-            ct);
-    }
-
-    public async Task<Result<MarkAssetsOverdueResponse>> MarkAssetsOverdueAsync(
-        string allocationGroupId,
-        MarkAssetsOverdueRequest request,
-        CancellationToken ct = default)
-    {
-        string route = InventoryContractSpec.Routes.MarkOverdue(allocationGroupId);
-        return await SendAsync<MarkAssetsOverdueRequest, MarkAssetsOverdueResponse>(
-            HttpMethod.Post,
-            route,
-            request,
-            InventoryContractSpec.Scopes.WriteAllocation,
-            ct);
-    }
-
-    public async Task<Result<MarkAssetsReturnedResponse>> MarkAssetsReturnedAsync(
-        string allocationGroupId,
-        MarkAssetsReturnedRequest request,
-        CancellationToken ct = default)
-    {
-        string route = InventoryContractSpec.Routes.MarkReturned(allocationGroupId);
-        return await SendAsync<MarkAssetsReturnedRequest, MarkAssetsReturnedResponse>(
-            HttpMethod.Post,
-            route,
-            request,
-            InventoryContractSpec.Scopes.WriteAllocation,
-            ct);
-    }
-
-    public async Task<Result<BlockDamagedAssetsResponse>> BlockDamagedAssetsAsync(
-        string allocationGroupId,
-        BlockDamagedAssetsRequest request,
-        CancellationToken ct = default)
-    {
-        string route = InventoryContractSpec.Routes.BlockDamaged(allocationGroupId);
-        return await SendAsync<BlockDamagedAssetsRequest, BlockDamagedAssetsResponse>(
-            HttpMethod.Post,
-            route,
-            request,
-            InventoryContractSpec.Scopes.WriteAllocation,
-            ct);
-    }
-
     private async Task<Result<TResponse>> SendAsync<TRequest, TResponse>(
         HttpMethod method,
         string relativeRoute,
@@ -193,22 +84,15 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
         string scope,
         CancellationToken ct)
     {
-        // 1. Obtain token with audience & scope
-        var tokenResult = await _tokenProvider.GetServiceTokenAsync(InventoryAudience, scope, ct);
-        if (tokenResult.IsFailure)
-        {
-            _logger.LogError("Không thể lấy token cho InventoryService (Audience: {Audience}, Scope: {Scope}): {Error}",
-                InventoryAudience, scope, tokenResult.Error.Message);
-            return tokenResult.Error;
-        }
-
         string fullUrl = $"{_baseUrl}{relativeRoute}";
 
         try
         {
             using var httpRequest = new HttpRequestMessage(method, fullUrl);
-            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenResult.Value);
-
+            if (!string.IsNullOrWhiteSpace(_apiKey))
+            {
+                httpRequest.Headers.TryAddWithoutValidation("X-Api-Key", _apiKey);
+            }
             if (requestBody != null)
             {
                 string json = JsonSerializer.Serialize(requestBody, JsonOptions);
@@ -228,6 +112,11 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
                     return Result.Success(data);
                 }
                 return Error.Failure("INVENTORY_DESERIALIZATION_FAILED", "Không thể deserialize phản hồi từ InventoryService.");
+            }
+            if (httpResponse.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+            {
+                _logger.LogWarning("InventoryService authentication failed with status {StatusCode}", httpResponse.StatusCode);
+                return Error.ServiceUnavailable("INVENTORY_UNAVAILABLE", "Không thể xác thực hoặc kết nối tới InventoryService (503).");
             }
 
             string errorCode = $"Inventory.Http{(int)httpResponse.StatusCode}";

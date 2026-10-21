@@ -98,25 +98,13 @@ public sealed class OutboxRepository : IOutboxRepository
 
         if (_dbContext.Database.IsRelational())
         {
-            bool hasCallerTx = _dbContext.Database.CurrentTransaction != null;
-            if (hasCallerTx)
+            if (_dbContext.Database.CurrentTransaction is null)
             {
-                return await ExecuteInsertOnConflictAsync(message, cancellationToken);
+                return Error.Failure("OUTBOX_TRANSACTION_REQUIRED",
+                    "Outbox message must be enqueued inside the state mutation transaction.");
             }
-            else
-            {
-                await using var tx = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
-                var result = await ExecuteInsertOnConflictAsync(message, cancellationToken);
-                if (result.IsSuccess)
-                {
-                    await tx.CommitAsync(cancellationToken);
-                }
-                else
-                {
-                    await tx.RollbackAsync(cancellationToken);
-                }
-                return result;
-            }
+
+            return await ExecuteInsertOnConflictAsync(message, cancellationToken);
         }
         else
         {
@@ -273,23 +261,60 @@ public sealed class OutboxRepository : IOutboxRepository
         string errorMessage,
         DateTimeOffset attemptedAt,
         DateTimeOffset? nextScheduledAt = null,
+        string? targetStatus = null,
         CancellationToken cancellationToken = default)
     {
         if (_dbContext.Database.IsNpgsql())
         {
-            int rows = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
-                UPDATE rental.rental_outbox_messages
-                SET ""RetryCount"" = ""RetryCount"" + 1,
-                    ""Status"" = CASE WHEN ""RetryCount"" + 1 >= 10 THEN 'DeadLettered' ELSE 'Pending' END,
-                    ""ErrorMessage"" = {errorMessage},
-                    ""LastAttemptedAt"" = {attemptedAt},
-                    ""ScheduledAt"" = CASE WHEN ""RetryCount"" + 1 >= 10 THEN NULL ELSE {nextScheduledAt} END,
-                    ""LockedBy"" = NULL,
-                    ""LockedUntilUtc"" = NULL
-                WHERE ""Id"" = {id}
-                  AND ""Status"" = 'Pending'
-                  AND ""LockedBy"" = {claimToken}
-                  AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" > NOW())", cancellationToken);
+            int rows;
+            if (targetStatus == "DeadLettered")
+            {
+                rows = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+                    UPDATE rental.rental_outbox_messages
+                    SET ""RetryCount"" = ""RetryCount"" + 1,
+                        ""Status"" = 'DeadLettered',
+                        ""ErrorMessage"" = {errorMessage},
+                        ""LastAttemptedAt"" = {attemptedAt},
+                        ""ScheduledAt"" = NULL,
+                        ""LockedBy"" = NULL,
+                        ""LockedUntilUtc"" = NULL
+                    WHERE ""Id"" = {id}
+                      AND ""Status"" = 'Pending'
+                      AND ""LockedBy"" = {claimToken}
+                      AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" > NOW())", cancellationToken);
+            }
+            else if (targetStatus == "Pending")
+            {
+                rows = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+                    UPDATE rental.rental_outbox_messages
+                    SET ""RetryCount"" = ""RetryCount"" + 1,
+                        ""Status"" = 'Pending',
+                        ""ErrorMessage"" = {errorMessage},
+                        ""LastAttemptedAt"" = {attemptedAt},
+                        ""ScheduledAt"" = {nextScheduledAt},
+                        ""LockedBy"" = NULL,
+                        ""LockedUntilUtc"" = NULL
+                    WHERE ""Id"" = {id}
+                      AND ""Status"" = 'Pending'
+                      AND ""LockedBy"" = {claimToken}
+                      AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" > NOW())", cancellationToken);
+            }
+            else
+            {
+                rows = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+                    UPDATE rental.rental_outbox_messages
+                    SET ""RetryCount"" = ""RetryCount"" + 1,
+                        ""Status"" = CASE WHEN ""RetryCount"" + 1 >= 10 THEN 'DeadLettered' ELSE 'Pending' END,
+                        ""ErrorMessage"" = {errorMessage},
+                        ""LastAttemptedAt"" = {attemptedAt},
+                        ""ScheduledAt"" = CASE WHEN ""RetryCount"" + 1 >= 10 THEN NULL ELSE {nextScheduledAt} END,
+                        ""LockedBy"" = NULL,
+                        ""LockedUntilUtc"" = NULL
+                    WHERE ""Id"" = {id}
+                      AND ""Status"" = 'Pending'
+                      AND ""LockedBy"" = {claimToken}
+                      AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" > NOW())", cancellationToken);
+            }
 
             return rows == 1;
         }
@@ -304,7 +329,7 @@ public sealed class OutboxRepository : IOutboxRepository
                 return false;
             }
 
-            msg.RecordFailure(errorMessage, attemptedAt, nextScheduledAt);
+            msg.RecordFailure(errorMessage, attemptedAt, nextScheduledAt, targetStatus);
             await _dbContext.SaveChangesAsync(cancellationToken);
             return true;
         }
