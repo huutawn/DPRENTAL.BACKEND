@@ -150,6 +150,7 @@ namespace RentalService.Domain.Migrations
                     IsSuccess = table.Column<bool>(type: "boolean", nullable: false),
                     ErrorCode = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
                     ErrorMessage = table.Column<string>(type: "character varying(2000)", maxLength: 2000, nullable: true),
+                    InventoryOperationKey = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true),
                     CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>

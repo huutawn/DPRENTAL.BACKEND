@@ -61,8 +61,10 @@ public static class RentalOrderStatusPolicy
         {
             // Candidate là terminal: Cancelled, Expired, Rejected
             // Từ Paid có thể sang Cancelled, Expired, Rejected khi không còn active item
-            // Từ AwaitingHandover / InRental / PendingSettlement chỉ có thể sang Cancelled (hủy toàn bộ)
-            if (candidate.Value is RentalOrderStatus.Expired or RentalOrderStatus.Rejected && order.Status != RentalOrderStatus.Paid)
+            // Expired cũng hợp lệ khi mọi item AwaitingHandover đều quá hạn giao; Rejected chỉ từ Paid.
+            if ((candidate.Value == RentalOrderStatus.Rejected && order.Status != RentalOrderStatus.Paid) ||
+                (candidate.Value == RentalOrderStatus.Expired &&
+                 order.Status is not (RentalOrderStatus.Paid or RentalOrderStatus.AwaitingHandover)))
             {
                 return false;
             }

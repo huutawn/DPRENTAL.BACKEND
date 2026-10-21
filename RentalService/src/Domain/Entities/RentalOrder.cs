@@ -561,6 +561,19 @@ public class RentalOrder
         return Result.Success();
     }
 
+    internal void RecordPaymentReceived(string invoiceRef, string paymentRef, DateTimeOffset paidAt, DateTimeOffset utcNow)
+    {
+        InvoiceRef = invoiceRef;
+        PaymentRef = paymentRef;
+        PaymentConfirmedAt = paidAt;
+        UpdatedAt = utcNow;
+    }
+
+    internal void ClearLatePaymentFlag()
+    {
+        LatePaymentRefundRequired = false;
+    }
+
     internal void MarkAsLatePayment(string invoiceRef, string paymentRef, DateTimeOffset paidAt, DateTimeOffset utcNow)
     {
         LatePaymentRefundRequired = true;
@@ -653,14 +666,19 @@ public class RentalOrder
             operationId));
     }
 
-    internal void MarkCancelled(DateTimeOffset utcNow, string operationId, string reason = "Order cancelled")
+    internal void MarkCancelled(
+        DateTimeOffset utcNow,
+        string operationId,
+        string reason = "Order cancelled",
+        Guid? actorId = null,
+        ActorRole actorRole = ActorRole.System)
     {
         string from = Status.ToString();
         Status = RentalOrderStatus.Cancelled;
         UpdatedAt = utcNow;
         foreach (var item in _items)
         {
-            item.ApplyHoldExpired(utcNow, operationId, reason);
+            item.ApplyCancelled(utcNow, operationId, reason, actorId, actorRole);
         }
 
         AddStateTransition(new RentalStateTransition(
@@ -670,8 +688,8 @@ public class RentalOrder
             from,
             RentalOrderStatus.Cancelled.ToString(),
             "CancelOrder",
-            null,
-            ActorRole.System,
+            actorId,
+            actorRole,
             reason,
             utcNow,
             operationId));

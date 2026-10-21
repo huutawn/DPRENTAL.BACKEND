@@ -78,11 +78,11 @@ internal sealed class InventoryReplySimulator(
     }
 
     /// <summary>Inventory thực hiện xong lệnh. Với CreateHold, <paramref name="allocations"/> là các máy được gán.</summary>
-    public Task<Result> SucceedAsync(InventoryCommand command, IReadOnlyList<AllocationAssetMappingPayload>? allocations = null) =>
+    public Task<Result> SucceedAsync(InventoryCommand command, IReadOnlyList<AllocationAssetMappingPayload>? allocations = null, string? allocationGroupId = null) =>
         ReplyAsync(command, KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded,
             new InventoryAllocationCommandSucceededPayload(
                 command.RentalOrderId, command.RentalItemId, command.OperationKey, command.CommandType,
-                "Succeeded", Allocations: allocations, OccurredAt: clock.GetUtcNow()));
+                "Succeeded", Allocations: allocations, OccurredAt: clock.GetUtcNow(), AllocationGroupId: allocationGroupId));
 
     public Task<Result> RejectAsync(InventoryCommand command, string errorCode, string errorMessage) =>
         ReplyAsync(command, KafkaContractSpec.EventTypes.InventoryAllocationCommandRejected,
@@ -198,7 +198,8 @@ internal sealed class InventoryReplySimulator(
                 orderCodes?.Invoke(context) ?? _defaultOrderCodes,
                 NullLogger<CheckoutOrderWriter>.Instance),
             NullLogger<InventoryAllocationResultHandler>.Instance,
-            new RentalEventProducer(new KafkaOutboxWriter(outbox), options, clock));
+            new RentalEventProducer(new KafkaOutboxWriter(outbox), options, clock),
+            paymentClient: payment);
 
         return new PaymentEventsDispatcher(
             new InboxRepository(context),

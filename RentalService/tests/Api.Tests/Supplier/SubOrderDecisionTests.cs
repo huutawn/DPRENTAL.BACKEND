@@ -92,7 +92,7 @@ public sealed class SubOrderDecisionTests
         Assert.Equal(RentalItemStatus.AwaitingHandover, items.Single(i => i.Id == confirms[0].RentalItemId).Status);
         Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, items.Single(i => i.Id == confirms[1].RentalItemId).Status);
         await using RentalServiceDbContext context = NewContext();
-        RentalOperationReceipt rejected = await context.RentalOperationReceipts.SingleAsync(r => r.OperationId == confirms[1].OperationKey);
+        RentalOperationReceipt rejected = await context.RentalOperationReceipts.SingleAsync(r => r.OperationId == confirms[1].OperationKey || r.InventoryOperationKey == confirms[1].OperationKey);
         Assert.Equal(RentalOperationReceipt.StatusFailed, rejected.Status);
         Assert.Equal("ALLOCATION_NOT_HELD", rejected.ErrorCode);
     }

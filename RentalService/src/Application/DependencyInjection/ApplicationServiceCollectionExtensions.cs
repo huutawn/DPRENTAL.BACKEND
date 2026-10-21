@@ -2,6 +2,7 @@ using Dprental.RentalService.Application.Background;
 using Dprental.RentalService.Application.Kafka.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.IServices.Addresses;
 using Dprental.RentalService.Application.IServices.Calendar;
 using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.IServices.Expiry;
@@ -17,6 +18,7 @@ using Dprental.RentalService.Application.Observability;
 using Dprental.RentalService.Application.Options;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
+using Dprental.RentalService.Application.Services.Addresses;
 using Dprental.RentalService.Application.Services.Calendar;
 using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Application.Services.Checkout;
@@ -70,6 +72,7 @@ public static class ApplicationServiceCollectionExtensions
 
         // Orders
         services.AddScoped<IRenterOrderQueryService, RenterOrderQueryService>();
+        services.AddScoped<IRenterOrderCancellationService, RenterOrderCancellationService>();
         services.AddScoped<ISupplierSubOrderQueryService, SupplierSubOrderQueryService>();
         services.AddScoped<IAdminOrderQueryService, AdminOrderQueryService>();
 
@@ -78,6 +81,9 @@ public static class ApplicationServiceCollectionExtensions
 
         // Calendar
         services.AddScoped<IRentalCalendarService, RentalCalendarService>();
+
+        // Addresses
+        services.AddScoped<IRenterAddressService, RenterAddressService>();
 
         // Operations
         services.AddScoped<IRentalOperationExecutor, RentalOperationExecutor>();
@@ -120,7 +126,10 @@ public static class ApplicationServiceCollectionExtensions
 
         // Handover Overdue & Auto-Cancellation
         services.AddOptions<HandoverOverdueOptions>()
-            .BindConfiguration(HandoverOverdueOptions.SectionName);
+            .BindConfiguration(HandoverOverdueOptions.SectionName)
+            .Validate(o => o.AutoExpireGraceHours is >= 1 and <= 168,
+                "Rental:HandoverOverdue:AutoExpireGraceHours must be between 1 and 168.")
+            .ValidateOnStart();
         services.AddScoped<IHandoverOverdueService, HandoverOverdueService>();
         services.AddHostedService<HandoverOverdueWorker>();
 

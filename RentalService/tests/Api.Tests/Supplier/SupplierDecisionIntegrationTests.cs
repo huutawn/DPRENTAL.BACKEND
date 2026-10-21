@@ -164,7 +164,6 @@ public sealed class SupplierDecisionIntegrationTests
                 : Task.FromResult(Result.Success(new ReleaseAllocationResponse("REC-REL", request.OperationKey, allocationGroupId, FixedNow, false)));
 
         public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) => throw new NotImplementedException();
@@ -378,7 +377,7 @@ public sealed class SupplierDecisionIntegrationTests
         // Trạng thái phải giữ nguyên PendingSupplierConfirmation, phiếu nhận ghi lỗi của Inventory.
         await using var verify = CreateDbContext(dbName);
         Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, (await verify.RentalItems.FirstAsync(i => i.Id == item.Id)).Status);
-        RentalOperationReceipt receipt = await verify.RentalOperationReceipts.SingleAsync(r => r.OperationId == confirm.OperationKey);
+        RentalOperationReceipt receipt = await verify.RentalOperationReceipts.SingleAsync(r => r.OperationId == confirm.OperationKey || r.InventoryOperationKey == confirm.OperationKey);
         Assert.Equal(RentalOperationReceipt.StatusFailed, receipt.Status);
         Assert.Equal("INVALID_ALLOCATION", receipt.ErrorCode);
         Assert.False(await verify.RentalOutboxMessages.AnyAsync(m => m.MessageType == "RentalItemConfirmed"));

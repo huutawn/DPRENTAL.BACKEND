@@ -64,6 +64,20 @@ public sealed class HttpPaymentRentalClient : IPaymentRentalClient
             ct);
     }
 
+    public async Task<Result<AcceptLatePaymentResponse>> AcceptLatePaymentAsync(
+        string invoiceRef,
+        AcceptLatePaymentRequest request,
+        CancellationToken ct = default)
+    {
+        string route = PaymentContractSpec.ProposedRoutes.AcceptLatePayment(invoiceRef);
+        return await SendJsonAsync<AcceptLatePaymentRequest, AcceptLatePaymentResponse>(
+            HttpMethod.Post,
+            route,
+            request,
+            PaymentContractSpec.ProposedScopes.WriteInvoice,
+            ct);
+    }
+
     public async Task<Result<RequestRefundResponse>> RequestRefundAsync(
         RequestRefundRequest request,
         CancellationToken ct = default)

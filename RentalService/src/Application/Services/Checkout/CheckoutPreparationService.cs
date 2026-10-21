@@ -88,31 +88,46 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             return CheckoutPreparationResult.PendingOrder(pendingOrder.OrderCode);
         }
 
-        RentalCart? cart = await _carts.GetByRenterIdAsync(renter.RenterId, cancellationToken);
-        if (cart is null || cart.RenterId != renter.RenterId)
+        Guid? cartId = null;
+        List<CheckoutSelection> selections;
+        if (request.BuyNow is { } buyNow)
         {
-            return CheckoutPreparationResult.Failure(RentalErrors.CartNotFound);
+            // Thuê ngay: một dòng dựng từ body, không đọc giỏ. Mã dòng mới sinh, không thuộc giỏ nào.
+            selections =
+            [
+                new(Guid.NewGuid(), buyNow.EquipmentListingId, buyNow.Quantity,
+            buyNow.ExpectedStartDate, buyNow.ExpectedEndDate)
+            ];
         }
-
-        if (cart.Status != RentalCartStatus.Active)
+        else
         {
-            return CheckoutPreparationResult.Failure(RentalErrors.CartNotActive);
-        }
-
-        List<RentalCartItem> selectedItems = [];
-        foreach (Guid cartItemId in request.CartItemIds!)
-        {
-            RentalCartItem? item = cart.Items.FirstOrDefault(i => i.Id == cartItemId);
-            if (item is null)
+            RentalCart? cart = await _carts.GetByRenterIdAsync(renter.RenterId, cancellationToken);
+            if (cart is null || cart.RenterId != renter.RenterId)
             {
-                return CheckoutPreparationResult.Failure(RentalErrors.CartItemNotFound);
+                return CheckoutPreparationResult.Failure(RentalErrors.CartNotFound);
             }
 
-            selectedItems.Add(item);
+            if (cart.Status != RentalCartStatus.Active)
+            {
+                return CheckoutPreparationResult.Failure(RentalErrors.CartNotActive);
+            }
+
+            cartId = cart.Id;
+            selections = [];
+            foreach (Guid cartItemId in request.CartItemIds!)
+            {
+                RentalCartItem? item = cart.Items.FirstOrDefault(i => i.Id == cartItemId);
+                if (item is null)
+                {
+                    return CheckoutPreparationResult.Failure(RentalErrors.CartItemNotFound);
+                }
+
+                selections.Add(new(item.Id, item.EquipmentListingId, item.Quantity, item.ExpectedStartDate, item.ExpectedEndDate));
+            }
         }
 
         DateOnly today = RentalInventoryDateAdapter.ToBusinessDate(utcNow);
-        List<CheckoutLineIssue> dateIssues = selectedItems
+        List<CheckoutLineIssue> dateIssues = selections
             .Select(i => CheckoutRules.CheckRentalPeriod(i, today))
             .OfType<CheckoutLineIssue>()
             .ToList();
@@ -121,7 +136,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             return CheckoutPreparationResult.LinesRejected(CheckoutErrors.InvalidRentalDates, dateIssues);
         }
 
-        LineBuildOutcome outcome = await BuildLinesAsync(renter.RenterId, selectedItems, cancellationToken);
+        LineBuildOutcome outcome = await BuildLinesAsync(renter.RenterId, selections, cancellationToken);
         if (outcome.DependencyFailed)
         {
             return CheckoutPreparationResult.Failure(CheckoutErrors.DependencyUnavailable);
@@ -134,7 +149,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 
         CheckoutPlan plan = new(
             renter.RenterId,
-            cart.Id,
+            cartId,
             Normalize(request.Delivery!),
             Normalize(request.RefundAccount!),
             _terms.CurrentVersion.Trim(),
@@ -154,7 +169,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     /// </summary>
     private async Task<LineBuildOutcome> BuildLinesAsync(
         Guid renterId,
-        List<RentalCartItem> items,
+        List<CheckoutSelection> items,
         CancellationToken cancellationToken)
     {
         // 1. Một lần gọi cho mọi Listing của các dòng đã chọn.
@@ -168,19 +183,19 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         }
 
         List<CheckoutLineIssue> issues = [];
-        List<(RentalCartItem Item, ListingRentalSnapshotDto Listing, DateOnly From, DateOnly To)> candidates = [];
-        foreach (RentalCartItem item in items)
+        List<(CheckoutSelection Item, ListingRentalSnapshotDto Listing, DateOnly From, DateOnly To)> candidates = [];
+        foreach (CheckoutSelection item in items)
         {
             if (!listings.TryGetValue(item.EquipmentListingId, out ListingRentalSnapshotDto? listing) || !IsRentable(listing))
             {
-                issues.Add(new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.ListingUnavailable,
+                issues.Add(new(item.LineId, item.EquipmentListingId, CheckoutLineIssueCode.ListingUnavailable,
                     "Thiết bị không còn cho thuê."));
                 continue;
             }
 
             if (listing.OwnerUserId == renterId)
             {
-                issues.Add(new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.OwnListing,
+                issues.Add(new(item.LineId, item.EquipmentListingId, CheckoutLineIssueCode.OwnListing,
                     "Bạn không thể thuê thiết bị của chính mình."));
                 continue;
             }
@@ -205,7 +220,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             if (result.IsFailure && result.Error.Type == ErrorType.NotFound)
             {
                 // Listing vừa bị xóa giữa hai lần gọi.
-                issues.Add(new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.ListingUnavailable,
+                issues.Add(new(item.LineId, item.EquipmentListingId, CheckoutLineIssueCode.ListingUnavailable,
                     "Thiết bị không còn cho thuê."));
                 continue;
             }
@@ -219,7 +234,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             ListingAvailabilityCheckResponse lineAvailability = result.Value;
             if (!lineAvailability.IsAvailable || lineAvailability.AvailableQuantity < item.Quantity)
             {
-                issues.Add(new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.InsufficientAvailability,
+                issues.Add(new(item.LineId, item.EquipmentListingId, CheckoutLineIssueCode.InsufficientAvailability,
                     "Thiết bị không đủ số lượng trống trong ngày đã chọn.", item.Quantity, lineAvailability.AvailableQuantity));
                 continue;
             }
@@ -227,7 +242,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             lines.Add(BuildLine(item, orderStartDate, orderEndDate, listing));
         }
 
-        Dictionary<Guid, int> cartOrder = items.Select((item, index) => (item.Id, index)).ToDictionary(x => x.Id, x => x.index);
+        Dictionary<Guid, int> cartOrder = items.Select((item, index) => (item.LineId, index)).ToDictionary(x => x.LineId, x => x.index);
         return new(false, lines, issues.OrderBy(i => cartOrder[i.CartItemId]).ToList());
     }
 
@@ -263,7 +278,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     }
 
     private static CheckoutPlanLine BuildLine(
-        RentalCartItem item,
+        CheckoutSelection item,
         DateOnly orderStartDate,
         DateOnly orderEndDate,
         ListingRentalSnapshotDto listing)
@@ -294,7 +309,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         }
 
         return new(
-            item.Id,
+            item.LineId,
             item.EquipmentListingId,
             listing.OwnerUserId,
             item.Quantity,
@@ -318,7 +333,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             pickupLocationSnapshot);
     }
 
-    private static bool MatchesLine(ListingAvailabilityCheckResponse response, RentalCartItem item) =>
+    private static bool MatchesLine(ListingAvailabilityCheckResponse response, CheckoutSelection item) =>
         response is not null &&
         response.ListingId == item.EquipmentListingId &&
         response.StartDate == item.ExpectedStartDate &&

@@ -117,124 +117,34 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             return Error.Conflict("PAYMENT_REF_CONFLICT", "Đơn hàng đã được thanh toán với mã tham chiếu thanh toán khác.");
         }
 
-        // Lifecycle branching: late if terminal or bank transfer paidAt >= deadline
+        // 1. Actively cancelled order
+        if (order.Status == RentalOrderStatus.Cancelled)
+        {
+            _logger.LogWarning("Payment arrived for cancelled Order {OrderId}. Staging full refund.", order.Id);
+            order.MarkAsLatePayment(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
+            await StageFullRefundAndReleaseAsync(order, payload, utcNow, cancellationToken);
+            return Result.Success(true);
+        }
+
+        // 2. Calculate recovery cutoff
+        DateTimeOffset paymentCutoff = order.PaymentDeadline.AddMinutes(15);
+        DateTimeOffset supplierCutoff = order.Items
+            .Where(i => i.SupplierConfirmationDeadline.HasValue)
+            .Select(i => i.SupplierConfirmationDeadline!.Value)
+            .DefaultIfEmpty(paymentCutoff)
+            .Min();
+        DateTimeOffset startOfDayCutoff = order.Items
+            .Select(i => Clients.RentalInventoryDateAdapter.GetStartOfDayUtc(i.ExpectedStartDate))
+            .Min();
+        DateTimeOffset cutoff = paymentCutoff < supplierCutoff ? paymentCutoff : supplierCutoff;
+        cutoff = cutoff < startOfDayCutoff ? cutoff : startOfDayCutoff;
+
+        // 3. Determine if hold is still active
         bool isLatePayment = string.Equals(payload.PaymentDisposition, "LATE_REQUIRES_REFUND", StringComparison.OrdinalIgnoreCase) ||
-                             order.Status is RentalOrderStatus.Expired or RentalOrderStatus.Cancelled ||
+                             order.Status == RentalOrderStatus.Expired ||
                              payload.PaidAt >= order.PaymentDeadline;
 
-        if (isLatePayment)
-        {
-            _logger.LogWarning("Payment arrived late for Order {OrderId} (Status: {Status}, Deadline: {Deadline}, PaidAt: {PaidAt}). Staging late-payment cleanup and refund.",
-                order.Id, order.Status, order.PaymentDeadline, payload.PaidAt);
-
-            order.MarkAsLatePayment(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
-
-            foreach (var item in order.Items)
-            {
-                string releaseOpKey = RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
-                var existingRelease = order.OperationReceipts.FirstOrDefault(r => r.OperationId == releaseOpKey);
-                if (existingRelease == null)
-                {
-                    var releaseReq = new ReleaseAllocationRequest(releaseOpKey, "Late payment arrived after deadline; releasing allocation");
-                    var releaseCmd = new RentalOperationCommand(
-                        1,
-                        "ReleaseAllocation",
-                        order.Id,
-                        item.Id,
-                        releaseOpKey,
-                        item.AllocationGroupId,
-                        null,
-                        JsonSerializer.Serialize(releaseReq, JsonOptions));
-
-                    var releaseReceipt = RentalOperationReceipt.CreatePending(
-                        Guid.NewGuid(),
-                        order.Id,
-                        releaseOpKey,
-                        "ReleaseAllocation",
-                        RentalOperationExecutor.ComputeFingerprint($"ReleaseAllocation:{item.AllocationGroupId}"),
-                        utcNow,
-                        item.Id,
-                        JsonSerializer.Serialize(releaseCmd, JsonOptions));
-
-                    order.AddOperationReceipt(releaseReceipt);
-
-                    var releaseCmdPayload = new ReleaseAllocationCommandPayload(
-                        order.Id,
-                        item.Id,
-                        releaseOpKey,
-                        "Late payment arrived after deadline; releasing allocation");
-                    if (_inventoryCommands != null)
-                    {
-                        await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmdPayload, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
-                    }
-                }
-
-                string refundKey = RentalOperationExecutor.ComputeOperationKey("RequestRefund", $"{order.Id}:{item.Id}");
-                var existingRefund = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundKey);
-                if (existingRefund == null)
-                {
-                    var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
-                    var refundReq = new RequestRefundRequest(order.Id, payload.InvoiceRef, payload.PaymentRef, refundItems, "Late payment arrived on terminal/expired order; 100% refund", refundKey);
-                    var refundCmd = new RentalOperationCommand(
-                        1,
-                        "RequestRefund",
-                        order.Id,
-                        item.Id,
-                        refundKey,
-                        null,
-                        null,
-                        JsonSerializer.Serialize(refundReq, JsonOptions));
-
-                    var refundReceipt = new RentalOperationReceipt(
-                        Guid.NewGuid(),
-                        order.Id,
-                        refundKey,
-                        "RequestRefund",
-                        RentalOperationExecutor.ComputeFingerprint($"RequestRefund:{order.Id}:{item.RentalAmount + item.DepositAmount}"),
-                        isSuccess: false,
-                        errorCode: null,
-                        errorMessage: null,
-                        createdAt: utcNow,
-                        status: RentalOperationReceipt.StatusPending,
-                        targetItemId: item.Id,
-                        prerequisiteOperationId: releaseOpKey,
-                        payloadJson: JsonSerializer.Serialize(refundCmd, JsonOptions));
-
-                    order.AddOperationReceipt(refundReceipt);
-                }
-            }
-
-            var outboxEnvelope = new KafkaMessageEnvelope<LatePaymentRefundRequestedPayload>(
-                OutboxMessageIdGenerator.ComputeDeterministicId(
-                    KafkaContractSpec.Producers.RentalService,
-                    KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
-                    $"{order.Id:D}:{payload.PaymentRef}"),
-                KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
-                1,
-                KafkaContractSpec.Producers.RentalService,
-                order.Id.ToString("D"),
-                utcNow,
-                envelope.CorrelationId,
-                envelope.MessageId,
-                new LatePaymentRefundRequestedPayload(
-                    order.Id,
-                    order.RenterId,
-                    payload.InvoiceRef,
-                    payload.PaymentRef,
-                    order.TotalPayableAmount,
-                    utcNow));
-
-            var outboxMessage = new RentalOutboxMessage(
-                outboxEnvelope.MessageId,
-                _rentalEventsTopic,
-                order.Id.ToString("D"),
-                KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
-                JsonSerializer.Serialize(outboxEnvelope, JsonOptions),
-                utcNow);
-
-            await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
-        }
-        else
+        if (!isLatePayment)
         {
             var markResult = order.MarkAsPaid(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
             if (markResult.IsFailure) return markResult.Error;
@@ -255,7 +165,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
 
                 var enqueueResult = await _rentalEventProducer.EnqueueRentalItemPaidAsync(
                     new RentalItemPaidPayload(order.RenterId, item.EquipmentListingId,
-                        item.EquipmentTypeId.Value, order.Id, item.Id, item.Quantity, payload.PaidAt),
+                        item.EquipmentTypeId, order.Id, item.Id),
                     correlationId: envelope.CorrelationId,
                     causationId: envelope.MessageId,
                     cancellationToken: cancellationToken);
@@ -265,7 +175,6 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                 var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
                 if (existingReceipt == null)
                 {
-                    // Hold sống thêm một khoảng sau hạn xác nhận để worker chốt nốt đơn con supplier đã bấm nhận trước hạn.
                     DateTimeOffset newHoldExpiresAt = item.SupplierConfirmationDeadline is DateTimeOffset deadline
                         ? RentalItem.CalculateConfirmationHoldExpiry(deadline, item.ExpectedStartDate)
                         : payload.PaidAt.AddHours(24);
@@ -296,7 +205,8 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                         order.Id,
                         item.Id,
                         opKey,
-                        newHoldExpiresAt);
+                        newHoldExpiresAt,
+                        item.AllocationGroupId);
                     if (_inventoryCommands != null)
                     {
                         await _inventoryCommands.EnqueueExtendHoldAsync(extendCmdPayload, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
@@ -304,8 +214,177 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                 }
             }
         }
+        else
+        {
+            if (utcNow >= cutoff)
+            {
+                _logger.LogWarning("Payment arrived after recovery cutoff for Order {OrderId}. Cannot recover. Staging full refund.", order.Id);
+                order.MarkAsLatePayment(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
+                await StageFullRefundAndReleaseAsync(order, payload, utcNow, cancellationToken);
+                return Result.Success(true);
+            }
+
+            _logger.LogInformation("Payment arrived late/hold expired for Order {OrderId}. Initiating recovery re-allocation before cutoff {Cutoff}.", order.Id, cutoff);
+            order.RecordPaymentReceived(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
+
+            foreach (var item in order.Items)
+            {
+                string recGroupId = $"rental-item:{item.Id}:rec-1";
+                string recOpKey = RentalOperationExecutor.ComputeOperationKey("RecoveryHold", $"{order.Id}:{item.Id}");
+                var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == recOpKey);
+                if (existingReceipt == null)
+                {
+                    DateTimeOffset holdExpiry = item.SupplierConfirmationDeadline is DateTimeOffset deadline
+                        ? RentalItem.CalculateConfirmationHoldExpiry(deadline, item.ExpectedStartDate)
+                        : cutoff;
+
+                    var createHoldReq = new CreateHoldCommandPayload(
+                        order.Id,
+                        item.Id,
+                        recOpKey,
+                        item.EquipmentListingId,
+                        item.Quantity,
+                        item.ExpectedStartDate,
+                        item.ExpectedEndDate,
+                        holdExpiry,
+                        Notes: "Recovery hold after payment",
+                        AllocationGroupId: recGroupId,
+                        ExecutionCutoffUtc: cutoff);
+
+                    var receipt = RentalOperationReceipt.CreatePending(
+                        Guid.NewGuid(),
+                        order.Id,
+                        recOpKey,
+                        "RecoveryHold",
+                        RentalOperationExecutor.ComputeFingerprint($"RecoveryHold:{recGroupId}"),
+                        utcNow,
+                        item.Id,
+                        JsonSerializer.Serialize(createHoldReq, JsonOptions));
+
+                    order.AddOperationReceipt(receipt);
+
+                    if (_inventoryCommands != null)
+                    {
+                        await _inventoryCommands.EnqueueCreateHoldAsync(createHoldReq, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
+                    }
+                }
+            }
+        }
 
         return Result.Success(true);
+    }
+
+    private async Task StageFullRefundAndReleaseAsync(
+        RentalOrder order,
+        InvoicePaidPayload payload,
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken)
+    {
+        foreach (var item in order.Items)
+        {
+            string releaseOpKey = RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
+            var existingRelease = order.OperationReceipts.FirstOrDefault(r => r.OperationId == releaseOpKey);
+            if (existingRelease == null)
+            {
+                var releaseReq = new ReleaseAllocationRequest(releaseOpKey, "Late payment arrived after deadline; releasing allocation");
+                var releaseCmd = new RentalOperationCommand(
+                    1,
+                    "ReleaseAllocation",
+                    order.Id,
+                    item.Id,
+                    releaseOpKey,
+                    item.AllocationGroupId,
+                    null,
+                    JsonSerializer.Serialize(releaseReq, JsonOptions));
+
+                var releaseReceipt = RentalOperationReceipt.CreatePending(
+                    Guid.NewGuid(),
+                    order.Id,
+                    releaseOpKey,
+                    "ReleaseAllocation",
+                    RentalOperationExecutor.ComputeFingerprint($"ReleaseAllocation:{item.AllocationGroupId}"),
+                    utcNow,
+                    item.Id,
+                    JsonSerializer.Serialize(releaseCmd, JsonOptions));
+
+                order.AddOperationReceipt(releaseReceipt);
+
+                var releaseCmdPayload = new ReleaseAllocationCommandPayload(
+                    order.Id,
+                    item.Id,
+                    releaseOpKey,
+                    "Late payment arrived after deadline; releasing allocation",
+                    item.AllocationGroupId);
+                if (_inventoryCommands != null)
+                {
+                    await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmdPayload, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
+                }
+            }
+
+            string refundKey = RentalOperationExecutor.ComputeOperationKey("RequestRefund", $"{order.Id}:{item.Id}");
+            var existingRefund = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundKey);
+            if (existingRefund == null)
+            {
+                var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
+                var refundReq = new RequestRefundRequest(order.Id, payload.InvoiceRef, payload.PaymentRef, refundItems, "Late payment arrived on terminal/expired order; 100% refund", refundKey);
+                var refundCmd = new RentalOperationCommand(
+                    1,
+                    "RequestRefund",
+                    order.Id,
+                    item.Id,
+                    refundKey,
+                    null,
+                    null,
+                    JsonSerializer.Serialize(refundReq, JsonOptions));
+
+                var refundReceipt = new RentalOperationReceipt(
+                    Guid.NewGuid(),
+                    order.Id,
+                    refundKey,
+                    "RequestRefund",
+                    RentalOperationExecutor.ComputeFingerprint($"RequestRefund:{order.Id}:{item.RentalAmount + item.DepositAmount}"),
+                    isSuccess: false,
+                    errorCode: null,
+                    errorMessage: null,
+                    createdAt: utcNow,
+                    status: RentalOperationReceipt.StatusPending,
+                    targetItemId: item.Id,
+                    prerequisiteOperationId: releaseOpKey,
+                    payloadJson: JsonSerializer.Serialize(refundCmd, JsonOptions));
+
+                order.AddOperationReceipt(refundReceipt);
+            }
+        }
+
+        var outboxEnvelope = new KafkaMessageEnvelope<LatePaymentRefundRequestedPayload>(
+            OutboxMessageIdGenerator.ComputeDeterministicId(
+                KafkaContractSpec.Producers.RentalService,
+                KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
+                $"{order.Id:D}:{payload.PaymentRef}"),
+            KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
+            1,
+            KafkaContractSpec.Producers.RentalService,
+            order.Id.ToString("D"),
+            utcNow,
+            order.Id.ToString("D"),
+            null,
+            new LatePaymentRefundRequestedPayload(
+                order.Id,
+                order.RenterId,
+                payload.InvoiceRef,
+                payload.PaymentRef,
+                order.TotalPayableAmount,
+                utcNow));
+
+        var outboxMessage = new RentalOutboxMessage(
+            outboxEnvelope.MessageId,
+            _rentalEventsTopic,
+            order.Id.ToString("D"),
+            KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
+            JsonSerializer.Serialize(outboxEnvelope, JsonOptions),
+            utcNow);
+
+        await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
     }
 
     public async Task<Result> ProcessInvoicePaidAsync(

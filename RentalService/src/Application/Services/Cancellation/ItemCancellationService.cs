@@ -6,6 +6,7 @@ using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.Kafka.Producers;
+using Dprental.RentalService.Application.Options;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Operations;
@@ -15,6 +16,7 @@ using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Services.Cancellation;
 
@@ -33,6 +35,7 @@ public sealed class ItemCancellationService : IItemCancellationService
     private readonly IUnitOfWork _unitOfWork;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ItemCancellationService> _logger;
+    private readonly int _autoExpireGraceHours;
 
     public ItemCancellationService(
         IRentalOrderRepository orderRepository,
@@ -41,7 +44,8 @@ public sealed class ItemCancellationService : IItemCancellationService
         IOutboxRepository outboxRepository,
         IUnitOfWork unitOfWork,
         TimeProvider? timeProvider = null,
-        ILogger<ItemCancellationService>? logger = null)
+        ILogger<ItemCancellationService>? logger = null,
+        IOptions<HandoverOverdueOptions>? handoverOptions = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _lockManager = lockManager ?? throw new ArgumentNullException(nameof(lockManager));
@@ -50,6 +54,7 @@ public sealed class ItemCancellationService : IItemCancellationService
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ItemCancellationService>.Instance;
+        _autoExpireGraceHours = (handoverOptions?.Value ?? new HandoverOverdueOptions()).AutoExpireGraceHours;
     }
 
     public async Task<Result<CancelNotDeliveredResponse>> CancelByRenterAsync(
@@ -145,7 +150,7 @@ public sealed class ItemCancellationService : IItemCancellationService
         }
 
         // 8. Chưa qua mốc quá hạn giao -> 409 CANCEL_TOO_EARLY
-        if (!item.IsHandoverOverdue(utcNow))
+        if (!HandoverDeadlinePolicy.IsNoticeDue(item, utcNow))
         {
             return RentalErrors.CancelTooEarly;
         }
@@ -230,7 +235,7 @@ public sealed class ItemCancellationService : IItemCancellationService
         return response;
     }
 
-    public async Task<Result<CancelNotDeliveredResponse>> CancelBySystemAsync(
+    public async Task<Result<bool>> ExpireNoHandoverAsync(
         Guid itemId,
         string reason,
         string operationKey,
@@ -263,48 +268,28 @@ public sealed class ItemCancellationService : IItemCancellationService
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         string normalizedKey = operationKey.Trim();
-        string fingerprint = RentalOperationExecutor.ComputeFingerprint(new
-        {
-            Action = RentalItem.CancelNotDeliveredAction,
-            ItemId = item.Id,
-            Role = ActorRole.System.ToString()
-        });
+        const string action = "HandoverDeadlineExpired";
+        string fingerprint = RentalOperationExecutor.ComputeFingerprint(new { Action = action, ItemId = item.Id });
 
         var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == normalizedKey);
         if (existingReceipt != null)
         {
-            if (existingReceipt.Fingerprint == fingerprint)
-            {
-                if (!string.IsNullOrEmpty(existingReceipt.ApiResponseJson))
-                {
-                    var cached = JsonSerializer.Deserialize<CancelNotDeliveredResponse>(existingReceipt.ApiResponseJson, JsonOptions);
-                    if (cached != null) return cached;
-                }
-                return new CancelNotDeliveredResponse(item.Id, item.Status.ToString(), existingReceipt.CreatedAt, item.RentalAmount + item.DepositAmount);
-            }
+            if (existingReceipt.Action == action && existingReceipt.Fingerprint == fingerprint &&
+                existingReceipt.IsSuccess && existingReceipt.Status == RentalOperationReceipt.StatusSucceeded)
+                return false;
             return Error.Conflict("IDEMPOTENCY_CONFLICT", "Khóa thao tác đã được dùng với nội dung khác.");
         }
 
-        if (item.Status == RentalItemStatus.Cancelled)
-        {
-            var cancelReceipt = order.OperationReceipts
-                .Where(r => r.TargetItemId == item.Id && r.Action == RentalItem.CancelNotDeliveredAction && r.Status == RentalOperationReceipt.StatusSucceeded)
-                .OrderByDescending(r => r.CreatedAt)
-                .FirstOrDefault();
-
-            DateTimeOffset cancelledAt = cancelReceipt?.CreatedAt ?? utcNow;
-            if (cancelReceipt != null && !string.IsNullOrEmpty(cancelReceipt.ApiResponseJson))
-            {
-                var cached = JsonSerializer.Deserialize<CancelNotDeliveredResponse>(cancelReceipt.ApiResponseJson, JsonOptions);
-                if (cached != null) return cached;
-            }
-            return new CancelNotDeliveredResponse(item.Id, RentalItemStatus.Cancelled.ToString(), cancelledAt, item.RentalAmount + item.DepositAmount);
-        }
+        if (item.Status is RentalItemStatus.Expired or RentalItemStatus.Cancelled)
+            return false;
 
         if (item.Status != RentalItemStatus.AwaitingHandover)
         {
             return RentalErrors.OrderCancellationForbidden;
         }
+
+        if (!HandoverDeadlinePolicy.IsAutoExpireDue(item, utcNow, _autoExpireGraceHours))
+            return Error.Conflict("HANDOVER_DEADLINE_NOT_REACHED", "Chưa đến hạn hệ thống kết thúc mục thuê chưa bàn giao.");
 
         bool handoverInProgress = order.OperationReceipts.Any(r =>
             r.TargetItemId == item.Id &&
@@ -316,27 +301,23 @@ public sealed class ItemCancellationService : IItemCancellationService
             return RentalErrors.HandoverInProgress;
         }
 
-        Guid actorId = Guid.Empty;
-        var cancelResult = item.ApplyNotDeliveredCancellation(actorId, ActorRole.System, utcNow, reason, normalizedKey);
-        if (cancelResult.IsFailure)
-        {
-            return cancelResult.Error;
-        }
+        const string transitionAction = "HandoverDeadlineExpired";
+        item.SetStatus(RentalItemStatus.Expired);
+        order.AddStateTransition(new RentalStateTransition(
+            Guid.NewGuid(), order.Id, item.Id, RentalItemStatus.AwaitingHandover.ToString(),
+            RentalItemStatus.Expired.ToString(), transitionAction, null, ActorRole.System,
+            reason, utcNow, normalizedKey));
 
         RentalOrderStatus previousOrderStatus = order.Status;
         RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
 
-        await _operationExecutor.ScheduleReleaseAndRefundAsync(order, item, actorId, reason, utcNow, cancellationToken);
-
-        decimal refundAmount = item.RentalAmount + item.DepositAmount;
-        var response = new CancelNotDeliveredResponse(item.Id, RentalItemStatus.Cancelled.ToString(), utcNow, refundAmount);
-        string responseJson = JsonSerializer.Serialize(response, JsonOptions);
+        await _operationExecutor.ScheduleReleaseAndRefundAsync(order, item, Guid.Empty, reason, utcNow, cancellationToken);
 
         var receipt = new RentalOperationReceipt(
             Guid.NewGuid(),
             order.Id,
             normalizedKey,
-            RentalItem.CancelNotDeliveredAction,
+            action,
             fingerprint,
             isSuccess: true,
             errorCode: null,
@@ -344,41 +325,59 @@ public sealed class ItemCancellationService : IItemCancellationService
             createdAt: utcNow,
             status: RentalOperationReceipt.StatusSucceeded,
             completedAt: utcNow,
-            targetItemId: item.Id,
-            apiResponseJson: responseJson);
+            targetItemId: item.Id);
         order.AddOperationReceipt(receipt);
 
-        var notifyEnvelope = new KafkaMessageEnvelope<RentalItemCancelledPayload>(
+        var notifyEnvelope = new KafkaMessageEnvelope<RentalItemExpiredPayload>(
             OutboxMessageIdGenerator.ComputeDeterministicId(
                 KafkaContractSpec.Producers.RentalService,
-                KafkaContractSpec.EventTypes.RentalItemCancelled,
+                KafkaContractSpec.EventTypes.RentalItemExpired,
                 normalizedKey),
-            KafkaContractSpec.EventTypes.RentalItemCancelled,
+            KafkaContractSpec.EventTypes.RentalItemExpired,
             KafkaContractSpec.CurrentEnvelopeVersion,
             KafkaContractSpec.Producers.RentalService,
             order.Id.ToString("D"),
             utcNow,
             normalizedKey,
             null,
-            new RentalItemCancelledPayload(order.Id, item.Id, actorId, ActorRole.System.ToString(), utcNow, reason, refundAmount));
+            new RentalItemExpiredPayload(order.Id, item.Id, item.SupplierId, utcNow, reason));
 
         var outbox = new RentalOutboxMessage(
             notifyEnvelope.MessageId,
             KafkaContractSpec.Topics.RentalEvents,
             order.Id.ToString("D"),
-            KafkaContractSpec.EventTypes.RentalItemCancelled,
+            KafkaContractSpec.EventTypes.RentalItemExpired,
             JsonSerializer.Serialize(notifyEnvelope, JsonOptions),
             utcNow);
 
         await _outboxRepository.AddAsync(outbox, cancellationToken);
-        if (previousOrderStatus != RentalOrderStatus.Cancelled && order.Status == RentalOrderStatus.Cancelled)
-            await EnqueueOrderCancelledAsync(order, normalizedKey, utcNow, reason, cancellationToken);
+        if (previousOrderStatus != RentalOrderStatus.Expired && order.Status == RentalOrderStatus.Expired)
+            await EnqueueOrderExpiredAsync(order, normalizedKey, utcNow, reason, cancellationToken);
 
         order.RecordReadModelUpdate(utcNow);
         await _orderRepository.UpdateAsync(order, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return response;
+        return true;
+    }
+
+    private async Task EnqueueOrderExpiredAsync(
+        RentalOrder order, string operationKey, DateTimeOffset occurredAt, string reason,
+        CancellationToken cancellationToken)
+    {
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalOrderExpired,
+            operationKey);
+        var envelope = new KafkaMessageEnvelope<RentalOrderExpiredPayload>(
+            messageId, KafkaContractSpec.EventTypes.RentalOrderExpired,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            order.Id.ToString("D"), occurredAt, operationKey, null,
+            new RentalOrderExpiredPayload(order.Id, order.RenterId, occurredAt, reason));
+        await _outboxRepository.AddAsync(new RentalOutboxMessage(
+            messageId, KafkaContractSpec.Topics.RentalEvents, order.Id.ToString("D"),
+            KafkaContractSpec.EventTypes.RentalOrderExpired,
+            JsonSerializer.Serialize(envelope, JsonOptions), occurredAt), cancellationToken);
     }
 
     private async Task EnqueueOrderCancelledAsync(

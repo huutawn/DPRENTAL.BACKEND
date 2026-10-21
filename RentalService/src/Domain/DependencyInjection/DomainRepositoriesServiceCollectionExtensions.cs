@@ -28,6 +28,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
         services.AddScoped<IOutboxRepository, OutboxRepository>();
         services.AddScoped<IOperationReceiptRepository, OperationReceiptRepository>();
         services.AddScoped<IRentalCheckoutOperationRepository, RentalCheckoutOperationRepository>();
+        services.AddScoped<IRenterAddressRepository, RenterAddressRepository>();
         services.AddSingleton<IOrderLockManager, PostgresOrderLockManager>();
         services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<RentalServiceDbContext>());
         return services;

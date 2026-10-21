@@ -25,6 +25,15 @@ public interface IPaymentRentalClient
         CancellationToken ct = default);
 
     /// <summary>
+    /// Requests PaymentService to accept a late payment after all rental items have successfully acquired re-allocation holds.
+    /// </summary>
+    Task<Result<AcceptLatePaymentResponse>> AcceptLatePaymentAsync(
+        string invoiceRef,
+        AcceptLatePaymentRequest request,
+        CancellationToken ct = default) =>
+        Task.FromResult(Result.Success(new AcceptLatePaymentResponse(invoiceRef, "PAID", false, DateTimeOffset.UtcNow)));
+
+    /// <summary>
     /// Requests a refund for rejected items, supplier timeouts, or late payment terminal orders.
     /// Payment processes refund back to the original funding source.
     /// </summary>

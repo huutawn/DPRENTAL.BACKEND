@@ -48,19 +48,6 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
         _httpClient.Timeout = TimeSpan.FromSeconds(10);
     }
 
-    public async Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(
-        Guid listingId,
-        CancellationToken ct = default)
-    {
-        string route = InventoryContractSpec.Routes.ListingRentalSnapshot(listingId);
-        return await SendAsync<object, ListingRentalSnapshotDto>(
-            HttpMethod.Get,
-            route,
-            null,
-            InventoryContractSpec.Scopes.ReadAvailability,
-            ct);
-    }
-
     public async Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(
         ListingAvailabilityCheckRequest request,
         CancellationToken ct = default)

@@ -119,10 +119,15 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
             return existingOrder;
         }
 
-        RentalCart? cart = await _carts.GetActiveByRenterIdAsync(plan.RenterId, cancellationToken);
-        if (cart is null || cart.Id != plan.CartId)
+        // Thuê ngay không đi qua giỏ: không kiểm tra và không gỡ dòng giỏ nào.
+        RentalCart? cart = null;
+        if (plan.CartId is { } cartId)
         {
-            return await FailAsync(heldLines, RentalErrors.CartNotFound);
+            cart = await _carts.GetActiveByRenterIdAsync(plan.RenterId, cancellationToken);
+            if (cart is null || cart.Id != cartId)
+            {
+                return await FailAsync(heldLines, RentalErrors.CartNotFound);
+            }
         }
 
         string orderCode = await _orderCodes.NextAsync(orderCreatedAt, cancellationToken);
@@ -150,11 +155,14 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
             return await FailAsync(heldLines, order.Error);
         }
 
-        Result cartResult = cart.CompleteCheckout(plan.Lines.Select(l => l.CartItemId), orderCreatedAt);
-        if (cartResult.IsFailure)
+        if (cart is not null)
         {
-            _unitOfWork?.DiscardChanges();
-            return await FailAsync(heldLines, cartResult.Error);
+            Result cartResult = cart.CompleteCheckout(plan.Lines.Select(l => l.CartItemId), orderCreatedAt);
+            if (cartResult.IsFailure)
+            {
+                _unitOfWork?.DiscardChanges();
+                return await FailAsync(heldLines, cartResult.Error);
+            }
         }
 
         await _orders.CreateAsync(order.Value, cancellationToken);

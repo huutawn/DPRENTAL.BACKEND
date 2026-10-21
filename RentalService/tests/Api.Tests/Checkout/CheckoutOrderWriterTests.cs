@@ -513,4 +513,22 @@ public sealed class CheckoutOrderWriterTests
         public Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
             inner.BeginTransactionAsync(cancellationToken);
     }
+
+    [Fact]
+    public async Task CreateOrder_BuyNow_LeavesTheCartUntouched()
+    {
+        // Thuê ngay: dòng không thuộc giỏ, plan không có CartId.
+        CheckoutPlanLine buyNowLine = _cameraLine with { CartItemId = Guid.NewGuid() };
+        CheckoutPlan plan = Plan(buyNowLine) with { CartId = null };
+        IReadOnlyList<CheckoutHeldLine> held = await HoldAsync(plan);
+
+        await using RentalServiceDbContext writeContext = NewContext();
+        Result<RentalOrder> result = await CreateWriter(writeContext).CreateOrderAsync(plan, held, OperationId, Now);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, await CountOrdersAsync());
+        RentalCart cart = await ReloadCartAsync();
+        Assert.Equal(4, cart.Items.Count);
+        Assert.Equal(RentalCartStatus.Active, cart.Status);
+    }
 }

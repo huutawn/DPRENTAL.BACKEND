@@ -78,11 +78,9 @@ public sealed class RentalSettledConsumer(
                 new RentalItemCompletedPayload(
                     order.RenterId,
                     item.EquipmentListingId,
-                    item.EquipmentTypeId.Value,
+                    item.EquipmentTypeId,
                     order.Id,
-                    item.Id,
-                    item.Quantity,
-                    payload.CompletedAt),
+                    item.Id),
                 correlationId: envelope.CorrelationId,
                 causationId: envelope.MessageId,
                 cancellationToken: cancellationToken);

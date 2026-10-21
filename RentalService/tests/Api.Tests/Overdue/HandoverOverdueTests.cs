@@ -46,6 +46,7 @@ public sealed class HandoverOverdueTests
         services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<RentalServiceDbContext>());
         services.AddSingleton<TimeProvider>(_clock);
         services.AddScoped<IItemCancellationService, ItemCancellationService>();
+        services.AddOptions<HandoverOverdueOptions>();
         services.AddScoped<IHandoverOverdueService, HandoverOverdueService>();
         services.AddLogging();
         return services.BuildServiceProvider();
@@ -87,7 +88,7 @@ public sealed class HandoverOverdueTests
         var firstResult = await service.ProcessOrderAsync(_order.Id);
         Assert.Equal(1, firstResult.ProcessedItems);
         Assert.Equal(1, firstResult.NoticesSent);
-        Assert.Equal(0, firstResult.AutoCancelled);
+        Assert.Equal(0, firstResult.AutoExpired);
 
         // Verify receipt and outbox
         var receipt = await context.RentalOperationReceipts.SingleAsync(r => r.Action == "HandoverOverdueNotice");
@@ -105,13 +106,12 @@ public sealed class HandoverOverdueTests
     }
 
     [Fact]
-    public async Task ProcessOrderAsync_WhenPastAutoCancelMilestone_AutoCancelsItem_SchedulesReleaseAndRefund()
+    public async Task ProcessOrderAsync_WhenPastExpiryMilestone_ExpiresItem_SchedulesReleaseAndRefund()
     {
         await SeedAsync(RentalItemStatus.AwaitingHandover);
 
-        // ReturnDate is 2026-10-15. Auto-cancellation milestone is 2026-10-16 00:00 VN.
-        // Advance clock past auto-cancellation
-        _clock.UtcNow = new DateTimeOffset(2026, 10, 16, 08, 0, 0, TimeSpan.FromHours(7));
+        // StartDate is 2026-10-12. Notice at D+1 and expiry 24 hours later.
+        _clock.UtcNow = new DateTimeOffset(2026, 10, 14, 0, 0, 0, TimeSpan.FromHours(7));
 
         await using var context = NewContext();
         var sp = CreateServiceProvider(context);
@@ -119,22 +119,78 @@ public sealed class HandoverOverdueTests
 
         var result = await service.ProcessOrderAsync(_order.Id);
         Assert.Equal(1, result.ProcessedItems);
-        Assert.Equal(1, result.AutoCancelled);
+        Assert.Equal(1, result.AutoExpired);
         Assert.Equal(0, result.NoticesSent);
 
-        // Verify item is cancelled
+        // Verify item and order are expired
         var dbOrder = await context.RentalOrders.Include(o => o.Items).SingleAsync(o => o.Id == _order.Id);
-        Assert.Equal(RentalOrderStatus.Cancelled, dbOrder.Status);
-        Assert.Equal(RentalItemStatus.Cancelled, dbOrder.Items.Single().Status);
+        Assert.Equal(RentalOrderStatus.Expired, dbOrder.Status);
+        Assert.Equal(RentalItemStatus.Expired, dbOrder.Items.Single().Status);
 
         // Verify executor was called for release and refund
         _mockExecutor.Verify(x => x.ScheduleReleaseAndRefundAsync(
             It.Is<RentalOrder>(o => o.Id == _order.Id),
             It.Is<RentalItem>(i => i.Id == _item.Id),
             Guid.Empty,
-            "Hết kỳ thuê mà chưa bàn giao thiết bị",
+            "Hết hạn bàn giao thiết bị",
             _clock.GetUtcNow(),
             It.IsAny<CancellationToken>()), Times.Once);
+
+        Assert.Single(context.RentalOperationReceipts.Where(r => r.Action == "HandoverDeadlineExpired"));
+        Assert.Single(context.RentalOutboxMessages.Where(m => m.MessageType == "RentalItemExpired"));
+        Assert.Single(context.RentalOutboxMessages.Where(m => m.MessageType == "RentalOrderExpired"));
+        Assert.Empty(context.RentalOutboxMessages.Where(m => m.MessageType == "RentalItemCancelled"));
+
+        var replay = await service.ProcessOrderAsync(_order.Id);
+        Assert.Equal(0, replay.AutoExpired);
+        Assert.Single(context.RentalOperationReceipts.Where(r => r.Action == "HandoverDeadlineExpired"));
+        Assert.Single(context.RentalOutboxMessages.Where(m => m.MessageType == "RentalItemExpired"));
+    }
+
+    [Fact]
+    public async Task WorkerQuery_StillFindsItemAfterNoticeWhen24HourGraceExpires()
+    {
+        await SeedAsync(RentalItemStatus.AwaitingHandover);
+        await using var context = NewContext();
+        var sp = CreateServiceProvider(context);
+        var service = sp.GetRequiredService<IHandoverOverdueService>();
+
+        await service.ProcessOrderAsync(_order.Id);
+        _clock.UtcNow = new DateTimeOffset(2026, 10, 14, 0, 0, 0, TimeSpan.FromHours(7));
+
+        Assert.Contains(_order.Id, await service.GetDueOrderIdsAsync(10));
+        var result = await service.ProcessOrderAsync(_order.Id);
+        Assert.Equal(1, result.AutoExpired);
+        Assert.Single(context.RentalOperationReceipts.Where(r => r.Action == "HandoverOverdueNotice"));
+    }
+
+    [Fact]
+    public async Task ExpireNoHandover_BeforeDeadlineIsRejected_AndRetryAfterDeadlineIsIdempotent()
+    {
+        await SeedAsync(RentalItemStatus.AwaitingHandover);
+        await using var context = NewContext();
+        using var sp = CreateServiceProvider(context);
+        var expiry = sp.GetRequiredService<IItemCancellationService>();
+        const string key = "handover-expiry-boundary";
+
+        _clock.UtcNow = new DateTimeOffset(2026, 10, 13, 23, 59, 59, TimeSpan.FromHours(7));
+        var early = await expiry.ExpireNoHandoverAsync(_item.Id, "Hết hạn bàn giao thiết bị", key);
+        Assert.True(early.IsFailure);
+        Assert.Equal("HANDOVER_DEADLINE_NOT_REACHED", early.Error.Code);
+        Assert.Equal(RentalItemStatus.AwaitingHandover,
+            (await context.RentalItems.SingleAsync(i => i.Id == _item.Id)).Status);
+
+        _clock.UtcNow = new DateTimeOffset(2026, 10, 14, 0, 0, 0, TimeSpan.FromHours(7));
+        var first = await expiry.ExpireNoHandoverAsync(_item.Id, "Hết hạn bàn giao thiết bị", key);
+        var replay = await expiry.ExpireNoHandoverAsync(_item.Id, "Hết hạn bàn giao thiết bị", key);
+
+        Assert.True(first.IsSuccess && first.Value);
+        Assert.True(replay.IsSuccess && !replay.Value);
+        Assert.Single(context.RentalOperationReceipts.Where(r => r.Action == "HandoverDeadlineExpired"));
+        Assert.Single(context.RentalOutboxMessages.Where(m => m.MessageType == "RentalItemExpired"));
+        _mockExecutor.Verify(x => x.ScheduleReleaseAndRefundAsync(
+            It.IsAny<RentalOrder>(), It.IsAny<RentalItem>(), Guid.Empty,
+            "Hết hạn bàn giao thiết bị", _clock.GetUtcNow(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -167,7 +223,7 @@ public sealed class HandoverOverdueTests
 
         var result = await service.ProcessOrderAsync(_order.Id);
         Assert.Equal(0, result.ProcessedItems);
-        Assert.Equal(0, result.AutoCancelled);
+        Assert.Equal(0, result.AutoExpired);
         Assert.Equal(0, result.NoticesSent);
 
         // Status remains AwaitingHandover
@@ -211,7 +267,7 @@ public sealed class HandoverOverdueTests
     }
 
     [Fact]
-    public async Task Concurrency_WorkerAndRenterConcurrentCancellation_OnlyOneCancelsAndOneRefundScheduled()
+    public async Task Concurrency_WorkerExpiryAndRenterCancellation_OnlyOneClosesItemAndOneRefundScheduled()
     {
         await SeedAsync(RentalItemStatus.AwaitingHandover);
 
@@ -223,7 +279,7 @@ public sealed class HandoverOverdueTests
         var overdueService = sp.GetRequiredService<IHandoverOverdueService>();
         var cancelService = sp.GetRequiredService<IItemCancellationService>();
 
-        // Run both worker auto-cancel and renter cancel
+        // Run both worker expiry and renter cancellation.
         var workerTask = overdueService.ProcessOrderAsync(_order.Id);
         var renterTask = cancelService.CancelByRenterAsync(
             _item.Id,
@@ -234,8 +290,12 @@ public sealed class HandoverOverdueTests
         await Task.WhenAll(workerTask, renterTask);
 
         var renterResult = await renterTask;
-        Assert.True(renterResult.IsSuccess);
-        Assert.Equal(RentalItemStatus.Cancelled.ToString(), renterResult.Value.Status);
+        var finalStatus = (await context.RentalItems.SingleAsync(i => i.Id == _item.Id)).Status;
+        Assert.True(finalStatus is RentalItemStatus.Cancelled or RentalItemStatus.Expired);
+        if (renterResult.IsSuccess)
+            Assert.Equal(RentalItemStatus.Cancelled, finalStatus);
+        else
+            Assert.Equal(RentalItemStatus.Expired, finalStatus);
 
         // Verify executor was called AT MOST ONCE for release and refund
         _mockExecutor.Verify(x => x.ScheduleReleaseAndRefundAsync(

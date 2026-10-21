@@ -33,9 +33,6 @@ public sealed class InventoryRentalConsumerContractTests
         Guid listingId = Guid.Parse("11111111-1111-1111-1111-111111111111");
         string groupId = "group-test-01";
 
-        Assert.Equal("/equipment-listings/11111111-1111-1111-1111-111111111111/rental-snapshot",
-            InventoryContractSpec.Routes.ListingRentalSnapshot(listingId));
-
         Assert.Equal("/equipment-listings/11111111-1111-1111-1111-111111111111/availability/check",
             InventoryContractSpec.Routes.CheckAvailability(listingId));
 
@@ -82,50 +79,39 @@ public sealed class InventoryRentalConsumerContractTests
         Assert.Equal([listingId], snapshots!.MissingIds);
     }
 
-    // 2. Listing Snapshot Fixture & Serialization
+    // 2. Một Listing trong kết quả batch: đúng tên ô Inventory dùng, không lộ mã máy nội bộ.
     [Fact]
-    public async Task GetListingRentalSnapshot_MapsFromFixture_WithoutInternalAssetCodes()
+    public void ListingSnapshot_UsesInventoryJsonShape_WithoutInternalAssetCodes()
     {
-        Guid listingId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-        Guid supplierId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
-
         ListingRentalSnapshotDto fixture = new(
-            listingId,
-            supplierId,
+            Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
             Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc"),
-            "Sony FX3",
+            "Komatsu PC200 excavator",
             Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
-            500_000m,
+            3_000_000m,
             "VND",
             "Active",
             BrandId: Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd"),
-            Model: "FX3",
-            DepositPerUnit: 2_000_000m,
+            Model: "PC200",
+            DepositPerUnit: 20_000_000m,
             SpecSchemaVersion: 1,
-            SpecValues: JsonSerializer.Deserialize<JsonElement>("{\"sensor\":\"full-frame\"}"));
+            SpecValues: JsonSerializer.Deserialize<JsonElement>("{\"bucketCapacity\":\"0.8\"}"));
 
-        _stub.GetSnapshotHandler = id => Task.FromResult(Result.Success(fixture));
-
-        Result<ListingRentalSnapshotDto> result = await _stub.GetListingRentalSnapshotAsync(listingId);
-
-        Assert.True(result.IsSuccess);
-        Assert.Equal(500_000m, result.Value.DailyRate);
-        Assert.Equal("VND", result.Value.Currency);
-
-        string json = JsonSerializer.Serialize(result.Value, JsonOptions);
+        string json = JsonSerializer.Serialize(fixture, JsonOptions);
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement root = document.RootElement;
-        Assert.Equal(2_000_000m, root.GetProperty("depositAmount").GetDecimal());
+        Assert.Equal(20_000_000m, root.GetProperty("depositAmount").GetDecimal());
         Assert.Equal(fixture.EquipmentTypeId, root.GetProperty("equipmentTypeId").GetGuid());
         Assert.Equal(fixture.BrandId, root.GetProperty("brandId").GetGuid());
-        Assert.Equal("FX3", root.GetProperty("model").GetString());
+        Assert.Equal("PC200", root.GetProperty("model").GetString());
         Assert.Equal(1, root.GetProperty("specSchemaVersion").GetInt32());
-        Assert.Equal("full-frame", root.GetProperty("specValues").GetProperty("sensor").GetString());
+        Assert.Equal("0.8", root.GetProperty("specValues").GetProperty("bucketCapacity").GetString());
         Assert.DoesNotContain("serialNumber", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("assetCode", json, StringComparison.OrdinalIgnoreCase);
 
         ListingRentalSnapshotDto? deserialized = JsonSerializer.Deserialize<ListingRentalSnapshotDto>(
-            """{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","ownerUserId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","equipmentTypeId":"cccccccc-cccc-cccc-cccc-cccccccccccc","name":"Sony FX3","dailyRate":500000,"currency":"VND","status":"Active","depositAmount":2000000,"brandId":"dddddddd-dddd-dddd-dddd-dddddddddddd","model":"FX3","specSchemaVersion":1,"specValues":{"sensor":"full-frame"}}""",
+            """{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","ownerUserId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","equipmentTypeId":"cccccccc-cccc-cccc-cccc-cccccccccccc","name":"Komatsu PC200 excavator","dailyRate":3000000,"currency":"VND","status":"Active","depositAmount":20000000,"brandId":"dddddddd-dddd-dddd-dddd-dddddddddddd","model":"PC200","specSchemaVersion":1,"specValues":{"bucketCapacity":"0.8"}}""",
             JsonOptions);
         Assert.NotNull(deserialized);
         Assert.Equal(fixture.Id, deserialized.Id);
@@ -133,18 +119,6 @@ public sealed class InventoryRentalConsumerContractTests
         Assert.Equal(fixture.EquipmentTypeId, deserialized.EquipmentTypeId);
         Assert.Equal(fixture.BrandId, deserialized.BrandId);
         Assert.Equal(fixture.SpecValues?.GetRawText(), deserialized.SpecValues?.GetRawText());
-    }
-
-    [Fact]
-    public async Task GetListingRentalSnapshot_WhenNotFound_MapsErrorCorrectly()
-    {
-        _stub.GetSnapshotHandler = _ => Task.FromResult(Result.Failure<ListingRentalSnapshotDto>(
-            Error.NotFound(InventoryContractSpec.ErrorCodes.ListingNotFound, "Listing does not exist.")));
-
-        Result<ListingRentalSnapshotDto> result = await _stub.GetListingRentalSnapshotAsync(Guid.NewGuid());
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(InventoryContractSpec.ErrorCodes.ListingNotFound, result.Error.Code);
     }
 
     [Fact]
@@ -378,7 +352,6 @@ public sealed class InventoryRentalConsumerContractTests
     // Stub Implementation
     private sealed class StubInventoryRentalClient : IInventoryRentalClient
     {
-        public Func<Guid, Task<Result<ListingRentalSnapshotDto>>>? GetSnapshotHandler { get; set; }
         public Func<ListingRentalSnapshotsRequest, Task<Result<ListingRentalSnapshotsResponse>>>? GetSnapshotsHandler { get; set; }
         public Func<ListingAvailabilityCheckRequest, Task<Result<ListingAvailabilityCheckResponse>>>? CheckAvailabilityHandler { get; set; }
         public Func<CreateHoldRequest, Task<Result<CreateHoldResponse>>>? CreateHoldHandler { get; set; }
@@ -392,8 +365,6 @@ public sealed class InventoryRentalConsumerContractTests
 
         public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) =>
             GetSnapshotsHandler?.Invoke(request) ?? Task.FromResult(Result.Failure<ListingRentalSnapshotsResponse>(Error.NotFound("NotConfigured", "Stub not configured.")));
-        public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) =>
-            GetSnapshotHandler?.Invoke(listingId) ?? Task.FromResult(Result.Failure<ListingRentalSnapshotDto>(Error.NotFound("NotConfigured", "Stub not configured.")));
 
         public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) =>
             CheckAvailabilityHandler?.Invoke(request) ?? Task.FromResult(Result.Failure<ListingAvailabilityCheckResponse>(Error.NotFound("NotConfigured", "Stub not configured.")));

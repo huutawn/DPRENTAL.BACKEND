@@ -14,6 +14,41 @@ public sealed class CheckoutRequestValidatorTests
         true,
         7_000_000m);
 
+    private static CheckoutRequest BuyNowRequest() => ValidRequest() with
+    {
+        CartItemIds = null,
+        BuyNow = new(Guid.NewGuid(), 1, new DateOnly(2026, 10, 25), new DateOnly(2026, 10, 27))
+    };
+
+    [Fact]
+    public void Validate_AcceptsBuyNowWithoutCartItems()
+    {
+        Assert.Empty(CheckoutRequestValidator.Validate(BuyNowRequest()));
+    }
+
+    [Fact]
+    public void Validate_RejectsCartItemsAndBuyNowTogether()
+    {
+        CheckoutRequest request = BuyNowRequest() with { CartItemIds = [Guid.NewGuid()] };
+
+        Assert.Contains(CheckoutRequestValidator.Validate(request), e => e.Field == "buyNow" && e.Code == "CONFLICTING");
+    }
+
+    [Fact]
+    public void Validate_RejectsInvalidBuyNowFields()
+    {
+        CheckoutRequest request = BuyNowRequest() with
+        {
+            BuyNow = new(Guid.Empty, 0, new DateOnly(2026, 10, 27), new DateOnly(2026, 10, 25))
+        };
+
+        IReadOnlyList<CheckoutFieldError> errors = CheckoutRequestValidator.Validate(request);
+
+        Assert.Contains(errors, e => e.Field == "buyNow.equipmentListingId");
+        Assert.Contains(errors, e => e.Field == "buyNow.quantity");
+        Assert.Contains(errors, e => e.Field == "buyNow.expectedEndDate");
+    }
+
     [Fact]
     public void Validate_AcceptsValidRequest()
     {

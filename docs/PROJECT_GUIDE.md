@@ -493,7 +493,8 @@ PENDING_SUPPLIER_CONFIRMATION
         ▼
 AWAITING_HANDOVER
         │
-        ├── cancel/not-delivered → CANCELLED
+        ├── renter cancel/not-delivered → CANCELLED
+        ├── handover timeout → EXPIRED
         │
         ▼
 IN_RENTAL
@@ -588,6 +589,16 @@ Payment/Billing service chịu trách nhiệm invoice, payment status, refund, p
 ---
 
 # 13. Handover
+
+Nếu chưa bàn giao, 00:00 giờ Việt Nam ngày sau ngày bắt đầu thuê dự kiến (D+1)
+là mốc cảnh báo và mở quyền hủy vì chưa nhận máy cho renter. Hệ thống kết thúc mục thuê quá hạn
+sau thời gian gia hạn cấu hình `Rental:HandoverOverdue:AutoExpireGraceHours`
+(MVP: 24 giờ kể từ D+1, tức 00:00 ngày D+2). Mục thuê chuyển `Expired` khi vẫn `AwaitingHandover`; lệnh bàn giao mới
+sau deadline bị từ chối. Lệnh bàn giao đã gửi nhưng Inventory chưa xác nhận
+phải được đối soát trước khi hủy để tránh hoàn tiền cho máy đã giao thực tế.
+
+Khi quá hạn bàn giao: release allocation và yêu cầu hoàn toàn bộ tiền thuê
+cùng tiền cọc của chính RentalItem; các item khác trong order tiếp tục độc lập.
 
 Supplier ghi nhận handover với:
 

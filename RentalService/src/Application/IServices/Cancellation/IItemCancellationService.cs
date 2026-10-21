@@ -13,7 +13,7 @@ public interface IItemCancellationService
         IRentalCallerContext caller,
         CancellationToken cancellationToken = default);
 
-    Task<Result<CancelNotDeliveredResponse>> CancelBySystemAsync(
+    Task<Result<bool>> ExpireNoHandoverAsync(
         Guid itemId,
         string reason,
         string operationKey,

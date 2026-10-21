@@ -5,6 +5,8 @@ using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Dprental.RentalService.Application.IServices.Cancellation;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace Dprental.RentalService.Api.Controllers;
 
@@ -21,6 +23,7 @@ namespace Dprental.RentalService.Api.Controllers;
 [Route("orders")]
 public sealed class RentalOrdersController(
     IRenterOrderQueryService orders,
+    IRenterOrderCancellationService cancellation,
     IRentalCallerContext callerContext) : ControllerBase
 {
     /// <summary>
@@ -54,6 +57,55 @@ public sealed class RentalOrdersController(
     {
         Result<PagedResponse<RenterOrderSummaryResponse>> result =
             await orders.GetMyOrdersAsync(page, pageSize, status, callerContext, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : this.ToProblem(result.Error);
+    }
+
+    /// <summary>
+    /// Người thuê hủy cả đơn khi đang chờ thanh toán.
+    /// </summary>
+    /// <remarks>
+    /// - Chỉ hủy được đơn của chính người gọi đang ở <c>PendingPayment</c>; đơn của người khác hoặc không tồn tại trả 404 <c>Order.NotFound</c>.
+    /// - Header <c>Idempotency-Key</c> bắt buộc (tối đa 64 ký tự). Gửi lại cùng khóa và cùng nội dung trả lại kết quả đã lưu;
+    ///   khóa đã dùng với nội dung khác trả 409 <c>IDEMPOTENCY_CONFLICT</c>.
+    /// - Hủy hóa đơn (nếu có) rồi giải phóng từng phân bổ tại Inventory trước khi lưu trạng thái <c>Cancelled</c>.
+    /// - Hóa đơn đã được thanh toán trả 409 <c>INVOICE_ALREADY_PAID</c> và đơn không bị hủy; luồng đối soát thanh toán xử lý tiếp.
+    /// - Hóa đơn đang được tạo hoặc chưa rõ kết quả trả 503 <c>Order.InvoiceCreationInProgress</c>; thử lại cùng khóa sau ít phút.
+    /// - Giải phóng phân bổ chưa xong trả 503 <c>RELEASE_PENDING</c>; thử lại cùng khóa.
+    /// - Body tùy chọn: <c>{"reason":"..."}</c>, tối đa 500 ký tự.
+    /// </remarks>
+    /// <param name="orderId">Mã định danh đơn hàng.</param>
+    /// <param name="idempotencyKey">Khóa chống trùng lặp gửi qua header HTTP (bắt buộc, tối đa 64 ký tự).</param>
+    /// <param name="request">Lý do hủy, tùy chọn.</param>
+    /// <param name="cancellationToken">Token hủy yêu cầu.</param>
+    /// <response code="200">Hủy đơn thành công, đơn chuyển sang Cancelled.</response>
+    /// <response code="400">Thiếu hoặc sai Idempotency-Key, hoặc lý do hủy quá dài.</response>
+    /// <response code="401">Người dùng chưa được xác thực.</response>
+    /// <response code="403">Người gọi không phải tài khoản cá nhân có quyền Renter.</response>
+    /// <response code="404">Không tìm thấy đơn của người gọi (Order.NotFound).</response>
+    /// <response code="409">Đơn không ở PendingPayment, hóa đơn đã thanh toán hoặc xung đột Idempotency-Key.</response>
+    /// <response code="503">Hóa đơn đang được tạo hoặc việc giải phóng phân bổ chưa hoàn tất; thử lại cùng Idempotency-Key.</response>
+    /// <returns>Kết quả hủy đơn.</returns>
+    [HttpPost("{orderId:guid}/cancel")]
+    [ProducesResponseType(typeof(CancelOrderResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> CancelMyOrder(
+        [FromRoute] Guid orderId,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] CancelOrderRequest? request = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            return this.ToProblem(Error.Validation("MISSING_IDEMPOTENCY_KEY", "Header Idempotency-Key là bắt buộc."));
+        }
+
+        Result<CancelOrderResponse> result =
+            await cancellation.CancelOrderAsync(orderId, request, idempotencyKey, callerContext, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : this.ToProblem(result.Error);
     }
 

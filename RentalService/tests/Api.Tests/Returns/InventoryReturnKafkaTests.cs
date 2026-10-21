@@ -48,9 +48,6 @@ public sealed class InventoryReturnKafkaTests
         var uow = new Mock<IUnitOfWork>();
         uow.Setup(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(tx.Object);
         uow.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
-        var outbox = new Mock<IOutboxRepository>();
-        outbox.Setup(o => o.AddAsync(It.IsAny<RentalOutboxMessage>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
         ApplyReturnedUnitsCommandPayload? sent = null;
         var producer = new Mock<IInventoryCommandProducer>();
         producer.Setup(p => p.EnqueueApplyReturnedUnitsAsync(It.IsAny<ApplyReturnedUnitsCommandPayload>(),
@@ -82,7 +79,7 @@ public sealed class InventoryReturnKafkaTests
         Assert.Single(order.OperationReceipts, r => r.Action == RentalItem.ApplyReturnedUnitsAction);
         Assert.DoesNotContain(order.OperationReceipts, r => r.Action == RentalItem.MarkReturnedAction);
         tx.Verify(t => t.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
-        outbox.Verify(o => o.AddAsync(It.IsAny<RentalOutboxMessage>(), It.IsAny<CancellationToken>()), Times.Once);
+        producer.Verify(p => p.EnqueueApplyReturnedUnitsAsync(It.IsAny<ApplyReturnedUnitsCommandPayload>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

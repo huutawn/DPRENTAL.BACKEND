@@ -5,6 +5,7 @@ using Dprental.RentalService.Application.Validation;
 using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.IServices.SupplierDecision;
 using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Application.Options;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
@@ -12,6 +13,7 @@ using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Services.SupplierDecision;
 
@@ -31,6 +33,7 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
     private readonly IUnitOfWork _unitOfWork;
     private readonly IRentalMediaClient? _mediaClient;
     private readonly TimeProvider _timeProvider;
+    private readonly int _autoExpireGraceHours;
     private readonly ILogger<SupplierDecisionService> _logger;
 
     public SupplierDecisionService(
@@ -41,7 +44,8 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         IUnitOfWork unitOfWork,
         TimeProvider? timeProvider = null,
         ILogger<SupplierDecisionService>? logger = null,
-        IRentalMediaClient? mediaClient = null)
+        IRentalMediaClient? mediaClient = null,
+        IOptions<HandoverOverdueOptions>? handoverOptions = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _operationExecutor = operationExecutor ?? throw new ArgumentNullException(nameof(operationExecutor));
@@ -50,6 +54,7 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         _unitOfWork = unitOfWork!;
         _mediaClient = mediaClient;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _autoExpireGraceHours = (handoverOptions?.Value ?? new HandoverOverdueOptions()).AutoExpireGraceHours;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SupplierDecisionService>.Instance;
     }
 
@@ -234,6 +239,11 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         if (item.Status != RentalItemStatus.AwaitingHandover)
         {
             return Error.Conflict("INVALID_STATUS", $"Mục thuê không ở trạng thái AwaitingHandover. Trạng thái hiện tại: {item.Status}.");
+        }
+
+        if (HandoverDeadlinePolicy.IsAutoExpireDue(item, utcNow, _autoExpireGraceHours))
+        {
+            return Error.Conflict("HANDOVER_DEADLINE_PASSED", "Đã hết hạn bàn giao; cần đối soát nếu thiết bị đã được giao thực tế.");
         }
 
         // Một lệnh bàn giao đang chờ Inventory trả lời thì không gửi lệnh thứ hai song song.
