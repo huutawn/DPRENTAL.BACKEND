@@ -113,22 +113,37 @@ public static partial class CheckoutRequestValidator
             return;
         }
 
-        CheckLength(delivery.Province, 1, 100, "delivery.province", "Tỉnh, thành phố giao", errors);
-        CheckLength(delivery.AddressDetail, 5, 200, "delivery.addressDetail", "Địa chỉ chi tiết", errors);
-        CheckLength(delivery.RecipientName, 1, 100, "delivery.recipientName", "Người nhận", errors);
-
-        if (string.IsNullOrWhiteSpace(delivery.RecipientPhone))
-        {
-            errors.Add(new("delivery.recipientPhone", Required, "Thiếu số điện thoại người nhận."));
-        }
-        else if (!PhoneRegex().IsMatch(delivery.RecipientPhone.Trim()))
-        {
-            errors.Add(new("delivery.recipientPhone", InvalidFormat, "Số điện thoại phải bắt đầu bằng 0 hoặc +84, theo sau 9 chữ số."));
-        }
+        ValidateAddress(delivery.Province, delivery.AddressDetail, delivery.RecipientName, delivery.RecipientPhone, "delivery.", errors);
 
         if (delivery.Note is not null && delivery.Note.Trim().Length > 500)
         {
             errors.Add(new("delivery.note", InvalidLength, "Ghi chú tối đa 500 ký tự."));
+        }
+    }
+
+    /// <summary>
+    /// Luật chung cho một địa chỉ giao: dùng cho nơi giao của checkout và sổ địa chỉ của người thuê.
+    /// Tên ô trong lỗi có thêm tiền tố <c>fieldPrefix</c>, ví dụ <c>delivery.</c>; sổ địa chỉ dùng chuỗi rỗng.
+    /// </summary>
+    internal static void ValidateAddress(
+        string? province,
+        string? addressDetail,
+        string? recipientName,
+        string? recipientPhone,
+        string fieldPrefix,
+        List<CheckoutFieldError> errors)
+    {
+        CheckLength(province, 1, 100, $"{fieldPrefix}province", "Tỉnh, thành phố giao", errors);
+        CheckLength(addressDetail, 5, 200, $"{fieldPrefix}addressDetail", "Địa chỉ chi tiết", errors);
+        CheckLength(recipientName, 1, 100, $"{fieldPrefix}recipientName", "Người nhận", errors);
+
+        if (string.IsNullOrWhiteSpace(recipientPhone))
+        {
+            errors.Add(new($"{fieldPrefix}recipientPhone", Required, "Thiếu số điện thoại người nhận."));
+        }
+        else if (!PhoneRegex().IsMatch(recipientPhone.Trim()))
+        {
+            errors.Add(new($"{fieldPrefix}recipientPhone", InvalidFormat, "Số điện thoại phải bắt đầu bằng 0 hoặc +84, theo sau 9 chữ số."));
         }
     }
 

@@ -2,6 +2,7 @@ using Dprental.RentalService.Application.Background;
 using Dprental.RentalService.Application.Kafka.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.IServices.Addresses;
 using Dprental.RentalService.Application.IServices.Calendar;
 using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.IServices.Expiry;
@@ -17,6 +18,7 @@ using Dprental.RentalService.Application.Observability;
 using Dprental.RentalService.Application.Options;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
+using Dprental.RentalService.Application.Services.Addresses;
 using Dprental.RentalService.Application.Services.Calendar;
 using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Application.Services.Checkout;
@@ -78,6 +80,9 @@ public static class ApplicationServiceCollectionExtensions
 
         // Calendar
         services.AddScoped<IRentalCalendarService, RentalCalendarService>();
+
+        // Addresses
+        services.AddScoped<IRenterAddressService, RenterAddressService>();
 
         // Operations
         services.AddScoped<IRentalOperationExecutor, RentalOperationExecutor>();
