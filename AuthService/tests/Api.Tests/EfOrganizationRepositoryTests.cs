@@ -157,7 +157,7 @@ public sealed class EfOrganizationRepositoryTests
 
         User? user = await userRepo.GetByIdWithAccessAsync(userId);
         Assert.NotNull(user);
-        IReadOnlyList<string> effective = Dprental.AuthService.Application.Security.UserAccessResolver.Permissions(user);
+        IReadOnlyList<string> effective = Dprental.AuthService.Domain.Security.UserAccessResolver.Permissions(user);
 
         Assert.Contains("global.perm", effective);
         Assert.Contains("scoped.perm", effective);

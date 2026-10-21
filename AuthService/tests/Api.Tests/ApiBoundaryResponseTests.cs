@@ -239,13 +239,13 @@ public sealed class ApiBoundaryResponseTests
     [InlineData(OrganizationType.Supplier, OrganizationStatus.Rejected, false)]
     [InlineData(OrganizationType.Supplier, OrganizationStatus.Suspended, false)]
     [InlineData(OrganizationType.Renter, OrganizationStatus.Active, true)]
-    public async Task Login_ReplacesCustomerRoleWithOwnerInTokenAndMe_OnlyWhenOrganizationIsApproved(
+    public async Task Login_AccumulatesCustomerAndOwnerRolesInTokenAndMe_OnlyWhenOrganizationIsApproved(
         OrganizationType organizationType,
         OrganizationStatus organizationStatus,
         bool expectOwnerRole)
     {
-        // Đi qua luồng thật: khi tổ chức đã được duyệt, role Owner (alias "own") thay cho role customer
-        // trong claim "r" và GET /me cùng lúc; chưa duyệt/bị khoá thì vẫn là customer.
+        // Đi qua luồng thật: khi tổ chức đã được duyệt, role Owner (alias "own") được cộng dồn với role customer (alias "cus")
+        // trong claim "r" và GET /me cùng lúc; chưa duyệt/bị khoá thì chỉ có customer.
         using WebApplicationFactory<Program> factory = CreateFactory();
         using HttpClient client = factory.CreateClient();
         Guid userId = await SeedUserAsync(factory, "orgowner@example.com", "Password123!", isActive: true);
@@ -297,17 +297,195 @@ public sealed class ApiBoundaryResponseTests
         HttpResponseMessage meResponse = await client.SendAsync(meRequest);
         Assert.Equal(HttpStatusCode.OK, meResponse.StatusCode);
         using JsonDocument me = JsonDocument.Parse(await meResponse.Content.ReadAsStringAsync());
-        string?[] meRoles = me.RootElement.GetProperty("roles").EnumerateArray().Select(r => r.GetString()).ToArray();
+        string[] meRoles = me.RootElement.GetProperty("roles").EnumerateArray().Select(r => r.GetString()!).ToArray();
 
         // Token dùng alias rút gọn, GET /me trả tên đầy đủ.
         string[] expectedTokenRoles = expectOwnerRole
-            ? [JwtClaimCatalog.RoleAliases.Owner]
+            ? [JwtClaimCatalog.RoleAliases.Customer, JwtClaimCatalog.RoleAliases.Owner]
             : [JwtClaimCatalog.RoleAliases.Customer];
         string[] expectedMeRoles = expectOwnerRole
-            ? [SystemRoleCode.Owner]
+            ? [SystemRoleCode.Customer, SystemRoleCode.Owner]
             : [SystemRoleCode.Customer];
         Assert.Equal(expectedTokenRoles, tokenRoles);
         Assert.Equal(expectedMeRoles, meRoles);
+
+        // DB: UserRoles vẫn chỉ lưu customer
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            var dbUserRoles = await db.UserRoles.Where(ur => ur.UserId == userId).Select(ur => ur.Role.Name).ToArrayAsync();
+            Assert.Equal([SystemRoleCode.Customer], dbUserRoles);
+        }
+    }
+
+    [Theory]
+    [InlineData(MembershipStatus.Invited)]
+    [InlineData(MembershipStatus.Suspended)]
+    public async Task Login_MembershipNotActive_DoesNotGrantOwnerRole(MembershipStatus membershipStatus)
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        using HttpClient client = factory.CreateClient();
+        Guid userId = await SeedUserAsync(factory, "inactive-mem@example.com", "Password123!", isActive: true);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            Role customer = new() { Id = Guid.NewGuid(), Name = SystemRoleCode.Customer, Scope = RoleScope.Global };
+            Role owner = new() { Id = Guid.NewGuid(), Name = SystemRoleCode.Owner, Scope = RoleScope.Organization };
+            Organization organization = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "Active Org Inactive Membership",
+                Slug = "active-org-inactive-mem",
+                Type = OrganizationType.Supplier,
+                Status = OrganizationStatus.Active,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            db.Roles.AddRange(customer, owner);
+            db.Organizations.Add(organization);
+            db.UserRoles.Add(new UserRole { UserId = userId, RoleId = customer.Id });
+            db.OrganizationMemberships.Add(new OrganizationMembership
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                OrganizationId = organization.Id,
+                RoleId = owner.Id,
+                Status = membershipStatus,
+                JoinedAtUtc = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        HttpResponseMessage loginResponse = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest(
+            Email: "inactive-mem@example.com",
+            Password: "Password123!"));
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+
+        string accessToken = loginResponse.Headers.GetValues("Set-Cookie")
+            .First(c => c.StartsWith("accessToken=", StringComparison.OrdinalIgnoreCase))
+            .Split(';')[0]["accessToken=".Length..];
+        string[] tokenRoles = new JwtSecurityTokenHandler().ReadJwtToken(accessToken).Claims
+            .Where(c => c.Type == JwtClaimCatalog.Claims.Role)
+            .Select(c => c.Value)
+            .ToArray();
+
+        HttpRequestMessage meRequest = new(HttpMethod.Get, "/api/v1/auth/users/me");
+        meRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+        HttpResponseMessage meResponse = await client.SendAsync(meRequest);
+        Assert.Equal(HttpStatusCode.OK, meResponse.StatusCode);
+        using JsonDocument me = JsonDocument.Parse(await meResponse.Content.ReadAsStringAsync());
+        string[] meRoles = me.RootElement.GetProperty("roles").EnumerateArray().Select(r => r.GetString()!).ToArray();
+
+        Assert.Equal([JwtClaimCatalog.RoleAliases.Customer], tokenRoles);
+        Assert.Equal([SystemRoleCode.Customer], meRoles);
+    }
+
+
+    [Fact]
+    public async Task Login_MultipleActiveMemberships_DoesNotDuplicateOwnerRole_AndUserWithoutCustomerInDbDoesNotGetCustomer()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        using HttpClient client = factory.CreateClient();
+
+        Guid multiOwnerUserId = await SeedUserAsync(factory, "multiowner@example.com", "Password123!", isActive: true);
+        Guid noCustomerUserId = await SeedUserAsync(factory, "nocustomer@example.com", "Password123!", isActive: true);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            Role customer = new() { Id = Guid.NewGuid(), Name = SystemRoleCode.Customer, Scope = RoleScope.Global };
+            Role owner = new() { Id = Guid.NewGuid(), Name = SystemRoleCode.Owner, Scope = RoleScope.Organization };
+            Organization org1 = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "Org 1",
+                Slug = "org-1",
+                Type = OrganizationType.Supplier,
+                Status = OrganizationStatus.Active,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            Organization org2 = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "Org 2",
+                Slug = "org-2",
+                Type = OrganizationType.Renter,
+                Status = OrganizationStatus.Active,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            db.Roles.AddRange(customer, owner);
+            db.Organizations.AddRange(org1, org2);
+
+            // User 1: có customer trong DB và là Owner ở cả 2 org
+            db.UserRoles.Add(new UserRole { UserId = multiOwnerUserId, RoleId = customer.Id });
+            db.OrganizationMemberships.Add(new OrganizationMembership
+            {
+                Id = Guid.NewGuid(),
+                UserId = multiOwnerUserId,
+                OrganizationId = org1.Id,
+                RoleId = owner.Id,
+                Status = MembershipStatus.Active,
+                JoinedAtUtc = DateTime.UtcNow
+            });
+            db.OrganizationMemberships.Add(new OrganizationMembership
+            {
+                Id = Guid.NewGuid(),
+                UserId = multiOwnerUserId,
+                OrganizationId = org2.Id,
+                RoleId = owner.Id,
+                Status = MembershipStatus.Active,
+                JoinedAtUtc = DateTime.UtcNow
+            });
+
+            // User 2: KHÔNG có customer trong DB (UserRoles rỗng), chỉ là Owner ở org1
+            db.OrganizationMemberships.Add(new OrganizationMembership
+            {
+                Id = Guid.NewGuid(),
+                UserId = noCustomerUserId,
+                OrganizationId = org1.Id,
+                RoleId = owner.Id,
+                Status = MembershipStatus.Active,
+                JoinedAtUtc = DateTime.UtcNow
+            });
+
+            await db.SaveChangesAsync();
+        }
+
+        // Test User 1: nhiều membership không sinh role trùng
+        HttpResponseMessage loginRes1 = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest("multiowner@example.com", "Password123!"));
+        Assert.Equal(HttpStatusCode.OK, loginRes1.StatusCode);
+        string token1 = loginRes1.Headers.GetValues("Set-Cookie").First(c => c.StartsWith("accessToken=", StringComparison.OrdinalIgnoreCase)).Split(';')[0]["accessToken=".Length..];
+        string[] roles1 = new JwtSecurityTokenHandler().ReadJwtToken(token1).Claims
+            .Where(c => c.Type == JwtClaimCatalog.Claims.Role)
+            .Select(c => c.Value)
+            .ToArray();
+        Assert.Equal([JwtClaimCatalog.RoleAliases.Customer, JwtClaimCatalog.RoleAliases.Owner], roles1);
+
+        HttpRequestMessage meReq1 = new(HttpMethod.Get, "/api/v1/auth/users/me");
+        meReq1.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token1);
+        HttpResponseMessage meRes1 = await client.SendAsync(meReq1);
+        using JsonDocument meDoc1 = JsonDocument.Parse(await meRes1.Content.ReadAsStringAsync());
+        string[] meRoles1 = meDoc1.RootElement.GetProperty("roles").EnumerateArray().Select(r => r.GetString()!).ToArray();
+        Assert.Equal([SystemRoleCode.Customer, SystemRoleCode.Owner], meRoles1);
+
+        // Test User 2: user không có customer trong DB không tự được thêm role này
+        HttpResponseMessage loginRes2 = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest("nocustomer@example.com", "Password123!"));
+        Assert.Equal(HttpStatusCode.OK, loginRes2.StatusCode);
+        string token2 = loginRes2.Headers.GetValues("Set-Cookie").First(c => c.StartsWith("accessToken=", StringComparison.OrdinalIgnoreCase)).Split(';')[0]["accessToken=".Length..];
+        string[] roles2 = new JwtSecurityTokenHandler().ReadJwtToken(token2).Claims
+            .Where(c => c.Type == JwtClaimCatalog.Claims.Role)
+            .Select(c => c.Value)
+            .ToArray();
+        Assert.Equal([JwtClaimCatalog.RoleAliases.Owner], roles2);
+        Assert.DoesNotContain(JwtClaimCatalog.RoleAliases.Customer, roles2);
+
+        HttpRequestMessage meReq2 = new(HttpMethod.Get, "/api/v1/auth/users/me");
+        meReq2.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token2);
+        HttpResponseMessage meRes2 = await client.SendAsync(meReq2);
+        using JsonDocument meDoc2 = JsonDocument.Parse(await meRes2.Content.ReadAsStringAsync());
+        string[] meRoles2 = meDoc2.RootElement.GetProperty("roles").EnumerateArray().Select(r => r.GetString()!).ToArray();
+        Assert.Equal([SystemRoleCode.Owner], meRoles2);
+        Assert.DoesNotContain(SystemRoleCode.Customer, meRoles2);
     }
 
     [Fact]

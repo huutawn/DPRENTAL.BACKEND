@@ -1,4 +1,5 @@
 using Dprental.AuthService.Domain.Entities;
+using Dprental.AuthService.Domain.Security;
 using Dprental.AuthService.Domain.IRepositories;
 using Dprental.AuthService.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
@@ -242,41 +243,13 @@ public sealed class EfAuthSessionRepository(AuthDbContext dbContext, TimeProvide
 
     private static AuthSessionPrincipal BuildPrincipal(User user, Guid? sessionId = null)
     {
-        var globalRoles = user.UserRoles?.Select(ur => ur.Role.Name) ?? [];
-        var globalPermissions = user.UserRoles?
-            .SelectMany(ur => ur.Role.RolePermissions)
-            .Select(rp => rp.Permission.Code) ?? [];
-
-        var activeMemberships = user.OrganizationMemberships?
-            .Where(m => m.Status == Dprental.AuthService.Common.Enums.MembershipStatus.Active &&
-                m.Organization.Status == Dprental.AuthService.Common.Enums.OrganizationStatus.Active)
-            .ToArray() ?? [];
-        // Role trong organization (vd Owner) vào claim "r" cùng role toàn cục, chỉ khi organization đã Active.
-        // Khi đó role customer bị thay thế: chủ tổ chức đã duyệt chỉ còn "own", không còn "cus".
-        string[] organizationRoles = activeMemberships.Select(m => m.Role.Name).ToArray();
-        if (organizationRoles.Length > 0)
-        {
-            globalRoles = globalRoles.Where(name => name != Dprental.AuthService.Common.Enums.SystemRoleCode.Customer);
-        }
-
-        string[] roles = globalRoles.Concat(organizationRoles)
-            .Where(name => !string.IsNullOrEmpty(name))
-            .Distinct()
-            .ToArray();
-        var orgPermissions = activeMemberships
-            .SelectMany(m => m.Role.RolePermissions)
-            .Select(rp => rp.Permission.Code) ?? [];
-
-        string[] permissions = globalPermissions.Concat(orgPermissions)
-            .Where(name => !string.IsNullOrEmpty(name))
-            .Distinct()
-            .ToArray();
-        Guid[] orgIds = activeMemberships
-            .Select(m => m.OrganizationId)
-            .Distinct()
-            .ToArray();
-
-        return new AuthSessionPrincipal(user.Id, roles, permissions, orgIds, SessionId: sessionId);
+        return new AuthSessionPrincipal(
+            user.Id,
+            UserAccessResolver.EffectiveRoles(user),
+            UserAccessResolver.Permissions(user),
+            UserAccessResolver.OrganizationIds(user),
+            IsProfileCompleted: user.IsProfileCompleted,
+            SessionId: sessionId);
     }
 
     private static bool IsUsable(Session session, RefreshToken refreshToken, DateTime utcNow) =>

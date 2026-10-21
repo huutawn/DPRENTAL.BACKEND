@@ -163,7 +163,7 @@ public sealed class OrganizationRegistrationServiceTests
         User? reloaded = await new EfUserRepository(dbContext).GetByIdWithAccessAsync(owner.Id);
 
         Assert.NotNull(reloaded);
-        Assert.Empty(Dprental.AuthService.Application.Security.UserAccessResolver.ActiveMemberships(reloaded));
+        Assert.Empty(Dprental.AuthService.Domain.Security.UserAccessResolver.ActiveMemberships(reloaded));
     }
 
     private static OrganizationProfileRequest CreateProfile(string name = "Dong A Rental", string? slug = null) =>

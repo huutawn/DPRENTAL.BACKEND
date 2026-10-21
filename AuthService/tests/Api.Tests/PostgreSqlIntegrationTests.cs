@@ -879,6 +879,132 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         Assert.Equal(log2.Id, page2.Items[0].Id);
         Assert.Equal(log1.Id, page2.Items[1].Id);
     }
+    [Fact]
+    public async Task PostgreSql_RefreshToken_ReflectsRoleChanges_WhenOrganizationIsApprovedOrSuspended()
+    {
+        await using var db = CreateDbContext();
+        Role customerRole = await db.Roles.FirstAsync(r => r.Name == SystemRoleCode.Customer);
+        Role ownerRole = await db.Roles.FirstAsync(r => r.Name == SystemRoleCode.Owner);
+
+        Guid userId = Guid.NewGuid();
+        Guid orgId = Guid.NewGuid();
+
+        User user = new()
+        {
+            Id = userId,
+            Email = $"refresh_owner_{Guid.NewGuid():N}@example.com",
+            FullName = "Refresh Owner User",
+            PasswordHash = "hash",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        };
+        user.UserRoles.Add(new UserRole { UserId = userId, RoleId = customerRole.Id });
+
+        Organization org = new()
+        {
+            Id = orgId,
+            Name = "Refresh Org",
+            Slug = $"refresh-org-{Guid.NewGuid():N}",
+            Status = OrganizationStatus.Pending,
+            TaxCode = Guid.NewGuid().ToString("N")[..14],
+            CreatedAtUtc = DateTime.UtcNow
+        };
+
+        OrganizationMembership membership = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            OrganizationId = orgId,
+            RoleId = ownerRole.Id,
+            Status = MembershipStatus.Active,
+            JoinedAtUtc = DateTime.UtcNow
+        };
+
+        db.Users.Add(user);
+        db.Organizations.Add(org);
+        db.OrganizationMemberships.Add(membership);
+        await db.SaveChangesAsync();
+
+        var sessionRepo = new EfAuthSessionRepository(db, TimeProvider.System);
+        var userRepo = new EfUserRepository(db);
+        var recordingIssuer = new RecordingAccessTokenIssuer();
+        var sessionService = new AuthSessionService(
+            sessionRepo,
+            userRepo,
+            recordingIssuer,
+            TimeProvider.System,
+            FixedCorrelationIdProvider.Instance,
+            new EfAuditLogRepository(db),
+            new Microsoft.AspNetCore.Http.HttpContextAccessor());
+
+        // 1. Tạo session ban đầu khi org còn Pending -> chỉ có role "customer"
+        var createResult = await sessionService.CreateSessionAsync(userId);
+        Assert.True(createResult.IsSuccess);
+        Assert.NotNull(recordingIssuer.LastRequest);
+        Assert.Equal([SystemRoleCode.Customer], recordingIssuer.LastRequest.Roles);
+        string refreshToken1 = createResult.Value.RefreshToken;
+
+        // 2. Admin duyệt tổ chức (Status -> Active)
+        await using (var updateDb = CreateDbContext())
+        {
+            var targetOrg = await updateDb.Organizations.FindAsync(orgId);
+            targetOrg!.Status = OrganizationStatus.Active;
+            await updateDb.SaveChangesAsync();
+        }
+
+        // 3. Refresh session -> nhận đồng thời cả customer và Owner
+        await using var refreshDb1 = CreateDbContext();
+        var refreshRepo1 = new EfAuthSessionRepository(refreshDb1, TimeProvider.System);
+        var refreshUsers1 = new EfUserRepository(refreshDb1);
+        var refreshService1 = new AuthSessionService(
+            refreshRepo1,
+            refreshUsers1,
+            recordingIssuer,
+            TimeProvider.System,
+            FixedCorrelationIdProvider.Instance,
+            new EfAuditLogRepository(refreshDb1),
+            new Microsoft.AspNetCore.Http.HttpContextAccessor());
+
+        var refreshResult1 = await refreshService1.RefreshAsync(refreshToken1);
+        Assert.True(refreshResult1.IsSuccess);
+        Assert.NotNull(recordingIssuer.LastRequest);
+        Assert.Equal([SystemRoleCode.Customer, SystemRoleCode.Owner], recordingIssuer.LastRequest.Roles);
+        string refreshToken2 = refreshResult1.Value.RefreshToken;
+
+        // 4. Admin khóa tổ chức (Status -> Suspended)
+        await using (var suspendDb = CreateDbContext())
+        {
+            var targetOrg = await suspendDb.Organizations.FindAsync(orgId);
+            targetOrg!.Status = OrganizationStatus.Suspended;
+            await suspendDb.SaveChangesAsync();
+        }
+
+        // 5. Refresh session lần nữa -> role Owner bị rút, chỉ còn customer
+        await using var refreshDb2 = CreateDbContext();
+        var refreshRepo2 = new EfAuthSessionRepository(refreshDb2, TimeProvider.System);
+        var refreshUsers2 = new EfUserRepository(refreshDb2);
+        var refreshService2 = new AuthSessionService(
+            refreshRepo2,
+            refreshUsers2,
+            recordingIssuer,
+            TimeProvider.System,
+            FixedCorrelationIdProvider.Instance,
+            new EfAuditLogRepository(refreshDb2),
+            new Microsoft.AspNetCore.Http.HttpContextAccessor());
+
+        var refreshResult2 = await refreshService2.RefreshAsync(refreshToken2);
+        Assert.True(refreshResult2.IsSuccess);
+        Assert.NotNull(recordingIssuer.LastRequest);
+        Assert.Equal([SystemRoleCode.Customer], recordingIssuer.LastRequest.Roles);
+
+        // 6. DB: UserRoles của user vẫn chỉ có customer
+        await using var verifyDb = CreateDbContext();
+        var dbRoles = await verifyDb.UserRoles
+            .Where(ur => ur.UserId == userId)
+            .Select(ur => ur.Role.Name)
+            .ToArrayAsync();
+        Assert.Equal([SystemRoleCode.Customer], dbRoles);
+    }
 
     private sealed class ThrowingAuditLogRepository : IAuditLogRepository
     {
@@ -893,5 +1019,16 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
     {
         public IssuedAccessToken Issue(AccessTokenRequest request) =>
             new("dummy-access-token", DateTimeOffset.UtcNow.AddMinutes(15));
+    }
+
+    private sealed class RecordingAccessTokenIssuer : IAccessTokenIssuer
+    {
+        public AccessTokenRequest? LastRequest { get; private set; }
+
+        public IssuedAccessToken Issue(AccessTokenRequest request)
+        {
+            LastRequest = request;
+            return new("dummy-token", DateTimeOffset.UtcNow.AddMinutes(15));
+        }
     }
 }
