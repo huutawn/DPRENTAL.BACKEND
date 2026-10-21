@@ -15,6 +15,8 @@ public sealed record EquipmentListingSearchCriteria
     public DateTimeOffset AvailabilityEvaluationUtc { get; init; }
     public int Skip { get; init; }
     public int Take { get; init; }
+    public Guid? ExcludedOwnerUserId { get; init; }
+    public RecommendationPriority? Recommendation { get; init; }
 
     public EquipmentListingSearchCriteria(
         AssetSearchFilters? filters = null,
@@ -66,7 +68,8 @@ public sealed record PublicEquipmentListingItem(
 public sealed record PublicEquipmentListingSearchResult(
     IReadOnlyList<PublicEquipmentListingItem> Items,
     int TotalCount,
-    DateTimeOffset? NextAvailabilityChangeAtUtc = null);
+    DateTimeOffset? NextAvailabilityChangeAtUtc = null,
+    int PriorityCandidateCount = 0);
 
 /// <summary>
 /// Tiêu chí tìm kiếm và phân trang EquipmentListing của người sở hữu (Owner Listings).
@@ -95,3 +98,13 @@ public sealed record OwnerEquipmentListingItem(
 public sealed record OwnerEquipmentListingSearchResult(
     IReadOnlyList<OwnerEquipmentListingItem> Items,
     int TotalCount);
+
+public enum RecommendationPriorityKind
+{
+    PersonalTypes,
+    GlobalListings,
+}
+
+public sealed record RecommendationPriority(
+    RecommendationPriorityKind Kind,
+    IReadOnlyList<Guid> RankedIds);

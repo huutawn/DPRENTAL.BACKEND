@@ -1,5 +1,16 @@
 # Tài liệu Kỹ thuật InventoryService
 
+## Recommendation trong public listing
+
+`GET /api/v1/inventory/public/equipment-listings?sort=recommended` đọc hai JSON snapshot
+`rec:v1:user:{userId}:equipment-types` và `rec:v1:global:popular-listings` từ Valkey bằng `GET`.
+Chế độ này ưu tiên equipment type của người dùng đã xác thực, sau đó fallback sang
+listing phổ biến toàn hệ thống nếu không có ứng viên hợp lệ, cuối cùng dùng thứ tự
+Inventory mặc định. Không truyền `sort=recommended` thì thứ tự hiện tại không đổi;
+có từ khóa `q` thì search relevance được ưu tiên. Inventory luôn lọc trạng thái,
+owner, các bộ lọc và availability trên dữ liệu hiện tại trước khi phân trang.
+Valkey lỗi hoặc snapshot không hợp lệ sẽ fallback và không làm hỏng public API.
+
 ## Ranh giới các lớp
 
 | Lớp | Trách nhiệm | Không được chứa |

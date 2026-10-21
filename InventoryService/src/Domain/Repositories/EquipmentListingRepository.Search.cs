@@ -18,6 +18,12 @@ public sealed partial class EquipmentListingRepository
         public int AvailableQuantity { get; set; }
     }
 
+    private sealed class ListingCountRow
+    {
+        public int TotalCount { get; set; }
+        public int PriorityCandidateCount { get; set; }
+    }
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<int>> GetDistinctSchemaVersionsPublicAsync(
         AssetSearchFilters filters,
@@ -124,9 +130,10 @@ public sealed partial class EquipmentListingRepository
 
             var (countSql, pageSql, holdExpirySql, countParams, pageParams, holdParams) = BuildSearchSql(criteria);
 
-            int totalCount = await _context.Database
-                .SqlQueryRaw<int>(countSql, countParams)
+            var counts = await _context.Database
+                .SqlQueryRaw<ListingCountRow>(countSql, countParams)
                 .SingleAsync(cancellationToken);
+            int totalCount = counts.TotalCount;
 
             DateTimeOffset? nextAvailabilityChangeAtUtc = null;
             if (holdExpirySql != null && holdParams != null)
@@ -139,7 +146,7 @@ public sealed partial class EquipmentListingRepository
             if (totalCount == 0)
             {
                 await transaction.CommitAsync(cancellationToken);
-                return new PublicEquipmentListingSearchResult(Array.Empty<PublicEquipmentListingItem>(), 0, nextAvailabilityChangeAtUtc);
+                return new PublicEquipmentListingSearchResult(Array.Empty<PublicEquipmentListingItem>(), 0, nextAvailabilityChangeAtUtc, 0);
             }
 
             var rows = await _context.Database
@@ -160,7 +167,7 @@ public sealed partial class EquipmentListingRepository
                 .Select(r => new PublicEquipmentListingItem(listingMap[r.Id], r.TotalQuantity, r.AvailableQuantity))
                 .ToList();
 
-            return new PublicEquipmentListingSearchResult(items, totalCount, nextAvailabilityChangeAtUtc);
+            return new PublicEquipmentListingSearchResult(items, totalCount, nextAvailabilityChangeAtUtc, counts.PriorityCandidateCount);
         }
         throw new NotSupportedException("Public equipment listing search requires PostgreSQL relational provider.");
     }
@@ -219,6 +226,22 @@ public sealed partial class EquipmentListingRepository
         {
             clauses.Add("l.brand_id = @pBrandId");
             commonParams.Add(new NpgsqlParameter("pBrandId", filters.BrandId.Value));
+        }
+
+        if (criteria.ExcludedOwnerUserId.HasValue)
+        {
+            clauses.Add("l.owner_user_id <> @pExcludedOwnerUserId");
+            commonParams.Add(new NpgsqlParameter("pExcludedOwnerUserId", criteria.ExcludedOwnerUserId.Value));
+        }
+
+        string recommendationJoin = "";
+        if (criteria.Recommendation is { RankedIds.Count: > 0 } recommendation)
+        {
+            string matchColumn = recommendation.Kind == RecommendationPriorityKind.PersonalTypes
+                ? "l.equipment_type_id"
+                : "l.id";
+            recommendationJoin = $"LEFT JOIN unnest(@pRecommendedIds) WITH ORDINALITY AS rec(id, rank) ON rec.id = {matchColumn}";
+            commonParams.Add(new NpgsqlParameter("pRecommendedIds", recommendation.RankedIds.Distinct().ToArray()));
         }
 
         string warehouseJoin = "";
@@ -337,14 +360,27 @@ public sealed partial class EquipmentListingRepository
             filterWhere = $"{baseWhere} AND ({availableQtyExpr}) >= @pReqQty";
         }
 
+        string priorityCountSql = recommendationJoin.Length == 0
+            ? "0::int"
+            : "COUNT(*) FILTER (WHERE rec.rank IS NOT NULL)::int";
         string countSql = $"""
-            SELECT COUNT(*)::int AS "Value" FROM "inventory"."equipment_listings" l
+            SELECT COUNT(*)::int AS "TotalCount", {priorityCountSql} AS "PriorityCandidateCount"
+            FROM "inventory"."equipment_listings" l
             {joinSql}
             {warehouseJoin}
+            {recommendationJoin}
             WHERE {filterWhere}
             """;
 
-        string orderSql = criteria.Filters.Sort switch
+        string orderSql = recommendationJoin.Length != 0 ? """
+            ORDER BY
+                CASE WHEN rec.rank IS NULL THEN 1 ELSE 0 END ASC,
+                rec.rank ASC NULLS LAST,
+                CASE WHEN rec.rank IS NOT NULL THEN l.updated_at END DESC,
+                CASE WHEN rec.rank IS NOT NULL THEN l.id END ASC,
+                CASE WHEN rec.rank IS NULL THEN l.created_at END DESC,
+                CASE WHEN rec.rank IS NULL THEN l.id END DESC
+            """ : criteria.Filters.Sort switch
         {
             AssetSortOption.Relevance when hasCandidates => "ORDER BY cand.ord ASC",
             AssetSortOption.Relevance => "ORDER BY l.created_at DESC, l.id DESC",
@@ -359,6 +395,7 @@ public sealed partial class EquipmentListingRepository
             FROM "inventory"."equipment_listings" l
             {joinSql}
             {warehouseJoin}
+            {recommendationJoin}
             WHERE {filterWhere}
             {orderSql}
             LIMIT @pTake OFFSET @pSkip
@@ -373,6 +410,7 @@ public sealed partial class EquipmentListingRepository
                 FROM "inventory"."equipment_listings" l
                 {joinSql}
                 {warehouseJoin}
+                {recommendationJoin}
                 JOIN "inventory"."assets" a ON a.equipment_listing_id = l.id
                 JOIN "inventory"."asset_allocations" al ON al.asset_id = a.id
                 WHERE {baseWhere}

@@ -211,6 +211,7 @@ public sealed class AssetSearchQueryValidator
                 "model_desc" => AssetSortOption.ModelDesc,
                 "model_asc" => AssetSortOption.ModelAsc,
                 "relevance" => AssetSortOption.Relevance,
+                "recommended" => AssetSortOption.Recommended,
                 _ => (AssetSortOption)(-1)
             };
 
@@ -218,6 +219,11 @@ public sealed class AssetSearchQueryValidator
             {
                 return Error.Validation("INVALID_QUERY_PARAMETER", "Tùy chọn sắp xếp (sort) không hợp lệ.");
             }
+        }
+
+        if (searchKeyword is not null && sortOption == AssetSortOption.Recommended)
+        {
+            sortOption = AssetSortOption.Relevance;
         }
 
         return Result.Success(new ValidatedAssetSearchQuery(

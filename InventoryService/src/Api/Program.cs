@@ -27,6 +27,7 @@ builder.Services.AddInventoryAuthorization();
 builder.Services.AddInventoryApplication();
 // DPR-150: Valkey Read Cache
 builder.Services.AddInventoryValkeyCache(builder.Configuration, builder.Environment);
+builder.Services.AddInventoryRecommendationReader(builder.Configuration);
 // Domain clients (MediaService & CatalogService): Options validation and typed HTTP clients
 builder.Services.AddInventoryClients(builder.Configuration);
 

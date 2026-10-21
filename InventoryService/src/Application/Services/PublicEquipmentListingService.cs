@@ -12,6 +12,7 @@ using Dprental.InventoryService.Common.Utils;
 using Dprental.InventoryService.Domain.IRepositories;
 using Microsoft.Extensions.Options;
 using Dprental.InventoryService.Application.Search;
+using Dprental.InventoryService.Application.Caching;
 using Microsoft.Extensions.Logging;
 
 namespace Dprental.InventoryService.Application.Services;
@@ -32,6 +33,8 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
     private readonly Locations.IVietnamDivisionsCatalog _divisionsCatalog;
     private readonly Dprental.InventoryService.Application.Caching.IInventoryReadCache _cache;
     private readonly Dprental.InventoryService.Application.Caching.InventoryCacheOptions _cacheOptions;
+    private readonly IRecommendationSnapshotReader? _recommendationReader;
+    private readonly IInventoryCallerContext? _caller;
 
     public PublicEquipmentListingService(
         IEquipmentListingRepository listingRepository,
@@ -44,7 +47,9 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
         ICatalogServiceClient? catalogClient = null,
         Locations.IVietnamDivisionsCatalog? divisionsCatalog = null,
         Dprental.InventoryService.Application.Caching.IInventoryReadCache? cache = null,
-        IOptions<Dprental.InventoryService.Application.Caching.InventoryCacheOptions>? cacheOptions = null)
+        IOptions<Dprental.InventoryService.Application.Caching.InventoryCacheOptions>? cacheOptions = null,
+        IRecommendationSnapshotReader? recommendationReader = null,
+        IInventoryCallerContext? caller = null)
     {
         _listingRepository = listingRepository ?? throw new ArgumentNullException(nameof(listingRepository));
         _queryValidator = queryValidator ?? throw new ArgumentNullException(nameof(queryValidator));
@@ -58,6 +63,8 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
         _divisionsCatalog = divisionsCatalog ?? new Locations.VietnamDivisionsCatalog();
         _cache = cache ?? Dprental.InventoryService.Application.Caching.NoOpInventoryReadCache.Instance;
         _cacheOptions = cacheOptions?.Value ?? new Dprental.InventoryService.Application.Caching.InventoryCacheOptions();
+        _recommendationReader = recommendationReader;
+        _caller = caller;
     }
 
     /// <inheritdoc />
@@ -196,6 +203,29 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
             return structCheck.Error;
         }
 
+        var validated = valResult.Value;
+        bool recommended = validated.Sort == AssetSortOption.Recommended;
+        Guid? viewerId = recommended && _caller?.IsHuman == true ? _caller.UserId : null;
+        RecommendationSnapshot? personal = null;
+        RecommendationSnapshot? global = null;
+        if (recommended && _recommendationReader is not null)
+        {
+            var globalTask = _recommendationReader.GetGlobalListingsAsync(cancellationToken);
+            if (viewerId.HasValue)
+            {
+                var personalTask = _recommendationReader.GetPersonalTypesAsync(viewerId.Value, cancellationToken);
+                await Task.WhenAll(personalTask, globalTask);
+                personal = await personalTask;
+            }
+            global = await globalTask;
+        }
+
+        RecommendationPriority? priority = personal is { RankedIds.Count: > 0 }
+            ? new RecommendationPriority(RecommendationPriorityKind.PersonalTypes, personal.RankedIds)
+            : global is { RankedIds.Count: > 0 }
+                ? new RecommendationPriority(RecommendationPriorityKind.GlobalListings, global.RankedIds)
+                : null;
+
         var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
         var todayVn = BusinessDateTime.ToVietnamDate(nowUtc);
 
@@ -217,7 +247,11 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
             request.RequestedQuantity,
             todayVn);
 
-        var validated = valResult.Value;
+        if (recommended)
+        {
+            searchHash = CacheKeyHelper.ComputeSha256(
+                $"{searchHash}|{viewerId:D}|{personal?.ContentHash}|{global?.ContentHash}");
+        }
 
         return await _cache.GetOrCreateAsync<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>(
             searchScope,
@@ -389,9 +423,24 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
                     requestedQuantity: request.RequestedQuantity,
                     availabilityEvaluationUtc: evaluationNowUtc,
                     skip: validated.Skip,
-                    take: validated.Take);
+                    take: validated.Take)
+                {
+                    ExcludedOwnerUserId = recommended ? viewerId : null,
+                    Recommendation = priority
+                };
 
                 var searchResult = await _listingRepository.SearchPublicAsync(searchCriteria, ct);
+                if (priority?.Kind == RecommendationPriorityKind.PersonalTypes &&
+                    searchResult.PriorityCandidateCount == 0 &&
+                    global is { RankedIds.Count: > 0 })
+                {
+                    searchResult = await _listingRepository.SearchPublicAsync(
+                        searchCriteria with
+                        {
+                            Recommendation = new RecommendationPriority(
+                                RecommendationPriorityKind.GlobalListings, global.RankedIds)
+                        }, ct);
+                }
                 int totalCount = searchResult.TotalCount;
                 int totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling((double)totalCount / validated.Take);
 
@@ -435,6 +484,13 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
                 if (categoryDeadline.HasValue && categoryDeadline.Value < candidateDeadline)
                 {
                     candidateDeadline = categoryDeadline.Value;
+                }
+
+                foreach (var snapshot in new[] { personal, global })
+                {
+                    if (snapshot is null) continue;
+                    var snapshotDeadline = snapshot.GeneratedAtUtc.AddMinutes(5);
+                    if (snapshotDeadline < candidateDeadline) candidateDeadline = snapshotDeadline;
                 }
 
                 DateTimeOffset? finalDeadline = candidateDeadline > evaluationNowUtc ? candidateDeadline : null;
