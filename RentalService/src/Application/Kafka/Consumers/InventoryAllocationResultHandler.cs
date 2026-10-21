@@ -9,8 +9,8 @@ using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
+using Dprental.RentalService.Application.DTOs.Operations;
 using Dprental.RentalService.Application.IServices.Checkout;
-using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.Kafka.Producers;
@@ -19,6 +19,7 @@ using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Services.SupplierDecision;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
+using Dprental.RentalService.Common.Utils;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
@@ -39,35 +40,32 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
     private readonly IRentalOrderRepository _orderRepository;
     private readonly IInventoryCommandProducer? _inventoryCommands;
     private readonly ICheckoutOrderWriter? _orderWriter;
-    private readonly IOutboxRepository _outboxRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IOrderLockManager _lockManager;
-    private readonly IRentalOperationExecutor? _operationExecutor;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<InventoryAllocationResultHandler> _logger;
+    private readonly IRentalEventProducer? _rentalEvents;
 
     public InventoryAllocationResultHandler(
         IRentalOrderRepository orderRepository,
-        IOutboxRepository outboxRepository,
         IUnitOfWork unitOfWork,
         IOrderLockManager lockManager,
         TimeProvider? timeProvider = null,
         IRentalCheckoutOperationRepository? checkoutOperationRepo = null,
         IInventoryCommandProducer? inventoryCommands = null,
         ICheckoutOrderWriter? orderWriter = null,
-        IRentalOperationExecutor? operationExecutor = null,
-        ILogger<InventoryAllocationResultHandler>? logger = null)
+        ILogger<InventoryAllocationResultHandler>? logger = null,
+        IRentalEventProducer? rentalEvents = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
-        _outboxRepository = outboxRepository ?? throw new ArgumentNullException(nameof(outboxRepository));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _lockManager = lockManager ?? throw new ArgumentNullException(nameof(lockManager));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _checkoutOperationRepo = checkoutOperationRepo;
         _inventoryCommands = inventoryCommands;
         _orderWriter = orderWriter;
-        _operationExecutor = operationExecutor;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<InventoryAllocationResultHandler>.Instance;
+        _rentalEvents = rentalEvents;
     }
 
     public async Task<Result> HandleAllocationEventAsync(
@@ -88,6 +86,9 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         string commandType = payloadElement.TryGetProperty("commandType", out var ctProp) ? ctProp.GetString() ?? string.Empty : string.Empty;
         string operationKey = payloadElement.TryGetProperty("operationKey", out var okProp) ? okProp.GetString() ?? string.Empty : string.Empty;
         Guid rentalItemId = payloadElement.TryGetProperty("rentalItemId", out var riProp) && riProp.TryGetGuid(out var ri) ? ri : Guid.Empty;
+        Guid payloadOrderId = payloadElement.TryGetProperty("rentalOrderId", out var roProp) && roProp.TryGetGuid(out var ro) ? ro : Guid.Empty;
+        if (payloadOrderId == Guid.Empty || payloadOrderId != orderId || rentalItemId == Guid.Empty || string.IsNullOrWhiteSpace(operationKey))
+            return Error.Validation("INVENTORY_RESULT_IDENTITY_MISMATCH", "Inventory result identity does not match its Kafka aggregate.");
 
         // Skip return events: Return consumer handles ReturnedUnitsApplied/Rejected
         if (string.Equals(commandType, KafkaContractSpec.CommandTypes.ApplyReturnedUnits, StringComparison.OrdinalIgnoreCase) ||
@@ -121,11 +122,34 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             return Error.NotFound("ORDER_NOT_FOUND", $"Không tìm thấy đơn hàng '{orderId}'.");
         }
 
-        var receipt = order.OperationReceipts.FirstOrDefault(r => string.Equals(r.OperationId, operationKey, StringComparison.OrdinalIgnoreCase));
+        var receipt = order.OperationReceipts.FirstOrDefault(r =>
+            r.TargetItemId == rentalItemId &&
+            (string.Equals(r.OperationId, operationKey, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(r.InventoryOperationKey, operationKey, StringComparison.OrdinalIgnoreCase)));
         if (receipt == null)
         {
             _logger.LogWarning("Receipt for operationKey {OperationKey} not found on order {OrderId}", operationKey, orderId);
             return Result.Success();
+        }
+        if (!IsReceiptForCommand(receipt, commandType))
+            return Error.Validation("INVENTORY_RESULT_ACTION_MISMATCH", "Inventory result action does not match the staged operation.");
+
+        if (receipt.Status == RentalOperationReceipt.StatusSucceeded)
+        {
+            bool sameSuccess = isSuccess && !string.IsNullOrWhiteSpace(receipt.ResponseJson) &&
+                CanonicalJson.AreEquivalent(receipt.ResponseJson, payloadElement.GetRawText());
+            return sameSuccess ? Result.Success() : Error.Conflict("INVENTORY_RESULT_CONFLICT", "Operation already has a different terminal result.");
+        }
+        if (receipt.Status == RentalOperationReceipt.StatusFailed)
+        {
+            string incomingCode = payloadElement.TryGetProperty("errorCode", out var errorCodeElement) ? errorCodeElement.GetString() ?? "" : "";
+            bool sameFailure = !isSuccess && string.Equals(receipt.ErrorCode, incomingCode, StringComparison.OrdinalIgnoreCase);
+            return sameFailure ? Result.Success() : Error.Conflict("INVENTORY_RESULT_CONFLICT", "Operation already has a different terminal result.");
+        }
+
+        if (string.Equals(commandType, KafkaContractSpec.CommandTypes.MarkAssetsOverdue, StringComparison.OrdinalIgnoreCase))
+        {
+            return HandleOverdueResult(order, receipt, operationKey, isSuccess, payloadElement, utcNow);
         }
 
         if (string.Equals(commandType, KafkaContractSpec.CommandTypes.ConfirmAllocation, StringComparison.OrdinalIgnoreCase))
@@ -152,6 +176,63 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         return Result.Success();
     }
 
+    private static bool IsReceiptForCommand(RentalOperationReceipt receipt, string commandType) => commandType switch
+    {
+        KafkaContractSpec.CommandTypes.ConfirmAllocation => receipt.Action is "SupplierAccept" or KafkaContractSpec.CommandTypes.ConfirmAllocation,
+        _ => string.Equals(receipt.Action, commandType, StringComparison.OrdinalIgnoreCase)
+    };
+
+    private static Result HandleOverdueResult(RentalOrder order, RentalOperationReceipt receipt,
+        string operationKey, bool isSuccess, JsonElement payload, DateTimeOffset now)
+    {
+        if (receipt.Status == RentalOperationReceipt.StatusSucceeded) return Result.Success();
+        if (receipt.InventoryOperationKey is not null && !string.Equals(receipt.InventoryOperationKey, operationKey, StringComparison.Ordinal))
+            return Error.Conflict("INVENTORY_RESULT_CONFLICT", "Overdue result operation key differs from the staged command.");
+        if (isSuccess)
+        {
+            string status = payload.TryGetProperty("status", out var statusElement) ? statusElement.GetString() ?? "" : "";
+            if (!string.Equals(status, "PROTECTED", StringComparison.OrdinalIgnoreCase))
+                return Error.Validation("INVALID_OVERDUE_RESULT", "Inventory did not confirm overdue protection.");
+            var item = order.Items.FirstOrDefault(i => i.Id == receipt.TargetItemId);
+            if (item is null || !payload.TryGetProperty("allocations", out var maps) || maps.ValueKind != JsonValueKind.Array)
+                return Error.Validation("INVALID_OVERDUE_RESULT", "Overdue result has no allocation mapping.");
+            OverdueProtectionCommand? command;
+            try { command = JsonSerializer.Deserialize<OverdueProtectionCommand>(receipt.PayloadJson ?? "", JsonOptions); }
+            catch (JsonException) { return Error.Validation("INVALID_OVERDUE_COMMAND", "Stored overdue command is invalid."); }
+            var expected = command?.ProviderRequest?.AllocationIds?.Order().ToArray() ?? [];
+            var actual = maps.EnumerateArray().Select(m => m.TryGetProperty("allocationId", out var id) && id.TryGetGuid(out var value) ? value : Guid.Empty).Order().ToArray();
+            if (expected.Length != 1 || !expected.SequenceEqual(actual))
+                return Error.Validation("INVALID_OVERDUE_RESULT", "Overdue result allocation does not match the pending assignment.");
+            receipt.MarkSucceeded(now, payload.GetRawText());
+            return Result.Success();
+        }
+
+        string errorCode = payload.TryGetProperty("errorCode", out var codeElement) ? codeElement.GetString() ?? "" : "";
+        if (string.Equals(errorCode, "ALLOCATION_NOT_OVERDUE", StringComparison.OrdinalIgnoreCase) &&
+            order.Items.FirstOrDefault(i => i.Id == receipt.TargetItemId)?.UnitAssignments
+                .Any(u => u.Status is RentalUnitAssignmentStatus.ReturnedNormal or RentalUnitAssignmentStatus.ReturnedDamaged) == true)
+        {
+            receipt.MarkSucceeded(now);
+            return Result.Success();
+        }
+        receipt.MarkFailed(errorCode, payload.TryGetProperty("errorMessage", out var errorElement) ? errorElement.GetString() : null,
+            now, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+        return Result.Success();
+    }
+
+    private async Task<Result> StageCheckoutReleasesAsync(Guid orderId, IEnumerable<Guid> rentalItemIds, CancellationToken ct)
+    {
+        foreach (Guid itemId in rentalItemIds.Distinct().Order())
+        {
+            var release = new ReleaseAllocationCommandPayload(orderId, itemId,
+                $"checkout:compensation:{orderId:N}:{itemId:N}:release", "Checkout did not complete");
+            var result = await _inventoryCommands!.EnqueueReleaseAllocationAsync(
+                release, orderId.ToString("D"), cancellationToken: ct);
+            if (result.IsFailure) return result.Error;
+        }
+        return Result.Success();
+    }
+
     private async Task<Result> HandleCreateHoldResultAsync(
         Guid orderId,
         Guid rentalItemId,
@@ -163,8 +244,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
     {
         if (_checkoutOperationRepo == null || _inventoryCommands == null || _orderWriter == null)
         {
-            _logger.LogWarning("Checkout dependencies not configured on allocation handler; skipping CreateHold result");
-            return Result.Success();
+            return Error.Failure("CHECKOUT_HANDLER_NOT_CONFIGURED",
+                "Checkout allocation result handling requires its repository, Inventory producer and order writer.");
         }
 
         var op = await _checkoutOperationRepo.GetByExpectedOrderIdAsync(orderId, cancellationToken);
@@ -184,13 +265,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         {
             if (isSuccess)
             {
-                var releaseCmd = new ReleaseAllocationCommandPayload(
-                    orderId,
-                    rentalItemId,
-                    $"checkout:late:{orderId:N}:{rentalItemId:N}:release",
-                    "Late hold response after checkout failed/timed out");
-
-                await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmd, correlationId: orderId.ToString("D"), cancellationToken: cancellationToken);
+                var staged = await StageCheckoutReleasesAsync(orderId, [rentalItemId], cancellationToken);
+                if (staged.IsFailure) return staged.Error;
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
             }
             return Result.Success();
@@ -202,15 +278,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             var lines = JsonSerializer.Deserialize<List<CheckoutItemHoldDescriptor>>(op.ItemHoldStatusesJson, JsonOptions);
             if (lines != null)
             {
-                foreach (var l in lines)
-                {
-                    var releaseCmd = new ReleaseAllocationCommandPayload(
-                        orderId,
-                        l.RentalItemId,
-                        $"checkout:timeout:{orderId:N}:{l.RentalItemId:N}:release",
-                        "Checkout timed out before all holds completed");
-                    await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmd, correlationId: orderId.ToString("D"), cancellationToken: cancellationToken);
-                }
+                var staged = await StageCheckoutReleasesAsync(orderId, lines.Select(l => l.RentalItemId), cancellationToken);
+                if (staged.IsFailure) return staged.Error;
             }
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             return Result.Success();
@@ -226,15 +295,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             var lines = JsonSerializer.Deserialize<List<CheckoutItemHoldDescriptor>>(op.ItemHoldStatusesJson, JsonOptions);
             if (lines != null)
             {
-                foreach (var l in lines)
-                {
-                    var releaseCmd = new ReleaseAllocationCommandPayload(
-                        orderId,
-                        l.RentalItemId,
-                        $"checkout:compensation:{orderId:N}:{l.RentalItemId:N}:release",
-                        $"Hold rejected on line {rentalItemId}: {errMsg}");
-                    await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmd, correlationId: orderId.ToString("D"), cancellationToken: cancellationToken);
-                }
+                var staged = await StageCheckoutReleasesAsync(orderId, lines.Select(l => l.RentalItemId), cancellationToken);
+                if (staged.IsFailure) return staged.Error;
             }
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             return Result.Success();
@@ -245,25 +307,43 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         if (targetLine == null)
         {
             _logger.LogWarning("Line for rentalItemId {RentalItemId} not found in operation {OperationId}", rentalItemId, op.OperationId);
+            op.MarkFailed("CHECKOUT_LINE_NOT_FOUND", "The successful hold result does not match a checkout line.", utcNow);
+            var staged = await StageCheckoutReleasesAsync(orderId, linesMap.Select(l => l.RentalItemId), cancellationToken);
+            if (staged.IsFailure) return staged.Error;
+            await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
             return Result.Success();
         }
 
-        var plan = JsonSerializer.Deserialize<CheckoutPlan>(op.PreparationSnapshotJson, JsonOptions)!;
+        var plan = JsonSerializer.Deserialize<CheckoutPlan>(op.PreparationSnapshotJson, JsonOptions);
+        if (plan is null)
+        {
+            op.MarkFailed("CHECKOUT_SNAPSHOT_INVALID", "Checkout snapshot is invalid.", utcNow);
+            var staged = await StageCheckoutReleasesAsync(orderId, linesMap.Select(l => l.RentalItemId), cancellationToken);
+            if (staged.IsFailure) return staged.Error;
+            await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            return Result.Success();
+        }
         var planLine = plan.Lines.FirstOrDefault(pl => pl.CartItemId == targetLine.CartItemId);
-        int expectedQuantity = planLine?.Quantity ?? 1;
+        if (planLine is null)
+        {
+            op.MarkFailed("CHECKOUT_PLAN_LINE_MISSING", "Checkout snapshot is missing the held cart line.", utcNow);
+            var staged = await StageCheckoutReleasesAsync(orderId, linesMap.Select(l => l.RentalItemId), cancellationToken);
+            if (staged.IsFailure) return staged.Error;
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            return Result.Success();
+        }
+        int expectedQuantity = planLine.Quantity;
 
         // Validate allocations from Inventory
         if (!payloadElement.TryGetProperty("allocations", out var alProp) || alProp.ValueKind != JsonValueKind.Array)
         {
             op.MarkFailed("INVALID_ALLOCATIONS_PAYLOAD", "Missing allocations array from Inventory", utcNow);
-            foreach (var l in linesMap)
-            {
-                var releaseCmd = new ReleaseAllocationCommandPayload(
-                    orderId, l.RentalItemId, $"checkout:compensation:{orderId:N}:{l.RentalItemId:N}:release", "Invalid allocations payload");
-                await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmd, correlationId: orderId.ToString("D"), cancellationToken: cancellationToken);
-            }
+            var staged = await StageCheckoutReleasesAsync(orderId, linesMap.Select(l => l.RentalItemId), cancellationToken);
+            if (staged.IsFailure) return staged.Error;
             await _unitOfWork.SaveChangesAsync(cancellationToken);
-            return Error.Validation("INVALID_ALLOCATIONS_PAYLOAD", "Missing allocations array from Inventory");
+            return Result.Success();
         }
 
         var allocs = JsonSerializer.Deserialize<List<AllocationAssetMappingPayload>>(alProp.GetRawText(), JsonOptions);
@@ -273,14 +353,10 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             allocs.Any(a => a.AllocationId == Guid.Empty || a.AssetId == Guid.Empty))
         {
             op.MarkFailed("ALLOCATIONS_VALIDATION_FAILED", "Allocations quantity mismatch or duplicate IDs from Inventory", utcNow);
-            foreach (var l in linesMap)
-            {
-                var releaseCmd = new ReleaseAllocationCommandPayload(
-                    orderId, l.RentalItemId, $"checkout:compensation:{orderId:N}:{l.RentalItemId:N}:release", "Allocations validation failed");
-                await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmd, correlationId: orderId.ToString("D"), cancellationToken: cancellationToken);
-            }
+            var staged = await StageCheckoutReleasesAsync(orderId, linesMap.Select(l => l.RentalItemId), cancellationToken);
+            if (staged.IsFailure) return staged.Error;
             await _unitOfWork.SaveChangesAsync(cancellationToken);
-            return Error.Validation("ALLOCATIONS_VALIDATION_FAILED", "Allocations quantity mismatch or duplicate IDs from Inventory");
+            return Result.Success();
         }
 
         linesMap.Remove(targetLine);
@@ -334,21 +410,45 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 _unitOfWork.DiscardChanges();
 
                 op.MarkFailed(orderResult.Error.Code, orderResult.Error.Message, utcNow);
-                foreach (var l in linesMap)
-                {
-                    var releaseCmd = new ReleaseAllocationCommandPayload(
-                        orderId,
-                        l.RentalItemId,
-                        $"checkout:compensation:{orderId:N}:{l.RentalItemId:N}:release",
-                        $"Failed to create order: {orderResult.Error.Message}");
-                    await _inventoryCommands.EnqueueReleaseAllocationAsync(releaseCmd, correlationId: orderId.ToString("D"), cancellationToken: cancellationToken);
-                }
+                var staged = await StageCheckoutReleasesAsync(orderId, linesMap.Select(l => l.RentalItemId), cancellationToken);
+                if (staged.IsFailure) return staged.Error;
                 await _checkoutOperationRepo.UpdateAsync(op, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
-                return orderResult.Error;
+                return Result.Success();
             }
 
             var createdOrder = orderResult.Value;
+            if (_rentalEvents is not null)
+            {
+                var orderCreated = await _rentalEvents.EnqueueRentalOrderCreatedAsync(
+                    new RentalOrderCreatedPayload(
+                        createdOrder.Id,
+                        createdOrder.OrderCode,
+                        createdOrder.RenterId,
+                        createdOrder.Currency,
+                        createdOrder.TotalRentalAmount,
+                        createdOrder.TotalDepositAmount,
+                        createdOrder.TotalPayableAmount,
+                        createdOrder.PaymentDeadline,
+                        createdOrder.CreatedAt,
+                        createdOrder.Items.Select(item => new RentalOrderCreatedItemPayload(
+                            item.Id,
+                            item.EquipmentListingId,
+                            item.SupplierId,
+                            item.Quantity,
+                            item.ExpectedStartDate,
+                            item.ExpectedEndDate,
+                            item.RentalAmount,
+                            item.DepositAmount)).ToArray()),
+                    correlationId: orderId.ToString("D"),
+                    cancellationToken: cancellationToken);
+                if (orderCreated.IsFailure) return orderCreated.Error;
+            }
+            else
+            {
+                return Error.Failure("RENTAL_EVENT_PRODUCER_NOT_CONFIGURED",
+                    "RentalOrderCreated must be staged before checkout acknowledgement.");
+            }
             string invoiceOpKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", createdOrder.Id.ToString());
             var invoiceReceipt = RentalOperationReceipt.CreatePending(
                 Guid.NewGuid(),
@@ -405,26 +505,11 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                         utcNow,
                         operationKey);
 
-                    var envelope = new KafkaMessageEnvelope<RentalItemConfirmedPayload>(
-                        Guid.NewGuid(),
-                        KafkaContractSpec.EventTypes.RentalItemConfirmed,
-                        KafkaContractSpec.CurrentEnvelopeVersion,
-                        KafkaContractSpec.Producers.RentalService,
-                        order.Id.ToString("D"),
-                        utcNow,
-                        operationKey,
-                        null,
-                        outboxPayload);
-
-                    var outbox = new RentalOutboxMessage(
-                        envelope.MessageId,
-                        KafkaContractSpec.Topics.RentalEvents,
-                        order.Id.ToString("D"),
-                        KafkaContractSpec.EventTypes.RentalItemConfirmed,
-                        JsonSerializer.Serialize(envelope, JsonOptions),
-                        utcNow);
-
-                    await _outboxRepository.AddAsync(outbox, cancellationToken);
+                    var published = await _rentalEvents!.EnqueueDomainEventAsync(
+                        KafkaContractSpec.EventTypes.RentalItemConfirmed, item.Id.ToString("D"),
+                        order.Id.ToString("D"), utcNow, outboxPayload,
+                        order.Id.ToString("D"), causationId: receipt.Id, cancellationToken: cancellationToken);
+                    if (published.IsFailure) return published.Error;
                 }
                 else
                 {
@@ -458,37 +543,23 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
     {
         if (isSuccess)
         {
-            receipt.MarkSucceeded(utcNow, null, payloadElement.GetRawText());
+            receipt.MarkSucceeded(utcNow, payloadElement.GetRawText());
 
             var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
-            if (item != null)
+            if (item != null && item.Status == RentalItemStatus.PendingSupplierConfirmation)
             {
-                var notifyEnvelope = new KafkaMessageEnvelope<RentalSupplierConfirmationRequestedPayload>(
-                    Guid.NewGuid(),
+                var published = await _rentalEvents!.EnqueueDomainEventAsync(
                     KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested,
-                    1,
-                    KafkaContractSpec.Producers.RentalService,
-                    order.Id.ToString("D"),
-                    utcNow,
-                    receipt.OperationId,
-                    null,
+                    item.Id.ToString("D"), order.Id.ToString("D"), utcNow,
                     new RentalSupplierConfirmationRequestedPayload(
                         order.Id,
                         item.Id,
                         item.SupplierId,
                         item.EquipmentListingId,
                         item.Quantity,
-                        item.SupplierConfirmationDeadline ?? utcNow.AddHours(24)));
-
-                var outbox = new RentalOutboxMessage(
-                    notifyEnvelope.MessageId,
-                    KafkaContractSpec.Topics.RentalEvents,
-                    order.Id.ToString("D"),
-                    KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested,
-                    JsonSerializer.Serialize(notifyEnvelope, JsonOptions),
-                    utcNow);
-
-                await _outboxRepository.AddAsync(outbox, cancellationToken);
+                        item.SupplierConfirmationDeadline ?? utcNow.AddHours(24)),
+                    order.Id.ToString("D"), receipt.Id, cancellationToken);
+                if (published.IsFailure) return published.Error;
             }
         }
         else
@@ -500,9 +571,38 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
             if (item != null)
             {
+                bool expiredNow = item.Status != RentalItemStatus.Expired;
                 item.ApplySupplierTimeout(utcNow, operationKey);
                 RentalOrderStatusPolicy.Apply(order, utcNow, operationKey);
                 order.RecordReadModelUpdate(utcNow);
+
+                if (expiredNow)
+                {
+                    var expired = await _rentalEvents!.EnqueueDomainEventAsync(
+                        KafkaContractSpec.EventTypes.RentalItemExpired, item.Id.ToString("D"),
+                        order.Id.ToString("D"), utcNow,
+                        new RentalItemExpiredPayload(order.Id, item.Id, item.SupplierId, utcNow, errMsg),
+                        order.Id.ToString("D"), receipt.Id, cancellationToken);
+                    if (expired.IsFailure) return expired.Error;
+                }
+
+                string releaseKey = RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.Id}");
+                var releaseReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == releaseKey);
+                if (releaseReceipt is null)
+                {
+                    string releaseProviderKey = RentalOperationExecutor.ComputeOperationKey("ReleaseAllocation", $"{order.Id}:{item.AllocationGroupId}");
+                    string releaseReason = "Supplier confirmation expired; releasing allocation";
+                    releaseReceipt = RentalOperationReceipt.CreatePending(
+                        Guid.NewGuid(), order.Id, releaseKey, "ReleaseAllocation",
+                        RentalOperationExecutor.ComputeFingerprint($"ReleaseAllocation:{item.AllocationGroupId}"), utcNow,
+                        item.Id, JsonSerializer.Serialize(new ReleaseAllocationRequest(releaseKey, releaseReason), JsonOptions));
+                    releaseReceipt.SetInventoryOperationKey(releaseProviderKey);
+                    order.AddOperationReceipt(releaseReceipt);
+                    var stagedRelease = await _inventoryCommands!.EnqueueReleaseAllocationAsync(
+                        new ReleaseAllocationCommandPayload(order.Id, item.Id, releaseProviderKey, releaseReason),
+                        order.Id.ToString("D"), cancellationToken: cancellationToken);
+                    if (stagedRelease.IsFailure) return stagedRelease.Error;
+                }
 
                 string refundKey = RentalOperationExecutor.ComputeOperationKey("RequestRefund", $"{order.Id}:{rentalItemId}");
                 var refundReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundKey);
@@ -521,6 +621,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                         createdAt: utcNow,
                         status: RentalOperationReceipt.StatusPending,
                         targetItemId: item.Id,
+                        prerequisiteOperationId: releaseKey,
                         payloadJson: JsonSerializer.Serialize(new RequestRefundRequest(order.Id, order.InvoiceRef, order.PaymentRef!, refundItems, errMsg, refundKey), JsonOptions));
                     order.AddOperationReceipt(refundReceipt);
                 }
@@ -528,10 +629,6 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 await _orderRepository.UpdateAsync(order, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-                if (_operationExecutor != null && refundReceipt != null)
-                {
-                    await _operationExecutor.RequestRefundDirectAsync(order, item, refundReceipt, refundKey, cancellationToken);
-                }
                 return Result.Success();
             }
         }
@@ -552,7 +649,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
     {
         if (isSuccess)
         {
-            receipt.MarkSucceeded(utcNow, null, payloadElement.GetRawText());
+            receipt.MarkSucceeded(utcNow, payloadElement.GetRawText());
             var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
             bool assignmentsChanged = item?.MarkAssignmentsReleased(utcNow) ?? false;
             bool rollupChanged = RentalOrderStatusPolicy.Apply(order, utcNow, receipt.OperationId);
@@ -563,10 +660,6 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             }
             string refundOpKey = RentalOperationExecutor.ComputeOperationKey("RequestRefund", $"{order.Id}:{rentalItemId}");
             var pendingRefund = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundOpKey && r.Status == RentalOperationReceipt.StatusPending);
-            if (pendingRefund != null && _operationExecutor != null && item != null)
-            {
-                await _operationExecutor.RequestRefundDirectAsync(order, item, pendingRefund, refundOpKey, cancellationToken);
-            }
         }
         else
         {
@@ -643,9 +736,22 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
 
                 RentalOrderStatusPolicy.Apply(order, utcNow, operationKey);
                 order.RecordReadModelUpdate(utcNow);
+
+                if (item.HandoverRecord is { } handover)
+                {
+                    var handoverPayload = new RentalItemHandoverCompletedPayload(
+                        order.Id, item.Id, order.RenterId, item.SupplierId,
+                        item.EquipmentListingId, item.Quantity, handover.Id,
+                        handover.ActualHandoverAt, utcNow);
+                    var published = await _rentalEvents!.EnqueueDomainEventAsync(
+                        KafkaContractSpec.EventTypes.RentalItemHandoverCompleted, handover.Id.ToString("D"),
+                        order.Id.ToString("D"), utcNow, handoverPayload,
+                        order.Id.ToString("D"), receipt.Id, cancellationToken);
+                    if (published.IsFailure) return published.Error;
+                }
             }
 
-            receipt.MarkSucceeded(utcNow, null, payloadElement.GetRawText());
+            receipt.MarkSucceeded(utcNow, payloadElement.GetRawText());
         }
         else
         {

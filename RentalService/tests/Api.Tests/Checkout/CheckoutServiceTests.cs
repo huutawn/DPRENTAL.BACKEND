@@ -104,7 +104,7 @@ public sealed class CheckoutServiceTests
         Assert.Equal(2, outboxMessages.Count);
         Assert.All(outboxMessages, m =>
         {
-            Assert.Equal(KafkaContractSpec.Topics.InventoryAllocationCommands, m.Topic);
+            Assert.Equal(KafkaContractSpec.Topics.InventoryCommands, m.Topic);
             Assert.Equal(KafkaContractSpec.CommandTypes.CreateHold, m.MessageType);
             Assert.Equal(op.ExpectedRentalOrderId.ToString("D"), m.PartitionKey);
         });

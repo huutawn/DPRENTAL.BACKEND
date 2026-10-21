@@ -28,9 +28,7 @@ public sealed class CheckoutOrderWriterTests
     private readonly string _dbName = $"CheckoutWriter_{Guid.NewGuid():N}";
     private readonly Guid _renterId = Guid.NewGuid();
     private readonly Guid _cartId = Guid.NewGuid();
-    private readonly FakeInventoryRentalClient _inventory = new();
     private readonly SequentialOrderCodeGenerator _orderCodes = new();
-    private readonly CheckoutHoldOrchestrator _holds;
     private readonly CheckoutPlanLine _cameraLine;
     private readonly CheckoutPlanLine _lightLine;
     private readonly CheckoutPlanLine _tripodLine;
@@ -39,7 +37,6 @@ public sealed class CheckoutOrderWriterTests
 
     public CheckoutOrderWriterTests()
     {
-        _holds = new CheckoutHoldOrchestrator(_inventory, NullLogger<CheckoutHoldOrchestrator>.Instance);
 
         RentalCart cart = RentalCart.Create(_cartId, _renterId, Now).Value;
         _cameraLine = AddCartLine(cart, 2);
@@ -98,12 +95,14 @@ public sealed class CheckoutOrderWriterTests
         orders ?? new RentalOrderRepository(context),
         new RentalCartRepository(context),
         orderCodes ?? _orderCodes,
-        _holds,
         unitOfWork ?? context,
         NullLogger<CheckoutOrderWriter>.Instance);
 
-    private async Task<IReadOnlyList<CheckoutHeldLine>> HoldAsync(CheckoutPlan plan, string operationId = OperationId) =>
-        (await _holds.HoldAllLinesAsync(plan, operationId, Now)).HeldLines;
+    private static Task<IReadOnlyList<CheckoutHeldLine>> HoldAsync(CheckoutPlan plan) =>
+        Task.FromResult<IReadOnlyList<CheckoutHeldLine>>(plan.Lines.Select(line => new CheckoutHeldLine(
+            line, Guid.NewGuid(), $"rental-item:{Guid.NewGuid():N}",
+            Enumerable.Range(0, line.Quantity).Select(_ => new Dprental.RentalService.Application.DTOs.Inventory.AssignedAssetDto(
+                Guid.NewGuid(), Guid.NewGuid(), "ASSIGNED")).ToArray())).ToArray());
 
     private async Task<int> CountOrdersAsync()
     {
@@ -162,10 +161,10 @@ public sealed class CheckoutOrderWriterTests
     [Fact]
     public async Task CreateOrder_PersistsOrderWithDeliveryTermsAndPaymentDeadline()
     {
-        CheckoutHoldResult held = await _holds.HoldAllLinesAsync(_plan, OperationId, Now);
+        IReadOnlyList<CheckoutHeldLine> held = await HoldAsync(_plan);
 
         await using RentalServiceDbContext writeContext = NewContext();
-        Result<RentalOrder> result = await CreateWriter(writeContext).CreateOrderAsync(_plan, held.HeldLines, OperationId, Now);
+        Result<RentalOrder> result = await CreateWriter(writeContext).CreateOrderAsync(_plan, held, OperationId, Now);
 
         Assert.True(result.IsSuccess);
         await using RentalServiceDbContext readContext = NewContext();
@@ -176,7 +175,7 @@ public sealed class CheckoutOrderWriterTests
         Assert.Equal(_renterId, order.RenterId);
         Assert.Equal(RentalOrderStatus.PendingPayment, order.Status);
         Assert.Equal("VND", order.Currency);
-        Assert.Equal(held.HoldExpiresAt, order.PaymentDeadline);
+        Assert.Equal(Now.Add(Dprental.RentalService.Application.Policies.CheckoutRules.PaymentWindow), order.PaymentDeadline);
         Assert.Equal(OperationId, order.CheckoutOperationId);
 
         Assert.Equal("Delivery", order.DeliveryMethod);
@@ -193,7 +192,6 @@ public sealed class CheckoutOrderWriterTests
         Assert.Equal("v1.0", order.TermsAcceptance.TermsVersion);
         Assert.Equal(Now, order.TermsAcceptance.AcceptedAt);
 
-        Assert.Empty(_inventory.Releases);
     }
 
     [Fact]
@@ -285,16 +283,13 @@ public sealed class CheckoutOrderWriterTests
     public async Task CreateOrder_ReleasesHoldsAndSavesNothing_WhenDomainRejectsTheOrder()
     {
         string tooLongOperationId = new('k', 65);
-        IReadOnlyList<CheckoutHeldLine> held = await HoldAsync(_plan, tooLongOperationId);
+        IReadOnlyList<CheckoutHeldLine> held = await HoldAsync(_plan);
 
         await using RentalServiceDbContext context = NewContext();
         Result<RentalOrder> result = await CreateWriter(context).CreateOrderAsync(_plan, held, tooLongOperationId, Now);
 
         Assert.True(result.IsFailure);
         Assert.Equal(RentalErrors.InvalidSnapshot, result.Error);
-        Assert.Equal(
-            held.Select(h => h.AllocationGroupId).Reverse(),
-            _inventory.Releases.Select(r => r.AllocationGroupId));
         Assert.Equal(0, await CountOrdersAsync());
         Assert.Equal(4, (await ReloadCartAsync()).Items.Count);
     }
@@ -309,7 +304,6 @@ public sealed class CheckoutOrderWriterTests
         Result<RentalOrder> result = await CreateWriter(context).CreateOrderAsync(stalePlan, held, OperationId, Now);
 
         Assert.Equal(RentalErrors.CartNotFound, result.Error);
-        Assert.Equal(3, _inventory.Releases.Count);
         Assert.Equal(0, _orderCodes.IssuedCount);
         Assert.Equal(0, await CountOrdersAsync());
     }
@@ -324,7 +318,6 @@ public sealed class CheckoutOrderWriterTests
             .CreateOrderAsync(_plan, held, OperationId, Now);
 
         Assert.Equal(CheckoutErrors.OrderNotSaved, result.Error);
-        Assert.Equal(3, _inventory.Releases.Count);
         Assert.Equal(0, await CountOrdersAsync());
         Assert.Equal(4, (await ReloadCartAsync()).Items.Count);
         Assert.Empty(context.ChangeTracker.Entries());
@@ -342,7 +335,6 @@ public sealed class CheckoutOrderWriterTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(existingOrderId, result.Value.Id);
-        Assert.Empty(_inventory.Releases);
         Assert.Equal(1, await CountOrdersAsync());
     }
 
@@ -357,7 +349,6 @@ public sealed class CheckoutOrderWriterTests
             .CreateOrderAsync(_plan, held, OperationId, Now);
 
         Assert.Equal(CheckoutErrors.OrderNotSaved, result.Error);
-        Assert.Equal(3, _inventory.Releases.Count);
     }
 
     [Fact]
@@ -371,10 +362,6 @@ public sealed class CheckoutOrderWriterTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => writer.CreateOrderAsync(_plan, held, OperationId, Now));
-
-        Assert.Equal(
-            held.Select(h => h.AllocationGroupId).Reverse(),
-            _inventory.Releases.Select(r => r.AllocationGroupId));
         Assert.Equal(0, await CountOrdersAsync());
         Assert.Equal(4, (await ReloadCartAsync()).Items.Count);
         Assert.Empty(context.ChangeTracker.Entries());
@@ -395,9 +382,6 @@ public sealed class CheckoutOrderWriterTests
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => writer.CreateOrderAsync(_plan, held, OperationId, Now, requestAborted.Token));
-
-        Assert.Equal(3, _inventory.Releases.Count);
-        Assert.All(_inventory.Releases, r => Assert.Equal(CancellationToken.None, r.Token));
         Assert.Equal(0, await CountOrdersAsync());
     }
 
@@ -410,8 +394,6 @@ public sealed class CheckoutOrderWriterTests
         CheckoutOrderWriter writer = CreateWriter(context, orderCodes: new FailingOrderCodeGenerator());
 
         await Assert.ThrowsAsync<TimeoutException>(() => writer.CreateOrderAsync(_plan, held, OperationId, Now));
-
-        Assert.Equal(3, _inventory.Releases.Count);
         Assert.Equal(0, await CountOrdersAsync());
         Assert.Equal(4, (await ReloadCartAsync()).Items.Count);
     }
@@ -427,7 +409,6 @@ public sealed class CheckoutOrderWriterTests
         await Assert.ThrowsAsync<TimeoutException>(() => writer.CreateOrderAsync(_plan, held, OperationId, Now));
 
         // Đơn đã nằm trong database và đang dùng các hold này: nhả ra là có đơn không còn máy.
-        Assert.Empty(_inventory.Releases);
         Assert.Equal(1, await CountOrdersAsync());
     }
 
@@ -442,7 +423,6 @@ public sealed class CheckoutOrderWriterTests
 
         await Assert.ThrowsAsync<NotSupportedException>(() => writer.CreateOrderAsync(_plan, held, OperationId, Now));
 
-        Assert.Empty(_inventory.Releases);
     }
 
     [Fact]

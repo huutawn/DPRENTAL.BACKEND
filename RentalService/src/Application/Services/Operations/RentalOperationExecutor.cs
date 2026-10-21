@@ -209,15 +209,6 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
 
         switch (receipt.Action)
         {
-            case RentalItem.BlockDamagedAction:
-            case RentalItem.MarkReturnedAction:
-                {
-                    var item = order.Items.FirstOrDefault(i => i.Id == receipt.TargetItemId);
-                    if (item is null) return Error.NotFound("ITEM_NOT_FOUND", "Rental item was not found.");
-                    return receipt.Action == RentalItem.BlockDamagedAction
-                        ? await BlockDamagedUnitsCoreAsync(order, item, receipt, cancellationToken)
-                        : await MarkReturnedUnitsCoreAsync(order, item, receipt, cancellationToken);
-                }
             case RentalItem.OverdueProtectionAction:
                 {
                     var item = order.Items.FirstOrDefault(i => i.Id == receipt.TargetItemId);
@@ -312,15 +303,14 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == operationId);
         if (receipt == null) return Error.NotFound("OPERATION_NOT_FOUND", $"Không tìm thấy operation '{operationId}'.");
 
+        if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired)
+        {
+            return Error.Conflict("MANUAL_REFUND_REQUIRED", "Refund receipt is reserved for manual reconciliation and cannot be replayed automatically.");
+        }
+
         if (receipt.IsSuccess && receipt.Status == RentalOperationReceipt.StatusSucceeded)
         {
             return Error.Conflict("OPERATION_ALREADY_SUCCEEDED", "Operation đã hoàn thành thành công (Succeeded); không thể replay.");
-        }
-
-        if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired ||
-            (receipt.Action == "RequestRefund" && order.LatePaymentRefundRequired))
-        {
-            return Error.Conflict("MANUAL_REFUND_REQUIRED", "Tác vụ hoàn tiền late payment yêu cầu xử lý thủ công, không hỗ trợ Admin replay tự động.");
         }
 
         // Validate journal command payload
@@ -396,10 +386,9 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
             var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == operationId);
             if (receipt == null) return Error.NotFound("RECEIPT_NOT_FOUND", "Không tìm thấy operation receipt.");
 
-            if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired ||
-                (receipt.Action == "RequestRefund" && order.LatePaymentRefundRequired))
+            if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired)
             {
-                return Error.Conflict("MANUAL_REFUND_REQUIRED", "Tác vụ hoàn tiền late payment yêu cầu xử lý thủ công, không hỗ trợ replay tự động.");
+                return Error.Conflict("MANUAL_REFUND_REQUIRED", "Refund receipt is reserved for manual reconciliation and cannot be replayed automatically.");
             }
 
             receipt.ReopenForManualReplay(utcNow);

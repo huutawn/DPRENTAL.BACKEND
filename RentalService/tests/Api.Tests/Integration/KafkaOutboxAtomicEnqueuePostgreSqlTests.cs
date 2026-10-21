@@ -50,6 +50,7 @@ public sealed class KafkaOutboxAtomicEnqueuePostgreSqlTests
                 DateTimeOffset.UtcNow);
 
             // 1. Initial Enqueue -> IsReplay = false
+            await using var tx = await db.Database.BeginTransactionAsync();
             var res1 = await repository.EnqueueAtomicAsync(message1);
             Assert.True(res1.IsSuccess);
             Assert.False(res1.Value.IsReplay);
@@ -68,6 +69,7 @@ public sealed class KafkaOutboxAtomicEnqueuePostgreSqlTests
             Assert.True(res2.IsSuccess);
             Assert.True(res2.Value.IsReplay);
             Assert.Equal(messageId, res2.Value.Message.Id);
+            await tx.CommitAsync();
 
             // Exactly 1 row in database
             int count = await db.RentalOutboxMessages.CountAsync(m => m.Id == messageId);
@@ -92,6 +94,7 @@ public sealed class KafkaOutboxAtomicEnqueuePostgreSqlTests
 
             var repository = new OutboxRepository(db);
             var writer = new KafkaOutboxWriter(repository);
+            await using var tx = await db.Database.BeginTransactionAsync();
             Guid orderId = Guid.NewGuid();
             string opKey = "checkout:order-2";
             Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId("rental-service", "CreateHold", opKey);
@@ -125,6 +128,7 @@ public sealed class KafkaOutboxAtomicEnqueuePostgreSqlTests
             var res2 = await writer.EnqueueAsync(KafkaContractSpec.Topics.InventoryCommands, orderId.ToString("D"), conflictingEnvelope);
             Assert.True(res2.IsFailure);
             Assert.Equal("OUTBOX_MESSAGE_CONFLICT", res2.Error.Code);
+            await tx.CommitAsync();
         }
         finally
         {
@@ -133,7 +137,7 @@ public sealed class KafkaOutboxAtomicEnqueuePostgreSqlTests
     }
 
     [Fact]
-    public async Task EnqueueAtomic_DoesNotFlushUnrelatedTrackedChanges()
+    public async Task EnqueueAtomic_RequiresCallerTransaction_AndDoesNotPersistWithoutIt()
     {
         await EnsurePostgreSqlAvailableAsync();
         var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
@@ -162,16 +166,17 @@ public sealed class KafkaOutboxAtomicEnqueuePostgreSqlTests
                 DateTimeOffset.UtcNow);
 
             var enqueueResult = await repository.EnqueueAtomicAsync(outboxMsg);
-            Assert.True(enqueueResult.IsSuccess);
+            Assert.True(enqueueResult.IsFailure);
+            Assert.Equal("OUTBOX_TRANSACTION_REQUIRED", enqueueResult.Error.Code);
 
             // Cart must STILL be uncommitted in the database
             await using var verifyDb = new RentalServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(connectionString));
             var persistedCart = await verifyDb.RentalCarts.FirstOrDefaultAsync(c => c.Id == unrelatedCartId);
             Assert.Null(persistedCart);
 
-            // Outbox message MUST be persisted
+            // Outbox message must not be persisted without a caller-owned transaction.
             var persistedOutbox = await verifyDb.RentalOutboxMessages.FirstOrDefaultAsync(m => m.Id == messageId);
-            Assert.NotNull(persistedOutbox);
+            Assert.Null(persistedOutbox);
         }
         finally
         {
@@ -201,6 +206,7 @@ public sealed class KafkaOutboxAtomicEnqueuePostgreSqlTests
             });
 
             var producer = new RentalEventProducer(writer, options, timeProvider);
+            await using var tx = await db.Database.BeginTransactionAsync();
 
             Guid orderId = Guid.NewGuid();
             Guid renterId = Guid.NewGuid();
@@ -238,8 +244,7 @@ public sealed class KafkaOutboxAtomicEnqueuePostgreSqlTests
             Assert.True(res2.Value.IsReplay);
             Assert.Equal(res1.Value.MessageId, res2.Value.MessageId);
 
-            await using var verifyDb = new RentalServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(connectionString));
-            var stored2 = await verifyDb.RentalOutboxMessages.FirstAsync(m => m.Id == res1.Value.MessageId);
+            var stored2 = await db.RentalOutboxMessages.FirstAsync(m => m.Id == res1.Value.MessageId);
             DateTimeOffset preservedOccurredAt = DateTimeOffset.Parse(
                 JsonDocument.Parse(stored2.Payload).RootElement.GetProperty("occurredAt").GetString()!,
                 CultureInfo.InvariantCulture);
@@ -250,6 +255,7 @@ public sealed class KafkaOutboxAtomicEnqueuePostgreSqlTests
             var res3 = await producer.EnqueueRentalOrderCreatedAsync(conflictingPayload);
             Assert.True(res3.IsFailure);
             Assert.Equal("OUTBOX_MESSAGE_CONFLICT", res3.Error.Code);
+            await tx.CommitAsync();
         }
         finally
         {
@@ -383,7 +389,11 @@ public sealed class KafkaOutboxAtomicEnqueuePostgreSqlTests
                     payload,
                     DateTimeOffset.UtcNow);
 
-                return await repo.EnqueueAtomicAsync(msg);
+                await using var tx = await workerDb.Database.BeginTransactionAsync();
+                var result = await repo.EnqueueAtomicAsync(msg);
+                if (result.IsSuccess) await tx.CommitAsync();
+                else await tx.RollbackAsync();
+                return result;
             });
 
             var results = await Task.WhenAll(tasks);

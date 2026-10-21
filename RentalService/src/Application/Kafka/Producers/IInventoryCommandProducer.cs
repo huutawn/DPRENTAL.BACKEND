@@ -44,4 +44,10 @@ public interface IInventoryCommandProducer
         Guid? causationId = null,
         CancellationToken cancellationToken = default);
 
+    Task<Result<ProducerEnqueueResult>> EnqueueMarkAssetsOverdueAsync(
+        MarkAssetsOverdueCommandPayload command,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
 }

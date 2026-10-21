@@ -72,7 +72,7 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
             KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
             key, now, command.ReturnRecordId.ToString("D"), null, command);
         return await _outboxWriter.EnqueueAsync(
-            _kafkaOptions.InventoryReturnCommandsTopic, key, envelope, cancellationToken);
+            _kafkaOptions.InventoryCommandsTopic, key, envelope, cancellationToken);
     }
 
     public async Task<Result<ProducerEnqueueResult>> EnqueueCreateHoldAsync(
@@ -227,4 +227,24 @@ public sealed class InventoryCommandProducer : IInventoryCommandProducer
             cancellationToken);
     }
 
+    public async Task<Result<ProducerEnqueueResult>> EnqueueMarkAssetsOverdueAsync(
+        MarkAssetsOverdueCommandPayload command,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (command is null || command.RentalOrderId == Guid.Empty || command.RentalItemId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(command.AllocationGroupId) || string.IsNullOrWhiteSpace(command.OperationKey) ||
+            command.AllocationIds is not { Count: > 0 } || command.AllocationIds.Any(id => id == Guid.Empty) ||
+            command.AllocationIds.Distinct().Count() != command.AllocationIds.Count)
+            return Error.Validation("INVALID_OVERDUE_COMMAND", "Overdue command is incomplete or has duplicate allocations.");
+        string aggregateId = command.RentalOrderId.ToString("D");
+        var envelope = new KafkaMessageEnvelope<MarkAssetsOverdueCommandPayload>(
+            OutboxMessageIdGenerator.ComputeDeterministicId(KafkaContractSpec.Producers.RentalService,
+                KafkaContractSpec.CommandTypes.MarkAssetsOverdue, command.OperationKey),
+            KafkaContractSpec.CommandTypes.MarkAssetsOverdue, KafkaContractSpec.CurrentEnvelopeVersion,
+            KafkaContractSpec.Producers.RentalService, aggregateId, _timeProvider.GetUtcNow(),
+            string.IsNullOrWhiteSpace(correlationId) ? aggregateId : correlationId, causationId, command);
+        return await _outboxWriter.EnqueueAsync(_kafkaOptions.InventoryCommandsTopic, aggregateId, envelope, cancellationToken);
+    }
 }

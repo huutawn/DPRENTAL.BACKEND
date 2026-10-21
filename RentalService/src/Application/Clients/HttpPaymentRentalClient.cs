@@ -36,9 +36,7 @@ public sealed class HttpPaymentRentalClient : IPaymentRentalClient
         _httpClient.BaseAddress = new Uri(baseUrl);
         _httpClient.Timeout = TimeSpan.FromSeconds(10);
 
-        _apiKey = configuration["InternalAuthentication:ApiKey"]
-            ?? configuration["INTERNAL_API_KEY"]
-            ?? string.Empty;
+        _apiKey = configuration["Services:Payment:ApiKey"] ?? string.Empty;
     }
 
     public async Task<Result<CreateInvoiceResponse>> CreateInvoiceAsync(

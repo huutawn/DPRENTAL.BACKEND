@@ -24,13 +24,12 @@ public sealed class KafkaOptions
 
     // Allocation and Inventory command topics
     public string InventoryCommandsTopic { get; set; } = "inventory.allocation.commands.v1";
-    public string InventoryReturnCommandsTopic { get; set; } = "inventory.allocation.commands.v1";
-    public string InventoryReturnEventsTopic { get; set; } = "inventory.allocation.events.v1";
-    public string InventoryReturnDlqTopic { get; set; } = "inventory.allocation.events.v1.rental.dlq";
-    public string InventoryReturnConsumerGroupId { get; set; } = "rental-inventory-return-consumer";
     public string InventoryAllocationEventsTopic { get; set; } = "inventory.allocation.events.v1";
     public string InventoryAllocationEventsDlqTopic { get; set; } = "inventory.allocation.events.v1.dlq";
-    public string PaymentCommandsTopic { get; set; } = "payment.commands.v1";
+
+    public Dictionary<string, string> PaymentProofPublicKeys { get; set; } = new(StringComparer.Ordinal);
+    public string PaymentProofIssuer { get; set; } = "dprental-integrity-host";
+    public string PaymentProofEnvironment { get; set; } = "production";
 
     // Security options
     public SecurityProtocol? SecurityProtocol { get; set; }

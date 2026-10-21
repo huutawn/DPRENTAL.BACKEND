@@ -16,10 +16,6 @@ public sealed class RentalSettledConsumer(
     IRentalEventProducer eventProducer,
     TimeProvider timeProvider) : IRentalSettledConsumer
 {
-    public RentalSettledConsumer(TimeProvider timeProvider)
-        : this(null!, timeProvider)
-    {
-    }
     public async Task<Result<bool>> ApplyRentalSettledStagedAsync(
         RentalOrder order, KafkaMessageEnvelope<RentalSettledPayload> envelope,
         RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default)
@@ -71,7 +67,7 @@ public sealed class RentalSettledConsumer(
 
         bool isNowCompleted = item.Status == RentalItemStatus.Completed;
 
-        if (!wasCompleted && isNowCompleted && eventProducer != null)
+        if (!wasCompleted && isNowCompleted)
         {
             if (!item.EquipmentTypeId.HasValue || item.EquipmentTypeId.Value == Guid.Empty)
             {
@@ -84,7 +80,9 @@ public sealed class RentalSettledConsumer(
                     item.EquipmentListingId,
                     item.EquipmentTypeId.Value,
                     order.Id,
-                    item.Id),
+                    item.Id,
+                    item.Quantity,
+                    payload.CompletedAt),
                 correlationId: envelope.CorrelationId,
                 causationId: envelope.MessageId,
                 cancellationToken: cancellationToken);
@@ -100,7 +98,14 @@ public sealed class RentalSettledConsumer(
             return Result.Success(false);
         }
 
-        RentalOrderStatusPolicy.Apply(order, now, payload.OperationKey);   // cập nhật order khi mọi item đã kết thúc
+        bool orderStatusChanged = RentalOrderStatusPolicy.Apply(order, now, payload.OperationKey);
+        if (orderStatusChanged && order.Status == RentalOrderStatus.Completed)
+        {
+            var orderCompletedResult = await eventProducer.EnqueueRentalOrderCompletedAsync(
+                new RentalOrderCompletedPayload(order.Id, order.RenterId, payload.CompletedAt),
+                envelope.CorrelationId, envelope.MessageId, cancellationToken);
+            if (orderCompletedResult.IsFailure) return orderCompletedResult.Error;
+        }
         return Result.Success(true);
     }
 }

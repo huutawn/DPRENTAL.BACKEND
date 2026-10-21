@@ -317,6 +317,10 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<string>("KafkaMessageKey")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<long?>("KafkaOffset")
                         .HasColumnType("bigint");
 
@@ -354,6 +358,9 @@ namespace RentalService.Domain.Migrations
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
+
+                    b.Property<string>("PublicationProofJson")
+                        .HasColumnType("text");
 
                     b.Property<DateTimeOffset>("ReceivedAt")
                         .HasColumnType("timestamp with time zone");
@@ -575,6 +582,10 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<string>("InventoryOperationKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<bool>("IsOutcomeUncertain")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -631,6 +642,8 @@ namespace RentalService.Domain.Migrations
                     b.HasIndex("TargetItemId");
 
                     b.HasIndex("Action", "Status");
+
+                    b.HasIndex("RentalOrderId", "InventoryOperationKey");
 
                     b.HasIndex("RentalOrderId", "OperationId")
                         .IsUnique();

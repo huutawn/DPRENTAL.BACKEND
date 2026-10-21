@@ -14,7 +14,9 @@ public sealed record InvoicePaidPayload(
     [Required] string PaymentRef,
     [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal PaidAmount,
     [Required] string Currency,
-    [Required] DateTimeOffset PaidAt);
+    [Required] DateTimeOffset PaidAt,
+    string PaymentDisposition = "ON_TIME",
+    DateTimeOffset? ProcessedAt = null);
 
 /// <summary>
 /// Breakdown item for RefundCompleted event.

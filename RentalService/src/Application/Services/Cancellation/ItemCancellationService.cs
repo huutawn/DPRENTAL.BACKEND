@@ -5,6 +5,7 @@ using Dprental.RentalService.Application.IServices.Cancellation;
 using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Events;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Operations;
@@ -169,6 +170,7 @@ public sealed class ItemCancellationService : IItemCancellationService
             return cancelResult.Error;
         }
 
+        RentalOrderStatus previousOrderStatus = order.Status;
         RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
 
         // 11. Lên lịch nhả lịch và hoàn tiền 100%
@@ -196,7 +198,10 @@ public sealed class ItemCancellationService : IItemCancellationService
 
         // 12. Phát event RentalItemCancelled qua outbox
         var notifyEnvelope = new KafkaMessageEnvelope<RentalItemCancelledPayload>(
-            Guid.NewGuid(),
+            OutboxMessageIdGenerator.ComputeDeterministicId(
+                KafkaContractSpec.Producers.RentalService,
+                KafkaContractSpec.EventTypes.RentalItemCancelled,
+                normalizedKey),
             KafkaContractSpec.EventTypes.RentalItemCancelled,
             KafkaContractSpec.CurrentEnvelopeVersion,
             KafkaContractSpec.Producers.RentalService,
@@ -215,6 +220,8 @@ public sealed class ItemCancellationService : IItemCancellationService
             utcNow);
 
         await _outboxRepository.AddAsync(outbox, cancellationToken);
+        if (previousOrderStatus != RentalOrderStatus.Cancelled && order.Status == RentalOrderStatus.Cancelled)
+            await EnqueueOrderCancelledAsync(order, normalizedKey, utcNow, cancelReason, cancellationToken);
 
         order.RecordReadModelUpdate(utcNow);
         await _orderRepository.UpdateAsync(order, cancellationToken);
@@ -316,6 +323,7 @@ public sealed class ItemCancellationService : IItemCancellationService
             return cancelResult.Error;
         }
 
+        RentalOrderStatus previousOrderStatus = order.Status;
         RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
 
         await _operationExecutor.ScheduleReleaseAndRefundAsync(order, item, actorId, reason, utcNow, cancellationToken);
@@ -341,7 +349,10 @@ public sealed class ItemCancellationService : IItemCancellationService
         order.AddOperationReceipt(receipt);
 
         var notifyEnvelope = new KafkaMessageEnvelope<RentalItemCancelledPayload>(
-            Guid.NewGuid(),
+            OutboxMessageIdGenerator.ComputeDeterministicId(
+                KafkaContractSpec.Producers.RentalService,
+                KafkaContractSpec.EventTypes.RentalItemCancelled,
+                normalizedKey),
             KafkaContractSpec.EventTypes.RentalItemCancelled,
             KafkaContractSpec.CurrentEnvelopeVersion,
             KafkaContractSpec.Producers.RentalService,
@@ -360,11 +371,32 @@ public sealed class ItemCancellationService : IItemCancellationService
             utcNow);
 
         await _outboxRepository.AddAsync(outbox, cancellationToken);
+        if (previousOrderStatus != RentalOrderStatus.Cancelled && order.Status == RentalOrderStatus.Cancelled)
+            await EnqueueOrderCancelledAsync(order, normalizedKey, utcNow, reason, cancellationToken);
 
         order.RecordReadModelUpdate(utcNow);
         await _orderRepository.UpdateAsync(order, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return response;
+    }
+
+    private async Task EnqueueOrderCancelledAsync(
+        RentalOrder order, string operationKey, DateTimeOffset occurredAt, string reason,
+        CancellationToken cancellationToken)
+    {
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalOrderCancelled,
+            operationKey);
+        var envelope = new KafkaMessageEnvelope<RentalOrderCancelledPayload>(
+            messageId, KafkaContractSpec.EventTypes.RentalOrderCancelled,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            order.Id.ToString("D"), occurredAt, order.Id.ToString("D"), null,
+            new RentalOrderCancelledPayload(order.Id, order.RenterId, occurredAt, reason));
+        await _outboxRepository.AddAsync(new RentalOutboxMessage(
+            messageId, KafkaContractSpec.Topics.RentalEvents, order.Id.ToString("D"),
+            KafkaContractSpec.EventTypes.RentalOrderCancelled,
+            JsonSerializer.Serialize(envelope, JsonOptions), occurredAt), cancellationToken);
     }
 }
