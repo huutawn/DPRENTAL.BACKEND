@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Dprental.InventoryService.Api.Tests.Allocations;
 using Dprental.InventoryService.Api.Tests.Security;
 using Dprental.InventoryService.Application.Clients;
@@ -361,6 +362,10 @@ public sealed class EquipmentListingBatchServiceTests
         Assert.Equal("VND", item.Currency);
         Assert.Equal("Active", item.Status);
         Assert.Equal(500_000m, item.DepositAmount);
+        Assert.Equal(listing.BrandId, item.BrandId);
+        Assert.Equal("FX3", item.Model);
+        Assert.Equal(listing.SchemaVersion, item.SpecSchemaVersion);
+        Assert.Equal(JsonValueKind.Object, item.SpecValues.ValueKind);
     }
 
 

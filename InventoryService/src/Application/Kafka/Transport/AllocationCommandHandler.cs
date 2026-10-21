@@ -12,6 +12,7 @@ public sealed class AllocationCommandHandler :
     IMessageHandler<ConfirmAllocationPayload>,
     IMessageHandler<ReleaseAllocationPayload>,
     IMessageHandler<MarkAssetsHandedOverPayload>,
+    IMessageHandler<MarkAssetsOverduePayload>,
     IMessageHandler<ApplyReturnedUnitsCommandPayload>
 {
     public const string ConsumerGroupId = "inventory-allocation-command-consumer";
@@ -85,6 +86,17 @@ public sealed class AllocationCommandHandler :
         if (validation.IsFailure) return validation;
 
         var result = await _allocationService.ProcessApplyReturnedUnitsCommandAsync(envelope, KafkaServiceCallerContext.Instance, $"{nameof(AllocationCommandHandler)}_{AllocationMessageTypes.ApplyReturnedUnits}", cancellationToken);
+        return result.IsSuccess ? Result.Success() : result.Error;
+    }
+
+    public async Task<Result> HandleAsync(MessageEnvelope<MarkAssetsOverduePayload> envelope, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        var validation = ValidateProducer(envelope);
+        if (validation.IsFailure) return validation;
+        var result = await _allocationService.ProcessMarkAssetsOverdueCommandAsync(
+            envelope, KafkaServiceCallerContext.Instance,
+            $"{nameof(AllocationCommandHandler)}_{AllocationMessageTypes.MarkAssetsOverdue}", cancellationToken);
         return result.IsSuccess ? Result.Success() : result.Error;
     }
 

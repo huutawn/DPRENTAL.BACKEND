@@ -15,6 +15,10 @@ public sealed record EquipmentListingBatchItem(
     string Currency,
     EquipmentListingStatus Status,
     decimal DepositAmount,
+    Guid BrandId,
+    string Model,
+    int SpecSchemaVersion,
+    string SpecValues,
     EquipmentListingBatchWarehouse? Warehouse = null
 );
 

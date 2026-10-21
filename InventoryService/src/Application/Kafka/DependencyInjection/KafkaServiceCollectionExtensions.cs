@@ -77,6 +77,13 @@ public static class KafkaServiceCollectionExtensions
             handlerName: $"{nameof(AllocationCommandHandler)}_{AllocationMessageTypes.MarkAssetsHandedOver}",
             groupId: AllocationCommandHandler.ConsumerGroupId);
 
+        registry.Register<AllocationCommandHandler, MarkAssetsOverduePayload>(
+            topic: KafkaTopics.InventoryAllocationCommandsV1,
+            messageType: AllocationMessageTypes.MarkAssetsOverdue,
+            version: 1,
+            handlerName: $"{nameof(AllocationCommandHandler)}_{AllocationMessageTypes.MarkAssetsOverdue}",
+            groupId: AllocationCommandHandler.ConsumerGroupId);
+
         registry.Register<AllocationCommandHandler, ApplyReturnedUnitsCommandPayload>(
             topic: KafkaTopics.InventoryAllocationCommandsV1,
             messageType: AllocationMessageTypes.ApplyReturnedUnits,

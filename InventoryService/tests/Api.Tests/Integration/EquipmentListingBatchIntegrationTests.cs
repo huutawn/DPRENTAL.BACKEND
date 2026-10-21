@@ -306,6 +306,10 @@ public sealed class EquipmentListingBatchIntegrationTests : IClassFixture<Postgr
         Assert.Equal("Inactive", item0.GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, item0.GetProperty("thumbnailMediaId").ValueKind);
         Assert.Equal(500_000m, item0.GetProperty("depositAmount").GetDecimal());
+        Assert.Equal(listing2.BrandId, item0.GetProperty("brandId").GetGuid());
+        Assert.Equal("FX3", item0.GetProperty("model").GetString());
+        Assert.Equal(1, item0.GetProperty("specSchemaVersion").GetInt32());
+        Assert.Equal(JsonValueKind.Object, item0.GetProperty("specValues").ValueKind);
 
         var item1 = itemsElement[1];
         Assert.Equal(listing1.Id, item1.GetProperty("id").GetGuid());
@@ -317,6 +321,10 @@ public sealed class EquipmentListingBatchIntegrationTests : IClassFixture<Postgr
         Assert.Equal("Active", item1.GetProperty("status").GetString());
 
         Assert.Equal(500_000m, item1.GetProperty("depositAmount").GetDecimal());
+        Assert.Equal(listing1.BrandId, item1.GetProperty("brandId").GetGuid());
+        Assert.Equal("FX3", item1.GetProperty("model").GetString());
+        Assert.Equal(1, item1.GetProperty("specSchemaVersion").GetInt32());
+        Assert.Equal(JsonValueKind.Object, item1.GetProperty("specValues").ValueKind);
         var item2 = itemsElement[2];
         Assert.Equal(listing3.Id, item2.GetProperty("id").GetGuid());
         Assert.Equal(listing3.EquipmentTypeId, item2.GetProperty("equipmentTypeId").GetGuid());
@@ -326,9 +334,6 @@ public sealed class EquipmentListingBatchIntegrationTests : IClassFixture<Postgr
         {
             "description",
             "schemaVersion",
-            "specValues",
-            "model",
-            "brandId",
             "manufactureYear",
             "media",
             "thumbnailUrl",

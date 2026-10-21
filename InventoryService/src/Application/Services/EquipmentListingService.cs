@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Dprental.InventoryService.Application.Clients;
 using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Listings;
@@ -477,6 +478,7 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
                         listing.Warehouse.Longitude);
                 }
 
+                using JsonDocument specValues = JsonDocument.Parse(listing.SpecValues);
                 items.Add(new EquipmentListingBatchItemResponse(
                     listing.Id,
                     listing.OwnerUserId,
@@ -487,6 +489,10 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
                     listing.Currency,
                     listing.Status.ToString(),
                     listing.DepositAmount,
+                    listing.BrandId,
+                    listing.Model,
+                    listing.SpecSchemaVersion,
+                    specValues.RootElement.Clone(),
                     warehouseDto));
             }
             else
