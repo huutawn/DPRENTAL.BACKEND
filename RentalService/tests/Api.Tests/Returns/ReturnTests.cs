@@ -87,7 +87,7 @@ public sealed class ReturnTests : IAsyncLifetime
             outbox, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), _clock);
         return new(
             new RentalOrderRepository(db), new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
-            db, media ?? Mock.Of<IRentalMediaClient>(), _clock, outbox, configuration ?? Configuration(), inventoryCommands);
+            db, media ?? Mock.Of<IRentalMediaClient>(), _clock, new FakeRentalEventProducer(), configuration ?? Configuration(), inventoryCommands);
     }
     private async Task<RentalItem> SeedAsync(int quantity = 2)
     {

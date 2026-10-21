@@ -14,6 +14,8 @@ public interface IPaymentEventsDispatcher
         string? topic = null,
         int? partition = null,
         long? offset = null,
+        string? publicationProof = null,
+        string? messageKey = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

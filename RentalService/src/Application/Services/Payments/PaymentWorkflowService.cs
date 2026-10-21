@@ -39,7 +39,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
     private readonly ILogger<PaymentWorkflowService> _logger;
     private readonly string _rentalEventsTopic;
     private readonly IInventoryCommandProducer _inventoryCommands;
-    private readonly IRentalEventProducer? _rentalEventProducer;
+    private readonly IRentalEventProducer _rentalEventProducer;
     public PaymentWorkflowService(
         IRentalOrderRepository orderRepository,
         IInboxRepository inboxRepository,
@@ -51,8 +51,8 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         IInventoryCommandProducer inventoryCommands,
         IConfiguration configuration,
         ILogger<PaymentWorkflowService> logger,
-        TimeProvider? timeProvider = null,
-        IRentalEventProducer? rentalEventProducer = null)
+        IRentalEventProducer rentalEventProducer,
+        TimeProvider? timeProvider = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _inboxRepository = inboxRepository ?? throw new ArgumentNullException(nameof(inboxRepository));
@@ -61,39 +61,11 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         _lockManager = lockManager ?? throw new ArgumentNullException(nameof(lockManager));
         _operationExecutor = operationExecutor ?? throw new ArgumentNullException(nameof(operationExecutor));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-        _inventoryCommands = inventoryCommands!;
+        _inventoryCommands = inventoryCommands ?? throw new ArgumentNullException(nameof(inventoryCommands));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _rentalEventsTopic = configuration["Kafka:RentalEventsTopic"] ?? "rental.events.v1";
-        _rentalEventProducer = rentalEventProducer ?? new RentalEventProducer(new KafkaOutboxWriter(_outboxRepository), Microsoft.Extensions.Options.Options.Create(new KafkaOptions { RentalEventsTopic = _rentalEventsTopic }), _timeProvider);
-    }
-
-    public PaymentWorkflowService(
-        IRentalOrderRepository orderRepository,
-        IInboxRepository inboxRepository,
-        IOutboxRepository outboxRepository,
-        IOperationReceiptRepository receiptRepository,
-        IOrderLockManager lockManager,
-        IRentalOperationExecutor operationExecutor,
-        IUnitOfWork unitOfWork,
-        IConfiguration configuration,
-        ILogger<PaymentWorkflowService> logger,
-        TimeProvider? timeProvider = null,
-        IRentalEventProducer? rentalEventProducer = null)
-        : this(
-            orderRepository,
-            inboxRepository,
-            outboxRepository,
-            receiptRepository,
-            lockManager,
-            operationExecutor,
-            unitOfWork,
-            new InventoryCommandProducer(outboxRepository, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), timeProvider),
-            configuration,
-            logger,
-            timeProvider,
-            rentalEventProducer)
-    {
+        _rentalEventProducer = rentalEventProducer ?? throw new ArgumentNullException(nameof(rentalEventProducer));
     }
 
     public async Task<Result<bool>> ApplyInvoicePaidStagedAsync(
@@ -146,7 +118,8 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         }
 
         // Lifecycle branching: late if terminal or bank transfer paidAt >= deadline
-        bool isLatePayment = order.Status is RentalOrderStatus.Expired or RentalOrderStatus.Cancelled ||
+        bool isLatePayment = string.Equals(payload.PaymentDisposition, "LATE_REQUIRES_REFUND", StringComparison.OrdinalIgnoreCase) ||
+                             order.Status is RentalOrderStatus.Expired or RentalOrderStatus.Cancelled ||
                              payload.PaidAt >= order.PaymentDeadline;
 
         if (isLatePayment)
@@ -222,7 +195,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                         errorCode: null,
                         errorMessage: null,
                         createdAt: utcNow,
-                        status: RentalOperationReceipt.StatusManualRefundRequired,
+                        status: RentalOperationReceipt.StatusPending,
                         targetItemId: item.Id,
                         prerequisiteOperationId: releaseOpKey,
                         payloadJson: JsonSerializer.Serialize(refundCmd, JsonOptions));
@@ -232,10 +205,13 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             }
 
             var outboxEnvelope = new KafkaMessageEnvelope<LatePaymentRefundRequestedPayload>(
-                Guid.NewGuid(),
+                OutboxMessageIdGenerator.ComputeDeterministicId(
+                    KafkaContractSpec.Producers.RentalService,
+                    KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
+                    $"{order.Id:D}:{payload.PaymentRef}"),
                 KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
                 1,
-                "rental-service",
+                KafkaContractSpec.Producers.RentalService,
                 order.Id.ToString("D"),
                 utcNow,
                 envelope.CorrelationId,
@@ -262,6 +238,14 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         {
             var markResult = order.MarkAsPaid(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
             if (markResult.IsFailure) return markResult.Error;
+            var orderPaidResult = await _rentalEventProducer.EnqueueRentalOrderPaidAsync(
+                new RentalOrderPaidPayload(order.Id, order.RenterId, payload.InvoiceRef,
+                    payload.PaymentRef, order.TotalPayableAmount, payload.PaidAt),
+                correlationId: envelope.CorrelationId,
+                causationId: envelope.MessageId,
+                cancellationToken: cancellationToken);
+            if (orderPaidResult.IsFailure) return orderPaidResult.Error;
+
             foreach (var item in order.Items)
             {
                 if (!item.EquipmentTypeId.HasValue || item.EquipmentTypeId.Value == Guid.Empty)
@@ -269,24 +253,13 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                     return Error.Validation("INVALID_EQUIPMENT_TYPE_ID", $"EquipmentTypeId của rental item {item.Id} không hợp lệ.");
                 }
 
-                if (_rentalEventProducer != null)
-                {
-                    var enqueueResult = await _rentalEventProducer.EnqueueRentalItemPaidAsync(
-                        new RentalItemPaidPayload(
-                            order.RenterId,
-                            item.EquipmentListingId,
-                            item.EquipmentTypeId.Value,
-                            order.Id,
-                            item.Id),
-                        correlationId: envelope.CorrelationId,
-                        causationId: envelope.MessageId,
-                        cancellationToken: cancellationToken);
-
-                    if (enqueueResult.IsFailure)
-                    {
-                        return enqueueResult.Error;
-                    }
-                }
+                var enqueueResult = await _rentalEventProducer.EnqueueRentalItemPaidAsync(
+                    new RentalItemPaidPayload(order.RenterId, item.EquipmentListingId,
+                        item.EquipmentTypeId.Value, order.Id, item.Id, item.Quantity, payload.PaidAt),
+                    correlationId: envelope.CorrelationId,
+                    causationId: envelope.MessageId,
+                    cancellationToken: cancellationToken);
+                if (enqueueResult.IsFailure) return enqueueResult.Error;
 
                 string opKey = RentalOperationExecutor.ComputeOperationKey("ExtendHold", $"{order.Id}:{item.Id}");
                 var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
@@ -435,6 +408,9 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         if (!string.Equals(envelope.Payload.Currency, "VND", StringComparison.OrdinalIgnoreCase)) return Error.Validation("INVALID_CURRENCY", $"Tiền tệ không hợp lệ: {envelope.Payload.Currency}.");
         if (envelope.Payload.PaidAmount < 0) return Error.Validation("INVALID_PAID_AMOUNT", "Số tiền thanh toán không được âm.");
         if (envelope.Payload.PaidAt == default) return Error.Validation("INVALID_PAID_AT", "Thời gian thanh toán không hợp lệ.");
+        if (!string.Equals(envelope.Payload.PaymentDisposition, "ON_TIME", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(envelope.Payload.PaymentDisposition, "LATE_REQUIRES_REFUND", StringComparison.OrdinalIgnoreCase))
+            return Error.Validation("INVALID_PAYMENT_DISPOSITION", "PaymentDisposition không được hỗ trợ.");
 
         return Result.Success();
     }

@@ -265,33 +265,42 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             request.Note,
             request.Units.Select(u => new HandoverUnitSnapshot(u.AssignmentId, u.Condition, u.Note, u.MediaIds)).ToList());
 
+        string providerKey = RentalOperationExecutor.ComputeOperationKey(
+            "MarkAssetsHandedOver", $"{order.Id}:{item.Id}:{opKey}");
         var handoverCmd = new MarkAssetsHandedOverCommandPayload(
             order.Id,
             item.Id,
-            opKey,
+            providerKey,
             request.ActualHandoverAt);
 
-        var enqueueResult = await _inventoryCommands.EnqueueMarkAssetsHandedOverAsync(
-            handoverCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
-        if (enqueueResult.IsFailure)
+        await using var transaction = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
         {
-            return enqueueResult.Error;
+            var enqueueResult = await _inventoryCommands.EnqueueMarkAssetsHandedOverAsync(
+                handoverCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
+            if (enqueueResult.IsFailure)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return enqueueResult.Error;
+            }
+
+            var receipt = RentalOperationReceipt.CreatePending(
+                Guid.NewGuid(), order.Id, opKey, "MarkAssetsHandedOver", fingerprint,
+                utcNow, item.Id, snapshot.ToJson());
+            receipt.SetInventoryOperationKey(providerKey);
+            order.AddOperationReceipt(receipt);
+            order.RecordReadModelUpdate(utcNow);
+            await _orderRepository.UpdateAsync(order, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
-
-        var receipt = RentalOperationReceipt.CreatePending(
-            Guid.NewGuid(),
-            order.Id,
-            opKey,
-            "MarkAssetsHandedOver",
-            fingerprint,
-            utcNow,
-            item.Id,
-            snapshot.ToJson());
-
-        order.AddOperationReceipt(receipt);
-        order.RecordReadModelUpdate(utcNow);
-        await _orderRepository.UpdateAsync(order, cancellationToken);
-        await _unitOfWork.CommitAsync(cancellationToken);
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            _unitOfWork.DiscardChanges();
+            throw;
+        }
 
         return new HandoverItemResponse(null, request.ActualHandoverAt, "Processing");
     }

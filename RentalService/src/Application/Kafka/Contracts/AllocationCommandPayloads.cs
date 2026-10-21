@@ -37,6 +37,13 @@ public sealed record MarkAssetsHandedOverCommandPayload(
     [property: JsonRequired] string OperationKey,
     [property: JsonRequired] DateTimeOffset HandedOverAt);
 
+public sealed record MarkAssetsOverdueCommandPayload(
+    [property: JsonRequired] Guid RentalOrderId,
+    [property: JsonRequired] Guid RentalItemId,
+    [property: JsonRequired] string AllocationGroupId,
+    [property: JsonRequired] string OperationKey,
+    [property: JsonRequired] IReadOnlyList<Guid> AllocationIds);
+
 
 public sealed record AllocationAssetMappingPayload(
     [property: JsonRequired] Guid AllocationId,

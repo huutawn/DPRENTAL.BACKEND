@@ -7,6 +7,7 @@ namespace Dprental.RentalService.Domain.Repositories;
 
 public class RentalServiceDbContext : DbContext, IUnitOfWork
 {
+    public bool HasActiveTransaction => Database.CurrentTransaction is not null;
     public RentalServiceDbContext(DbContextOptions<RentalServiceDbContext> options) : base(options)
     {
     }

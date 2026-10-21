@@ -257,7 +257,9 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         }
 
         HashSet<Guid> notFound = [.. response.MissingIds];
-        return requestedIds.All(id => indexed.ContainsKey(id) || notFound.Contains(id));
+        return notFound.Count == response.MissingIds.Count &&
+               notFound.All(id => requested.Contains(id) && !indexed.ContainsKey(id)) &&
+               requestedIds.All(id => indexed.ContainsKey(id) || notFound.Contains(id));
     }
 
     private static CheckoutPlanLine BuildLine(

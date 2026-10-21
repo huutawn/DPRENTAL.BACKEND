@@ -3,6 +3,7 @@ using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Events;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Common;
@@ -124,11 +125,6 @@ public sealed partial class RentalOperationExecutor
         var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == operationKey);
         if (receipt == null) return Error.NotFound("RECEIPT_NOT_FOUND", "Không tìm thấy receipt.");
 
-        if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired)
-        {
-            return Error.Conflict("MANUAL_REFUND_REQUIRED", "Tác vụ hoàn tiền late payment yêu cầu xử lý thủ công, không hỗ trợ gọi refund tự động.");
-        }
-
         return await RequestRefundInternalAsync(order, item, receipt, operationKey, cancellationToken);
     }
 
@@ -160,12 +156,6 @@ public sealed partial class RentalOperationExecutor
         CancellationToken cancellationToken)
     {
         if (receipt.IsSuccess && receipt.Status == RentalOperationReceipt.StatusSucceeded) return Result.Success();
-        if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired)
-        {
-            return Error.Conflict("MANUAL_REFUND_REQUIRED", "Tác vụ hoàn tiền late payment yêu cầu xử lý thủ công, không hỗ trợ gọi refund tự động.");
-        }
-
-
         // Strict prerequisite check: ReleaseAllocation must be confirmed Succeeded
         if (!string.IsNullOrWhiteSpace(receipt.PrerequisiteOperationId))
         {
@@ -220,7 +210,9 @@ public sealed partial class RentalOperationExecutor
             var refundData = result.Value;
             if (string.IsNullOrWhiteSpace(refundData.RefundRef) ||
                 !string.Equals(refundData.Status, "Accepted", StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(refundData.OperationKey, operationKey, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(refundData.OperationKey, operationKey, StringComparison.OrdinalIgnoreCase) ||
+                refundData.TotalRefundAmount != request.TotalRefundAmount ||
+                !string.Equals(refundData.Currency, "VND", StringComparison.OrdinalIgnoreCase))
             {
                 RecordExecutionFailure(receipt, Error.Validation("INVALID_REFUND_RESPONSE", "Phản hồi từ PaymentService không hợp lệ."), utcNow, forceUncertain: true);
                 await CommitLocalChangesAsync(order, cancellationToken);
@@ -332,10 +324,13 @@ public sealed partial class RentalOperationExecutor
         order.RecordReadModelUpdate(utcNow);
 
         var outboxEnvelope = new KafkaMessageEnvelope<RentalOrderExpiredPayload>(
-            Guid.NewGuid(),
+            OutboxMessageIdGenerator.ComputeDeterministicId(
+                KafkaContractSpec.Producers.RentalService,
+                KafkaContractSpec.EventTypes.RentalOrderExpired,
+                operationKey),
             KafkaContractSpec.EventTypes.RentalOrderExpired,
             1,
-            "rental-service",
+            KafkaContractSpec.Producers.RentalService,
             order.Id.ToString("D"),
             utcNow,
             operationKey,

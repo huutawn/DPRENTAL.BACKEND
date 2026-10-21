@@ -88,6 +88,7 @@ public sealed class OverdueProtectionService(
                     Guid.NewGuid(), order.Id, operationId, RentalItem.OverdueProtectionAction,
                     RentalOperationExecutor.ComputeFingerprint(payload), now,
                     targetItemId: item.Id, payloadJson: payload);
+                receipt.SetInventoryOperationKey(providerKey);
 
                 order.AddOperationReceipt(receipt);
                 created.Add(new OperationReceiptDescriptor(

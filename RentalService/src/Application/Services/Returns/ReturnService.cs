@@ -27,12 +27,11 @@ public sealed class ReturnService(
     IUnitOfWork unitOfWork,
     IRentalMediaClient mediaClient,
     TimeProvider timeProvider,
-    IOutboxRepository outbox,
+    IRentalEventProducer rentalEvents,
     IConfiguration configuration,
     IInventoryCommandProducer inventoryCommands) : IReturnService
 {
 
-    private static readonly JsonSerializerOptions EventJsonOptions = new(JsonSerializerDefaults.Web);
     public async Task<Result<RecordReturnResponse>> RecordReturnAsync(Guid itemId, IRentalCallerContext caller,
         RecordReturnRequest request, string idempotencyKey, CancellationToken cancellationToken = default)
     {
@@ -124,14 +123,19 @@ public sealed class ReturnService(
                 return enqueueResult.Error;
             }
 
-            var envelope = new KafkaMessageEnvelope<RentalUnitsReturnedPayload>(Guid.NewGuid(), "RentalUnitsReturned",
-                1, "rental-service", order.Id.ToString("D"), now, key, null,
+            var returnedEvent = await rentalEvents.EnqueueDomainEventAsync(
+                KafkaContractSpec.EventTypes.RentalUnitsReturned, recorded.Value.Id.ToString("D"),
+                order.Id.ToString("D"), now,
                 new RentalUnitsReturnedPayload(order.Id, item.Id, recorded.Value.Id,
                     request.ActualReturnAt.ToUniversalTime(), now,
-                    request.Units.Select(u => u.RentalUnitAssignmentId).ToArray()));
-            await outbox.AddAsync(new RentalOutboxMessage(envelope.MessageId,
-                configuration["Kafka:RentalEventsTopic"] ?? "rental.events.v1", order.Id.ToString("D"),
-                envelope.MessageType, JsonSerializer.Serialize(envelope, EventJsonOptions), now), cancellationToken);
+                    request.Units.Select(u => u.RentalUnitAssignmentId).ToArray()),
+                correlationId: key, cancellationToken: cancellationToken);
+            if (returnedEvent.IsFailure)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                unitOfWork.DiscardChanges();
+                return returnedEvent.Error;
+            }
             await repository.UpdateAsync(order, cancellationToken);
             await unitOfWork.SaveChangesAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
