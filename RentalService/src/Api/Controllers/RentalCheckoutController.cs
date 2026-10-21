@@ -30,7 +30,7 @@ public sealed class RentalCheckoutController(
     ICheckoutService checkout) : ControllerBase
 {
     /// <summary>
-    /// Gửi đơn hàng từ các dòng đã chọn trong giỏ.
+    /// Gửi đơn hàng từ các dòng đã chọn trong giỏ, hoặc thuê ngay một máy từ trang chi tiết.
     /// </summary>
     /// <remarks>
     /// Quy trình xử lý (tất cả các dòng cùng thành công hoặc không tạo đơn):
@@ -49,7 +49,11 @@ public sealed class RentalCheckoutController(
     /// Mọi lỗi nghiệp vụ có trường <c>retryable</c>. Tùy lỗi có thêm <c>fieldErrors</c> (dữ liệu sai), <c>lines</c> (thiết bị hoặc ngày thuê không hợp lệ),
     /// <c>currentQuote</c> (giá thay đổi) hoặc <c>pendingOrderCode</c> (đang có đơn chưa thanh toán).
     /// </para>
-    /// <para>Ví dụ body: {"cartItemIds":["11111111-1111-1111-1111-111111111111"],"delivery":{"province":"Hồ Chí Minh","addressDetail":"123 Nguyễn Huệ, Quận 1","recipientName":"Nguyễn Văn A","recipientPhone":"0901234567","note":null},"refundAccount":{"bankCode":"VCB","accountNumber":"0123456789","accountHolderName":"NGUYEN VAN A"},"termsVersion":"v1.0","termsAccepted":true,"expectedTotalAmount":7000000}.</para>
+    /// <para>
+    /// Thuê ngay từ trang chi tiết: gửi <c>buyNow</c> thay cho <c>cartItemIds</c> (không gửi cả hai). Giỏ không bị đọc hay sửa,
+    /// các dòng đang có trong giỏ giữ nguyên. Ví dụ: {"buyNow":{"equipmentListingId":"22222222-2222-2222-2222-222222222222","quantity":1,"expectedStartDate":"2026-10-25","expectedEndDate":"2026-10-27"},"delivery":{...},"refundAccount":{...},"termsVersion":"v1.0","termsAccepted":true,"expectedTotalAmount":9000000}.
+    /// </para>
+    /// <para>Ví dụ body từ giỏ: {"cartItemIds":["11111111-1111-1111-1111-111111111111"],"delivery":{"province":"Hồ Chí Minh","addressDetail":"123 Nguyễn Huệ, Quận 1","recipientName":"Nguyễn Văn A","recipientPhone":"0901234567","note":null},"refundAccount":{"bankCode":"VCB","accountNumber":"0123456789","accountHolderName":"NGUYEN VAN A"},"termsVersion":"v1.0","termsAccepted":true,"expectedTotalAmount":7000000}.</para>
     /// </remarks>
     /// <param name="idempotencyKey">Khóa chống trùng lặp gửi qua header HTTP (bắt buộc, tối đa 64 ký tự).</param>
     /// <param name="request">Các dòng giỏ được chọn, nơi giao, tài khoản nhận hoàn tiền, điều khoản và tổng tiền người thuê đã thấy.</param>

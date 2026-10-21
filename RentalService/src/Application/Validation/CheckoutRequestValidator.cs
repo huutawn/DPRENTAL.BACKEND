@@ -12,6 +12,7 @@ public static partial class CheckoutRequestValidator
     private const string InvalidLength = "INVALID_LENGTH";
     private const string InvalidFormat = "INVALID_FORMAT";
     private const string Duplicate = "DUPLICATE";
+    private const string Conflicting = "CONFLICTING";
 
     [GeneratedRegex(@"^(0|\+84)[0-9]{9}$")]
     private static partial Regex PhoneRegex();
@@ -25,7 +26,7 @@ public static partial class CheckoutRequestValidator
 
         List<CheckoutFieldError> errors = [];
 
-        ValidateCartItems(request.CartItemIds, errors);
+        ValidateSelection(request, errors);
         ValidateDelivery(request.Delivery, errors);
         ValidateRefundAccount(request.RefundAccount, errors);
 
@@ -45,6 +46,44 @@ public static partial class CheckoutRequestValidator
         }
 
         return errors;
+    }
+
+    private static void ValidateSelection(CheckoutRequest request, List<CheckoutFieldError> errors)
+    {
+        bool hasCartItems = request.CartItemIds is { Count: > 0 };
+        bool hasBuyNow = request.BuyNow is not null;
+
+        if (hasCartItems && hasBuyNow)
+        {
+            errors.Add(new("buyNow", Conflicting, "Chỉ gửi một trong hai: cartItemIds hoặc buyNow."));
+            return;
+        }
+
+        if (hasBuyNow)
+        {
+            ValidateBuyNow(request.BuyNow!, errors);
+            return;
+        }
+
+        ValidateCartItems(request.CartItemIds, errors);
+    }
+
+    private static void ValidateBuyNow(CheckoutBuyNowDto buyNow, List<CheckoutFieldError> errors)
+    {
+        if (buyNow.EquipmentListingId == Guid.Empty)
+        {
+            errors.Add(new("buyNow.equipmentListingId", Required, "Thiếu mã thiết bị muốn thuê."));
+        }
+
+        if (buyNow.Quantity < 1)
+        {
+            errors.Add(new("buyNow.quantity", InvalidFormat, "Số lượng thuê phải từ 1 trở lên."));
+        }
+
+        if (buyNow.ExpectedEndDate < buyNow.ExpectedStartDate)
+        {
+            errors.Add(new("buyNow.expectedEndDate", InvalidFormat, "Ngày trả không được trước ngày giao."));
+        }
     }
 
     private static void ValidateCartItems(IReadOnlyList<Guid>? cartItemIds, List<CheckoutFieldError> errors)
