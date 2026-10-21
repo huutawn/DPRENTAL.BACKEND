@@ -107,6 +107,8 @@ public sealed class GatewayIntegrationTests
         Assert.Contains("/media/swagger/v1/swagger.json", uiConfiguration);
         Assert.Contains("RentalService", uiConfiguration);
         Assert.Contains("/rental/swagger/v1/swagger.json", uiConfiguration);
+        Assert.Contains("PaymentService", uiConfiguration);
+        Assert.Contains("/payment/swagger/v1/swagger.json", uiConfiguration);
         Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
 
         using HttpResponseMessage responseRoot = await client.GetAsync("/swagger");
@@ -115,6 +117,27 @@ public sealed class GatewayIntegrationTests
 
         using HttpResponseMessage oldMediaUi = await client.GetAsync("/media/swagger/index.html");
         Assert.Equal(HttpStatusCode.NotFound, oldMediaUi.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.OK)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    public async Task PaymentOpenApiRouteAllowsAnonymousAndPreservesDownstreamResponse(HttpStatusCode statusCode)
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using DownstreamGatewayTestHost.LoopbackTestService upstream = new(CreateJwks(signingKey, "key-1"))
+        {
+            ResponseStatusCode = (int)statusCode,
+            ResponseBody = "{\"service\":\"PaymentService\"}"
+        };
+        using WebApplicationFactory<Program> factory = DownstreamGatewayTestHost.CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/payment/swagger/v1/swagger.json");
+
+        Assert.Equal(statusCode, response.StatusCode);
+        Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest?.Path);
+        Assert.Equal(upstream.ResponseBody, await response.Content.ReadAsStringAsync());
     }
 
     [Theory]
