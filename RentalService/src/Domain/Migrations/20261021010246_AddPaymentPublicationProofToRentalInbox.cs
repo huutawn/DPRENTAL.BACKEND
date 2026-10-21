@@ -18,13 +18,6 @@ namespace RentalService.Domain.Migrations
                 maxLength: 256,
                 nullable: true);
 
-            migrationBuilder.Sql("""
-                UPDATE rental.rental_operation_receipts
-                SET "Status" = 'Pending', "IsSuccess" = FALSE, "CompletedAt" = NULL,
-                    "NextRetryAt" = NOW(), "ErrorCode" = NULL, "ErrorMessage" = NULL
-                WHERE "Action" = 'RequestRefund' AND "Status" = 'MANUAL_REFUND_REQUIRED';
-                """);
-
             migrationBuilder.AddColumn<string>(
                 name: "PublicationProofJson",
                 schema: "rental",

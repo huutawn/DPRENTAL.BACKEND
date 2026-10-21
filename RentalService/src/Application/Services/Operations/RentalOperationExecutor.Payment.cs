@@ -155,6 +155,11 @@ public sealed partial class RentalOperationExecutor
         string operationKey,
         CancellationToken cancellationToken)
     {
+        if (receipt.Status == RentalOperationReceipt.StatusManualRefundRequired)
+        {
+            return Error.Conflict("MANUAL_REFUND_REQUIRED", "Refund receipt is reserved for manual reconciliation and cannot be replayed automatically.");
+        }
+
         if (receipt.IsSuccess && receipt.Status == RentalOperationReceipt.StatusSucceeded) return Result.Success();
         // Strict prerequisite check: ReleaseAllocation must be confirmed Succeeded
         if (!string.IsNullOrWhiteSpace(receipt.PrerequisiteOperationId))
@@ -194,6 +199,14 @@ public sealed partial class RentalOperationExecutor
         {
             return Error.Failure("MISSING_REQUEST_PAYLOAD", "Thiếu request payload JSON cho RequestRefund.");
         }
+        var requestValidation = request.Validate();
+        if (requestValidation.IsFailure)
+        {
+            RecordExecutionFailure(receipt, requestValidation.Error, utcNow);
+            await CommitLocalChangesAsync(order, cancellationToken);
+            return requestValidation.Error;
+        }
+
         // Amount = 0 does not disburse
         if (request.TotalRefundAmount <= 0)
         {

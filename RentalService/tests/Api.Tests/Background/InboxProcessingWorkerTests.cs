@@ -90,7 +90,10 @@ public sealed class InboxProcessingWorkerTests
 
         var inboxMsg = new RentalInboxMessage(
             Guid.NewGuid(), envelope.MessageId, "InvoicePaid", "payment-service", orderId.ToString("D"), null, null,
-            JsonSerializer.Serialize(envelope), FixedNow);
+            JsonSerializer.Serialize(envelope, JsonSerializerOptions.Web), FixedNow);
+        inboxMsg.AssignPublicationProof(
+            Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Create(inboxMsg.Payload),
+            orderId.ToString("D"));
         db.RentalInboxMessages.Add(inboxMsg);
         await db.SaveChangesAsync();
         var services = new ServiceCollection();
@@ -105,11 +108,11 @@ public sealed class InboxProcessingWorkerTests
         services.AddScoped<IKafkaOutboxWriter, KafkaOutboxWriter>();
         services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
         services.AddScoped<IInventoryAllocationResultHandler, InventoryAllocationResultHandler>();
-        services.AddSingleton(Options.Create(new KafkaOptions { Enabled = true }));
+        services.AddSingleton(Options.Create(Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Configure(new KafkaOptions { Enabled = true })));
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var worker = new InboxProcessingWorker(scopeFactory, Options.Create(new KafkaOptions { Enabled = true }), NullLogger<InboxProcessingWorker>.Instance);
+        var worker = new InboxProcessingWorker(scopeFactory, Options.Create(Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Configure(new KafkaOptions { Enabled = true })), NullLogger<InboxProcessingWorker>.Instance);
         int processed = await worker.ProcessBatchAsync(CancellationToken.None);
 
         Assert.Equal(1, processed);
@@ -138,7 +141,10 @@ public sealed class InboxProcessingWorkerTests
 
         var inboxMsg = new RentalInboxMessage(
             Guid.NewGuid(), envelope.MessageId, "InvoicePaid", "payment-service", orderId.ToString("D"), null, null,
-            JsonSerializer.Serialize(envelope), FixedNow);
+            JsonSerializer.Serialize(envelope, JsonSerializerOptions.Web), FixedNow);
+        inboxMsg.AssignPublicationProof(
+            Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Create(inboxMsg.Payload),
+            orderId.ToString("D"));
         db.RentalInboxMessages.Add(inboxMsg);
         await db.SaveChangesAsync();
         var paymentWorkflow = new StubPaymentWorkflow
@@ -157,12 +163,12 @@ public sealed class InboxProcessingWorkerTests
         services.AddSingleton<IRefundCompletedConsumer>(new StubRefundConsumer());
         services.AddScoped<IKafkaOutboxWriter, KafkaOutboxWriter>();
         services.AddScoped<IPaymentEventsDispatcher, PaymentEventsDispatcher>();
-        services.AddSingleton(Options.Create(new KafkaOptions { Enabled = true }));
+        services.AddSingleton(Options.Create(Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Configure(new KafkaOptions { Enabled = true })));
         services.AddScoped<IInventoryAllocationResultHandler, InventoryAllocationResultHandler>();
         var sp = services.BuildServiceProvider();
         var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
 
-        var worker = new InboxProcessingWorker(scopeFactory, Options.Create(new KafkaOptions { Enabled = true }), NullLogger<InboxProcessingWorker>.Instance);
+        var worker = new InboxProcessingWorker(scopeFactory, Options.Create(Dprental.RentalService.Api.Tests.TestHelpers.PaymentPublicationProofTestFixture.Configure(new KafkaOptions { Enabled = true })), NullLogger<InboxProcessingWorker>.Instance);
         int processed = await worker.ProcessBatchAsync(CancellationToken.None);
 
         Assert.Equal(0, processed);
