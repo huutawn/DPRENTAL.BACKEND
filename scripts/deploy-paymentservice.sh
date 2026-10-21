@@ -171,7 +171,7 @@ printf 'Đang phát hành PaymentService revision %s...\n' "$release_sha"
 update_release_images "$payment_image" "$payment_migrator_image" "$integrity_image" "$integrity_migrator_image"
 
 "${compose_command[@]}" --profile migration pull payment-service payment-migrate integrity-host integrity-migrate
-"${compose_command[@]}" up -d payment-postgres integrity-postgres
+"${compose_command[@]}" up -d postgres integrity-postgres
 "${compose_command[@]}" --profile migration run --rm payment-migrate </dev/null
 "${compose_command[@]}" --profile migration run --rm integrity-migrate </dev/null
 "${compose_command[@]}" up -d --no-deps --force-recreate integrity-host

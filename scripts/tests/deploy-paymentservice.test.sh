@@ -108,7 +108,7 @@ assert_contains 'login ghcr.io --username example --password-stdin' "$docker_log
 assert_not_contains 'test-token' "$docker_log"
 [ ! -e "$(< "$docker_config_log")" ] || fail 'Docker config tạm vẫn tồn tại sau deploy.'
 assert_contains '--profile migration pull payment-service payment-migrate integrity-host integrity-migrate' "$docker_log"
-assert_contains 'up -d payment-postgres integrity-postgres' "$docker_log"
+assert_contains 'up -d postgres integrity-postgres' "$docker_log"
 assert_contains '--profile migration run --rm payment-migrate' "$docker_log"
 assert_contains '--profile migration run --rm integrity-migrate' "$docker_log"
 assert_contains 'up -d --no-deps --force-recreate integrity-host' "$docker_log"
