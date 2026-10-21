@@ -85,7 +85,7 @@ public sealed class HttpClientsAndTokenProviderIntegrationTests
                 new KeyValuePair<string, string?>("InternalAuthentication:ApiKey", "test-key")
             }).Build();
         var client = new HttpInventoryRentalClient(new HttpClient(mockHandler), config, NullLogger<HttpInventoryRentalClient>.Instance);
-        var result = await client.GetListingRentalSnapshotAsync(Guid.NewGuid());
+        var result = await client.GetListingRentalSnapshotsAsync(new ListingRentalSnapshotsRequest([Guid.NewGuid()]));
         Assert.True(result.IsFailure);
         Assert.Equal(ErrorType.ServiceUnavailable, result.Error.Type);
         Assert.Equal("INVENTORY_UNAVAILABLE", result.Error.Code);

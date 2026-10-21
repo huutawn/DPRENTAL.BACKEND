@@ -223,7 +223,7 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
 }
 
 /// <summary>
-/// Inventory giả phục vụ bước chuẩn bị checkout: đọc thông tin máy (rental-snapshot) và hỏi lịch trống.
+/// Inventory giả phục vụ bước chuẩn bị checkout: đọc thông tin máy (API batch) và hỏi lịch trống.
 /// ListingReadCount đếm số lần gọi đọc Listing; AvailabilityCheckCount đếm số lần hỏi lịch (mỗi dòng một lần).
 /// </summary>
 internal sealed class FakeInventoryListingClient : IInventoryRentalClient
@@ -260,20 +260,6 @@ internal sealed class FakeInventoryListingClient : IInventoryRentalClient
         List<ListingRentalSnapshotDto> found = request.EquipmentListingIds.Where(Listings.ContainsKey).Select(id => Listings[id]).ToList();
         List<Guid> notFound = request.EquipmentListingIds.Where(id => !Listings.ContainsKey(id)).ToList();
         return Task.FromResult(Result.Success(new ListingRentalSnapshotsResponse(found, notFound)));
-    }
-
-    public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default)
-    {
-        ListingReadCount++;
-        if (FailListingRead)
-        {
-            return Task.FromResult(Result.Failure<ListingRentalSnapshotDto>(Down));
-        }
-
-        return Task.FromResult(Listings.TryGetValue(listingId, out ListingRentalSnapshotDto? listing)
-            ? Result.Success(listing)
-            : Result.Failure<ListingRentalSnapshotDto>(Error.NotFound(
-                InventoryContractSpec.ErrorCodes.ListingNotFound, "Không tìm thấy Listing.")));
     }
 
     public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(

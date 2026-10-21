@@ -87,7 +87,6 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
             Task.FromResult(Result.Success(new ReleaseAllocationResponse("REC-REL", request.OperationKey, allocationGroupId, FixedNow, false)));
 
         public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<ListingAvailabilityCheckResponse>> CheckListingAvailabilityAsync(ListingAvailabilityCheckRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<CancelAllocationResponse>> CancelAllocationAsync(string allocationGroupId, CancelAllocationRequest request, CancellationToken ct = default) => throw new NotImplementedException();
@@ -143,7 +142,8 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
                 Assert.Contains("rental_outbox_messages", tables);
                 Assert.Contains("rental_sub_orders", tables);
                 Assert.Contains("rental_checkout_operations", tables);
-                Assert.Equal(16, tables.Count);
+                Assert.Contains("renter_addresses", tables);
+                Assert.Equal(17, tables.Count);
             }
         }
         finally

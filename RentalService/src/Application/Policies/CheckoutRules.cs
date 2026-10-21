@@ -1,6 +1,5 @@
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.Services.Operations;
-using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Policies;
 
 namespace Dprental.RentalService.Application.Policies;
@@ -53,32 +52,32 @@ public static class CheckoutRules
     /// Đổi khoảng ngày của dòng giỏ (ngày trả có tính) sang khoảng [từ, đến) của đơn hàng:
     /// giao 10, trả 12 thành [10, 13), tức 3 ngày thuê và Inventory giữ lịch các ngày 10, 11, 12.
     /// </summary>
-    public static (DateOnly From, DateOnly To) ToOrderPeriod(RentalCartItem item)
+    public static (DateOnly From, DateOnly To) ToOrderPeriod(CheckoutSelection item)
     {
         ArgumentNullException.ThrowIfNull(item);
         return (item.ExpectedStartDate, item.ExpectedEndDate.AddDays(1));
     }
 
-    public static CheckoutLineIssue? CheckRentalPeriod(RentalCartItem item, DateOnly today)
+    public static CheckoutLineIssue? CheckRentalPeriod(CheckoutSelection item, DateOnly today)
     {
         ArgumentNullException.ThrowIfNull(item);
 
         if (RentalBookingPolicy.IsStartDateTooSoon(item.ExpectedStartDate, today))
         {
-            return new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.StartDateNotInFuture,
+            return new(item.LineId, item.EquipmentListingId, CheckoutLineIssueCode.StartDateNotInFuture,
                 RentalBookingPolicy.TooSoonMessage(today));
         }
 
         if (item.ExpectedStartDate > today.AddMonths(BookingHorizonMonths))
         {
-            return new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.StartDateBeyondHorizon,
+            return new(item.LineId, item.EquipmentListingId, CheckoutLineIssueCode.StartDateBeyondHorizon,
                 $"Ngày giao dự kiến phải trong vòng {BookingHorizonMonths} tháng tới.");
         }
 
         (DateOnly from, DateOnly to) = ToOrderPeriod(item);
         if (RentalPricingPolicy.CalculateRentalDays(from, to) > MaxRentalDays)
         {
-            return new(item.Id, item.EquipmentListingId, CheckoutLineIssueCode.RentalPeriodTooLong,
+            return new(item.LineId, item.EquipmentListingId, CheckoutLineIssueCode.RentalPeriodTooLong,
                 $"Thời gian thuê tối đa {MaxRentalDays} ngày.");
         }
 

@@ -1,4 +1,5 @@
 using Dprental.RentalService.Domain.Entities;
+using System.Text.Json.Serialization;
 
 namespace Dprental.RentalService.Application.DTOs.Checkout;
 
@@ -8,19 +9,22 @@ public sealed record CheckoutRenterContext(Guid RenterId, bool IsProfileComplete
 /// <summary>
 /// DTO yêu cầu gửi đơn hàng từ giỏ thuê.
 /// </summary>
-/// <param name="CartItemIds">Mã các dòng giỏ muốn đặt (bắt buộc, ít nhất một dòng, không trùng nhau).</param>
+/// <param name="CartItemIds">Mã các dòng giỏ muốn đặt. Gửi cái này hoặc BuyNow, không gửi cả hai.</param>
 /// <param name="Delivery">Nơi giao thiết bị, dùng chung cho mọi dòng trong đơn (bắt buộc).</param>
 /// <param name="RefundAccount">Tài khoản nhận mọi khoản hoàn của đơn, kể cả hoàn cọc (bắt buộc).</param>
 /// <param name="TermsVersion">Phiên bản Điều khoản thuê người thuê đã đọc; phải là phiên bản đang có hiệu lực.</param>
 /// <param name="TermsAccepted">Người thuê đã đồng ý Điều khoản thuê (phải là true).</param>
 /// <param name="ExpectedTotalAmount">Tổng tiền thuê và tiền cọc người thuê đã thấy; khác số hệ thống tính lại thì trả 409 Checkout.PriceChanged.</param>
+/// <param name="BuyNow">Thuê ngay một máy từ trang chi tiết, không qua giỏ. Gửi cái này hoặc CartItemIds, không gửi cả hai.</param>
 public sealed record CheckoutRequest(
     IReadOnlyList<Guid>? CartItemIds,
     CheckoutDeliveryDto? Delivery,
     CheckoutRefundAccountDto? RefundAccount,
     string? TermsVersion,
     bool TermsAccepted,
-    decimal ExpectedTotalAmount);
+    decimal ExpectedTotalAmount,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    CheckoutBuyNowDto? BuyNow = null);
 
 /// <summary>
 /// Nơi giao thiết bị của đơn hàng.
@@ -53,7 +57,7 @@ public sealed record CheckoutRefundAccountDto(
 /// </summary>
 public sealed record CheckoutPlan(
     Guid RenterId,
-    Guid CartId,
+    Guid? CartId,
     CheckoutDeliveryDto Delivery,
     CheckoutRefundAccountDto RefundAccount,
     string TermsVersion,
@@ -104,3 +108,33 @@ public sealed record CheckoutLineIssue(
     string Message,
     int? RequestedQuantity = null,
     int? AvailableQuantity = null);
+
+/// <summary>
+/// Máy muốn thuê ngay từ trang chi tiết, không đi qua giỏ.
+/// </summary>
+/// <param name="EquipmentListingId">Mã bài đăng máy bên Inventory (bắt buộc).</param>
+/// <param name="Quantity">Số máy muốn thuê (ít nhất 1).</param>
+/// <param name="ExpectedStartDate">Ngày giao dự kiến.</param>
+/// <param name="ExpectedEndDate">Ngày dùng máy cuối cùng (có tính), không trước ngày giao.</param>
+public sealed record CheckoutBuyNowDto(
+    Guid EquipmentListingId,
+    int Quantity,
+    DateOnly ExpectedStartDate,
+    DateOnly ExpectedEndDate
+    );
+
+
+/// <summary>
+/// Một dòng người thuê muốn đặt: lấy từ dòng giỏ, hoặc dựng từ body khi Thuê ngay.
+/// </summary>
+/// <param name="LineId">Mã dòng giỏ; với Thuê ngay là mã mới sinh, không thuộc giỏ nào.</param>
+/// <param name="EquipmentListingId">Mã bài đăng máy bên Inventory.</param>
+/// <param name="Quantity">Số máy muốn thuê.</param>
+/// <param name="ExpectedStartDate">Ngày giao dự kiến.</param>
+/// <param name="ExpectedEndDate">Ngày dùng máy cuối cùng (có tính).</param>
+public sealed record CheckoutSelection(
+    Guid LineId,
+    Guid EquipmentListingId,
+    int Quantity,
+    DateOnly ExpectedStartDate,
+    DateOnly ExpectedEndDate);

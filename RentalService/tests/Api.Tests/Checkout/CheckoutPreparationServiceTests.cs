@@ -56,6 +56,13 @@ public sealed class CheckoutPreparationServiceTests
         true,
         expectedTotal);
 
+    private CheckoutRequest BuyNowRequest(decimal expectedTotal, DateOnly? start = null) =>
+        Request(expectedTotal) with
+        {
+            CartItemIds = null,
+            BuyNow = new(_listingId, 1, start ?? Start, End)
+        };
+
     private CheckoutRenterContext Renter(bool profileCompleted = true) => new(_renterId, profileCompleted);
 
     private CheckoutPreparationService CreateService(DateTimeOffset? utcNow = null, IInventoryRentalClient? inventory = null) => new(
@@ -587,7 +594,6 @@ public sealed class CheckoutPreparationServiceTests
                 : result;
         }
 
-        public Task<Result<ListingRentalSnapshotDto>> GetListingRentalSnapshotAsync(Guid listingId, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(string allocationGroupId, ConfirmAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
@@ -596,5 +602,34 @@ public sealed class CheckoutPreparationServiceTests
         public Task<Result<MarkAssetsOverdueResponse>> MarkAssetsOverdueAsync(string allocationGroupId, MarkAssetsOverdueRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<MarkAssetsReturnedResponse>> MarkAssetsReturnedAsync(string allocationGroupId, MarkAssetsReturnedRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<BlockDamagedAssetsResponse>> BlockDamagedAssetsAsync(string allocationGroupId, BlockDamagedAssetsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public async Task Prepare_BuyNow_BuildsOneLineWithoutReadingTheCart()
+    {
+        // Người thuê chưa có giỏ vẫn thuê ngay được.
+        _carts.Cart = null;
+
+        // 1 máy × 3 ngày (12, 13, 14) × 500.000 = 1.500.000, cọc 0.
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), BuyNowRequest(1_500_000m));
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.Plan.CartId);
+        CheckoutPlanLine line = Assert.Single(result.Plan.Lines);
+        Assert.Equal(_listingId, line.EquipmentListingId);
+        Assert.Equal(1, line.Quantity);
+        Assert.NotEqual(_cartItemId, line.CartItemId);
+        Assert.Equal(1_500_000m, result.Plan.TotalAmount);
+    }
+
+    [Fact]
+    public async Task Prepare_BuyNow_StillRequiresBookingThreeDaysAhead()
+    {
+        // Bây giờ là 09/10: ngày giao sớm nhất là 12/10, nên 10/10 bị chặn.
+        CheckoutPreparationResult result = await CreateService()
+            .PrepareAsync(Renter(), BuyNowRequest(1_500_000m, start: new DateOnly(2026, 10, 10)));
+
+        Assert.Equal(CheckoutErrors.InvalidRentalDates, result.Error);
+        Assert.Equal(0, _inventory.ListingReadCount);
     }
 }

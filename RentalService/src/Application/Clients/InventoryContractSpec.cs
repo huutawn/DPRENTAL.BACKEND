@@ -11,13 +11,10 @@ public static class InventoryContractSpec
 
     public static class Routes
     {
-        public static string ListingRentalSnapshot(Guid listingId) =>
-            $"/equipment-listings/{listingId}/rental-snapshot";
-
         public static string CheckAvailability(Guid listingId) =>
             $"/equipment-listings/{listingId}/availability/check";
 
-        // Inventory 654acf4: tối đa 100 Listing mỗi lần.
+        // Cách duy nhất đọc thông tin Listing (Inventory 654acf4), tối đa 100 Listing mỗi lần; đọc một Listing thì gửi một mã.
         public const string ListingRentalSnapshots = "/equipment-listings/batch";
 
         public static string CreateHold(Guid listingId) =>

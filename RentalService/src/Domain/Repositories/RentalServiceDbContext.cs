@@ -28,6 +28,7 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
     public DbSet<RentalInboxMessage> RentalInboxMessages => Set<RentalInboxMessage>();
     public DbSet<RentalOutboxMessage> RentalOutboxMessages => Set<RentalOutboxMessage>();
     public DbSet<RentalCheckoutOperation> RentalCheckoutOperations => Set<RentalCheckoutOperation>();
+    public DbSet<RenterAddress> RenterAddresses => Set<RenterAddress>();
 
     public void DiscardChanges() => ChangeTracker.Clear();
 
