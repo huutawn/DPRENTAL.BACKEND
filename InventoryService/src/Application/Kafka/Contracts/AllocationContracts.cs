@@ -42,31 +42,36 @@ public sealed record CreateHoldPayload(
     [property: JsonRequired] DateOnly StartDate,
     [property: JsonRequired] DateOnly EndDate,
     [property: JsonRequired] DateTimeOffset HoldExpiresAt,
-    string? Notes = null);
+    string? Notes = null,
+    string? AllocationGroupId = null,
+    DateTimeOffset? ExecutionCutoffUtc = null);
 
 public sealed record ExtendHoldPayload(
     [property: JsonRequired] Guid RentalOrderId,
     [property: JsonRequired] Guid RentalItemId,
     [property: JsonRequired] string OperationKey,
-    [property: JsonRequired] DateTimeOffset NewHoldExpiresAt);
+    [property: JsonRequired] DateTimeOffset NewHoldExpiresAt,
+    string? AllocationGroupId = null);
 
 public sealed record ConfirmAllocationPayload(
     [property: JsonRequired] Guid RentalOrderId,
     [property: JsonRequired] Guid RentalItemId,
-    [property: JsonRequired] string OperationKey);
+    [property: JsonRequired] string OperationKey,
+    string? AllocationGroupId = null);
 
 public sealed record ReleaseAllocationPayload(
     [property: JsonRequired] Guid RentalOrderId,
     [property: JsonRequired] Guid RentalItemId,
     [property: JsonRequired] string OperationKey,
-    [property: JsonRequired] string Reason);
+    [property: JsonRequired] string Reason,
+    string? AllocationGroupId = null);
 
 public sealed record MarkAssetsHandedOverPayload(
     [property: JsonRequired] Guid RentalOrderId,
     [property: JsonRequired] Guid RentalItemId,
     [property: JsonRequired] string OperationKey,
-    [property: JsonRequired] DateTimeOffset HandedOverAt);
-
+    [property: JsonRequired] DateTimeOffset HandedOverAt,
+    string? AllocationGroupId = null);
 public sealed record MarkAssetsOverduePayload(
     [property: JsonRequired] Guid RentalOrderId,
     [property: JsonRequired] Guid RentalItemId,
@@ -126,7 +131,8 @@ public sealed record InventoryAllocationCommandSucceededPayload(
     [property: JsonRequired] string Status,
     DateTimeOffset? HoldExpiresAt = null,
     IReadOnlyList<AllocationAssetMappingPayload>? Allocations = null,
-    DateTimeOffset? OccurredAt = null);
+    DateTimeOffset? OccurredAt = null,
+    string? AllocationGroupId = null);
 
 public sealed record InventoryAllocationCommandRejectedPayload(
     [property: JsonRequired] Guid RentalOrderId,
@@ -135,4 +141,5 @@ public sealed record InventoryAllocationCommandRejectedPayload(
     [property: JsonRequired] string CommandType,
     [property: JsonRequired] string ErrorCode,
     [property: JsonRequired] string ErrorMessage,
-    DateTimeOffset? OccurredAt = null);
+    DateTimeOffset? OccurredAt = null,
+    string? AllocationGroupId = null);

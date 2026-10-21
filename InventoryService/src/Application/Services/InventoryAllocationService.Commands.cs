@@ -140,6 +140,9 @@ public sealed partial class InventoryAllocationService
 
         var period = periodResult.Value;
         var canonicalHoldExpiresAt = BusinessDateTime.NormalizeUtc(command.HoldExpiresAt);
+        string groupReference = !string.IsNullOrWhiteSpace(command.AllocationGroupId)
+            ? command.AllocationGroupId.Trim()
+            : $"rental-item:{command.RentalItemId}";
 
         var hashPayload = new
         {
@@ -150,7 +153,9 @@ public sealed partial class InventoryAllocationService
             command.StartDate,
             command.EndDate,
             HoldExpiresAt = canonicalHoldExpiresAt,
-            Notes = command.Notes?.Trim()
+            Notes = command.Notes?.Trim(),
+            AllocationGroupId = groupReference,
+            command.ExecutionCutoffUtc
         };
 
         return await _coordinator.CoordinateAsync<CreateHoldPayload>(
@@ -164,6 +169,11 @@ public sealed partial class InventoryAllocationService
             handlerName,
             async (ctx, nowUtc, ct) =>
             {
+                if (command.ExecutionCutoffUtc.HasValue && nowUtc >= command.ExecutionCutoffUtc.Value)
+                {
+                    return Error.Conflict("CUTOFF_EXPIRED", "Lệnh giữ chỗ đã quá thời hạn thực thi (recovery cutoff).");
+                }
+
                 var startOfDayUtc = BusinessDateTime.StartOfDayUtc(period.StartDate);
                 if (canonicalHoldExpiresAt <= nowUtc)
                 {
@@ -182,7 +192,7 @@ public sealed partial class InventoryAllocationService
                     period,
                     canonicalHoldExpiresAt,
                     RentalSourceSystem,
-                    $"rental-item:{command.RentalItemId}",
+                    groupReference,
                     command.OperationKey,
                     command.Notes?.Trim(),
                     nowUtc,
@@ -207,7 +217,8 @@ public sealed partial class InventoryAllocationService
                     Status: "Held",
                     HoldExpiresAt: canonicalHoldExpiresAt,
                     Allocations: mapping,
-                    OccurredAt: nowUtc);
+                    OccurredAt: nowUtc,
+                    AllocationGroupId: groupReference);
 
                 return Result.Success(AllocationCommandOutcome.Succeeded(
                     AllocationMessageTypes.CreateHold,
@@ -216,7 +227,9 @@ public sealed partial class InventoryAllocationService
                     command.RentalItemId,
                     successPayload));
             },
-            cancellationToken);
+            rejectionFactory: null,
+            customGroupRef: groupReference,
+            cancellationToken: cancellationToken);
     }
 
     /// <inheritdoc />
@@ -233,11 +246,16 @@ public sealed partial class InventoryAllocationService
 
         var command = envelope.Payload;
         var canonicalNewHoldExpiresAt = BusinessDateTime.NormalizeUtc(command.NewHoldExpiresAt);
+        string groupReference = !string.IsNullOrWhiteSpace(command.AllocationGroupId)
+            ? command.AllocationGroupId.Trim()
+            : $"rental-item:{command.RentalItemId}";
+
         var hashPayload = new
         {
             command.RentalOrderId,
             command.RentalItemId,
-            NewHoldExpiresAt = canonicalNewHoldExpiresAt
+            NewHoldExpiresAt = canonicalNewHoldExpiresAt,
+            AllocationGroupId = groupReference
         };
 
         return await _coordinator.CoordinateAsync<ExtendHoldPayload>(
@@ -251,7 +269,7 @@ public sealed partial class InventoryAllocationService
             handlerName,
             async (ctx, nowUtc, ct) =>
             {
-                var groupAllocations = await ctx.Allocations.GetByGroupReferenceAsync(RentalSourceSystem, $"rental-item:{command.RentalItemId}", ct);
+                var groupAllocations = await ctx.Allocations.GetByGroupReferenceAsync(RentalSourceSystem, groupReference, ct);
                 if (groupAllocations.Count == 0)
                 {
                     return Error.NotFound("GROUP_NOT_FOUND", "Không tìm thấy nhóm phân bổ tương ứng để gia hạn.");
@@ -288,7 +306,8 @@ public sealed partial class InventoryAllocationService
                     Status: "Held",
                     HoldExpiresAt: canonicalNewHoldExpiresAt,
                     Allocations: mapping,
-                    OccurredAt: nowUtc);
+                    OccurredAt: nowUtc,
+                    AllocationGroupId: groupReference);
 
                 return Result.Success(AllocationCommandOutcome.Succeeded(
                     AllocationMessageTypes.ExtendHold,
@@ -297,7 +316,9 @@ public sealed partial class InventoryAllocationService
                     command.RentalItemId,
                     successPayload));
             },
-            cancellationToken);
+            rejectionFactory: null,
+            customGroupRef: groupReference,
+            cancellationToken: cancellationToken);
     }
 
     /// <inheritdoc />
@@ -313,10 +334,15 @@ public sealed partial class InventoryAllocationService
         if (!caller.IsAuthenticated) return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
 
         var command = envelope.Payload;
+        string groupReference = !string.IsNullOrWhiteSpace(command.AllocationGroupId)
+            ? command.AllocationGroupId.Trim()
+            : $"rental-item:{command.RentalItemId}";
+
         var hashPayload = new
         {
             command.RentalOrderId,
-            command.RentalItemId
+            command.RentalItemId,
+            AllocationGroupId = groupReference
         };
 
         return await _coordinator.CoordinateAsync<ConfirmAllocationPayload>(
@@ -330,7 +356,7 @@ public sealed partial class InventoryAllocationService
             handlerName,
             async (ctx, nowUtc, ct) =>
             {
-                var groupAllocations = await ctx.Allocations.GetByGroupReferenceAsync(RentalSourceSystem, $"rental-item:{command.RentalItemId}", ct);
+                var groupAllocations = await ctx.Allocations.GetByGroupReferenceAsync(RentalSourceSystem, groupReference, ct);
                 if (groupAllocations.Count == 0)
                 {
                     return Error.NotFound("GROUP_NOT_FOUND", "Không tìm thấy nhóm phân bổ tương ứng để xác nhận.");
@@ -367,7 +393,8 @@ public sealed partial class InventoryAllocationService
                     Status: "Allocated",
                     HoldExpiresAt: null,
                     Allocations: mapping,
-                    OccurredAt: nowUtc);
+                    OccurredAt: nowUtc,
+                    AllocationGroupId: groupReference);
 
                 return Result.Success(AllocationCommandOutcome.Succeeded(
                     AllocationMessageTypes.ConfirmAllocation,
@@ -376,7 +403,9 @@ public sealed partial class InventoryAllocationService
                     command.RentalItemId,
                     successPayload));
             },
-            cancellationToken);
+            rejectionFactory: null,
+            customGroupRef: groupReference,
+            cancellationToken: cancellationToken);
     }
 
     /// <inheritdoc />
@@ -392,11 +421,16 @@ public sealed partial class InventoryAllocationService
         if (!caller.IsAuthenticated) return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
 
         var command = envelope.Payload;
+        string groupReference = !string.IsNullOrWhiteSpace(command.AllocationGroupId)
+            ? command.AllocationGroupId.Trim()
+            : $"rental-item:{command.RentalItemId}";
+
         var hashPayload = new
         {
             command.RentalOrderId,
             command.RentalItemId,
-            Reason = command.Reason?.Trim()
+            Reason = command.Reason?.Trim(),
+            AllocationGroupId = groupReference
         };
 
         return await _coordinator.CoordinateAsync<ReleaseAllocationPayload>(
@@ -410,7 +444,7 @@ public sealed partial class InventoryAllocationService
             handlerName,
             async (ctx, nowUtc, ct) =>
             {
-                var groupAllocations = await ctx.Allocations.GetByGroupReferenceAsync(RentalSourceSystem, $"rental-item:{command.RentalItemId}", ct);
+                var groupAllocations = await ctx.Allocations.GetByGroupReferenceAsync(RentalSourceSystem, groupReference, ct);
 
                 // Release trước Hold
                 if (groupAllocations.Count == 0)
@@ -423,7 +457,8 @@ public sealed partial class InventoryAllocationService
                         Status: "Released",
                         HoldExpiresAt: null,
                         Allocations: Array.Empty<AllocationAssetMappingPayload>(),
-                        OccurredAt: nowUtc);
+                        OccurredAt: nowUtc,
+                        AllocationGroupId: groupReference);
 
                     return Result.Success(AllocationCommandOutcome.Succeeded(
                         AllocationMessageTypes.ReleaseAllocation,
@@ -476,7 +511,8 @@ public sealed partial class InventoryAllocationService
                     Status: "Released",
                     HoldExpiresAt: null,
                     Allocations: mapping,
-                    OccurredAt: nowUtc);
+                    OccurredAt: nowUtc,
+                    AllocationGroupId: groupReference);
 
                 return Result.Success(AllocationCommandOutcome.Succeeded(
                     AllocationMessageTypes.ReleaseAllocation,
@@ -485,7 +521,9 @@ public sealed partial class InventoryAllocationService
                     command.RentalItemId,
                     successPayload));
             },
-            cancellationToken);
+            rejectionFactory: null,
+            customGroupRef: groupReference,
+            cancellationToken: cancellationToken);
     }
 
     /// <inheritdoc />
@@ -502,11 +540,16 @@ public sealed partial class InventoryAllocationService
 
         var command = envelope.Payload;
         var normalizedHandedOverAt = BusinessDateTime.NormalizeUtc(command.HandedOverAt);
+        string groupReference = !string.IsNullOrWhiteSpace(command.AllocationGroupId)
+            ? command.AllocationGroupId.Trim()
+            : $"rental-item:{command.RentalItemId}";
+
         var hashPayload = new
         {
             command.RentalOrderId,
             command.RentalItemId,
-            HandedOverAt = normalizedHandedOverAt
+            HandedOverAt = normalizedHandedOverAt,
+            AllocationGroupId = groupReference
         };
 
         return await _coordinator.CoordinateAsync<MarkAssetsHandedOverPayload>(
@@ -520,7 +563,7 @@ public sealed partial class InventoryAllocationService
             handlerName,
             async (ctx, nowUtc, ct) =>
             {
-                var groupAllocations = await ctx.Allocations.GetByGroupReferenceAsync(RentalSourceSystem, $"rental-item:{command.RentalItemId}", ct);
+                var groupAllocations = await ctx.Allocations.GetByGroupReferenceAsync(RentalSourceSystem, groupReference, ct);
                 if (groupAllocations.Count == 0)
                 {
                     return Error.NotFound("GROUP_NOT_FOUND", "Không tìm thấy nhóm phân bổ tương ứng để ghi nhận bàn giao.");
@@ -559,7 +602,8 @@ public sealed partial class InventoryAllocationService
                     Status: "Allocated",
                     HoldExpiresAt: null,
                     Allocations: mapping,
-                    OccurredAt: nowUtc);
+                    OccurredAt: nowUtc,
+                    AllocationGroupId: groupReference);
 
                 return Result.Success(AllocationCommandOutcome.Succeeded(
                     AllocationMessageTypes.MarkAssetsHandedOver,
@@ -568,7 +612,9 @@ public sealed partial class InventoryAllocationService
                     command.RentalItemId,
                     successPayload));
             },
-            cancellationToken);
+            rejectionFactory: null,
+            customGroupRef: groupReference,
+            cancellationToken: cancellationToken);
     }
 
     public async Task<Result<AllocationCommandOutcome>> ProcessMarkAssetsOverdueCommandAsync(
