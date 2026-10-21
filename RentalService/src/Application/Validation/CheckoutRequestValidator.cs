@@ -12,6 +12,9 @@ public static partial class CheckoutRequestValidator
     private const string InvalidLength = "INVALID_LENGTH";
     private const string InvalidFormat = "INVALID_FORMAT";
     private const string Duplicate = "DUPLICATE";
+
+    /// <summary>Độ dài tối đa của ghi chú giao hàng, lúc checkout và khi sửa sau khi đặt.</summary>
+    public const int MaxDeliveryNoteLength = 500;
     private const string Conflicting = "CONFLICTING";
 
     [GeneratedRegex(@"^(0|\+84)[0-9]{9}$")]
@@ -27,7 +30,7 @@ public static partial class CheckoutRequestValidator
         List<CheckoutFieldError> errors = [];
 
         ValidateSelection(request, errors);
-        ValidateDelivery(request.Delivery, errors);
+        ValidateDeliverySource(request, errors);
         ValidateRefundAccount(request.RefundAccount, errors);
 
         if (string.IsNullOrWhiteSpace(request.TermsVersion))
@@ -105,6 +108,36 @@ public static partial class CheckoutRequestValidator
         }
     }
 
+    private static void ValidateDeliverySource(CheckoutRequest request, List<CheckoutFieldError> errors)
+    {
+        if (request.AddressId is not { } addressId)
+        {
+            if (request.DeliveryNote is not null)
+            {
+                errors.Add(new("deliveryNote", Conflicting, "deliveryNote chỉ dùng với addressId; nhập tay thì dùng delivery.note."));
+            }
+
+            ValidateDelivery(request.Delivery, errors);
+            return;
+        }
+
+        if (request.Delivery is not null)
+        {
+            errors.Add(new("addressId", Conflicting, "Chỉ gửi một trong hai: addressId hoặc delivery."));
+            return;
+        }
+
+        if (addressId == Guid.Empty)
+        {
+            errors.Add(new("addressId", InvalidFormat, "Mã địa chỉ không hợp lệ."));
+        }
+
+        if (request.DeliveryNote is not null && request.DeliveryNote.Trim().Length > MaxDeliveryNoteLength)
+        {
+            errors.Add(new("deliveryNote", InvalidLength, $"Ghi chú tối đa {MaxDeliveryNoteLength} ký tự."));
+        }
+    }
+
     private static void ValidateDelivery(CheckoutDeliveryDto? delivery, List<CheckoutFieldError> errors)
     {
         if (delivery is null)
@@ -115,9 +148,9 @@ public static partial class CheckoutRequestValidator
 
         ValidateAddress(delivery.Province, delivery.AddressDetail, delivery.RecipientName, delivery.RecipientPhone, "delivery.", errors);
 
-        if (delivery.Note is not null && delivery.Note.Trim().Length > 500)
+        if (delivery.Note is not null && delivery.Note.Trim().Length > MaxDeliveryNoteLength)
         {
-            errors.Add(new("delivery.note", InvalidLength, "Ghi chú tối đa 500 ký tự."));
+            errors.Add(new("delivery.note", InvalidLength, $"Ghi chú tối đa {MaxDeliveryNoteLength} ký tự."));
         }
     }
 

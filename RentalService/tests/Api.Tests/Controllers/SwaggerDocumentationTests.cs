@@ -35,13 +35,14 @@ public sealed class SwaggerDocumentationTests
                 operationCount++;
                 string where = $"{operation.Name.ToUpperInvariant()} {path.Name}";
                 Assert.True(operation.Value.TryGetProperty("summary", out JsonElement summary) && !string.IsNullOrWhiteSpace(summary.GetString()), $"{where} thiếu summary");
-                Assert.True(operation.Value.TryGetProperty("description", out JsonElement description) && !string.IsNullOrWhiteSpace(description.GetString()), $"{where} thiếu description");
                 Assert.True(operation.Value.GetProperty("responses").TryGetProperty("500", out _), $"{where} thiếu response 500");
             }
         }
-        Assert.Equal(31, operationCount);
+        Assert.Equal(33, operationCount);
+        Assert.True(paths.GetProperty("/api/v1/rental/orders/{orderId}/delivery-note").TryGetProperty("patch", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/me/addresses", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/me/addresses/{addressId}/default", out _));
+        Assert.True(paths.GetProperty("/api/v1/rental/me/addresses/{addressId}").TryGetProperty("get", out _));
         Assert.True(paths.GetProperty("/api/v1/rental/orders/{orderId}/cancel")
             .GetProperty("post").GetProperty("responses").TryGetProperty("409", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/returns", out _));

@@ -14,7 +14,6 @@ public sealed class RentalDeductionsController(IDeductionService deductions,
     IDeductionResponseService responses, IRentalCallerContext caller) : ControllerBase
 {
     /// <summary>Nhà cung cấp gửi đề nghị khấu trừ tiền cọc sau khi đã thu hồi đủ các máy.</summary>
-    /// <remarks>Cần header Idempotency-Key. Số tiền khấu trừ áp dụng cho toàn bộ mục thuê; danh sách AssetId chỉ xác định những máy bị hỏng, không chia tiền khấu trừ cho từng máy.</remarks>
     [HttpPost]
     [ProducesResponseType(typeof(SubmitDeductionResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
@@ -31,7 +30,6 @@ public sealed class RentalDeductionsController(IDeductionService deductions,
     }
 
     /// <summary>Người thuê chấp nhận hoặc khiếu nại đề nghị khấu trừ tiền cọc.</summary>
-    /// <remarks>Cần header Idempotency-Key. Nếu khiếu nại, phải nhập lý do và có thể gửi thêm MediaId làm bằng chứng.</remarks>
     [HttpPost("response")]
     [ProducesResponseType(typeof(RespondDeductionResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
@@ -44,7 +42,6 @@ public sealed class RentalDeductionsController(IDeductionService deductions,
     }
 
     /// <summary>Quản trị viên xem đề nghị khấu trừ, khiếu nại và bằng chứng thu hồi của từng máy.</summary>
-    /// <remarks>Chỉ quản trị viên hệ thống được xem bằng chứng khiếu nại riêng tư.</remarks>
     [HttpGet("dispute")]
     [ProducesResponseType(typeof(DisputeDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
@@ -55,7 +52,6 @@ public sealed class RentalDeductionsController(IDeductionService deductions,
     }
 
     /// <summary>Quản trị viên chốt số tiền khấu trừ sau khi người thuê khiếu nại.</summary>
-    /// <remarks>Cần header Idempotency-Key. Số tiền chốt không được vượt đề nghị của nhà cung cấp hoặc tổng tiền cọc của mục thuê.</remarks>
     [HttpPost("dispute/resolution")]
     [ProducesResponseType(typeof(ResolveDisputeResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]

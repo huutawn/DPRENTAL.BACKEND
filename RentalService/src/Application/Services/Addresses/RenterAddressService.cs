@@ -29,6 +29,12 @@ public sealed class RenterAddressService(
         return list.Select(ToResponse).ToList();
     }
 
+    public async Task<Result<RenterAddressResponse>> GetAsync(Guid renterId, Guid addressId, CancellationToken cancellationToken = default)
+    {
+        RenterAddress? address = await addresses.GetByIdAsync(renterId, addressId, cancellationToken);
+        return address is null ? RenterAddressErrors.NotFound : ToResponse(address);
+    }
+
     public async Task<Result<RenterAddressResponse>> CreateAsync(
         Guid renterId,
         SaveRenterAddressRequest request,

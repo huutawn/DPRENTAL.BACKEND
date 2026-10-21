@@ -27,6 +27,7 @@ public sealed class CheckoutPreparationServiceTests
 
     private readonly FakeCartRepository _carts = new();
     private readonly FakeOrderRepository _orders = new();
+    private readonly FakeRenterAddressRepository _addresses = new();
     private readonly FakeInventoryListingClient _inventory = new();
     private readonly RentalCart _cart;
     private readonly Guid _cartItemId;
@@ -68,6 +69,7 @@ public sealed class CheckoutPreparationServiceTests
     private CheckoutPreparationService CreateService(DateTimeOffset? utcNow = null, IInventoryRentalClient? inventory = null) => new(
         _carts,
         _orders,
+        _addresses,
         inventory ?? _inventory,
         Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
         {
@@ -630,6 +632,35 @@ public sealed class CheckoutPreparationServiceTests
             .PrepareAsync(Renter(), BuyNowRequest(1_500_000m, start: new DateOnly(2026, 10, 10)));
 
         Assert.Equal(CheckoutErrors.InvalidRentalDates, result.Error);
+        Assert.Equal(0, _inventory.ListingReadCount);
+    }
+
+    [Fact]
+    public async Task Prepare_WithAddressId_UsesTheSavedAddressAndDeliveryNote()
+    {
+        RenterAddress site = new(Guid.NewGuid(), _renterId, "Bình Dương", "Công trường KCN VSIP 2, Thủ Dầu Một",
+            "Trần Văn Bình", "0912345678", isDefault: true, Now);
+        _addresses.Addresses.Add(site);
+
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(),
+            Request() with { Delivery = null, AddressId = site.Id, DeliveryNote = " Gọi trước khi giao " });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(new CheckoutDeliveryDto("Bình Dương", "Công trường KCN VSIP 2, Thủ Dầu Một",
+            "Trần Văn Bình", "0912345678", "Gọi trước khi giao"), result.Plan.Delivery);
+    }
+
+    [Fact]
+    public async Task Prepare_WithAnotherRentersAddressId_IsAddressNotFound()
+    {
+        RenterAddress strangers = new(Guid.NewGuid(), Guid.NewGuid(), "Đồng Nai", "Kho bãi số 5, Biên Hòa",
+            "Lê Văn C", "0987654321", isDefault: true, Now);
+        _addresses.Addresses.Add(strangers);
+
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(),
+            Request() with { Delivery = null, AddressId = strangers.Id });
+
+        Assert.Equal(RenterAddressErrors.NotFound, result.Error);
         Assert.Equal(0, _inventory.ListingReadCount);
     }
 }

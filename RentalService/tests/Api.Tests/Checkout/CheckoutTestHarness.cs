@@ -132,6 +132,7 @@ internal sealed class CheckoutTestHarness
             new CheckoutPreparationService(
                 carts,
                 orders,
+                new RenterAddressRepository(context),
                 Listings,
                 Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
                 {

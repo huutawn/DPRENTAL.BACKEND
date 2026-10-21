@@ -14,6 +14,11 @@ public sealed class RenterAddressRepository(RentalServiceDbContext dbContext) : 
             .ThenByDescending(address => address.CreatedAt)
             .ToListAsync(cancellationToken);
 
+    public Task<RenterAddress?> GetByIdAsync(Guid renterId, Guid addressId, CancellationToken cancellationToken = default) =>
+        dbContext.RenterAddresses
+            .AsNoTracking()
+            .FirstOrDefaultAsync(address => address.Id == addressId && address.RenterId == renterId, cancellationToken);
+
     public async Task<IReadOnlyList<RenterAddress>> ListForUpdateAsync(Guid renterId, CancellationToken cancellationToken = default) =>
         await dbContext.RenterAddresses
             .Where(address => address.RenterId == renterId)

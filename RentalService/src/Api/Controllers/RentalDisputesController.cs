@@ -13,7 +13,6 @@ public sealed class RentalDisputesController(IDeductionResponseService responses
     IRentalCallerContext caller) : ControllerBase
 {
     /// <summary>Quản trị viên xem danh sách khiếu nại chưa được giải quyết.</summary>
-    /// <remarks>Trả về danh sách phân trang các khiếu nại đang chờ quản trị viên quyết định.</remarks>
     [HttpGet]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]

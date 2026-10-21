@@ -21,6 +21,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 {
     private readonly IRentalCartRepository _carts;
     private readonly IRentalOrderRepository _orders;
+    private readonly IRenterAddressRepository _addresses;
     private readonly IInventoryRentalClient _inventory;
     private readonly RentalTermsOptions _terms;
     private readonly TimeProvider _timeProvider;
@@ -31,6 +32,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     public CheckoutPreparationService(
         IRentalCartRepository carts,
         IRentalOrderRepository orders,
+        IRenterAddressRepository addresses,
         IInventoryRentalClient inventory,
         IOptions<RentalTermsOptions> termsOptions,
         TimeProvider timeProvider)
@@ -39,6 +41,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 
         _carts = carts ?? throw new ArgumentNullException(nameof(carts));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
+        _addresses = addresses ?? throw new ArgumentNullException(nameof(addresses));
         _inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
         _terms = termsOptions.Value;
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
@@ -86,6 +89,23 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         if (pendingOrder is not null && pendingOrder.PaymentDeadline > utcNow)
         {
             return CheckoutPreparationResult.PendingOrder(pendingOrder.OrderCode);
+        }
+
+        CheckoutDeliveryDto delivery;
+        if (request.AddressId is { } addressId)
+        {
+            // Chọn từ sổ địa chỉ: chỉ địa chỉ của chính người thuê; đơn chép lại nội dung lúc đặt.
+            RenterAddress? address = await _addresses.GetByIdAsync(renter.RenterId, addressId, cancellationToken);
+            if (address is null)
+            {
+                return CheckoutPreparationResult.Failure(RenterAddressErrors.NotFound);
+            }
+
+            delivery = new(address.Province, address.AddressDetail, address.RecipientName, address.RecipientPhone, request.DeliveryNote);
+        }
+        else
+        {
+            delivery = request.Delivery!;
         }
 
         Guid? cartId = null;
@@ -150,7 +170,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         CheckoutPlan plan = new(
             renter.RenterId,
             cartId,
-            Normalize(request.Delivery!),
+            Normalize(delivery),
             Normalize(request.RefundAccount!),
             _terms.CurrentVersion.Trim(),
             _terms.DocumentRef.Trim(),

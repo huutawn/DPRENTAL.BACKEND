@@ -65,6 +65,7 @@ public sealed class CheckoutServiceTests
             new CheckoutPreparationService(
                 carts,
                 orders,
+                new RenterAddressRepository(context),
                 _harness.Listings,
                 Options.Create(new RentalTermsOptions
                 {

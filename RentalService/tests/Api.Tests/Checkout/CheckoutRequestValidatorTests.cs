@@ -142,4 +142,36 @@ public sealed class CheckoutRequestValidatorTests
             ["cartItemIds", "delivery", "expectedTotalAmount", "refundAccount", "termsAccepted", "termsVersion"],
             errors.Select(e => e.Field).Order(StringComparer.Ordinal));
     }
+
+    [Fact]
+    public void Validate_AcceptsAddressIdInsteadOfDelivery()
+    {
+        CheckoutRequest request = ValidRequest() with { Delivery = null, AddressId = Guid.NewGuid(), DeliveryNote = "Gọi trước khi giao" };
+
+        Assert.Empty(CheckoutRequestValidator.Validate(request));
+    }
+
+    [Fact]
+    public void Validate_RejectsAddressIdAndDeliveryTogether()
+    {
+        CheckoutRequest request = ValidRequest() with { AddressId = Guid.NewGuid() };
+
+        Assert.Contains(CheckoutRequestValidator.Validate(request), e => e.Field == "addressId" && e.Code == "CONFLICTING");
+    }
+
+    [Fact]
+    public void Validate_RejectsDeliveryNoteWithoutAddressId()
+    {
+        CheckoutRequest request = ValidRequest() with { DeliveryNote = "Gọi trước khi giao" };
+
+        Assert.Contains(CheckoutRequestValidator.Validate(request), e => e.Field == "deliveryNote");
+    }
+
+    [Fact]
+    public void Validate_RequiresDeliveryWhenNoAddressId()
+    {
+        CheckoutRequest request = ValidRequest() with { Delivery = null };
+
+        Assert.Contains(CheckoutRequestValidator.Validate(request), e => e.Field == "delivery");
+    }
 }
