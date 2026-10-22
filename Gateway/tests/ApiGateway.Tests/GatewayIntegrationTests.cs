@@ -21,6 +21,25 @@ public sealed class GatewayIntegrationTests
     private const string Issuer = "https://auth.example.test";
     private const string Audience = "dprental-clients";
 
+    [Theory]
+    [InlineData(200)]
+    [InlineData(503)]
+    public async Task RecommendationReadinessAllowsAnonymousAndPreservesStatus(int statusCode)
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using DownstreamGatewayTestHost.LoopbackTestService upstream = new(DownstreamGatewayTestHost.CreateJwks(signingKey, "key-1"))
+        {
+            ResponseStatusCode = statusCode
+        };
+        using WebApplicationFactory<Program> factory = DownstreamGatewayTestHost.CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/recommendation/health/ready");
+
+        Assert.Equal((HttpStatusCode)statusCode, response.StatusCode);
+        Assert.Equal("/health/ready", upstream.LastRequest?.Path);
+    }
+
     [Fact]
     public async Task AuthRoutePreservesPathAndKeepsCorrelationId()
     {
