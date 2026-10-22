@@ -16,6 +16,17 @@ RUN dotnet publish RecommendationService/src/Api/RecommendationService.Api.cspro
     --output /app/publish \
     --no-restore
 
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS migrator
+WORKDIR /app
+RUN sed -i 's/Components: .*/Components: main/' /etc/apt/sources.list.d/ubuntu.sources \
+    && sed -i 's/Suites: noble noble-updates noble-backports/Suites: noble noble-updates/' /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get update \
+    && apt-get install --yes --no-install-recommends libgssapi-krb5-2 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /app/publish ./
+USER $APP_UID
+ENTRYPOINT ["dotnet", "RecommendationService.Api.dll", "--migrate"]
+
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 

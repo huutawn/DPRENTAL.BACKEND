@@ -117,3 +117,20 @@ Quy tắc:
 dotnet build RecommendationService.sln -c Release
 dotnet test RecommendationService.sln -c Release
 ```
+
+## CI/CD dev
+
+Workflow `.github/workflows/recommendationservice-dev.yml` được duy trì trên nhánh
+`recommendation/develop-ci-cd`, theo cùng luồng RentalService: publish runtime và
+migrator lên GHCR với tag commit SHA, SSH tới VPS, cập nhật `release.env`, chạy
+migration, recreate service, kiểm tra container healthy, Gateway và JWKS.
+Migrator dùng lệnh `--migrate` hiện có; không thêm cơ chế migration thứ hai.
+
+VPS dùng `/opt/dprental/dev/compose.yaml`, `.env`, `release.env` với hai biến
+`RECOMMENDATION_SERVICE_IMAGE` và `RECOMMENDATION_MIGRATOR_IMAGE`. Runtime dùng
+PostgreSQL schema `recommendation` (tạo sẵn trên VPS trước lần migration đầu), Kafka nội bộ và Valkey dùng chung với
+`ConnectionStrings__RecommendationRedis` của InventoryService. Gateway chuyển
+`GET /recommendation/health/ready` tới `/health/ready`; service chưa có business
+HTTP endpoints. Không tự rollback schema hoặc image khi triển khai thất bại.
+
+Kiểm thử script: `bash scripts/tests/deploy-recommendationservice.test.sh`.
