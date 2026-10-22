@@ -172,6 +172,15 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(url, request)).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("cus"));
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(url, request)).StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("sup"));
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(url, request)).StatusCode);
+
+        // Manual refunds GET endpoints also reject renter, supplier, and service tokens
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/v1/manual-refunds/{requirementId}")).StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("cus"));
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/v1/manual-refunds/{requirementId}")).StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token("payment.settlement.write"));
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/v1/manual-refunds/{requirementId}")).StatusCode);
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("adm"));
         var response = await client.PostAsJsonAsync(url, request);

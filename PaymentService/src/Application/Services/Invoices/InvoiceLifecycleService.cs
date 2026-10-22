@@ -21,6 +21,7 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
     private readonly IManualRefundRepository _refundRepository;
     private readonly ITransactionIntegrityChecker _integrityChecker;
     private readonly TimeProvider _timeProvider;
+    private readonly Dprental.PaymentService.Application.Hub.IPaymentHubNotifier? _notifier;
 
     public InvoiceLifecycleService(
         IInvoiceRepository repository,
@@ -28,7 +29,8 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
         IPaymentDataEncryptor encryptor,
         IManualRefundRepository refundRepository,
         ITransactionIntegrityChecker integrityChecker,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Dprental.PaymentService.Application.Hub.IPaymentHubNotifier? notifier = null)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _journalRepository = journalRepository;
@@ -36,6 +38,7 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
         _refundRepository = refundRepository ?? throw new ArgumentNullException(nameof(refundRepository));
         _integrityChecker = integrityChecker ?? throw new ArgumentNullException(nameof(integrityChecker));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _notifier = notifier;
     }
 
     public async Task<Result<CancelInvoiceResponse>> CancelInvoiceAsync(
@@ -491,6 +494,10 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
             }
 
             await tx.CommitAsync(ct);
+            if (_notifier is not null)
+            {
+                await _notifier.NotifyPaymentCompletedAsync(invoice.RenterId, acceptInvoiceJournal.EventId, invoice, ct);
+            }
 
             return Result.Success(response);
         }

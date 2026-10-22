@@ -205,6 +205,13 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             Assert.True(firstRes.IsSuccess);
             Assert.False(firstRes.Value.IsReplay);
             Assert.Equal(1_000_000m, firstRes.Value.TotalAmount);
+            Assert.Equal(InvoiceStatus.Pending, firstRes.Value.Status);
+            Assert.Equal("MBBank", firstRes.Value.Bank);
+            Assert.Equal("0383799632", firstRes.Value.Account);
+            Assert.False(string.IsNullOrWhiteSpace(firstRes.Value.TransferContent));
+            Assert.Equal(Dprental.PaymentService.Common.Utils.VietQrUrlGenerator.Generate(
+                "MBBank", "0383799632", firstRes.Value.TotalAmount,
+                firstRes.Value.TransferContent!), firstRes.Value.QrUrl);
 
             // Replay with exact same key and payload
             var replayRes = await service.CreateInvoiceAsync(req);
@@ -212,6 +219,62 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             Assert.True(replayRes.Value.IsReplay);
             Assert.Equal(firstRes.Value.InvoiceRef, replayRes.Value.InvoiceRef);
             Assert.Equal(firstRes.Value.TotalAmount, replayRes.Value.TotalAmount);
+            Assert.Equal(firstRes.Value.QrUrl, replayRes.Value.QrUrl);
+            Assert.Equal(firstRes.Value.TransferContent, replayRes.Value.TransferContent);
+            Assert.Equal(1, await ctx.Invoices.CountAsync());
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(dbName);
+        }
+    }
+
+    [Fact]
+    public async Task CreateInvoice_OldReceiptWithoutQr_ReplaysBankDetailsFromInvoiceSnapshot()
+    {
+        var (connString, dbName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connString);
+            await using var ctx = new PaymentServiceDbContext(options);
+            await ctx.Database.MigrateAsync();
+            var clock = new FakeTimeProvider(new DateTimeOffset(2026, 10, 12, 10, 0, 0, TimeSpan.Zero));
+            var item = new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 4000m, 0m);
+            var request = new CreateInvoiceRequest(Guid.NewGuid(), "OLD-RECEIPT", Guid.NewGuid(), "VND",
+                clock.GetUtcNow().AddMinutes(30), [item], "old-create-invoice");
+            var invoice = Invoice.Create(request.RentalOrderId, request.OrderCode, request.RenterId, request.Currency,
+                request.PaymentDeadline, [InvoiceItem.Create(item.RentalItemId, item.SupplierId, 4000m, 0m).Value],
+                "DPR 23456789AB", "VCB", "snapshot-account", clock.GetUtcNow()).Value;
+            string oldJson = JsonSerializer.Serialize(new
+            {
+                invoice.InvoiceRef,
+                invoice.TotalAmount,
+                invoice.Currency,
+                invoice.PaymentDeadline,
+                IsReplay = false
+            });
+            string fingerprint = Dprental.PaymentService.Common.Utils.PayloadFingerprinter.ComputeCreateFingerprint(
+                request.RentalOrderId, request.OrderCode, request.RenterId, request.PaymentDeadline,
+                request.Items!.Select(i => (i!.RentalItemId, i.SupplierId, i.RentalAmount, i.DepositAmount)));
+            ctx.Invoices.Add(invoice);
+            ctx.OperationReceipts.Add(OperationReceipt.Create(request.OperationKey, "CreateInvoice", fingerprint,
+                oldJson, invoice.InvoiceRef, invoice.RentalOrderId, clock.GetUtcNow()));
+            await ctx.SaveChangesAsync();
+
+            var result = await CreateCreationService(ctx, MerchantOptions, clock).CreateInvoiceAsync(request);
+
+            Assert.True(result.IsSuccess);
+            Assert.True(result.Value.IsReplay);
+            Assert.Equal(invoice.InvoiceRef, result.Value.InvoiceRef);
+            Assert.Equal(InvoiceStatus.Pending, result.Value.Status);
+            Assert.Equal("VCB", result.Value.Bank);
+            Assert.Equal("snapshot-account", result.Value.Account);
+            Assert.Equal(invoice.PaymentCode, result.Value.TransferContent);
+            Assert.Equal(Dprental.PaymentService.Common.Utils.VietQrUrlGenerator.Generate(
+                "VCB", "snapshot-account", 4000m, invoice.PaymentCode), result.Value.QrUrl);
+            Assert.Equal(oldJson, (await ctx.OperationReceipts.SingleAsync()).ResultJson);
+            Assert.Equal(1, await ctx.Invoices.CountAsync());
+            Assert.Equal(1, await ctx.OperationReceipts.CountAsync());
         }
         finally
         {
@@ -314,6 +377,8 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             Assert.True(replayRes.IsSuccess);
             Assert.True(replayRes.Value.IsReplay);
             Assert.Equal(firstRes.Value.InvoiceRef, replayRes.Value.InvoiceRef);
+            Assert.Equal(InvoiceStatus.Expired, replayRes.Value.Status);
+            Assert.Null(replayRes.Value.QrUrl);
 
             // Verify invoice in DB was updated to EXPIRED and no extra invoice/receipt was added
             var dbInvoice = await ctx.Invoices.AsNoTracking().SingleAsync(i => i.RentalOrderId == orderId);

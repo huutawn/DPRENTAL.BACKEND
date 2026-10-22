@@ -15,8 +15,14 @@ public sealed partial class ManualRefundService
         ArgumentNullException.ThrowIfNull(request);
         var valid = request.Validate();
         if (valid.IsFailure) return valid.Error;
-        request = request with { OperationKey = request.OperationKey.Trim(), InvoiceRef = request.InvoiceRef.Trim(),
-            PaymentRef = request.PaymentRef.Trim(), Reason = request.Reason.Trim(), Items = request.Items.OrderBy(x => x.RentalItemId).ToArray() };
+        request = request with
+        {
+            OperationKey = request.OperationKey.Trim(),
+            InvoiceRef = request.InvoiceRef.Trim(),
+            PaymentRef = request.PaymentRef.Trim(),
+            Reason = request.Reason.Trim(),
+            Items = request.Items.OrderBy(x => x.RentalItemId).ToArray()
+        };
         string fingerprint = CanonicalJournalHasher.ComputeOutboxDigest(JsonSerializer.Serialize(request));
         var stored = await invoices.GetOperationReceiptAsync(request.OperationKey, ct);
         if (stored is not null) return ReadReplay<RequestRefundResponse>(stored, "RequestRefund", fingerprint, x => x with { IsReplay = true });

@@ -89,8 +89,10 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             ReferenceCode: $"FT-{id}");
     }
 
-    [Fact]
-    public async Task SequentialRetry_SameId_ReturnsSavedResult_DoesNotRerunMatching()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SequentialRetry_SameId_ReturnsSavedResult_DoesNotRerunMatching(bool descriptionOnly)
     {
         var (connString, dbName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
         try
@@ -115,6 +117,10 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             }
 
             var tx = CreateBankTx(1001, paymentCode, 500_000m);
+            if (descriptionOnly)
+            {
+                tx = tx with { Code = null, Content = null, Description = $"Thanh toan {paymentCode}" };
+            }
 
             // 1. First execution
             await using (var ctx1 = new PaymentServiceDbContext(options))
@@ -447,11 +453,11 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
         private int _readCount;
 
         public Task<Invoice?> GetInvoiceSnapshotByIdAsync(Guid id, CancellationToken cancellationToken = default) => inner.GetInvoiceSnapshotByIdAsync(id, cancellationToken);
-    public Task SaveFinancialOperationAsync(OperationReceipt receipt, IReadOnlyList<TransactionJournalEntry> journals,
-        IReadOnlyList<OutboxMessage> messages, CancellationToken cancellationToken = default) => inner.SaveFinancialOperationAsync(receipt, journals, messages, cancellationToken);
+        public Task SaveFinancialOperationAsync(OperationReceipt receipt, IReadOnlyList<TransactionJournalEntry> journals,
+            IReadOnlyList<OutboxMessage> messages, CancellationToken cancellationToken = default) => inner.SaveFinancialOperationAsync(receipt, journals, messages, cancellationToken);
 
-    public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
-            inner.BeginTransactionAsync(cancellationToken);
+        public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
+                inner.BeginTransactionAsync(cancellationToken);
 
         public Task<OperationReceipt?> GetOperationReceiptAsync(string operationKey, CancellationToken cancellationToken = default) =>
             inner.GetOperationReceiptAsync(operationKey, cancellationToken);
@@ -927,11 +933,11 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
     private sealed class FaultyInvoiceRepository(IInvoiceRepository inner, bool shouldThrowOnSave) : IInvoiceRepository
     {
         public Task<Invoice?> GetInvoiceSnapshotByIdAsync(Guid id, CancellationToken cancellationToken = default) => inner.GetInvoiceSnapshotByIdAsync(id, cancellationToken);
-    public Task SaveFinancialOperationAsync(OperationReceipt receipt, IReadOnlyList<TransactionJournalEntry> journals,
-        IReadOnlyList<OutboxMessage> messages, CancellationToken cancellationToken = default) => inner.SaveFinancialOperationAsync(receipt, journals, messages, cancellationToken);
+        public Task SaveFinancialOperationAsync(OperationReceipt receipt, IReadOnlyList<TransactionJournalEntry> journals,
+            IReadOnlyList<OutboxMessage> messages, CancellationToken cancellationToken = default) => inner.SaveFinancialOperationAsync(receipt, journals, messages, cancellationToken);
 
-    public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
-            inner.BeginTransactionAsync(cancellationToken);
+        public Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
+                inner.BeginTransactionAsync(cancellationToken);
 
         public Task<OperationReceipt?> GetOperationReceiptAsync(string operationKey, CancellationToken cancellationToken = default) =>
             inner.GetOperationReceiptAsync(operationKey, cancellationToken);

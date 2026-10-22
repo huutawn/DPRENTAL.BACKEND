@@ -81,7 +81,7 @@ Codebase tuân thủ cấu trúc phân tầng sạch (Clean Architecture) tươn
 - Mã thanh toán (`PaymentCode`) được trích xuất từ nội dung chuyển khoản theo tiền tố cấu hình (`DPR...`).
 - Xử lý hai nhánh giao dịch:
   - **Thanh toán đúng hạn** (thời điểm giao dịch ngân hàng < `PaymentDeadline`): Hóa đơn chuyển trạng thái `PAID`, gán `PaymentRef`, ghi nhận 1 journal `PaymentMatched`, phát 1 sự kiện Outbox `InvoicePaid`.
-  - **Thanh toán trễ** (thời điểm giao dịch >= `PaymentDeadline` hoặc hóa đơn đã ở trạng thái `EXPIRED`/`CANCELLED`): Không ghi nhận thanh toán thành công; hóa đơn chuyển `EXPIRED` (nếu đang `PENDING`), lưu transaction với trạng thái `MANUAL_REFUND_REQUIRED`, gán `PaymentRef`, phát sự kiện Outbox `InvoicePaid` kèm cờ chỉ định để hỗ trợ hoàn tiền thủ công.
+  - **Thanh toán trễ**: Giao dịch được phân loại trễ nếu webhook được xử lý từ deadline trở đi (sau khi lấy khóa hàng), giao dịch ngân hàng từ deadline trở đi, hoặc hóa đơn đã `EXPIRED`/`CANCELLED`. Webhook không tự mở lại invoice; chỉ command recovery hợp lệ từ Rental mới được chấp nhận trong 15 phút (giữ điều kiện không có refund reservation và kiểm tra Integrity). Ghi transaction `MANUAL_REFUND_REQUIRED`, gán `PaymentRef`, journal và Outbox `InvoicePaid` cùng transaction để Rental đăng ký refund.
 - Deduplication: Kiểm tra trùng lặp trên cặp `(Provider, ProviderTransactionId)` và unique index trên `PaymentRef`.
 
 ### 6.3. Snapshot Hóa Đơn & Quyết Định Settlement
@@ -144,7 +144,7 @@ Codebase tuân thủ cấu trúc phân tầng sạch (Clean Architecture) tươn
 - **Phân Quyền API**:
   - Service-to-service endpoints (`CreateInvoice`, `CancelInvoice`, `Settlements`): Yêu cầu token định danh service (`u=svc`) kèm scopes tương ứng (`payment.invoice.write`, `payment.settlement.write`).
   - Customer endpoints (`GetInvoice`): Kiểm tra quyền sở hữu IDOR (`sub == RenterId`).
-  - Admin endpoints (`ConfirmManualRefund`): Yêu cầu token quản trị viên (`payment.refund.admin`).
+  - Admin endpoints (`GET /api/v1/manual-refunds`, `POST .../{id}/complete`, `POST /api/v1/admin/payments/unmatched/{id}/resolve`): Yêu cầu JWT client quản trị viên (role admin) và danh tính từ `sub` (không dùng service token, renter hoặc supplier).
 
 ---
 

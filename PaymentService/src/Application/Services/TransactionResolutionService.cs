@@ -2,19 +2,29 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Dprental.PaymentService.Application.DTOs.Operations;
+using Dprental.PaymentService.Application.Hub;
 using Dprental.PaymentService.Application.IServices;
 using Dprental.PaymentService.Application.Options;
+using Dprental.PaymentService.Application.Services.Integrity;
 using Dprental.PaymentService.Common;
+using Dprental.PaymentService.Common.Cryptography;
 using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Domain.IRepositories;
+using Dprental.PaymentService.Domain.Repositories;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Dprental.PaymentService.Application.Services;
 
 public sealed class TransactionResolutionService(
     ITransactionResolutionRepository repository,
+    IInvoiceRepository invoiceRepository,
+    IUnitOfWork unitOfWork,
+    IPaymentDataEncryptor encryptor,
+    IPaymentHubNotifier notifier,
     IOptionsMonitor<PaymentMerchantOptions> merchantOptions,
-    IOptionsMonitor<SePayOptions> sePayOptions) : ITransactionResolutionService
+    IOptionsMonitor<SePayOptions> sePayOptions,
+    TimeProvider clock) : ITransactionResolutionService
 {
     public async Task<Result<ResolveUnmatchedTransactionResponse>> ResolveAsync(
         Guid transactionId, Guid adminId, ResolveUnmatchedTransactionRequest request,
@@ -32,20 +42,122 @@ public sealed class TransactionResolutionService(
         var reason = request.AuditReason.Trim();
         var fingerprint = Fingerprint(transactionId, adminId, invoiceRef, externalReference, reason);
 
-        var command = new ResolveTransactionCommand(
-            transactionId, adminId, invoiceRef, operationKey, externalReference, reason, fingerprint);
-        var result = await repository.ResolveAsync(command,
-            (transaction, invoice, now) => ValidateAndCreateEvent(transaction, invoice, externalReference, now),
-            cancellationToken);
-        if (result.IsFailure) return result.Error;
+        // Fast-path replay check before opening transaction
+        var existingResolution = await repository.FindResolutionByOperationKeyAsync(operationKey, cancellationToken);
+        if (existingResolution is not null)
+        {
+            var existingTx = await repository.FindTransactionByIdAsync(transactionId, cancellationToken);
+            return ReplayOrConflict(existingResolution, existingTx, transactionId, fingerprint);
+        }
 
-        var value = result.Value;
-        return Result.Success(new ResolveUnmatchedTransactionResponse(
-            value.ResolutionId, value.TransactionId, value.InvoiceRef, value.PaymentRef,
-            value.ResolvedAt, value.ResolvedBy, value.IsReplay));
+        await using var tx = await unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            // 1. Lock payment transaction first
+            var bankTransaction = await repository.FindTransactionWithRowLockAsync(transactionId, cancellationToken);
+            if (bankTransaction is null)
+                return Error.NotFound("Payment.TransactionNotFound", "Không tìm thấy giao dịch.");
+
+            // 2. Re-check replay under lock
+            existingResolution = await repository.FindResolutionByOperationKeyAsync(operationKey, cancellationToken);
+            if (existingResolution is not null)
+                return ReplayOrConflict(existingResolution, bankTransaction, transactionId, fingerprint);
+
+            if (await repository.ExistsResolutionByTransactionIdAsync(bankTransaction.Id, cancellationToken))
+                return Error.Conflict("Payment.TransactionAlreadyResolved", "Giao dịch đã được đối soát.");
+
+            if (bankTransaction.Status != PaymentTransactionStatus.Unmatched)
+                return Error.Conflict("Payment.TransactionNotUnmatched", "Chỉ đối soát giao dịch UNMATCHED.");
+
+            // 3. Lock invoice next, maintaining consistent locking order
+            var invoice = await invoiceRepository.FindInvoiceWithRowLockAsync(invoiceRef, cancellationToken);
+            if (invoice is null)
+                return Error.NotFound("Payment.InvoiceNotFound", "Không tìm thấy hóa đơn.");
+
+            // 4. Validate matching conditions
+            var now = clock.GetUtcNow();
+            var validationResult = ValidateMatching(bankTransaction, invoice, externalReference, now);
+            if (validationResult.IsFailure) return validationResult.Error;
+
+            // 5. Update invoice state to PAID
+            var paid = invoice.MarkPaid(bankTransaction.PaymentRef, bankTransaction.TransferAmount, invoice.Currency, bankTransaction.TransactionDate);
+            if (paid.IsFailure) return paid.Error;
+
+            // 6. Build resolution record, outbox, journal entry linking attestation
+            var resolution = PaymentTransactionResolution.Create(
+                bankTransaction, invoice, adminId, operationKey, fingerprint, externalReference, reason, now);
+
+            var outbox = PaymentOutboxFactory.CreateInvoicePaidOutboxMessage(
+                invoice, occurredAt: now, paidAt: bankTransaction.TransactionDate);
+
+            var prevInv = await invoiceRepository.GetLatestJournalEntryAsync(invoice.InvoiceRef, cancellationToken);
+            long nextInvVersion = (prevInv?.Version ?? 0) + 1;
+            string prevInvHash = prevInv?.EntryHash ?? CanonicalJournalHasher.GenesisHash;
+            Guid eventId = Guid.NewGuid();
+            Guid operationId = Guid.NewGuid();
+            outbox.LinkAttestation(eventId, operationId);
+            string outboxDigest = CanonicalJournalHasher.ComputeOutboxDigest(outbox.Payload);
+
+            var claims = new List<CanonicalEntityClaim>
+            {
+                OperationalSnapshotEngine.CreateInvoiceClaim(invoice),
+                OperationalSnapshotEngine.CreatePaymentTransactionClaim(bankTransaction),
+                OperationalSnapshotEngine.CreateOutboxClaim(outbox)
+            };
+
+            var journal = JournalEntryFactory.CreateEntry(
+                operationId: operationId,
+                streamId: invoice.InvoiceRef,
+                streamType: JournalStreamTypes.Invoice,
+                version: nextInvVersion,
+                eventId: eventId,
+                eventType: JournalEventTypes.PaymentMatched,
+                amount: invoice.TotalAmount,
+                currency: invoice.Currency,
+                status: invoice.Status,
+                confirmationSource: JournalConfirmationSources.Admin,
+                actor: $"ADMIN:{adminId:D}",
+                timestampUtc: now,
+                previousHash: prevInvHash,
+                relatedEntities: new Dictionary<string, string?>
+                {
+                    ["paymentRef"] = bankTransaction.PaymentRef,
+                    ["invoiceRef"] = invoice.InvoiceRef,
+                    ["rentalOrderId"] = invoice.RentalOrderId.ToString("D"),
+                    ["externalReference"] = externalReference,
+                    ["operationKey"] = operationKey
+                },
+                snapshot: OperationalSnapshotEngine.CreateInvoiceSnapshot(invoice, invoice.Revision),
+                entityClaims: claims,
+                outboxDigest: outboxDigest,
+                outboxMessageId: outbox.MessageId,
+                paymentRef: bankTransaction.PaymentRef,
+                invoiceRef: invoice.InvoiceRef,
+                rentalOrderId: invoice.RentalOrderId,
+                encryptor: encryptor);
+
+            await repository.SaveResolutionAsync(resolution, journal, outbox, cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+
+            // 7. Fire realtime notification after successful commit
+            await notifier.NotifyPaymentCompletedAsync(invoice.RenterId, eventId, invoice, cancellationToken);
+
+            return Result.Success(new ResolveUnmatchedTransactionResponse(
+                resolution.Id, resolution.TransactionId, resolution.InvoiceRef, bankTransaction.PaymentRef,
+                resolution.OccurredAt, resolution.ActorId, IsReplay: false));
+        }
+        catch (Exception ex) when (ex is StorageConstraintViolationException or DbUpdateException)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            var prior = await repository.FindResolutionByOperationKeyAsync(operationKey, cancellationToken);
+            var bankTransaction = await repository.FindTransactionByIdAsync(transactionId, cancellationToken);
+            if (prior is not null && bankTransaction is not null)
+                return ReplayOrConflict(prior, bankTransaction, transactionId, fingerprint);
+            return Error.Conflict("Payment.TransactionAlreadyResolved", "Giao dịch đã được đối soát.");
+        }
     }
 
-    private Result<OutboxMessage> ValidateAndCreateEvent(
+    private Result ValidateMatching(
         PaymentTransaction transaction, Invoice invoice, string externalReference, DateTimeOffset now)
     {
         if (!string.Equals(externalReference, transaction.ProviderTransactionId, StringComparison.Ordinal) &&
@@ -83,12 +195,19 @@ public sealed class TransactionResolutionService(
             return Error.Conflict("Payment.ResolutionPastDeadline",
                 "Hóa đơn không còn trong hạn thanh toán; giữ giao dịch để đối soát thủ công.");
 
-        var paid = invoice.MarkPaid(transaction.PaymentRef, transaction.TransferAmount, invoice.Currency,
-            transaction.TransactionDate);
-        if (paid.IsFailure) return paid.Error;
+        return Result.Success();
+    }
 
-        return Result.Success(PaymentOutboxFactory.CreateInvoicePaidOutboxMessage(
-            invoice, occurredAt: now, paidAt: transaction.TransactionDate));
+    private static Result<ResolveUnmatchedTransactionResponse> ReplayOrConflict(
+        PaymentTransactionResolution prior, PaymentTransaction? transaction, Guid transactionId, string fingerprint)
+    {
+        if (prior.TransactionId != transactionId ||
+            prior.PayloadFingerprint != fingerprint)
+            return Error.Conflict("Payment.ResolutionOperationKeyConflict",
+                "OperationKey đã được dùng cho giao dịch hoặc nội dung khác.");
+        return Result.Success(new ResolveUnmatchedTransactionResponse(
+            prior.Id, prior.TransactionId, prior.InvoiceRef, transaction?.PaymentRef ?? string.Empty,
+            prior.OccurredAt, prior.ActorId, IsReplay: true));
     }
 
     private static string? MapBank(string gateway, string merchantBank, SePayOptions options)

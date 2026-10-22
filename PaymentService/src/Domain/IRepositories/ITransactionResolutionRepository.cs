@@ -3,18 +3,11 @@ using Dprental.PaymentService.Domain.Entities;
 
 namespace Dprental.PaymentService.Domain.IRepositories;
 
-public sealed record ResolveTransactionCommand(
-    Guid TransactionId, Guid AdminId, string InvoiceRef, string OperationKey,
-    string ExternalReference, string AuditReason, string PayloadFingerprint);
-
-public sealed record TransactionResolutionResult(
-    Guid ResolutionId, Guid TransactionId, string InvoiceRef, string PaymentRef,
-    DateTimeOffset ResolvedAt, Guid ResolvedBy, bool IsReplay);
-
 public interface ITransactionResolutionRepository
 {
-    Task<Result<TransactionResolutionResult>> ResolveAsync(
-        ResolveTransactionCommand command,
-        Func<PaymentTransaction, Invoice, DateTimeOffset, Result<OutboxMessage>> validateAndCreateEvent,
-        CancellationToken cancellationToken);
+    Task<PaymentTransaction?> FindTransactionWithRowLockAsync(Guid transactionId, CancellationToken cancellationToken = default);
+    Task<PaymentTransaction?> FindTransactionByIdAsync(Guid transactionId, CancellationToken cancellationToken = default);
+    Task<PaymentTransactionResolution?> FindResolutionByOperationKeyAsync(string operationKey, CancellationToken cancellationToken = default);
+    Task<bool> ExistsResolutionByTransactionIdAsync(Guid transactionId, CancellationToken cancellationToken = default);
+    Task SaveResolutionAsync(PaymentTransactionResolution resolution, TransactionJournalEntry journal, OutboxMessage outbox, CancellationToken cancellationToken = default);
 }

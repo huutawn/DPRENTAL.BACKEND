@@ -5,14 +5,14 @@ namespace Dprental.PaymentService.Application.DTOs.Payout;
 
 public sealed record RegisterPayoutDestinationRequest(
     [Required, MaxLength(64)] string OperationKey,
-    [MaxLength(64)] string? DestinationRef,            
+    [MaxLength(64)] string? DestinationRef,
     [Required, MaxLength(32)] string BankCode,
     [Required, MaxLength(128)] string AccountHolderName,
     [Required, MaxLength(32)] string AccountNumber,
     [Required, MaxLength(128)] string VerificationRef,
     [Required, MaxLength(500)] string AuditReason)
 {
-    
+
     private bool PrintMembers(StringBuilder builder)
     {
         builder.Append("OperationKey = ").Append(OperationKey)
