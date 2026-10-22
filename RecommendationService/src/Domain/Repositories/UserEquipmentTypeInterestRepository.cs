@@ -54,15 +54,20 @@ public sealed class UserEquipmentTypeInterestRepository : IUserEquipmentTypeInte
 
     public async Task<IReadOnlyList<Guid>> GetDistinctUserIdsAsync(Guid? afterUserId, int take, CancellationToken cancellationToken)
     {
+        var query = _dbContext.UserEquipmentTypeInterests
+            .AsNoTracking();
+
         if (afterUserId.HasValue)
         {
-            return await _dbContext.Database
-                .SqlQuery<Guid>($"SELECT DISTINCT user_id AS \"Value\" FROM recommendation.user_equipment_type_interest WHERE user_id > {afterUserId.Value} ORDER BY user_id ASC LIMIT {take}")
-                .ToListAsync(cancellationToken);
+            var cursor = afterUserId.Value;
+            query = query.Where(x => x.UserId.CompareTo(cursor) > 0);
         }
 
-        return await _dbContext.Database
-            .SqlQuery<Guid>($"SELECT DISTINCT user_id AS \"Value\" FROM recommendation.user_equipment_type_interest ORDER BY user_id ASC LIMIT {take}")
+        return await query
+            .Select(x => x.UserId)
+            .Distinct()
+            .OrderBy(u => u)
+            .Take(take)
             .ToListAsync(cancellationToken);
     }
 }
