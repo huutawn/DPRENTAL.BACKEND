@@ -233,11 +233,12 @@ public sealed class RentalCartJwtApiTests : IClassFixture<RentalCartJwtApiTests.
             => Task.FromResult(Result.Success(new RentalListingSnapshot(
                 listingId, Guid.NewGuid(), Guid.NewGuid(), true, true, 100m, 50m, "v1")));
 
-        public Task<Result<int>> GetAvailableQuantityAsync(
+        public Task<Result<RentalAvailabilityResult>> GetAvailableQuantityAsync(
             Guid listingId,
             DateOnly startDate,
             DateOnly endDate,
+            int requestedQuantity,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(Result.Success(10));
+            => Task.FromResult(Result.Success(new RentalAvailabilityResult(10, true)));
     }
 }

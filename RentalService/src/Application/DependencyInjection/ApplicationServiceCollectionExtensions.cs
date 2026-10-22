@@ -46,10 +46,10 @@ public static class ApplicationServiceCollectionExtensions
 {
     public static IServiceCollection AddRentalServiceApplication(this IServiceCollection services, IConfiguration? configuration = null)
     {
-        // Cart Use Cases & Read Models
+        // Cart Evaluator, Use Cases & Read Models
+        services.AddScoped<RentalCartItemEvaluator>();
         services.AddScoped<RentalCartUseCases>();
         services.AddScoped<GetRentalCart>();
-
         // Cart Policy & Adapter
         services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
         services.AddScoped<InventoryRentalCartReader>();

@@ -89,11 +89,12 @@ public sealed class HealthEndpointTests
         public Task<Result<RentalListingSnapshot>> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default) =>
             Task.FromResult<Result<RentalListingSnapshot>>(Error.NotFound("NOT_FOUND", "Not found"));
 
-        public Task<Result<int>> GetAvailableQuantityAsync(
+        public Task<Result<RentalAvailabilityResult>> GetAvailableQuantityAsync(
             Guid listingId,
             DateOnly startDate,
             DateOnly endDate,
+            int requestedQuantity,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<Result<int>>(Error.NotFound("NOT_FOUND", "Not found"));
+            Task.FromResult<Result<RentalAvailabilityResult>>(Error.NotFound("NOT_FOUND", "Not found"));
     }
 }

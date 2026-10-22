@@ -1,3 +1,5 @@
+using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Common;
 using Dprental.RentalService.Application.DTOs.Cart;
 using System;
 using System.Net;
@@ -189,6 +191,7 @@ public class RentalCartApiTests : IClassFixture<RentalApiFixture>
         using var cartDoc = await getResponse.Content.ReadFromJsonAsync<JsonDocument>();
         var item = Assert.Single(cartDoc!.RootElement.GetProperty("items").EnumerateArray());
         Assert.Equal("AVAILABLE", item.GetProperty("status").GetString());
+        Assert.Equal("ENABLED", item.GetProperty("interactionStatus").GetString());
         Assert.Equal("v1", item.GetProperty("currentPriceVersion").GetString());
     }
 
@@ -220,6 +223,144 @@ public class RentalCartApiTests : IClassFixture<RentalApiFixture>
         await EnsureSuccessAsync(get);
         using var cart = await get.Content.ReadFromJsonAsync<JsonDocument>();
         Assert.Empty(cart!.RootElement.GetProperty("items").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Cart_RouteAliases_ReturnIdenticalCart()
+    {
+        using var addResponse = await _renter1Client.PostAsJsonAsync("rental/cart/items", NewItemRequest());
+        await EnsureSuccessAsync(addResponse);
+
+        using var get1 = await _renter1Client.GetAsync("rental/cart");
+        using var get2 = await _renter1Client.GetAsync("api/v1/rental/cart");
+
+        await EnsureSuccessAsync(get1);
+        await EnsureSuccessAsync(get2);
+
+        string body1 = await get1.Content.ReadAsStringAsync();
+        string body2 = await get2.Content.ReadAsStringAsync();
+        Assert.Equal(body1, body2);
+
+        using var clear = await _renter1Client.DeleteAsync("rental/cart");
+        Assert.Equal(HttpStatusCode.NoContent, clear.StatusCode);
+    }
+
+    [Fact]
+    public async Task AddItem_InsufficientStock_Returns409ConflictWithProblemDetails()
+    {
+        _fixture.Dependencies.AvailabilityHandler = (id, s, e, qty) =>
+            Task.FromResult(Result.Success(new RentalAvailabilityResult(1, false)));
+
+        try
+        {
+            DateOnly start = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(7);
+            using var response = await _renter1Client.PostAsJsonAsync(
+                "rental/cart/items", new AddCartItemRequest(Guid.NewGuid(), 5, start, start.AddDays(2)));
+
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            using var problem = await response.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.Equal("Cart.InsufficientAvailability", problem!.RootElement.GetProperty("title").GetString());
+            Assert.Contains("1", problem.RootElement.GetProperty("detail").GetString());
+        }
+        finally
+        {
+            _fixture.Dependencies.AvailabilityHandler = null;
+        }
+    }
+
+    [Fact]
+    public async Task AddItem_ListingDisabled_Returns409Conflict()
+    {
+        _fixture.Dependencies.ListingHandler = id =>
+            Task.FromResult(Result.Success(new RentalListingSnapshot(id, Guid.NewGuid(), Guid.NewGuid(), false, false, 100m, 50m, "v1")));
+
+        try
+        {
+            using var response = await _renter1Client.PostAsJsonAsync("rental/cart/items", NewItemRequest());
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            using var problem = await response.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.Equal("Cart.ListingUnavailable", problem!.RootElement.GetProperty("title").GetString());
+        }
+        finally
+        {
+            _fixture.Dependencies.ListingHandler = null;
+        }
+    }
+
+    [Fact]
+    public async Task AddItem_OwnListing_Returns403Forbidden()
+    {
+        _fixture.Dependencies.ListingHandler = id =>
+            Task.FromResult(Result.Success(new RentalListingSnapshot(id, _renter1Id, Guid.NewGuid(), true, true, 100m, 50m, "v1")));
+
+        try
+        {
+            using var response = await _renter1Client.PostAsJsonAsync("rental/cart/items", NewItemRequest());
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+            using var problem = await response.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.Equal("Cart.CannotRentOwnListing", problem!.RootElement.GetProperty("title").GetString());
+        }
+        finally
+        {
+            _fixture.Dependencies.ListingHandler = null;
+        }
+    }
+
+    [Fact]
+    public async Task AddItem_WhenInventoryFailsWith503_Returns503WithoutLeakingMessage()
+    {
+        _fixture.Dependencies.ListingHandler = _ =>
+            Task.FromResult(Result.Failure<RentalListingSnapshot>(Error.ServiceUnavailable("INVENTORY_UNAVAILABLE", "Không thể kiểm tra thiết bị lúc này. Vui lòng thử lại.")));
+
+        try
+        {
+            using var response = await _renter1Client.PostAsJsonAsync("rental/cart/items", NewItemRequest());
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            using var problem = await response.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.Equal("INVENTORY_UNAVAILABLE", problem!.RootElement.GetProperty("title").GetString());
+            Assert.Equal("Không thể kiểm tra thiết bị lúc này. Vui lòng thử lại.", problem.RootElement.GetProperty("detail").GetString());
+        }
+        finally
+        {
+            _fixture.Dependencies.ListingHandler = null;
+        }
+    }
+
+    [Fact]
+    public async Task RaceCondition_ApiReturns200AtGetAnd409AtPatch()
+    {
+        // Setup normal add
+        using var addResponse = await _renter1Client.PostAsJsonAsync("rental/cart/items", NewItemRequest());
+        await EnsureSuccessAsync(addResponse);
+        using var addDoc = await addResponse.Content.ReadFromJsonAsync<JsonDocument>();
+        Guid itemId = addDoc!.RootElement.GetProperty("cartItemId").GetGuid();
+
+        // Simulate race condition: listing snapshot succeeds, but availability returns NotFound (listing deleted in between)
+        _fixture.Dependencies.AvailabilityHandler = (id, s, e, qty) =>
+            Task.FromResult(Result.Failure<RentalAvailabilityResult>(Error.NotFound("LISTING_NOT_FOUND", "Sản phẩm không tồn tại hoặc đã bị xóa.")));
+
+        try
+        {
+            // GET: returns 200, item marked UNAVAILABLE and DISABLED_READ_ONLY
+            using var getResponse = await _renter1Client.GetAsync("rental/cart");
+            await EnsureSuccessAsync(getResponse);
+            using var cartDoc = await getResponse.Content.ReadFromJsonAsync<JsonDocument>();
+            var item = Assert.Single(cartDoc!.RootElement.GetProperty("items").EnumerateArray());
+            Assert.Equal("UNAVAILABLE", item.GetProperty("status").GetString());
+            Assert.Equal("DISABLED_READ_ONLY", item.GetProperty("interactionStatus").GetString());
+
+            // PATCH quantity: returns 409 Cart.ListingUnavailable
+            using var patchResponse = await _renter1Client.PatchAsJsonAsync(
+                $"rental/cart/items/{itemId}", new UpdateCartItemRequest(5, null, null));
+            Assert.Equal(HttpStatusCode.Conflict, patchResponse.StatusCode);
+            using var patchProblem = await patchResponse.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.Equal("Cart.ListingUnavailable", patchProblem!.RootElement.GetProperty("title").GetString());
+        }
+        finally
+        {
+            _fixture.Dependencies.AvailabilityHandler = null;
+            await _renter1Client.DeleteAsync("rental/cart");
+        }
     }
 
 }

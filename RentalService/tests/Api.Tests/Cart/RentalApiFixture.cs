@@ -73,19 +73,21 @@ public class RentalApiFixture : WebApplicationFactory<Program>
             services.AddSingleton<IRentalCartRepository, FakeRentalCartRepository>();
 
             // 4. Mock Inventory Providers (Trả về dữ liệu dummy)
-            var fakeDeps = new FakeDependencies();
-            services.AddSingleton<IRentalListingReader>(fakeDeps);
-            services.AddSingleton<IRentalAvailabilityReader>(fakeDeps);
+            services.AddSingleton<IRentalListingReader>(Dependencies);
+            services.AddSingleton<IRentalAvailabilityReader>(Dependencies);
             services.AddSingleton<IOrderLockManager, FakeOrderLockManager>();
             services.AddSingleton<IUnitOfWork, FakeUnitOfWork>();
             services.AddSingleton<IRentalEventProducer, FakeRentalEventProducer>();
             services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
 
             services.AddSingleton<TimeProvider>(TimeProvider.System);
+            services.AddScoped<RentalCartItemEvaluator>();
             services.AddScoped<RentalCartUseCases>();
             services.AddScoped<GetRentalCart>();
         });
     }
+
+    public FakeDependencies Dependencies { get; } = new();
 
     // ==========================================
     // CÁC CLASS MOCK DÙNG RIÊNG CHO MÔI TRƯỜNG TEST
@@ -170,13 +172,19 @@ public class RentalApiFixture : WebApplicationFactory<Program>
         }
     }
 
-    private sealed class FakeDependencies : IRentalListingReader, IRentalAvailabilityReader
+    public sealed class FakeDependencies : IRentalListingReader, IRentalAvailabilityReader
     {
-        public Task<Result<RentalListingSnapshot>> GetListingAsync(Guid listingId, CancellationToken token = default)
-            => Task.FromResult(Result.Success(new RentalListingSnapshot(
-                listingId, Guid.NewGuid(), Guid.NewGuid(), true, true, 100m, 50m, "v1")));
+        public Func<Guid, Task<Result<RentalListingSnapshot>>>? ListingHandler { get; set; }
+        public Func<Guid, DateOnly, DateOnly, int, Task<Result<RentalAvailabilityResult>>>? AvailabilityHandler { get; set; }
 
-        public Task<Result<int>> GetAvailableQuantityAsync(Guid listingId, DateOnly start, DateOnly end, CancellationToken token = default)
-            => Task.FromResult(Result.Success(999)); // Luôn dồi dào số lượng
+        public Task<Result<RentalListingSnapshot>> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default)
+            => ListingHandler?.Invoke(listingId)
+               ?? Task.FromResult(Result.Success(new RentalListingSnapshot(
+                   listingId, Guid.NewGuid(), Guid.NewGuid(), true, true, 100m, 50m, "v1")));
+
+        public Task<Result<RentalAvailabilityResult>> GetAvailableQuantityAsync(
+            Guid listingId, DateOnly startDate, DateOnly endDate, int requestedQuantity, CancellationToken cancellationToken = default)
+            => AvailabilityHandler?.Invoke(listingId, startDate, endDate, requestedQuantity)
+               ?? Task.FromResult(Result.Success(new RentalAvailabilityResult(999, true)));
     }
 }

@@ -1040,57 +1040,57 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             intakeTransaction = await _unitOfWork.BeginTransactionAsync(ct);
         try
         {
-        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-        Guid dlqId = inboxMessageId.HasValue
-            ? ComputeProcessingDlqId(inboxMessageId.Value)
-            : ComputeIntakeDlqId(rawMessage, topic, partition, offset);
+            DateTimeOffset utcNow = _timeProvider.GetUtcNow();
+            Guid dlqId = inboxMessageId.HasValue
+                ? ComputeProcessingDlqId(inboxMessageId.Value)
+                : ComputeIntakeDlqId(rawMessage, topic, partition, offset);
 
-        string originalType = "UnknownEvent";
-        try
-        {
-            using var original = JsonDocument.Parse(rawMessage ?? string.Empty);
-            if (original.RootElement.ValueKind == JsonValueKind.Object &&
-                original.RootElement.TryGetProperty("messageType", out var typeElement) &&
-                typeElement.ValueKind == JsonValueKind.String)
-                originalType = typeElement.GetString() ?? originalType;
-        }
-        catch (JsonException) { }
-        var dlqPayload = new DeadLetterPayload(originalType, rawMessage ?? string.Empty, $"{errorCode}: {errorDetail}", utcNow);
-        var dlqEnvelope = new KafkaMessageEnvelope<DeadLetterPayload>(
-            dlqId,
-            KafkaContractSpec.EventTypes.DeadLetter,
-            KafkaContractSpec.CurrentEnvelopeVersion,
-            KafkaContractSpec.Producers.RentalService,
-            dlqId.ToString("D"),
-            utcNow,
-            null,
-            null,
-            dlqPayload);
+            string originalType = "UnknownEvent";
+            try
+            {
+                using var original = JsonDocument.Parse(rawMessage ?? string.Empty);
+                if (original.RootElement.ValueKind == JsonValueKind.Object &&
+                    original.RootElement.TryGetProperty("messageType", out var typeElement) &&
+                    typeElement.ValueKind == JsonValueKind.String)
+                    originalType = typeElement.GetString() ?? originalType;
+            }
+            catch (JsonException) { }
+            var dlqPayload = new DeadLetterPayload(originalType, rawMessage ?? string.Empty, $"{errorCode}: {errorDetail}", utcNow);
+            var dlqEnvelope = new KafkaMessageEnvelope<DeadLetterPayload>(
+                dlqId,
+                KafkaContractSpec.EventTypes.DeadLetter,
+                KafkaContractSpec.CurrentEnvelopeVersion,
+                KafkaContractSpec.Producers.RentalService,
+                dlqId.ToString("D"),
+                utcNow,
+                null,
+                null,
+                dlqPayload);
 
-        string dlqTopic = topic is not null && string.Equals(topic, _kafkaOptions.InventoryAllocationEventsTopic, StringComparison.Ordinal)
-            ? _kafkaOptions.InventoryAllocationEventsDlqTopic
-            : _kafkaOptions.PaymentDlqTopic;
-        var enqueueResult = await _outboxWriter.EnqueueAsync(dlqTopic, dlqId.ToString("D"), dlqEnvelope, ct);
-        if (enqueueResult.IsFailure)
-        {
+            string dlqTopic = topic is not null && string.Equals(topic, _kafkaOptions.InventoryAllocationEventsTopic, StringComparison.Ordinal)
+                ? _kafkaOptions.InventoryAllocationEventsDlqTopic
+                : _kafkaOptions.PaymentDlqTopic;
+            var enqueueResult = await _outboxWriter.EnqueueAsync(dlqTopic, dlqId.ToString("D"), dlqEnvelope, ct);
+            if (enqueueResult.IsFailure)
+            {
+                if (intakeTransaction is not null)
+                {
+                    await intakeTransaction.RollbackAsync(ct);
+                    _unitOfWork.DiscardChanges();
+                }
+                _logger.LogError("Failed to persist DLQ outbox record {DlqId}: {Error}", dlqId, enqueueResult.Error.Message);
+                return enqueueResult.Error;
+            }
+
             if (intakeTransaction is not null)
             {
-                await intakeTransaction.RollbackAsync(ct);
-                _unitOfWork.DiscardChanges();
+                await _unitOfWork.SaveChangesAsync(ct);
+                await intakeTransaction.CommitAsync(ct);
             }
-            _logger.LogError("Failed to persist DLQ outbox record {DlqId}: {Error}", dlqId, enqueueResult.Error.Message);
-            return enqueueResult.Error;
-        }
 
-        if (intakeTransaction is not null)
-        {
-            await _unitOfWork.SaveChangesAsync(ct);
-            await intakeTransaction.CommitAsync(ct);
-        }
-
-        _logger.LogWarning("Routed invalid payment event to DLQ ({Topic}) [DlqId: {DlqId}, Replay: {Replay}]: {ErrorCode} - {Detail}",
-            dlqTopic, dlqId, enqueueResult.Value.IsReplay, errorCode, errorDetail);
-        return Result.Success();
+            _logger.LogWarning("Routed invalid payment event to DLQ ({Topic}) [DlqId: {DlqId}, Replay: {Replay}]: {ErrorCode} - {Detail}",
+                dlqTopic, dlqId, enqueueResult.Value.IsReplay, errorCode, errorDetail);
+            return Result.Success();
         }
         catch
         {

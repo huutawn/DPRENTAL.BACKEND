@@ -25,6 +25,12 @@ public static class RentalErrors
     public static readonly Error InvalidCartUpdate =
         Error.Validation("Cart.InvalidUpdate", "Cung cấp Quantity hoặc cả ExpectedStartDate và ExpectedEndDate; mỗi PATCH chỉ cập nhật một loại thông tin.");
 
+    public static readonly Error ListingUnavailable =
+        Error.Conflict("Cart.ListingUnavailable", "Sản phẩm không tồn tại hoặc đã ngừng nhận đơn thuê.");
+
+    public static Error InsufficientAvailability(int availableQuantity) =>
+        Error.Conflict("Cart.InsufficientAvailability", $"Chỉ còn {availableQuantity} sản phẩm khả dụng.");
+
     public static readonly Error InvalidQuantity =
         Error.Validation("Rental.InvalidQuantity", "Số lượng thuê phải lớn hơn 0.");
 

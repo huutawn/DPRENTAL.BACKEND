@@ -13,6 +13,7 @@ namespace Dprental.RentalService.Application.DTOs.Cart;
 /// <param name="EstimatedRentalAmount">Tổng tiền thuê ước tính cho khoảng ngày và số lượng đã chọn.</param>
 /// <param name="CurrentPriceVersion">Phiên bản giá hiện tại của bài niêm yết thiết bị để đối chiếu.</param>
 /// <param name="Status">Trạng thái kiểm tra tính khả dụng và hợp lệ của mục giỏ hàng.</param>
+/// <param name="InteractionStatus">Mức thao tác cho phép đối với mục giỏ hàng.</param>
 /// <param name="Message">Thông điệp chi tiết giải thích trạng thái nếu có lỗi hoặc cảnh báo.</param>
 public sealed record RentalCartLineReadModel(
     Guid CartItemId,
@@ -25,4 +26,5 @@ public sealed record RentalCartLineReadModel(
     decimal? EstimatedRentalAmount,
     string? CurrentPriceVersion,
     RentalCartLineStatus Status,
+    RentalCartItemInteractionStatus InteractionStatus,
     string? Message);

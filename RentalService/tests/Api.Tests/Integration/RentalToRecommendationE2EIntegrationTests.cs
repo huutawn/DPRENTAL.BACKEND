@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Options;
 using System.Globalization;
 using System.Net.Sockets;
 using Moq;
@@ -148,14 +149,16 @@ public sealed class RentalToRecommendationE2EIntegrationTests(ITestOutputHelper 
             var fakeListingReader = new StubListingReader(new RentalListingSnapshot(
                 listingId, supplierId, typeId, true, true, 500_000m, 1_000_000m, "v1"));
 
+            var fakeAvailabilityReader = new StubAvailabilityReader();
+            var cartPolicy = new RentalCartOptions();
+            var evaluator = new RentalCartItemEvaluator(fakeListingReader, fakeAvailabilityReader, cartPolicy, timeProvider);
             var cartUseCases = new RentalCartUseCases(
                 cartRepo,
-                fakeListingReader,
+                evaluator,
                 lockManager,
                 rentalDb,
                 eventProducer,
                 timeProvider);
-
             // ==========================================
             // STEP 1: Add to Cart (CartItemAdded -> +5)
             // ==========================================
@@ -553,5 +556,12 @@ public sealed class RentalToRecommendationE2EIntegrationTests(ITestOutputHelper 
     {
         public Task<Result<RentalListingSnapshot>> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(snapshot));
+    }
+
+    private sealed class StubAvailabilityReader : IRentalAvailabilityReader
+    {
+        public Task<Result<RentalAvailabilityResult>> GetAvailableQuantityAsync(
+            Guid listingId, DateOnly startDate, DateOnly endDate, int requestedQuantity, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(new RentalAvailabilityResult(10, true)));
     }
 }
