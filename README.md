@@ -194,14 +194,14 @@ Mọi quyết định "ai được làm gì" nằm trong `RentalAuthorizationPol
 - Header bắt buộc: `Idempotency-Key` (tối đa 64 ký tự). Client sinh một key mới cho mỗi lần bấm "Đặt hàng" và dùng lại đúng key đó khi gửi lại.
 - Body: `cartItemIds`, `delivery`, `refundAccount`, `termsVersion` (tùy chọn; nếu thiếu, null hoặc khoảng trắng sẽ dùng cấu hình `Rental:Terms:CurrentVersion`), `termsAccepted` (bắt buộc `true`), `expectedTotalAmount`.
 - Đặt trước tối thiểu 3 ngày (giờ Việt Nam, `RentalBookingPolicy.MinimumLeadDays`; SRS cũ ghi "từ ngày mai"): hôm nay 14/10 thì ngày bắt đầu thuê sớm nhất là 17/10. Quy tắc áp ở ba chỗ: thêm/sửa dòng giỏ (`400 Cart.StartDateInvalid`), xem giỏ (dòng `DatePassed`) và checkout (dòng `StartDateNotInFuture`). Mã lỗi giữ nguyên, chỉ đổi câu thông báo. Ngoài ra ngày bắt đầu trong vòng 6 tháng, tối đa 30 ngày thuê.
-- Luồng xử lý: khóa theo người thuê → kiểm tra idempotency theo key → kiểm tra đơn chờ thanh toán hiện có → chuẩn bị (đọc lại Listing, giá, lịch) → gửi lệnh giữ lịch cho mọi dòng qua Outbox và lưu RentalCheckoutOperation trong cùng một transaction.
+- Luồng xử lý: khóa theo người thuê → kiểm tra idempotency theo key → kiểm tra thao tác checkout đang chạy (`ACTIVE_CHECKOUT_IN_PROGRESS`) → chuẩn bị (đọc lại Listing, giá, lịch) → gửi lệnh giữ lịch cho mọi dòng qua Outbox và lưu RentalCheckoutOperation trong cùng một transaction.
 - Kết quả:
   - `202 Accepted` cho cả lần gửi mới lẫn replay cùng Idempotency-Key. Response trả về `operationId` và `statusUrl` (`/api/v1/rental/checkout/operations/{operationId}`).
   - Response không chứa `AssetId`, `AllocationId` hay `AllocationGroupId`.
 - Idempotency:
   - Key được gắn với người thuê (`CheckoutRules.DeriveOperationId`), nên hai người thuê trùng key không đụng nhau.
   - Cùng key nhưng khác danh sách dòng giỏ: `409 Checkout.IdempotencyKeyReused`.
-  - Mỗi người thuê chỉ có một checkout chạy tại một thời điểm (PostgreSQL advisory lock theo `RenterId`). Request đến sau chờ tối đa 10 giây, quá hạn nhận `409 Checkout.InProgress`.
+- Mỗi người thuê chỉ có một checkout chạy tại một thời điểm (PostgreSQL advisory lock theo `RenterId` và kiểm tra active checkout operation). Request đến sau chờ tối đa 10 giây, quá hạn nhận `409 Checkout.InProgress`. Không giới hạn số lượng đơn ở trạng thái `PendingPayment`; mỗi đơn có `PaymentDeadline`, hold và hóa đơn riêng biệt.
 - Polling trạng thái checkout: `GET /rental/checkout/operations/{operationId}`
   - `status = Succeeded`: đã tạo thành công Order.
   - `readyForPayment`: boolean duy nhất quyết định FE có được chuyển sang màn thanh toán hay không. FE không chuyển màn dựa riêng vào `status === "Succeeded"` hay sự xuất hiện của `orderId`.
@@ -216,7 +216,7 @@ Mọi quyết định "ai được làm gì" nằm trong `RentalAuthorizationPol
   - Lưu đơn thất bại, kể cả exception ngoài dự kiến như database lỗi hoặc renter ngắt kết nối: nhả toàn bộ hold bằng `CancellationToken.None` rồi mới trả lỗi.
   - Chỉ nhả khi đọc lại database và chắc chắn chưa có đơn của lần checkout đó. Nếu đơn đã được commit, hoặc không đọc được database để xác nhận, hold được giữ nguyên và tự hết hạn sau 30 phút.
   - Nhả hold thất bại chỉ ghi log; hold đó tự hết hạn theo `HoldExpiresAt`.
-- Mọi lỗi checkout có `retryable`; tùy lỗi có thêm `fieldErrors`, `lines`, `conflicts`, `currentQuote` hoặc `pendingOrderCode`.
+- Mọi lỗi checkout có `retryable`; tùy lỗi có thêm `fieldErrors`, `lines`, `conflicts` hoặc `currentQuote`.
 - Cấu hình: `Rental:Terms:CurrentVersion`, `Rental:Terms:DocumentRef`, `Rental:Terms:ContentHash` là bắt buộc và được kiểm tra khi khởi động. Ngoài Development, triển khai phải cung cấp phiên bản, tham chiếu tài liệu và hash nội dung điều khoản thực tế (có thể dùng các biến môi trường `Rental__Terms__CurrentVersion`, `Rental__Terms__DocumentRef`, `Rental__Terms__ContentHash`); thiếu cấu hình thì ứng dụng không khởi động. Giá trị mẫu chỉ nằm trong cấu hình Development và test.
 - Checkout đọc Listing và lịch trống qua hợp đồng Inventory dùng chung (`IInventoryRentalClient`): **một** lần lấy thông tin mọi Listing của các dòng đã chọn (`{ ids }` → `{ items: [{ id, ownerUserId, name, thumbnailMediaId, dailyRate, currency, status }], missingIds }`, dạng response theo Inventory ngày 15/10/2026), rồi hỏi lịch **từng dòng** bằng API có sẵn của Inventory `POST /equipment-listings/{listingId}/availability/check` (`{ startDate, endDate, requestedQuantity }`, `endDate` là ngày dùng máy cuối có tính), các dòng gọi song song. Giỏ hàng dùng cùng API hỏi lịch. Inventory trả Listing lạ, trùng, bỏ sót Listing, hoặc trả lịch của Listing/khoảng ngày khác thì checkout trả `503 Checkout.DependencyUnavailable`; Listing biến mất giữa hai lần gọi (404) thì báo dòng `ListingUnavailable`.
 - Inventory trả thiếu `ownerUserId`, `name`, `status` hoặc `currency` thì checkout trả `503 Checkout.DependencyUnavailable`, không báo khách là thiết bị ngừng cho thuê. Listing không `Active`, giá thuê ≤ 0 hoặc không phải VND thì báo dòng `ListingUnavailable`.
@@ -225,6 +225,21 @@ Mọi quyết định "ai được làm gì" nằm trong `RentalAuthorizationPol
   - Inventory chưa có tiền cọc: Rental tạm tính cọc = 0 (`CheckoutRules.DepositPerUnit`), cả ở giỏ hàng và checkout. Phiên bản giá trong giỏ tạm lấy chính giá thuê/ngày.
   - Lấy nhiều Listing dùng `POST /equipment-listings/batch` của Inventory (`{ equipmentListingIds }`, tối đa 100 mã mỗi lần).
   - Giữ máy dùng `POST /equipment-listings/{listingId}/holds` đúng dạng Inventory (`quantity, startDate, endDate` có tính, `holdExpiresAt, sourceSystem = "rental", groupReference = "rental-item:{rentalItemId}"`). `RentalItem.AllocationGroupId` lưu chính `groupReference`, cũng là mã các lệnh Kafka của Inventory dùng để tìm nhóm máy. Inventory chưa có API **nhả** qua HTTP nên khi checkout hỏng giữa chừng, lời gọi nhả thất bại (ghi log) và lượt giữ tự hết hạn sau 30 phút; sẽ chuyển sang lệnh Kafka `ReleaseAllocation`. Các bước sau thanh toán (gia hạn, chốt, nhả, giao, trả máy) cần chuyển sang Kafka `inventory.allocation.commands.v1` (producer `RentalService`).
+
+
+### Luồng tiếp tục thanh toán đơn cũ
+
+Khi người thuê có đơn hàng đang ở trạng thái `PendingPayment` và muốn tiếp tục thanh toán, client gọi trực tiếp các API hiện có (không tạo endpoint thanh toán mới trong Rental và không tạo checkout thay thế):
+
+1. `GET /api/v1/rental/orders?status=PendingPayment` để tìm danh sách đơn chờ thanh toán.
+2. `GET /api/v1/rental/orders/{orderId}` để lấy `invoiceRef` và `paymentDeadline`.
+3. `GET /api/v1/invoices/{invoiceRef}` (Payment Service) để lấy mã QR, số tiền và nội dung chuyển khoản.
+4. `GET /api/v1/invoices/{invoiceRef}/status` (Payment Service) để theo dõi trạng thái thanh toán.
+
+*Lưu ý:*
+- Nếu đơn chưa có `invoiceRef` (hóa đơn đang trong quá trình tạo hoặc retry qua Outbox/Worker), chờ xử lý tạo hóa đơn; không tạo checkout mới thay thế.
+- Đơn quá hạn (`now >= PaymentDeadline`) không được gia hạn khi mở lại.
+- Payment Service tiếp tục kiểm tra quyền sở hữu hóa đơn của người dùng.
 
 ## Payment và Supplier Confirmation Workflow
 

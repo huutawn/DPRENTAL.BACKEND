@@ -144,7 +144,6 @@ internal sealed class CheckoutTestHarness
         CheckoutService service = new(
             new CheckoutPreparationService(
                 carts,
-                orders,
                 new RenterAddressRepository(context),
                 Listings,
                 Auth,

@@ -144,9 +144,6 @@ internal sealed class FakeOrderRepository : IRentalOrderRepository
         CancellationToken cancellationToken = default) =>
         Task.FromResult(new SupplierConfirmationStatisticsRecord(0, 0, 0, 0));
 
-    public Task<RentalOrder?> GetPendingPaymentByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default) =>
-        Task.FromResult(PendingPaymentOrder?.RenterId == renterId ? PendingPaymentOrder : null);
-
     public Task<RentalOrder?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 

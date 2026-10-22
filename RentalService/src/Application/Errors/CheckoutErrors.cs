@@ -16,9 +16,6 @@ public static class CheckoutErrors
     public static readonly Error TermsVersionOutdated =
         Error.Conflict("Checkout.TermsVersionOutdated", "Điều khoản thuê đã có phiên bản mới. Vui lòng đọc và đồng ý lại.");
 
-    public static readonly Error PendingOrderExists =
-        Error.Conflict("Checkout.PendingOrderExists", "Bạn đang có đơn hàng chưa thanh toán. Hãy thanh toán hoặc hủy đơn hàng đó trước.");
-
     public static readonly Error InvalidRentalDates =
         Error.Validation("Checkout.InvalidRentalDates", "Ngày thuê của một số thiết bị không còn hợp lệ.");
 

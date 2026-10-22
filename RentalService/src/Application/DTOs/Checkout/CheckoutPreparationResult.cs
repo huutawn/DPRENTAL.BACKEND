@@ -16,15 +16,13 @@ public sealed class CheckoutPreparationResult
         Error error,
         IReadOnlyList<CheckoutFieldError>? fieldErrors = null,
         IReadOnlyList<CheckoutLineIssue>? lineIssues = null,
-        CheckoutPlan? currentQuote = null,
-        string? pendingOrderCode = null)
+        CheckoutPlan? currentQuote = null)
     {
         _plan = plan;
         Error = error;
         FieldErrors = fieldErrors ?? [];
         LineIssues = lineIssues ?? [];
         CurrentQuote = currentQuote;
-        PendingOrderCode = pendingOrderCode;
     }
 
     public bool IsSuccess => Error == Error.None;
@@ -43,9 +41,6 @@ public sealed class CheckoutPreparationResult
 
     /// <summary>Giá và số tiền hiện tại, chỉ có khi lỗi là <see cref="CheckoutErrors.PriceChanged"/>.</summary>
     public CheckoutPlan? CurrentQuote { get; }
-
-    /// <summary>Mã đơn hàng đang chờ thanh toán, chỉ có khi lỗi là <see cref="CheckoutErrors.PendingOrderExists"/>.</summary>
-    public string? PendingOrderCode { get; }
 
     public static CheckoutPreparationResult Success(CheckoutPlan plan)
     {
@@ -72,7 +67,4 @@ public sealed class CheckoutPreparationResult
 
     public static CheckoutPreparationResult PriceChanged(CheckoutPlan currentQuote) =>
         new(null, CheckoutErrors.PriceChanged, currentQuote: currentQuote);
-
-    public static CheckoutPreparationResult PendingOrder(string orderCode) =>
-        new(null, CheckoutErrors.PendingOrderExists, pendingOrderCode: orderCode);
 }
