@@ -1,5 +1,8 @@
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Dprental.RentalService.Application.DTOs.Cart;
-using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Common;
@@ -7,13 +10,12 @@ using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
-using Dprental.RentalService.Domain.Policies;
 
 namespace Dprental.RentalService.Application.Services.Cart;
 
 public sealed class RentalCartUseCases(
     IRentalCartRepository carts,
-    IRentalListingReader listingReader,
+    RentalCartItemEvaluator evaluator,
     IOrderLockManager lockManager,
     IUnitOfWork unitOfWork,
     IRentalEventProducer eventProducer,
@@ -27,25 +29,18 @@ public sealed class RentalCartUseCases(
         DateOnly endDate,
         CancellationToken cancellationToken = default)
     {
-        Result dateCheck = ValidateRentalDates(startDate, endDate);
-        if (dateCheck.IsFailure) return dateCheck.Error;
         if (renterId == Guid.Empty)
             return RentalErrors.CartNotFound;
 
-        Result<RentalListingSnapshot> listingResult = await listingReader.GetListingAsync(
-            equipmentListingId,
-            cancellationToken);
+        if (equipmentListingId == Guid.Empty)
+            return RentalErrors.CartItemNotFound;
 
-        if (listingResult.IsFailure)
-        {
-            if (listingResult.Error.Type == ErrorType.NotFound)
-                return RentalErrors.OwnerIdRequired;
-            return listingResult.Error;
-        }
+        if (quantity <= 0)
+            return RentalErrors.InvalidQuantity;
 
-        RentalListingSnapshot listing = listingResult.Value;
-        if (listing.EquipmentTypeId == Guid.Empty)
-            return Error.Validation("INVALID_EQUIPMENT_TYPE_ID", "EquipmentTypeId của listing không được để trống hoặc rỗng.");
+        Result dateCheck = evaluator.ValidateRentalDates(startDate, endDate);
+        if (dateCheck.IsFailure)
+            return dateCheck.Error;
 
         await using var renterLock = await lockManager.AcquireRenterLockAsync(
             renterId,
@@ -69,10 +64,52 @@ public sealed class RentalCartUseCases(
             isNewCart = true;
         }
 
-        bool isNewItem = !cart.Items.Any(i =>
+        RentalCartItem? existing = cart.Items.FirstOrDefault(i =>
             i.EquipmentListingId == equipmentListingId &&
             i.ExpectedStartDate == startDate &&
             i.ExpectedEndDate == endDate);
+
+        int targetQuantity = quantity;
+        if (existing is not null)
+        {
+            if (quantity > int.MaxValue - existing.Quantity)
+                return RentalErrors.QuantityOverflow;
+
+            targetQuantity = existing.Quantity + quantity;
+        }
+
+        Result<RentalCartItemEvaluationResult> evalResult = await evaluator.EvaluateItemAsync(
+            renterId,
+            equipmentListingId,
+            targetQuantity,
+            startDate,
+            endDate,
+            cancellationToken);
+
+        if (evalResult.IsFailure)
+        {
+            return evalResult.Error;
+        }
+
+        RentalCartItemEvaluationResult evaluation = evalResult.Value;
+        Result checkResult = MapEvaluationToMutationResult(evaluation, allowDatePassed: false);
+        if (checkResult.IsFailure)
+        {
+            return checkResult.Error;
+        }
+
+        RentalListingSnapshot? listing = evaluation.Snapshot;
+        if (listing is null)
+        {
+            return RentalErrors.ListingUnavailable;
+        }
+
+        if (listing.EquipmentTypeId == Guid.Empty)
+        {
+            return Error.Validation("INVALID_EQUIPMENT_TYPE_ID", "EquipmentTypeId của listing không được để trống hoặc rỗng.");
+        }
+
+        bool isNewItem = existing is null;
 
         Result<RentalCartItem> added = cart.AddItem(
             Guid.NewGuid(),
@@ -135,6 +172,7 @@ public sealed class RentalCartUseCases(
             throw;
         }
     }
+
     public async Task<Result> UpdateCartItemAsync(
         Guid renterId,
         Guid cartItemId,
@@ -162,13 +200,15 @@ public sealed class RentalCartUseCases(
             renterId, cartItemId, request.ExpectedStartDate.GetValueOrDefault(), request.ExpectedEndDate.GetValueOrDefault(), cancellationToken);
     }
 
-
     public async Task<Result> UpdateCartItemQuantityAsync(
         Guid renterId,
         Guid cartItemId,
         int quantity,
         CancellationToken cancellationToken = default)
     {
+        if (quantity < 1)
+            return RentalErrors.InvalidQuantity;
+
         await using var renterLock = await lockManager.AcquireRenterLockAsync(
             renterId, TimeSpan.FromSeconds(5), cancellationToken);
 
@@ -180,23 +220,36 @@ public sealed class RentalCartUseCases(
         if (item is null)
             return RentalErrors.CartItemNotFound;
 
-        Result<RentalListingSnapshot> listingResult = await listingReader.GetListingAsync(
+        // Đánh giá dữ liệu đích bằng evaluator duy nhất (không tự gọi availability hay check riêng)
+        Result<RentalCartItemEvaluationResult> evalResult = await evaluator.EvaluateItemAsync(
+            renterId,
             item.EquipmentListingId,
+            quantity,
+            item.ExpectedStartDate,
+            item.ExpectedEndDate,
             cancellationToken);
 
-        if (listingResult.IsFailure)
+        if (evalResult.IsFailure)
         {
-            if (listingResult.Error.Type == ErrorType.NotFound)
-                return RentalErrors.OwnerIdRequired;
-            return listingResult.Error;
+            return evalResult.Error;
         }
 
-        RentalListingSnapshot listing = listingResult.Value;
-        Guid ownerId = listing.OwnerId;
+        RentalCartItemEvaluationResult evaluation = evalResult.Value;
+        Result checkResult = MapEvaluationToMutationResult(evaluation, allowDatePassed: true);
+        if (checkResult.IsFailure)
+        {
+            return checkResult.Error;
+        }
+
+        Guid ownerId = evaluation.Snapshot?.OwnerId ?? Guid.Empty;
+        if (ownerId == Guid.Empty)
+        {
+            return RentalErrors.ListingUnavailable;
+        }
 
         Result updated = cart.UpdateItemQuantity(
             cartItemId,
-            ownerId, // Pass retrieved ownerId to domain
+            ownerId,
             quantity,
             timeProvider.GetUtcNow());
 
@@ -215,7 +268,10 @@ public sealed class RentalCartUseCases(
         DateOnly endDate,
         CancellationToken cancellationToken = default)
     {
-        Result dateCheck = ValidateRentalDates(startDate, endDate); if (dateCheck.IsFailure) return dateCheck.Error;
+        Result dateCheck = evaluator.ValidateRentalDates(startDate, endDate);
+        if (dateCheck.IsFailure)
+            return dateCheck.Error;
+
         await using var renterLock = await lockManager.AcquireRenterLockAsync(
             renterId, TimeSpan.FromSeconds(5), cancellationToken);
 
@@ -227,19 +283,46 @@ public sealed class RentalCartUseCases(
         if (item is null)
             return RentalErrors.CartItemNotFound;
 
-        Result<RentalListingSnapshot> listingResult = await listingReader.GetListingAsync(
-            item.EquipmentListingId,
-            cancellationToken);
+        RentalCartItem? duplicate = cart.Items.FirstOrDefault(i =>
+            i.Id != cartItemId &&
+            i.EquipmentListingId == item.EquipmentListingId &&
+            i.ExpectedStartDate == startDate &&
+            i.ExpectedEndDate == endDate);
 
-        if (listingResult.IsFailure)
+        int targetQuantity = item.Quantity;
+        if (duplicate is not null)
         {
-            if (listingResult.Error.Type == ErrorType.NotFound)
-                return RentalErrors.OwnerIdRequired;
-            return listingResult.Error;
+            if (item.Quantity > int.MaxValue - duplicate.Quantity)
+                return RentalErrors.QuantityOverflow;
+
+            targetQuantity = duplicate.Quantity + item.Quantity;
         }
 
-        RentalListingSnapshot listing = listingResult.Value;
-        Guid ownerId = listing.OwnerId;
+        Result<RentalCartItemEvaluationResult> evalResult = await evaluator.EvaluateItemAsync(
+            renterId,
+            item.EquipmentListingId,
+            targetQuantity,
+            startDate,
+            endDate,
+            cancellationToken);
+
+        if (evalResult.IsFailure)
+        {
+            return evalResult.Error;
+        }
+
+        RentalCartItemEvaluationResult evaluation = evalResult.Value;
+        Result checkResult = MapEvaluationToMutationResult(evaluation, allowDatePassed: false);
+        if (checkResult.IsFailure)
+        {
+            return checkResult.Error;
+        }
+
+        Guid ownerId = evaluation.Snapshot?.OwnerId ?? Guid.Empty;
+        if (ownerId == Guid.Empty)
+        {
+            return RentalErrors.ListingUnavailable;
+        }
 
         Result updated = cart.UpdateItemDates(
             cartItemId,
@@ -296,22 +379,43 @@ public sealed class RentalCartUseCases(
             ? Result.Success()
             : Error.Conflict("CONCURRENCY_CONFLICT", "Giỏ hàng đã bị thay đổi đồng thời.");
     }
-    private Result ValidateRentalDates(DateOnly startDate, DateOnly endDate)
+
+    private static Result MapEvaluationToMutationResult(
+        RentalCartItemEvaluationResult evaluation,
+        bool allowDatePassed)
     {
-        DateOnly todayVn = DateOnly.FromDateTime(timeProvider.GetUtcNow().AddHours(7).DateTime);
+        if (evaluation.Status == RentalCartLineStatus.Available)
+        {
+            return Result.Success();
+        }
 
-        if (startDate > endDate) return RentalErrors.InvalidRentalPeriod;
+        if (evaluation.Status == RentalCartLineStatus.DatePassed && allowDatePassed)
+        {
+            return Result.Success();
+        }
 
-        int durationDays = endDate.DayNumber - startDate.DayNumber + 1;
-        if (durationDays > 365) return RentalErrors.DurationExceedsOneYear; // Đảm bảo khai báo Error này trong RentalErrors
+        if (evaluation.Status == RentalCartLineStatus.Unavailable ||
+            evaluation.Status == RentalCartLineStatus.ListingDisabled)
+        {
+            return RentalErrors.ListingUnavailable;
+        }
 
-        if (RentalBookingPolicy.IsStartDateTooSoon(startDate, todayVn))
-            return Error.Validation("Cart.StartDateInvalid", RentalBookingPolicy.TooSoonMessage(todayVn));
+        if (evaluation.InteractionStatus == RentalCartItemInteractionStatus.DisabledReadOnly &&
+            evaluation.Status == RentalCartLineStatus.ValidationFailed)
+        {
+            return RentalErrors.CannotRentOwnListing;
+        }
 
-        if (startDate > todayVn.AddMonths(6))
-            return Error.Validation("Cart.AdvanceBookingTooFar", "Chỉ được phép đặt trước tối đa 6 tháng.");
+        if (evaluation.Status == RentalCartLineStatus.InsufficientQuantity)
+        {
+            return RentalErrors.InsufficientAvailability(evaluation.AvailableQuantity ?? 0);
+        }
 
-        return Result.Success();
+        string errorCode = !string.IsNullOrEmpty(evaluation.ErrorCode)
+            ? evaluation.ErrorCode
+            : (evaluation.Status == RentalCartLineStatus.DatePassed ? "Cart.StartDateInvalid" : "Cart.ValidationFailed");
+
+        return Error.Validation(errorCode, evaluation.Message ?? "Mục thuê không hợp lệ.");
     }
 
     private async Task<RentalCart?> GetActiveCartAsync(
