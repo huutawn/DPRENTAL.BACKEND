@@ -3,8 +3,8 @@ using System.Text.Json.Serialization;
 
 namespace Dprental.RentalService.Application.DTOs.Checkout;
 
-/// <summary>Danh tính renter lấy từ JWT (<c>sub</c>, <c>pc</c>), không nhận từ request body.</summary>
-public sealed record CheckoutRenterContext(Guid RenterId, bool IsProfileCompleted);
+/// <summary>Danh tính renter lấy từ JWT (<c>sub</c>), không nhận từ request body.</summary>
+public sealed record CheckoutRenterContext(Guid RenterId);
 
 /// <summary>
 /// DTO yêu cầu gửi đơn hàng từ giỏ thuê.
@@ -12,7 +12,7 @@ public sealed record CheckoutRenterContext(Guid RenterId, bool IsProfileComplete
 /// <param name="CartItemIds">Mã các dòng giỏ muốn đặt. Gửi cái này hoặc BuyNow, không gửi cả hai.</param>
 /// <param name="Delivery">Nơi giao nhập tay, dùng chung cho mọi dòng trong đơn. Gửi cái này hoặc AddressId, không gửi cả hai.</param>
 /// <param name="RefundAccount">Tài khoản nhận mọi khoản hoàn của đơn, kể cả hoàn cọc (bắt buộc).</param>
-/// <param name="TermsVersion">Phiên bản Điều khoản thuê người thuê đã đọc; phải là phiên bản đang có hiệu lực.</param>
+/// <param name="TermsVersion">Phiên bản Điều khoản thuê người thuê đã đọc (tùy chọn; nếu thiếu/trống sẽ dùng phiên bản đang có hiệu lực).</param>
 /// <param name="TermsAccepted">Người thuê đã đồng ý Điều khoản thuê (phải là true).</param>
 /// <param name="ExpectedTotalAmount">Tổng tiền thuê và tiền cọc người thuê đã thấy; khác số hệ thống tính lại thì trả 409 Checkout.PriceChanged.</param>
 /// <param name="BuyNow">Thuê ngay một máy từ trang chi tiết, không qua giỏ. Gửi cái này hoặc CartItemIds, không gửi cả hai.</param>

@@ -139,8 +139,15 @@ public sealed class CheckoutRequestValidatorTests
         IReadOnlyList<CheckoutFieldError> errors = CheckoutRequestValidator.Validate(request);
 
         Assert.Equal(
-            ["cartItemIds", "delivery", "expectedTotalAmount", "refundAccount", "termsAccepted", "termsVersion"],
+            ["cartItemIds", "delivery", "expectedTotalAmount", "refundAccount", "termsAccepted"],
             errors.Select(e => e.Field).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_AcceptsMissingOrNullTermsVersion()
+    {
+        CheckoutRequest request = ValidRequest() with { TermsVersion = null };
+        Assert.Empty(CheckoutRequestValidator.Validate(request));
     }
 
     [Fact]

@@ -28,6 +28,7 @@ public sealed class CheckoutPreparationServiceTests
     private readonly FakeCartRepository _carts = new();
     private readonly FakeOrderRepository _orders = new();
     private readonly FakeRenterAddressRepository _addresses = new();
+    private readonly FakeAuthRentalClient _auth = new();
     private readonly FakeInventoryListingClient _inventory = new();
     private readonly RentalCart _cart;
     private readonly Guid _cartItemId;
@@ -40,6 +41,8 @@ public sealed class CheckoutPreparationServiceTests
 
         _inventory.Listings[_listingId] = Listing(_listingId);
         _inventory.AvailableQuantities[_listingId] = 10;
+        _auth.UserId = _renterId;
+        _auth.IsProfileCompleted = true;
     }
 
     private Guid AddCartItem(Guid listingId, int quantity, DateOnly start, DateOnly end) =>
@@ -64,13 +67,14 @@ public sealed class CheckoutPreparationServiceTests
             BuyNow = new(_listingId, 1, start ?? Start, End)
         };
 
-    private CheckoutRenterContext Renter(bool profileCompleted = true) => new(_renterId, profileCompleted);
+    private CheckoutRenterContext Renter() => new(_renterId);
 
-    private CheckoutPreparationService CreateService(DateTimeOffset? utcNow = null, IInventoryRentalClient? inventory = null) => new(
+    private CheckoutPreparationService CreateService(DateTimeOffset? utcNow = null, IInventoryRentalClient? inventory = null, IAuthRentalClient? auth = null) => new(
         _carts,
         _orders,
         _addresses,
         inventory ?? _inventory,
+        auth ?? _auth,
         Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
         {
             CurrentVersion = "v1.0",
@@ -234,7 +238,8 @@ public sealed class CheckoutPreparationServiceTests
     [Fact]
     public async Task Prepare_RejectsIncompleteProfile_BeforeCallingInventory()
     {
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(profileCompleted: false), Request());
+        _auth.IsProfileCompleted = false;
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
 
         Assert.Equal(CheckoutErrors.ProfileIncomplete, result.Error);
         Assert.Equal(0, _inventory.ListingReadCount);
@@ -243,7 +248,7 @@ public sealed class CheckoutPreparationServiceTests
     [Fact]
     public async Task Prepare_RejectsMissingRenterIdentity()
     {
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(new(Guid.Empty, true), Request());
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(new(Guid.Empty), Request());
 
         Assert.Equal(CheckoutErrors.Unauthenticated, result.Error);
     }
@@ -662,5 +667,68 @@ public sealed class CheckoutPreparationServiceTests
 
         Assert.Equal(RenterAddressErrors.NotFound, result.Error);
         Assert.Equal(0, _inventory.ListingReadCount);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenAuthReturnsMismatchedUserId_Returns503DependencyUnavailable()
+    {
+        _auth.UserId = Guid.NewGuid();
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
+
+        Assert.Equal(CheckoutErrors.DependencyUnavailable, result.Error);
+        Assert.Equal(0, _inventory.ListingReadCount);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenAuthReturns401_Returns401Unauthenticated()
+    {
+        _auth.Failure = CheckoutErrors.Unauthenticated;
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
+
+        Assert.Equal(CheckoutErrors.Unauthenticated, result.Error);
+        Assert.Equal(0, _inventory.ListingReadCount);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenAuthReturns403_ReturnsForbidden()
+    {
+        _auth.Failure = Error.Forbidden("Auth.Forbidden", "Forbidden by auth");
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
+
+        Assert.Equal(ErrorType.Forbidden, result.Error.Type);
+        Assert.Equal(0, _inventory.ListingReadCount);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenAuthFailsWithDependencyUnavailable_Returns503()
+    {
+        _auth.Failure = CheckoutErrors.DependencyUnavailable;
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
+
+        Assert.Equal(CheckoutErrors.DependencyUnavailable, result.Error);
+        Assert.Equal(0, _inventory.ListingReadCount);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenTermsVersionMissingOrWhitespace_UsesConfiguredVersion()
+    {
+        var reqNull = Request() with { TermsVersion = null };
+        CheckoutPreparationResult resNull = await CreateService().PrepareAsync(Renter(), reqNull);
+        Assert.True(resNull.IsSuccess);
+        Assert.Equal("v1.0", resNull.Plan.TermsVersion);
+
+        var reqWhitespace = Request() with { TermsVersion = "   " };
+        CheckoutPreparationResult resWhitespace = await CreateService().PrepareAsync(Renter(), reqWhitespace);
+        Assert.True(resWhitespace.IsSuccess);
+        Assert.Equal("v1.0", resWhitespace.Plan.TermsVersion);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenTermsVersionMatches_UsesConfiguredVersion()
+    {
+        var req = Request() with { TermsVersion = " v1.0 " };
+        CheckoutPreparationResult res = await CreateService().PrepareAsync(Renter(), req);
+        Assert.True(res.IsSuccess);
+        Assert.Equal("v1.0", res.Plan.TermsVersion);
     }
 }

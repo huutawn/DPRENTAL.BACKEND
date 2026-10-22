@@ -23,6 +23,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     private readonly IRentalOrderRepository _orders;
     private readonly IRenterAddressRepository _addresses;
     private readonly IInventoryRentalClient _inventory;
+    private readonly IAuthRentalClient _auth;
     private readonly RentalTermsOptions _terms;
     private readonly TimeProvider _timeProvider;
 
@@ -34,6 +35,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         IRentalOrderRepository orders,
         IRenterAddressRepository addresses,
         IInventoryRentalClient inventory,
+        IAuthRentalClient auth,
         IOptions<RentalTermsOptions> termsOptions,
         TimeProvider timeProvider)
     {
@@ -43,6 +45,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _addresses = addresses ?? throw new ArgumentNullException(nameof(addresses));
         _inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
+        _auth = auth ?? throw new ArgumentNullException(nameof(auth));
         _terms = termsOptions.Value;
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
     }
@@ -60,7 +63,19 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             return CheckoutPreparationResult.Failure(CheckoutErrors.Unauthenticated);
         }
 
-        if (!renter.IsProfileCompleted)
+        Result<AuthUserSummaryDto> authResult = await _auth.GetCurrentUserAsync(cancellationToken);
+        if (authResult.IsFailure)
+        {
+            return CheckoutPreparationResult.Failure(authResult.Error);
+        }
+
+        AuthUserSummaryDto authUser = authResult.Value;
+        if (authUser.Id != renter.RenterId)
+        {
+            return CheckoutPreparationResult.Failure(CheckoutErrors.DependencyUnavailable);
+        }
+
+        if (!authUser.IsProfileCompleted)
         {
             return CheckoutPreparationResult.Failure(CheckoutErrors.ProfileIncomplete);
         }
@@ -78,9 +93,13 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             throw new InvalidOperationException($"Thiếu cấu hình {RentalTermsOptions.SectionName}.");
         }
 
-        if (!string.Equals(request.TermsVersion!.Trim(), _terms.CurrentVersion.Trim(), StringComparison.Ordinal))
+        string effectiveTermsVersion = _terms.CurrentVersion.Trim();
+        if (!string.IsNullOrWhiteSpace(request.TermsVersion))
         {
-            return CheckoutPreparationResult.Failure(CheckoutErrors.TermsVersionOutdated);
+            if (!string.Equals(request.TermsVersion.Trim(), effectiveTermsVersion, StringComparison.Ordinal))
+            {
+                return CheckoutPreparationResult.Failure(CheckoutErrors.TermsVersionOutdated);
+            }
         }
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
@@ -172,7 +191,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             cartId,
             Normalize(delivery),
             Normalize(request.RefundAccount!),
-            _terms.CurrentVersion.Trim(),
+            effectiveTermsVersion,
             _terms.DocumentRef.Trim(),
             _terms.ContentHash.Trim(),
             CheckoutRules.Currency,

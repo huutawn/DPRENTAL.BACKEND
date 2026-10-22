@@ -60,6 +60,9 @@ public sealed class CommonBoundaryTests
                 builder.UseSetting("ConnectionStrings:Postgres",
                     "Host=localhost;Database=test;Username=test;Password=test");
                 builder.UseSetting("InternalAuthentication:ApiKey", "dev-internal-api-key-dprental-2026");
+                builder.UseSetting("Rental:Terms:CurrentVersion", "test-v1");
+                builder.UseSetting("Rental:Terms:DocumentRef", "terms/test-v1");
+                builder.UseSetting("Rental:Terms:ContentHash", "test-content-hash");
                 builder.ConfigureLogging(logging => logging.ClearProviders());
                 builder.ConfigureTestServices(services => services.AddControllers()
                     .AddApplicationPart(typeof(BoundaryTestController).Assembly));

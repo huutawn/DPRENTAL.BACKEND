@@ -5,11 +5,13 @@ using System.Net;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Repositories;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Dprental.RentalService.Api.Tests;
@@ -64,6 +66,23 @@ public sealed class HealthEndpointTests
             });
 
         Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
+    }
+
+    [Fact]
+    public void MissingProductionTerms_FailsAtStartup()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Production");
+                builder.UseSetting("Kafka:Enabled", "false");
+            });
+
+        OptionsValidationException exception = Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
+
+        Assert.Contains(exception.Failures, failure => failure.Contains("Rental:Terms:CurrentVersion", StringComparison.Ordinal));
+        Assert.Contains(exception.Failures, failure => failure.Contains("Rental:Terms:DocumentRef", StringComparison.Ordinal));
+        Assert.Contains(exception.Failures, failure => failure.Contains("Rental:Terms:ContentHash", StringComparison.Ordinal));
     }
 
     private static WebApplicationFactory<Program> CreateFactory() =>

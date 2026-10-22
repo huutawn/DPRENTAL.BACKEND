@@ -242,7 +242,7 @@ RentalService relies strictly on verified JWT claims delivered in the `Authoriza
 | Claim | JSON Type | Description | Rental Invariant |
 |---|---|---|---|
 | `sub` | string (UUID) | Authenticated User ID or Service Identifier | Valid UUID identifies interactive user or service client. |
-| `pc` | boolean | Profile Completed (`true` / `false`) | **Strictly required for checkout**. If missing, false, or malformed, checkout is rejected. Always false for services. |
+| `pc` | boolean | Profile Completed (`true` / `false`) | Legacy claim; Checkout now checks profile completion directly via AuthService `GET /api/v1/auth/users/me`. |
 | `r` | string array or comma list | Roles assigned to user | Normalized canonical roles and aliases (`adm` ↔ `admin`, `adp` ↔ `admin_platform`, `cus` ↔ `customer`, `own` ↔ `owner`, `mem` ↔ `member`). |
 | `p` | string array or comma list | Granular permissions | Permission catalog matching AuthService. |
 | `u` | string | User alias or Service indicator | Value `svc` indicates background service token (with `UserId = null`). Audit identity is strictly tracked by `UserId`. |
@@ -252,8 +252,7 @@ RentalService relies strictly on verified JWT claims delivered in the `Authoriza
 1. **Checkout Eligibility:**
    - Caller must be authenticated (`IsAuthenticated == true`).
    - Caller must NOT be a service token (`IsService == false`).
-   - Claim `pc` must be boolean `true`.
-   - **Performance Guarantee:** Checkout evaluates ONLY JWT claims; does NOT make synchronous HTTP calls to AuthService during checkout.
+   - Profile completion is verified directly via AuthService `GET /api/v1/auth/users/me` using the request's Bearer token and internal API key. JWT claim `pc` is not evaluated for checkout.
 2. **Resource Ownership Rules:**
    - **Renter:** `caller.UserId == RentalOrder.RenterId`.
    - **Supplier:** `caller.UserId == RentalItem.SupplierId`. Supplier ID at checkout is immutable from Inventory listing snapshot.
@@ -301,7 +300,7 @@ RentalService relies strictly on verified JWT claims delivered in the `Authoriza
 | **Payment** | `REFUND_EXCEEDS_PAID_AMOUNT` | 409 Conflict | Requested refund exceeds captured payment. |
 | **Payment** | `SETTLEMENT_EXCEEDS_DEPOSIT` | 409 Conflict | Final deduction exceeds held deposit. |
 | **Auth** | `Auth.Unauthorized` | 401 Unauthorized | Caller is not authenticated. |
-| **Auth** | `Auth.ProfileIncomplete` | 403 Forbidden | Renter has not completed identity profile (claim `pc` is not true). |
+| **Auth** | `Checkout.ProfileIncomplete` | 403 Forbidden | Renter has not completed identity profile (verified via AuthService GET /users/me). |
 | **Auth** | `Auth.Forbidden` | 403 Forbidden | Caller lacks ownership of the order/item. |
 | **Auth** | `Auth.ServiceTokenNotAllowed` | 403 Forbidden | Service token attempted interactive user operation. |
 | **Media** | `MEDIA_NOT_FOUND` | 404 Not Found | Media ID does not exist. |
