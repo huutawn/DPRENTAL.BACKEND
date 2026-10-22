@@ -26,6 +26,43 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
         string path = context.Request.Path.Value ?? string.Empty;
         string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
+        if (segments.Length >= 2 &&
+            segments[0].Equals("hubs", StringComparison.OrdinalIgnoreCase) &&
+            segments[1].Equals("payments", StringComparison.OrdinalIgnoreCase))
+        {
+            if (context.User?.Identity?.IsAuthenticated != true)
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                context.Response.ContentType = "application/problem+json";
+                var problem = new ProblemDetails
+                {
+                    Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+                    Title = "Unauthorized",
+                    Status = StatusCodes.Status401Unauthorized,
+                    Detail = "User authentication is required to access Payment Hub.",
+                    Instance = context.Request.Path
+                };
+                await context.Response.WriteAsJsonAsync(problem);
+                return;
+            }
+
+            if (context.User.HasClaim("u", "svc") || string.Equals(context.User.FindFirst("u")?.Value, "svc", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                context.Response.ContentType = "application/problem+json";
+                var problem = new ProblemDetails
+                {
+                    Type = "https://tools.ietf.org/html/rfc9110#section-15.5.4",
+                    Title = "Forbidden",
+                    Status = StatusCodes.Status403Forbidden,
+                    Detail = "Service tokens are not permitted to connect to Payment Hub.",
+                    Instance = context.Request.Path
+                };
+                await context.Response.WriteAsJsonAsync(problem);
+                return;
+            }
+        }
+
         if (IsServiceOnlyRoute(method, segments))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
