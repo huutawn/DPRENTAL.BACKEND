@@ -4,6 +4,7 @@ using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Mapping;
 using Dprental.InventoryService.Application.Options;
+using Dprental.InventoryService.Application.Recommendation;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Application.Validation;
 using Dprental.InventoryService.Common;
@@ -32,6 +33,8 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
     private readonly Locations.IVietnamDivisionsCatalog _divisionsCatalog;
     private readonly Dprental.InventoryService.Application.Caching.IInventoryReadCache _cache;
     private readonly Dprental.InventoryService.Application.Caching.InventoryCacheOptions _cacheOptions;
+    private readonly IRecommendationRankingReader? _recommendationReader;
+    private readonly IRecommendationMetrics? _recommendationMetrics;
 
     public PublicEquipmentListingService(
         IEquipmentListingRepository listingRepository,
@@ -44,7 +47,9 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
         ICatalogServiceClient? catalogClient = null,
         Locations.IVietnamDivisionsCatalog? divisionsCatalog = null,
         Dprental.InventoryService.Application.Caching.IInventoryReadCache? cache = null,
-        IOptions<Dprental.InventoryService.Application.Caching.InventoryCacheOptions>? cacheOptions = null)
+        IOptions<Dprental.InventoryService.Application.Caching.InventoryCacheOptions>? cacheOptions = null,
+        IRecommendationRankingReader? recommendationReader = null,
+        IRecommendationMetrics? recommendationMetrics = null)
     {
         _listingRepository = listingRepository ?? throw new ArgumentNullException(nameof(listingRepository));
         _queryValidator = queryValidator ?? throw new ArgumentNullException(nameof(queryValidator));
@@ -58,6 +63,8 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
         _divisionsCatalog = divisionsCatalog ?? new Locations.VietnamDivisionsCatalog();
         _cache = cache ?? Dprental.InventoryService.Application.Caching.NoOpInventoryReadCache.Instance;
         _cacheOptions = cacheOptions?.Value ?? new Dprental.InventoryService.Application.Caching.InventoryCacheOptions();
+        _recommendationReader = recommendationReader;
+        _recommendationMetrics = recommendationMetrics;
     }
 
     /// <inheritdoc />
@@ -150,13 +157,133 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
             },
             cancellationToken);
     }
+    private sealed record CoreSearchResult(
+        Dprental.InventoryService.Application.Caching.CachedRead<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>> Cached,
+        string? EffectiveTier);
+
     /// <inheritdoc />
     public async Task<Result<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>> ListPublicListingsAsync(
         ListPublicEquipmentListingsRequest request,
+        IInventoryCallerContext callerContext,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(callerContext);
 
+        var valResult = ValidatePublicListingRequest(request);
+        if (valResult.IsFailure)
+        {
+            return valResult.Error;
+        }
+
+        var validated = valResult.Value;
+        bool isRecommendation = validated.Sort == AssetSortOption.Recommended;
+
+        if (isRecommendation)
+        {
+            Guid? effectiveUserId = (callerContext.IsHuman && callerContext.UserId.HasValue && callerContext.UserId.Value != Guid.Empty)
+                ? callerContext.UserId.Value
+                : null;
+
+            Guid? excludedOwnerUserId = effectiveUserId;
+
+            RecommendationSnapshot snapshot;
+            if (_recommendationReader != null)
+            {
+                snapshot = await _recommendationReader.ReadAsync(effectiveUserId, cancellationToken);
+            }
+            else
+            {
+                snapshot = RecommendationSnapshot.Unavailable(RecommendationReasons.Unconfigured);
+            }
+
+            var coreResult = await ExecuteSearchCoreAsync(
+                request,
+                validated,
+                snapshot,
+                excludedOwnerUserId,
+                cancellationToken);
+
+            if (coreResult.IsFailure)
+            {
+                return coreResult.Error;
+            }
+
+            string tier = coreResult.Value.EffectiveTier ?? "default";
+            string reason;
+            if (snapshot.Outcome != RecommendationOutcome.Available)
+            {
+                reason = snapshot.Reason;
+            }
+            else
+            {
+                if (tier == "personalized")
+                {
+                    reason = RecommendationReasons.Available;
+                }
+                else if (tier == "global")
+                {
+                    reason = effectiveUserId.HasValue ? RecommendationReasons.Filtered : RecommendationReasons.Available;
+                }
+                else
+                {
+                    reason = RecommendationReasons.Filtered;
+                }
+            }
+
+            _recommendationMetrics?.RecordRequest(tier, reason);
+            return Result.Success(coreResult.Value.Cached.Value);
+        }
+        else
+        {
+            var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+            var todayVn = BusinessDateTime.ToVietnamDate(nowUtc);
+
+            string searchScope = "public-discovery";
+            string searchQueryType = "public-search";
+            string effectiveSortStr = validated.Sort == AssetSortOption.Relevance ? "relevance" : (request.Sort ?? "created_desc");
+            string searchHash = Dprental.InventoryService.Application.Caching.CacheKeyHelper.ComputePublicSearchHash(
+                request.Page,
+                request.PageSize,
+                request.Q,
+                request.EquipmentTypeId,
+                request.BrandId,
+                request.CategoryId,
+                request.ProvinceCode,
+                request.WardCode,
+                effectiveSortStr,
+                request.Filters,
+                request.From,
+                request.To,
+                request.RequestedQuantity,
+                todayVn);
+
+            return await _cache.GetOrCreateAsync<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>(
+                searchScope,
+                searchQueryType,
+                searchHash,
+                async (genToken, ct) =>
+                {
+                    var coreResult = await ExecuteSearchCoreAsync(
+                        request,
+                        validated,
+                        recommendationSnapshot: null,
+                        excludedOwnerUserId: null,
+                        ct);
+
+                    if (coreResult.IsFailure)
+                    {
+                        return coreResult.Error;
+                    }
+
+                    return Result.Success(coreResult.Value.Cached);
+                },
+                cancellationToken);
+        }
+    }
+
+    private Result<ValidatedAssetSearchQuery> ValidatePublicListingRequest(ListPublicEquipmentListingsRequest request)
+    {
         var valResult = AssetSearchQueryValidator.ValidateListingQuery(
             request.Page,
             request.PageSize,
@@ -190,256 +317,286 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
                 return Error.Validation("INVALID_LOCATION", "Mã tỉnh/thành phố không hợp lệ.");
             }
         }
+
         var structCheck = AssetSearchFilterResolver.ValidateStructure(request.Filters, request.EquipmentTypeId, PublicAssetDataPolicy.IsReservedPropertyName);
         if (structCheck.IsFailure)
         {
             return structCheck.Error;
         }
 
-        var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
-        var todayVn = BusinessDateTime.ToVietnamDate(nowUtc);
+        return valResult;
+    }
 
-        string searchScope = "public-discovery";
-        string searchQueryType = "public-search";
-        string searchHash = Dprental.InventoryService.Application.Caching.CacheKeyHelper.ComputePublicSearchHash(
-            request.Page,
-            request.PageSize,
-            request.Q,
-            request.EquipmentTypeId,
-            request.BrandId,
-            request.CategoryId,
-            request.ProvinceCode,
-            request.WardCode,
-            request.Sort,
-            request.Filters,
-            request.From,
-            request.To,
-            request.RequestedQuantity,
-            todayVn);
+    private async Task<Result<(Guid? EffectiveTypeId, IReadOnlyList<Guid>? EffectiveTypeIds, DateTimeOffset? Deadline)>> ResolveCategoryTypesAsync(
+        Guid? categoryId,
+        Guid? equipmentTypeId,
+        CancellationToken ct)
+    {
+        if (!categoryId.HasValue)
+        {
+            return Result.Success<(Guid?, IReadOnlyList<Guid>?, DateTimeOffset?)>((equipmentTypeId, null, null));
+        }
 
-        var validated = valResult.Value;
+        if (_catalogClient is null)
+        {
+            return Error.Unavailable("CATALOG_SERVICE_UNAVAILABLE", "CatalogService client chưa được cấu hình.");
+        }
 
-        return await _cache.GetOrCreateAsync<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>(
-            searchScope,
-            searchQueryType,
-            searchHash,
-            async (genToken, ct) =>
+        var categoryTypeIdsResult = await _catalogClient.GetEquipmentTypeIdsByCategoryAsync(categoryId.Value, ct);
+        if (categoryTypeIdsResult.IsFailure)
+        {
+            return categoryTypeIdsResult.Error;
+        }
+
+        var categoryCached = categoryTypeIdsResult.Value;
+        var categoryTypeIds = categoryCached.Value;
+        DateTimeOffset? categoryDeadline = categoryCached.ExpiresAtUtc;
+
+        if (equipmentTypeId.HasValue)
+        {
+            if (categoryTypeIds.Contains(equipmentTypeId.Value))
             {
-                var snapshotStartedAt = _timeProvider.GetUtcNow();
-                DateTimeOffset? categoryDeadline = null;
-                Guid? effectiveEquipmentTypeId = validated.EquipmentTypeId;
-                IReadOnlyList<Guid>? effectiveEquipmentTypeIds = null;
+                return Result.Success<(Guid?, IReadOnlyList<Guid>?, DateTimeOffset?)>((equipmentTypeId.Value, null, categoryDeadline));
+            }
+            else
+            {
+                return Result.Success<(Guid?, IReadOnlyList<Guid>?, DateTimeOffset?)>((null, categoryTypeIds, categoryDeadline));
+            }
+        }
 
-                if (validated.CategoryId.HasValue)
-                {
-                    if (_catalogClient is null)
-                    {
-                        return Error.Unavailable("CATALOG_SERVICE_UNAVAILABLE", "CatalogService client chưa được cấu hình.");
-                    }
+        return Result.Success<(Guid?, IReadOnlyList<Guid>?, DateTimeOffset?)>((null, categoryTypeIds, categoryDeadline));
+    }
 
-                    var categoryTypeIdsResult = await _catalogClient.GetEquipmentTypeIdsByCategoryAsync(validated.CategoryId.Value, ct);
-                    if (categoryTypeIdsResult.IsFailure)
-                    {
-                        return categoryTypeIdsResult.Error;
-                    }
+    private static Result<(DateOnly? From, DateOnly? To)> ResolveDateWindow(
+        DateOnly? requestFrom,
+        DateOnly? requestTo,
+        int? requestedQuantity)
+    {
+        DateOnly? availabilityFrom = null;
+        DateOnly? availabilityTo = null;
 
-                    var categoryCached = categoryTypeIdsResult.Value;
-                    categoryDeadline = categoryCached.ExpiresAtUtc;
-                    var categoryTypeIds = categoryCached.Value;
+        if (requestFrom.HasValue || requestTo.HasValue)
+        {
+            var dateValidationResult = AvailabilityDateValidator.ValidateDateWindow(
+                requestFrom,
+                requestTo,
+                out var validStart,
+                out var validEnd);
 
-                    if (validated.EquipmentTypeId.HasValue)
-                    {
-                        if (categoryTypeIds.Contains(validated.EquipmentTypeId.Value))
-                        {
-                            effectiveEquipmentTypeId = validated.EquipmentTypeId.Value;
-                            effectiveEquipmentTypeIds = null;
-                        }
-                        else
-                        {
-                            effectiveEquipmentTypeId = null;
-                            effectiveEquipmentTypeIds = categoryTypeIds;
-                        }
-                    }
-                    else
-                    {
-                        effectiveEquipmentTypeId = null;
-                        effectiveEquipmentTypeIds = categoryTypeIds;
-                    }
-                }
+            if (dateValidationResult.IsFailure)
+            {
+                return dateValidationResult.Error;
+            }
 
-                DateOnly? availabilityFrom = null;
-                DateOnly? availabilityTo = null;
+            availabilityFrom = validStart;
+            availabilityTo = validEnd;
+        }
 
-                if (request.From.HasValue || request.To.HasValue)
-                {
-                    var dateValidationResult = AvailabilityDateValidator.ValidateDateWindow(
-                        request.From,
-                        request.To,
-                        out var validStart,
-                        out var validEnd);
+        if (requestedQuantity.HasValue)
+        {
+            if (!availabilityFrom.HasValue || !availabilityTo.HasValue)
+            {
+                return Error.Validation("INVALID_QUERY_PARAMETER", "Truyền requestedQuantity phải kèm cả hai tham số ngày 'from' và 'to'.");
+            }
 
-                    if (dateValidationResult.IsFailure)
-                    {
-                        return dateValidationResult.Error;
-                    }
+            if (requestedQuantity.Value < 1)
+            {
+                return Error.Validation("INVALID_QUERY_PARAMETER", "RequestedQuantity phải lớn hơn hoặc bằng 1.");
+            }
+        }
 
-                    availabilityFrom = validStart;
-                    availabilityTo = validEnd;
-                }
+        return Result.Success<(DateOnly?, DateOnly?)>((availabilityFrom, availabilityTo));
+    }
 
-                if (request.RequestedQuantity.HasValue)
-                {
-                    if (!availabilityFrom.HasValue || !availabilityTo.HasValue)
-                    {
-                        return Error.Validation("INVALID_QUERY_PARAMETER", "Truyền requestedQuantity phải kèm cả hai tham số ngày 'from' và 'to'.");
-                    }
+    private async Task<Result<(IReadOnlyList<Guid>? CandidateIds, string Backend)>> ResolveCandidatesAsync(
+        ValidatedAssetSearchQuery validated,
+        Guid? effectiveEquipmentTypeId,
+        CancellationToken ct)
+    {
+        if (validated.Sort != AssetSortOption.Recommended &&
+            !string.IsNullOrWhiteSpace(validated.SearchKeyword) &&
+            _searchIndexService != null)
+        {
+            var candidateResult = await _searchIndexService.SearchPublicListingCandidatesAsync(
+                new PublicListingSearchIndexQuery(
+                    Keyword: validated.SearchKeyword,
+                    EquipmentTypeId: effectiveEquipmentTypeId,
+                    BrandId: validated.BrandId),
+                ct);
 
-                    if (request.RequestedQuantity.Value < 1)
-                    {
-                        return Error.Validation("INVALID_QUERY_PARAMETER", "RequestedQuantity phải lớn hơn hoặc bằng 1.");
-                    }
-                }
+            if (candidateResult.IsFailure && candidateResult.Error.Code is
+                "SEARCH_CREDENTIALS_INVALID" or "SEARCH_CONFIGURATION_INVALID")
+            {
+                return candidateResult.Error;
+            }
 
-                IReadOnlyList<Guid>? candidateIds = null;
-                string backend = "postgres";
+            if (candidateResult.IsSuccess && !candidateResult.Value.IsTruncated)
+            {
+                return Result.Success<(IReadOnlyList<Guid>?, string)>((candidateResult.Value.CandidateIds, "meilisearch"));
+            }
 
-                if (!string.IsNullOrWhiteSpace(validated.SearchKeyword) && _searchIndexService != null)
-                {
-                    var candidateResult = await _searchIndexService.SearchPublicListingCandidatesAsync(
-                        new PublicListingSearchIndexQuery(
-                            Keyword: validated.SearchKeyword,
-                            EquipmentTypeId: effectiveEquipmentTypeId,
-                            BrandId: validated.BrandId),
-                        ct);
+            _logger?.LogWarning(
+                "Meilisearch query failed or candidates truncated for query '{Keyword}'. Falling back to PostgreSQL. Reason: {Error}",
+                validated.SearchKeyword,
+                candidateResult.IsFailure ? candidateResult.Error.Message : "Truncated (exceeded candidate limit)");
+        }
 
-                    if (candidateResult.IsFailure && candidateResult.Error.Code is
-                        "SEARCH_CREDENTIALS_INVALID" or "SEARCH_CONFIGURATION_INVALID")
-                        return candidateResult.Error;
+        return Result.Success<(IReadOnlyList<Guid>?, string)>((null, "postgres"));
+    }
 
-                    if (candidateResult.IsSuccess && !candidateResult.Value.IsTruncated)
-                    {
-                        candidateIds = candidateResult.Value.CandidateIds;
-                        backend = "meilisearch";
-                    }
-                    else
-                    {
-                        _logger?.LogWarning(
-                            "Meilisearch query failed or candidates truncated for query '{Keyword}'. Falling back to PostgreSQL. Reason: {Error}",
-                            validated.SearchKeyword,
-                            candidateResult.IsFailure ? candidateResult.Error.Message : "Truncated (exceeded candidate limit)");
-                        candidateIds = null;
-                        backend = "postgres";
-                    }
-                }
+    private async Task<Result<CoreSearchResult>> ExecuteSearchCoreAsync(
+        ListPublicEquipmentListingsRequest request,
+        ValidatedAssetSearchQuery validated,
+        RecommendationSnapshot? recommendationSnapshot,
+        Guid? excludedOwnerUserId,
+        CancellationToken ct)
+    {
+        var snapshotStartedAt = _timeProvider.GetUtcNow();
 
-                var resolveResult = await _filterResolver.ResolveAsync(
-                    request.Filters,
-                    effectiveEquipmentTypeId,
-                    cancellationToken => _listingRepository.GetDistinctSchemaVersionsPublicAsync(
-                        new AssetSearchFilters(
-                            SearchKeyword: candidateIds == null ? validated.SearchKeyword : null,
-                            EquipmentTypeId: effectiveEquipmentTypeId,
-                            BrandId: validated.BrandId,
-                            CandidateIds: candidateIds,
-                            EquipmentTypeIds: effectiveEquipmentTypeIds,
-                            ProvinceCode: request.ProvinceCode,
-                            WardCode: request.WardCode),
-                        cancellationToken),
-                    isFieldForbidden: PublicAssetDataPolicy.IsReservedPropertyName,
-                    ct);
+        var categoryResult = await ResolveCategoryTypesAsync(validated.CategoryId, validated.EquipmentTypeId, ct);
+        if (categoryResult.IsFailure)
+        {
+            return categoryResult.Error;
+        }
 
-                if (resolveResult.IsFailure)
-                {
-                    return resolveResult.Error;
-                }
+        var (effectiveEquipmentTypeId, effectiveEquipmentTypeIds, categoryDeadline) = categoryResult.Value;
 
-                var resolvedFilters = resolveResult.Value;
-                var schemaDeadline = resolvedFilters.ExpiresAtUtc;
+        var dateResult = ResolveDateWindow(request.From, request.To, request.RequestedQuantity);
+        if (dateResult.IsFailure)
+        {
+            return dateResult.Error;
+        }
 
-                if (effectiveEquipmentTypeIds is not null && effectiveEquipmentTypeIds.Count == 0)
-                {
-                    var emptyPaged = new PagedResponse<PublicEquipmentListingResponse>(
-                        Array.Empty<PublicEquipmentListingResponse>(),
-                        request.Page,
-                        request.PageSize,
-                        0,
-                        0);
-                    var emptyResult = new SearchExecution<PagedResponse<PublicEquipmentListingResponse>>(emptyPaged, backend);
-                    var emptyTtl = _timeProvider.GetUtcNow().AddSeconds(_cacheOptions.DynamicTtlSeconds > 0 ? _cacheOptions.DynamicTtlSeconds : 15);
-                    return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>(emptyResult, emptyTtl));
-                }
+        var (availabilityFrom, availabilityTo) = dateResult.Value;
 
-                var evaluationNowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+        var candidatesResult = await ResolveCandidatesAsync(validated, effectiveEquipmentTypeId, ct);
+        if (candidatesResult.IsFailure)
+        {
+            return candidatesResult.Error;
+        }
 
-                var searchFilters = new AssetSearchFilters(
+        var (candidateIds, backend) = candidatesResult.Value;
+
+        var resolveResult = await _filterResolver.ResolveAsync(
+            request.Filters,
+            effectiveEquipmentTypeId,
+            cancellationToken => _listingRepository.GetDistinctSchemaVersionsPublicAsync(
+                new AssetSearchFilters(
                     SearchKeyword: candidateIds == null ? validated.SearchKeyword : null,
                     EquipmentTypeId: effectiveEquipmentTypeId,
                     BrandId: validated.BrandId,
-                    Sort: validated.Sort,
-                    CompatibleSchemaVersions: resolvedFilters.CompatibleSchemaVersions,
-                    DynamicFilters: resolvedFilters.Criteria,
                     CandidateIds: candidateIds,
                     EquipmentTypeIds: effectiveEquipmentTypeIds,
                     ProvinceCode: request.ProvinceCode,
-                    WardCode: request.WardCode);
-                var searchCriteria = new EquipmentListingSearchCriteria(
-                    filters: searchFilters,
-                    availabilityFrom: availabilityFrom,
-                    availabilityTo: availabilityTo,
-                    requestedQuantity: request.RequestedQuantity,
-                    availabilityEvaluationUtc: evaluationNowUtc,
-                    skip: validated.Skip,
-                    take: validated.Take);
+                    WardCode: request.WardCode),
+                cancellationToken),
+            isFieldForbidden: PublicAssetDataPolicy.IsReservedPropertyName,
+            ct);
 
-                var searchResult = await _listingRepository.SearchPublicAsync(searchCriteria, ct);
-                int totalCount = searchResult.TotalCount;
-                int totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling((double)totalCount / validated.Take);
+        if (resolveResult.IsFailure)
+        {
+            return resolveResult.Error;
+        }
 
-                var mappedItems = searchResult.Items
-                    .Select(item => PublicEquipmentListingMapper.ToResponse(
-                        item.Listing,
-                        item.TotalQuantity,
-                        item.AvailableQuantity,
-                        _mediaOptions.PublicGatewayUrl))
-                    .ToList();
+        var resolvedFilters = resolveResult.Value;
+        var schemaDeadline = resolvedFilters.ExpiresAtUtc;
 
-                var paged = new PagedResponse<PublicEquipmentListingResponse>(
-                    mappedItems,
-                    request.Page,
-                    request.PageSize,
-                    totalCount,
-                    totalPages);
+        if (effectiveEquipmentTypeIds is not null && effectiveEquipmentTypeIds.Count == 0)
+        {
+            var emptyPaged = new PagedResponse<PublicEquipmentListingResponse>(
+                Array.Empty<PublicEquipmentListingResponse>(),
+                request.Page,
+                request.PageSize,
+                0,
+                0);
+            var emptyResult = new SearchExecution<PagedResponse<PublicEquipmentListingResponse>>(emptyPaged, backend);
+            var emptyTtl = _timeProvider.GetUtcNow().AddSeconds(_cacheOptions.DynamicTtlSeconds > 0 ? _cacheOptions.DynamicTtlSeconds : 15);
+            var emptyCached = new Dprental.InventoryService.Application.Caching.CachedRead<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>(emptyResult, emptyTtl);
+            return Result.Success(new CoreSearchResult(emptyCached, "default"));
+        }
 
-                var searchExecutionResult = new SearchExecution<PagedResponse<PublicEquipmentListingResponse>>(paged, backend);
+        var evaluationNowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
 
-                var baseTtl = TimeSpan.FromSeconds(_cacheOptions.DynamicTtlSeconds > 0 ? _cacheOptions.DynamicTtlSeconds : 15);
-                var candidateDeadline = snapshotStartedAt.Add(baseTtl);
+        var searchFilters = new AssetSearchFilters(
+            SearchKeyword: candidateIds == null ? validated.SearchKeyword : null,
+            EquipmentTypeId: effectiveEquipmentTypeId,
+            BrandId: validated.BrandId,
+            Sort: validated.Sort,
+            CompatibleSchemaVersions: resolvedFilters.CompatibleSchemaVersions,
+            DynamicFilters: resolvedFilters.Criteria,
+            CandidateIds: candidateIds,
+            EquipmentTypeIds: effectiveEquipmentTypeIds,
+            ProvinceCode: request.ProvinceCode,
+            WardCode: request.WardCode);
 
-                if (searchResult.NextAvailabilityChangeAtUtc.HasValue && searchResult.NextAvailabilityChangeAtUtc.Value < candidateDeadline)
-                {
-                    candidateDeadline = searchResult.NextAvailabilityChangeAtUtc.Value;
-                }
+        var personalScores = recommendationSnapshot?.Outcome == RecommendationOutcome.Available
+            ? recommendationSnapshot.PersonalInterests
+            : null;
+        var globalScores = recommendationSnapshot?.Outcome == RecommendationOutcome.Available
+            ? recommendationSnapshot.GlobalPopularity
+            : null;
 
-                var vnNow = evaluationNowUtc.ToOffset(TimeSpan.FromHours(7));
-                var nextVnMidnight = new DateTimeOffset(vnNow.Year, vnNow.Month, vnNow.Day, 0, 0, 0, TimeSpan.FromHours(7)).AddDays(1).ToUniversalTime();
-                if (nextVnMidnight < candidateDeadline)
-                {
-                    candidateDeadline = nextVnMidnight;
-                }
+        var searchCriteria = new EquipmentListingSearchCriteria(
+            filters: searchFilters,
+            availabilityFrom: availabilityFrom,
+            availabilityTo: availabilityTo,
+            requestedQuantity: request.RequestedQuantity,
+            availabilityEvaluationUtc: evaluationNowUtc,
+            skip: validated.Skip,
+            take: validated.Take,
+            personalScores: personalScores,
+            globalScores: globalScores,
+            excludedOwnerUserId: excludedOwnerUserId);
 
-                if (schemaDeadline.HasValue && schemaDeadline.Value < candidateDeadline)
-                {
-                    candidateDeadline = schemaDeadline.Value;
-                }
+        var searchResult = await _listingRepository.SearchPublicAsync(searchCriteria, ct);
+        int totalCount = searchResult.TotalCount;
+        int totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling((double)totalCount / validated.Take);
 
-                if (categoryDeadline.HasValue && categoryDeadline.Value < candidateDeadline)
-                {
-                    candidateDeadline = categoryDeadline.Value;
-                }
+        var mappedItems = searchResult.Items
+            .Select(item => PublicEquipmentListingMapper.ToResponse(
+                item.Listing,
+                item.TotalQuantity,
+                item.AvailableQuantity,
+                _mediaOptions.PublicGatewayUrl))
+            .ToList();
 
-                DateTimeOffset? finalDeadline = candidateDeadline > evaluationNowUtc ? candidateDeadline : null;
-                return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>(searchExecutionResult, finalDeadline));
-            },
-            cancellationToken);
+        var paged = new PagedResponse<PublicEquipmentListingResponse>(
+            mappedItems,
+            request.Page,
+            request.PageSize,
+            totalCount,
+            totalPages);
+
+        var searchExecutionResult = new SearchExecution<PagedResponse<PublicEquipmentListingResponse>>(paged, backend);
+
+        var baseTtl = TimeSpan.FromSeconds(_cacheOptions.DynamicTtlSeconds > 0 ? _cacheOptions.DynamicTtlSeconds : 15);
+        var candidateDeadline = snapshotStartedAt.Add(baseTtl);
+
+        if (searchResult.NextAvailabilityChangeAtUtc.HasValue && searchResult.NextAvailabilityChangeAtUtc.Value < candidateDeadline)
+        {
+            candidateDeadline = searchResult.NextAvailabilityChangeAtUtc.Value;
+        }
+
+        var vnNow = evaluationNowUtc.ToOffset(TimeSpan.FromHours(7));
+        var nextVnMidnight = new DateTimeOffset(vnNow.Year, vnNow.Month, vnNow.Day, 0, 0, 0, TimeSpan.FromHours(7)).AddDays(1).ToUniversalTime();
+        if (nextVnMidnight < candidateDeadline)
+        {
+            candidateDeadline = nextVnMidnight;
+        }
+
+        if (schemaDeadline.HasValue && schemaDeadline.Value < candidateDeadline)
+        {
+            candidateDeadline = schemaDeadline.Value;
+        }
+
+        if (categoryDeadline.HasValue && categoryDeadline.Value < candidateDeadline)
+        {
+            candidateDeadline = categoryDeadline.Value;
+        }
+
+        DateTimeOffset? finalDeadline = candidateDeadline > evaluationNowUtc ? candidateDeadline : null;
+        var cachedRead = new Dprental.InventoryService.Application.Caching.CachedRead<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>(searchExecutionResult, finalDeadline);
+
+        return Result.Success(new CoreSearchResult(cachedRead, searchResult.EffectiveTier));
     }
 }

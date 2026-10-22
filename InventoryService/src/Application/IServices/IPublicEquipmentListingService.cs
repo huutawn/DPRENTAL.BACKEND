@@ -1,6 +1,7 @@
 using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.Search;
+using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 
 namespace Dprental.InventoryService.Application.IServices;
@@ -23,6 +24,7 @@ public interface IPublicEquipmentListingService
     /// </summary>
     Task<Result<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>> ListPublicListingsAsync(
         ListPublicEquipmentListingsRequest request,
+        IInventoryCallerContext callerContext,
         CancellationToken cancellationToken = default);
 
     /// <summary>

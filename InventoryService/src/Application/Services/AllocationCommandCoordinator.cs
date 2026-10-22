@@ -56,6 +56,33 @@ public sealed class AllocationCommandCoordinator
             handlerName,
             useCaseAction,
             rejectionFactory: null,
+            customGroupRef: null,
+            cancellationToken: cancellationToken);
+
+    public Task<Result<AllocationCommandOutcome>> CoordinateAsync<TPayload>(
+        string commandType,
+        Guid sourceMessageId,
+        string? correlationId,
+        Guid rentalOrderId,
+        Guid rentalItemId,
+        string operationKey,
+        object businessPayloadToHash,
+        string handlerName,
+        Func<IInventoryWriteContext, DateTimeOffset, CancellationToken, Task<Result<AllocationCommandOutcome>>> useCaseAction,
+        RejectionOutcomeFactory? rejectionFactory,
+        CancellationToken cancellationToken)
+        => CoordinateAsync<TPayload>(
+            commandType,
+            sourceMessageId,
+            correlationId,
+            rentalOrderId,
+            rentalItemId,
+            operationKey,
+            businessPayloadToHash,
+            handlerName,
+            useCaseAction,
+            rejectionFactory,
+            customGroupRef: null,
             cancellationToken: cancellationToken);
 
     public async Task<Result<AllocationCommandOutcome>> CoordinateAsync<TPayload>(
@@ -69,18 +96,18 @@ public sealed class AllocationCommandCoordinator
         string handlerName,
         Func<IInventoryWriteContext, DateTimeOffset, CancellationToken, Task<Result<AllocationCommandOutcome>>> useCaseAction,
         RejectionOutcomeFactory? rejectionFactory = null,
+        string? customGroupRef = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(commandType);
         ArgumentException.ThrowIfNullOrWhiteSpace(operationKey);
 
-        var groupRef = $"rental-item:{rentalItemId}";
+        var groupRef = !string.IsNullOrWhiteSpace(customGroupRef) ? customGroupRef.Trim() : $"rental-item:{rentalItemId}";
         var fingerprint = ComputeFingerprint(commandType, businessPayloadToHash);
         var effectiveCorrelationId = string.IsNullOrWhiteSpace(correlationId) ? rentalOrderId.ToString("D") : correlationId;
 
         rejectionFactory ??= (errCode, errMsg, occurredAt) =>
-            AllocationCommandOutcome.Rejected(commandType, operationKey, rentalOrderId, rentalItemId, errCode, errMsg, occurredAt);
-
+            AllocationCommandOutcome.Rejected(commandType, operationKey, rentalOrderId, rentalItemId, errCode, errMsg, occurredAt, groupRef);
         return await _writeTransaction.ExecuteAllocationCommandAsync(RentalSourceSystem, operationKey, groupRef, async (ctx, ct) =>
         {
             var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());

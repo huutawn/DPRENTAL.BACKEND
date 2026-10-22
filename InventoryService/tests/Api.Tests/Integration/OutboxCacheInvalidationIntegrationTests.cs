@@ -184,7 +184,7 @@ public sealed class OutboxCacheInvalidationIntegrationTests : IClassFixture<Post
         var listingRepo = scope.ServiceProvider.GetRequiredService<IEquipmentListingRepository>();
         var tx = scope.ServiceProvider.GetRequiredService<IInventoryWriteTransaction>();
 
-        var calendarService = new CalendarService(assetRepo, listingRepo, tx);
+        var calendarService = new CalendarService(assetRepo, listingRepo, tx, new Dprental.InventoryService.Api.Tests.Security.TestTimeProvider(FixedNow));
         var caller = new TestCaller { UserId = ownerId };
 
         var req = new CreateCalendarBlockRequest

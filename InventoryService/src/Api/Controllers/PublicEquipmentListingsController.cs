@@ -3,6 +3,7 @@ using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.DTOs.Availability;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.IServices;
+using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -37,10 +38,14 @@ public sealed class PublicEquipmentListingsController : ControllerBase
     };
 
     private readonly IPublicEquipmentListingService _publicListingService;
+    private readonly IInventoryCallerContext _callerContext;
 
-    public PublicEquipmentListingsController(IPublicEquipmentListingService publicListingService)
+    public PublicEquipmentListingsController(
+        IPublicEquipmentListingService publicListingService,
+        IInventoryCallerContext callerContext)
     {
         _publicListingService = publicListingService ?? throw new ArgumentNullException(nameof(publicListingService));
+        _callerContext = callerContext ?? throw new ArgumentNullException(nameof(callerContext));
     }
 
     /// <summary>
@@ -109,7 +114,7 @@ public sealed class PublicEquipmentListingsController : ControllerBase
                 "Tham số 'requestedQuantity' chỉ được sử dụng khi lọc theo khoảng thời gian 'from' và 'to'."));
         }
 
-        var result = await _publicListingService.ListPublicListingsAsync(request, cancellationToken);
+        var result = await _publicListingService.ListPublicListingsAsync(request, _callerContext, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);

@@ -31,7 +31,8 @@ public sealed record AllocationCommandOutcome(
         Guid rentalItemId,
         string errorCode,
         string errorMessage,
-        DateTimeOffset occurredAt) =>
+        DateTimeOffset occurredAt,
+        string? allocationGroupId = null) =>
         new(false, commandType, operationKey, rentalOrderId, rentalItemId,
             RejectionPayload: new InventoryAllocationCommandRejectedPayload(
                 rentalOrderId,
@@ -40,7 +41,8 @@ public sealed record AllocationCommandOutcome(
                 commandType,
                 errorCode,
                 errorMessage,
-                occurredAt));
+                occurredAt,
+                allocationGroupId));
 
     public static AllocationCommandOutcome ReturnApplied(
         string operationKey,

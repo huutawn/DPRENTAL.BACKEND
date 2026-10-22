@@ -58,7 +58,6 @@ public sealed class OutboxStore : IOutboxStore
                         WHERE o.published_at IS NULL
                           AND (o.next_attempt_at IS NULL OR o.next_attempt_at <= {now})
                           AND (o.lock_lease_expires_at IS NULL OR o.lock_lease_expires_at <= {now})
-                          AND o.retry_count < 10
                           AND NOT EXISTS (
                               SELECT 1
                               FROM inventory.outbox_messages prev
@@ -88,8 +87,7 @@ public sealed class OutboxStore : IOutboxStore
         var candidates = await _context.OutboxMessages
             .Where(o => o.PublishedAt == null &&
                         (o.NextAttemptAt == null || o.NextAttemptAt <= now) &&
-                        (o.LockLeaseExpiresAt == null || o.LockLeaseExpiresAt <= now) &&
-                        o.RetryCount < 10)
+                        (o.LockLeaseExpiresAt == null || o.LockLeaseExpiresAt <= now))
             .OrderBy(o => o.CreatedAt)
             .ThenBy(o => o.Id)
             .ToListAsync(cancellationToken);
