@@ -189,6 +189,22 @@ public sealed class SynchronousCheckoutFlowTests
         Assert.True(result.IsFailure);
         Assert.Equal(CheckoutErrors.CheckoutNotReady, result.Error);
         Assert.True(result.Failure!.IsRetryable);
+        Assert.Equal("Pending", (await context.RentalCheckoutOperations.SingleAsync()).InvoiceStatus);
+        Guid orderId = (await context.RentalOrders.SingleAsync()).Id;
+        string invoiceRef = (await context.RentalOrders.SingleAsync()).InvoiceRef!;
+
+        _harness.Payment.Tamper = null;
+        await using var retryContext = _harness.NewContext();
+        var recovered = await CreateService(retryContext).SubmitAsync(
+            new CheckoutRenterContext(_renterId), request, "missing-qr-key");
+        Assert.True(recovered.IsSuccess, recovered.Error.Message);
+        Assert.Equal(orderId, recovered.Value.OrderId);
+        Assert.Equal(invoiceRef, recovered.Value.Payment!.InvoiceRef);
+        Assert.False(string.IsNullOrWhiteSpace(recovered.Value.Payment.QrUrl));
+        Assert.Equal(1, _harness.Payment.CreatedInvoiceCount);
+        Assert.Equal(1, await retryContext.RentalOrders.CountAsync());
+        Assert.Single(_harness.Payment.InvoiceRequests.Select(r => r.OperationKey).Distinct());
+        Assert.Equal("Ready", (await retryContext.RentalCheckoutOperations.SingleAsync()).InvoiceStatus);
     }
 
     [Fact]
