@@ -11,7 +11,8 @@ public enum AssetSortOption
     ModelAsc = 3,
     ManufactureYearDesc = 4,
     ManufactureYearAsc = 5,
-    Relevance = 6
+    Relevance = 6,
+    Recommended = 7
 }
 
 /// <summary>

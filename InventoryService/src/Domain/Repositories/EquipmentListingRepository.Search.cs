@@ -16,6 +16,7 @@ public sealed partial class EquipmentListingRepository
         public Guid Id { get; set; }
         public int TotalQuantity { get; set; }
         public int AvailableQuantity { get; set; }
+        public string? EffectiveTier { get; set; }
     }
 
     /// <inheritdoc />
@@ -159,8 +160,9 @@ public sealed partial class EquipmentListingRepository
                 .Where(r => listingMap.ContainsKey(r.Id))
                 .Select(r => new PublicEquipmentListingItem(listingMap[r.Id], r.TotalQuantity, r.AvailableQuantity))
                 .ToList();
+            string? effectiveTier = rows.Count > 0 ? rows[0].EffectiveTier : null;
 
-            return new PublicEquipmentListingSearchResult(items, totalCount, nextAvailabilityChangeAtUtc);
+            return new PublicEquipmentListingSearchResult(items, totalCount, nextAvailabilityChangeAtUtc, effectiveTier);
         }
         throw new NotSupportedException("Public equipment listing search requires PostgreSQL relational provider.");
     }
@@ -174,6 +176,12 @@ public sealed partial class EquipmentListingRepository
         };
 
         var commonParams = new List<NpgsqlParameter>();
+
+        if (criteria.ExcludedOwnerUserId.HasValue && criteria.ExcludedOwnerUserId.Value != Guid.Empty)
+        {
+            clauses.Add("l.owner_user_id <> @pExcludedOwnerUserId");
+            commonParams.Add(new NpgsqlParameter("pExcludedOwnerUserId", criteria.ExcludedOwnerUserId.Value));
+        }
 
         var filters = criteria.Filters;
         bool hasCandidates = filters.CandidateIds != null && filters.CandidateIds.Count > 0;
@@ -344,25 +352,112 @@ public sealed partial class EquipmentListingRepository
             WHERE {filterWhere}
             """;
 
-        string orderSql = criteria.Filters.Sort switch
-        {
-            AssetSortOption.Relevance when hasCandidates => "ORDER BY cand.ord ASC",
-            AssetSortOption.Relevance => "ORDER BY l.created_at DESC, l.id DESC",
-            AssetSortOption.CreatedAsc => "ORDER BY l.created_at ASC, l.id ASC",
-            AssetSortOption.ModelDesc => "ORDER BY l.model DESC, l.id DESC",
-            AssetSortOption.ModelAsc => "ORDER BY l.model ASC, l.id ASC",
-            _ => "ORDER BY l.created_at DESC, l.id DESC"
-        };
+        var pageParamsList = commonParams.ToList();
+        pageParamsList.Add(new NpgsqlParameter("pTake", criteria.Take));
+        pageParamsList.Add(new NpgsqlParameter("pSkip", criteria.Skip));
 
-        string pageSql = $"""
-            SELECT l.id AS "Id", ({totalQtyExpr}) AS "TotalQuantity", ({availableQtyExpr}) AS "AvailableQuantity"
-            FROM "inventory"."equipment_listings" l
-            {joinSql}
-            {warehouseJoin}
-            WHERE {filterWhere}
-            {orderSql}
-            LIMIT @pTake OFFSET @pSkip
-            """;
+        string pageSql;
+        if (criteria.Filters.Sort == AssetSortOption.Recommended)
+        {
+            var personalTypeIds = criteria.PersonalScores?.Select(s => s.EquipmentTypeId).ToArray() ?? Array.Empty<Guid>();
+            var personalScores = criteria.PersonalScores?.Select(s => s.Score).ToArray() ?? Array.Empty<long>();
+            var globalListingIds = criteria.GlobalScores?.Select(s => s.ListingId).ToArray() ?? Array.Empty<Guid>();
+            var globalScores = criteria.GlobalScores?.Select(s => s.Score).ToArray() ?? Array.Empty<long>();
+
+            pageParamsList.Add(new NpgsqlParameter("pPersonalTypeIds", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Uuid) { Value = personalTypeIds });
+            pageParamsList.Add(new NpgsqlParameter("pPersonalScores", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bigint) { Value = personalScores });
+            pageParamsList.Add(new NpgsqlParameter("pGlobalListingIds", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Uuid) { Value = globalListingIds });
+            pageParamsList.Add(new NpgsqlParameter("pGlobalScores", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bigint) { Value = globalScores });
+
+            pageSql = $"""
+                WITH valid_listings AS (
+                    SELECT
+                        l.id,
+                        l.created_at,
+                        l.updated_at,
+                        COALESCE(pers.score, 0) AS interest,
+                        COALESCE(glob.score, 0) AS popularity
+                    FROM "inventory"."equipment_listings" l
+                    {joinSql}
+                    {warehouseJoin}
+                    LEFT JOIN (
+                        SELECT id, score FROM unnest(@pPersonalTypeIds, @pPersonalScores) AS p(id, score)
+                    ) pers ON l.equipment_type_id = pers.id
+                    LEFT JOIN (
+                        SELECT id, score FROM unnest(@pGlobalListingIds, @pGlobalScores) AS g(id, score)
+                    ) glob ON l.id = glob.id
+                    WHERE {filterWhere}
+                ),
+                tier_summary AS (
+                    SELECT
+                        COALESCE(bool_or(interest > 0), false) AS has_personal,
+                        COALESCE(bool_or(popularity > 0), false) AS has_global
+                    FROM valid_listings
+                ),
+                ordered_page AS (
+                    SELECT
+                        v.id,
+                        CASE
+                            WHEN t.has_personal THEN 'personalized'
+                            WHEN t.has_global THEN 'global'
+                            ELSE 'default'
+                        END AS effective_tier,
+                        row_number() OVER (
+                            ORDER BY
+                                CASE
+                                    WHEN t.has_personal THEN
+                                        CASE WHEN v.interest > 0 THEN 1 ELSE 2 END
+                                    WHEN t.has_global THEN
+                                        CASE WHEN v.popularity > 0 THEN 1 ELSE 2 END
+                                    ELSE 1
+                                END ASC,
+                                CASE WHEN t.has_personal AND v.interest > 0 THEN v.interest END DESC NULLS LAST,
+                                CASE WHEN t.has_personal AND v.interest > 0 THEN v.popularity END DESC NULLS LAST,
+                                CASE WHEN t.has_personal AND v.interest > 0 THEN v.updated_at END DESC NULLS LAST,
+                                CASE WHEN t.has_personal AND v.interest > 0 THEN v.id END ASC NULLS LAST,
+                                CASE WHEN NOT t.has_personal AND t.has_global AND v.popularity > 0 THEN v.popularity END DESC NULLS LAST,
+                                CASE WHEN NOT t.has_personal AND t.has_global AND v.popularity > 0 THEN v.updated_at END DESC NULLS LAST,
+                                CASE WHEN NOT t.has_personal AND t.has_global AND v.popularity > 0 THEN v.id END ASC NULLS LAST,
+                                v.created_at DESC,
+                                v.id DESC
+                        ) AS page_ord
+                    FROM valid_listings v
+                    CROSS JOIN tier_summary t
+                    ORDER BY page_ord ASC
+                    LIMIT @pTake OFFSET @pSkip
+                )
+                SELECT
+                    op.id AS "Id",
+                    ({totalQtyExpr}) AS "TotalQuantity",
+                    ({availableQtyExpr}) AS "AvailableQuantity",
+                    op.effective_tier AS "EffectiveTier"
+                FROM ordered_page op
+                JOIN "inventory"."equipment_listings" l ON l.id = op.id
+                ORDER BY op.page_ord ASC
+                """;
+        }
+        else
+        {
+            string orderSql = criteria.Filters.Sort switch
+            {
+                AssetSortOption.Relevance when hasCandidates => "ORDER BY cand.ord ASC",
+                AssetSortOption.Relevance => "ORDER BY l.created_at DESC, l.id DESC",
+                AssetSortOption.CreatedAsc => "ORDER BY l.created_at ASC, l.id ASC",
+                AssetSortOption.ModelDesc => "ORDER BY l.model DESC, l.id DESC",
+                AssetSortOption.ModelAsc => "ORDER BY l.model ASC, l.id ASC",
+                _ => "ORDER BY l.created_at DESC, l.id DESC"
+            };
+
+            pageSql = $"""
+                SELECT l.id AS "Id", ({totalQtyExpr}) AS "TotalQuantity", ({availableQtyExpr}) AS "AvailableQuantity", NULL AS "EffectiveTier"
+                FROM "inventory"."equipment_listings" l
+                {joinSql}
+                {warehouseJoin}
+                WHERE {filterWhere}
+                {orderSql}
+                LIMIT @pTake OFFSET @pSkip
+                """;
+        }
 
         string? holdExpirySql = null;
         NpgsqlParameter[]? holdParams = null;
@@ -384,10 +479,6 @@ public sealed partial class EquipmentListingRepository
         }
 
         var countParams = CloneParameters(commonParams);
-
-        var pageParamsList = commonParams.ToList();
-        pageParamsList.Add(new NpgsqlParameter("pTake", criteria.Take));
-        pageParamsList.Add(new NpgsqlParameter("pSkip", criteria.Skip));
         var pageParams = CloneParameters(pageParamsList);
 
         return (countSql, pageSql, holdExpirySql, countParams, pageParams, holdParams);
@@ -465,6 +556,6 @@ public sealed partial class EquipmentListingRepository
 
     private static NpgsqlParameter[] CloneParameters(IEnumerable<NpgsqlParameter> parameters)
     {
-        return parameters.Select(p => new NpgsqlParameter(p.ParameterName, p.Value)).ToArray();
+        return parameters.Select(p => (NpgsqlParameter)((ICloneable)p).Clone()).ToArray();
     }
 }

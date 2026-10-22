@@ -5,6 +5,7 @@ using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Search;
+using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -22,6 +23,7 @@ public sealed class PublicEquipmentListingsControllerTests
 
         public Task<Result<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>> ListPublicListingsAsync(
             ListPublicEquipmentListingsRequest request,
+            IInventoryCallerContext callerContext,
             CancellationToken cancellationToken = default) =>
             ListHandler != null
                 ? ListHandler(request)
@@ -51,7 +53,7 @@ public sealed class PublicEquipmentListingsControllerTests
 
     public PublicEquipmentListingsControllerTests()
     {
-        _controller = new PublicEquipmentListingsController(_stubService);
+        _controller = new PublicEquipmentListingsController(_stubService, AnonymousCallerContext.Instance);
         var httpContext = new DefaultHttpContext();
         _controller.ControllerContext = new ControllerContext
         {

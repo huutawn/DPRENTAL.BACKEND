@@ -197,27 +197,39 @@ public sealed class AssetSearchQueryValidator
             return Error.Validation("INVALID_QUERY_PARAMETER", "CategoryId không hợp lệ.");
         }
 
-        AssetSortOption sortOption = !string.IsNullOrWhiteSpace(searchKeyword)
-            ? AssetSortOption.Relevance
-            : AssetSortOption.CreatedDesc;
-
+        AssetSortOption sortOption;
         if (!string.IsNullOrWhiteSpace(sort))
         {
             string sortStr = sort.Trim().ToLowerInvariant();
-            sortOption = sortStr switch
+            if (sortStr == "recommended")
             {
-                "created_desc" => AssetSortOption.CreatedDesc,
-                "created_asc" => AssetSortOption.CreatedAsc,
-                "model_desc" => AssetSortOption.ModelDesc,
-                "model_asc" => AssetSortOption.ModelAsc,
-                "relevance" => AssetSortOption.Relevance,
-                _ => (AssetSortOption)(-1)
-            };
-
-            if ((int)sortOption == -1)
-            {
-                return Error.Validation("INVALID_QUERY_PARAMETER", "Tùy chọn sắp xếp (sort) không hợp lệ.");
+                sortOption = !string.IsNullOrWhiteSpace(searchKeyword)
+                    ? AssetSortOption.Relevance
+                    : AssetSortOption.Recommended;
             }
+            else
+            {
+                sortOption = sortStr switch
+                {
+                    "created_desc" => AssetSortOption.CreatedDesc,
+                    "created_asc" => AssetSortOption.CreatedAsc,
+                    "model_desc" => AssetSortOption.ModelDesc,
+                    "model_asc" => AssetSortOption.ModelAsc,
+                    "relevance" => AssetSortOption.Relevance,
+                    _ => (AssetSortOption)(-1)
+                };
+
+                if ((int)sortOption == -1)
+                {
+                    return Error.Validation("INVALID_QUERY_PARAMETER", "Tùy chọn sắp xếp (sort) không hợp lệ.");
+                }
+            }
+        }
+        else
+        {
+            sortOption = !string.IsNullOrWhiteSpace(searchKeyword)
+                ? AssetSortOption.Relevance
+                : AssetSortOption.CreatedDesc;
         }
 
         return Result.Success(new ValidatedAssetSearchQuery(
