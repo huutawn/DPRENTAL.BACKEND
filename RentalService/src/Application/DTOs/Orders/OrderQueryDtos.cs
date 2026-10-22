@@ -51,6 +51,37 @@ public sealed record OrderItemResponse(
     string? PickupLocation = null);
 
 /// <summary>
+/// Thông tin cơ bản nhận biết một dòng thiết bị trong danh sách đơn hàng.
+/// </summary>
+/// <param name="RentalItemId">Mã định danh dòng thiết bị.</param>
+/// <param name="EquipmentListingId">Mã thiết bị đã đặt.</param>
+/// <param name="SupplierId">Mã nhà cung cấp.</param>
+/// <param name="Name">Tên thiết bị lúc đặt hàng.</param>
+/// <param name="ThumbnailMediaId">Ảnh đại diện thiết bị (nếu có).</param>
+/// <param name="Quantity">Số máy thuê.</param>
+/// <param name="RentalDays">Số ngày thuê.</param>
+/// <param name="DailyRate">Giá thuê một máy một ngày.</param>
+/// <param name="RentalAmount">Tiền thuê = giá ngày x số máy x số ngày.</param>
+/// <param name="DepositAmount">Tiền cọc = cọc một máy x số máy.</param>
+/// <param name="StartDate">Ngày đầu tiên dùng máy.</param>
+/// <param name="EndDate">Ngày cuối cùng dùng máy (có tính), giống cách giỏ hàng hiển thị.</param>
+/// <param name="Status">Trạng thái dòng thiết bị.</param>
+public sealed record OrderSummaryItemResponse(
+    Guid RentalItemId,
+    Guid EquipmentListingId,
+    Guid SupplierId,
+    string Name,
+    Guid? ThumbnailMediaId,
+    int Quantity,
+    int RentalDays,
+    decimal DailyRate,
+    decimal RentalAmount,
+    decimal DepositAmount,
+    DateOnly StartDate,
+    DateOnly EndDate,
+    RentalItemStatus Status);
+
+/// <summary>
 /// Một đơn trong danh sách đơn của người thuê.
 /// </summary>
 /// <param name="OrderId">Mã định danh đơn.</param>
@@ -64,6 +95,7 @@ public sealed record OrderItemResponse(
 /// <param name="SubOrderCount">Số đơn con (số nhà cung cấp).</param>
 /// <param name="PaymentDeadline">Hạn thanh toán.</param>
 /// <param name="CreatedAt">Thời điểm đặt hàng.</param>
+/// <param name="Items">Các dòng thiết bị trong đơn kèm thông tin nhận biết cơ bản.</param>
 public sealed record RenterOrderSummaryResponse(
     Guid OrderId,
     string OrderCode,
@@ -75,7 +107,25 @@ public sealed record RenterOrderSummaryResponse(
     int ItemCount,
     int SubOrderCount,
     DateTimeOffset PaymentDeadline,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    IReadOnlyList<OrderSummaryItemResponse> Items)
+{
+    public RenterOrderSummaryResponse(
+        Guid orderId,
+        string orderCode,
+        RentalOrderStatus status,
+        string currency,
+        decimal totalRentalAmount,
+        decimal totalDepositAmount,
+        decimal totalAmount,
+        int itemCount,
+        int subOrderCount,
+        DateTimeOffset paymentDeadline,
+        DateTimeOffset createdAt)
+        : this(orderId, orderCode, status, currency, totalRentalAmount, totalDepositAmount, totalAmount, itemCount, subOrderCount, paymentDeadline, createdAt, [])
+    {
+    }
+}
 
 /// <summary>
 /// Một đơn con trong chi tiết đơn của người thuê.

@@ -374,7 +374,24 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 o.Items.Count,
                 o.SubOrders.Count,
                 o.PaymentDeadline,
-                o.CreatedAt))
+                o.CreatedAt,
+                o.Items
+                    .OrderBy(i => i.ExpectedStartDate)
+                    .ThenBy(i => i.Id)
+                    .Select(i => new OrderItemSummaryRecord(
+                        i.Id,
+                        i.EquipmentListingId,
+                        i.SupplierId,
+                        i.ListingTitleSnapshot,
+                        i.ThumbnailMediaIdSnapshot,
+                        i.Quantity,
+                        i.DailyRateSnapshot,
+                        i.RentalAmount,
+                        i.DepositAmount,
+                        i.ExpectedStartDate,
+                        i.ExpectedEndDate,
+                        i.Status))
+                    .ToList()))
             .ToListAsync(cancellationToken);
 
         return new RecordPage<RenterOrderSummaryRecord>(items, totalCount);
@@ -532,7 +549,24 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 o.Items.Count,
                 o.InvoiceRef,
                 o.PaymentConfirmedAt,
-                o.CreatedAt))
+                o.CreatedAt,
+                o.Items
+                    .OrderBy(i => i.ExpectedStartDate)
+                    .ThenBy(i => i.Id)
+                    .Select(i => new OrderItemSummaryRecord(
+                        i.Id,
+                        i.EquipmentListingId,
+                        i.SupplierId,
+                        i.ListingTitleSnapshot,
+                        i.ThumbnailMediaIdSnapshot,
+                        i.Quantity,
+                        i.DailyRateSnapshot,
+                        i.RentalAmount,
+                        i.DepositAmount,
+                        i.ExpectedStartDate,
+                        i.ExpectedEndDate,
+                        i.Status))
+                    .ToList()))
             .ToListAsync(cancellationToken);
 
         return new RecordPage<AdminOrderSummaryRecord>(items, totalCount);
