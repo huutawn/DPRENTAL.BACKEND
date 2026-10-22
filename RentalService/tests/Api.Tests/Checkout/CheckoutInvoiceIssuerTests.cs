@@ -101,6 +101,99 @@ public sealed class CheckoutInvoiceIssuerTests
         Assert.Equal("INV-1", (await ReloadAsync()).InvoiceRef);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not-a-url")]
+    [InlineData("javascript:alert(1)")]
+    public async Task EnsureInvoice_MissingOrInvalidQr_RemainsRetryableAndRecoversSameInvoice(string? qrUrl)
+    {
+        await using (var context = NewContext())
+        {
+            var op = new RentalCheckoutOperation(
+                OperationId, _renterId, "fingerprint", _orderId, Now.AddMinutes(30), "{}", "[]", Now);
+            op.MarkSucceeded(Now, "Pending");
+            context.RentalCheckoutOperations.Add(op);
+            await context.SaveChangesAsync();
+        }
+        _payment.Tamper = invoice => invoice with { QrUrl = qrUrl };
+        Result missing = await EnsureInvoiceAsync();
+        Assert.Equal(CheckoutErrors.InvoiceTemporarilyUnavailable, missing.Error);
+        await using (var context = NewContext())
+        {
+            var op = await new RentalCheckoutOperationRepository(context).GetByOperationIdAsync(OperationId);
+            Assert.Equal("Pending", op!.InvoiceStatus);
+        }
+        _payment.Tamper = invoice => invoice with
+        {
+            QrUrl = "https://vietqr.app/img?acc=snapshot-account&bank=MB&amount=4000&des=DPR%20SNAPSHOT",
+            Bank = "MB",
+            Account = "snapshot-account",
+            TransferContent = "DPR SNAPSHOT"
+        };
+
+        Result recovered = await EnsureInvoiceAsync();
+        Assert.True(recovered.IsSuccess);
+        Result replay = await EnsureInvoiceAsync();
+        Assert.True(replay.IsSuccess);
+        Assert.Equal(2, _payment.InvoiceRequests.Count);
+        Assert.Equal(1, _payment.CreatedInvoiceCount);
+        Assert.Single(_payment.InvoiceRequests.Select(r => r.OperationKey).Distinct());
+        await using (var context = NewContext())
+        {
+            Assert.Equal(1, await context.RentalOrders.CountAsync());
+            var order = await LoadAsync(context);
+            var receipt = Assert.Single(order.OperationReceipts, r => r.Action == "CreateInvoice");
+            var saved = System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceResponse>(receipt.ApiResponseJson!);
+            Assert.Equal("snapshot-account", saved!.Account);
+            Assert.Equal("DPR SNAPSHOT", saved.TransferContent);
+            Assert.Equal(saved, System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceResponse>(receipt.ResponseJson!));
+            Assert.Equal("Ready", (await new RentalCheckoutOperationRepository(context).GetByOperationIdAsync(OperationId))!.InvoiceStatus);
+        }
+    }
+
+    [Fact]
+    public async Task EnsureInvoice_OldSucceededReceiptWithoutQr_IsReplacedWithPaymentSnapshot()
+    {
+        await EnsureInvoiceAsync();
+        await using (var context = NewContext())
+        {
+            var order = await LoadAsync(context);
+            var receipt = Assert.Single(order.OperationReceipts, r => r.Action == "CreateInvoice");
+            var old = new
+            {
+                InvoiceRef = order.InvoiceRef,
+                TotalAmount = order.TotalPayableAmount,
+                order.Currency,
+                order.PaymentDeadline,
+                IsReplay = false
+            };
+            string json = System.Text.Json.JsonSerializer.Serialize(old);
+            receipt.MarkSucceeded(Now, json, json);
+            await context.SaveChangesAsync();
+        }
+        Result recovered = await EnsureInvoiceAsync();
+        Assert.True(recovered.IsSuccess);
+        await EnsureInvoiceAsync();
+        Assert.Equal(2, _payment.InvoiceRequests.Count);
+        Assert.Equal(1, _payment.CreatedInvoiceCount);
+        var restored = Assert.Single((await ReloadAsync()).OperationReceipts, r => r.Action == "CreateInvoice");
+        Assert.False(string.IsNullOrWhiteSpace(System.Text.Json.JsonSerializer.Deserialize<CreateInvoiceResponse>(restored.ApiResponseJson!)!.QrUrl));
+    }
+
+    [Fact]
+    public async Task EnsureInvoice_IncompleteReceiptAfterDeadline_DoesNotCallPaymentOrReopenOrder()
+    {
+        _payment.Tamper = invoice => invoice with { QrUrl = null };
+        await EnsureInvoiceAsync();
+        _clock.UtcNow = Now.AddMinutes(30);
+        Result result = await EnsureInvoiceAsync();
+        Assert.Equal(CheckoutErrors.OrderExpired, result.Error);
+        Assert.Single(_payment.InvoiceRequests);
+        Assert.Equal(1, _payment.CreatedInvoiceCount);
+        Assert.Equal(Now.AddMinutes(30), (await ReloadAsync()).PaymentDeadline);
+    }
+
     [Fact]
     public async Task EnsureInvoice_RetriesOnceWithTheSameOperationKey_WhenPaymentFailsTemporarily()
     {

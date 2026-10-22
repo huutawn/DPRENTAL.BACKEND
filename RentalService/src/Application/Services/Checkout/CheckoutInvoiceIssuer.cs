@@ -54,34 +54,22 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
         {
             string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
             var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
-            if (!string.IsNullOrWhiteSpace(receipt?.ApiResponseJson))
+            string? cachedJson = receipt?.ApiResponseJson ?? receipt?.ResponseJson;
+            if (!string.IsNullOrWhiteSpace(cachedJson))
             {
                 try
                 {
-                    var cached = JsonSerializer.Deserialize<CreateInvoiceResponse>(receipt.ApiResponseJson);
-                    if (cached != null && (!string.IsNullOrWhiteSpace(cached.QrUrl) || order.TotalPayableAmount == 0))
+                    var cached = JsonSerializer.Deserialize<CreateInvoiceResponse>(cachedJson);
+                    if (cached != null && MatchesOrder(cached, order) && IsReady(cached, order))
                     {
                         return cached;
                     }
                 }
-                catch { }
+                catch (JsonException)
+                {
+                    _logger.LogWarning("Receipt hóa đơn của đơn {OrderId} không đọc được; gọi lại Payment cùng operation key.", order.Id);
+                }
             }
-
-            var localRes = await CompleteInvoiceLocalAsync(order, _timeProvider.GetUtcNow(), null, cancellationToken);
-            if (localRes.IsFailure) return localRes.Error;
-
-            string qrUrl = $"https://vietqr.app/img?acc=101010101010&bank=ICB&amount={order.TotalPayableAmount}&des={order.OrderCode}";
-            return new CreateInvoiceResponse(
-                order.InvoiceRef,
-                order.TotalPayableAmount,
-                order.Currency,
-                order.PaymentDeadline,
-                "Pending",
-                qrUrl,
-                "VietinBank",
-                "101010101010",
-                order.OrderCode,
-                IsReplay: true);
         }
         // OperationKey tính từ mã đơn nên gọi lại bao nhiêu lần Payment cũng chỉ tạo một hóa đơn.
         CreateInvoiceRequest request = new(
@@ -128,10 +116,7 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
         }
 
         CreateInvoiceResponse invoice = response.Value;
-        if (string.IsNullOrWhiteSpace(invoice.InvoiceRef) ||
-            invoice.TotalAmount != order.TotalPayableAmount ||
-            !string.Equals(invoice.Currency, order.Currency, StringComparison.OrdinalIgnoreCase) ||
-            invoice.PaymentDeadline != order.PaymentDeadline)
+        if (!MatchesOrder(invoice, order))
         {
             _logger.LogError(
                 "Hóa đơn Payment trả về cho đơn {OrderId} ({OrderCode}) không hợp lệ hoặc lệch số tiền/loại tiền/deadline. OperationKey: {OperationKey}, Error: {ErrorCode}.",
@@ -139,6 +124,10 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
             return CheckoutErrors.InvoiceRejected;
         }
         DateTimeOffset completedAt = _timeProvider.GetUtcNow();
+        if (completedAt >= order.PaymentDeadline)
+        {
+            return CheckoutErrors.OrderExpired;
+        }
         if (string.IsNullOrWhiteSpace(order.InvoiceRef))
         {
             Result attached = order.AttachInvoice(invoice.InvoiceRef, completedAt);
@@ -155,37 +144,47 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
             return localResult.Error;
         }
 
+        if (!IsReady(invoice, order) &&
+            !string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(invoice.Status, "Cancelled", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(invoice.Status, "Expired", StringComparison.OrdinalIgnoreCase))
+        {
+            return CheckoutErrors.InvoiceTemporarilyUnavailable;
+        }
+
         return invoice;
     }
+
     private async Task<Result> CompleteInvoiceLocalAsync(
         RentalOrder order,
         DateTimeOffset completedAt,
-        CreateInvoiceResponse? invoiceResponse,
+        CreateInvoiceResponse invoiceResponse,
         CancellationToken cancellationToken)
     {
-        bool changed = invoiceResponse != null;
         string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
+        string responseJson = JsonSerializer.Serialize(invoiceResponse);
         var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
-        if (receipt != null && (!receipt.IsSuccess || receipt.Status != RentalOperationReceipt.StatusSucceeded))
+        if (receipt != null)
         {
-            string? responseJson = invoiceResponse != null
-                ? JsonSerializer.Serialize(invoiceResponse)
-                : null;
-            receipt.MarkSucceeded(completedAt, responseJson);
-            changed = true;
+            receipt.MarkSucceeded(completedAt, responseJson, responseJson);
+        }
+        else
+        {
+            order.AddOperationReceipt(new RentalOperationReceipt(
+                Guid.NewGuid(), order.Id, opKey, "CreateInvoice", opKey,
+                isSuccess: true, errorCode: null, errorMessage: null,
+                completedAt, RentalOperationReceipt.StatusSucceeded,
+                completedAt: completedAt,
+                responseJson: responseJson,
+                apiResponseJson: responseJson));
         }
 
         var op = await _checkoutOperations.GetByExpectedOrderIdAsync(order.Id, cancellationToken);
-        if (op != null && op.InvoiceStatus != "Ready")
+        string invoiceStatus = IsReady(invoiceResponse, order) ? "Ready" : "Pending";
+        if (op != null && op.InvoiceStatus != invoiceStatus)
         {
-            op.SetInvoiceStatus("Ready", completedAt);
+            op.SetInvoiceStatus(invoiceStatus, completedAt);
             await _checkoutOperations.UpdateAsync(op, cancellationToken);
-            changed = true;
-        }
-
-        if (!changed)
-        {
-            return Result.Success();
         }
 
         await _orders.UpdateAsync(order, cancellationToken);
@@ -201,6 +200,23 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
 
         return Result.Success();
     }
+
+    private static bool MatchesOrder(CreateInvoiceResponse invoice, RentalOrder order) =>
+        !string.IsNullOrWhiteSpace(invoice.InvoiceRef) &&
+        (string.IsNullOrWhiteSpace(order.InvoiceRef) || string.Equals(invoice.InvoiceRef, order.InvoiceRef, StringComparison.Ordinal)) &&
+        invoice.TotalAmount == order.TotalPayableAmount &&
+        string.Equals(invoice.Currency, order.Currency, StringComparison.OrdinalIgnoreCase) &&
+        invoice.PaymentDeadline == order.PaymentDeadline;
+
+    private static bool IsReady(CreateInvoiceResponse invoice, RentalOrder order) =>
+        order.TotalPayableAmount == 0
+            ? string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase)
+            : string.Equals(invoice.Status, "Pending", StringComparison.OrdinalIgnoreCase) &&
+              Uri.TryCreate(invoice.QrUrl, UriKind.Absolute, out var qrUri) &&
+              qrUri.Scheme == Uri.UriSchemeHttps &&
+              !string.IsNullOrWhiteSpace(invoice.Bank) &&
+              !string.IsNullOrWhiteSpace(invoice.Account) &&
+              !string.IsNullOrWhiteSpace(invoice.TransferContent);
 
     /// <summary>Không kết nối được hoặc Payment lỗi phía máy chủ: gọi lại có thể thành công.</summary>
     private static bool IsTemporary(Error error) =>
